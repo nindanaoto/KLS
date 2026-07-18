@@ -677,7 +677,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -704,6 +704,7 @@ int main(int argc, char **argv) {
   int repeat = 5;
   int factor_repeat = -1;
   int refactor_repeat = 5;
+  int transpose_solve = 1;
   int json = 0;
   int analyze_only = 0;
   bench_refactor_value_mode refactor_value_mode =
@@ -805,6 +806,8 @@ int main(int argc, char **argv) {
       options.fast_factor = 0;
     } else if (strcmp(argv[i], "--no-static-pivoting") == 0) {
       options.static_pivoting = 0;
+    } else if (strcmp(argv[i], "--no-transpose-solve") == 0) {
+      transpose_solve = 0;
     } else {
       usage(argv[0]);
       return EXIT_FAILURE;
@@ -1210,16 +1213,20 @@ int main(int argc, char **argv) {
       kls_prof_stop_report();
     }
   }
-  for (int i = 0; i < repeat && status == KLS_OK; ++i) {
-    status = kls_solve_transpose(solver, 1, b, 0, x, 0);
-    if (status == KLS_ERR_UNSUPPORTED) {
-      status = KLS_OK;
-      tsolve_total = -1.0 * (double)repeat;
-      break;
+  if (!transpose_solve) {
+    tsolve_total = -1.0 * (double)repeat;
+  } else {
+    for (int i = 0; i < repeat && status == KLS_OK; ++i) {
+      status = kls_solve_transpose(solver, 1, b, 0, x, 0);
+      if (status == KLS_ERR_UNSUPPORTED) {
+        status = KLS_OK;
+        tsolve_total = -1.0 * (double)repeat;
+        break;
+      }
+      if (status != KLS_OK) break;
+      kls_get_stats(solver, &stats);
+      tsolve_total += stats.solve_seconds;
     }
-    if (status != KLS_OK) break;
-    kls_get_stats(solver, &stats);
-    tsolve_total += stats.solve_seconds;
   }
   if (status == KLS_OK && repeat > 0 && tsolve_total >= 0.0 &&
       bench_env_enabled("KLS_BENCH_VERIFY_TRANSPOSE")) {

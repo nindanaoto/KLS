@@ -140,6 +140,11 @@ back to 64-bit otherwise; use `--input-index 64` or `--input-index 32` for
 forced A/B runs. Use `--analyze-only` to measure symbolic analysis and ordering
 decisions without running numeric factorization.
 
+Use `--no-transpose-solve` when a comparison protocol scores only normal
+solves.  The paired-suite runner supplies it because the CKTSO, SubtreeLU, and
+KLU harnesses do not execute a second, unscored transpose-solve loop.  The
+standalone benchmark keeps measuring both directions by default.
+
 ### Opt-in lean serial backend
 
 For one-thread SPICE workloads, `KLS_BACKEND_SERIAL` skips the adaptive

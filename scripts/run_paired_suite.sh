@@ -81,6 +81,7 @@ while IFS= read -r name; do
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
         --repeat "$SOLVE_REPEAT" --factor-repeat "$FACTOR_REPEAT" \
         --refactor-repeat "$REFACTOR_REPEAT" --threads "$THREADS" \
+        --no-transpose-solve \
         --input-index "$INPUT_INDEX" \
         --refactor-values "$REFACTOR_VALUES" \
         --refactor-value-amplitude "$REFACTOR_VALUE_AMPLITUDE" \

@@ -16456,6 +16456,182 @@ static int run_sn_panel_factor_test(void) {
   return 1;
 }
 
+/* A solve immediately after factorization builds the compact i32 row-index
+   streams.  Large factors defer their engine preparations until the first
+   changed refactorization, and that preparation sorts the packed LU columns.
+   The sort must invalidate and rebuild the streams before the next solve. */
+static int test_deferred_sort_rebuilds_compact_solve(void) {
+  enum { block_size = 64, block_count = 256, n = block_size * block_count };
+  const size_t nnz = (size_t)n * block_size;
+  const char *env_names[] = {
+    "KLS_ENABLE_KLS_FIRST_FACTOR",
+    "KLS_ENABLE_ROW_REFACTOR",
+    "KLS_ENABLE_CHECKED_ROW_REFACTOR",
+    "KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC",
+    "KLS_SYNC_FACTOR_PREPS",
+    "KLS_DISABLE_I32_SOLVE",
+    "KLS_DISABLE_SNB_REFACTOR"
+  };
+  enum { env_count = (int)(sizeof(env_names) / sizeof(env_names[0])) };
+  char *saved[env_count];
+  int had[env_count];
+  int32_t *ap = NULL;
+  int32_t *ai = NULL;
+  double *ax = NULL;
+  double *b = NULL;
+  double *x = NULL;
+  double *expected = NULL;
+  kls_solver *solver = NULL;
+  int ok = 1;
+
+  memset(saved, 0, sizeof(saved));
+  memset(had, 0, sizeof(had));
+  for (int e = 0; e < env_count; ++e) {
+    const char *value = getenv(env_names[e]);
+    had[e] = value != NULL;
+    saved[e] = value != NULL ? strdup(value) : NULL;
+    if (had[e] && saved[e] == NULL) {
+      ok = 0;
+    }
+  }
+  if (ok &&
+      (setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0 ||
+       setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0 ||
+       setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0 ||
+       setenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC", "0", 1) != 0 ||
+       unsetenv("KLS_SYNC_FACTOR_PREPS") != 0 ||
+       unsetenv("KLS_DISABLE_I32_SOLVE") != 0 ||
+       unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0)) {
+    perror("configure deferred-sort compact-solve test");
+    ok = 0;
+  }
+
+  if (ok) {
+    ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+    ai = (int32_t *)malloc(nnz * sizeof(*ai));
+    ax = (double *)malloc(nnz * sizeof(*ax));
+    b = (double *)calloc((size_t)n, sizeof(*b));
+    x = (double *)calloc((size_t)n, sizeof(*x));
+    expected = (double *)malloc((size_t)n * sizeof(*expected));
+    if (ap == NULL || ai == NULL || ax == NULL || b == NULL || x == NULL ||
+        expected == NULL) {
+      fprintf(stderr, "failed to allocate deferred-sort fixture\n");
+      ok = 0;
+    }
+  }
+
+  if (ok) {
+    size_t pos = 0u;
+    for (int32_t col = 0; col < n; ++col) {
+      const int32_t block = col / block_size;
+      const int32_t local_col = col % block_size;
+      const int32_t first = block * block_size;
+      ap[col] = (int32_t)pos;
+      expected[col] = 1.0 + 0.001 * (double)(col % 29);
+      /* Deliberately permute input rows.  KLU accepts unsorted CSC input and
+         its packed factors therefore give the deferred sort real work. */
+      for (int32_t q = 0; q < block_size; ++q) {
+        const int32_t local_row = (17 * q + 7 * local_col) % block_size;
+        const int32_t row = first + local_row;
+        ai[pos] = row;
+        ax[pos] = local_row == local_col
+                    ? 8.0
+                    : 0.002 * (double)(1 + ((13 * local_row +
+                                              11 * local_col) % 11));
+        ++pos;
+      }
+    }
+    ap[n] = (int32_t)pos;
+    if (pos != nnz) {
+      fprintf(stderr, "deferred-sort fixture nnz mismatch\n");
+      ok = 0;
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.backend = KLS_BACKEND_AUTO;
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.use_btf = 0;
+  options.static_pivoting = 0;
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create deferred-sort compact solve")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze deferred-sort compact solve")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor deferred-sort compact solve")) ok = 0;
+
+  if (ok) {
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p2 = ap[col]; p2 < ap[col + 1]; ++p2) {
+        b[ai[p2]] += ax[p2] * expected[col];
+      }
+    }
+    /* This is the cache-building solve that precedes deferred preparation. */
+    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                    "pre-sort compact solve")) {
+      ok = 0;
+    }
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (fabs(x[i] - expected[i]) > 1.0e-9) {
+      fprintf(stderr, "pre-sort compact solve mismatch at %d: %.17g\n",
+              (int)i, x[i]);
+      ok = 0;
+    }
+  }
+
+  if (ok) {
+    memset(b, 0, (size_t)n * sizeof(*b));
+    memset(x, 0, (size_t)n * sizeof(*x));
+    for (size_t p2 = 0; p2 < nnz; ++p2) {
+      const int delta = (int)(p2 % 17u) - 8;
+      ax[p2] *= 1.0 + 1.0e-4 * (double)delta;
+    }
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p2 = ap[col]; p2 < ap[col + 1]; ++p2) {
+        b[ai[p2]] += ax[p2] * expected[col];
+      }
+    }
+    if (!require_ok(kls_refactor(solver, ax),
+                    "deferred sorted refactor")) {
+      ok = 0;
+    }
+    if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                          "post-sort compact solve")) {
+      ok = 0;
+    }
+  }
+  for (int32_t i = 0; ok && i < n; ++i) {
+    if (fabs(x[i] - expected[i]) > 1.0e-8) {
+      fprintf(stderr, "post-sort compact solve mismatch at %d: %.17g\n",
+              (int)i, x[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  free(expected);
+  for (int e = 0; e < env_count; ++e) {
+    if (!restore_env_value(env_names[e], had[e],
+                           saved[e] != NULL ? saved[e] : "")) {
+      ok = 0;
+    }
+    free(saved[e]);
+  }
+  return ok;
+}
+
 static int test_exact_unchanged_refactor_reuse(void) {
   const int32_t n = 3;
   const int32_t ap[4] = {0, 2, 5, 7};
@@ -17031,6 +17207,9 @@ int main(void) {
      its own changing/in-place coverage above. */
   if (setenv("KLS_DISABLE_UNCHANGED_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_DISABLE_UNCHANGED_REFACTOR=1");
+    return EXIT_FAILURE;
+  }
+  if (!test_deferred_sort_rebuilds_compact_solve()) {
     return EXIT_FAILURE;
   }
 

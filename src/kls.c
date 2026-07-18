@@ -26005,6 +26005,8 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
+  /* PTS is built from these streams and retains offsets into them. */
+  kls_pts_free(solver);
 }
 
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
@@ -35810,6 +35812,15 @@ static int kls_compact_medium_dominant_btf_symbolic_shape(
          solver->symbolic->lnz + solver->symbolic->unz >= 1.0e6;
 }
 
+/* Dense giant circuits already expose a compact AMD factor, while NodeND and
+   its candidate factor are tens of seconds of non-amortizing setup
+   (circuit5M: 28.6 s rejected promotion).  Sparse giants stay eligible:
+   rajat31 and the Freescale chain materially reduce fill with METIS. */
+static int kls_dense_giant_declines_auto_metis(UF_long n,
+                                                const UF_long *col_ptr) {
+  return col_ptr != NULL && n >= 1000000u && col_ptr[n] / n >= 8u;
+}
+
 /* Analyze-time start: the METIS analyze stage needs only the pattern,
    so the worker launches when the analysis finishes and overlaps both
    the caller's gap to kls_factor and the whole main-side first factor.
@@ -35818,7 +35829,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   if (solver->metis_race != NULL || solver->auto_metis_checked ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
-      solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL) {
+      solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL ||
+      kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr)) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -35967,7 +35979,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
      pays AMD-rate refactors until adoption — both metrics regressed.
      The race pays only where NodeND dwarfs the bootstrap factor. */
   if (solver->metis_race != NULL || options->ordering != KLS_ORDERING_AUTO ||
-      getenv("KLS_DISABLE_METIS_RACE") != NULL) {
+      getenv("KLS_DISABLE_METIS_RACE") != NULL ||
+      kls_dense_giant_declines_auto_metis(n, col_ptr)) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -36484,6 +36497,9 @@ static int should_try_auto_metis(const kls_solver *solver) {
   if (solver->auto_metis_checked || solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->stats.selected_ordering == KLS_ORDERING_METIS ||
       solver->numeric == NULL) {
+    return 0;
+  }
+  if (kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr)) {
     return 0;
   }
   if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
@@ -109257,7 +109273,6 @@ static int kls_snb_env_disabled(void) {
   return value != NULL && value[0] == '1';
 }
 
-
 /* Run the supernodal acceptance at factor time so its one-time A/B cost
  * lands in the once-charged factor term instead of inflating the first
  * (99x-charged) refactor.  Also lets snb sort the numeric below the
@@ -109273,6 +109288,18 @@ static void kls_snb_maybe_accept(kls_solver *solver,
       solver->numeric == NULL || solver->numeric->LUbx == NULL ||
       (solver->fp32_decision > 0 && !kls_snb_fp32_eligible(solver)) ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
+    return;
+  }
+  if (solver->symbolic->maxblock > 1000000u &&
+      getenv("KLS_SNB_FORCE_TRIAL") == NULL) {
+    /* SNB's retained schedule is deliberately rich: it performs several
+       max-block-sized passes and materializes per-supernode unions and edge
+       maps.  On million-column blocks that setup cannot amortize over H100;
+       worse, sparse giant circuits can spend the entire process timeout in
+       preparation before reaching a single refactor (circuit5M and rajat31).
+       The union audit's largest SNB adopter has a 321K-column block. */
+    solver->snb_declined = 1;
+    solver->snb_decision = -1;
     return;
   }
   if (solver->options.backend == KLS_BACKEND_SERIAL &&
@@ -109688,6 +109715,11 @@ static void *kls_par_sort_worker(void *argp) {
 /* Drop-in for trilinos_klu_l_sort: parallel when it can be, vendored
  * serial otherwise.  Returns nonzero on success like the original. */
 static UF_long kls_parallel_lu_sort(kls_solver *solver) {
+  /* The compact solve streams copy the row-index order of each packed L/U
+     column.  A deferred prep may reach this sort after an earlier solve has
+     already built those streams, so invalidate them at the mutation boundary
+     rather than relying on every sort caller to predict that lifecycle. */
+  kls_invalidate_i32_solve(solver);
   int nt = solver->options.threads;
   if (nt > 16) nt = 16;
   if (nt < 2 || solver->n < 100000u ||
@@ -135468,6 +135500,11 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
           &l_entries, &u_entries)) {
       kls_row_first_refactor_seed_clear(&row_refactor_seed);
     }
+    /* The block-local workspace aliases the outer row arrays, but its
+       supernode scratch is grown locally by the row/pipeline consumers. */
+    free(row_workspace.supernode_workspace);
+    row_workspace.supernode_workspace = NULL;
+    row_workspace.supernode_workspace_capacity = 0u;
     kls_row_first_supernode_panel_cache_free(&row_supernode_panel_cache);
     kls_row_first_entries_free(&l_entries);
     kls_row_first_entries_free(&u_entries);
@@ -135488,6 +135525,9 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     continue;
 
 fail_block_entries:
+    free(row_workspace.supernode_workspace);
+    row_workspace.supernode_workspace = NULL;
+    row_workspace.supernode_workspace_capacity = 0u;
     kls_row_first_supernode_panel_cache_free(&row_supernode_panel_cache);
     kls_row_first_entries_free(&l_entries);
     kls_row_first_entries_free(&u_entries);

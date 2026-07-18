@@ -16531,3 +16531,50 @@ everything, 4/4 clean reproductions after), mac_econ 6/6 valid
 refinement-strength item, but its 4.3x row-path price is gone).
 KLS_VETO_EGRAPH_TIGHT_TOL (plain-frame n>=200k) restores the ban if
 the class regresses.  raj1 and mac_econ re-tier on their fast engines.
+
+The full generic-entrywise union rerun exposed a solve-lifecycle correctness
+bug rather than a numeric-kernel failure.  An initial verification solve could
+build compact i32 row-index streams from the packed LU order; the first changed
+refactor's deferred engine preparation then sorted those packed columns while
+leaving the copied streams (and PTS offsets into them) live.  Fourteen rows
+failed residual validation, with `rajat16` isolating the defect: disabling the
+i32 solve made the same factors valid.  The sort now invalidates both compact
+streams and PTS at the mutation boundary.  A 16,384-row smoke fixture builds a
+compact solve before a deferred sort and failed at `0.9999997588` without the
+invalidation; it passes with the fix.  All fourteen former residual failures,
+plus the previous `TSOPF_FS_b9_c1` parse/failure row, are below `1e-8` under
+twenty independently verified entrywise refactors.
+
+Two large-case setup policies close the remaining avoidable timeouts.  SNB
+trials are declined by default above a one-million-column largest block: their
+multi-pass union/edge metadata did not amortize there, while the largest union
+adopter is 321K columns.  Dense giant inputs (`n >= 10^6`, `nnz/n >= 8`) also
+decline speculative auto-METIS work; `circuit5M` already has a compact AMD
+factor and had paid 28.6 seconds for a rejected promotion.  Sparse giants such
+as `rajat31` remain eligible and retain the 118.8M-entry METIS factors instead
+of the much larger AMD factors.  `circuit5M` now completes the exact H100
+protocol with a valid `1.2e-14` residual.  `rajat31` revealed a harness
+asymmetry: KLS alone performed 100 extra transpose solves that are absent from
+H100 and from every comparison wrapper.  The paired runner now explicitly
+skips that diagnostic (standalone behavior is unchanged); the scored workload
+then completes inside the same 180-second process guard at `2.17e-12`.
+
+After rerunning two interrupted timing outliers once (the first clean sample
+was retained; two additional reproductions confirmed each), KLS and CKTSO both
+have 106/110 valid entrywise records, versus 92 for SubtreeLU and 96 for KLU.
+On residual-valid pairs the geometric means of other/KLS H100 are 1.133 for
+CKTSO (52/106 KLS wins), 1.145 for SubtreeLU (61/92), and 3.061 for KLU
+(90/96).  Thus the supported generic-numeric claim is fastest by paired
+geometric mean with matched CKTSO coverage, not fastest on most individual
+matrices.  The remaining CKTSO loss leaders (`rajat24`, `rajat30`, ASIC,
+`transient`, and `ss1`) are the already-profiled row/supernode throughput
+class; the paper-backed scheduler and micro-kernel variants recorded above did
+not supply another concise general policy win.  The honest next implementation
+step is a production row-major supernodal numeric representation, not another
+corpus threshold.
+
+The final sanitizer gate also found a pre-existing block-local row-first
+supernode scratch leak (2.5 KiB across four smoke paths).  Those workspaces
+alias the outer row arrays but own their dynamically grown supernode scratch;
+success and failure cleanup now free that owned buffer.  Release and ASan/LSan
+test suites both pass.
