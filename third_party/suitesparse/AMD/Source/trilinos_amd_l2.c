@@ -1140,7 +1140,15 @@ GLOBAL void TRILINOS_AMD_2
 			if (dext > 0)
 			{
 			    deg += dext ;
-			    amf_cliq_i += (dext * (dext - 1)) / 2 ;
+			    if (trilinos_amd_l2_amf == 3)
+			    {
+				const Int q = MAX (dext, Degree [e]) ;
+				amf_cliq_i += (dext * (2 * q - dext)) / 2 ;
+			    }
+			    else
+			    {
+				amf_cliq_i += (dext * (dext - 1)) / 2 ;
+			    }
 			    Iw [pn++] = e ;
 			    hash += e ;
 			    TRILINOS_AMD_DEBUG4 ((" e: "ID" hash = "ID"\n",e,hash)) ;
@@ -1170,7 +1178,15 @@ GLOBAL void TRILINOS_AMD_2
 			dext = we - wflg ;
 			ASSERT (dext >= 0) ;
 			deg += dext ;
-			amf_cliq_i += (dext * (dext - 1)) / 2 ;
+			if (trilinos_amd_l2_amf == 3)
+			{
+			    const Int q = MAX (dext, Degree [e]) ;
+			    amf_cliq_i += (dext * (2 * q - dext)) / 2 ;
+			}
+			else
+			{
+			    amf_cliq_i += (dext * (dext - 1)) / 2 ;
+			}
 			Iw [pn++] = e ;
 			hash += e ;
 			TRILINOS_AMD_DEBUG4 (("	e: "ID" hash = "ID"\n",e,hash)) ;
@@ -1502,26 +1518,39 @@ GLOBAL void TRILINOS_AMD_2
 		    Int bucket = deg ;
 		    if (amf_bucket != NULL)
 		    {
-			/* approximate deficiency: pairs among the (approx)
-			 * degree, discounted by pairs already inside the
-			 * adjacent cliques (current element + unabsorbed
-			 * elements seen in scan 2).  sqrt maps the O(d^2)
-			 * score back onto the O(n) bucket range without
+			/* Approximate deficiency: pairs among the (approximate)
+			 * degree, discounted by pairs already present in adjacent
+			 * elements.  Mode 3 uses the tighter AMF3 local-fill bound;
+			 * modes 1 and 2 retain the original AMF/AMMF score.  sqrt
+			 * maps the O(d^2) score back onto O(n) buckets without
 			 * changing its order. */
 			Int dme = degme - nvi ;
 			double def ;
 			if (dme < 0) dme = 0 ;
-			def = 0.5 * (double) deg * ((double) deg - 1.0)
-			    - (double) amf_cliq [i]
-			    - 0.5 * (double) dme * ((double) dme - 1.0) ;
-			if (def < 0.0) def = 0.0 ;
-			if (trilinos_amd_l2_amf == 2 && nvi > 1)
+			if (trilinos_amd_l2_amf == 3)
 			{
-			    /* approximate minimum MEAN local fill (Rothberg-
-			     * Eisenstat AMMF): amortize the deficiency over the
-			     * nvi pivots eliminated with this supervariable */
-			    def /= (double) nvi ;
+			    def = 0.5 * (double) deg * (double) deg
+				- (double) amf_cliq [i]
+				- 0.5 * (double) dme * (double) dme ;
+			    if (nvi > 1)
+			    {
+				def /= pow ((double) nvi, 0.445) ;
+			    }
 			}
+			else
+			{
+			    def = 0.5 * (double) deg * ((double) deg - 1.0)
+				- (double) amf_cliq [i]
+				- 0.5 * (double) dme * ((double) dme - 1.0) ;
+			    if (trilinos_amd_l2_amf == 2 && nvi > 1)
+			    {
+				/* Approximate minimum MEAN local fill (AMMF):
+				 * amortize deficiency over the pivots represented by
+				 * this supervariable. */
+				def /= (double) nvi ;
+			    }
+			}
+			if (def < 0.0) def = 0.0 ;
 			bucket = (Int) sqrt (2.0 * def) ;
 			if (bucket > deg) bucket = deg ;
 			ASSERT (bucket >= 0 && bucket < n) ;
