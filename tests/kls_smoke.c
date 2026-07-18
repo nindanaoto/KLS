@@ -16568,6 +16568,7 @@ static int test_diagonal_equivalent_refactor(void) {
   const double expected_transpose[3] = {-1.0, 0.25, 2.0};
   double ax1[9];
   double ax2[9];
+  double ax3[9];
   double b[3] = {0.0, 0.0, 0.0};
   double bt[3] = {0.0, 0.0, 0.0};
   double x[3] = {0.0, 0.0, 0.0};
@@ -16680,6 +16681,80 @@ static int test_diagonal_equivalent_refactor(void) {
   for (int i = 0; ok && i < n; ++i) {
     if (!close_enough(x[i], expected[i])) {
       fprintf(stderr, "nonseparable fallback mismatch at %d: %.17g\n",
+              i, x[i]);
+      ok = 0;
+    }
+  }
+
+  /* The failed chord is now the pre-recovery hint and ax2 is the new
+     numeric reference.  A genuinely separable update must pass that
+     conservative witness and still execute the complete certificate. */
+  memset(b, 0, sizeof(b));
+  memset(x, 0, sizeof(x));
+  for (int col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      ax3[p] = ax2[p] * row_scale[ai[p]] * col_scale[col];
+      b[ai[p]] += ax3[p] * expected[col];
+    }
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax3),
+                        "certify after learned rejection hint")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats after learned rejection hint")) ok = 0;
+  if (ok && stats.last_refactor_path !=
+              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
+    fprintf(stderr, "post-rejection separable update used path %s\n",
+            kls_refactor_path_name(stats.last_refactor_path));
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve after learned rejection hint")) ok = 0;
+  for (int i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr,
+              "post-rejection separable solve mismatch at %d: %.17g\n",
+              i, x[i]);
+      ok = 0;
+    }
+  }
+
+  /* Four sampled failures (with bounded skipped retries between them) gate
+     the opportunistic plan.  A public factor call starts a new reference
+     epoch and must rearm it. */
+  for (int generation = 0; ok && generation < 7; ++generation) {
+    ax3[8] *= 1.001;
+    if (!require_ok(kls_refactor(solver, ax3),
+                    "repeated nonseparable rejection")) {
+      ok = 0;
+    }
+  }
+  if (ok && !require_ok(kls_factor(solver, ax3),
+                        "factor rearms rejection gate")) ok = 0;
+  memset(b, 0, sizeof(b));
+  memset(x, 0, sizeof(x));
+  for (int col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      ax1[p] = ax3[p] * row_scale[ai[p]] * col_scale[col];
+      b[ai[p]] += ax1[p] * expected[col];
+    }
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "certify after rejection-gate rearm")) ok = 0;
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats after rejection-gate rearm")) ok = 0;
+  if (ok && stats.last_refactor_path !=
+              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
+    fprintf(stderr, "rearmed separable update used path %s\n",
+            kls_refactor_path_name(stats.last_refactor_path));
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve after rejection-gate rearm")) ok = 0;
+  for (int i = 0; ok && i < n; ++i) {
+    if (!close_enough(x[i], expected[i])) {
+      fprintf(stderr, "rearmed separable solve mismatch at %d: %.17g\n",
               i, x[i]);
       ok = 0;
     }

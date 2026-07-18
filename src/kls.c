@@ -495,6 +495,7 @@ struct kls_solver {
   uint32_t *diagonal_equiv_validation_pos;
   uint32_t *diagonal_equiv_validation_col;
   uint32_t diagonal_equiv_validation_nnz;
+  uint32_t diagonal_equiv_validation_hint;
   uint32_t *diagonal_equiv_vertex_order;
   uint32_t *diagonal_equiv_level_ptr;
   uint32_t diagonal_equiv_level_count;
@@ -513,9 +514,12 @@ struct kls_solver {
   double *diagonal_equiv_public_scales;
   double *diagonal_equiv_rhs_workspace;
   size_t diagonal_equiv_rhs_capacity;
-  int diagonal_equiv_plan_state; /* 0 unbuilt, 1 ready, -1 unsupported */
+  int diagonal_equiv_plan_state; /* 0 unbuilt, 1 ready, 2 gated,
+                                    -1 unsupported */
   int diagonal_equiv_reference_valid;
   int diagonal_equiv_active;
+  uint32_t diagonal_equiv_reject_streak;
+  uint32_t diagonal_equiv_retry_countdown;
   double *solve_perm_workspace;
   UF_long solve_perm_workspace_n;
   kls_egraph_refactor_pool *egraph_pool;
@@ -2747,6 +2751,7 @@ typedef struct kls_egraph_refactor_shared {
   uint32_t diagonal_equiv_n;
   uint32_t diagonal_equiv_nnz;
   uint32_t diagonal_equiv_validation_nnz;
+  uint32_t diagonal_equiv_validation_hint;
   double diagonal_equiv_rel_tol;
   atomic_int diagonal_equiv_invalid;
   double *row_refactor_component_seconds;
@@ -25796,6 +25801,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->diagonal_equiv_validation_pos = NULL;
   solver->diagonal_equiv_validation_col = NULL;
   solver->diagonal_equiv_validation_nnz = 0u;
+  solver->diagonal_equiv_validation_hint = UINT32_MAX;
   solver->diagonal_equiv_vertex_order = NULL;
   solver->diagonal_equiv_level_ptr = NULL;
   solver->diagonal_equiv_level_count = 0u;
@@ -25817,6 +25823,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->diagonal_equiv_plan_state = 0;
   solver->diagonal_equiv_reference_valid = 0;
   solver->diagonal_equiv_active = 0;
+  solver->diagonal_equiv_reject_streak = 0u;
+  solver->diagonal_equiv_retry_countdown = 0u;
   solver->lean_scale_input_snapshot = NULL;
   solver->lean_scale_rs_snapshot = NULL;
   solver->lean_scale_input_state = 0;
@@ -100319,6 +100327,25 @@ static void kls_contract_rgrowth_worker_run(
   results[tid] = local_ok ? local_min : -1.0;
 }
 
+static KLS_ALWAYS_INLINE int kls_diagonal_equiv_constraint_valid(
+  const double *restrict reference, const double *restrict values,
+  const double *restrict scales, const uint32_t *restrict row_idx,
+  const uint32_t *restrict validation_pos,
+  const uint32_t *restrict validation_col, uint32_t n, uint32_t q,
+  double rel_tol) {
+  const uint32_t p = validation_pos[q];
+  const uint32_t col = validation_col[q];
+  const double new_value = values[p];
+  const double predicted =
+    reference[p] * scales[row_idx[p]] * scales[n + col];
+  if (!isfinite(new_value) || !isfinite(predicted)) {
+    return 0;
+  }
+  const double error = fabs(new_value - predicted);
+  const double magnitude = fabs(new_value) + fabs(predicted);
+  return error <= rel_tol * magnitude + 16.0 * DBL_MIN;
+}
+
 static void kls_diagonal_equiv_worker_run(
   kls_egraph_refactor_worker *worker) {
   kls_egraph_refactor_shared *shared = worker->shared;
@@ -100424,8 +100451,21 @@ static void kls_diagonal_equiv_worker_run(
   }
 
   int validation_invalid = 0;
+  if (!invalid && validation_nnz > 0u) {
+    const uint32_t hint = shared->diagonal_equiv_validation_hint <
+                            validation_nnz
+      ? shared->diagonal_equiv_validation_hint : 0u;
+    /* Every worker checks the same remembered constraint after the recovery
+       rendezvous.  The redundant scalar read is cheaper than adding another
+       pool barrier and lets a recurring inconsistency bypass every worker's
+       full chord slice. */
+    validation_invalid = !kls_diagonal_equiv_constraint_valid(
+      reference, values, scales, row_idx, validation_pos, validation_col,
+      n, hint, rel_tol);
+  }
+  const uint32_t validation_begin = validation_invalid ? q_end : q_begin;
 #pragma omp simd reduction(|:validation_invalid)
-  for (uint32_t q = q_begin; q < q_end; ++q) {
+  for (uint32_t q = validation_begin; q < q_end; ++q) {
     const uint32_t p = validation_pos[q];
     const uint32_t col = validation_col[q];
     const double old_value = reference[p];
@@ -100452,6 +100492,11 @@ static void kls_diagonal_equiv_worker_run(
      worker invert its slice for the solve maps while a later worker is
      still scanning nonzeros against that same array. */
   pthread_barrier_wait(&shared->barrier);
+
+  if (atomic_load_explicit(&shared->diagonal_equiv_invalid,
+                           memory_order_relaxed)) {
+    return;
+  }
 
   const uint32_t vertices = 2u * n;
   const uint32_t v_begin =
@@ -142403,6 +142448,7 @@ static void kls_diagonal_equiv_decline(kls_solver *solver) {
   solver->diagonal_equiv_validation_pos = NULL;
   solver->diagonal_equiv_validation_col = NULL;
   solver->diagonal_equiv_validation_nnz = 0u;
+  solver->diagonal_equiv_validation_hint = UINT32_MAX;
   solver->diagonal_equiv_vertex_order = NULL;
   solver->diagonal_equiv_level_ptr = NULL;
   solver->diagonal_equiv_level_count = 0u;
@@ -142421,6 +142467,8 @@ static void kls_diagonal_equiv_decline(kls_solver *solver) {
   solver->diagonal_equiv_public_scales = NULL;
   solver->diagonal_equiv_reference_valid = 0;
   solver->diagonal_equiv_active = 0;
+  solver->diagonal_equiv_reject_streak = 0u;
+  solver->diagonal_equiv_retry_countdown = 0u;
   solver->diagonal_equiv_plan_state = -1;
 }
 
@@ -142992,6 +143040,7 @@ static void kls_prepare_diagonal_equiv_plan(kls_solver *solver,
   solver->diagonal_equiv_validation_pos = validation_pos;
   solver->diagonal_equiv_validation_col = validation_col;
   solver->diagonal_equiv_validation_nnz = validation_nnz;
+  solver->diagonal_equiv_validation_hint = UINT32_MAX;
   solver->diagonal_equiv_vertex_order = order;
   solver->diagonal_equiv_level_ptr = level_ptr;
   solver->diagonal_equiv_level_count = level_count;
@@ -143011,6 +143060,8 @@ static void kls_prepare_diagonal_equiv_plan(kls_solver *solver,
   solver->diagonal_equiv_plan_state = 1;
   solver->diagonal_equiv_reference_valid = 1;
   solver->diagonal_equiv_active = 0;
+  solver->diagonal_equiv_reject_streak = 0u;
+  solver->diagonal_equiv_retry_countdown = 0u;
   if (trace_plan) {
     const double trace_end = kls_now_seconds();
     fprintf(stderr,
@@ -143110,6 +143161,121 @@ static void kls_diagonal_equiv_update_reference(kls_solver *solver,
   kls_diagonal_equiv_refresh_parent_recips(solver);
   solver->diagonal_equiv_reference_valid = 1;
   solver->diagonal_equiv_active = 0;
+}
+
+static void kls_diagonal_equiv_record_rejection(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  if (solver->diagonal_equiv_reject_streak < UINT32_MAX) {
+    solver->diagonal_equiv_reject_streak++;
+  }
+  if (getenv("KLS_DISABLE_DIAGONAL_EQUIV_REJECTION_GATE") == NULL &&
+      solver->diagonal_equiv_reject_streak >= 2u) {
+    uint32_t shift = solver->diagonal_equiv_reject_streak - 2u;
+    if (shift > 5u) {
+      shift = 5u;
+    }
+    solver->diagonal_equiv_retry_countdown = UINT32_C(1) << shift;
+    if (solver->diagonal_equiv_reject_streak >= 4u) {
+      /* Four sampled inconsistencies with no intervening success are enough
+         evidence to stop copying a fresh O(nnz) reference after every
+         fallback.  An explicit factor call rearms the retained plan. */
+      solver->diagonal_equiv_plan_state = 2;
+      solver->diagonal_equiv_reference_valid = 0;
+      solver->diagonal_equiv_retry_countdown = 0u;
+    }
+  }
+}
+
+static int kls_diagonal_equiv_hint_vertex_scale(
+  const kls_solver *solver, const double *values, uint32_t vertex,
+  long double *scale_out, uint32_t *steps_out) {
+  if (solver == NULL || values == NULL || scale_out == NULL ||
+      steps_out == NULL || solver->diagonal_equiv_parent == NULL ||
+      solver->diagonal_equiv_reference_values == NULL) {
+    return 0;
+  }
+  long double scale = 1.0L;
+  uint32_t steps = 0u;
+  int multiply = 1;
+  for (;;) {
+    const uint64_t packed = solver->diagonal_equiv_parent[vertex];
+    const uint32_t edge = (uint32_t)(packed >> 32u);
+    if (edge == UINT32_MAX) {
+      break;
+    }
+    if (steps >= 1024u || edge >= (uint32_t)solver->nnz) {
+      return 0;
+    }
+    const double old_value = solver->diagonal_equiv_reference_values[edge];
+    const double new_value = values[edge];
+    if (old_value == 0.0 || new_value == 0.0 ||
+        !isfinite(old_value) || !isfinite(new_value)) {
+      return 0;
+    }
+    const long double ratio =
+      (long double)new_value / (long double)old_value;
+    if (ratio == 0.0L || !isfinite(ratio)) {
+      return 0;
+    }
+    scale = multiply ? scale * ratio : scale / ratio;
+    if (scale == 0.0L || !isfinite(scale)) {
+      return 0;
+    }
+    multiply = !multiply;
+    vertex = (uint32_t)packed;
+    steps++;
+  }
+  *scale_out = scale;
+  *steps_out = steps;
+  return 1;
+}
+
+/* Recheck a learned fundamental-cycle witness before recovering the complete
+   forest.  A generous path-length-scaled tolerance makes this a rejection-
+   only prefilter: borderline cases still execute the ordinary complete
+   certificate. */
+static int kls_diagonal_equiv_hint_rejects_before_recovery(
+  const kls_solver *solver, const double *values, double rel_tol) {
+  if (solver == NULL || values == NULL ||
+      solver->diagonal_equiv_validation_hint >=
+        solver->diagonal_equiv_validation_nnz) {
+    return 0;
+  }
+  const uint32_t q = solver->diagonal_equiv_validation_hint;
+  const uint32_t p = solver->diagonal_equiv_validation_pos[q];
+  const uint32_t col = solver->diagonal_equiv_validation_col[q];
+  const uint32_t row = solver->diagonal_equiv_row_idx[p];
+  const uint32_t n = (uint32_t)solver->n;
+  long double row_scale = 1.0L;
+  long double col_scale = 1.0L;
+  uint32_t row_steps = 0u;
+  uint32_t col_steps = 0u;
+  if (!kls_diagonal_equiv_hint_vertex_scale(
+        solver, values, row, &row_scale, &row_steps) ||
+      !kls_diagonal_equiv_hint_vertex_scale(
+        solver, values, n + col, &col_scale, &col_steps)) {
+    return 0;
+  }
+  const double new_value_double = values[p];
+  if (!isfinite(new_value_double)) {
+    return 1;
+  }
+  const long double new_value = (long double)new_value_double;
+  const long double predicted =
+    (long double)solver->diagonal_equiv_reference_values[p] *
+      row_scale * col_scale;
+  if (!isfinite(predicted)) {
+    return 0;
+  }
+  const long double error = fabsl(new_value - predicted);
+  const long double magnitude = fabsl(new_value) + fabsl(predicted);
+  const long double slack =
+    16.0L * (long double)(row_steps + col_steps + 1u);
+  const long double tolerance = slack *
+    ((long double)rel_tol * magnitude + 16.0L * (long double)DBL_MIN);
+  return error > tolerance;
 }
 
 /* The identity is certified in the factor's internal matrix frame.  Solves
@@ -143271,6 +143437,12 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
       getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL) {
     return 0;
   }
+  if (getenv("KLS_DISABLE_DIAGONAL_EQUIV_REJECTION_GATE") == NULL &&
+      solver->diagonal_equiv_retry_countdown > 0u) {
+    solver->diagonal_equiv_retry_countdown--;
+    solver->diagonal_equiv_active = 0;
+    return 0;
+  }
   const uint32_t n = (uint32_t)solver->n;
   const uint32_t vertices = 2u * n;
   double *restrict scales = solver->diagonal_equiv_scales;
@@ -143280,6 +143452,12 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
      drift, so compare at roughly 4K ulps.  A nonseparable update would need
      to satisfy this independently at every non-tree entry and is rejected. */
   const double rel_tol = 4096.0 * DBL_EPSILON;
+  if (kls_diagonal_equiv_hint_rejects_before_recovery(
+        solver, values, rel_tol)) {
+    solver->diagonal_equiv_active = 0;
+    kls_diagonal_equiv_record_rejection(solver);
+    return 0;
+  }
   const uint32_t *restrict col_ptr = solver->diagonal_equiv_col_ptr;
   const uint32_t *restrict row_idx = solver->diagonal_equiv_row_idx;
   const uint32_t *restrict validation_pos =
@@ -143293,6 +143471,7 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
   double trace_validate_end = trace_begin;
   double trace_invert_end = trace_begin;
   int invalid = 0;
+  uint32_t failed_validation = UINT32_MAX;
   int parallel = 0;
   int recovered = 0;
   const int requested_threads = solver->options.threads;
@@ -143358,6 +143537,8 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
       shared->diagonal_equiv_nnz = (uint32_t)solver->nnz;
       shared->diagonal_equiv_validation_nnz =
         solver->diagonal_equiv_validation_nnz;
+      shared->diagonal_equiv_validation_hint =
+        solver->diagonal_equiv_validation_hint;
       shared->diagonal_equiv_rel_tol = rel_tol;
       atomic_store_explicit(&shared->diagonal_equiv_invalid, 0,
                             memory_order_relaxed);
@@ -143378,10 +143559,23 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
     }
     trace_recover_end = trace_phases ? kls_now_seconds() : trace_begin;
     int validation_invalid = 0;
-    if (!invalid) {
+    const uint32_t validation_nnz =
+      solver->diagonal_equiv_validation_nnz;
+    if (!invalid && validation_nnz > 0u) {
+      const uint32_t hint = solver->diagonal_equiv_validation_hint <
+                              validation_nnz
+        ? solver->diagonal_equiv_validation_hint : 0u;
+      if (!kls_diagonal_equiv_constraint_valid(
+            reference, values, scales, row_idx, validation_pos,
+            validation_col, n, hint, rel_tol)) {
+        validation_invalid = 1;
+        failed_validation = hint;
+      }
+    }
+    if (!invalid && !validation_invalid) {
 #pragma omp simd reduction(|:validation_invalid)
       for (uint32_t q = 0u;
-           q < solver->diagonal_equiv_validation_nnz; ++q) {
+           q < validation_nnz; ++q) {
         const uint32_t p = validation_pos[q];
         const uint32_t col = validation_col[q];
         const double old_value = reference[p];
@@ -143394,32 +143588,8 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
           !isfinite(new_value) || !isfinite(predicted) ||
           error > rel_tol * magnitude + 16.0 * DBL_MIN;
       }
-      invalid = validation_invalid;
     }
-    if (validation_invalid && trace_phases) {
-      for (uint32_t q = 0u;
-           q < solver->diagonal_equiv_validation_nnz; ++q) {
-        const uint32_t p = validation_pos[q];
-        const uint32_t col = validation_col[q];
-        const double old_value = reference[p];
-        const double new_value = values[p];
-        const double predicted =
-          old_value * scales[row_idx[p]] * scales[n + col];
-        const double error = fabs(new_value - predicted);
-        const double tolerance =
-          rel_tol * (fabs(new_value) + fabs(predicted)) + 16.0 * DBL_MIN;
-        if (!isfinite(new_value) || !isfinite(predicted) ||
-            error > tolerance) {
-          fprintf(stderr,
-                  "KLS diagonal-equivalent validate reject col=%u p=%u"
-                  " row=%u old=%.17g new=%.17g predicted=%.17g"
-                  " err=%.3e tol=%.3e\n",
-                  col, p, row_idx[p], old_value, new_value, predicted,
-                  error, tolerance);
-          break;
-        }
-      }
-    }
+    invalid |= validation_invalid;
     trace_validate_end = trace_phases ? kls_now_seconds() : trace_begin;
     /* Solves consume the inverses.  Compute them once per changed matrix so
        the two boundary maps are vectorizable multiplies rather than two
@@ -143435,15 +143605,50 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
     trace_recover_end = trace_validate_end = trace_invert_end =
       trace_phases ? kls_now_seconds() : trace_begin;
   }
+  if (invalid && failed_validation == UINT32_MAX) {
+    for (uint32_t q = 0u;
+         q < solver->diagonal_equiv_validation_nnz; ++q) {
+      if (!kls_diagonal_equiv_constraint_valid(
+            reference, values, scales, row_idx, validation_pos,
+            validation_col, n, q, rel_tol)) {
+        failed_validation = q;
+        break;
+      }
+    }
+  }
+  if (failed_validation != UINT32_MAX) {
+    solver->diagonal_equiv_validation_hint = failed_validation;
+    if (trace_phases) {
+      const uint32_t p = validation_pos[failed_validation];
+      const uint32_t col = validation_col[failed_validation];
+      const double old_value = reference[p];
+      const double new_value = values[p];
+      const double predicted =
+        old_value * scales[row_idx[p]] * scales[n + col];
+      const double error = fabs(new_value - predicted);
+      const double tolerance =
+        rel_tol * (fabs(new_value) + fabs(predicted)) + 16.0 * DBL_MIN;
+      fprintf(stderr,
+              "KLS diagonal-equivalent validate reject col=%u p=%u"
+              " row=%u old=%.17g new=%.17g predicted=%.17g"
+              " err=%.3e tol=%.3e\n",
+              col, p, row_idx[p], old_value, new_value, predicted,
+              error, tolerance);
+    }
+  }
   if (invalid) {
     solver->diagonal_equiv_active = 0;
+    kls_diagonal_equiv_record_rejection(solver);
     return 0;
   }
   if (!kls_diagonal_equiv_publish_public_scales(solver)) {
     solver->diagonal_equiv_active = 0;
+    kls_diagonal_equiv_record_rejection(solver);
     return 0;
   }
   solver->diagonal_equiv_active = 1;
+  solver->diagonal_equiv_reject_streak = 0u;
+  solver->diagonal_equiv_retry_countdown = 0u;
   if (trace_phases) {
     const double trace_end = kls_now_seconds();
     fprintf(stderr,
@@ -143476,7 +143681,14 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->refactor_input_snapshot_valid = 0;
   solver->unchanged_refactor_state = 0;
   solver->diagonal_equiv_active = 0;
+  solver->diagonal_equiv_validation_hint = UINT32_MAX;
+  solver->diagonal_equiv_reject_streak = 0u;
+  solver->diagonal_equiv_retry_countdown = 0u;
   solver->snb_factor_start = kls_now_seconds();
+  if (solver->diagonal_equiv_plan_state == 2) {
+    solver->diagonal_equiv_plan_state = 1;
+    solver->diagonal_equiv_reference_valid = 0;
+  }
   if (solver->diagonal_equiv_plan_state == 1 &&
       !kls_diagonal_equiv_plan_matches_pattern(solver)) {
     /* A prior adaptive adoption may have replaced the internal coordinates.
