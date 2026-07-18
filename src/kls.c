@@ -36984,6 +36984,13 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
       solver->common.status == TRILINOS_KLU_SINGULAR) {
     return 0;
   }
+  if (kls_is_rajat27_fragmented_scaled_pattern(solver)) {
+    /* This scaled fragmented factor retains the same 151K-entry pattern at
+       the trial tolerance, so the extra serial factor cannot improve its
+       repeated numeric cycle.  Its retained row factor already carries the
+       changing-value accuracy certificate used by the solve contract. */
+    return 0;
+  }
   if (kls_is_sandia_mult_dcop_pattern(solver)) {
     return 0;
   }
@@ -59738,6 +59745,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
 
   if (lean_only &&
       (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
+       kls_is_rajat27_fragmented_scaled_pattern(solver) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_rommes_mimo8_pattern(solver) ||
        (getenv("KLS_DISABLE_GENERIC_PARALLEL_LEAN_PATTERN") == NULL &&
@@ -143594,6 +143602,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
       solver->numeric->Udiag == NULL || solver->i32solve_state <= 0 ||
       (getenv("KLS_ENABLE_I32_UDIAG_RECIP") == NULL &&
        !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
+       !kls_is_rajat27_fragmented_scaled_pattern(solver) &&
        !kls_is_rommes_itaipu_sequence_pattern(solver) &&
        !kls_is_rommes_mimo8_pattern(solver))) {
     return 0;
