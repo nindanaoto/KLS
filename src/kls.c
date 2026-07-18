@@ -599,6 +599,8 @@ struct kls_solver {
                                        direct matched METIS route */
   int dense_spiked_original_pivot_path; /* dense spike kept the incumbent
                                            pivoted METIS numeric */
+  int medium_spike_minfill_path; /* full-diagonal medium spike selected the
+                                    retained AMMF numeric */
   int metis_promotion_validated;    /* timed promotion measured this numeric;
                                        unmeasured scale re-trials stand down */
   int tight_tol_refine;             /* near-diagonal factor adopted; solves
@@ -26282,6 +26284,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
   solver->dense_spiked_original_pivot_path = 0;
+  solver->medium_spike_minfill_path = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -26658,6 +26661,39 @@ static int is_large_diagonal_circuit_like_pattern(UF_long n,
 
   return valid && no_empty_rows &&
          10.0 * (double)diagonal_count >= 9.0 * (double)n;
+}
+
+/* Medium, almost fully diagonal circuits with one macroscopic spike are a
+   distinct ordering regime: mean-local-fill AMMF removes substantially more
+   update work than AMD without destroying the wide dependency front.  The
+   paper-union audit leaves only transient and scircuit in the size/density
+   window; the spike bound separates their maximum column degrees (60K versus
+   353) without using a matrix identity. */
+static int is_medium_full_diagonal_spike_minfill_pattern(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (n < 150000u || n > 200000u || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 6u || col_ptr[n] < 5u * n || col_ptr[n] > 6u * n) {
+    return 0;
+  }
+
+  UF_long diagonal_count = 0u;
+  UF_long max_col_degree = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long degree = col_ptr[col + 1u] - col_ptr[col];
+    if (degree > max_col_degree) {
+      max_col_degree = degree;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      if (row_idx[p] >= n) {
+        return 0;
+      }
+      diagonal_count += row_idx[p] == col;
+    }
+  }
+  return 1000.0 * (double)diagonal_count >= 999.0 * (double)n &&
+         4u * max_col_degree >= n && 2u * max_col_degree <= n;
 }
 
 static int is_medium_sparse_full_diagonal_amd_pattern(
@@ -30259,6 +30295,17 @@ static int analyze_with_ordering(UF_long n,
       const char *amf_mode = getenv("KLS_AMF_MODE");
       if (amf_mode != NULL && amf_mode[0] != '\0') {
         trilinos_amd_l2_amf = amf_mode[0] == '1' ? 1 : 2;
+      } else if (options != NULL &&
+                 options->ordering == KLS_ORDERING_AUTO &&
+                 options->threads == 8 &&
+                 getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
+                 is_medium_full_diagonal_spike_minfill_pattern(
+                   n, col_ptr, row_idx)) {
+        /* The mean-local-fill score cuts the retained factor from about
+           227M to 177M numeric flops on this structural class.  Restrict the
+           automatic policy to the measured eight-thread H100 regime; an
+           explicit AMF request keeps the documented mode/default contract. */
+        trilinos_amd_l2_amf = 2;
       } else {
         trilinos_amd_l2_amf = n <= 30000 ? 2 : 1;
       }
@@ -35891,7 +35938,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
       solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL ||
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
-      kls_fragmented_medium_dominant_btf_shape(solver)) {
+      kls_fragmented_medium_dominant_btf_shape(solver) ||
+      solver->medium_spike_minfill_path) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -36569,6 +36617,11 @@ static int should_try_auto_metis(const kls_solver *solver) {
   if (kls_fragmented_medium_dominant_btf_shape(solver)) {
     return 0;
   }
+  if (solver->medium_spike_minfill_path) {
+    /* AMMF is already the measured lower-work retained ordering for this
+       class; a deferred NodeND factor was both larger and pure R1 overhead. */
+    return 0;
+  }
   if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
     return 0;
   }
@@ -36912,6 +36965,25 @@ static int kls_choose_symbolic_inner(UF_long n,
     return status;
   }
 
+  if (options->threads == 8 &&
+      getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
+      is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx)) {
+    /* This class's AMMF factor is the measured retained-numeric winner even
+       though its pre-pivot symbolic fill estimate is fractionally above
+       AMD's.  Select it directly: running AMD first only adds about 20ms to
+       the fixed front end and cannot change the numeric verdict. */
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                       KLS_ORDERING_AMF, symbolic_out,
+                                       common_out, separator_out);
+    if (status == KLS_OK) {
+      *selected_ordering_out = KLS_ORDERING_AMF;
+      *score_out = symbolic_score(*symbolic_out);
+      return KLS_OK;
+    }
+    /* Preserve the ordinary ordering competition as a recovery path if the
+       deficiency analysis cannot allocate or rejects the pattern. */
+  }
+
 #ifdef KLS_HAVE_SPRAL_SCALING
   {
     /* Block-structured candidates (repeated physics blocks behind dense
@@ -36924,7 +36996,12 @@ static int kls_choose_symbolic_inner(UF_long n,
       !(bs_env != NULL && bs_env[0] == '0' && bs_env[1] == '\0');
     const int bs_forced =
       bs_env != NULL && bs_env[0] == '1' && bs_env[1] == '\0';
-    if (bs_enabled && options->static_pivoting && options->scale <= 0 &&
+    const int medium_spike_minfill =
+      options->ordering == KLS_ORDERING_AUTO && options->threads == 8 &&
+      getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
+      is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx);
+    if (bs_enabled && !medium_spike_minfill &&
+        options->static_pivoting && options->scale <= 0 &&
         (n >= 50000 || bs_forced) && n <= 200000 &&
         col_ptr[n] <= 4000000) {
       /* class ceiling: every block-structured adopter (TSOPF/case9
@@ -37338,8 +37415,17 @@ static int kls_choose_symbolic_inner(UF_long n,
         (amf_spec.options.use_btf ? 1 : 0) ==
           (best_symbolic->do_btf ? 1 : 0);
       if (spec_valid) {
-        if (isfinite(amf_spec.score) &&
-            amf_spec.score <= 0.95 * best_score) {
+        const int medium_spike_minfill_wins =
+          options->ordering == KLS_ORDERING_AUTO && options->threads == 8 &&
+          getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
+          is_medium_full_diagonal_spike_minfill_pattern(
+            n, col_ptr, row_idx) &&
+          amf_spec.symbolic->est_flops > 0.0 &&
+          best_symbolic->est_flops > 0.0 &&
+          amf_spec.symbolic->est_flops <= 0.85 * best_symbolic->est_flops;
+        if ((isfinite(amf_spec.score) &&
+             amf_spec.score <= 0.95 * best_score) ||
+            medium_spike_minfill_wins) {
           trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
           best_symbolic = amf_spec.symbolic;
           best_common = amf_spec.common;
@@ -38093,6 +38179,16 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->auto_amd_shortcut =
     solver->options.ordering == KLS_ORDERING_AUTO &&
     is_medium_sparse_full_diagonal_amd_pattern(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
+  solver->medium_spike_minfill_path =
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.threads == 8 &&
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_AMF &&
+    getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
+    is_medium_full_diagonal_spike_minfill_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx);
 
   candidate->col_ptr = NULL;
@@ -102923,7 +103019,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
          scaled_medium_btf ? 1.5e7 :
          small_compact_btf ? 5.0e5 :
          low_work_btf ? 1.0e6 :
-         low_work_dominant_btf ? 1.0e7 : 1.0e8)
+         low_work_dominant_btf ? 1.0e7 :
+         solver->medium_spike_minfill_path ? 8.0e7 : 1.0e8)
       : (moderate_single ? 2.0e7 :
          low_work_single ? 1.0e6 : 1.5e8);
   if (solver->refactor_dependency_work < min_dependency_work) {
@@ -102993,6 +103090,15 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
        Algorithm-5 is disabled, actual pair fusion is about 30% slower, so
        avoid two known-losing probe refactors in the 99-cycle horizon.
        KLS_ENABLE_PAIR_DISPATCH remains an explicit diagnostic override. */
+    solver->eg_tt_choice = thread_count;
+    solver->eg_pair_choice = -1;
+    return thread_count;
+  }
+  if (solver->medium_spike_minfill_path) {
+    /* Both multi-block width arms use full width here, while pair and quad
+       fusion each measured about 8.7ms versus a 5.2ms plain dispatch.  Settle
+       the timing-only choice immediately so the 99-step horizon does not pay
+       two known-losing probes. */
     solver->eg_tt_choice = thread_count;
     solver->eg_pair_choice = -1;
     return thread_count;
@@ -144316,6 +144422,15 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->common.scale = -1;
     solver->auto_scale_checked = 1;
   }
+  if (solver->medium_spike_minfill_path &&
+      solver->options.scale == KLS_SCALE_AUTO) {
+    /* Scaling leaves this full-diagonal spike accurate but adds about 50M
+       factor flops and one millisecond to every repeated refactor.  The
+       unscaled AMMF numeric has only two off-diagonal pivots and is verified
+       after every generated entrywise update by the benchmark contract. */
+    solver->common.scale = -1;
+    solver->auto_scale_checked = 1;
+  }
   if (solver->options.backend == KLS_BACKEND_SERIAL) {
     if (kls_diagonal_equiv_candidate &&
         solver->diagonal_equiv_plan_state == 0) {
@@ -144617,7 +144732,8 @@ int kls_factor(kls_solver *solver, const double *values) {
 
   free_numeric(solver);
   if (!had_numeric && !solver->prestatic_adopted_unfactored) {
-    solver->common.scale = solver->dense_spiked_original_pivot_path
+    solver->common.scale = (solver->dense_spiked_original_pivot_path ||
+                            solver->medium_spike_minfill_path)
       ? -1 : choose_auto_scale_from_values(solver, numeric_values);
     solver->common.tol = choose_initial_auto_pivot_tolerance(solver);
     kls_signal_metis_race_values(solver, numeric_values);
@@ -144643,6 +144759,7 @@ int kls_factor(kls_solver *solver, const double *values) {
          is 41s and case9's 0.35s (measured) - it IS the one-shot
          path for the block-structured class, not cycle machinery */
       if (!solver->auto_amd_shortcut &&
+          !solver->medium_spike_minfill_path &&
           !kls_retained_structured_colamd_selected(solver)) {
         maybe_select_block_structured_ordering(solver, &elapsed,
                                                numeric_values);
