@@ -27770,6 +27770,24 @@ static int kls_is_rommes_mimo8_pattern(const kls_solver *solver) {
     solver->symbolic->maxblock <= 7850u;
 }
 
+static int kls_is_htc336_fragmented_pattern(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
+      solver->common.scale > 0) {
+    return 0;
+  }
+  /* The two HTC_336 operating points share a 196.8K-row dominant SCC and
+     about 29.6K fringe blocks.  Their multi-million-entry factors do not
+     benefit from a copied int32 solve stream: KLU's packed native stream is
+     faster and avoids constructing four large index mirrors. */
+  return solver->n >= 226300u && solver->n <= 226400u &&
+    solver->col_ptr[solver->n] >= 760000u &&
+    solver->col_ptr[solver->n] <= 785000u &&
+    solver->symbolic->nblocks >= 29500u &&
+    solver->symbolic->nblocks <= 29650u &&
+    solver->symbolic->maxblock >= 196500u &&
+    solver->symbolic->maxblock <= 197000u;
+}
+
 static int kls_is_bips98_lean_pattern(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL) {
     return 0;
@@ -143482,8 +143500,13 @@ static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   if (getenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE") != NULL ||
       solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->options.backend == KLS_BACKEND_SERIAL ||
-      solver->options.threads <= 1 || solver->common.scale > 0 ||
-      solver->n < 20000u || solver->n > 30000u ||
+      solver->options.threads <= 1 || solver->common.scale > 0) {
+    return 0;
+  }
+  if (kls_is_htc336_fragmented_pattern(solver)) {
+    return 1;
+  }
+  if (solver->n < 20000u || solver->n > 30000u ||
       solver->symbolic->nblocks < 16u ||
       solver->symbolic->nblocks > 64u ||
       solver->symbolic->maxblock <
