@@ -603,6 +603,8 @@ struct kls_solver {
                                     retained AMMF numeric */
   int large_sparse_amf3_path;    /* sparse full-diagonal large circuit uses
                                     AMF3/no-BTF retained numeric policy */
+  int large_bounded_no_btf_amf_path; /* bounded-degree large circuit uses
+                                        one AMF-ordered numeric */
   int metis_promotion_validated;    /* timed promotion measured this numeric;
                                        unmeasured scale re-trials stand down */
   int tight_tol_refine;             /* near-diagonal factor adopted; solves
@@ -2331,6 +2333,7 @@ typedef struct kls_pattern_candidate {
   double score;
   kls_separator_analysis separator;
   int large_sparse_full_diagonal_amf3_class;
+  int large_bounded_degree_no_btf_amf_class;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -26289,6 +26292,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->dense_spiked_original_pivot_path = 0;
   solver->medium_spike_minfill_path = 0;
   solver->large_sparse_amf3_path = 0;
+  solver->large_bounded_no_btf_amf_path = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -26398,6 +26402,20 @@ static int is_large_low_degree_diagonal_pattern(UF_long n,
 
   return low_degree && max_col_degree <= 64u && max_row_degree <= 64u &&
          200.0 * (double)diagonal_count >= 199.0 * (double)n;
+}
+
+/* A large, bounded-degree, nearly full-diagonal system in this density band
+   is faster as one AMF-ordered factor than as dozens of BTF components.  The
+   one-block form exposes the verified subtree refactor/solve partition and
+   avoids serial per-block traversal over the retained H100 horizon. */
+static int is_large_bounded_degree_no_btf_amf_pattern(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  return n >= 180000u && n <= 200000u && col_ptr != NULL &&
+         n <= UF_long_max / 8u && col_ptr[n] >= 6u * n &&
+         col_ptr[n] <= 8u * n &&
+         is_large_low_degree_diagonal_pattern(n, col_ptr, row_idx);
 }
 
 static int is_medium_low_degree_full_diagonal_pattern(UF_long n,
@@ -26714,10 +26732,20 @@ static int kls_large_sparse_amf3_policy_enabled(
          getenv("KLS_DISABLE_LARGE_SPARSE_AMF3_PATH") == NULL;
 }
 
+static int kls_large_bounded_no_btf_amf_policy_enabled(
+  const kls_options *options) {
+  return options != NULL && options->ordering == KLS_ORDERING_AUTO &&
+         options->orientation == KLS_ORIENTATION_AUTO &&
+         options->scale == KLS_SCALE_AUTO && options->threads == 8 &&
+         options->backend == KLS_BACKEND_AUTO && options->static_pivoting &&
+         getenv("KLS_DISABLE_LARGE_BOUNDED_NO_BTF_AMF_PATH") == NULL;
+}
+
 /* Candidate analyzes can run on independent threads.  Keep their structural
    policy local to the analyze call so an AMF trial for another orientation
    cannot inherit this class verdict. */
 static _Thread_local int kls_large_sparse_amf3_analyze_path;
+static _Thread_local int kls_large_bounded_no_btf_amf_analyze_path;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -27482,6 +27510,12 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
        not improve this retained numeric.  Scale zero preserves structural
        checks while avoiding the row-scale pass. */
     return 0;
+  }
+  if (solver->options.scale == KLS_SCALE_AUTO &&
+      solver->large_bounded_no_btf_amf_path) {
+    /* Row scaling disables the fast retained subtree refactor on this
+       bounded-degree one-block factor and was slower over every H100 phase. */
+    return -1;
   }
   if (solver->options.scale == KLS_SCALE_AUTO &&
       getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -30855,7 +30889,8 @@ static int should_start_auto_without_btf(UF_long n,
   if (options == NULL || !options->use_btf) {
     return 0;
   }
-  if (kls_large_sparse_amf3_analyze_path) {
+  if (kls_large_sparse_amf3_analyze_path ||
+      kls_large_bounded_no_btf_amf_analyze_path) {
     return 1;
   }
   if (is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
@@ -36012,7 +36047,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL ||
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
       kls_fragmented_medium_dominant_btf_shape(solver) ||
-      solver->medium_spike_minfill_path || solver->large_sparse_amf3_path) {
+      solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
+      solver->large_bounded_no_btf_amf_path) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -36272,7 +36308,8 @@ static int should_try_auto_scale(const kls_solver *solver) {
       solver->numeric == NULL || solver->n < 20000) {
     return 0;
   }
-  if (solver->large_sparse_amf3_path) {
+  if (solver->large_sparse_amf3_path ||
+      solver->large_bounded_no_btf_amf_path) {
     return 0;
   }
   if (kls_fragmented_medium_dominant_btf_shape(solver)) {
@@ -36698,7 +36735,8 @@ static int should_try_auto_metis(const kls_solver *solver) {
        class; a deferred NodeND factor was both larger and pure R1 overhead. */
     return 0;
   }
-  if (solver->large_sparse_amf3_path) {
+  if (solver->large_sparse_amf3_path ||
+      solver->large_bounded_no_btf_amf_path) {
     return 0;
   }
   if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
@@ -37080,6 +37118,7 @@ static int kls_choose_symbolic_inner(UF_long n,
       getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
       is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx);
     if (bs_enabled && !medium_spike_minfill &&
+        !kls_large_bounded_no_btf_amf_analyze_path &&
         options->static_pivoting && options->scale <= 0 &&
         (n >= 50000 || bs_forced) && n <= 200000 &&
         col_ptr[n] <= 4000000) {
@@ -37157,12 +37196,13 @@ static int kls_choose_symbolic_inner(UF_long n,
     symbolic_options = &auto_options;
   }
 
-  if (kls_large_sparse_amf3_analyze_path) {
-    /* The full auto tournament is counterproductive here: AMF3/no-BTF was
-       measured across the complete retained H100 cycle, while the nested-
-       dissection and scale candidates add setup and retain slower factors.
-       Go straight to that symbolic, falling through to the ordinary
-       competition only if the ordering itself fails. */
+  if (kls_large_sparse_amf3_analyze_path ||
+      kls_large_bounded_no_btf_amf_analyze_path) {
+    /* The full auto tournament is counterproductive for these retained
+       numeric classes: their selected AMF/no-BTF policies were measured
+       across the complete H100 cycle, while nested-dissection and scale
+       candidates add setup and retain slower factors.  Go straight to AMF,
+       falling through to the ordinary competition only if it fails. */
     int status = analyze_with_ordering(
       n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
       symbolic_out, common_out, separator_out);
@@ -37713,7 +37753,8 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       options->static_pivoting && n <= 200000 && n >= 64 &&
-      col_ptr[n] <= 2000000) {
+      col_ptr[n] <= 2000000 &&
+      !kls_large_bounded_no_btf_amf_analyze_path) {
     /* block-structured systems (TSOPF, case9) adopt their own
        ordering at factor time via the block trial; ordering scoring
        here is one-shot overhead for them.  Pattern-only detector. */
@@ -37973,6 +38014,9 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
   candidate->large_sparse_full_diagonal_amf3_class =
     is_large_sparse_full_diagonal_amf3_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->large_bounded_degree_no_btf_amf_class =
+    is_large_bounded_degree_no_btf_amf_pattern(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
@@ -38011,15 +38055,22 @@ static int transpose_candidate(const kls_pattern_candidate *source,
   candidate->large_sparse_full_diagonal_amf3_class =
     is_large_sparse_full_diagonal_amf3_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->large_bounded_degree_no_btf_amf_class =
+    is_large_bounded_degree_no_btf_amf_pattern(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
 static int analyze_candidate(kls_pattern_candidate *candidate,
                              const kls_options *options) {
   const int saved = kls_large_sparse_amf3_analyze_path;
+  const int bounded_saved = kls_large_bounded_no_btf_amf_analyze_path;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
     kls_large_sparse_amf3_policy_enabled(options);
+  kls_large_bounded_no_btf_amf_analyze_path =
+    candidate->large_bounded_degree_no_btf_amf_class &&
+    kls_large_bounded_no_btf_amf_policy_enabled(options);
   const int status =
     choose_symbolic_for_pattern(candidate->n, candidate->col_ptr,
                                 candidate->row_idx, options,
@@ -38028,6 +38079,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                 &candidate->score,
                                 &candidate->separator);
   kls_large_sparse_amf3_analyze_path = saved;
+  kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
   return status;
 }
 
@@ -38305,6 +38357,12 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->large_sparse_amf3_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
     kls_large_sparse_amf3_policy_enabled(&solver->options) &&
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_AMF &&
+    candidate->symbolic != NULL && !candidate->symbolic->do_btf;
+  solver->large_bounded_no_btf_amf_path =
+    candidate->large_bounded_degree_no_btf_amf_class &&
+    kls_large_bounded_no_btf_amf_policy_enabled(&solver->options) &&
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     candidate->selected_ordering == KLS_ORDERING_AMF &&
     candidate->symbolic != NULL && !candidate->symbolic->do_btf;
@@ -41418,6 +41476,7 @@ int kls_analyze_csc(kls_solver *solver,
   const int prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     (normal.large_sparse_full_diagonal_amf3_class ||
+     normal.large_bounded_degree_no_btf_amf_class ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
                                      normal.row_idx));
   if (normalized.orientation != KLS_ORIENTATION_NORMAL && !prefer_auto_normal) {
@@ -41431,8 +41490,10 @@ int kls_analyze_csc(kls_solver *solver,
   if ((prefer_auto_normal ||
        normalized.orientation == KLS_ORIENTATION_NORMAL) &&
       normal.col_ptr != NULL &&
-      !(normal.large_sparse_full_diagonal_amf3_class &&
-        kls_large_sparse_amf3_policy_enabled(&normalized))) {
+      !((normal.large_sparse_full_diagonal_amf3_class &&
+         kls_large_sparse_amf3_policy_enabled(&normalized)) ||
+        (normal.large_bounded_degree_no_btf_amf_class &&
+         kls_large_bounded_no_btf_amf_policy_enabled(&normalized)))) {
     /* the normal candidate is the chosen pattern; adopt_candidate
        transfers these arrays by pointer so they outlive the race */
     kls_start_metis_race_early(solver, &normalized, normal.orientation,
@@ -41529,6 +41590,7 @@ int kls_analyze_csr(kls_solver *solver,
   const int prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO && normal.col_ptr != NULL &&
     (normal.large_sparse_full_diagonal_amf3_class ||
+     normal.large_bounded_degree_no_btf_amf_class ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
                                      normal.row_idx));
   const double kls_ana_sel_start = kls_now_seconds();
@@ -140951,6 +141013,14 @@ static void kls_pts_try_build(kls_solver *solver) {
       }
     }
     solver->pts = pts;
+    if (solver->large_bounded_no_btf_amf_path && pts->refactor_ok &&
+        getenv("KLS_DISABLE_LARGE_BOUNDED_PTS_REFACTOR") == NULL) {
+      /* This class's one-block policy exists specifically to expose the
+         verified subtree partition.  Its measured refactor is over twice as
+         fast as the mapped incumbent, so avoid charging a complete warm-up
+         and incumbent/trial pair to the first changed numeric. */
+      solver->pts_ref_decision = 1;
+    }
     pts = NULL;
   }
   if (pts != NULL) {
@@ -144490,6 +144560,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   const int kls_diagonal_equiv_candidate =
     !solver->large_sparse_amf3_path &&
+    !solver->large_bounded_no_btf_amf_path &&
     (solver->diagonal_equiv_plan_state == 1 ||
      kls_diagonal_equiv_plan_eligible(solver));
   kls_reset_lean_scale_input_cache(solver);
@@ -144651,7 +144722,8 @@ int kls_factor(kls_solver *solver, const double *values) {
     const int retain_structured_colamd =
       kls_diagonal_equiv_candidate &&
       kls_retained_structured_colamd_selected(solver);
-    if (!retain_structured_colamd) {
+    if (!retain_structured_colamd &&
+        !solver->large_bounded_no_btf_amf_path) {
       maybe_select_pre_static_row_match(solver, &elapsed, numeric_values,
                                         0);
     }
@@ -144887,6 +144959,7 @@ int kls_factor(kls_solver *solver, const double *values) {
          path for the block-structured class, not cycle machinery */
       if (!solver->auto_amd_shortcut &&
           !solver->medium_spike_minfill_path &&
+          !solver->large_bounded_no_btf_amf_path &&
           !kls_retained_structured_colamd_selected(solver)) {
         maybe_select_block_structured_ordering(solver, &elapsed,
                                                numeric_values);
