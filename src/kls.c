@@ -2888,6 +2888,8 @@ typedef struct kls_gemat_match_entry {
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
+static int kls_fragmented_medium_dominant_btf_shape(
+  const kls_solver *solver);
 static UF_long kls_padded_run_consume(const kls_solver *ps,
                                       UF_long k1,
                                       UF_long j,
@@ -27533,6 +27535,13 @@ static int kls_uses_structural_initial_pivot_tolerance(
      solver->options.orientation == KLS_ORIENTATION_AUTO &&
      solver->options.ordering == KLS_ORDERING_AUTO &&
      solver->options.scale == KLS_SCALE_AUTO &&
+     solver->orientation == KLS_ORIENTATION_NORMAL &&
+     solver->common.scale == 0 &&
+     kls_fragmented_medium_dominant_btf_shape(solver)) ||
+    (solver != NULL &&
+     solver->options.orientation == KLS_ORIENTATION_AUTO &&
+     solver->options.ordering == KLS_ORDERING_AUTO &&
+     solver->options.scale == KLS_SCALE_AUTO &&
      solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
      ((solver->common.scale == -1 &&
        kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr)) ||
@@ -27558,6 +27567,19 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
        numeric factor roughly in half without changing the mapped steady
        engine (qh1484: 70 vs 137 off-diagonal pivots, 1.5e-16 residual). */
     return 1.0e-4;
+  }
+  if (solver->options.orientation == KLS_ORIENTATION_AUTO &&
+      solver->options.ordering == KLS_ORDERING_AUTO &&
+      solver->options.scale == KLS_SCALE_AUTO &&
+      solver->orientation == KLS_ORIENTATION_NORMAL &&
+      solver->common.scale == 0 &&
+      kls_fragmented_medium_dominant_btf_shape(solver)) {
+    /* The default threshold takes hundreds of off-diagonal pivots in this
+       dominant block and inflates both triangular streams.  At 1e-5 the
+       audited changing-value run reduced factor work from 649M to 550M
+       flops, cut the solve from 3.77ms to 1.75--1.80ms, and kept the worst
+       relative residual below 1.2e-13 across every checked refactor. */
+    return 1.0e-5;
   }
   if (solver->options.orientation == KLS_ORIENTATION_AUTO &&
       solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -35821,6 +35843,30 @@ static int kls_dense_giant_declines_auto_metis(UF_long n,
   return col_ptr != NULL && n >= 1000000u && col_ptr[n] / n >= 8u;
 }
 
+/* A medium-size dominant BTF block with thousands of small fringe blocks is
+   already well served by the incumbent AMD factor.  In this shape, ordering
+   the dominant block with nested dissection destroys the useful local
+   structure while scale trials retain the same numeric: on the audited
+   358K-row case METIS grows L+U from 4.49M to 12.26M entries and the rejected
+   METIS/scale consultations add 6.65s to the first refactor.  The symbolic
+   work and fill bounds keep this separate from low-work fragmented systems
+   and from the single/few-block matrices where METIS is profitable. */
+static int kls_fragmented_medium_dominant_btf_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
+      solver->n < 300000u || solver->n > 500000u ||
+      solver->nnz < 4u * solver->n || solver->nnz > 7u * solver->n ||
+      !solver->symbolic->do_btf || solver->symbolic->nblocks < 1024u ||
+      solver->symbolic->maxblock * 100u < 95u * solver->n) {
+    return 0;
+  }
+  const double est_fill =
+    solver->symbolic->lnz + solver->symbolic->unz;
+  const double est_flops = solver->symbolic->est_flops;
+  return est_fill >= 2000000.0 && est_fill <= 10000000.0 &&
+         est_flops >= 1.0e8 && est_flops <= 2.0e9;
+}
+
 /* Analyze-time start: the METIS analyze stage needs only the pattern,
    so the worker launches when the analysis finishes and overlaps both
    the caller's gap to kls_factor and the whole main-side first factor.
@@ -35830,7 +35876,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
       solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL ||
-      kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr)) {
+      kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
+      kls_fragmented_medium_dominant_btf_shape(solver)) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -36088,6 +36135,9 @@ static void kls_signal_metis_race_values(kls_solver *solver,
 static int should_try_auto_scale(const kls_solver *solver) {
   if (solver->auto_scale_checked || solver->options.scale != KLS_SCALE_AUTO ||
       solver->numeric == NULL || solver->n < 20000) {
+    return 0;
+  }
+  if (kls_fragmented_medium_dominant_btf_shape(solver)) {
     return 0;
   }
   if (solver->metis_promotion_validated) {
@@ -36500,6 +36550,9 @@ static int should_try_auto_metis(const kls_solver *solver) {
     return 0;
   }
   if (kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr)) {
+    return 0;
+  }
+  if (kls_fragmented_medium_dominant_btf_shape(solver)) {
     return 0;
   }
   if (kls_auto_low_work_no_btf_direct_amd_is_preferable(solver)) {
@@ -99678,6 +99731,13 @@ static int kls_egraph_algorithm5_prefactor_update_requested(
        cached-supernode walk is both faster and bit-identical here. */
     return 0;
   }
+  if (kls_fragmented_medium_dominant_btf_shape(solver)) {
+    /* This fragmented dominant-block shape exposes only a few Algorithm 5
+       prefactor dependencies.  Maintaining that side path costs more than
+       the cached-supernode work it removes (1.9--3.0ms per refactor on the
+       audited case), so keep the plain dependency walk. */
+    return 0;
+  }
   return solver != NULL &&
          solver->refactor_dependency_work >=
            KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK &&
@@ -145533,12 +145593,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_choice = -1;
   }
   if ((getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL ||
-       kls_egraph_hybrid_huge_single_shape(solver)) &&
+       kls_egraph_hybrid_huge_single_shape(solver) ||
+       kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->floor_choice == 0) {
     solver->floor_choice = -1;
   }
   if ((getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL ||
-       kls_egraph_hybrid_huge_single_shape(solver)) &&
+       kls_egraph_hybrid_huge_single_shape(solver) ||
+       kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->padded_choice == 0) {
     solver->padded_choice = -1;
   }
