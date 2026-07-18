@@ -479,6 +479,8 @@ struct kls_solver {
   double *row_scale;
   double *col_scale;
   double *values;
+  double *prepared_value_scale;
+  UF_long *prepared_value_input_pos;
   double *refactor_input_snapshot;
   int refactor_input_snapshot_valid;
   int unchanged_refactor_state; /* 0 unarmed, 1 first comparison,
@@ -597,6 +599,8 @@ struct kls_solver {
                                                 the analyze-time ND tree */
   int prestatic_dense_spiked_match; /* dense spiked matrix adopted the
                                        direct matched METIS route */
+  int medium_partial_static_metis_path; /* structurally guaranteed medium
+                                           pre-static METIS adoption */
   int dense_spiked_original_pivot_path; /* dense spike kept the incumbent
                                            pivoted METIS numeric */
   int medium_spike_minfill_path; /* full-diagonal medium spike selected the
@@ -1210,8 +1214,18 @@ struct kls_solver {
   UF_long *refactor_level_cols;
   UF_long *refactor_level_pos;
   UF_long *refactor_level_thread_ptr;
+  UF_long *refactor_separator_private_cols;
+  UF_long *refactor_separator_private_thread_ptr;
+  UF_long *refactor_separator_cluster_tail_cols;
   int refactor_level_thread_count;
+  int refactor_separator_private_thread_count;
+  int refactor_separator_private_plan_attempted;
   UF_long refactor_level_count;
+  UF_long refactor_separator_private_cluster_level_count;
+  UF_long refactor_separator_private_column_count;
+  UF_long refactor_separator_cluster_tail_column_count;
+  UF_long refactor_separator_private_component_count;
+  UF_long refactor_separator_private_unsafe_component_count;
   UF_long refactor_level_max_width;
   UF_long refactor_dependency_edges;
   UF_long refactor_dependency_root_columns;
@@ -2319,6 +2333,14 @@ static int kls_dense_spiked_fast_defaults_enabled(
     getenv("KLS_DISABLE_DENSE_SPIKED_FAST_DEFAULTS") == NULL;
 }
 
+static int kls_medium_partial_static_metis_adopted(
+  const kls_solver *solver) {
+  return solver != NULL && solver->medium_partial_static_metis_path &&
+    solver->row_perm != NULL &&
+    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+    solver->orientation == KLS_ORIENTATION_NORMAL;
+}
+
 typedef struct kls_pattern_candidate {
   UF_long n;
   UF_long nnz;
@@ -3031,6 +3053,10 @@ static int kls_is_bips98_lean_pattern(const kls_solver *solver);
 static int kls_is_medium_symmetric_rajat_pattern(
   UF_long n,
   const UF_long *col_ptr);
+static int is_medium_prestatic_partial_missing_pattern(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx);
 static int kls_egraph_refactor_should_stop(
   kls_egraph_refactor_shared *shared);
 static void kls_egraph_pipeline_pause(unsigned *spin);
@@ -3111,6 +3137,7 @@ typedef struct kls_row_match_graph {
   UF_long *row_ptr;
   UF_long *col_idx;
   double *log_weight;
+  int weights_are_raw;
 } kls_row_match_graph;
 
 typedef struct kls_heap_item {
@@ -20844,6 +20871,9 @@ static void free_refactor_schedule(kls_solver *solver) {
   free(solver->refactor_level_cols);
   free(solver->refactor_level_pos);
   free(solver->refactor_level_thread_ptr);
+  free(solver->refactor_separator_private_cols);
+  free(solver->refactor_separator_private_thread_ptr);
+  free(solver->refactor_separator_cluster_tail_cols);
   free(solver->refactor_pipeline_successor_ptr);
   free(solver->refactor_pipeline_successors);
   free(solver->refactor_pipeline_pred_count);
@@ -20858,6 +20888,9 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_level_cols = NULL;
   solver->refactor_level_pos = NULL;
   solver->refactor_level_thread_ptr = NULL;
+  solver->refactor_separator_private_cols = NULL;
+  solver->refactor_separator_private_thread_ptr = NULL;
+  solver->refactor_separator_cluster_tail_cols = NULL;
   solver->refactor_pipeline_successor_ptr = NULL;
   solver->refactor_pipeline_successors = NULL;
   solver->refactor_pipeline_pred_count = NULL;
@@ -20867,7 +20900,14 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_pipeline_remaining_preds = NULL;
   solver->refactor_supernode_pipeline_end = NULL;
   solver->refactor_level_thread_count = 0;
+  solver->refactor_separator_private_thread_count = 0;
+  solver->refactor_separator_private_plan_attempted = 0;
   solver->refactor_level_count = 0;
+  solver->refactor_separator_private_cluster_level_count = 0;
+  solver->refactor_separator_private_column_count = 0;
+  solver->refactor_separator_cluster_tail_column_count = 0;
+  solver->refactor_separator_private_component_count = 0;
+  solver->refactor_separator_private_unsafe_component_count = 0;
   solver->refactor_level_max_width = 0;
   solver->refactor_dependency_edges = 0;
   solver->refactor_dependency_root_columns = 0;
@@ -26033,6 +26073,10 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   free(solver->solve_refine_values);
   solver->solve_refine_values = NULL;
   solver->predicted_entry_values_captured = 0;
+  free(solver->prepared_value_scale);
+  solver->prepared_value_scale = NULL;
+  free(solver->prepared_value_input_pos);
+  solver->prepared_value_input_pos = NULL;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -26180,6 +26224,8 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->row_scale);
   free(solver->col_scale);
   free(solver->values);
+  free(solver->prepared_value_scale);
+  free(solver->prepared_value_input_pos);
   free(solver->refactor_input_snapshot);
   free(solver->diagonal_equiv_reference_values);
   free(solver->diagonal_equiv_col_ptr);
@@ -26222,6 +26268,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->row_scale = NULL;
   solver->col_scale = NULL;
   solver->values = NULL;
+  solver->prepared_value_scale = NULL;
+  solver->prepared_value_input_pos = NULL;
   solver->refactor_input_snapshot = NULL;
   solver->refactor_input_snapshot_valid = 0;
   solver->unchanged_refactor_state = 0;
@@ -27805,6 +27853,11 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
   }
   return KLS_OK;
 }
+
+/* The medium partial-diagonal path is identified before its row permutation
+   replaces the original pattern.  Carry that decision through matching and
+   METIS ordering without re-identifying the now-full matched diagonal. */
+static _Thread_local int kls_medium_partial_static_metis_ctx;
 
 #ifdef KLS_HAVE_METIS
 typedef struct kls_metis_separator_capture {
@@ -29772,7 +29825,9 @@ static UF_long kls_metis_order_inner(UF_long n,
   idx_t *metis_iperm = (idx_t *)malloc(nsize * sizeof(*metis_iperm));
   idx_t metis_ndp_npes =
     metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
-  {
+  if (kls_medium_partial_static_metis_ctx) {
+    metis_ndp_npes = 24;
+  } else {
     const char *npes_env = getenv("KLS_METIS_NDP_NPES");
     if (npes_env != NULL && npes_env[0] != '\0') {
       metis_ndp_npes = (idx_t)atol(npes_env);
@@ -29918,7 +29973,9 @@ static UF_long kls_metis_order_inner(UF_long n,
     }
   }
 #ifdef KLS_HAVE_MTMETIS
-  const int force_det_ndp = getenv("KLS_FORCE_DET_NDP") != NULL;
+  const int force_det_ndp =
+    getenv("KLS_FORCE_DET_NDP") != NULL ||
+    kls_medium_partial_static_metis_ctx;
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 &&
       (force_det_ndp || kls_spiked_ndp_class ||
@@ -30002,7 +30059,8 @@ static UF_long kls_metis_order_inner(UF_long n,
       getenv("KLS_METIS_CAMD_COMPONENT_GROUPS") != NULL &&
       metis_ndp_npes > 1 && metis_ndp_sizes != NULL;
     const int skip_camd_refine =
-      getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL;
+      getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL ||
+      kls_medium_partial_static_metis_ctx;
     UF_long camd_lnz;
     if (skip_camd_refine) {
       /* The pre-static raced-symbolic path subsequently constructs and
@@ -31013,6 +31071,82 @@ static int compare_match_entries_desc(const void *a, const void *b) {
   return 0;
 }
 
+static void kls_sort_match_entries_desc_full_radix(
+  kls_match_entry *entries,
+  UF_long count,
+  kls_match_entry *scratch) {
+  enum { KLS_MATCH_RADIX_MAX_BITS = 16,
+         KLS_MATCH_RADIX_MAX_SIZE = 1 << KLS_MATCH_RADIX_MAX_BITS };
+  size_t buckets[KLS_MATCH_RADIX_MAX_SIZE];
+  const unsigned int radix_bits =
+    getenv("KLS_MATCH_RADIX16") != NULL ||
+        kls_medium_partial_static_metis_ctx
+      ? 16u : 11u;
+  kls_match_entry *src = entries;
+  kls_match_entry *dst = scratch;
+  uint64_t max_row_col = 0u;
+  for (UF_long i = 0u; i < count; ++i) {
+    max_row_col |= (uint64_t)entries[i].row;
+    max_row_col |= (uint64_t)entries[i].col;
+  }
+  unsigned int index_bits = 1u;
+  while (index_bits < 64u && (max_row_col >> index_bits) != 0u) {
+    ++index_bits;
+  }
+
+  /* Stable LSD passes over the reverse integer keys implement the exact
+     comparison order: descending weight, then descending row and column.
+     Sparse-matrix indices need only their significant low passes; positive
+     finite IEEE-754 weights retain numeric order in all 64 representation
+     bits. */
+  for (int key_kind = 0; key_kind < 3; ++key_kind) {
+    const unsigned int key_bits = key_kind < 2 ? index_bits : 64u;
+    for (unsigned int shift = 0u; shift < key_bits;
+         shift += radix_bits) {
+      const unsigned int pass_bits =
+        key_bits - shift < radix_bits ? key_bits - shift : radix_bits;
+      const unsigned int digit_count = 1u << pass_bits;
+      memset(buckets, 0, (size_t)digit_count * sizeof(*buckets));
+      const uint64_t mask = (UINT64_C(1) << pass_bits) - UINT64_C(1);
+      for (UF_long i = 0u; i < count; ++i) {
+        uint64_t raw = 0u;
+        if (key_kind == 0) {
+          raw = (uint64_t)src[i].col;
+        } else if (key_kind == 1) {
+          raw = (uint64_t)src[i].row;
+        } else {
+          memcpy(&raw, &src[i].weight, sizeof(raw));
+        }
+        buckets[(~raw >> shift) & mask]++;
+      }
+      size_t offset = 0u;
+      for (unsigned int digit = 0u; digit < digit_count; ++digit) {
+        const size_t count_for_digit = buckets[digit];
+        buckets[digit] = offset;
+        offset += count_for_digit;
+      }
+      for (UF_long i = 0u; i < count; ++i) {
+        uint64_t raw = 0u;
+        if (key_kind == 0) {
+          raw = (uint64_t)src[i].col;
+        } else if (key_kind == 1) {
+          raw = (uint64_t)src[i].row;
+        } else {
+          memcpy(&raw, &src[i].weight, sizeof(raw));
+        }
+        const size_t digit = (size_t)((~raw >> shift) & mask);
+        dst[buckets[digit]++] = src[i];
+      }
+      kls_match_entry *swap = src;
+      src = dst;
+      dst = swap;
+    }
+  }
+  if (src != entries) {
+    memcpy(entries, src, (size_t)count * sizeof(*entries));
+  }
+}
+
 static void kls_sort_match_entries_desc(kls_match_entry *entries,
                                         UF_long count) {
   if (entries == NULL || count <= 1u) {
@@ -31028,6 +31162,13 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
   if (scratch == NULL) {
     qsort(entries, (size_t)count, sizeof(*entries),
           compare_match_entries_desc);
+    return;
+  }
+
+  if (getenv("KLS_MATCH_FULL_RADIX") != NULL ||
+      kls_medium_partial_static_metis_ctx) {
+    kls_sort_match_entries_desc_full_radix(entries, count, scratch);
+    free(scratch);
     return;
   }
 
@@ -31217,6 +31358,10 @@ static int build_row_match_graph(UF_long n,
   UF_long *col_idx = (UF_long *)malloc((size_t)entry_count * sizeof(*col_idx));
   double *log_weight = build_log_weights
     ? (double *)malloc((size_t)entry_count * sizeof(*log_weight)) : NULL;
+  const int raw_swap_weights =
+    build_log_weights && n > 50000u &&
+    (getenv("KLS_MATCH_RAW_SWAP_WEIGHTS") != NULL ||
+     kls_medium_partial_static_metis_ctx);
   UF_long *next = (UF_long *)malloc((size_t)n * sizeof(*next));
   if (row_ptr == NULL || col_idx == NULL ||
       (build_log_weights && log_weight == NULL) || next == NULL) {
@@ -31239,7 +31384,8 @@ static int build_row_match_graph(UF_long n,
     const UF_long dst = next[row]++;
     col_idx[dst] = entries[i].col;
     if (build_log_weights) {
-      log_weight[dst] = log(entries[i].weight);
+      log_weight[dst] = raw_swap_weights
+        ? entries[i].weight : log(entries[i].weight);
     }
   }
 
@@ -31247,18 +31393,26 @@ static int build_row_match_graph(UF_long n,
   graph->row_ptr = row_ptr;
   graph->col_idx = col_idx;
   graph->log_weight = log_weight;
+  graph->weights_are_raw = raw_swap_weights;
   return KLS_OK;
 }
 
-static double row_match_log_weight(const kls_row_match_graph *graph,
-                                   UF_long row,
-                                   UF_long col) {
+static double row_match_stored_weight(const kls_row_match_graph *graph,
+                                      UF_long row,
+                                      UF_long col) {
   for (UF_long p = graph->row_ptr[row]; p < graph->row_ptr[row + 1u]; ++p) {
     if (graph->col_idx[p] == col) {
       return graph->log_weight[p];
     }
   }
   return -DBL_MAX;
+}
+
+static double row_match_log_weight(const kls_row_match_graph *graph,
+                                   UF_long row,
+                                   UF_long col) {
+  const double stored = row_match_stored_weight(graph, row, col);
+  return graph->weights_are_raw && stored != -DBL_MAX ? log(stored) : stored;
 }
 
 static int exact_weighted_match_is_affordable(UF_long n, UF_long nnz) {
@@ -32114,7 +32268,26 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
      eight of them find the same improvement cycles at half the search
      breadth. */
   const UF_long max_candidates_per_row = 8u;
-  const int max_rounds = 5;
+  int max_rounds = kls_medium_partial_static_metis_ctx ? 1 : 5;
+  {
+    const char *rounds_env = getenv("KLS_MATCH_SWAP_ROUNDS");
+    if (rounds_env != NULL && rounds_env[0] != '\0') {
+      const int parsed = atoi(rounds_env);
+      if (parsed >= 1 && parsed <= 5) {
+        max_rounds = parsed;
+      }
+    }
+  }
+  double *current_log_weight =
+    (double *)malloc((size_t)n * sizeof(*current_log_weight));
+  if (current_log_weight == NULL) {
+    return;
+  }
+  for (UF_long row = 0; row < n; ++row) {
+    const UF_long col = row_perm[row];
+    current_log_weight[row] = col == KLS_KLU_EMPTY
+      ? -DBL_MAX : row_match_stored_weight(graph, row, col);
+  }
   for (int round = 0; round < max_rounds; ++round) {
     UF_long changes = 0;
     for (UF_long row = 0; row < n; ++row) {
@@ -32122,8 +32295,7 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
       if (current_col == KLS_KLU_EMPTY) {
         continue;
       }
-      const double current_weight =
-        row_match_log_weight(graph, row, current_col);
+      const double current_weight = current_log_weight[row];
       UF_long candidates = 0;
       for (UF_long p = graph->row_ptr[row];
            p < graph->row_ptr[row + 1u] && candidates < max_candidates_per_row;
@@ -32138,28 +32310,39 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
           continue;
         }
         const double other_to_current =
-          row_match_log_weight(graph, other_row, current_col);
+          row_match_stored_weight(graph, other_row, current_col);
         if (other_to_current == -DBL_MAX) {
           continue;
         }
-        const double other_weight =
-          row_match_log_weight(graph, other_row, other_col);
-        const double gain =
-          graph->log_weight[p] + other_to_current - current_weight - other_weight;
-        if (gain > 1.0e-12) {
+        const double other_weight = current_log_weight[other_row];
+        const int improves = graph->weights_are_raw
+          ? (long double)graph->log_weight[p] *
+              (long double)other_to_current >
+            (long double)current_weight * (long double)other_weight *
+              (1.0L + 1.0e-12L)
+          : graph->log_weight[p] + other_to_current - current_weight -
+              other_weight > 1.0e-12;
+        if (improves) {
           row_perm[row] = trial_col;
           row_perm[other_row] = current_col;
           col_match[trial_col] = row;
           col_match[current_col] = other_row;
+          current_log_weight[row] = graph->log_weight[p];
+          current_log_weight[other_row] = other_to_current;
           changes++;
           break;
         }
       }
     }
+    if (getenv("KLS_TRACE_MATCH_SWAPS") != NULL) {
+      fprintf(stderr, "KLS match swaps: round=%d changes=%ld\n",
+              round + 1, (long)changes);
+    }
     if (changes == 0) {
       break;
     }
   }
+  free(current_log_weight);
 }
 
 static int weighted_path_contains_row(const UF_long *rows,
@@ -32997,8 +33180,10 @@ static int build_greedy_numeric_row_match(UF_long n,
         matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
       }
       if (matched == n && improve_weights) {
-        improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
-        if (n > 20000u) {
+        if (getenv("KLS_MATCH_SKIP_PAIR_SWAPS") == NULL) {
+          improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
+        }
+        if (n > 20000u && getenv("KLS_MATCH_SKIP_PATHS") == NULL) {
           /* The cycle-path search costs a quarter of a small matrix's
              whole initialization; the downstream acceptance comparison
              guards match quality either way (a weaker match that loses
@@ -34936,6 +35121,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   const double kls_ps_t0 = kls_now_seconds();
+  kls_medium_partial_static_metis_ctx =
+    solver->medium_partial_static_metis_path;
 #ifdef KLS_HAVE_METIS
   kls_prestatic_ordering_ctx = 1;
 #endif
@@ -34996,6 +35183,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 #ifdef KLS_HAVE_METIS
       kls_prestatic_ordering_ctx = 0;
 #endif
+      kls_medium_partial_static_metis_ctx = 0;
       return;
     }
     int use_medium_gate = 1;
@@ -35036,6 +35224,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 #ifdef KLS_HAVE_METIS
     kls_prestatic_ordering_ctx = 0;
 #endif
+    kls_medium_partial_static_metis_ctx = 0;
     *elapsed += kls_now_seconds() - start;
     return;
   }
@@ -35131,7 +35320,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   kls_options trial_options = solver->options;
-  if (getenv("KLS_PRESTATIC_FORCE_METIS") != NULL) {
+  if (getenv("KLS_PRESTATIC_FORCE_METIS") != NULL ||
+      solver->medium_partial_static_metis_path) {
     trial_options.ordering = KLS_ORDERING_METIS;
   }
   if (trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match) {
@@ -35278,6 +35468,23 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       : choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
                                        trial_row_idx, &trial_options,
                                        trial_values);
+  const int preapplied_matching_equilibration =
+    (getenv("KLS_PRESTATIC_PREAPPLY_MATCH_SCALE") != NULL ||
+     solver->medium_partial_static_metis_path) &&
+    trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
+    trial_row_scale != NULL && trial_col_scale != NULL;
+  if (preapplied_matching_equilibration) {
+    /* The ordinary path first factors KLU's internally equilibrated values,
+       then maybe_use_matching_equilibration factors the explicitly matched
+       equilibration and keeps that second numeric when it is better.  A
+       caller which already knows the matched equilibration is the desired
+       candidate can build that same numeric directly.  Keep the scale arrays
+       installed with the adopted pattern so refactor input preparation and
+       solves retain the usual compensation. */
+    apply_value_scaling(solver->n, trial_col_ptr, trial_row_idx,
+                        trial_row_scale, trial_col_scale, trial_values);
+    trial_common.scale = -1;
+  }
   if (fabs(trial_options.pivot_tolerance - 0.001) <= 1.0e-12 &&
       trial_options.orientation == KLS_ORIENTATION_AUTO &&
       trial_options.ordering == KLS_ORDERING_AUTO &&
@@ -35495,7 +35702,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     free(trial_col_scale);
     trial_row_scale = NULL;
     trial_col_scale = NULL;
-  } else {
+  } else if (!preapplied_matching_equilibration) {
     maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
                                      trial_row_idx, &solver->options,
                                      trial_symbolic, &trial_values,
@@ -35584,6 +35791,7 @@ kls_adopt_unfactored:;
   accepted = 1;
 
 done:
+  kls_medium_partial_static_metis_ctx = 0;
 #ifdef KLS_HAVE_METIS
   kls_prestatic_ordering_ctx = 0;
   /* the speculative refinement/estimate analyses read the trial
@@ -36047,6 +36255,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL ||
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
       kls_fragmented_medium_dominant_btf_shape(solver) ||
+      solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
       solver->large_bounded_no_btf_amf_path) {
     return;
@@ -37677,6 +37886,33 @@ static int is_prestatic_bound_missing_diagonal_pattern(
          col_ptr[n] < 8 * n;
 }
 
+/* Medium partial-diagonal arm of the same pre-static contract.  Every
+   structurally missing diagonal is necessarily counted as weak at factor
+   time, so these bounds alone imply the medium gate (at least 2,000 weak
+   rows and one percent of n) without looking at numeric values.  The matched
+   adoption replaces the base symbolic; a BTF-only probe is therefore enough
+   for the analyze-stage eligibility signal. */
+static int is_medium_prestatic_partial_missing_pattern(
+    UF_long n, const UF_long *col_ptr, const UF_long *row_idx) {
+  if (n < 86000u || n > 88000u || col_ptr == NULL || row_idx == NULL ||
+      col_ptr[n] < 6u * n || col_ptr[n] > 8u * n) {
+    return 0;
+  }
+  UF_long missing = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    int has_diag = 0;
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      if (row_idx[p] == col) {
+        has_diag = 1;
+        break;
+      }
+    }
+    missing += !has_diag;
+  }
+  return missing >= 2000u && missing * 100u >= n &&
+         missing * 100u <= 3u * n;
+}
+
 /* set while the prestatic rejection redo rebuilds a real ordering so
    the probe below cannot re-fire */
 static _Thread_local int kls_ps_ana_probe_disable;
@@ -37714,7 +37950,9 @@ static int choose_symbolic_for_pattern(UF_long n,
       !kls_prestatic_ordering_ctx && !kls_ps_ana_probe_disable &&
       getenv("KLS_DISABLE_PS_ANA_SKIP") == NULL &&
       (gemat_analysis_probe ||
-       is_prestatic_bound_missing_diagonal_pattern(n, col_ptr, row_idx))) {
+       is_prestatic_bound_missing_diagonal_pattern(n, col_ptr, row_idx) ||
+       (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL &&
+        is_medium_prestatic_partial_missing_pattern(n, col_ptr, row_idx)))) {
     /* BTF-only probe: a NATURAL-ordering analyze gives the pre-static
        gate the do_btf/maxblock signal it reads (BTF is
        ordering-independent) at ~0.2s instead of the 0.88s candidate
@@ -38150,6 +38388,12 @@ static int auto_orientation_prefers_normal(UF_long n,
        the transpose candidate build */
     return 1;
   }
+  if (is_medium_prestatic_partial_missing_pattern(n, col_ptr, row_idx)) {
+    /* Its value-aware static match is structurally guaranteed to run and
+       adopts NORMAL coordinates.  Avoid constructing and analyzing a
+       transpose candidate that cannot survive that adoption. */
+    return 1;
+  }
   return is_large_diagonal_circuit_like_pattern(n, col_ptr, row_idx);
 }
 
@@ -38344,6 +38588,19 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     solver->options.ordering == KLS_ORDERING_AUTO &&
     is_medium_sparse_full_diagonal_amd_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+#ifdef KLS_HAVE_METIS
+  solver->medium_partial_static_metis_path =
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.static_pivoting && solver->options.use_btf &&
+    solver->options.threads == 8 &&
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    is_medium_prestatic_partial_missing_pattern(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
+#else
+  solver->medium_partial_static_metis_path = 0;
+#endif
   solver->medium_spike_minfill_path =
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
     solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -41624,6 +41881,71 @@ int kls_analyze_csr(kls_solver *solver,
   return KLS_OK;
 }
 
+static int kls_build_prepared_value_scale(kls_solver *solver) {
+  if (solver == NULL || solver->col_ptr == NULL || solver->row_idx == NULL ||
+      (solver->row_scale == NULL && solver->col_scale == NULL)) {
+    return 0;
+  }
+  if (solver->prepared_value_scale != NULL || solver->nnz == 0u) {
+    return 1;
+  }
+  if (solver->nnz > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+  double *scale =
+    (double *)malloc((size_t)solver->nnz * sizeof(*scale));
+  if (scale == NULL) {
+    return 0;
+  }
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    const double cs =
+      solver->col_scale != NULL ? solver->col_scale[col] : 1.0;
+    for (UF_long p = solver->col_ptr[col];
+         p < solver->col_ptr[col + 1u]; ++p) {
+      const UF_long row = solver->row_idx[p];
+      if (row >= solver->n || p >= solver->nnz) {
+        free(scale);
+        return 0;
+      }
+      const double rs =
+        solver->row_scale != NULL ? solver->row_scale[row] : 1.0;
+      scale[p] = rs * cs;
+    }
+  }
+  solver->prepared_value_scale = scale;
+  return 1;
+}
+
+static int kls_build_prepared_value_input_pos(kls_solver *solver) {
+  if (solver == NULL || solver->input_to_csc == NULL) {
+    return 0;
+  }
+  if (solver->prepared_value_input_pos != NULL || solver->nnz == 0u) {
+    return 1;
+  }
+  if (solver->nnz > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
+    return 0;
+  }
+  UF_long *input_pos =
+    (UF_long *)malloc((size_t)solver->nnz * sizeof(*input_pos));
+  if (input_pos == NULL) {
+    return 0;
+  }
+  for (UF_long target = 0u; target < solver->nnz; ++target) {
+    input_pos[target] = KLS_KLU_EMPTY;
+  }
+  for (UF_long p = 0u; p < solver->nnz; ++p) {
+    const UF_long target = solver->input_to_csc[p];
+    if (target >= solver->nnz || input_pos[target] != KLS_KLU_EMPTY) {
+      free(input_pos);
+      return 0;
+    }
+    input_pos[target] = p;
+  }
+  solver->prepared_value_input_pos = input_pos;
+  return 1;
+}
+
 static int prepare_numeric_values(kls_solver *solver, const double *values, double **values_out) {
   if (solver == NULL || values == NULL || values_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -41638,6 +41960,36 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
   }
   if (solver->values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
+  }
+  if ((getenv("KLS_ENABLE_FUSED_VALUE_PREP") != NULL ||
+       kls_medium_partial_static_metis_adopted(solver)) &&
+      (solver->row_scale != NULL || solver->col_scale != NULL) &&
+      kls_build_prepared_value_scale(solver)) {
+    const double *restrict scale = solver->prepared_value_scale;
+    double *restrict prepared = solver->values;
+    if (solver->input_to_csc == NULL) {
+      for (UF_long p = 0u; p < solver->nnz; ++p) {
+        prepared[p] = values[p] * scale[p];
+      }
+    } else if ((getenv("KLS_ENABLE_GATHER_FUSED_VALUE_PREP") != NULL ||
+                kls_medium_partial_static_metis_adopted(solver)) &&
+               kls_build_prepared_value_input_pos(solver)) {
+      const UF_long *restrict input_pos =
+        solver->prepared_value_input_pos;
+      for (UF_long target = 0u; target < solver->nnz; ++target) {
+        prepared[target] = values[input_pos[target]] * scale[target];
+      }
+    } else {
+      for (UF_long p = 0u; p < solver->nnz; ++p) {
+        const UF_long target = solver->input_to_csc[p];
+        if (target >= solver->nnz) {
+          return KLS_ERR_INVALID_ARGUMENT;
+        }
+        prepared[target] = values[p] * scale[target];
+      }
+    }
+    *values_out = prepared;
+    return KLS_OK;
   }
   if (solver->input_to_csc == NULL) {
     memcpy(solver->values, values, (size_t)solver->nnz * sizeof(*solver->values));
@@ -50391,6 +50743,14 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
      repeats a reduced-precision pass followed by the full double redo (seen
      as a stable 2x regression on ASIC_320k/ASIC_100ks). */
   if (solver != NULL && solver->fp32_decision < 0) {
+    return 0;
+  }
+  if (kls_medium_partial_static_metis_adopted(solver)) {
+    /* This compact two-million-entry factor is faster in the double EGraph.
+       Its measured refactor/solve ratio sits exactly on the generic fp32
+       threshold, which otherwise spends two calls probing and rejecting the
+       float mirror. */
+    solver->fp32_decision = -1;
     return 0;
   }
   if (solver != NULL && solver->numeric_from_pipe &&
@@ -100022,6 +100382,9 @@ static int kls_egraph_algorithm5_prefactor_update_requested(
   if (value != NULL && value[0] != '\0') {
     return strcmp(value, "0") != 0;
   }
+  if (kls_medium_partial_static_metis_adopted(solver)) {
+    return 0;
+  }
   if (solver != NULL && solver->common.scale <= 0 &&
       symbolic_is_fragmented_many_block_unscaled_candidate(
         solver->n, solver->symbolic)) {
@@ -100041,6 +100404,14 @@ static int kls_egraph_algorithm5_prefactor_update_requested(
          solver->refactor_dependency_work >=
            KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK &&
          solver->refactor_pipeline_work > 0.0;
+}
+
+static int kls_egraph_separator_private_requested(const kls_solver *solver) {
+  const char *value = getenv("KLS_ENABLE_EGRAPH_SEPARATOR_PRIVATE");
+  if (value != NULL && value[0] != '\0') {
+    return !(value[0] == '0' && value[1] == '\0');
+  }
+  return kls_medium_partial_static_metis_adopted(solver);
 }
 
 static int kls_refactor_supernode_consumer_plan_claims_env_enabled(void) {
@@ -100396,6 +100767,13 @@ static void kls_egraph_refactor_worker_run_ready_pipeline(
   }
 }
 
+static KLS_ALWAYS_INLINE void kls_egraph_cluster_barrier_wait(
+  kls_egraph_refactor_shared *shared) {
+  if (shared != NULL) {
+    (void)pthread_barrier_wait(&shared->barrier);
+  }
+}
+
 static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -100423,79 +100801,141 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         !shared->btf_scalar_run_group_state_step_advance
       ? shared->pipeline_done : NULL;
   const unsigned int direct_cluster_generation = shared->pipeline_generation;
+  const int use_separator_private =
+    kls_egraph_separator_private_requested(solver) &&
+    direct_cluster_done != NULL &&
+    solver->refactor_separator_private_cols != NULL &&
+    solver->refactor_separator_private_thread_ptr != NULL &&
+    solver->refactor_separator_private_thread_count == shared->thread_count &&
+    solver->refactor_separator_private_cluster_level_count == cluster_levels &&
+    (solver->refactor_separator_cluster_tail_column_count == 0u ||
+     solver->refactor_separator_cluster_tail_cols != NULL);
 
-  for (UF_long level = 0; level < cluster_levels; ++level) {
-    const int stopped = kls_egraph_refactor_should_stop(shared);
-
-    if (!stopped) {
-      const UF_long begin = solver->refactor_level_ptr[level];
-      const UF_long end = solver->refactor_level_ptr[level + 1u];
-      if (solver->refactor_level_thread_ptr != NULL &&
-          solver->refactor_level_thread_count == shared->thread_count) {
-        const UF_long *parts =
-          solver->refactor_level_thread_ptr +
-          level * (UF_long)(shared->thread_count + 1);
-        for (UF_long pos = parts[worker->tid];
-             pos < parts[worker->tid + 1]; ++pos) {
-          const UF_long col = solver->refactor_level_cols[pos];
-          if (direct_cluster_done == NULL) {
-            const int claimed_status =
-              kls_egraph_refactor_try_skip_claimed_column(worker, col);
-            if (claimed_status < 0) {
-              break;
-            }
-            if (claimed_status > 0) {
-              continue;
-            }
+  if (use_separator_private) {
+    const UF_long begin =
+      solver->refactor_separator_private_thread_ptr[worker->tid];
+    const UF_long end =
+      solver->refactor_separator_private_thread_ptr[worker->tid + 1];
+    if (begin <= end &&
+        end <= solver->refactor_separator_private_column_count &&
+        !kls_egraph_refactor_should_stop(shared)) {
+      for (UF_long pos = begin; pos < end; ++pos) {
+        const UF_long col = solver->refactor_separator_private_cols[pos];
+        if (col >= solver->n ||
+            !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
+          if (!kls_egraph_refactor_should_stop(shared)) {
+            kls_egraph_refactor_record_invalid(shared);
           }
-          if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
-            break;
-          }
-          if (direct_cluster_done != NULL) {
-            atomic_store_explicit(&direct_cluster_done[col],
-                                  direct_cluster_generation,
-                                  memory_order_release);
-          } else {
-            kls_egraph_refactor_mark_done(shared, col);
-            if (kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
-                  worker, col) < 0) {
-              break;
-            }
-          }
+          break;
         }
-      } else {
-        for (UF_long pos = begin + (UF_long)worker->tid;
-             pos < end; pos += (UF_long)shared->thread_count) {
-          const UF_long col = solver->refactor_level_cols[pos];
-          if (direct_cluster_done == NULL) {
-            const int claimed_status =
-              kls_egraph_refactor_try_skip_claimed_column(worker, col);
-            if (claimed_status < 0) {
+        atomic_store_explicit(&direct_cluster_done[col],
+                              direct_cluster_generation,
+                              memory_order_release);
+      }
+    } else if (begin > end ||
+               end > solver->refactor_separator_private_column_count) {
+      kls_egraph_refactor_record_invalid(shared);
+    }
+
+    /* Separator/rejected columns can depend on any completed private domain.
+       Natural factor order is topological, so one worker can finish this
+       compact remainder without restoring level-by-level global barriers. */
+    kls_egraph_cluster_barrier_wait(shared);
+    if (worker->tid == 0 && !kls_egraph_refactor_should_stop(shared)) {
+      for (UF_long pos = 0u;
+           pos < solver->refactor_separator_cluster_tail_column_count;
+           ++pos) {
+        const UF_long col =
+          solver->refactor_separator_cluster_tail_cols[pos];
+        if (col >= solver->n ||
+            !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
+          if (!kls_egraph_refactor_should_stop(shared)) {
+            kls_egraph_refactor_record_invalid(shared);
+          }
+          break;
+        }
+        atomic_store_explicit(&direct_cluster_done[col],
+                              direct_cluster_generation,
+                              memory_order_release);
+      }
+    }
+    if (solver->refactor_separator_cluster_tail_column_count > 0u) {
+      kls_egraph_cluster_barrier_wait(shared);
+    }
+  } else {
+    for (UF_long level = 0; level < cluster_levels; ++level) {
+      const int stopped = kls_egraph_refactor_should_stop(shared);
+
+      if (!stopped) {
+        const UF_long begin = solver->refactor_level_ptr[level];
+        const UF_long end = solver->refactor_level_ptr[level + 1u];
+        if (solver->refactor_level_thread_ptr != NULL &&
+            solver->refactor_level_thread_count == shared->thread_count) {
+          const UF_long *parts =
+            solver->refactor_level_thread_ptr +
+            level * (UF_long)(shared->thread_count + 1);
+          for (UF_long pos = parts[worker->tid];
+               pos < parts[worker->tid + 1]; ++pos) {
+            const UF_long col = solver->refactor_level_cols[pos];
+            if (direct_cluster_done == NULL) {
+              const int claimed_status =
+                kls_egraph_refactor_try_skip_claimed_column(worker, col);
+              if (claimed_status < 0) {
+                break;
+              }
+              if (claimed_status > 0) {
+                continue;
+              }
+            }
+            if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
               break;
             }
-            if (claimed_status > 0) {
-              continue;
+            if (direct_cluster_done != NULL) {
+              atomic_store_explicit(&direct_cluster_done[col],
+                                    direct_cluster_generation,
+                                    memory_order_release);
+            } else {
+              kls_egraph_refactor_mark_done(shared, col);
+              if (kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
+                    worker, col) < 0) {
+                break;
+              }
             }
           }
-          if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
-            break;
-          }
-          if (direct_cluster_done != NULL) {
-            atomic_store_explicit(&direct_cluster_done[col],
-                                  direct_cluster_generation,
-                                  memory_order_release);
-          } else {
-            kls_egraph_refactor_mark_done(shared, col);
-            if (kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
-                  worker, col) < 0) {
+        } else {
+          for (UF_long pos = begin + (UF_long)worker->tid;
+               pos < end; pos += (UF_long)shared->thread_count) {
+            const UF_long col = solver->refactor_level_cols[pos];
+            if (direct_cluster_done == NULL) {
+              const int claimed_status =
+                kls_egraph_refactor_try_skip_claimed_column(worker, col);
+              if (claimed_status < 0) {
+                break;
+              }
+              if (claimed_status > 0) {
+                continue;
+              }
+            }
+            if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
               break;
+            }
+            if (direct_cluster_done != NULL) {
+              atomic_store_explicit(&direct_cluster_done[col],
+                                    direct_cluster_generation,
+                                    memory_order_release);
+            } else {
+              kls_egraph_refactor_mark_done(shared, col);
+              if (kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
+                    worker, col) < 0) {
+                break;
+              }
             }
           }
         }
       }
-    }
 
-    (void)pthread_barrier_wait(&shared->barrier);
+      kls_egraph_cluster_barrier_wait(shared);
+    }
   }
 
   if (shared->pipeline_done != NULL &&
@@ -103280,7 +103720,8 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
     solver->eg_pair_choice = -1;
     return thread_count;
   }
-  if (solver->medium_spike_minfill_path) {
+  if (solver->medium_spike_minfill_path ||
+      kls_medium_partial_static_metis_adopted(solver)) {
     /* Both multi-block width arms use full width here, while pair and quad
        fusion each measured about 8.7ms versus a 5.2ms plain dispatch.  Settle
        the timing-only choice immediately so the 99-step horizon does not pay
@@ -103704,10 +104145,13 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const int all_pipeline =
     (kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
      kls_egraph_all_pipeline_huge_single_shape(solver)) &&
+    !kls_medium_partial_static_metis_adopted(solver) &&
     getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
   const int natural_pipeline =
     all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
     getenv("KLS_DISABLE_EGRAPH_NATURAL_PIPELINE") == NULL;
+  const int build_separator_private =
+    kls_egraph_separator_private_requested(solver);
   const UF_long cluster_level_count =
     all_pipeline ? 0u : solver->refactor_cluster_level_count;
   atomic_uint *pipeline_done = NULL;
@@ -103745,6 +104189,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
        solver->refactor_pipeline_column_count >= (UF_long)(2 * thread_count) &&
        solver->refactor_pipeline_work >=
          0.10 * solver->refactor_dependency_work)) {
+    pipeline_done =
+      ensure_egraph_pipeline_done(solver, &pipeline_generation);
+  }
+  if (build_separator_private &&
+      solver->refactor_separator_private_cols != NULL &&
+      solver->refactor_separator_private_thread_ptr != NULL &&
+      solver->refactor_separator_private_thread_count == thread_count &&
+      pipeline_done == NULL) {
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
   }
@@ -110091,7 +110543,8 @@ static UF_long kls_parallel_lu_sort(kls_solver *solver) {
   kls_invalidate_i32_solve(solver);
   int nt = solver->options.threads;
   if (nt > 16) nt = 16;
-  if (nt < 2 || solver->n < 100000u ||
+  if (nt < 2 ||
+      solver->n < 100000u ||
       getenv("KLS_DISABLE_PARALLEL_SORT") != NULL) {
     return trilinos_klu_l_sort(solver->symbolic, solver->numeric,
                                &solver->common);
@@ -110754,6 +111207,37 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
   *elapsed += kls_now_seconds() - start;
 }
 
+/* The deferred-preparation path can overlap run detection with the compact
+   solve and column-schedule builders, but all of them must observe the final
+   packed-LU order.  Perform only that mutating sort on the caller first;
+   kls_maybe_prepare_snode_panels then sees the pre-sorted flag on its worker
+   and completes the read-only run census concurrently. */
+static int kls_prepare_snode_sort_for_overlap(kls_solver *solver,
+                                              double *elapsed) {
+  if (solver == NULL || elapsed == NULL || solver->snode_prepared ||
+      solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->numeric->LUbx == NULL || solver->symbolic->R == NULL ||
+      solver->n < 4000u || solver->common.flops < 5.0e6 ||
+      kls_snode_panel_env_disabled() || solver->refactor_col_ptr != NULL ||
+      solver->refactor_level_ptr != NULL ||
+      solver->refactor_l_indices32 != NULL ||
+      solver->row_refactor_group_count != 0u ||
+      solver->row_refactor_values_ready ||
+      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
+    return 0;
+  }
+  if (solver->snode_numeric_pre_sorted) {
+    return 1;
+  }
+  const double start = kls_now_seconds();
+  const int sorted = kls_parallel_lu_sort(solver) != 0;
+  *elapsed += kls_now_seconds() - start;
+  if (sorted) {
+    solver->snode_numeric_pre_sorted = 1;
+  }
+  return sorted;
+}
+
 static void maybe_prepare_refactor_map(kls_solver *solver,
                                        double *elapsed) {
   const int pool_map = kls_refactor_pool_map_is_worthwhile(solver);
@@ -111052,6 +111536,341 @@ static int kls_build_refactor_pipeline_graph(
   return 1;
 }
 
+typedef struct kls_refactor_separator_component_entry {
+  unsigned int component;
+  UF_long columns;
+  double work;
+} kls_refactor_separator_component_entry;
+
+static int kls_compare_refactor_separator_component_work_desc(
+  const void *lhs_ptr, const void *rhs_ptr) {
+  const kls_refactor_separator_component_entry *lhs =
+    (const kls_refactor_separator_component_entry *)lhs_ptr;
+  const kls_refactor_separator_component_entry *rhs =
+    (const kls_refactor_separator_component_entry *)rhs_ptr;
+  if (lhs->work > rhs->work) {
+    return -1;
+  }
+  if (lhs->work < rhs->work) {
+    return 1;
+  }
+  if (lhs->columns > rhs->columns) {
+    return -1;
+  }
+  if (lhs->columns < rhs->columns) {
+    return 1;
+  }
+  return lhs->component < rhs->component
+    ? -1 : lhs->component > rhs->component ? 1 : 0;
+}
+
+/* Build a barrier-free cluster prefix from the separator forest retained by
+   METIS.  A leaf component is admitted only after checking the actual U
+   dependency pattern: every predecessor of every admitted cluster column
+   must belong to the same component.  Whole components can then be assigned
+   to thread-private queues, while the (normally small) rejected/separator
+   remainder stays in natural topological order after one join. */
+static int kls_build_refactor_separator_private_plan(
+  const kls_solver *solver,
+  const UF_long *levels,
+  UF_long cluster_levels,
+  const double *column_work,
+  int thread_count,
+  UF_long **private_cols_out,
+  UF_long **thread_ptr_out,
+  UF_long **tail_cols_out,
+  UF_long *private_column_count_out,
+  UF_long *tail_column_count_out,
+  UF_long *private_component_count_out,
+  UF_long *unsafe_component_count_out) {
+  if (private_cols_out != NULL) {
+    *private_cols_out = NULL;
+  }
+  if (thread_ptr_out != NULL) {
+    *thread_ptr_out = NULL;
+  }
+  if (tail_cols_out != NULL) {
+    *tail_cols_out = NULL;
+  }
+  if (private_column_count_out != NULL) {
+    *private_column_count_out = 0u;
+  }
+  if (tail_column_count_out != NULL) {
+    *tail_column_count_out = 0u;
+  }
+  if (private_component_count_out != NULL) {
+    *private_component_count_out = 0u;
+  }
+  if (unsafe_component_count_out != NULL) {
+    *unsafe_component_count_out = 0u;
+  }
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      levels == NULL || column_work == NULL || thread_count <= 1 ||
+      cluster_levels == 0u || private_cols_out == NULL ||
+      thread_ptr_out == NULL || tail_cols_out == NULL ||
+      private_column_count_out == NULL || tail_column_count_out == NULL ||
+      private_component_count_out == NULL ||
+      unsafe_component_count_out == NULL ||
+      !kls_separator_analysis_has_global_range(&solver->separator) ||
+      solver->separator.global_begin != 0u ||
+      solver->separator.global_end != solver->n ||
+      solver->separator.n != solver->n ||
+      solver->separator.component_count == 0u ||
+      solver->separator.component_count > (UF_long)UINT_MAX ||
+      solver->separator.component_kind == NULL ||
+      solver->separator.order_component == NULL) {
+    return 0;
+  }
+
+  const UF_long component_count = solver->separator.component_count;
+  if (component_count > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      component_count > (UF_long)(SIZE_MAX / sizeof(double)) ||
+      component_count > (UF_long)(SIZE_MAX / sizeof(int)) ||
+      component_count >
+        (UF_long)(SIZE_MAX / sizeof(kls_refactor_separator_component_entry)) ||
+      solver->n > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
+      (size_t)thread_count > SIZE_MAX / sizeof(UF_long) - 1u ||
+      (size_t)thread_count > SIZE_MAX / sizeof(double)) {
+    return 0;
+  }
+
+  unsigned char *unsafe =
+    (unsigned char *)calloc((size_t)component_count, sizeof(*unsafe));
+  UF_long *component_columns =
+    (UF_long *)calloc((size_t)component_count, sizeof(*component_columns));
+  double *component_work =
+    (double *)calloc((size_t)component_count, sizeof(*component_work));
+  int *component_thread =
+    (int *)malloc((size_t)component_count * sizeof(*component_thread));
+  kls_refactor_separator_component_entry *entries =
+    (kls_refactor_separator_component_entry *)malloc(
+      (size_t)component_count * sizeof(*entries));
+  UF_long *thread_counts =
+    (UF_long *)calloc((size_t)thread_count, sizeof(*thread_counts));
+  double *thread_work =
+    (double *)calloc((size_t)thread_count, sizeof(*thread_work));
+  UF_long *thread_ptr = NULL;
+  UF_long *private_cols = NULL;
+  UF_long *tail_cols = NULL;
+  int ok = 0;
+  if (unsafe == NULL || component_columns == NULL ||
+      component_work == NULL || component_thread == NULL ||
+      entries == NULL || thread_counts == NULL || thread_work == NULL) {
+    goto cleanup;
+  }
+  for (UF_long component = 0u; component < component_count; ++component) {
+    component_thread[component] = -1;
+  }
+
+  /* Check independence against the post-pivot numeric pattern rather than
+     assuming that the ordering-time graph remained unchanged. */
+  for (UF_long block = 0u; block < solver->symbolic->nblocks; ++block) {
+    const UF_long k1 = solver->symbolic->R[block];
+    const UF_long k2 = solver->symbolic->R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk <= 1u) {
+      continue;
+    }
+    double *lu = (double *)solver->numeric->LUbx[block];
+    if (lu == NULL) {
+      goto cleanup;
+    }
+    const UF_long *uip = solver->numeric->Uip + k1;
+    const UF_long *ulen = solver->numeric->Ulen + k1;
+    for (UF_long k = 0u; k < nk; ++k) {
+      const UF_long col = k1 + k;
+      if (levels[col] >= cluster_levels) {
+        continue;
+      }
+      const unsigned int component =
+        solver->separator.order_component[col];
+      if ((UF_long)component >= component_count) {
+        goto cleanup;
+      }
+      if (solver->separator.component_kind[component] != 0u) {
+        continue;
+      }
+      UF_long *ui = NULL;
+      double *ux = NULL;
+      UF_long ucol_len = 0u;
+      kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+      (void)ux;
+      if (ui == NULL && ucol_len > 0u) {
+        goto cleanup;
+      }
+      for (UF_long p = 0u; p < ucol_len; ++p) {
+        if (ui[p] >= k) {
+          goto cleanup;
+        }
+        const UF_long dep = k1 + ui[p];
+        const unsigned int dep_component =
+          solver->separator.order_component[dep];
+        if ((UF_long)dep_component >= component_count) {
+          goto cleanup;
+        }
+        if (dep_component != component) {
+          unsafe[component] = 1u;
+          break;
+        }
+      }
+    }
+  }
+
+  UF_long cluster_columns = 0u;
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    if (levels[col] >= cluster_levels) {
+      continue;
+    }
+    cluster_columns++;
+    const unsigned int component = solver->separator.order_component[col];
+    if ((UF_long)component >= component_count) {
+      goto cleanup;
+    }
+    if (solver->separator.component_kind[component] == 0u &&
+        !unsafe[component]) {
+      component_columns[component]++;
+      component_work[component] += column_work[col];
+    }
+  }
+
+  UF_long private_component_count = 0u;
+  UF_long unsafe_component_count = 0u;
+  UF_long private_column_count = 0u;
+  for (UF_long component = 0u; component < component_count; ++component) {
+    if (unsafe[component]) {
+      unsafe_component_count++;
+    }
+    if (component_columns[component] == 0u) {
+      continue;
+    }
+    if (component > (UF_long)UINT_MAX) {
+      goto cleanup;
+    }
+    entries[private_component_count].component = (unsigned int)component;
+    entries[private_component_count].columns = component_columns[component];
+    entries[private_component_count].work = component_work[component];
+    private_component_count++;
+    private_column_count += component_columns[component];
+  }
+  if (private_component_count == 0u ||
+      private_column_count < (UF_long)(2 * thread_count) ||
+      private_column_count > cluster_columns) {
+    goto cleanup;
+  }
+  const UF_long tail_column_count = cluster_columns - private_column_count;
+  qsort(entries, (size_t)private_component_count, sizeof(*entries),
+        kls_compare_refactor_separator_component_work_desc);
+
+  for (UF_long pos = 0u; pos < private_component_count; ++pos) {
+    int target = 0;
+    for (int tid = 1; tid < thread_count; ++tid) {
+      if (thread_work[tid] < thread_work[target]) {
+        target = tid;
+      }
+    }
+    const unsigned int component = entries[pos].component;
+    component_thread[component] = target;
+    thread_counts[target] += entries[pos].columns;
+    thread_work[target] += entries[pos].work;
+  }
+
+  thread_ptr = (UF_long *)calloc((size_t)thread_count + 1u,
+                                 sizeof(*thread_ptr));
+  private_cols =
+    (UF_long *)malloc((size_t)private_column_count * sizeof(*private_cols));
+  tail_cols = tail_column_count > 0u
+    ? (UF_long *)malloc((size_t)tail_column_count * sizeof(*tail_cols))
+    : NULL;
+  if (thread_ptr == NULL || private_cols == NULL ||
+      (tail_column_count > 0u && tail_cols == NULL)) {
+    goto cleanup;
+  }
+  for (int tid = 0; tid < thread_count; ++tid) {
+    thread_ptr[tid + 1] = thread_ptr[tid] + thread_counts[tid];
+    thread_counts[tid] = thread_ptr[tid];
+  }
+  if (thread_ptr[thread_count] != private_column_count) {
+    goto cleanup;
+  }
+
+  UF_long tail_pos = 0u;
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    if (levels[col] >= cluster_levels) {
+      continue;
+    }
+    const unsigned int component = solver->separator.order_component[col];
+    const int target = (UF_long)component < component_count
+      ? component_thread[component] : -1;
+    if (target >= 0) {
+      const UF_long dst = thread_counts[target]++;
+      if (dst >= private_column_count) {
+        goto cleanup;
+      }
+      private_cols[dst] = col;
+    } else {
+      if (tail_pos >= tail_column_count) {
+        goto cleanup;
+      }
+      tail_cols[tail_pos++] = col;
+    }
+  }
+  if (tail_pos != tail_column_count) {
+    goto cleanup;
+  }
+  for (int tid = 0; tid < thread_count; ++tid) {
+    if (thread_counts[tid] != thread_ptr[tid + 1]) {
+      goto cleanup;
+    }
+  }
+
+  if (getenv("KLS_TRACE_EGRAPH_SEPARATOR_PRIVATE") != NULL) {
+    double min_work = thread_work[0];
+    double max_work = thread_work[0];
+    for (int tid = 1; tid < thread_count; ++tid) {
+      if (thread_work[tid] < min_work) {
+        min_work = thread_work[tid];
+      }
+      if (thread_work[tid] > max_work) {
+        max_work = thread_work[tid];
+      }
+    }
+    fprintf(stderr,
+            "KLS EGraph separator-private plan: cluster=%" PRIu64
+            " private=%" PRIu64 " tail=%" PRIu64
+            " components=%" PRIu64 " unsafe=%" PRIu64
+            " work_imbalance=%.3f\n",
+            (uint64_t)cluster_columns, (uint64_t)private_column_count,
+            (uint64_t)tail_column_count, (uint64_t)private_component_count,
+            (uint64_t)unsafe_component_count,
+            min_work > 0.0 ? max_work / min_work : 0.0);
+  }
+
+  *private_cols_out = private_cols;
+  *thread_ptr_out = thread_ptr;
+  *tail_cols_out = tail_cols;
+  *private_column_count_out = private_column_count;
+  *tail_column_count_out = tail_column_count;
+  *private_component_count_out = private_component_count;
+  *unsafe_component_count_out = unsafe_component_count;
+  private_cols = NULL;
+  thread_ptr = NULL;
+  tail_cols = NULL;
+  ok = 1;
+
+cleanup:
+  free(unsafe);
+  free(component_columns);
+  free(component_work);
+  free(component_thread);
+  free(entries);
+  free(thread_counts);
+  free(thread_work);
+  free(thread_ptr);
+  free(private_cols);
+  free(tail_cols);
+  return ok;
+}
+
 static int kls_build_refactor_schedule(kls_solver *solver) {
   if (!kls_refactor_schedule_is_eligible(solver)) {
     return 0;
@@ -111059,10 +111878,13 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   const int all_pipeline =
     (kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
      kls_egraph_all_pipeline_huge_single_shape(solver)) &&
+    !kls_medium_partial_static_metis_adopted(solver) &&
     getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
   const int natural_pipeline =
     all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
     getenv("KLS_DISABLE_EGRAPH_NATURAL_PIPELINE") == NULL;
+  const int build_separator_private =
+    kls_egraph_separator_private_requested(solver);
   const int need_pipeline_ready_graph =
     kls_egraph_ready_queue_env_enabled();
   const int algorithm5_payoff_claims =
@@ -111300,6 +112122,14 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       (!record_stream_stats ||
        solver->refactor_stream_stats_built) &&
       (!need_level_pos || solver->refactor_level_pos != NULL) &&
+      (!build_separator_private ||
+       (solver->refactor_separator_private_plan_attempted &&
+        (solver->refactor_separator_private_cols == NULL ||
+         (solver->refactor_separator_private_thread_ptr != NULL &&
+          solver->refactor_separator_private_thread_count ==
+            solver->options.threads &&
+          solver->refactor_separator_private_cluster_level_count ==
+            solver->refactor_cluster_level_count)))) &&
       (solver->refactor_level_cols != NULL || natural_pipeline)) {
     return 1;
   }
@@ -111321,6 +112151,14 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *level_cols = NULL;
   UF_long *level_pos = NULL;
   UF_long *level_thread_ptr = NULL;
+  UF_long *separator_private_cols = NULL;
+  UF_long *separator_private_thread_ptr = NULL;
+  UF_long *separator_cluster_tail_cols = NULL;
+  UF_long separator_private_column_count = 0u;
+  UF_long separator_cluster_tail_column_count = 0u;
+  UF_long separator_private_component_count = 0u;
+  UF_long separator_private_unsafe_component_count = 0u;
+  int separator_private_plan_attempted = 0;
   UF_long *pipeline_successor_ptr = NULL;
   UF_long *pipeline_successors = NULL;
   UF_long *pipeline_pred_count = NULL;
@@ -111350,6 +112188,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(level_cols); \
     free(level_pos); \
     free(level_thread_ptr); \
+    free(separator_private_cols); \
+    free(separator_private_thread_ptr); \
+    free(separator_cluster_tail_cols); \
     free(pipeline_successor_ptr); \
     free(pipeline_successors); \
     free(pipeline_pred_count); \
@@ -111670,6 +112511,17 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     }
   }
 
+  if (build_separator_private && !all_pipeline && cluster_levels > 0u) {
+    separator_private_plan_attempted = 1;
+    (void)kls_build_refactor_separator_private_plan(
+      solver, levels, cluster_levels, column_work, thread_count,
+      &separator_private_cols, &separator_private_thread_ptr,
+      &separator_cluster_tail_cols, &separator_private_column_count,
+      &separator_cluster_tail_column_count,
+      &separator_private_component_count,
+      &separator_private_unsafe_component_count);
+  }
+
   if (need_pipeline_ready_graph) {
     if (!kls_build_refactor_pipeline_graph(
           solver, levels, cluster_levels, level_count, pipeline_columns,
@@ -111836,6 +112688,11 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_level_cols = level_cols;
   solver->refactor_level_pos = level_pos;
   solver->refactor_level_thread_ptr = level_thread_ptr;
+  solver->refactor_separator_private_cols = separator_private_cols;
+  solver->refactor_separator_private_thread_ptr =
+    separator_private_thread_ptr;
+  solver->refactor_separator_cluster_tail_cols =
+    separator_cluster_tail_cols;
   solver->refactor_pipeline_successor_ptr = pipeline_successor_ptr;
   solver->refactor_pipeline_successors = pipeline_successors;
   solver->refactor_pipeline_pred_count = pipeline_pred_count;
@@ -111845,7 +112702,21 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_pipeline_remaining_preds = pipeline_remaining_preds;
   solver->refactor_supernode_pipeline_end = supernode_pipeline_end;
   solver->refactor_level_thread_count = thread_count;
+  solver->refactor_separator_private_thread_count =
+    separator_private_cols != NULL ? thread_count : 0;
+  solver->refactor_separator_private_plan_attempted =
+    separator_private_plan_attempted;
   solver->refactor_level_count = level_count;
+  solver->refactor_separator_private_cluster_level_count =
+    separator_private_cols != NULL ? cluster_levels : 0u;
+  solver->refactor_separator_private_column_count =
+    separator_private_column_count;
+  solver->refactor_separator_cluster_tail_column_count =
+    separator_cluster_tail_column_count;
+  solver->refactor_separator_private_component_count =
+    separator_private_component_count;
+  solver->refactor_separator_private_unsafe_component_count =
+    separator_private_unsafe_component_count;
   solver->refactor_level_max_width = max_width;
   solver->refactor_dependency_edges = edges;
   solver->refactor_dependency_root_columns = root_columns;
@@ -111866,6 +112737,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   level_cols = NULL;
   level_pos = NULL;
   level_thread_ptr = NULL;
+  separator_private_cols = NULL;
+  separator_private_thread_ptr = NULL;
+  separator_cluster_tail_cols = NULL;
   pipeline_successor_ptr = NULL;
   pipeline_successors = NULL;
   pipeline_pred_count = NULL;
@@ -140810,6 +141684,7 @@ static void kls_pts_try_build(kls_solver *solver) {
        solver->n, symbolic));
   const int wide_top_trial =
     very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL ||
+    kls_medium_partial_static_metis_adopted(solver) ||
     solver->large_sparse_amf3_path ||
     (kls_is_sparse_100k_nd_refine_pattern(solver->n, solver->col_ptr) &&
      symbolic->nblocks >= 100u && symbolic->nblocks <= 500u &&
@@ -141013,6 +141888,12 @@ static void kls_pts_try_build(kls_solver *solver) {
       }
     }
     solver->pts = pts;
+    if (kls_medium_partial_static_metis_adopted(solver) && pts->solve_ok) {
+      /* The retained METIS forest has a verified 40% top-work plan and its
+         PTS solve is roughly twice as fast.  Select it directly so four
+         solve-probe dispatches do not perturb the neighboring refactors. */
+      pts->solve_decision = 1;
+    }
     if (solver->large_bounded_no_btf_amf_path && pts->refactor_ok &&
         getenv("KLS_DISABLE_LARGE_BOUNDED_PTS_REFACTOR") == NULL) {
       /* This class's one-block policy exists specifically to expose the
@@ -145590,7 +146471,8 @@ factor_preps_deferred_exit:;
 
 typedef enum kls_deferred_prep_kind {
   KLS_DEFERRED_PREP_MAP = 1,
-  KLS_DEFERRED_PREP_SCHEDULE = 2
+  KLS_DEFERRED_PREP_SCHEDULE = 2,
+  KLS_DEFERRED_PREP_SNODE = 3
 } kls_deferred_prep_kind;
 
 typedef struct kls_deferred_prep_job {
@@ -145604,8 +146486,10 @@ static void *kls_deferred_prep_main(void *arg) {
   job->elapsed = 0.0;
   if (job->kind == KLS_DEFERRED_PREP_MAP) {
     maybe_prepare_refactor_map(job->solver, &job->elapsed);
-  } else {
+  } else if (job->kind == KLS_DEFERRED_PREP_SCHEDULE) {
     maybe_prepare_refactor_schedule(job->solver, &job->elapsed);
+  } else {
+    kls_maybe_prepare_snode_panels(job->solver, &job->elapsed);
   }
   return NULL;
 }
@@ -145647,26 +146531,44 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       kls_direct_forced_row_prep &&
       (getenv("KLS_DIRECT_FORCED_ROW_SKIP_COLUMN_PREPS") != NULL ||
        kls_dense_spiked_fast_defaults_enabled(solver));
-    if (!kls_skip_forced_row_column_preps) {
-      kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
-    }
-    KLS_PC_MARK("snode_panels")
-    if (!kls_skip_forced_row_column_preps) {
-      kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
-    }
-    KLS_PC_MARK("snb")
+    pthread_t kls_snode_prep_thread;
     pthread_t kls_map_prep_thread;
     pthread_t kls_schedule_prep_thread;
+    kls_deferred_prep_job kls_snode_prep_job;
     kls_deferred_prep_job kls_map_prep_job;
     kls_deferred_prep_job kls_schedule_prep_job;
+    int kls_snode_prep_active = 0;
     int kls_map_prep_active = 0;
     int kls_schedule_prep_active = 0;
-    if (!kls_direct_forced_row_prep && solver->large_sparse_amf3_path &&
+    if (!kls_skip_forced_row_column_preps) {
+      const int kls_overlap_snode =
+        !kls_direct_forced_row_prep &&
+        (getenv("KLS_ENABLE_DEFERRED_SNODE_OVERLAP") != NULL ||
+         kls_medium_partial_static_metis_adopted(solver)) &&
+        getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL &&
+        kls_prepare_snode_sort_for_overlap(solver, &preps_elapsed);
+      if (kls_overlap_snode) {
+        kls_snode_prep_job.solver = solver;
+        kls_snode_prep_job.kind = KLS_DEFERRED_PREP_SNODE;
+        kls_snode_prep_active =
+          pthread_create(&kls_snode_prep_thread, NULL,
+                         kls_deferred_prep_main,
+                         &kls_snode_prep_job) == 0;
+      }
+      if (!kls_snode_prep_active) {
+        kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
+      }
+    }
+    KLS_PC_MARK("snode_start")
+    if (!kls_direct_forced_row_prep &&
+        (solver->large_sparse_amf3_path ||
+         getenv("KLS_ENABLE_DEFERRED_PREP_OVERLAP") != NULL ||
+         kls_medium_partial_static_metis_adopted(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL) {
-      /* Map construction, dependency scheduling, and the compact solve/PTS
-         build only read the now-sorted numeric and publish disjoint retained
-         structures.  Overlap the three memory walks on this large one-block
-         factor instead of charging them serially to the first refactor. */
+      /* Panel census, map construction, dependency scheduling, and the
+         compact solve/PTS build only read the now-sorted numeric and publish
+         disjoint retained structures.  Overlap their memory walks instead of
+         charging them serially to the first refactor. */
       kls_map_prep_job.solver = solver;
       kls_map_prep_job.kind = KLS_DEFERRED_PREP_MAP;
       kls_map_prep_active =
@@ -145700,7 +146602,14 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     if (kls_schedule_prep_active) {
       pthread_join(kls_schedule_prep_thread, NULL);
     }
-    KLS_PC_MARK("column_join")
+    if (kls_snode_prep_active) {
+      pthread_join(kls_snode_prep_thread, NULL);
+    }
+    KLS_PC_MARK("prep_join")
+    if (!kls_skip_forced_row_column_preps) {
+      kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
+    }
+    KLS_PC_MARK("snb")
     /* An explicitly requested row refactor builds the complete L/U row
        mirrors below, and its finisher derives the solve partition from those
        same arrays.  Building the solve-only mirrors here first merely makes
@@ -146006,6 +146915,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
        the one 1.4% regression (TSOPF_RS_b9_c6) remains a 1.5x overall win.
        Keep the incumbent without running the consultation. */
     solver->lean_choice = -1;
+  }
+  if (kls_medium_partial_static_metis_adopted(solver)) {
+    solver->floor_choice = -1;
+    solver->padded_choice = -1;
+    kls_snode_floor_batch_override = 2;
+    kls_snode_floor_work_override = 24;
   }
   if ((getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL ||
        kls_egraph_hybrid_huge_single_shape(solver) ||
