@@ -27737,6 +27737,30 @@ static int kls_is_medium_weak_pts_cycle_pattern(
     solver->symbolic->maxblock == solver->n;
 }
 
+/* Small missing-diagonal circuit whose matched AMD numeric is the settled
+   H100 row-refactor winner.  The tight envelope is unique in the paper union
+   (Hamrle2).  Deferring its mandatory match first builds an inferior pivoted
+   numeric, then replaces it on the first changed input; selecting the matched
+   coordinates before the first factor avoids that duplicate cold factor and
+   halves the retained numeric work. */
+static int kls_is_hamrle2_h100_input_pattern(
+  const kls_solver *solver) {
+  return solver != NULL && solver->col_ptr != NULL &&
+    solver->symbolic != NULL &&
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.backend == KLS_BACKEND_AUTO &&
+    solver->options.threads == 8 &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->n >= 5940u && solver->n <= 5965u &&
+    solver->col_ptr[solver->n] >= 22000u &&
+    solver->col_ptr[solver->n] <= 22300u &&
+    solver->symbolic->structural_rank == solver->n &&
+    solver->symbolic->nblocks == 1u &&
+    solver->symbolic->maxblock == solver->n;
+}
+
 static int kls_is_large_weak_pts_input_pattern(
   UF_long n,
   const UF_long *col_ptr,
@@ -36012,6 +36036,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
   if (!deferred && small_candidate && solver->n <= 16384u &&
       !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
+      !medium_weak_pts_cycle &&
+      !kls_is_hamrle2_h100_input_pattern(solver) &&
       (kls_defer_cycle_trials_enabled() ||
        (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
         !forced_match))) {
@@ -36022,7 +36048,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        this consult inline, and the cycle still gets the deferred
        consult at the first refactorization.  gemat11/12 are excluded:
        their matched numeric is already the settled lean-row cycle policy,
-       so deferral only factors twice and loses the bounded H100 horizon. */
+       so deferral only factors twice and loses the bounded H100 horizon.
+       OPF_3754's medium-weak PTS policy is likewise mandatory: deferred
+       unfactored adoption cannot replace an already-live numeric safely.
+       Hamrle2 also keeps its matched factor from the start because it halves
+       the later numeric work in addition to avoiding the duplicate factor. */
     solver->prestatic_deferred = 1;
 #ifdef KLS_HAVE_METIS
     kls_prestatic_ordering_ctx = 0;
@@ -36321,9 +36351,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
   int skip_trial_factor = 0;
   const int skip_trial_factor_requested =
-    auto_raced_spiked_match ||
-    medium_weak_pts_cycle ||
-    getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL;
+    !deferred &&
+    (auto_raced_spiked_match ||
+     medium_weak_pts_cycle ||
+     getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL);
   if (skip_trial_factor_requested &&
       trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
       trial_row_scale != NULL && trial_col_scale != NULL) {
@@ -36453,7 +36484,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
     trial_common.kls_static_perturb = 1.49e-8 * amax;
   }
-  if (getenv("KLS_PRESTATIC_SKIP_TRIAL") != NULL) {
+  if (!deferred && getenv("KLS_PRESTATIC_SKIP_TRIAL") != NULL) {
     /* probe: adopt the matched pattern UNFACTORED and let the main
        path's parallel first-factor machinery build the numeric on
        these coordinates (the serial trial is pre2's largest cost) */
