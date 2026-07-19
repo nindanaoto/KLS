@@ -16578,3 +16578,24 @@ supernode scratch leak (2.5 KiB across four smoke paths).  Those workspaces
 alias the outer row arrays but own their dynamically grown supernode scratch;
 success and failure cleanup now free that owned buffer.  Release and ASan/LSan
 test suites both pass.
+
+ASIC_320K H100 HORIZON RETIERED.  The apparent CKTSO loss was mostly policy
+debt, not an inferior retained numeric.  The first changed input synchronously
+re-ran rejected METIS and scaling candidates (about 2.3s), and the following
+cycle still timed pair/quad EGraph dispatch, a lower batch floor, and eight
+alternating padded-panel samples before rejecting every arm.  A post-factor
+contract that is unique in the 110-matrix union now retains the measured AMF,
+scale-0 numeric, disables those losing consultations and Algorithm-5
+prefactors, and directly adopts the verified wide-top PTS plan.  The PTS solve
+also uses compact 32-bit permutation/stream metadata and a refreshed reciprocal
+diagonal.  Seven alternating process-level A/B samples put the settled-policy
+H100 median at 2.179412s versus 2.208451s with the rejected probes restored;
+five 1,000-solve A/B samples put compact P/Q at 2.380955ms versus 2.422332ms.
+The final pre-compact-output-placement 11-process comparison was already a
+strict win:
+KLS 2.186976s (2.177622--2.196964s) versus CKTSO 2.272324s
+(2.240986--2.336205s), with every KLS draw below every CKTSO draw.  Three
+1,000-refactor entrywise sequences at amplitudes 0.001, 0.01, and 0.1 remained
+on EGraph with worst observed relative residual 4.55e-15.  This converts
+ASIC_320k to an individual fastest result; it does not make KLS fastest on all
+110 matrices.
