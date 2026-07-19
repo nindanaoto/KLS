@@ -25279,6 +25279,14 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
   const int fast_direct_map32 = fused_direct_values &&
     map_row_idx32 != NULL && map_input_pos32 != NULL &&
     map_internal_pos32 != NULL && shared->solver->values != NULL;
+  /* The first changed-value solve certifies this full-precision matched
+     factor before direct input consumption begins.  Once certified, the
+     solver-owned prepared-value mirror has no residual/refinement consumer;
+     avoid a second random write for every input entry while the PTS scatter
+     already writes the factor workspace. */
+  const int skip_certified_value_mirror =
+    fast_direct_map32 && shared->solver->solve_contract_probe == 1 &&
+    getenv("KLS_DISABLE_LARGE_WEAK_PTS_VALUE_MIRROR_ELISION") == NULL;
   const double *prepared_scale = shared->solver->prepared_value_scale;
   double *owned_values = shared->solver->values;
 
@@ -25310,7 +25318,9 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
           if (prepared_scale != NULL) {
             value *= prepared_scale[internal];
           }
-          owned_values[internal] = value;
+          if (!skip_certified_value_mirror) {
+            owned_values[internal] = value;
+          }
           offx[poff++] = value;
         }
         for (UF_long p = block_start;
@@ -25320,7 +25330,9 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
           if (prepared_scale != NULL) {
             value *= prepared_scale[internal];
           }
-          owned_values[internal] = value;
+          if (!skip_certified_value_mirror) {
+            owned_values[internal] = value;
+          }
           x[(UF_long)map_row_idx32[p] - k1] = value;
         }
       } else if (fast_unscaled_map32) {
@@ -28136,6 +28148,7 @@ static int kls_is_large_weak_pts_input_pattern(
   const UF_long *col_ptr,
   const kls_options *options) {
   return col_ptr != NULL && options != NULL &&
+    getenv("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -36547,7 +36560,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
         (kls_defer_cycle_trials_enabled() ||
          (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
           !forced_match)) &&
-        solver->n <= 150000u && !majority_weak) {
+        solver->n <= 150000u && !majority_weak &&
+        !force_prestat_spral) {
       /* A mostly-strong diagonal means the incumbent ordering factors fine
          and the trial is a later-cycle payoff bet (rajat25: 0.53s trial
          versus 0.15s for the AMD factor).  Exact-input reuse defers that bet
@@ -36557,7 +36571,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          validation and reaches the ordinary refactor fallback.  The factor
          failure rescue below still runs this consult immediately.  Majority-
          weak rows (onetone1/twotone) stay inline because the matched ordering
-         is their fast and reliable initial-factor path. */
+         is their fast and reliable initial-factor path.  A forced large-weak
+         PTS match stays inline for the same reason: deferring it would factor
+         the known-losing unmatched numeric before building the retained
+         matched factor on the first update. */
       solver->prestatic_deferred = 1;
 #ifdef KLS_HAVE_METIS
       kls_prestatic_ordering_ctx = 0;
@@ -103913,9 +103930,14 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   {
     const char *busy = getenv("KLS_DISABLE_EGRAPH_BUSY_WAIT");
     pool->busy_wait = !(busy != NULL && busy[0] == '1');
+    /* These short PTS numerics return after every update/solve pair.  Keep
+       their crew live through that bounded gap so the next sub-millisecond
+       refactor avoids seven condition-variable wakeups. */
     pool->worker_spin_iters =
       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)
-        ? 200000u : KLS_EGRAPH_WORKER_SPIN_ITERS;
+        ? 200000u :
+      kls_is_large_weak_pts_cycle_pattern(solver)
+        ? 100000u : KLS_EGRAPH_WORKER_SPIN_ITERS;
     const char *spin_iters =
       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)
         ? getenv("KLS_GEMAT_WORKER_SPIN_ITERS")
@@ -143729,10 +143751,13 @@ static void kls_pts_try_build(kls_solver *solver) {
     /* The hybrid huge-single circuit has enough independent large subtrees
        that the generic 2x overpartition only enlarges the serial ancestor
        top.  A 1x cut retained balanced bins and reduced its repeated solve
-       top by more than half (3086 -> 1478 columns). */
+       top by more than half (3086 -> 1478 columns).  The large weak matched
+       factor has a still-cheaper 0.9x cut: its 73 bins keep the eight-way
+       maximum at 13.6% while reducing the serial ancestor top. */
     double cut_multiplier =
       kls_is_rajat15_h100_cycle(solver) ? 0.75 :
       kls_is_rajat21_h100_cycle(solver) ? 1.0 :
+      kls_is_large_weak_pts_cycle_pattern(solver) ? 0.9 :
       (kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver)) ? 1.0 :
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -144715,6 +144740,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
 
   if ((kls_is_medium_weak_pts_cycle_pattern(solver) ||
        kls_is_rajat21_h100_cycle(solver) ||
+       kls_is_large_weak_pts_cycle_pattern(solver) ||
        getenv("KLS_ENABLE_PTS_REFACTOR_POOL") != NULL) &&
       getenv("KLS_DISABLE_PTS_REFACTOR_POOL") == NULL) {
     const int pool_ok = kls_pts_mapped_refactor_pool(solver, &shared);
