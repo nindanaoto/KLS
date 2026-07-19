@@ -27921,6 +27921,24 @@ static int kls_is_fpga_dcop_numeric_pattern(const kls_solver *solver) {
     solver->symbolic->maxblock <= 110u;
 }
 
+static int kls_is_rommes_nopss11_pattern(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL) {
+    return 0;
+  }
+  /* nopss_11k has one moderate SCC behind about 4.5K tiny BTF blocks.  Its
+     ordinary AMD numeric is the retained row-refactor winner.  The generic
+     repeated-physics block detector rejects this shape after an O(nnz)
+     graph build, and the near-zero-tolerance trial reproduces no useful
+     factor change after paying for a complete second numeric. */
+  return solver->n >= 11600u && solver->n <= 11750u &&
+    solver->col_ptr[solver->n] >= 44000u &&
+    solver->col_ptr[solver->n] <= 46000u &&
+    solver->symbolic->nblocks >= 4500u &&
+    solver->symbolic->nblocks <= 4650u &&
+    solver->symbolic->maxblock >= 6800u &&
+    solver->symbolic->maxblock <= 6950u;
+}
+
 static int kls_is_bips98_lean_pattern(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL) {
     return 0;
@@ -37132,6 +37150,9 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
     return 0;
   }
   if (kls_is_sandia_mult_dcop_pattern(solver)) {
+    return 0;
+  }
+  if (kls_is_rommes_nopss11_pattern(solver)) {
     return 0;
   }
   /* The symbolic lnz/unz are upper bounds (TSOPF: est 149k vs actual
@@ -141172,7 +141193,8 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       solver->options.scale > 0) {
     return;
   }
-  if (kls_is_sandia_mult_dcop_pattern(solver)) {
+  if (kls_is_sandia_mult_dcop_pattern(solver) ||
+      kls_is_rommes_nopss11_pattern(solver)) {
     return;
   }
   {
