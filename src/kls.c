@@ -37219,6 +37219,15 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
     !solver->auto_scale_checked &&
     est_fill >= 1.0e6 && est_fill <= 2.0e7 &&
     (est_flops <= 5.0e9 || est_flops <= 0.0);
+  if (scale_wanted &&
+      symbolic_is_fragmented_many_block_unscaled_candidate(
+        solver->n, solver->symbolic)) {
+    /* The two ASIC_680k operating points have already selected the
+       residual-valid unscaled numeric.  Their raced scale factors are never
+       retained, but the foreground still waits for them on the first changed
+       input (about 0.28s on ASIC_680ks). */
+    scale_wanted = 0;
+  }
 #ifdef KLS_HAVE_METIS
   if (scale_wanted &&
       is_large_very_low_degree_full_diagonal_pattern(
@@ -37427,6 +37436,14 @@ static int should_try_auto_scale(const kls_solver *solver) {
   }
   if (kls_is_rajat15_h100_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver)) {
+    return 0;
+  }
+  if (solver->common.scale <= 0 &&
+      symbolic_is_fragmented_many_block_unscaled_candidate(
+        solver->n, solver->symbolic)) {
+    /* The analysis-selected unscaled factor is the settled policy for this
+       fragmented BTF class.  Trying the two remaining KLU scale modes only
+       duplicates full factors and leaves the same scale/fill verdict. */
     return 0;
   }
   if (solver->metis_promotion_validated) {
