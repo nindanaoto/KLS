@@ -2344,7 +2344,6 @@ static int kls_dense_spiked_fast_defaults_enabled(
 static int kls_medium_partial_static_metis_adopted(
   const kls_solver *solver) {
   return solver != NULL && solver->medium_partial_static_metis_path &&
-    solver->row_perm != NULL &&
     solver->stats.selected_ordering == KLS_ORDERING_METIS &&
     solver->orientation == KLS_ORIENTATION_NORMAL;
 }
@@ -30196,7 +30195,11 @@ static UF_long kls_metis_order_inner(UF_long n,
   idx_t metis_ndp_npes =
     metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
   if (kls_medium_partial_static_metis_ctx) {
-    metis_ndp_npes = 24;
+    /* Six deterministic leaves retain the compact factor and a separator
+       forest that feeds all eight numeric workers.  The former 24-leaf
+       matched route increased both the separator surface and the 100-cycle
+       numeric horizon. */
+    metis_ndp_npes = 6;
   } else if (kls_large_weak_diagonal_static_metis_ctx) {
     /* The two-leaf forest substantially reduces fill on this statically
        matched class.  On the audited 659K-row case it cuts modeled numeric
@@ -30404,7 +30407,8 @@ static UF_long kls_metis_order_inner(UF_long n,
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
     UF_long camd_group_size =
-      kls_metis_camd_group_size(n, col_ptr, row_idx);
+      kls_medium_partial_static_metis_ctx
+        ? 768u : kls_metis_camd_group_size(n, col_ptr, row_idx);
     if (camd_group_size == 0 && n > 1) {
       /* Below the window-refinement floor, keep the METIS order exactly by
          constraining every vertex to its own group.  CAMD then reproduces
@@ -30444,8 +30448,7 @@ static UF_long kls_metis_order_inner(UF_long n,
       getenv("KLS_METIS_CAMD_COMPONENT_GROUPS") != NULL &&
       metis_ndp_npes > 1 && metis_ndp_sizes != NULL;
     const int skip_camd_refine =
-      getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL ||
-      kls_medium_partial_static_metis_ctx;
+      getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL;
     UF_long camd_lnz;
     if (skip_camd_refine) {
       /* The pre-static raced-symbolic path subsequently constructs and
@@ -35380,6 +35383,13 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values,
                                               int deferred) {
+  if (solver != NULL && solver->medium_partial_static_metis_path &&
+      solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+      getenv("KLS_DISABLE_MEDIUM_PARTIAL_DIRECT_METIS") == NULL) {
+    /* Analysis already selected the compact direct numeric for this class;
+       a row match would replace it with the superseded pinned ordering. */
+    return;
+  }
   const int medium_weak_pts_cycle =
     kls_is_medium_weak_pts_cycle_pattern(solver);
   const int large_weak_pts_cycle =
@@ -38458,6 +38468,32 @@ static int choose_symbolic_for_pattern(UF_long n,
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
   }
+#ifdef KLS_HAVE_METIS
+  if (options != NULL &&
+      options->orientation == KLS_ORIENTATION_AUTO &&
+      options->ordering == KLS_ORDERING_AUTO &&
+      options->scale == KLS_SCALE_AUTO && options->static_pivoting &&
+      options->use_btf && options->threads == 8 &&
+      getenv("KLS_DISABLE_MEDIUM_PARTIAL_DIRECT_METIS") == NULL &&
+      is_medium_prestatic_partial_missing_pattern(n, col_ptr, row_idx)) {
+    /* The old policy built a weighted row match and a 24-leaf pinned METIS
+       numeric.  On this structurally bounded partial-diagonal class, direct
+       scale-2 METIS with six leaves and a 768-column CAMD window has a much
+       smaller factor and wins the complete generic-entrywise H100 horizon.
+       Select it at analysis time so the first changed matrix does not pay a
+       deferred matching trial or a replacement factorization. */
+    kls_options metis_options = *options;
+    metis_options.ordering = KLS_ORDERING_METIS;
+    metis_options.scale = 2;
+    const int saved_ctx = kls_medium_partial_static_metis_ctx;
+    kls_medium_partial_static_metis_ctx = 1;
+    const int status = choose_symbolic_for_pattern(
+      n, col_ptr, row_idx, &metis_options, symbolic_out, common_out,
+      selected_ordering_out, score_out, separator_out);
+    kls_medium_partial_static_metis_ctx = saved_ctx;
+    return status;
+  }
+#endif
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       kls_is_large_weak_pts_input_pattern(n, col_ptr, options) &&
       count_pattern_diagonal(n, col_ptr, row_idx) * 4u < 3u * n) {
@@ -88474,90 +88510,27 @@ static int kls_egraph_refactor_dependency_done_now(
  * only taken when every producer in it is already published; otherwise the
  * scalar path performs its usual blocking wait.  Returns the number of
  * producers consumed (0 = no batch at position up). */
+/* Keep the large panel temporaries out of the eligibility probe.  Most call
+ * sites decline because the first dependency is not in a supernode run; a
+ * single combined function made every one of those probes reserve the full
+ * ~2.7 KiB AVX-512 update frame before inspecting run_end. */
 #if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
 /* GCC cannot instantiate the explicit AVX-512 FMA source below as its
    x86-64-v3 clone.  The default clone remains the fallback and native v4
    builds dispatch to the tuned clone. */
-__attribute__((target_clones("default", "arch=x86-64-v4")))
+__attribute__((noinline, target_clones("default", "arch=x86-64-v4")))
 #endif
-static UF_long kls_snode_batch_consume_cached(
-  UF_long *const *l_indices,
+static UF_long kls_snode_batch_consume_cached_apply(
   double *const *l_values,
-  const UF_long *llen_local,
-  const UF_long *ui,
-  const int32_t *ui32,
   double *ux,
-  UF_long ucol_len,
   UF_long up,
   double *restrict x,
   UF_long k1,
-  UF_long producer_limit,
-  const UF_long *snode_run_end,
-  const kls_egraph_refactor_shared *shared,
-  int wait_for_dependencies,
-  const unsigned char *applied) {
-  const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-  const UF_long run_end = snode_run_end[k1 + j];
-  if (run_end <= k1 + j + 1u) {
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_norun++;
-    }
-    return 0;
-  }
-  UF_long tmax = run_end - (k1 + j);
-  if (tmax > KLS_SNODE_MAX_BATCH) {
-    tmax = KLS_SNODE_MAX_BATCH;
-  }
-  if (tmax > ucol_len - up) {
-    tmax = ucol_len - up;
-  }
-  UF_long t = 1;
-  if (ui32 != NULL) {
-    while (t < tmax && (UF_long)ui32[up + t] == j + t) {
-      t++;
-    }
-  } else {
-    while (t < tmax && ui[up + t] == j + t) {
-      t++;
-    }
-  }
-  if (applied != NULL) {
-    /* Positions the Algorithm-5 prefactor already applied must not be
-       consumed again; clamp the batch at the first applied position. */
-    UF_long limit = 0;
-    while (limit < t && !applied[up + limit]) {
-      limit++;
-    }
-    t = limit;
-  }
-  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_short++;
-    }
-    return 0;
-  }
-  if (wait_for_dependencies) {
-    for (UF_long i = 0; i < t; ++i) {
-      if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
-        return 0;
-      }
-    }
-  }
-  const UF_long *tli = l_indices[k1 + j + t - 1u];
-  const int32_t *tli32 =
-    shared != NULL && shared->solver != NULL &&
-        shared->solver->refactor_l_indices32 != NULL
-      ? shared->solver->refactor_l_indices32[k1 + j + t - 1u]
-      : NULL;
-  const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL || t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
-    /* Short shared tails lose to the 32-bit-index scalar path; only pay the
-       panel staging when the batched update amortizes it. */
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_work++;
-    }
-    return 0;
-  }
+  UF_long j,
+  UF_long t,
+  const UF_long *tli,
+  const int32_t *tli32,
+  UF_long tlen) {
   double xs[KLS_SNODE_MAX_BATCH];
   const double *lx_arr[KLS_SNODE_MAX_BATCH];
   for (UF_long i = 0; i < t; ++i) {
@@ -88681,8 +88654,99 @@ static UF_long kls_snode_batch_consume_cached(
   if (kls_snode_trace_enabled()) {
     kls_snode_trace_batched_producers += t;
     kls_snode_trace_batched_tail_entries += t * tlen;
+    kls_snode_trace_batches++;
+    kls_snode_trace_tlen_sum += tlen;
+    if (tlen > kls_snode_trace_tlen_max) {
+      kls_snode_trace_tlen_max = tlen;
+    }
+    const unsigned int bucket =
+      t <= 1u ? 0u : t <= 3u ? 1u : t <= 7u ? 2u : t <= 15u ? 3u
+      : t <= 31u ? 4u : t <= 63u ? 5u : 6u;
+    kls_snode_trace_t_hist[bucket]++;
   }
   return t;
+}
+
+static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
+  UF_long *const *l_indices,
+  double *const *l_values,
+  const UF_long *llen_local,
+  const UF_long *ui,
+  const int32_t *ui32,
+  double *ux,
+  UF_long ucol_len,
+  UF_long up,
+  double *restrict x,
+  UF_long k1,
+  UF_long producer_limit,
+  const UF_long *snode_run_end,
+  const kls_egraph_refactor_shared *shared,
+  int wait_for_dependencies,
+  const unsigned char *applied) {
+  const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+  const UF_long run_end = snode_run_end[k1 + j];
+  if (run_end <= k1 + j + 1u) {
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_norun++;
+    }
+    return 0;
+  }
+  UF_long tmax = run_end - (k1 + j);
+  if (tmax > KLS_SNODE_MAX_BATCH) {
+    tmax = KLS_SNODE_MAX_BATCH;
+  }
+  if (tmax > ucol_len - up) {
+    tmax = ucol_len - up;
+  }
+  UF_long t = 1;
+  if (ui32 != NULL) {
+    while (t < tmax && (UF_long)ui32[up + t] == j + t) {
+      t++;
+    }
+  } else {
+    while (t < tmax && ui[up + t] == j + t) {
+      t++;
+    }
+  }
+  if (applied != NULL) {
+    /* Positions the Algorithm-5 prefactor already applied must not be
+       consumed again; clamp the batch at the first applied position. */
+    UF_long limit = 0;
+    while (limit < t && !applied[up + limit]) {
+      limit++;
+    }
+    t = limit;
+  }
+  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_short++;
+    }
+    return 0;
+  }
+  if (wait_for_dependencies) {
+    for (UF_long i = 0; i < t; ++i) {
+      if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
+        return 0;
+      }
+    }
+  }
+  const UF_long *tli = l_indices[k1 + j + t - 1u];
+  const int32_t *tli32 =
+    shared != NULL && shared->solver != NULL &&
+        shared->solver->refactor_l_indices32 != NULL
+      ? shared->solver->refactor_l_indices32[k1 + j + t - 1u]
+      : NULL;
+  const UF_long tlen = llen_local[j + t - 1u];
+  if (tli == NULL || t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+    /* Short shared tails lose to the 32-bit-index scalar path; only pay the
+       panel staging when the batched update amortizes it. */
+    if (kls_snode_trace_enabled()) {
+      kls_snode_trace_decline_work++;
+    }
+    return 0;
+  }
+  return kls_snode_batch_consume_cached_apply(
+    l_values, ux, up, x, k1, j, t, tli, tli32, tlen);
 }
 
 /* Fused two-consumer batch consume: one pass over the producer run's tail
@@ -145041,9 +145105,15 @@ static int kls_serial_factor(kls_solver *solver,
   free_numeric(solver);
   solver->factor_preps_deferred = 0;
   solver->numeric_from_pipe = 0;
-  int auto_scale_policy = solver->options.scale;
-  int auto_scale_policy_known = solver->options.scale != KLS_SCALE_AUTO;
+  const int medium_partial_direct_scale2 =
+    kls_medium_partial_static_metis_adopted(solver) &&
+    getenv("KLS_DISABLE_MEDIUM_PARTIAL_DIRECT_METIS") == NULL;
+  int auto_scale_policy =
+    medium_partial_direct_scale2 ? 2 : solver->options.scale;
+  int auto_scale_policy_known =
+    medium_partial_direct_scale2 || solver->options.scale != KLS_SCALE_AUTO;
   const int scaled_pivots_preferred =
+    !medium_partial_direct_scale2 &&
     solver->options.scale == KLS_SCALE_AUTO &&
     kls_serial_scaled_pivots_preferred(solver, numeric_values);
   if (scaled_pivots_preferred) {
@@ -145051,7 +145121,8 @@ static int kls_serial_factor(kls_solver *solver,
     auto_scale_policy_known = 1;
   }
   const int preselect_max_scale =
-    scaled_pivots_preferred && auto_scale_policy == 2;
+    medium_partial_direct_scale2 ||
+    (scaled_pivots_preferred && auto_scale_policy == 2);
   solver->common.scale = solver->options.scale == KLS_SCALE_AUTO
     ? (preselect_max_scale ? 2 : -1) : solver->options.scale;
   solver->common.tol = solver->options.pivot_tolerance;
@@ -146682,6 +146753,17 @@ int kls_factor(kls_solver *solver, const double *values) {
        after every generated entrywise update by the benchmark contract. */
     solver->common.scale = -1;
     solver->auto_scale_checked = 1;
+  }
+  if (kls_medium_partial_static_metis_adopted(solver) &&
+      solver->options.scale == KLS_SCALE_AUTO &&
+      getenv("KLS_DISABLE_MEDIUM_PARTIAL_DIRECT_METIS") == NULL) {
+    /* The analysis policy already fixed scale 2 as part of the selected
+       numeric.  Mark that verdict settled so a diagonal-equivalent workload
+       cannot defer three redundant full scale trial factors into its first
+       genuinely changed refactor. */
+    solver->common.scale = 2;
+    solver->auto_scale_checked = 1;
+    solver->auto_scale_deferred = 0;
   }
   if (solver->options.backend == KLS_BACKEND_SERIAL) {
     if (kls_diagonal_equiv_candidate &&
