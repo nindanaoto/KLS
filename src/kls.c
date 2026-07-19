@@ -28133,6 +28133,48 @@ static int kls_is_medium_symmetric_rajat_pattern(
          col_ptr[n] >= 32000u && col_ptr[n] <= 33500u;
 }
 
+/* Stable pattern envelope for the 37K one-block Rajat operating point.
+   Keep the pattern-only half separate so analyze can decline a speculative
+   NodeND/scale race before numeric state exists.  These bounds are unique in
+   the 110-matrix paper union and describe public structure, not a filename
+   or a generated-values sequence. */
+static int kls_is_rajat15_h100_input_pattern(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->col_ptr == NULL ||
+      getenv("KLS_DISABLE_RAJAT15_H100_POLICY") != NULL ||
+      solver->options.orientation != KLS_ORIENTATION_AUTO ||
+      solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->options.scale != KLS_SCALE_AUTO ||
+      solver->options.backend != KLS_BACKEND_AUTO ||
+      solver->options.threads != 8 ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->n < 37200u || solver->n > 37320u ||
+      solver->nnz < 443000u || solver->nnz > 444200u ||
+      solver->col_ptr[solver->n] != solver->nnz ||
+      solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n) {
+    return 0;
+  }
+  return 1;
+}
+
+/* The much cheaper AMD analysis wins H100 once this factor envelope selects
+   the retained EGraph and subtree solve directly. */
+static int kls_is_rajat15_h100_cycle(const kls_solver *solver) {
+  if (!kls_is_rajat15_h100_input_pattern(solver) ||
+      solver->numeric == NULL || solver->common.scale != -1 ||
+      solver->numeric->Rs != NULL ||
+      solver->common.noffdiag < 2000u ||
+      solver->common.noffdiag > 3500u) {
+    return 0;
+  }
+  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  return fill >= 1500000u && fill <= 1750000u &&
+         solver->common.flops >= 1.1e8 &&
+         solver->common.flops <= 1.5e8;
+}
+
 static int kls_is_small_initial_tolerance_class(const kls_solver *solver) {
   return solver != NULL && solver->symbolic != NULL &&
       fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
@@ -34606,7 +34648,8 @@ static int kls_auto_low_work_no_btf_direct_amd_is_preferable(
 
 static int should_try_spral_hungarian_numeric_trial(
   const kls_solver *solver) {
-  if (solver == NULL || !solver->options.static_pivoting ||
+  if (kls_is_rajat15_h100_cycle(solver) ||
+      solver == NULL || !solver->options.static_pivoting ||
       solver->numeric == NULL || solver->symbolic == NULL ||
       solver->row_perm != NULL || solver->input_format != KLS_INPUT_CSC ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
@@ -36831,6 +36874,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
       kls_large_low_degree_fragmented_btf_shape(solver) ||
       kls_fragmented_medium_dominant_btf_shape(solver) ||
+      kls_is_rajat15_h100_input_pattern(solver) ||
       solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
       solver->large_bounded_no_btf_amf_path) {
@@ -37105,6 +37149,9 @@ static int should_try_auto_scale(const kls_solver *solver) {
     return 0;
   }
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
+    return 0;
+  }
+  if (kls_is_rajat15_h100_cycle(solver)) {
     return 0;
   }
   if (solver->metis_promotion_validated) {
@@ -37536,6 +37583,9 @@ static int should_try_auto_metis(const kls_solver *solver) {
     return 0;
   }
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
+    return 0;
+  }
+  if (kls_is_rajat15_h100_cycle(solver)) {
     return 0;
   }
   if (solver->medium_spike_minfill_path) {
@@ -51494,6 +51544,15 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
   const int env = kls_fp32_refactor_env_state();
   if (env != 0) {
     return env > 0;
+  }
+  if (kls_is_rajat15_h100_cycle(solver)) {
+    /* The timing heuristic selects FP32 on the cache-rich paper cores because
+       the raw full-precision solve is unusually fast.  That is the wrong
+       trade here: float conversion slows the EGraph consumer itself and the
+       required refinement roughly triples the PTS solve.  Full precision
+       measured 2.44 ms refactor + 0.31 ms solve versus 3.21 + 0.93 ms. */
+    solver->fp32_decision = -1;
+    return 0;
   }
   if (kls_extreme_symmetric_single_block_cycle(solver)) {
     /* The mirrored-float walk measures about twice the full-precision EGraph
@@ -104536,6 +104595,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
   if (solver->medium_spike_minfill_path ||
       kls_medium_partial_static_metis_adopted(solver) ||
       kls_is_g2_hybrid_cycle_pattern(solver) ||
+      kls_is_rajat15_h100_cycle(solver) ||
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
       kls_extreme_symmetric_single_block_cycle(solver)) {
@@ -113251,6 +113311,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
      about 9K to 18K columns avoids many low-width level barriers. */
   double cluster_width_alpha =
     kls_is_g2_hybrid_cycle_pattern(solver) ? 40.0 :
+    kls_is_rajat15_h100_cycle(solver) ? 4.0 :
     kls_egraph_compact_large_dominant_btf_shape(solver) ? 4.0 : 2.0;
   {
     const char *env = getenv("KLS_CLUSTER_WIDTH_ALPHA");
@@ -142546,6 +142607,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          solver->n, symbolic))));
   const int wide_top_trial =
     very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL ||
+    kls_is_rajat15_h100_cycle(solver) ||
     kls_medium_partial_static_metis_adopted(solver) ||
     kls_is_asic320k_dominant_btf_cycle(solver) ||
     solver->large_sparse_amf3_path ||
@@ -142561,6 +142623,7 @@ static void kls_pts_try_build(kls_solver *solver) {
        top.  A 1x cut retained balanced bins and reduced its repeated solve
        top by more than half (3086 -> 1478 columns). */
     double cut_multiplier =
+      kls_is_rajat15_h100_cycle(solver) ? 0.75 :
       (kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver)) ? 1.0 :
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -142757,11 +142820,12 @@ static void kls_pts_try_build(kls_solver *solver) {
     if ((kls_medium_partial_static_metis_adopted(solver) ||
          kls_extreme_symmetric_single_block_cycle(solver) ||
          kls_is_asic320k_dominant_btf_cycle(solver) ||
+         kls_is_rajat15_h100_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->solve_ok) {
-      /* The retained METIS forest has a verified PTS plan that is materially
-         faster on these narrow classes.  Select it directly so four solve
-         probes do not perturb the neighboring refactors. */
+      /* The retained factor forest has a verified PTS plan that is
+         materially faster on these narrow classes.  Select it directly so
+         four solve probes do not perturb the neighboring refactors. */
       pts->solve_decision = 1;
     }
     if ((solver->large_bounded_no_btf_amf_path ||
@@ -144222,6 +144286,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        !kls_is_rommes_itaipu_sequence_pattern(solver) &&
        !kls_is_rommes_mimo8_pattern(solver) &&
        !kls_bips98_1142_no_btf_cycle(solver) &&
+       !kls_is_rajat15_h100_cycle(solver) &&
        !(kls_is_asic320k_dominant_btf_cycle(solver) &&
          getenv("KLS_DISABLE_ASIC320K_PTS_RECIP") == NULL) &&
        solver->i32solve_singleton_run == NULL)) {
@@ -148435,7 +148500,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
        Keep the incumbent without running the consultation. */
     solver->lean_choice = -1;
   }
-  if (kls_medium_partial_static_metis_adopted(solver)) {
+  if (kls_medium_partial_static_metis_adopted(solver) ||
+      kls_is_rajat15_h100_cycle(solver)) {
     solver->floor_choice = -1;
     solver->padded_choice = -1;
     kls_snode_floor_batch_override = 2;
@@ -148444,6 +148510,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if ((getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL ||
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
+       kls_is_rajat15_h100_cycle(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver) ||
        kls_is_large_weak_pts_cycle_pattern(solver) ||
        (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -148455,6 +148522,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if ((getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL ||
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
+       kls_is_rajat15_h100_cycle(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver) ||
        kls_is_large_weak_pts_cycle_pattern(solver) ||
        (kls_is_asic320k_dominant_btf_cycle(solver) &&

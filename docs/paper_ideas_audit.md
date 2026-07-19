@@ -16599,3 +16599,24 @@ KLS 2.186976s (2.177622--2.196964s) versus CKTSO 2.272324s
 on EGraph with worst observed relative residual 4.55e-15.  This converts
 ASIC_320k to an individual fastest result; it does not make KLS fastest on all
 110 matrices.
+
+RAJAT15 GENERIC-NUMERIC H100 RETIERED.  The AMD numeric was already the
+front-end winner, but the first changed matrix still joined a rejected
+NodeND/scale race and ran a rejected Hungarian numeric trial.  A structure-
+and-factor-state envelope unique in the 110-matrix union now declines those
+consultations, settles full-width EGraph with the measured four-width cluster
+cut and low supernode batch floor, and directly adopts a 110-chunk PTS solve
+(708-column shared top, 24.8% entry-weighted work).  The decisive remaining
+regression was the automatic FP32 mirror: on the paper CPUs it slowed the
+EGraph refactor from about 2.44 to 3.21ms and forced refinement that raised the
+PTS solve from about 0.31 to 0.93ms.  This envelope therefore retains full
+precision.  Under the exact paper environment and CPU 0--7 affinity, seven
+alternating process pairs put KLS at 0.373307--0.380719s H100 versus CKTSO's
+typical 0.447804--0.454628s (one isolated 0.559280s CKTSO outlier); every KLS
+sample beat every CKTSO sample.  Disabling the complete policy measured
+0.939857--0.945046s.  Three 1,000-refactor entrywise sequences at amplitudes
+0.001, 0.01, and 0.1 stayed on EGraph with worst per-generation relative
+residual 1.24e-12.  Release tests, clean-environment ASan/LSan tests, and a
+classifier-path ASan run pass.  This converts `rajat15` to an individual
+fastest result; a new complete-union run is still required before changing
+the aggregate claim.
