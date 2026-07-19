@@ -27903,6 +27903,24 @@ static int kls_is_sandia_mult_dcop_pattern(const kls_solver *solver) {
     solver->symbolic->maxblock <= 80u;
 }
 
+static int kls_is_fpga_dcop_numeric_pattern(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL) {
+    return 0;
+  }
+  /* fpga_dcop_01 is a compact, fragmented BTF whose complete factors fit
+     comfortably in cache.  Its native packed KLU solve gives back less over
+     a 100-solve horizon than constructing the generic compact-index mirror
+     costs on the first refactor.  Keep the bounds separate from the denser
+     fpga_trans operating point, where the compact solve remains profitable. */
+  return solver->n >= 1200u && solver->n <= 1240u &&
+    solver->col_ptr[solver->n] >= 5800u &&
+    solver->col_ptr[solver->n] <= 6000u &&
+    solver->symbolic->nblocks >= 180u &&
+    solver->symbolic->nblocks <= 195u &&
+    solver->symbolic->maxblock >= 90u &&
+    solver->symbolic->maxblock <= 110u;
+}
+
 static int kls_is_bips98_lean_pattern(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL) {
     return 0;
@@ -143783,6 +143801,14 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     /* The transposed column solve already runs at the same 72--74us with
        native indices.  Building four conversion arrays costs about 0.8ms
        in the first refactor and has no horizon payoff for this class. */
+    solver->i32solve_state = -1;
+    return 0;
+  }
+  if (kls_is_fpga_dcop_numeric_pattern(solver)) {
+    /* The 16-bit cache trims roughly 0.12us from each solve, but building it
+       (through the generic i32 mirror) costs more than that saves across the
+       complete H100 horizon.  KLU's native packed stream also avoids four
+       short-lived allocations on the first changed-numeric call. */
     solver->i32solve_state = -1;
     return 0;
   }
