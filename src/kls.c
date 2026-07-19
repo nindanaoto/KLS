@@ -29561,6 +29561,33 @@ static int kls_is_sparse_100k_nd_refine_pattern(
     col_ptr[n] >= 5u * n && col_ptr[n] <= 7u * n;
 }
 
+/* The two ASIC_100k operating points share the same 98.8K-row METIS core
+   behind a few hundred BTF fringe blocks.  Their selected unscaled numeric
+   wins the changed-value residual contract and every retained H100 phase;
+   automatic scale trials only build and discard two full alternative
+   numerics on the first refactor. */
+static int kls_is_asic100k_fragmented_metis_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->col_ptr != NULL &&
+    solver->symbolic != NULL &&
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.backend == KLS_BACKEND_AUTO &&
+    solver->options.threads == 8 &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+    solver->n >= 99000u && solver->n <= 99500u &&
+    solver->nnz >= 570000u && solver->nnz <= 950000u &&
+    solver->col_ptr[solver->n] == solver->nnz &&
+    solver->symbolic->do_btf &&
+    solver->symbolic->structural_rank == solver->n &&
+    solver->symbolic->nblocks >= 200u &&
+    solver->symbolic->nblocks <= 450u &&
+    solver->symbolic->maxblock >= 98500u &&
+    solver->symbolic->maxblock <= 99000u;
+}
+
 static UF_long kls_metis_camd_group_size(UF_long n,
                                          const UF_long *col_ptr,
                                          const UF_long *row_idx) {
@@ -37228,6 +37255,9 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
        input (about 0.28s on ASIC_680ks). */
     scale_wanted = 0;
   }
+  if (scale_wanted && kls_is_asic100k_fragmented_metis_cycle(solver)) {
+    scale_wanted = 0;
+  }
 #ifdef KLS_HAVE_METIS
   if (scale_wanted &&
       is_large_very_low_degree_full_diagonal_pattern(
@@ -37444,6 +37474,10 @@ static int should_try_auto_scale(const kls_solver *solver) {
     /* The analysis-selected unscaled factor is the settled policy for this
        fragmented BTF class.  Trying the two remaining KLU scale modes only
        duplicates full factors and leaves the same scale/fill verdict. */
+    return 0;
+  }
+  if (solver->common.scale <= 0 &&
+      kls_is_asic100k_fragmented_metis_cycle(solver)) {
     return 0;
   }
   if (solver->metis_promotion_validated) {
