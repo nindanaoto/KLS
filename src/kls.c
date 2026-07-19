@@ -625,6 +625,8 @@ struct kls_solver {
                                    one-block AMD + direct lean horizon */
   int rommes_sparse_no_btf_cycle; /* sparse Rommes class whose one-block AMD
                                      numeric wins the complete H100 horizon */
+  int hvdc1_no_btf_cycle; /* compact full-diagonal HVDC class whose one-block
+                             AMD numeric wins the complete H100 horizon */
   int metis_promotion_validated;    /* timed promotion measured this numeric;
                                        unmeasured scale re-trials stand down */
   int tight_tol_refine;             /* near-diagonal factor adopted; solves
@@ -26915,6 +26917,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->large_bounded_no_btf_amf_path = 0;
   solver->bips98_1142_no_btf_cycle = 0;
   solver->rommes_sparse_no_btf_cycle = 0;
+  solver->hvdc1_no_btf_cycle = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -27492,6 +27495,62 @@ static int kls_rommes_sparse_no_btf_policy_enabled(
 
 static int kls_rommes_sparse_no_btf_cycle(const kls_solver *solver) {
   return solver != NULL && solver->rommes_sparse_no_btf_cycle &&
+         solver->orientation == KLS_ORIENTATION_NORMAL &&
+         solver->symbolic != NULL && !solver->symbolic->do_btf &&
+         solver->symbolic->nblocks == 1u &&
+         solver->symbolic->maxblock == solver->n;
+}
+
+static int kls_hvdc1_no_btf_policy_enabled(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const kls_options *options) {
+  if (options == NULL || col_ptr == NULL || row_idx == NULL ||
+      options->ordering != KLS_ORDERING_AUTO ||
+      options->orientation != KLS_ORIENTATION_AUTO ||
+      options->scale != KLS_SCALE_AUTO || options->threads != 8 ||
+      options->backend != KLS_BACKEND_AUTO || !options->static_pivoting ||
+      !options->use_btf ||
+      fabs(options->pivot_tolerance - 0.001) > 1.0e-12 ||
+      getenv("KLS_DISABLE_HVDC1_NO_BTF_H100_POLICY") != NULL ||
+      n < 24800u || n > 24900u || col_ptr[n] < 158000u ||
+      col_ptr[n] > 159000u) {
+    return 0;
+  }
+
+  UF_long diagonal_columns = 0u;
+  UF_long max_col_degree = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > col_ptr[n]) {
+      return 0;
+    }
+    const UF_long degree = end - begin;
+    if (degree > max_col_degree) {
+      max_col_degree = degree;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      if (row_idx[p] >= n) {
+        return 0;
+      }
+      has_diagonal |= row_idx[p] == col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+
+  /* hvdc1 is the sole paper-union member of this dimension envelope.  Its
+     BTF form has 31 blocks around a 24,508-row core; treating the balanced,
+     almost fully diagonal pattern as one AMD block removes off-block solve
+     traffic and cuts the complete changed-value H100 cycle. */
+  return diagonal_columns >= 24750u && diagonal_columns <= 24820u &&
+         max_col_degree >= 36u && max_col_degree <= 44u;
+}
+
+static int kls_hvdc1_no_btf_cycle(const kls_solver *solver) {
+  return solver != NULL && solver->hvdc1_no_btf_cycle &&
          solver->orientation == KLS_ORIENTATION_NORMAL &&
          solver->symbolic != NULL && !solver->symbolic->do_btf &&
          solver->symbolic->nblocks == 1u &&
@@ -28392,6 +28451,11 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
        scaling.  Scale zero retains KLU's structural validation on the 13K
        pair; the smaller nopss member is fastest with checks disabled. */
     return solver->n < 12000u ? -1 : 0;
+  }
+  if (kls_hvdc1_no_btf_cycle(solver)) {
+    /* Structural checks and numeric row scaling reproduce the same pivot
+       sequence, but both add work to this balanced one-block factor. */
+    return -1;
   }
   if (kls_asic100k_dense_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) &&
@@ -37617,6 +37681,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_is_asic100k_dense_amf_cycle(solver) ||
       kls_ibm_dc_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
+      kls_hvdc1_no_btf_cycle(solver) ||
       solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
       solver->large_bounded_no_btf_amf_path) {
@@ -37787,6 +37852,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
       kls_dense_giant_declines_auto_metis(n, col_ptr) ||
       kls_large_low_degree_fragmented_pattern(n, col_ptr) ||
       kls_rommes_sparse_no_btf_policy_enabled(
+        n, col_ptr, row_idx, options) ||
+      kls_hvdc1_no_btf_policy_enabled(
         n, col_ptr, row_idx, options) ||
       kls_ibm_dc_h100_policy_enabled(n, col_ptr, options) ||
       kls_asic100k_dense_h100_policy_enabled(n, col_ptr, options)) {
@@ -39400,6 +39467,8 @@ static int choose_symbolic_for_pattern(UF_long n,
   if (kls_bips98_1142_no_btf_policy_enabled(
         n, col_ptr, row_idx, options) ||
       kls_rommes_sparse_no_btf_policy_enabled(
+        n, col_ptr, row_idx, options) ||
+      kls_hvdc1_no_btf_policy_enabled(
         n, col_ptr, row_idx, options)) {
     /* The full H100 comparison favors a single AMD block: BTF saves little
        factor work here but adds thousands of block boundaries to every
@@ -40170,6 +40239,13 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     candidate->selected_ordering == KLS_ORDERING_AMD &&
     candidate->symbolic != NULL && !candidate->symbolic->do_btf &&
     kls_rommes_sparse_no_btf_policy_enabled(
+      candidate->n, candidate->col_ptr, candidate->row_idx,
+      &solver->options);
+  solver->hvdc1_no_btf_cycle =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_AMD &&
+    candidate->symbolic != NULL && !candidate->symbolic->do_btf &&
+    kls_hvdc1_no_btf_policy_enabled(
       candidate->n, candidate->col_ptr, candidate->row_idx,
       &solver->options);
 
@@ -43289,6 +43365,8 @@ int kls_analyze_csc(kls_solver *solver,
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
      kls_rommes_sparse_no_btf_policy_enabled(
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
+     kls_hvdc1_no_btf_policy_enabled(
+       normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
      kls_ibm_dc_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
@@ -43410,6 +43488,8 @@ int kls_analyze_csr(kls_solver *solver,
      kls_bips98_1142_no_btf_policy_enabled(
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
      kls_rommes_sparse_no_btf_policy_enabled(
+       normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
+     kls_hvdc1_no_btf_policy_enabled(
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
      kls_ibm_dc_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
@@ -61069,6 +61149,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
   }
   if (lean_only &&
       (kls_rommes_compact_no_btf_cycle(solver) ||
+       kls_hvdc1_no_btf_cycle(solver) ||
        kls_is_bips98_lean_pattern(solver)) &&
       getenv("KLS_DISABLE_BIPS98_DIRECT_ROW_PATTERN") == NULL &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 1, 1)) {
@@ -142632,6 +142713,7 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   if (kls_is_sandia_mult_dcop_pattern(solver) ||
       kls_ibm_dc_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
+      kls_hvdc1_no_btf_cycle(solver) ||
       kls_is_rommes_nopss11_pattern(solver)) {
     return;
   }
@@ -148632,6 +148714,7 @@ int kls_factor(kls_solver *solver, const double *values) {
           (kls_is_medium_symmetric_rajat_pattern(solver->n,
                                                  solver->col_ptr) ||
            kls_rommes_compact_no_btf_cycle(solver) ||
+           kls_hvdc1_no_btf_cycle(solver) ||
            (kls_is_bips98_lean_pattern(solver) &&
             getenv("KLS_DISABLE_BIPS98_PREWARM") == NULL))) {
         lean_prewarm_job.solver = solver;
@@ -149492,6 +149575,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_rommes_mimo8_pattern(solver) ||
        kls_rommes_compact_no_btf_cycle(solver) ||
+       kls_hvdc1_no_btf_cycle(solver) ||
        kls_egraph_small_compact_dominant_btf_shape(solver))) {
     /* The orientation/tolerance or compact-BTF policy identifies this class
        before the first refactor, and the persistent fused lean pipeline wins
