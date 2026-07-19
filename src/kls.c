@@ -36011,6 +36011,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     goto done;
   }
   if (!deferred && small_candidate && solver->n <= 16384u &&
+      !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
       (kls_defer_cycle_trials_enabled() ||
        (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
         !forced_match))) {
@@ -36019,7 +36020,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        3.2ms rel 3.9e-13 vs 6.7ms through the inline match+trial); a
        singular plain factor is rescued at the factor exit by running
        this consult inline, and the cycle still gets the deferred
-       consult at the first refactorization. */
+       consult at the first refactorization.  gemat11/12 are excluded:
+       their matched numeric is already the settled lean-row cycle policy,
+       so deferral only factors twice and loses the bounded H100 horizon. */
     solver->prestatic_deferred = 1;
 #ifdef KLS_HAVE_METIS
     kls_prestatic_ordering_ctx = 0;
