@@ -571,6 +571,7 @@ struct kls_solver {
   int32_t *i32solve_u;
   int64_t *i32solve_loff;   /* per global column offsets into the streams */
   int64_t *i32solve_uoff;
+  uint32_t *i32solve_singleton_run; /* consecutive singleton BTF blocks */
   uint16_t *i16solve_l;
   uint16_t *i16solve_u;
   uint16_t *i16solve_loff;
@@ -587,6 +588,7 @@ struct kls_solver {
   double **i16solve_lx;
   double **i16solve_ux;
   double *i32solve_udiag_recip;
+  int i32solve_udiag_recip_fresh;
   UF_long i16solve_p_identity_prefix;
   UF_long i16solve_q_identity_prefix;
   int i32solve_state;       /* 0 unbuilt, 1 ready, -1 declined */
@@ -843,6 +845,7 @@ struct kls_solver {
   double *egraph_btf_scalar_run_group_state_u_values;
   UF_long egraph_btf_scalar_run_group_state_size;
   UF_long refactor_lu_pointer_count;
+  int refactor_lu_pointer_egraph_certified;
   int refactor_l_indices_sorted;
   int refactor_l_sorted_enabled;
   int refactor_btf_scalar_run_group_built;
@@ -2770,6 +2773,7 @@ typedef struct kls_egraph_refactor_shared {
   int row_publish_mode;
   int contract_rgrowth_mode;
   double *contract_rgrowth_results;
+  double *udiag_recip;
   int row_solve_upper;
   const kls_row_solve_factor_view *row_solve_view;
   double *row_solve_work;
@@ -2833,6 +2837,17 @@ typedef struct kls_egraph_refactor_shared {
   double *row_refactor_component_seconds;
   UF_long row_refactor_component_seconds_count;
 } kls_egraph_refactor_shared;
+
+static KLS_ALWAYS_INLINE void kls_egraph_store_udiag(
+  kls_egraph_refactor_shared *shared,
+  double *restrict udiag,
+  UF_long column,
+  double value) {
+  udiag[column] = value;
+  if (shared->udiag_recip != NULL) {
+    shared->udiag_recip[column] = 1.0 / value;
+  }
+}
 
 typedef struct kls_egraph_refactor_worker {
   kls_egraph_refactor_shared *shared;
@@ -19338,6 +19353,7 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_btf_scalar_run_group_state_next = NULL;
   solver->refactor_btf_scalar_run_group_state_next_count = 0u;
   solver->refactor_lu_pointer_count = 0;
+  solver->refactor_lu_pointer_egraph_certified = 0;
   solver->refactor_l_indices_sorted = 0;
   solver->refactor_l_sorted_enabled = 0;
   solver->refactor_btf_scalar_run_group_built = 0;
@@ -25941,6 +25957,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   free(solver->i32solve_u);
   free(solver->i32solve_loff);
   free(solver->i32solve_uoff);
+  free(solver->i32solve_singleton_run);
   free(solver->i16solve_l);
   free(solver->i16solve_u);
   free(solver->i16solve_loff);
@@ -25961,6 +25978,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->i32solve_u = NULL;
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
+  solver->i32solve_singleton_run = NULL;
   solver->i16solve_l = NULL;
   solver->i16solve_u = NULL;
   solver->i16solve_loff = NULL;
@@ -25977,6 +25995,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->i16solve_lx = NULL;
   solver->i16solve_ux = NULL;
   solver->i32solve_udiag_recip = NULL;
+  solver->i32solve_udiag_recip_fresh = 0;
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
@@ -26040,6 +26059,7 @@ static void free_numeric(kls_solver *solver) {
   free(solver->i32solve_u);
   free(solver->i32solve_loff);
   free(solver->i32solve_uoff);
+  free(solver->i32solve_singleton_run);
   free(solver->i16solve_l);
   free(solver->i16solve_u);
   free(solver->i16solve_loff);
@@ -26060,6 +26080,7 @@ static void free_numeric(kls_solver *solver) {
   solver->i32solve_u = NULL;
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
+  solver->i32solve_singleton_run = NULL;
   solver->i16solve_l = NULL;
   solver->i16solve_u = NULL;
   solver->i16solve_loff = NULL;
@@ -26076,6 +26097,7 @@ static void free_numeric(kls_solver *solver) {
   solver->i16solve_lx = NULL;
   solver->i16solve_ux = NULL;
   solver->i32solve_udiag_recip = NULL;
+  solver->i32solve_udiag_recip_fresh = 0;
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
@@ -26134,6 +26156,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   free(solver->i32solve_u);
   free(solver->i32solve_loff);
   free(solver->i32solve_uoff);
+  free(solver->i32solve_singleton_run);
   free(solver->i16solve_l);
   free(solver->i16solve_u);
   free(solver->i16solve_loff);
@@ -26154,6 +26177,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->i32solve_u = NULL;
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
+  solver->i32solve_singleton_run = NULL;
   solver->i16solve_l = NULL;
   solver->i16solve_u = NULL;
   solver->i16solve_loff = NULL;
@@ -26170,6 +26194,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->i16solve_lx = NULL;
   solver->i16solve_ux = NULL;
   solver->i32solve_udiag_recip = NULL;
+  solver->i32solve_udiag_recip_fresh = 0;
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
@@ -29063,6 +29088,12 @@ static UF_long kls_metis_order_inner(UF_long n, UF_long *col_ptr,
                                      UF_long *row_idx, UF_long *perm_out,
                                      trilinos_klu_l_common *common);
 
+/* Top-level pattern context for METIS options.  KLU invokes the ordering
+   callback on individual BTF blocks, so the callback's local n/nnz cannot
+   recognize a whole-matrix class.  Scope this flag around the one direct
+   auto-selection that needs a measured option set. */
+static _Thread_local int kls_fragmented_metis_tuning_ctx;
+
 static UF_long kls_metis_order(UF_long n,
                                UF_long *col_ptr,
                                UF_long *row_idx,
@@ -30188,7 +30219,15 @@ static UF_long kls_metis_order_inner(UF_long n,
   METIS_SetDefaultOptions(options);
   options[METIS_OPTION_NUMBERING] = 0;
   options[METIS_OPTION_SEED] = 0;
-  if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
+  if (kls_fragmented_metis_tuning_ctx) {
+    /* ASIC_680ks-like BTF core: three refinement iterations with one
+       separator trial cut retained fill by about 9% versus the default
+       NodeND options, enough to win the complete 100-cycle numeric horizon.
+       Environment overrides below remain authoritative for experiments. */
+    options[METIS_OPTION_NITER] = 3;
+    options[METIS_OPTION_NSEPS] = 1;
+  } else if (is_medium_dense_diagonal_high_degree_pattern(
+               n, col_ptr, row_idx)) {
     options[METIS_OPTION_NSEPS] = 2;
   } else if (is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx)) {
     options[METIS_OPTION_NSEPS] = 2;
@@ -36571,6 +36610,38 @@ static int kls_dense_giant_declines_auto_metis(UF_long n,
   return col_ptr != NULL && n >= 1000000u && col_ptr[n] / n >= 8u;
 }
 
+/* Very large, low-degree circuits can consist mostly of scalar BTF blocks
+   around one moderate core.  The generic pre-static deferral leaves this
+   class on AMD after its inexpensive matching probe rejects, but a tuned
+   NodeND order of the core repays its analysis cost over H100.  Use a tight
+   pattern-only gate for the direct ordering decision, then confirm the BTF
+   geometry before suppressing later speculative numeric work. */
+static int kls_large_low_degree_fragmented_pattern(
+  UF_long n,
+  const UF_long *col_ptr) {
+  if (col_ptr == NULL || n < 600000u || n > 800000u) {
+    return 0;
+  }
+  const double nnz = (double)col_ptr[n];
+  return nnz >= 2.0 * (double)n && nnz < 3.0 * (double)n;
+}
+
+static int kls_large_low_degree_fragmented_btf_shape(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      !kls_large_low_degree_fragmented_pattern(solver->n,
+                                               solver->col_ptr) ||
+      !solver->symbolic->do_btf) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double blocks = (double)solver->symbolic->nblocks;
+  const double core = (double)solver->symbolic->maxblock;
+  const double work = solver->symbolic->est_flops;
+  return blocks >= 0.80 * n && core >= 0.10 * n && core <= 0.20 * n &&
+         work >= 5.0e8 && work <= 2.0e9;
+}
+
 /* A medium-size dominant BTF block with thousands of small fringe blocks is
    already well served by the incumbent AMD factor.  In this shape, ordering
    the dominant block with nested dissection destroys the useful local
@@ -36605,6 +36676,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
       solver->n < 20000 || getenv("KLS_DISABLE_METIS_RACE") != NULL ||
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
+      kls_large_low_degree_fragmented_btf_shape(solver) ||
       kls_fragmented_medium_dominant_btf_shape(solver) ||
       solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
@@ -36758,7 +36830,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
      The race pays only where NodeND dwarfs the bootstrap factor. */
   if (solver->metis_race != NULL || options->ordering != KLS_ORDERING_AUTO ||
       getenv("KLS_DISABLE_METIS_RACE") != NULL ||
-      kls_dense_giant_declines_auto_metis(n, col_ptr)) {
+      kls_dense_giant_declines_auto_metis(n, col_ptr) ||
+      kls_large_low_degree_fragmented_pattern(n, col_ptr)) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -36873,6 +36946,9 @@ static int should_try_auto_scale(const kls_solver *solver) {
     return 0;
   }
   if (kls_fragmented_medium_dominant_btf_shape(solver)) {
+    return 0;
+  }
+  if (kls_large_low_degree_fragmented_btf_shape(solver)) {
     return 0;
   }
   if (solver->metis_promotion_validated) {
@@ -37730,6 +37806,27 @@ static int kls_choose_symbolic_inner(UF_long n,
 #endif
 
 #ifdef KLS_HAVE_METIS
+  if (!kls_analyze_defer_nd && options->threads == 8 &&
+      kls_large_low_degree_fragmented_pattern(n, col_ptr)) {
+    /* The fragmented low-degree class has one moderate BTF core surrounded
+       by scalar blocks.  Its complete H100 metric favors a tuned NodeND
+       ordering directly; AMD's cheaper analysis is repaid by the smaller
+       retained factor well before the end of the refactor/solve horizon. */
+    const int old_tuning_ctx = kls_fragmented_metis_tuning_ctx;
+    kls_fragmented_metis_tuning_ctx = 1;
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                       KLS_ORDERING_METIS, symbolic_out,
+                                       common_out, separator_out);
+    kls_fragmented_metis_tuning_ctx = old_tuning_ctx;
+    if (status == KLS_OK) {
+      *selected_ordering_out = KLS_ORDERING_METIS;
+      *score_out = symbolic_score(*symbolic_out);
+      return KLS_OK;
+    }
+    /* Retain the ordinary AMD/AMF competition as the allocation/failure
+       recovery path. */
+  }
+
   if (!kls_analyze_defer_nd &&
       is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
@@ -38916,6 +39013,7 @@ static int select_candidate(kls_pattern_candidate *normal,
       ref->n > 150000u && ref->n <= 750000u && ref->nnz <= 8000000u &&
       !is_large_sparse_diagonal_low_degree_pattern(ref->n, ref->col_ptr,
                                                    ref->row_idx) &&
+      !kls_large_low_degree_fragmented_pattern(ref->n, ref->col_ptr) &&
       !is_large_very_low_degree_full_diagonal_pattern(
         ref->n, ref->col_ptr, ref->row_idx) &&
       /* The usual large-class deferral assumes a later matching or METIS
@@ -51366,12 +51464,20 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
       solver->n <= 0) {
     return 0;
   }
-  if (solver->refactor_lu_pointer_count == solver->n &&
-      solver->refactor_l_indices != NULL &&
-      solver->refactor_l_values != NULL &&
-      solver->refactor_u_indices != NULL &&
-      solver->refactor_u_values != NULL &&
-      kls_refactor_lu_pointer_cache_matches(solver)) {
+  const int cache_present =
+    solver->refactor_lu_pointer_count == solver->n &&
+    solver->refactor_l_indices != NULL &&
+    solver->refactor_l_values != NULL &&
+    solver->refactor_u_indices != NULL &&
+    solver->refactor_u_values != NULL;
+  if (cache_present &&
+      (solver->refactor_lu_pointer_egraph_certified ||
+       kls_refactor_lu_pointer_cache_matches(solver))) {
+    /* A successful EGraph pass mutates factor values but never its packed
+       layout.  Every representation-changing path frees this cache, which
+       also clears the certificate.  The first EGraph call after a cache build
+       still performs the complete pointer comparison; subsequent calls avoid
+       walking the whole factor merely to rediscover the same addresses. */
     return kls_ensure_refactor_l_index32_cache(solver) &&
            kls_ensure_refactor_u_index32_cache(solver) &&
            kls_ensure_refactor_l_sorted_cache(solver) &&
@@ -89777,7 +89883,7 @@ static int kls_egraph_refactor_single_unscaled_column(
       return 0;
     }
   }
-  udiag[k] = ukk;
+  kls_egraph_store_udiag(shared, udiag, k, ukk);
   if (u_supernode_values) {
     kls_egraph_record_u_supernode_value(shared, k, k, ukk);
   }
@@ -90489,7 +90595,7 @@ static int kls_egraph_refactor_btf_unscaled_plain_cluster_column(
          p < solver->refactor_col_ptr[k + 1u]; ++p) {
       pivot = kls_egraph_unscaled_input_value_at(solver, shared->values, p);
     }
-    udiag[k] = pivot;
+    kls_egraph_store_udiag(shared, udiag, k, pivot);
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
       if (solver->common.halt_if_singular) {
@@ -90563,7 +90669,7 @@ static int kls_egraph_refactor_btf_unscaled_plain_cluster_column(
       return 0;
     }
   }
-  udiag[k] = ukk;
+  kls_egraph_store_udiag(shared, udiag, k, ukk);
   UF_long *restrict li = l_indices[k];
   double *restrict lx = l_values[k];
   const UF_long lcol_len = llen[local_k];
@@ -90619,7 +90725,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
          p < solver->refactor_col_ptr[k + 1u]; ++p) {
       pivot = kls_egraph_unscaled_input_value_at(solver, shared->values, p);
     }
-    udiag[k] = pivot;
+    kls_egraph_store_udiag(shared, udiag, k, pivot);
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
       if (solver->common.halt_if_singular) {
@@ -91069,7 +91175,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
       return 0;
     }
   }
-  udiag[k] = ukk;
+  kls_egraph_store_udiag(shared, udiag, k, ukk);
   if (u_supernode_values) {
     kls_egraph_record_u_supernode_value(shared, k, k, ukk);
   }
@@ -91313,7 +91419,7 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
           return 0;
         }
       }
-      udiag[ka] = ukka;
+      kls_egraph_store_udiag(shared, udiag, ka, ukka);
       kls_egraph_store_l_column_from_workspace(solver, xa, ka,
                                                l_indices[ka], l_values[ka],
                                                llen[local_a], ukka);
@@ -91330,7 +91436,7 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
           return 0;
         }
       }
-      udiag[kb] = ukkb;
+      kls_egraph_store_udiag(shared, udiag, kb, ukkb);
       kls_egraph_store_l_column_from_workspace(solver, xb, kb,
                                                l_indices[kb], l_values[kb],
                                                llen[local_b], ukkb);
@@ -104063,6 +104169,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
        tail no-ops in the dispatch, the BLAS3 refresh rebuilds it */
     return solver->common.flops >= 5.0e8;
   }
+
   const int single_block = solver->symbolic->nblocks == 1u;
   const int dominant_btf = kls_egraph_dominant_btf_shape(solver);
   const int all_pipeline_btf =
@@ -104887,7 +104994,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       return -1;
     }
   }
-
   const int single_block = solver->symbolic->nblocks == 1u;
   const UF_long scratch_size =
     single_block ? solver->n : solver->symbolic->maxblock;
@@ -106040,6 +106146,13 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->pipeline_pos_end = solver->n;
   shared->cluster_level_count =
     pipeline_done != NULL ? cluster_level_count : solver->refactor_level_count;
+  shared->udiag_recip =
+    selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+      solver->dense_tail_cols == 0u && solver->n >= 262144u &&
+      solver->i32solve_state > 0 &&
+      solver->i32solve_udiag_recip != NULL &&
+      kls_egraph_btf_plain_cluster_allowed(shared)
+    ? solver->i32solve_udiag_recip : NULL;
 
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = shared;
@@ -106051,6 +106164,13 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
 
   kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
+  if (!shared->invalid && !shared->pivot_rejected && !shared->singular &&
+      shared->udiag_recip != NULL) {
+    /* Every BTF column published its reciprocal alongside Udiag while the
+       owning numeric worker already had both values hot. */
+    solver->i32solve_udiag_recip_fresh = 1;
+  }
+  shared->udiag_recip = NULL;
   const int group_l_batch_exec_active =
     shared->supernode_consumer_plan_group_l_batch_exec;
   shared->pipeline_ready_queue = 0;
@@ -107451,6 +107571,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
+  solver->refactor_lu_pointer_egraph_certified = 1;
   return 1;
 }
 
@@ -113270,6 +113391,10 @@ static double kls_egraph_refactor_floor(void) {
 static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
+  /* Any numeric engine below may replace Udiag values.  An EGraph pass can
+     republish the reciprocal mirror from its worker pool; all other paths
+     leave the public wrapper to refresh it serially. */
+  solver->i32solve_udiag_recip_fresh = 0;
   /* Refinement computes residuals against the true input values, which for
      pass-through CSC inputs are not otherwise retained past this call. */
   if ((solver->numeric_needs_refinement || kls_fp32_refactor_wanted(solver) ||
@@ -138654,6 +138779,18 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
     return 0;
   }
+  if (!solver->block_trial_active &&
+      (kls_large_low_degree_fragmented_btf_shape(solver) ||
+       (solver->options.ordering == KLS_ORDERING_AUTO &&
+        solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+        kls_large_low_degree_fragmented_pattern(solver->n,
+                                                solver->col_ptr)))) {
+    /* The scalar fringe is already factored by direct BTF pivots and only
+       the moderate core needs KLU's pattern discovery.  The ordinary KLU
+       factor is faster to construct than predicted-pattern closure and is
+       the numeric retained by the changing-value EGraph horizon. */
+    return 0;
+  }
   {
     /* Static-diagonal prediction requires the pivot diagonal to be
        structurally PRESENT under the symbolic's P/Q: patterns whose
@@ -143790,8 +143927,13 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
        !kls_is_rajat27_fragmented_scaled_pattern(solver) &&
        !kls_is_rommes_itaipu_sequence_pattern(solver) &&
-       !kls_is_rommes_mimo8_pattern(solver))) {
+       !kls_is_rommes_mimo8_pattern(solver) &&
+       solver->i32solve_singleton_run == NULL)) {
     return 0;
+  }
+  if (solver->i32solve_udiag_recip != NULL &&
+      solver->i32solve_udiag_recip_fresh) {
+    return 1;
   }
   if (solver->i32solve_udiag_recip == NULL) {
     solver->i32solve_udiag_recip = (double *)malloc(
@@ -143800,6 +143942,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
     if (solver->i32solve_udiag_recip == NULL) {
       return 0;
     }
+    solver->i32solve_udiag_recip_fresh = 0;
   }
   const double *restrict udiag =
     (const double *)solver->numeric->Udiag;
@@ -143808,6 +143951,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
   for (UF_long k = 0u; k < solver->n; ++k) {
     recip[k] = 1.0 / udiag[k];
   }
+  solver->i32solve_udiag_recip_fresh = 1;
   return 1;
 }
 
@@ -144194,6 +144338,42 @@ static int kls_i32_solve_ready(kls_solver *solver) {
       }
     }
   }
+  if (symbolic->nblocks >= 65536u &&
+      symbolic->nblocks <= (UF_long)UINT32_MAX &&
+      getenv("KLS_DISABLE_I32_SINGLETON_RUN") == NULL) {
+    uint32_t *singleton_run = (uint32_t *)malloc(
+      (size_t)symbolic->nblocks * sizeof(*singleton_run));
+    if (singleton_run != NULL) {
+      uint32_t run = 0u;
+      uint32_t max_run = 0u;
+      UF_long singleton_count = 0u;
+      for (UF_long block = 0u; block < symbolic->nblocks; ++block) {
+        if (symbolic->R[block + 1u] == symbolic->R[block] + 1u) {
+          run++;
+          singleton_count++;
+          if (run > max_run) {
+            max_run = run;
+          }
+        } else {
+          run = 0u;
+        }
+        singleton_run[block] = run;
+      }
+      if (singleton_count * 2u >= symbolic->nblocks &&
+          max_run >= 32768u) {
+        solver->i32solve_singleton_run = singleton_run;
+        singleton_run = NULL;
+      }
+      if (getenv("KLS_TRACE_I32_SINGLETON_RUN") != NULL) {
+        fprintf(stderr,
+                "KLS i32 singleton runs: blocks=%ld singleton=%ld"
+                " max=%u -> %s\n",
+                (long)symbolic->nblocks, (long)singleton_count, max_run,
+                solver->i32solve_singleton_run != NULL ? "adopt" : "decline");
+      }
+      free(singleton_run);
+    }
+  }
   solver->i32solve_state = 1;
   (void)kls_refresh_i32_udiag_recip(solver);
   kls_pts_try_build(solver);
@@ -144390,6 +144570,26 @@ static UF_long kls_i32_solve(kls_solver *solver,
           for (UF_long p = (UF_long)offp16[k];
                p < (UF_long)offp16[k + 1u]; ++p) {
             X[offi16[p]] -= offx[p] * xk;
+          }
+        }
+      }
+      block = first_block;
+      continue;
+    }
+    if (!i16_ready && solver->i32solve_singleton_run != NULL &&
+        solver->i32solve_singleton_run[block] != 0u) {
+      const UF_long run =
+        (UF_long)solver->i32solve_singleton_run[block];
+      const UF_long first_block = block + 1u - run;
+      const UF_long first_col = R[first_block];
+      for (UF_long k = k2; k > first_col;) {
+        --k;
+        const double xk = kls_i32_solve_diagonal(
+          X[k], udiag, udiag_recip, k);
+        X[k] = xk;
+        if (first_block != 0u || k != first_col) {
+          for (UF_long p = offp[k]; p < offp[k + 1u]; ++p) {
+            X[offi[p]] -= offx[p] * xk;
           }
         }
       }
@@ -146302,6 +146502,7 @@ int kls_factor(kls_solver *solver, const double *values) {
      the ordinary exact division path. */
   free(solver->i32solve_udiag_recip);
   solver->i32solve_udiag_recip = NULL;
+  solver->i32solve_udiag_recip_fresh = 0;
   /* A failed factor attempt may leave the old numeric partially refreshed;
      only a successful exit below is allowed to arm exact reuse. */
   solver->refactor_input_snapshot_valid = 0;
