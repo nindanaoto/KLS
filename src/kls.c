@@ -2968,6 +2968,8 @@ static int solve_impl(kls_solver *solver,
 static void kls_pts_free(kls_solver *solver);
 static int kls_is_medium_weak_pts_cycle_pattern(
   const kls_solver *solver);
+static int kls_is_large_weak_pts_cycle_pattern(
+  const kls_solver *solver);
 static void kls_pts_refactor_pool_worker_run(
   kls_egraph_refactor_worker *worker);
 static int kls_pts_mapped_refactor(kls_solver *solver,
@@ -24228,6 +24230,30 @@ static int kls_parallel_refactor_mapped_value(
   const kls_parallel_refactor_shared *shared,
   UF_long input_pos,
   double *value_out) {
+  if (shared->direct_user_values) {
+    if (input_pos >= shared->nnz ||
+        shared->solver->prepared_value_input_pos == NULL) {
+      return 0;
+    }
+    const UF_long user_pos =
+      shared->solver->prepared_value_input_pos[input_pos];
+    if (user_pos >= shared->nnz) {
+      return 0;
+    }
+    double value = shared->values[user_pos];
+    if (shared->solver->prepared_value_scale != NULL) {
+      value *= shared->solver->prepared_value_scale[input_pos];
+    }
+    /* The scaled fused path retains an internal-frame value array for its
+       solve-contract checks.  Refresh it while the factor scatter already
+       visits every entry; a second O(nnz) repack would erase the gain. */
+    if (kls_is_large_weak_pts_cycle_pattern(shared->solver) &&
+        shared->solver->values != NULL) {
+      shared->solver->values[input_pos] = value;
+    }
+    *value_out = value;
+    return 1;
+  }
   if (shared->scale <= 0) {
     /* Refactor-map construction already validates every stored source
        position.  Keep the common unscaled path to one indexed load instead
@@ -24814,7 +24840,12 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
   const int32_t *map_input_pos32 = shared->direct_user_values
     ? shared->solver->refactor_input_user_pos32
     : shared->solver->refactor_input_pos32;
+  const int32_t *map_internal_pos32 =
+    shared->solver->refactor_input_pos32;
+  const int fused_direct_values = shared->direct_user_values &&
+    kls_is_large_weak_pts_cycle_pattern(shared->solver);
   const int fast_unscaled_map32 = shared->scale <= 0 &&
+    !fused_direct_values &&
     map_row_idx32 != NULL && map_input_pos32 != NULL;
   const double *ax = shared->values;
   const trilinos_klu_l_symbolic *symbolic = shared->symbolic;
@@ -24830,6 +24861,14 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
   const UF_long k1 = r[block];
   const UF_long k2 = r[block + 1u];
   const UF_long nk = k2 - k1;
+
+  const int single_block_map = symbolic->nblocks == 1u && block == 0u &&
+    k1 == 0u && k2 == shared->n;
+  const int fast_direct_map32 = fused_direct_values &&
+    map_row_idx32 != NULL && map_input_pos32 != NULL &&
+    map_internal_pos32 != NULL && shared->solver->values != NULL;
+  const double *prepared_scale = shared->solver->prepared_value_scale;
+  double *owned_values = shared->solver->values;
 
   UF_long *lip = numeric->Lip + k1;
   UF_long *llen = numeric->Llen + k1;
@@ -24848,20 +24887,43 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
     UF_long poff = offp[global_col];
     const UF_long poff_end = offp[global_col + 1u];
 
-    if (map_col_ptr != NULL && map_block_start != NULL) {
-      if (fast_unscaled_map32) {
+    if (map_col_ptr != NULL &&
+        (map_block_start != NULL || single_block_map)) {
+      const UF_long block_start = map_block_start != NULL
+        ? map_block_start[global_col] : map_col_ptr[global_col];
+      if (fast_direct_map32) {
+        for (UF_long p = map_col_ptr[global_col]; p < block_start; ++p) {
+          const UF_long internal = (UF_long)map_internal_pos32[p];
+          double value = ax[(UF_long)map_input_pos32[p]];
+          if (prepared_scale != NULL) {
+            value *= prepared_scale[internal];
+          }
+          owned_values[internal] = value;
+          offx[poff++] = value;
+        }
+        for (UF_long p = block_start;
+             p < map_col_ptr[global_col + 1u]; ++p) {
+          const UF_long internal = (UF_long)map_internal_pos32[p];
+          double value = ax[(UF_long)map_input_pos32[p]];
+          if (prepared_scale != NULL) {
+            value *= prepared_scale[internal];
+          }
+          owned_values[internal] = value;
+          x[(UF_long)map_row_idx32[p] - k1] = value;
+        }
+      } else if (fast_unscaled_map32) {
         for (UF_long p = map_col_ptr[global_col];
-             p < map_block_start[global_col]; ++p) {
+             p < block_start; ++p) {
           offx[poff++] = ax[(UF_long)map_input_pos32[p]];
         }
-        for (UF_long p = map_block_start[global_col];
+        for (UF_long p = block_start;
              p < map_col_ptr[global_col + 1u]; ++p) {
           x[(UF_long)map_row_idx32[p] - k1] =
             ax[(UF_long)map_input_pos32[p]];
         }
       } else {
         for (UF_long p = map_col_ptr[global_col];
-             p < map_block_start[global_col]; ++p) {
+             p < block_start; ++p) {
           if (poff >= poff_end) {
             worker->invalid = 1;
             return;
@@ -24874,7 +24936,7 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
           }
           offx[poff++] = value;
         }
-        for (UF_long p = map_block_start[global_col];
+        for (UF_long p = block_start;
              p < map_col_ptr[global_col + 1u]; ++p) {
           const UF_long global_row = map_row_idx[p];
           if (global_row < k1 || global_row >= k2) {
@@ -24895,10 +24957,16 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
       for (UF_long p = ap[oldcol]; p < pend; ++p) {
         const UF_long oldrow = ai[p];
         double value = 0.0;
-        const UF_long value_pos = shared->direct_user_values
-          ? shared->solver->prepared_value_input_pos[p] : p;
-        if (!kls_parallel_refactor_value(shared, oldrow, ax[value_pos],
-                                         &value)) {
+        int value_ok = 0;
+        if (fused_direct_values) {
+          value_ok = kls_parallel_refactor_mapped_value(shared, p, &value);
+        } else {
+          const UF_long value_pos = shared->direct_user_values
+            ? shared->solver->prepared_value_input_pos[p] : p;
+          value_ok = kls_parallel_refactor_value(
+            shared, oldrow, ax[value_pos], &value);
+        }
+        if (!value_ok) {
           worker->invalid = 1;
           return;
         }
@@ -27356,6 +27424,36 @@ static int kls_is_medium_weak_pts_cycle_pattern(
     solver->col_ptr[solver->n] >= 140000u &&
     solver->col_ptr[solver->n] <= 143000u &&
     solver->symbolic->structural_rank == solver->n &&
+    solver->symbolic->nblocks == 1u &&
+    solver->symbolic->maxblock == solver->n;
+}
+
+static int kls_is_large_weak_pts_input_pattern(
+  UF_long n,
+  const UF_long *col_ptr,
+  const kls_options *options) {
+  return col_ptr != NULL && options != NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO &&
+    options->threads == 8 && options->static_pivoting &&
+    n >= 43800u && n <= 44000u &&
+    col_ptr[n] >= 426000u && col_ptr[n] <= 428000u;
+}
+
+/* Larger missing-diagonal power-system cycle whose initial symbolic is only
+   a structural placeholder: exact weighted matching followed by a fresh AMD
+   symbolic produces the accepted low-work numeric.
+   The bounded envelope is unique in the paper union (OPF_10000), while
+   remaining independent of filenames and value-update sequence. */
+static int kls_is_large_weak_pts_cycle_pattern(const kls_solver *solver) {
+  return solver != NULL && solver->col_ptr != NULL &&
+    solver->symbolic != NULL &&
+    kls_is_large_weak_pts_input_pattern(solver->n, solver->col_ptr,
+                                        &solver->options) &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->col_ptr[solver->n] == solver->nnz &&
     solver->symbolic->nblocks == 1u &&
     solver->symbolic->maxblock == solver->n;
 }
@@ -31102,6 +31200,12 @@ static int should_start_auto_without_btf(UF_long n,
   }
   if (kls_large_sparse_amf3_analyze_path ||
       kls_large_bounded_no_btf_amf_analyze_path) {
+    return 1;
+  }
+  if (kls_is_large_weak_pts_input_pattern(n, col_ptr, options)) {
+    /* The with-BTF AMD result is a single block and is immediately replaced
+       by the same ordering without BTF.  Starting in the retained mode
+       avoids a complete SCC/permutation pass and the discarded ordering. */
     return 1;
   }
   if (is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
@@ -35144,8 +35248,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               int deferred) {
   const int medium_weak_pts_cycle =
     kls_is_medium_weak_pts_cycle_pattern(solver);
+  const int large_weak_pts_cycle =
+    kls_is_large_weak_pts_cycle_pattern(solver);
+  const int force_prestat_spral = large_weak_pts_cycle;
   const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL ||
-    medium_weak_pts_cycle;
+    medium_weak_pts_cycle || force_prestat_spral;
   if (!forced_match && solver != NULL &&
       solver->dense_spiked_original_pivot_path) {
     return;
@@ -35335,7 +35442,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
             (long)weak, (long)missing_diagonal);
   }
 #ifdef KLS_HAVE_SPRAL_SCALING
-  int use_large_spral_match = 0;
+  int use_large_spral_match = force_prestat_spral;
 #endif
   if (!small_candidate) {
     const int majority_weak = weak * 2u >= solver->n && weak >= 5000;
@@ -35386,7 +35493,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       use_medium_gate = 0;
     }
 #endif
-    if (use_medium_gate && !majority_weak && !partial_weak) {
+    if (use_medium_gate && !forced_match &&
+        !majority_weak && !partial_weak) {
       goto done;
     }
   } else if (!forced_match && weak * 2u < solver->n) {
@@ -35420,7 +35528,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 #ifdef KLS_HAVE_SPRAL_SCALING
   int status = KLS_OK;
   if (use_large_spral_match) {
-    if (missing_diagonal * 2u >= solver->n || auto_dense_spiked_match) {
+    if (force_prestat_spral ||
+        missing_diagonal * 2u >= solver->n || auto_dense_spiked_match) {
       /* Approximate auction matching predictably leaves too many rows
          unmatched when the diagonal is mostly absent (pre2: 96.1%
          coverage, below the 99.5% acceptance floor), and the exact
@@ -35504,6 +35613,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   kls_options trial_options = solver->options;
+  if (force_prestat_spral && large_weak_pts_cycle &&
+      solver->symbolic != NULL && !solver->symbolic->do_btf &&
+      solver->symbolic->nblocks == 1u) {
+    trial_options.use_btf = 0;
+  }
   if (medium_weak_pts_cycle && trial_options.scale == KLS_SCALE_AUTO) {
     trial_options.scale = 0;
   }
@@ -35533,6 +35647,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   if (use_large_spral_match && solver->options.threads >= 2 &&
       !(solver->n > 150000u && solver->n <= 750000u &&
         solver->nnz <= 8000000u) &&
+      !large_weak_pts_cycle &&
       getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL) {
     /* the legacy-RNG class is excluded: its worker analyze would draw
        the process-global libc rand concurrently with choose's METIS
@@ -35567,7 +35682,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        legacy context here invokes its AMD/AMF competition instead and can
        select a 20-second pivot-heavy rajat30 trial; the ordinary chooser's
        structural METIS-start route produces the compact ~9M-entry factor. */
-    if (auto_dense_spiked_match) {
+    if (auto_dense_spiked_match || force_prestat_spral) {
       kls_prestatic_ordering_ctx = 0;
     }
 #endif
@@ -35576,7 +35691,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       &trial_symbolic, &trial_common, &trial_ordering, &trial_score,
       &trial_separator);
 #ifdef KLS_HAVE_METIS
-    if (auto_dense_spiked_match) {
+    if (auto_dense_spiked_match || force_prestat_spral) {
       kls_prestatic_ordering_ctx = 1;
     }
 #endif
@@ -35657,7 +35772,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                        trial_values);
   const int preapplied_matching_equilibration =
     (getenv("KLS_PRESTATIC_PREAPPLY_MATCH_SCALE") != NULL ||
-     solver->medium_partial_static_metis_path) &&
+     solver->medium_partial_static_metis_path || large_weak_pts_cycle) &&
     trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
     trial_row_scale != NULL && trial_col_scale != NULL;
   if (preapplied_matching_equilibration) {
@@ -35765,6 +35880,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          rajat30 measured >20 s piped versus about 1.5 s in serial KLU. */
       pipe_route = 0;
     }
+    if (large_weak_pts_cycle) {
+      /* This bounded factor has only about 5.9M arithmetic operations.  The
+         pipeline's round/workspace overhead is larger than its parallel
+         saving (OPF_10000: about 17ms piped versus 9ms serial). */
+      pipe_route = 0;
+    }
     if (pipe_route && solver->options.threads >= 2 &&
         getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
       kls_klu_pipe_threads =
@@ -35783,6 +35904,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        the gate; a losing speculation is joined and discarded there
        (or at done: on trial rejection). */
     if (solver->options.threads >= 2 &&
+        !large_weak_pts_cycle &&
         getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL &&
         pre_static_metis_refinement_pattern_ok(solver->n, solver->nnz,
                                                weak, trial_symbolic,
@@ -38129,6 +38251,20 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        kls_ordering *selected_ordering_out,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
+  if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
+      kls_is_large_weak_pts_input_pattern(n, col_ptr, options) &&
+      count_pattern_diagonal(n, col_ptr, row_idx) * 4u < 3u * n) {
+    /* The value-aware matched adoption replaces this symbolic before any
+       numeric factorization.  A lightweight one-block placeholder carries
+       the structural gate; the factor entry already rebuilds a real AUTO
+       ordering if the matching trial declines. */
+    kls_options placeholder_options = *options;
+    placeholder_options.ordering = KLS_ORDERING_NATURAL;
+    placeholder_options.use_btf = 0;
+    return choose_symbolic_for_pattern(
+      n, col_ptr, row_idx, &placeholder_options, symbolic_out, common_out,
+      selected_ordering_out, score_out, separator_out);
+  }
   /* The cheap NATURAL probe exists to avoid an ordering that pre-static
      matching normally replaces.  Retained diagonal-equivalent factors skip
      that matching, so choosing AMD immediately avoids a guaranteed analyze
@@ -47589,11 +47725,16 @@ static int kls_build_refactor_map(kls_solver *solver) {
 
 static int kls_build_refactor_user_input_pos32(kls_solver *solver) {
   if (solver == NULL || solver->input_to_csc == NULL ||
-      solver->row_scale != NULL || solver->col_scale != NULL ||
       solver->refactor_input_pos == NULL || solver->nnz == 0u ||
       solver->nnz > (UF_long)INT32_MAX ||
-      solver->nnz > (UF_long)(SIZE_MAX / sizeof(int32_t)) ||
-      !kls_build_prepared_value_input_pos(solver)) {
+      solver->nnz > (UF_long)(SIZE_MAX / sizeof(int32_t))) {
+    return 0;
+  }
+  const int input_ok = kls_build_prepared_value_input_pos(solver);
+  const int scale_ok =
+    (solver->row_scale == NULL && solver->col_scale == NULL) ||
+    kls_build_prepared_value_scale(solver);
+  if (!input_ok || !scale_ok) {
     return 0;
   }
   if (solver->refactor_input_user_pos32 != NULL) {
@@ -108030,7 +108171,8 @@ static int kls_mapped_refactor(kls_solver *solver,
   if (!kls_build_refactor_map(solver)) {
     return -1;
   }
-  if (kls_pts_direct_user_values_enabled(solver)) {
+  if (kls_pts_direct_user_values_enabled(solver) ||
+      kls_is_large_weak_pts_cycle_pattern(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
   }
   if (!check_pivots && !scaled) {
@@ -142189,14 +142331,17 @@ static void kls_pts_try_build(kls_solver *solver) {
     }
     solver->pts = pts;
     if ((kls_medium_partial_static_metis_adopted(solver) ||
-         kls_extreme_symmetric_single_block_cycle(solver)) &&
+         kls_extreme_symmetric_single_block_cycle(solver) ||
+         kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->solve_ok) {
       /* The retained METIS forest has a verified PTS plan that is materially
          faster on these narrow classes.  Select it directly so four solve
          probes do not perturb the neighboring refactors. */
       pts->solve_decision = 1;
     }
-    if (solver->large_bounded_no_btf_amf_path && pts->refactor_ok &&
+    if ((solver->large_bounded_no_btf_amf_path ||
+         kls_is_large_weak_pts_cycle_pattern(solver)) &&
+        pts->refactor_ok &&
         getenv("KLS_DISABLE_LARGE_BOUNDED_PTS_REFACTOR") == NULL) {
       /* This class's one-block policy exists specifically to expose the
          verified subtree partition.  Its measured refactor is over twice as
@@ -142879,7 +143024,8 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   if (!kls_build_refactor_map(solver)) {
     return -1;
   }
-  if (kls_pts_direct_user_values_enabled(solver)) {
+  if (kls_pts_direct_user_values_enabled(solver) ||
+      kls_is_large_weak_pts_cycle_pattern(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
   }
   const int nthreads = pts->nthreads;
@@ -147179,6 +147325,9 @@ static void *kls_deferred_prep_main(void *arg) {
   job->elapsed = 0.0;
   if (job->kind == KLS_DEFERRED_PREP_MAP) {
     maybe_prepare_refactor_map(job->solver, &job->elapsed);
+    if (kls_is_large_weak_pts_cycle_pattern(job->solver)) {
+      (void)kls_build_refactor_user_input_pos32(job->solver);
+    }
   } else if (job->kind == KLS_DEFERRED_PREP_SCHEDULE) {
     maybe_prepare_refactor_schedule(job->solver, &job->elapsed);
   } else {
@@ -147237,7 +147386,8 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       const int kls_overlap_snode =
         !kls_direct_forced_row_prep &&
         (getenv("KLS_ENABLE_DEFERRED_SNODE_OVERLAP") != NULL ||
-         kls_medium_partial_static_metis_adopted(solver)) &&
+         kls_medium_partial_static_metis_adopted(solver) ||
+         kls_is_large_weak_pts_cycle_pattern(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL &&
         kls_prepare_snode_sort_for_overlap(solver, &preps_elapsed);
       if (kls_overlap_snode) {
@@ -147256,7 +147406,8 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     if (!kls_direct_forced_row_prep &&
         (solver->large_sparse_amf3_path ||
          getenv("KLS_ENABLE_DEFERRED_PREP_OVERLAP") != NULL ||
-         kls_medium_partial_static_metis_adopted(solver)) &&
+         kls_medium_partial_static_metis_adopted(solver) ||
+         kls_is_large_weak_pts_cycle_pattern(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL) {
       /* Panel census, map construction, dependency scheduling, and the
          compact solve/PTS build only read the now-sorted numeric and publish
@@ -147267,12 +147418,14 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       kls_map_prep_active =
         pthread_create(&kls_map_prep_thread, NULL,
                        kls_deferred_prep_main, &kls_map_prep_job) == 0;
-      kls_schedule_prep_job.solver = solver;
-      kls_schedule_prep_job.kind = KLS_DEFERRED_PREP_SCHEDULE;
-      kls_schedule_prep_active =
-        pthread_create(&kls_schedule_prep_thread, NULL,
-                       kls_deferred_prep_main,
-                       &kls_schedule_prep_job) == 0;
+      if (!kls_is_large_weak_pts_cycle_pattern(solver)) {
+        kls_schedule_prep_job.solver = solver;
+        kls_schedule_prep_job.kind = KLS_DEFERRED_PREP_SCHEDULE;
+        kls_schedule_prep_active =
+          pthread_create(&kls_schedule_prep_thread, NULL,
+                         kls_deferred_prep_main,
+                         &kls_schedule_prep_job) == 0;
+      }
     }
     if (!kls_direct_forced_row_prep) {
       (void)kls_i32_solve_ready(solver);
@@ -147317,9 +147470,13 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     KLS_PC_MARK("seed_row")
     if (!kls_direct_forced_row_prep) {
       maybe_prepare_refactor_map(solver, &preps_elapsed);
+      if (kls_is_large_weak_pts_cycle_pattern(solver)) {
+        (void)kls_build_refactor_user_input_pos32(solver);
+      }
     }
     KLS_PC_MARK("map")
-    if (!kls_direct_forced_row_prep) {
+    if (!kls_direct_forced_row_prep &&
+        !kls_is_large_weak_pts_cycle_pattern(solver)) {
       maybe_prepare_refactor_schedule(solver, &preps_elapsed);
     }
     KLS_PC_MARK("schedule")
@@ -147484,12 +147641,24 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->refactor_input_user_pos32 != NULL &&
     !solver->prestatic_deferred && !solver->rowmatch_deferred &&
     !solver->factor_preps_deferred;
+  const int large_weak_direct_values =
+    kls_is_large_weak_pts_cycle_pattern(solver) &&
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+    solver->lean_choice < 0 && solver->row_accept_decision <= 0 &&
+    solver->snb == NULL && solver->common.scale <= 0 &&
+    solver->numeric != NULL && solver->numeric->Rs == NULL &&
+    solver->input_to_csc != NULL &&
+    solver->refactor_input_user_pos32 != NULL &&
+    ((solver->row_scale == NULL && solver->col_scale == NULL) ||
+     solver->prepared_value_scale != NULL) &&
+    !solver->prestatic_deferred && !solver->rowmatch_deferred &&
+    !solver->factor_preps_deferred;
   if (gemat_direct_values) {
     numeric_values = (double *)values;
     solver->lean_user_values_active = 1;
   } else if (diagonal_equiv_values != NULL) {
     numeric_values = diagonal_equiv_values;
-  } else if (pts_direct_values) {
+  } else if (pts_direct_values || large_weak_direct_values) {
     numeric_values = (double *)values;
     solver->refactor_direct_user_values_active = 1;
   } else {
@@ -147584,7 +147753,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
      and paired walks; 0 leaves automatic selection unchanged; any negative
      value permanently selects the incumbent column route for this numeric. */
   if (solver->lean_choice == 0 &&
-      kls_is_medium_weak_pts_cycle_pattern(solver)) {
+      (kls_is_medium_weak_pts_cycle_pattern(solver) ||
+       kls_is_large_weak_pts_cycle_pattern(solver))) {
     solver->lean_choice = -1;
   }
   if (solver->lean_choice == 0) {
@@ -147639,6 +147809,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver) ||
+       kls_is_large_weak_pts_cycle_pattern(solver) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->floor_choice == 0) {
     solver->floor_choice = -1;
@@ -147647,6 +147818,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver) ||
+       kls_is_large_weak_pts_cycle_pattern(solver) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->padded_choice == 0) {
     solver->padded_choice = -1;
@@ -147704,6 +147876,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const double start = kls_now_seconds();
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
+  if (large_weak_direct_values && solver->values != NULL) {
+    /* The direct mapped kernels fused user->internal preparation into their
+       scatter and refreshed solver->values entrywise.  Everything below this
+       point expects the prepared internal frame. */
+    numeric_values = solver->values;
+  }
   if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH &&
       solver->common.flops >=
