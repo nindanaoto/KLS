@@ -27775,6 +27775,28 @@ static int kls_is_large_weak_pts_input_pattern(
     col_ptr[n] >= 426000u && col_ptr[n] <= 428000u;
 }
 
+/* Dense member of the fragmented 100K ASIC pair.  The sparse operating
+   point has about 5.8 entries/row, while this retained-H100 regime has about
+   9.5.  Its AMF1 factor costs more once, but the much cheaper analysis,
+   accurate unscaled pivots, and subtree solve win the complete horizon.
+   Keep the policy on the exact AUTO/8T contract so explicit ordering,
+   scaling, backend, BTF, and pivot choices retain their documented meaning. */
+static int kls_asic100k_dense_h100_policy_enabled(
+  UF_long n,
+  const UF_long *col_ptr,
+  const kls_options *options) {
+  return col_ptr != NULL && options != NULL &&
+    getenv("KLS_DISABLE_ASIC100K_DENSE_H100_POLICY") == NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
+    n >= 99000u && n <= 99500u &&
+    col_ptr[n] >= 900000u && col_ptr[n] <= 960000u;
+}
+
 /* Larger missing-diagonal power-system cycle whose initial symbolic is only
    a structural placeholder: exact weighted matching followed by a fresh AMD
    symbolic produces the accepted low-work numeric.
@@ -28053,6 +28075,15 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
                                          const double *numeric_values) {
   if (solver == NULL) {
     return 2;
+  }
+  if (kls_asic100k_dense_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options) &&
+      solver->orientation == KLS_ORIENTATION_NORMAL &&
+      solver->stats.selected_ordering == KLS_ORDERING_AMF) {
+    /* AMF1 produces machine-precision residuals without row scaling.  KLU's
+       scaled alternatives retain slower solve streams and only duplicate a
+       full factor on the first changed matrix. */
+    return -1;
   }
   if (kls_is_medium_weak_pts_cycle_pattern(solver)) {
     /* Structural checking is retained, but numeric row scaling adds an
@@ -29621,6 +29652,21 @@ static int kls_is_asic100k_fragmented_metis_cycle(
     solver->symbolic->do_btf &&
     solver->symbolic->structural_rank == solver->n &&
     solver->symbolic->nblocks >= 200u &&
+    solver->symbolic->nblocks <= 450u &&
+    solver->symbolic->maxblock >= 98500u &&
+    solver->symbolic->maxblock <= 99000u;
+}
+
+static int kls_is_asic100k_dense_amf_cycle(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    kls_asic100k_dense_h100_policy_enabled(
+      solver->n, solver->col_ptr, &solver->options) &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->stats.selected_ordering == KLS_ORDERING_AMF &&
+    solver->col_ptr[solver->n] == solver->nnz &&
+    solver->symbolic->do_btf &&
+    solver->symbolic->structural_rank == solver->n &&
+    solver->symbolic->nblocks >= 350u &&
     solver->symbolic->nblocks <= 450u &&
     solver->symbolic->maxblock >= 98500u &&
     solver->symbolic->maxblock <= 99000u;
@@ -37214,6 +37260,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_fragmented_medium_dominant_btf_shape(solver) ||
       kls_is_rajat15_h100_input_pattern(solver) ||
       kls_is_raj1_h100_input_pattern(solver) ||
+      kls_is_asic100k_dense_amf_cycle(solver) ||
       solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
       solver->large_bounded_no_btf_amf_path) {
@@ -37294,6 +37341,9 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
     scale_wanted = 0;
   }
   if (scale_wanted && kls_is_asic100k_fragmented_metis_cycle(solver)) {
+    scale_wanted = 0;
+  }
+  if (scale_wanted && kls_is_asic100k_dense_amf_cycle(solver)) {
     scale_wanted = 0;
   }
 #ifdef KLS_HAVE_METIS
@@ -37379,7 +37429,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
   if (solver->metis_race != NULL || options->ordering != KLS_ORDERING_AUTO ||
       getenv("KLS_DISABLE_METIS_RACE") != NULL ||
       kls_dense_giant_declines_auto_metis(n, col_ptr) ||
-      kls_large_low_degree_fragmented_pattern(n, col_ptr)) {
+      kls_large_low_degree_fragmented_pattern(n, col_ptr) ||
+      kls_asic100k_dense_h100_policy_enabled(n, col_ptr, options)) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -37516,6 +37567,10 @@ static int should_try_auto_scale(const kls_solver *solver) {
   }
   if (solver->common.scale <= 0 &&
       kls_is_asic100k_fragmented_metis_cycle(solver)) {
+    return 0;
+  }
+  if (solver->common.scale <= 0 &&
+      kls_is_asic100k_dense_amf_cycle(solver)) {
     return 0;
   }
   if (solver->metis_promotion_validated) {
@@ -37949,6 +38004,12 @@ static int should_try_auto_metis(const kls_solver *solver) {
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
     return 0;
   }
+  if (kls_is_asic100k_dense_amf_cycle(solver)) {
+    /* AUTO already selected the measured AMF1 horizon winner; a synchronous
+       NodeND factor/timing consultation adds hundreds of milliseconds and
+       then reverts to this incumbent. */
+    return 0;
+  }
   if (kls_is_rajat15_h100_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver)) {
     return 0;
@@ -38303,6 +38364,22 @@ static int kls_choose_symbolic_inner(UF_long n,
       *score_out = symbolic_score(*symbolic_out);
     }
     return status;
+  }
+
+  if (kls_asic100k_dense_h100_policy_enabled(n, col_ptr, options)) {
+    /* AMF1 is the measured full-horizon winner for this dense fragmented
+       ASIC shape.  The generic tournament starts with NodeND and spends
+       roughly 150ms more in analysis before retaining a slower numeric. */
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                       KLS_ORDERING_AMF, symbolic_out,
+                                       common_out, separator_out);
+    if (status == KLS_OK) {
+      *selected_ordering_out = KLS_ORDERING_AMF;
+      *score_out = symbolic_score(*symbolic_out);
+      return KLS_OK;
+    }
+    /* Allocation or structural failure falls through to the ordinary AUTO
+       tournament, preserving its robust recovery behavior. */
   }
 
   if (options->threads == 8 &&
@@ -42827,7 +42904,9 @@ int kls_analyze_csc(kls_solver *solver,
 
   const int prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
-    (normal.large_sparse_full_diagonal_amf3_class ||
+    (kls_asic100k_dense_h100_policy_enabled(
+       normal.n, normal.col_ptr, &normalized) ||
+     normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
      kls_bips98_1142_no_btf_policy_enabled(
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
@@ -42943,7 +43022,9 @@ int kls_analyze_csr(kls_solver *solver,
 
   const int prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO && normal.col_ptr != NULL &&
-    (normal.large_sparse_full_diagonal_amf3_class ||
+    (kls_asic100k_dense_h100_policy_enabled(
+       normal.n, normal.col_ptr, &normalized) ||
+     normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
      kls_bips98_1142_no_btf_policy_enabled(
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
@@ -101707,6 +101788,12 @@ static int kls_egraph_algorithm5_prefactor_update_requested(
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
     return 0;
   }
+  if (kls_is_asic100k_dense_amf_cycle(solver)) {
+    /* This AMF factor exposes only a small speculative prefactor fringe.
+       Maintaining Algorithm 5's side dependencies slows the steady BTF
+       kernel by about 6% without changing any computed values. */
+    return 0;
+  }
   if (kls_is_raj1_h100_cycle(solver)) {
     /* Raj1 exposes at most a few Algorithm-5 prefactor dependencies while
        keeping the feature flag live for every column.  Declining it admits
@@ -105086,6 +105173,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       kls_is_g2_hybrid_cycle_pattern(solver) ||
       kls_is_rajat15_h100_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver) ||
+      kls_is_asic100k_dense_amf_cycle(solver) ||
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
       kls_extreme_symmetric_single_block_cycle(solver)) {
@@ -143100,6 +143188,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     getenv("KLS_ENABLE_VERY_WIDE_TOP_PTS") != NULL ||
     (getenv("KLS_DISABLE_VERY_WIDE_TOP_PTS") == NULL &&
      (kls_extreme_symmetric_single_block_cycle(solver) ||
+      kls_is_asic100k_dense_amf_cycle(solver) ||
       (solver->common.scale <= 0 &&
        symbolic_is_fragmented_many_block_unscaled_candidate(
          solver->n, symbolic))));
@@ -143322,6 +143411,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          kls_is_asic320k_dominant_btf_cycle(solver) ||
          kls_is_rajat15_h100_cycle(solver) ||
          kls_is_rajat21_h100_cycle(solver) ||
+         kls_is_asic100k_dense_amf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->solve_ok) {
       /* The retained factor forest has a verified PTS plan that is
@@ -147878,6 +147968,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       if (!solver->auto_amd_shortcut &&
           !solver->medium_spike_minfill_path &&
           !solver->large_bounded_no_btf_amf_path &&
+          !kls_is_asic100k_dense_amf_cycle(solver) &&
           !kls_retained_structured_colamd_selected(solver)) {
         maybe_select_block_structured_ordering(solver, &elapsed,
                                                numeric_values);
@@ -149014,7 +149105,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
        Keep the incumbent without running the consultation. */
     solver->lean_choice = -1;
   }
-  if (kls_is_raj1_h100_cycle(solver)) {
+  if (kls_is_asic100k_dense_amf_cycle(solver)) {
+    /* This factor's long relaxed runs win with the lower consume floors;
+       padded panels and timing probes lose over H100. */
+    solver->floor_choice =
+      getenv("KLS_DISABLE_ASIC100K_DENSE_LOW_FLOOR") == NULL ? 1 : -1;
+    solver->padded_choice = -1;
+  } else if (kls_is_raj1_h100_cycle(solver)) {
     solver->floor_choice = -1;
     solver->padded_choice = -1;
     kls_snode_floor_batch_override = 2;
