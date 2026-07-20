@@ -36203,9 +36203,20 @@ static int kls_auto_low_work_no_btf_direct_amd_is_preferable(
          10.0 * (double)diagonal <= 6.0 * n;
 }
 
+static int kls_retained_structured_colamd_selected(
+  const kls_solver *solver);
+
 static int should_try_spral_hungarian_numeric_trial(
   const kls_solver *solver) {
-  if (kls_is_rajat15_h100_cycle(solver) ||
+  if (getenv("KLS_DISABLE_SPRAL_HUNGARIAN_TRIAL") != NULL ||
+      /* The structured many-BTF selector has already chosen low-work COLAMD
+         for the retained horizon.  Re-matching that pattern and ordering its
+         dominant block with NodeND leaves the incumbent in place after a
+         full symbolic+numeric trial (power197k: 612 ms first refactor versus
+         29 ms without it).  Keep the experiment available explicitly. */
+      (kls_retained_structured_colamd_selected(solver) &&
+       getenv("KLS_ENABLE_STRUCTURED_COLAMD_SPRAL_TRIAL") == NULL) ||
+      kls_is_rajat15_h100_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver) ||
       solver == NULL || !solver->options.static_pivoting ||
       solver->numeric == NULL || solver->symbolic == NULL ||
