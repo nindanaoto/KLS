@@ -31889,11 +31889,13 @@ static UF_long kls_metis_order_inner(UF_long n,
   options[METIS_OPTION_NUMBERING] = 0;
   options[METIS_OPTION_SEED] = 0;
   if (kls_fragmented_metis_tuning_ctx) {
-    /* ASIC_680ks-like BTF core: three refinement iterations with one
-       separator trial cut retained fill by about 9% versus the default
-       NodeND options, enough to win the complete 100-cycle numeric horizon.
-       Environment overrides below remain authoritative for experiments. */
-    options[METIS_OPTION_NITER] = 3;
+    /* Fragmented BTF cores use one separator trial.  Three refinement
+       iterations cut retained fill on the broad class; the dense ASIC_100k
+       envelope needs ten to obtain its faster native separator tree without
+       a second CAMD ordering pass.  Environment overrides remain
+       authoritative for experiments. */
+    options[METIS_OPTION_NITER] =
+      kls_fragmented_metis_tuning_ctx == 2 ? 10 : 3;
     options[METIS_OPTION_NSEPS] = 1;
   } else if (is_medium_dense_diagonal_high_degree_pattern(
                n, col_ptr, row_idx)) {
@@ -32055,14 +32057,17 @@ static UF_long kls_metis_order_inner(UF_long n,
       getenv("KLS_METIS_CAMD_COMPONENT_GROUPS") != NULL &&
       metis_ndp_npes > 1 && metis_ndp_sizes != NULL;
     const int skip_camd_refine =
-      getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL;
+      getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL ||
+      (kls_fragmented_metis_tuning_ctx == 2 &&
+       getenv("KLS_ENABLE_ASIC100K_CAMD_REFINE") == NULL);
     UF_long camd_lnz;
     if (skip_camd_refine) {
       /* The pre-static raced-symbolic path subsequently constructs and
          probes the exact LU pattern, so it does not need CAMD's fill estimate.
-         Keeping NodeNDP's order also avoids a second serial ordering pass on
-         the cold path.  This remains opt-in because ordinary analyze-time
-         candidate selection does use the estimate to compare orderings. */
+         The dense ASIC policy also selects NodeNDP directly, without an
+         ordering comparison.  Keeping NodeNDP's order avoids a second serial
+         ordering pass in both cases; ordinary candidate selection still uses
+         CAMD's estimate. */
       for (UF_long i = 0; i < n; ++i) {
         perm_out[i] = (UF_long)metis_perm[i];
       }
@@ -148755,6 +148760,11 @@ static int kls_diagonal_equiv_plan_eligible(const kls_solver *solver) {
        Keep the structured plan available to callers that explicitly opt in. */
     (!kls_sandia_fpga_map32_h100_policy(solver) ||
      getenv("KLS_ENABLE_SANDIA_FPGA_DIAGONAL_EQUIV_PLAN") != NULL) &&
+    /* Native NodeND already gives the dense ASIC_100k cycle a retained
+       EGraph factor.  Building an O(nnz) structured-update plan beside its
+       first factor, then rejecting it on entrywise data, cannot amortize. */
+    (!kls_is_asic100k_dense_h100_cycle(solver) ||
+     getenv("KLS_ENABLE_ASIC100K_DIAGONAL_EQUIV_PLAN") != NULL) &&
     solver->diagonal_equiv_plan_state >= 0 &&
     solver->input_format == KLS_INPUT_CSC &&
     solver->col_ptr != NULL &&
