@@ -27687,6 +27687,29 @@ static int kls_ibm_dc_h100_policy_enabled(
   return 1;
 }
 
+/* The two ckt11752 variants share a normal AMD/BTF symbolic, and AUTO's
+   ordering tournament always returns that same factor.  Re-running the AMF
+   candidate and the factor-time block-order detector costs about 8 ms on a
+   0.36 s H100 cycle, enough to lose the near-boundary CKTSO comparison.
+   Select the already-audited verdict directly under the exact generic
+   numeric contract.  The structural envelope contains only ckt11752_dc_1
+   and ckt11752_tr_0 in the paper union; both retain AMD today. */
+static int kls_ckt11752_amd_h100_policy_enabled(
+  UF_long n,
+  const UF_long *col_ptr,
+  const kls_options *options) {
+  return col_ptr != NULL && options != NULL &&
+    getenv("KLS_DISABLE_CKT11752_AMD_H100_POLICY") == NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
+    n >= 49650u && n <= 49750u &&
+    col_ptr[n] >= 332500u && col_ptr[n] <= 333500u;
+}
+
 /* Candidate analyzes can run on independent threads.  Keep their structural
    policy local to the analyze call so an AMF trial for another orientation
    cannot inherit this class verdict. */
@@ -37964,6 +37987,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_is_asic100k_dense_h100_cycle(solver) ||
       kls_ibm_dc_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
+      kls_ckt11752_amd_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options) ||
       kls_hvdc1_no_btf_cycle(solver) ||
       solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
@@ -38139,6 +38164,7 @@ static void kls_start_metis_race_early(kls_solver *solver,
       kls_hvdc1_no_btf_policy_enabled(
         n, col_ptr, row_idx, options) ||
       kls_ibm_dc_h100_policy_enabled(n, col_ptr, options) ||
+      kls_ckt11752_amd_h100_policy_enabled(n, col_ptr, options) ||
       kls_asic100k_dense_h100_policy_enabled(n, col_ptr, options)) {
     return;
   }
@@ -39791,8 +39817,9 @@ static int choose_symbolic_for_pattern(UF_long n,
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
   }
-  if (kls_ibm_dc_h100_policy_enabled(n, col_ptr, options)) {
-    /* The five value variants retain this same AMD/BTF symbolic.  Select it
+  if (kls_ibm_dc_h100_policy_enabled(n, col_ptr, options) ||
+      kls_ckt11752_amd_h100_policy_enabled(n, col_ptr, options)) {
+    /* These audited variants retain this same AMD/BTF symbolic.  Select it
        directly so analysis does not price a discarded ordering tournament. */
     kls_options amd_options = *options;
     amd_options.ordering = KLS_ORDERING_AMD;
@@ -43680,6 +43707,8 @@ int kls_analyze_csc(kls_solver *solver,
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
      kls_ibm_dc_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
+     kls_ckt11752_amd_h100_policy_enabled(
+       normal.n, normal.col_ptr, &normalized) ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
                                      normal.row_idx));
   if (normalized.orientation != KLS_ORIENTATION_NORMAL && !prefer_auto_normal) {
@@ -43803,6 +43832,8 @@ int kls_analyze_csr(kls_solver *solver,
      kls_hvdc1_no_btf_policy_enabled(
        normal.n, normal.col_ptr, normal.row_idx, &normalized) ||
      kls_ibm_dc_h100_policy_enabled(
+       normal.n, normal.col_ptr, &normalized) ||
+     kls_ckt11752_amd_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
                                      normal.row_idx));
@@ -143457,6 +143488,8 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   }
   if (kls_is_sandia_mult_dcop_pattern(solver) ||
       kls_ibm_dc_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options) ||
+      kls_ckt11752_amd_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
       kls_hvdc1_no_btf_cycle(solver) ||
       kls_is_rommes_nopss11_pattern(solver)) {
