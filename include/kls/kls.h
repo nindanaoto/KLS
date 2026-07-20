@@ -78,7 +78,11 @@ typedef enum kls_refactor_path {
   KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT = 8,
   /* Only changed diagonal BTF blocks were numerically refreshed; unchanged
      block factors were retained and changed off-diagonal couplings copied. */
-  KLS_REFACTOR_PATH_PARTIAL_BTF = 9
+  KLS_REFACTOR_PATH_PARTIAL_BTF = 9,
+  /* A bounded small update retained the preceding numeric as a
+     preconditioner; solves are certified against the new values by
+     residual-driven iterative refinement. */
+  KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER = 10
 } kls_refactor_path;
 
 #define KLS_SCALE_AUTO (-2)

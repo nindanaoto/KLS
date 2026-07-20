@@ -3416,6 +3416,19 @@ The current `pre2` gap is therefore not caused by allowing component-extent
 pivots; KLS still needs the broader row/panel live-workspace owner for scalar
 trailing/output replay.
 
+The H100 AUTO policy now also covers the paper-union `Hamrle3` giant. It
+selects the measured transposed AMD factor directly, keeps BTF, uses scale 1
+and a `1e-4` pivot threshold, and retains that numeric as a preconditioner only
+while every changed entry remains within 0.101% of the factor input. Each
+solve performs residual-certified iterative refinement against the current
+values and returns failure rather than an unverified answer; a larger update
+falls back to the ordinary numeric refactor. On the pinned eight-core H100
+command, the full process completed in `164.37s` and the reported H100 metric
+was `140.771s`, with a worst relative residual of `1.92e-10` across 20
+entrywise generations. Fresh CKTSO, KLU, and SubtreeLU controls each timed out
+at 180 seconds. A 1% update correctly declined retention, used EGraph in
+`9.54s`, and returned a `1.36e-15` relative residual.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
