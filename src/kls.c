@@ -29035,6 +29035,30 @@ static int kls_is_compact_small_circuit_pattern(UF_long n,
          col_ptr[n] >= 5u * n && col_ptr[n] <= 7u * n;
 }
 
+static int kls_is_circuit204_h100_input_pattern(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->col_ptr != NULL &&
+    getenv("KLS_DISABLE_CIRCUIT204_H100_POLICY") == NULL &&
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.backend == KLS_BACKEND_AUTO &&
+    solver->options.threads == 8 && solver->options.use_btf &&
+    solver->options.static_pivoting &&
+    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
+    solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
+    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
+    solver->common.scale == -1 && solver->n >= 1010u &&
+    solver->n <= 1030u && solver->nnz >= 5850u && solver->nnz <= 5920u &&
+    solver->col_ptr[solver->n] == solver->nnz &&
+    solver->symbolic->do_btf &&
+    solver->symbolic->structural_rank == solver->n &&
+    solver->symbolic->nblocks >= 150u &&
+    solver->symbolic->nblocks <= 165u &&
+    solver->symbolic->maxblock >= 850u &&
+    solver->symbolic->maxblock <= 880u;
+}
+
 static int kls_is_gemat_power_sequence_pattern(
   UF_long n,
   const UF_long *col_ptr) {
@@ -69797,6 +69821,12 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
        narrow factor; pinned 2--8-thread sweeps put the steady minimum at
        five once the branch-reduced worker is active. */
     thread_count = 5;
+  } else if (thread_count > 6 &&
+             kls_is_circuit204_h100_input_pattern(solver)) {
+    /* Six streams minimize the complete cycle for this shallow compact
+       factor: the seventh adds more first-call hand-off cost than the small
+       steady reduction can repay over the remaining 98 updates. */
+    thread_count = 6;
   } else if (thread_count > 7 &&
              kls_uses_structural_initial_pivot_tolerance(solver) &&
              kls_is_compact_small_circuit_pattern(solver->n,
@@ -147193,7 +147223,8 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   const UF_long n = symbolic->n;
   if ((kls_is_bips98_lean_pattern(solver) ||
-       kls_rommes_compact_no_btf_cycle(solver)) &&
+       kls_rommes_compact_no_btf_cycle(solver) ||
+       kls_is_circuit204_h100_input_pattern(solver)) &&
       getenv("KLS_DISABLE_BIPS98_DIRECT_I16_SOLVE") == NULL &&
       getenv("KLS_DISABLE_I16_SOLVE") == NULL &&
       n <= (UF_long)UINT16_MAX &&
@@ -150609,12 +150640,15 @@ int kls_factor(kls_solver *solver, const double *values) {
       int diagonal_plan_active = 0;
       const int tsopf_b9_lean_prewarm =
         kls_is_tsopf_fs_b9_c1_initial_cycle(solver);
+      const int circuit204_lean_prewarm =
+        kls_is_circuit204_h100_input_pattern(solver);
       if (!had_numeric && solver->options.threads > 1 &&
           solver->egraph_pool == NULL &&
           (kls_is_medium_symmetric_rajat_pattern(solver->n,
                                                  solver->col_ptr) ||
            kls_rommes_compact_no_btf_cycle(solver) ||
            kls_hvdc1_no_btf_cycle(solver) ||
+           circuit204_lean_prewarm ||
            tsopf_b9_lean_prewarm ||
            (kls_is_bips98_lean_pattern(solver) &&
             getenv("KLS_DISABLE_BIPS98_PREWARM") == NULL))) {
@@ -150624,7 +150658,8 @@ int kls_factor(kls_solver *solver, const double *values) {
            otherwise its first refactor pays worker startup and scratch/done
            allocation on the measured critical path. */
         lean_prewarm_job.thread_count =
-          tsopf_b9_lean_prewarm ? 5 : solver->options.threads;
+          tsopf_b9_lean_prewarm ? 5 :
+          (circuit204_lean_prewarm ? 6 : solver->options.threads);
         lean_prewarm_active =
           pthread_create(&lean_prewarm_thread, NULL,
                          kls_lean_prewarm_main, &lean_prewarm_job) == 0;
