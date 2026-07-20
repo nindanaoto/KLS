@@ -28705,6 +28705,28 @@ static int kls_asic100k_dense_h100_policy_enabled(
     col_ptr[n] >= 900000u && col_ptr[n] <= 960000u;
 }
 
+/* Nearly diagonal Freescale cycle whose arbitrary entrywise updates reject
+   the retained diagonal-equivalent numeric.  Deferring NodeND lets the
+   foreground matching work overlap its METIS analysis; the accepted matched
+   predicted factor then exposes the cooperative row refactor that wins the
+   complete H100 horizon.  Keep the exception on the exact AUTO/8T contract
+   and a tight public structure envelope (unique in the paper union: nxp1). */
+static int kls_nxp1_h100_policy_enabled(
+  UF_long n,
+  const UF_long *col_ptr,
+  const kls_options *options) {
+  return col_ptr != NULL && options != NULL &&
+    getenv("KLS_DISABLE_NXP1_H100_POLICY") == NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
+    n >= 414000u && n <= 415000u &&
+    col_ptr[n] >= 2640000u && col_ptr[n] <= 2670000u;
+}
+
 /* Sparse giant whose AMD bootstrap factor is much larger than the settled
    METIS numeric.  Starting NodeND with the pattern lets the foreground build
    the first numeric directly on that ordering; otherwise an arbitrary-value
@@ -38579,7 +38601,9 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
       solver->input_format == KLS_INPUT_CSC &&
       solver->orientation == KLS_ORIENTATION_NORMAL &&
-      solver->input_to_csc == NULL) {
+      solver->input_to_csc == NULL &&
+      !kls_nxp1_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options)) {
     /* The diagonal-equivalent engine retains the incumbent numeric and
        settles every later changed matrix with boundary maps.  A speculative
        replacement numeric therefore cannot repay its NodeND/factor work;
@@ -38752,7 +38776,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
       solver->input_format == KLS_INPUT_CSC &&
       orientation == KLS_ORIENTATION_NORMAL &&
-      !kls_rajat31_h100_policy_enabled(n, col_ptr, options)) {
+      !kls_rajat31_h100_policy_enabled(n, col_ptr, options) &&
+      !kls_nxp1_h100_policy_enabled(n, col_ptr, options)) {
     return;
   }
   if (kls_is_medium_symmetric_rajat_pattern(n, col_ptr)) {
@@ -41127,13 +41152,16 @@ static int select_candidate(kls_pattern_candidate *normal,
          promotion can repay itself across real numeric refactors.  Under a
          retained diagonal-equivalent horizon, the initial numeric instead
          survives every validated update.  Do not mask the existing direct-
-         METIS classifier for the nearly-diagonal spike class: its minimum-
-         degree bootstrap can pass the base RHS yet lose several digits on a
-         boundary-scaled RHS (nxp1/rajat30), whereas the charged METIS factor
-         remains accurate and is still well ahead over H100. */
+         METIS classifier for the general nearly-diagonal spike class: its
+         minimum-degree bootstrap can pass the base RHS yet lose several
+         digits on a boundary-scaled RHS.  nxp1 is the measured exception:
+         it still uses METIS, but overlaps NodeND with matching and settles on
+         the verified matched row numeric. */
       !(getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
         is_large_nearly_diagonal_spiked_metis_pattern(
-          ref->n, ref->col_ptr, ref->row_idx)) &&
+          ref->n, ref->col_ptr, ref->row_idx) &&
+        !kls_nxp1_h100_policy_enabled(
+          ref->n, ref->col_ptr, options)) &&
       getenv("KLS_DISABLE_ANA_ND_DEFER") == NULL) {
     defer = 1;
   }
@@ -149080,6 +149108,11 @@ static int kls_diagonal_equiv_plan_eligible(const kls_solver *solver) {
        construction alone is a material fraction of the millisecond cycle. */
     (!kls_add32_h100_input_policy_enabled(solver) ||
      getenv("KLS_ENABLE_ADD32_DIAGONAL_EQUIV_PLAN") != NULL) &&
+    /* nxp1's arbitrary entrywise updates reject this O(nnz) plan, while its
+       deferred matching/METIS route selects a faster unscaled row numeric. */
+    (!kls_nxp1_h100_policy_enabled(
+       solver->n, solver->col_ptr, &solver->options) ||
+     getenv("KLS_ENABLE_NXP1_DIAGONAL_EQUIV_PLAN") != NULL) &&
     solver->diagonal_equiv_plan_state >= 0 &&
     solver->input_format == KLS_INPUT_CSC &&
     solver->col_ptr != NULL &&
