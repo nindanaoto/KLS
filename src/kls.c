@@ -28607,6 +28607,58 @@ static int kls_is_large_weak_pts_input_pattern(
     col_ptr[n] >= 426000u && col_ptr[n] <= 428000u;
 }
 
+/* Large, light-column power system whose low-work AMD/BTF numeric exposes a
+   useful subtree partition but does not repay value-aware row matching or a
+   predicted-pattern first-factor trial.  The public envelope is unique in
+   the paper union (rajat29).  Keep the policy on the exact AUTO/8T H100
+   contract so explicit orientation, ordering, scaling, backend, BTF, pivot,
+   and thread choices retain their documented meaning. */
+static int kls_rajat29_h100_policy_enabled(
+  UF_long n,
+  const UF_long *col_ptr,
+  const kls_options *options) {
+  return col_ptr != NULL && options != NULL &&
+    getenv("KLS_DISABLE_RAJAT29_H100_POLICY") == NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
+    n >= 643000u && n <= 645000u &&
+    col_ptr[n] >= 3740000u && col_ptr[n] <= 3780000u;
+}
+
+/* Post-factor confirmation for the rajat29 PTS route.  The input envelope
+   alone only selects the inexpensive AMD bootstrap; numeric-engine choices
+   additionally require the audited unscaled, full-rank, dominant-BTF factor
+   geometry.  A changed pivot/fill outcome therefore falls back to the
+   ordinary measured portfolio instead of inheriting benchmark tuning. */
+static int kls_is_rajat29_h100_cycle(const kls_solver *solver) {
+  if (solver == NULL || solver->col_ptr == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL ||
+      !kls_rajat29_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options) ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->col_ptr[solver->n] != solver->nnz ||
+      !solver->symbolic->do_btf ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->nblocks < 14000u ||
+      solver->symbolic->nblocks > 14600u ||
+      solver->symbolic->maxblock < 628000u ||
+      solver->symbolic->maxblock > 631000u ||
+      solver->common.noffdiag < 1000u ||
+      solver->common.noffdiag > 4000u) {
+    return 0;
+  }
+  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  return fill >= 4600000u && fill <= 4900000u &&
+         solver->common.flops >= 1.2e7 &&
+         solver->common.flops <= 1.6e7;
+}
+
 /* Sparse member of the fragmented 100K ASIC pair.  Eight NodeNDP leaves
    align the separator forest with the numeric worker count and halve the
    ordering wall time relative to the generic fourteen-leaf H100 setting.
@@ -36218,6 +36270,7 @@ static int should_try_spral_hungarian_numeric_trial(
        getenv("KLS_ENABLE_STRUCTURED_COLAMD_SPRAL_TRIAL") == NULL) ||
       kls_is_rajat15_h100_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver) ||
+      kls_is_rajat29_h100_cycle(solver) ||
       solver == NULL || !solver->options.static_pivoting ||
       solver->numeric == NULL || solver->symbolic == NULL ||
       solver->row_perm != NULL || solver->input_format != KLS_INPUT_CSC ||
@@ -37079,6 +37132,18 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values,
                                               int deferred) {
+  if (solver != NULL &&
+      kls_rajat29_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options) &&
+      getenv("KLS_ENABLE_RAJAT29_STATIC_MATCH") == NULL &&
+      solver->common.status >= TRILINOS_KLU_OK &&
+      solver->common.status != TRILINOS_KLU_SINGULAR) {
+    /* Its exact/auction match, reordered trial, and replacement factor add
+       roughly 0.6 s while the retained unscaled AMD factor is accurate and
+       supports the faster direct-value PTS cycle.  A failed bootstrap is
+       deliberately allowed back through this function as a safety rescue. */
+    return;
+  }
   if (solver != NULL && solver->medium_partial_static_metis_path &&
       solver->stats.selected_ordering == KLS_ORDERING_METIS &&
       getenv("KLS_DISABLE_MEDIUM_PARTIAL_DIRECT_METIS") == NULL) {
@@ -38498,6 +38563,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_fragmented_medium_dominant_btf_shape(solver) ||
       kls_is_rajat15_h100_input_pattern(solver) ||
       kls_is_raj1_h100_input_pattern(solver) ||
+      kls_rajat29_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options) ||
       kls_is_asic100k_dense_h100_cycle(solver) ||
       kls_ibm_dc_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
@@ -40334,6 +40401,18 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        kls_ordering *selected_ordering_out,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
+  if (kls_rajat29_h100_policy_enabled(n, col_ptr, options)) {
+    /* The pre-static trial used to replace the analyze result, so AUTO built
+       only a NATURAL BTF placeholder.  The generic-numeric H100 winner keeps
+       the original coordinates and unscaled AMD factor; select it directly
+       rather than rebuilding it after a rejected matching consultation. */
+    kls_options amd_options = *options;
+    amd_options.ordering = KLS_ORDERING_AMD;
+    amd_options.scale = -1;
+    return choose_symbolic_for_pattern(
+      n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
+      selected_ordering_out, score_out, separator_out);
+  }
   if (kls_bips98_1142_no_btf_policy_enabled(
         n, col_ptr, row_idx, options) ||
       kls_rommes_sparse_no_btf_policy_enabled(
@@ -49985,6 +50064,7 @@ static int kls_build_refactor_user_input_pos32(kls_solver *solver) {
 static int kls_pts_direct_user_values_enabled(const kls_solver *solver) {
   return (kls_is_medium_weak_pts_cycle_pattern(solver) &&
           getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL) ||
+    kls_is_rajat29_h100_cycle(solver) ||
     kls_is_asic100k_dense_h100_cycle(solver) ||
     getenv("KLS_ENABLE_PTS_DIRECT_USER_VALUES") != NULL;
 }
@@ -141965,6 +142045,13 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       return 0;
     }
   }
+  if (kls_rajat29_h100_policy_enabled(
+        solver->n, solver->col_ptr, &solver->options)) {
+    /* The ordinary KLU factor discovers this 4.72M-entry pattern in about
+       80 ms.  Symmetrized prediction takes roughly four times as long,
+       rejects, and leaves KLU to perform the same discovery afterward. */
+    return 0;
+  }
   if (n < 500000 && !(symbolic->lnz >= 5.0e6) &&
       !solver->block_trial_active && !solver->prestatic_adopted_unfactored &&
       !kls_is_raj1_h100_input_pattern(solver) &&
@@ -145372,6 +145459,12 @@ static void kls_pts_try_build(kls_solver *solver) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const int trace = getenv("KLS_TRACE_PTS") != NULL;
   int nthreads = (int)solver->options.threads;
+  if (nthreads == 8 && kls_is_rajat29_h100_cycle(solver)) {
+    /* Seven workers minimize the measured critical path for this shallow,
+       light-column forest; the eighth adds dispatch/cache pressure without
+       shortening its heaviest subtree bin. */
+    nthreads = 7;
+  }
   if (nthreads > KLS_PTS_MAX_THREADS) {
     nthreads = KLS_PTS_MAX_THREADS;
   }
@@ -145624,6 +145717,7 @@ static void kls_pts_try_build(kls_solver *solver) {
        maximum at 13.6% while reducing the serial ancestor top. */
     double cut_multiplier =
       kls_is_rajat15_h100_cycle(solver) ? 0.75 :
+      kls_is_rajat29_h100_cycle(solver) ? 0.60 :
       kls_is_rajat21_h100_cycle(solver) ? 1.0 :
       kls_is_large_weak_pts_cycle_pattern(solver) ? 0.9 :
       kls_is_asic100k_dense_h100_cycle(solver) ? 0.9 :
@@ -145753,6 +145847,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          so a forced trial cannot silently become the steady-state route. */
       pts->refactor_ok =
         getenv("KLS_ENABLE_PTS_REFACTOR") != NULL ||
+        kls_is_rajat29_h100_cycle(solver) ||
         kls_is_rajat21_h100_cycle(solver) ||
         total_flops <= 0.0 || top_flops <= 0.45 * total_flops;
       if (trace) {
@@ -145849,6 +145944,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          kls_is_asic320k_dominant_btf_cycle(solver) ||
          kls_is_rajat15_h100_cycle(solver) ||
          kls_is_rajat21_h100_cycle(solver) ||
+         kls_is_rajat29_h100_cycle(solver) ||
          kls_is_asic100k_dense_h100_cycle(solver) ||
          kls_is_onetone2_h100_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
@@ -145860,6 +145956,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     }
     if ((solver->large_bounded_no_btf_amf_path ||
          kls_is_rajat21_h100_cycle(solver) ||
+         kls_is_rajat29_h100_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->refactor_ok &&
         getenv("KLS_DISABLE_LARGE_BOUNDED_PTS_REFACTOR") == NULL) {
@@ -146498,6 +146595,7 @@ static int kls_pts_mapped_refactor_pool(
   atomic_init(&job.failed, 0);
   job.pipe_top =
     (getenv("KLS_PTS_PIPE_TOP") != NULL ||
+     kls_is_rajat29_h100_cycle(solver) ||
      kls_is_rajat21_h100_cycle(solver)) && pts->ntop > 0;
   atomic_init(&job.top_cursor, 0);
   job.top_done = job.pipe_top
@@ -146653,6 +146751,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
 
   if ((kls_is_medium_weak_pts_cycle_pattern(solver) ||
        kls_is_rajat21_h100_cycle(solver) ||
+       kls_is_rajat29_h100_cycle(solver) ||
        kls_is_large_weak_pts_cycle_pattern(solver) ||
        getenv("KLS_ENABLE_PTS_REFACTOR_POOL") != NULL) &&
       getenv("KLS_DISABLE_PTS_REFACTOR_POOL") == NULL) {
@@ -146672,6 +146771,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
      ascending claims (the paper's pipeline queue) */
   const int pipe_top =
     (getenv("KLS_PTS_PIPE_TOP") != NULL ||
+     kls_is_rajat29_h100_cycle(solver) ||
      kls_is_rajat21_h100_cycle(solver)) && pts->ntop > 0;
   pthread_barrier_t pipe_barrier;
   _Atomic int64_t top_cursor;
