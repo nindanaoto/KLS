@@ -148748,6 +148748,13 @@ static int kls_diagonal_equiv_plan_eligible(const kls_solver *solver) {
        diagonal updates. */
     (!kls_gemat_h100_policy_enabled(solver) ||
      getenv("KLS_ENABLE_GEMAT_DIAGONAL_EQUIV_PLAN") != NULL) &&
+    /* These two millisecond-scale Sandia cycles select a faster retained
+       map32 numeric after an ordinary changed-value update.  Eagerly
+       constructing a diagonal-equivalent forest beside their tiny first
+       factor, only to reject it on entrywise data, costs 4.7--6.9% of H100.
+       Keep the structured plan available to callers that explicitly opt in. */
+    (!kls_sandia_fpga_map32_h100_policy(solver) ||
+     getenv("KLS_ENABLE_SANDIA_FPGA_DIAGONAL_EQUIV_PLAN") != NULL) &&
     solver->diagonal_equiv_plan_state >= 0 &&
     solver->input_format == KLS_INPUT_CSC &&
     solver->col_ptr != NULL &&
