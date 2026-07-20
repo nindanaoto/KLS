@@ -28763,6 +28763,19 @@ static int kls_is_gemat_power_sequence_pattern(
          col_ptr[n] >= 32900u && col_ptr[n] <= 33300u;
 }
 
+static int kls_gemat_h100_policy_enabled(const kls_solver *solver) {
+  return solver != NULL && solver->col_ptr != NULL &&
+    getenv("KLS_DISABLE_GEMAT_H100_POLICY") == NULL &&
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.backend == KLS_BACKEND_AUTO &&
+    solver->options.threads == 8 && solver->options.use_btf &&
+    solver->options.static_pivoting &&
+    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
+    kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr);
+}
+
 static int kls_is_rajat27_fragmented_scaled_pattern(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
@@ -39900,13 +39913,14 @@ static int choose_symbolic_for_pattern(UF_long n,
       selected_ordering_out, score_out, separator_out);
   }
   /* The cheap NATURAL probe exists to avoid an ordering that pre-static
-     matching normally replaces.  Retained diagonal-equivalent factors skip
-     that matching, so choosing AMD immediately avoids a guaranteed analyze
-     redo at the first factor. */
+     matching normally replaces.  Retained diagonal-equivalent factors
+     generally skip that matching, so choosing AMD immediately avoids a
+     guaranteed analyze redo at the first factor.  The gemat sequence is the
+     exception: its almost entirely missing diagonal always adopts the compact
+     value-aware match before preparing any structured-update plan. */
   const int gemat_analysis_probe =
     options != NULL && options->ordering == KLS_ORDERING_AUTO &&
     getenv("KLS_DISABLE_GEMAT_ANALYSIS_PROBE") == NULL &&
-    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL &&
     kls_is_gemat_power_sequence_pattern(n, col_ptr);
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       getenv("KLS_DISABLE_AUTO_AMD_SHORTCUT") == NULL &&
@@ -39934,11 +39948,19 @@ static int choose_symbolic_for_pattern(UF_long n,
        full competition (their factor may run on these coordinates).
        A pre-static rejection rebuilds a real ordering at the factor
        entry (kls_ps_ana_probe_disable). */
+    kls_options probe_options = *options;
+    if (gemat_analysis_probe) {
+      /* The tight gemat classifier itself guarantees the compact row-match
+         trial below.  Unlike the broad missing-diagonal classes, it does not
+         need a BTF decomposition to establish the trial gate; the matched
+         analyze immediately replaces this placeholder. */
+      probe_options.use_btf = 0;
+    }
     trilinos_klu_l_symbolic *probe_sym = NULL;
     trilinos_klu_l_common probe_common;
     kls_separator_analysis probe_sep;
     memset(&probe_sep, 0, sizeof(probe_sep));
-    if (analyze_with_ordering(n, col_ptr, row_idx, options,
+    if (analyze_with_ordering(n, col_ptr, row_idx, &probe_options,
                               KLS_ORDERING_NATURAL, &probe_sym,
                               &probe_common, &probe_sep) == KLS_OK &&
         probe_sym != NULL) {
@@ -147828,6 +147850,14 @@ static void kls_diagonal_equiv_reset_plan(kls_solver *solver) {
 static int kls_diagonal_equiv_plan_eligible(const kls_solver *solver) {
   return solver != NULL &&
     getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
+    /* gemat11/12 immediately replace the almost-diagonal input with their
+       compact matched numeric.  On the generic H100 contract, eagerly
+       building and then rejecting a structured-update forest costs about
+       0.9 ms across factor/refactor setup, enough to lose gemat11.  Keep the
+       specialized plan opt-in for callers that actually supply separable
+       diagonal updates. */
+    (!kls_gemat_h100_policy_enabled(solver) ||
+     getenv("KLS_ENABLE_GEMAT_DIAGONAL_EQUIV_PLAN") != NULL) &&
     solver->diagonal_equiv_plan_state >= 0 &&
     solver->input_format == KLS_INPUT_CSC &&
     solver->col_ptr != NULL &&
