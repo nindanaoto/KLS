@@ -12,6 +12,7 @@
 #define kls_construct_secs kls32_construct_secs
 #define kls_klu_dense_tail kls32_klu_dense_tail
 #define kls_klu_pipe_det kls32_klu_pipe_det
+#define kls_klu_pipe_nopanels kls32_klu_pipe_nopanels
 #define kls_klu_pipe_threads kls32_klu_pipe_threads
 #define kls_pipe_copy_bytes kls32_pipe_copy_bytes
 #define kls_pipe_finish_threads kls32_pipe_finish_threads

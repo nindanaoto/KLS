@@ -809,6 +809,10 @@ _Thread_local int kls_klu_dense_tail = 0 ;
 _Thread_local int kls_klu_pipe_det = 0 ;    /* routed: force the
     deterministic scalar configuration (no dense finalize, no batched
     consume) until those paths are order-determinized */
+/* Per-thread structural exception for factors whose etree exposes only
+   width-two panels.  The solver layer scopes this to the relevant race;
+   KLS_KLU_PIPE_NOPANELS remains the process-wide experiment override. */
+_Thread_local int kls_klu_pipe_nopanels = 0 ;
 
 #define KLS_PIVOT_RETRY (-2)
 static Int kls_lpivot_diag_claim
@@ -4669,6 +4673,7 @@ size_t KLS_KLU_KERNEL_PIPE
        applies land in a compact L2-resident panel-major block instead
        of the 5MB X vector (pre2 workers 12.0 -> 7.2s). */
     if (getenv ("KLS_KLU_PIPE_NOPANELS") == NULL &&
+	!kls_klu_pipe_nopanels &&
 	(size_t) n * sizeof (Entry) > ((size_t) 1 << 20))
     {
 	/* the buffer's win is X-footprint compression into L2; when X
