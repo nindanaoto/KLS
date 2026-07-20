@@ -426,8 +426,20 @@ typedef struct kls_lean_done_slot {
   unsigned char padding[64u - sizeof(atomic_uint) - sizeof(unsigned int)];
 } kls_lean_done_slot;
 
+typedef struct kls_tsopf_b9_work_row16 {
+  uint16_t row;
+  uint16_t publish_slot;
+  uint16_t input_begin;
+  uint16_t input_end;
+  uint16_t dependency_begin;
+  uint16_t dependency_end;
+  uint16_t output_begin;
+  uint16_t output_end;
+} kls_tsopf_b9_work_row16;
+
 #define KLS_LEAN_GROUPED_OWNER_SHIFT 29u
-#define KLS_LEAN_GROUPED_SLOT_MASK UINT32_C(0x1fffffff)
+#define KLS_LEAN_GROUPED_PUBLISH_FLAG UINT32_C(0x10000000)
+#define KLS_LEAN_GROUPED_SLOT_MASK UINT32_C(0x0fffffff)
 
 typedef enum kls_lean_pattern_phase {
   KLS_LEAN_PATTERN_COUNT_L = 1,
@@ -729,6 +741,11 @@ struct kls_solver {
   UF_long pivot_nudge_capacity;
   double *solve_refine_workspace;
   double *solve_refine_values;
+  double *tsopf_b9_verified_rhs;
+  double *tsopf_b9_verified_factor_rhs;
+  int tsopf_b9_verified_rhs_valid;
+  int tsopf_b9_refine_values_copied;
+  int tsopf_b9_exact_recip_fresh;
   uint16_t *solve_refine_csc_ptr16;
   uint16_t *solve_refine_csc_row16;
   int solve_refine_csc_state;
@@ -2106,6 +2123,9 @@ struct kls_solver {
   UF_long lean_scalar_btf_prefix;
   atomic_uint *lean_parallel_grouped_done;
   uint32_t *lean_parallel_grouped_token;
+  uint64_t *lean_parallel_l_dep_work64;
+  kls_tsopf_b9_work_row16 *lean_parallel_work_rows16;
+  double *lean_parallel_udiag_inv;
   UF_long lean_parallel_grouped_done_size;
   UF_long lean_parallel_grouped_stride;
   atomic_uint *egraph_pipeline_claimed;
@@ -21256,8 +21276,14 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
   solver->lean_parallel_affinity_thread_count = 0;
   free(solver->lean_parallel_grouped_done);
   free(solver->lean_parallel_grouped_token);
+  free(solver->lean_parallel_l_dep_work64);
+  free(solver->lean_parallel_work_rows16);
+  free(solver->lean_parallel_udiag_inv);
   solver->lean_parallel_grouped_done = NULL;
   solver->lean_parallel_grouped_token = NULL;
+  solver->lean_parallel_l_dep_work64 = NULL;
+  solver->lean_parallel_work_rows16 = NULL;
+  solver->lean_parallel_udiag_inv = NULL;
   solver->lean_parallel_grouped_done_size = 0u;
   solver->lean_parallel_grouped_stride = 0u;
 }
@@ -21266,8 +21292,7 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
    TSOPF H100 cycle.  Every worker consumes its interleaved subsequence in the
    original topological direction, so the existing completion scoreboard
    remains the only run-time synchronization.  The fixed cost model was
-   selected from pinned five-stream sweeps: one unit per output, one per
-   dependency, and one twentieth of each predecessor's output work. */
+   selected from pinned five-stream sweeps. */
 static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
                                                      int thread_count) {
   if (!kls_is_tsopf_fs_b9_c1_h100_cycle(solver) || thread_count < 2 ||
@@ -21294,6 +21319,11 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
     return solver->row_refactor_level_rows;
   }
 
+  const double dependency_base_weight = 0.8;
+  const double dependency_output_weight = 0.04;
+  const double input_weight = 0.05;
+  const double row_output_weight = 1.2;
+
   UF_long capacity[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
   UF_long count[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
   double worker_finish[8] = {0.0, 0.0, 0.0, 0.0,
@@ -21315,9 +21345,12 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
       valid = 0;
       break;
     }
-    double row_work = 1.0 +
+    double row_work = 1.0 + input_weight *
+      (double)(solver->row_refactor_input_ptr[row + 1u] -
+               solver->row_refactor_input_ptr[row]) + row_output_weight *
       (double)(solver->row_refactor_u_ptr[row + 1u] -
                solver->row_refactor_u_ptr[row]);
+    double dependency_ready = 0.0;
     for (UF_long p = solver->row_refactor_l_ptr[row];
          p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
       const UF_long dep = solver->row_refactor_l_cols[p];
@@ -21325,9 +21358,12 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
         valid = 0;
         break;
       }
-      row_work += 1.0 + 0.05 *
+      row_work += dependency_base_weight + dependency_output_weight *
         (double)(solver->row_refactor_u_ptr[dep + 1u] -
                  solver->row_refactor_u_ptr[dep]);
+      if (finish[dep] > dependency_ready) {
+        dependency_ready = finish[dep];
+      }
     }
     if (!valid) {
       break;
@@ -21339,14 +21375,8 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
       if (count[tid] >= capacity[tid]) {
         continue;
       }
-      double ready = worker_finish[tid];
-      for (UF_long p = solver->row_refactor_l_ptr[row];
-           p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
-        const UF_long dep = solver->row_refactor_l_cols[p];
-        if (finish[dep] > ready) {
-          ready = finish[dep];
-        }
-      }
+      const double ready = worker_finish[tid] > dependency_ready
+        ? worker_finish[tid] : dependency_ready;
       const double candidate = ready + row_work;
       if (candidate < best_finish ||
           (candidate == best_finish &&
@@ -21376,7 +21406,10 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
     }
   }
   if (getenv("KLS_TRACE_TSOPF_B9_H100") != NULL) {
-    fprintf(stderr, "KLS TSOPF b9 schedule:");
+    fprintf(stderr,
+            "KLS TSOPF b9 schedule weights=%g/%g/%g/%g:",
+            dependency_base_weight, dependency_output_weight,
+            input_weight, row_output_weight);
     for (int tid = 0; tid < thread_count; ++tid) {
       fprintf(stderr, " t%d=%ld/%.0f", tid, (long)count[tid],
               worker_finish[tid]);
@@ -21502,7 +21535,173 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
       return 0;
     }
     solver->lean_parallel_grouped_token[row] =
-      ((uint32_t)owner << KLS_LEAN_GROUPED_OWNER_SHIFT) | (uint32_t)slot;
+      ((uint32_t)owner << KLS_LEAN_GROUPED_OWNER_SHIFT) |
+      KLS_LEAN_GROUPED_PUBLISH_FLAG | (uint32_t)slot;
+  }
+
+  /* Preserve the just-in-time dependency order of the compact TSOPF worker,
+     but predecode each L entry into a sequential dependency descriptor. Once
+     one consumer stream acquires a producer slot, all earlier rows from that
+     producer are visible for the rest of the generation; such covered waits
+     are omitted while building the stream. */
+  free(solver->lean_parallel_l_dep_work64);
+  solver->lean_parallel_l_dep_work64 = NULL;
+  free(solver->lean_parallel_work_rows16);
+  solver->lean_parallel_work_rows16 = NULL;
+  if (kls_is_tsopf_fs_b9_c1_h100_cycle(solver) &&
+      solver->row_refactor_l_ptr != NULL &&
+      solver->row_refactor_l_cols != NULL &&
+      solver->row_refactor_l_cols16 != NULL &&
+      solver->row_refactor_u_ptr != NULL &&
+      solver->row_refactor_u_cols != NULL &&
+      solver->row_refactor_input_ptr16 != NULL &&
+      solver->row_refactor_l_ptr16 != NULL &&
+      solver->row_refactor_u_ptr16 != NULL) {
+    const UF_long l_count = solver->row_refactor_l_ptr[solver->n];
+    uint64_t *packed_work = l_count <= (UF_long)(SIZE_MAX / sizeof(uint64_t))
+      ? (uint64_t *)malloc((size_t)l_count * sizeof(*packed_work)) : NULL;
+    unsigned char *snode_join = (unsigned char *)calloc(
+      (size_t)solver->n, sizeof(*snode_join));
+    const uint32_t max_snode_run = 4u;
+    if (snode_join != NULL) {
+      for (UF_long dep = 0u; dep + 1u < solver->n; ++dep) {
+        const UF_long begin0 = solver->row_refactor_u_ptr[dep];
+        const UF_long end0 = solver->row_refactor_u_ptr[dep + 1u];
+        const UF_long begin1 = end0;
+        const UF_long end1 = solver->row_refactor_u_ptr[dep + 2u];
+        const UF_long len0 = end0 - begin0;
+        const UF_long len1 = end1 - begin1;
+        snode_join[dep] = len0 == len1 + 1u && len0 > 0u &&
+          solver->row_refactor_u_cols[begin0] == dep + 1u &&
+          (len1 == 0u ||
+           memcmp(solver->row_refactor_u_cols + begin0 + 1u,
+                  solver->row_refactor_u_cols + begin1,
+                  (size_t)len1 *
+                    sizeof(*solver->row_refactor_u_cols)) == 0);
+      }
+    }
+    uint32_t acquired_slot[8][8];
+    for (int consumer = 0; consumer < thread_count; ++consumer) {
+      for (int producer = 0; producer < thread_count; ++producer) {
+        acquired_slot[consumer][producer] = 0u;
+      }
+    }
+    int packed_valid = packed_work != NULL;
+    for (UF_long row = 0u; row < solver->n; ++row) {
+      solver->lean_parallel_grouped_token[row] &=
+        ~KLS_LEAN_GROUPED_PUBLISH_FLAG;
+    }
+    for (UF_long pos = 0u; pos < solver->n && packed_valid; ++pos) {
+      const UF_long row = rows[pos];
+      const unsigned int consumer_owner =
+        solver->lean_parallel_grouped_token[row] >>
+          KLS_LEAN_GROUPED_OWNER_SHIFT;
+      UF_long fused_until = solver->row_refactor_l_ptr[row];
+      for (UF_long p = solver->row_refactor_l_ptr[row];
+           p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
+        const UF_long dep = solver->row_refactor_l_cols[p];
+        if (dep >= UINT32_C(0x1000)) {
+          packed_valid = 0;
+          break;
+        }
+        uint32_t run = 0u;
+        if (p >= fused_until && snode_join != NULL) {
+          uint32_t candidate = 1u;
+          while (candidate < max_snode_run &&
+                 p + candidate < solver->row_refactor_l_ptr[row + 1u] &&
+                 solver->row_refactor_l_cols[p + candidate] ==
+                   dep + candidate &&
+                 snode_join[dep + candidate - 1u]) {
+            candidate++;
+          }
+          if (candidate >= 2u) {
+            run = candidate;
+            fused_until = p + (UF_long)run;
+          }
+        }
+        const uint32_t token = solver->lean_parallel_grouped_token[dep];
+        const unsigned int producer_owner =
+          token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
+        const uint32_t dep_slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
+        const UF_long update_begin = solver->row_refactor_u_ptr[dep];
+        const UF_long update_end = solver->row_refactor_u_ptr[dep + 1u];
+        if (producer_owner >= (unsigned int)thread_count ||
+            dep_slot >= UINT32_C(0x0fff) ||
+            update_begin > UINT16_MAX ||
+            update_end > UINT16_MAX) {
+          packed_valid = 0;
+          break;
+        }
+        uint32_t encoded_slot = 0u;
+        if (producer_owner != consumer_owner) {
+          if (dep_slot >= acquired_slot[consumer_owner][producer_owner]) {
+            encoded_slot = dep_slot + 1u;
+            acquired_slot[consumer_owner][producer_owner] = dep_slot + 1u;
+            solver->lean_parallel_grouped_token[dep] |=
+              KLS_LEAN_GROUPED_PUBLISH_FLAG;
+          }
+        }
+        packed_work[p] = (uint64_t)dep | ((uint64_t)run << 12u) |
+          ((uint64_t)encoded_slot << 16u) |
+          ((uint64_t)update_begin << 32u) |
+          ((uint64_t)update_end << 48u);
+      }
+    }
+    free(snode_join);
+    if (packed_valid && solver->lean_parallel_udiag_inv == NULL) {
+      solver->lean_parallel_udiag_inv =
+        (double *)malloc((size_t)solver->n *
+                         sizeof(*solver->lean_parallel_udiag_inv));
+      if (solver->lean_parallel_udiag_inv == NULL) {
+        packed_valid = 0;
+      }
+    }
+    if (packed_valid) {
+      solver->lean_parallel_l_dep_work64 = packed_work;
+      kls_tsopf_b9_work_row16 *work_rows =
+        (kls_tsopf_b9_work_row16 *)malloc(
+          (size_t)solver->n * sizeof(*work_rows));
+      int work_rows_valid = work_rows != NULL;
+      for (UF_long pos = 0u; pos < solver->n && work_rows_valid; ++pos) {
+        const UF_long row = rows[pos];
+        const uint32_t token = solver->lean_parallel_grouped_token[row];
+        const uint32_t slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
+        const uint32_t publish_slot =
+          (token & KLS_LEAN_GROUPED_PUBLISH_FLAG) != 0u ? slot + 1u : 0u;
+        const UF_long input_begin = solver->row_refactor_input_ptr[row];
+        const UF_long input_end = solver->row_refactor_input_ptr[row + 1u];
+        const UF_long dependency_begin = solver->row_refactor_l_ptr[row];
+        const UF_long dependency_end = solver->row_refactor_l_ptr[row + 1u];
+        const UF_long output_begin = solver->row_refactor_u_ptr[row];
+        const UF_long output_end = solver->row_refactor_u_ptr[row + 1u];
+        if (row >= UINT16_MAX || publish_slot > UINT16_MAX ||
+            input_begin > UINT16_MAX || input_end > UINT16_MAX ||
+            dependency_begin > UINT16_MAX || dependency_end > UINT16_MAX ||
+            output_begin > UINT16_MAX || output_end > UINT16_MAX) {
+          work_rows_valid = 0;
+          break;
+        }
+        work_rows[pos].row = (uint16_t)row;
+        work_rows[pos].publish_slot = (uint16_t)publish_slot;
+        work_rows[pos].input_begin = (uint16_t)input_begin;
+        work_rows[pos].input_end = (uint16_t)input_end;
+        work_rows[pos].dependency_begin = (uint16_t)dependency_begin;
+        work_rows[pos].dependency_end = (uint16_t)dependency_end;
+        work_rows[pos].output_begin = (uint16_t)output_begin;
+        work_rows[pos].output_end = (uint16_t)output_end;
+      }
+      if (work_rows_valid) {
+        solver->lean_parallel_work_rows16 = work_rows;
+      } else {
+        free(work_rows);
+      }
+    } else {
+      for (UF_long row = 0u; row < solver->n; ++row) {
+        solver->lean_parallel_grouped_token[row] |=
+          KLS_LEAN_GROUPED_PUBLISH_FLAG;
+      }
+      free(packed_work);
+    }
   }
   return 1;
 }
@@ -26616,6 +26815,8 @@ static void free_numeric(kls_solver *solver) {
   solver->solve_refine_single_shot = 0;
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
+  solver->tsopf_b9_verified_rhs_valid = 0;
+  solver->tsopf_b9_exact_recip_fresh = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -26735,10 +26936,15 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
      refinement runs against a stale matrix */
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
+  solver->tsopf_b9_verified_rhs_valid = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
   free(solver->solve_refine_values);
+  free(solver->tsopf_b9_verified_rhs);
+  free(solver->tsopf_b9_verified_factor_rhs);
   solver->solve_refine_values = NULL;
+  solver->tsopf_b9_verified_rhs = NULL;
+  solver->tsopf_b9_verified_factor_rhs = NULL;
   solver->predicted_entry_values_captured = 0;
   free(solver->prepared_value_scale);
   solver->prepared_value_scale = NULL;
@@ -26926,6 +27132,8 @@ static void clear_matrix(kls_solver *solver) {
      it was only ever freed here-ish; a reused solver otherwise kept a
      STALE row-perm inverse sized to the previous matrix */
   free(solver->solve_refine_values);
+  free(solver->tsopf_b9_verified_rhs);
+  free(solver->tsopf_b9_verified_factor_rhs);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
   solver->col_ptr = NULL;
@@ -26936,6 +27144,9 @@ static void clear_matrix(kls_solver *solver) {
   solver->row_scale = NULL;
   solver->col_scale = NULL;
   solver->values = NULL;
+  solver->tsopf_b9_verified_rhs = NULL;
+  solver->tsopf_b9_verified_factor_rhs = NULL;
+  solver->tsopf_b9_verified_rhs_valid = 0;
   solver->prepared_value_scale = NULL;
   solver->prepared_value_input_pos = NULL;
   solver->refactor_input_snapshot = NULL;
@@ -49371,7 +49582,8 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
   if (solver != NULL &&
       (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
-       kls_is_bips98_lean_pattern(solver))) {
+       kls_is_bips98_lean_pattern(solver) ||
+       kls_is_tsopf_fs_b9_c1_h100_cycle(solver))) {
     /* The selected lean engine consumes the row-ordered 64-bit map directly;
        neither its fused updates nor the native column solve reads this copy. */
     return 1;
@@ -49679,7 +49891,8 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
   if (solver != NULL &&
       (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
-       kls_is_bips98_lean_pattern(solver))) {
+       kls_is_bips98_lean_pattern(solver) ||
+       kls_is_tsopf_fs_b9_c1_h100_cycle(solver))) {
     return 1;
   }
   if (solver == NULL || solver->numeric == NULL ||
@@ -49772,7 +49985,8 @@ static int kls_ensure_refactor_u_index32_cache(kls_solver *solver) {
   if (solver != NULL &&
       (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
-       kls_is_bips98_lean_pattern(solver))) {
+       kls_is_bips98_lean_pattern(solver) ||
+       kls_is_tsopf_fs_b9_c1_h100_cycle(solver))) {
     return 1;
   }
   if (solver == NULL || solver->numeric == NULL ||
@@ -53271,13 +53485,15 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
     solver->n <= (UF_long)INT32_MAX &&
     !kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) &&
     !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
-    !kls_is_bips98_lean_pattern(solver);
+    !kls_is_bips98_lean_pattern(solver) &&
+    !kls_is_tsopf_fs_b9_c1_h100_cycle(solver);
   const int build_u_index32 =
     kls_refactor_u_index32_env_enabled() &&
     solver->n <= (UF_long)INT32_MAX &&
     !kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) &&
     !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
-    !kls_is_bips98_lean_pattern(solver);
+    !kls_is_bips98_lean_pattern(solver) &&
+    !kls_is_tsopf_fs_b9_c1_h100_cycle(solver);
   UF_long l_index32_entries = 0;
   UF_long u_index32_entries = 0;
   UF_long pattern_columns = 0;
@@ -62032,7 +62248,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
       }
     }
   }
-
   if (lean_only) {
     return kls_finish_lean_row_refactor_pattern_from_arrays(
       solver, l_ptr, l_cols, l_values, l_row_values,
@@ -68783,7 +68998,6 @@ static void kls_tsopf_b9_i16ptr_worker_run(
   const uint32_t *restrict done_token =
     solver->lean_parallel_grouped_token;
   atomic_uint *restrict grouped_done = solver->lean_parallel_grouped_done;
-
   for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
     const UF_long row = rows[pos];
     if (in_packed != NULL) {
@@ -68839,6 +69053,300 @@ static void kls_tsopf_b9_i16ptr_worker_run(
                           memory_order_release);
     if (atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
       return;
+    }
+  }
+}
+
+/* Predecoded waits preserve the original dependency-by-dependency overlap,
+   while replacing random token-owner loads with one sequential packed word.
+   A zero upper half means an earlier acquire on this consumer stream already
+   covers the dependency. */
+static KLS_ALWAYS_INLINE int kls_tsopf_b9_wait_for_dependency(
+  kls_egraph_refactor_shared *shared,
+  atomic_uint *grouped_done,
+  unsigned int generation,
+  uint64_t descriptor) {
+  const uint32_t encoded_slot =
+    (uint32_t)((descriptor >> 16u) & UINT64_C(0xffff));
+  if (encoded_slot == 0u) {
+    return 1;
+  }
+  const uint32_t slot = encoded_slot - 1u;
+  unsigned int spin = 0u;
+  while (atomic_load_explicit(&grouped_done[slot],
+                              memory_order_acquire) != generation) {
+    if ((++spin & 255u) == 0u &&
+        atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
+      return 0;
+    }
+    kls_cpu_relax();
+  }
+  return 1;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot, aligned(64)))
+#endif
+static void kls_tsopf_b9_packed_exact_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  UF_long stride) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  const UF_long n = solver->n;
+  double *restrict x = worker->x;
+  const double *restrict values = shared->values;
+  const uint32_t *restrict in_packed =
+    solver->row_refactor_input_col_user32;
+  const uint64_t *restrict l_dep_work =
+    solver->lean_parallel_l_dep_work64;
+  double *restrict l_val = solver->row_refactor_l_row_values;
+  const uint16_t *restrict u_cols = solver->row_refactor_u_cols16;
+  double *restrict u_val = solver->row_refactor_u_row_values;
+  double *restrict udiag = (double *)solver->numeric->Udiag;
+  double *restrict udiag_inv = solver->i32solve_udiag_recip != NULL
+    ? solver->i32solve_udiag_recip : solver->lean_parallel_udiag_inv;
+  const kls_tsopf_b9_work_row16 *restrict work_rows =
+    solver->lean_parallel_work_rows16;
+  atomic_uint *restrict grouped_done = solver->lean_parallel_grouped_done;
+  for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
+    const kls_tsopf_b9_work_row16 *restrict work = &work_rows[pos];
+    const UF_long row = (UF_long)work->row;
+    UF_long p = (UF_long)work->input_begin;
+    const UF_long input_end = (UF_long)work->input_end;
+    for (; p + 3u < input_end; p += 4u) {
+      const uint32_t packed0 = in_packed[p];
+      const uint32_t packed1 = in_packed[p + 1u];
+      const uint32_t packed2 = in_packed[p + 2u];
+      const uint32_t packed3 = in_packed[p + 3u];
+      x[packed0 & UINT32_C(0xffff)] = values[packed0 >> 16u];
+      x[packed1 & UINT32_C(0xffff)] = values[packed1 >> 16u];
+      x[packed2 & UINT32_C(0xffff)] = values[packed2 >> 16u];
+      x[packed3 & UINT32_C(0xffff)] = values[packed3 >> 16u];
+    }
+    for (; p < input_end; ++p) {
+      const uint32_t packed = in_packed[p];
+      x[packed & UINT32_C(0xffff)] = values[packed >> 16u];
+    }
+    p = (UF_long)work->dependency_begin;
+    const UF_long dependency_end = (UF_long)work->dependency_end;
+    while (p < dependency_end) {
+      const uint64_t packed = l_dep_work[p];
+      const UF_long dep = (UF_long)(packed & UINT64_C(0x0fff));
+      const uint32_t run =
+        (uint32_t)((packed >> 12u) & UINT64_C(0x0f));
+      if (run == 2u && p + 1u < dependency_end) {
+        const uint64_t packed1 = l_dep_work[p + 1u];
+        if (!kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed) ||
+            !kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed1)) {
+          return;
+        }
+        const UF_long dep1 =
+          (UF_long)(packed1 & UINT64_C(0x0fff));
+        const UF_long update0 =
+          (UF_long)((packed >> 32u) & UINT64_C(0xffff));
+        const UF_long update1 =
+          (UF_long)((packed1 >> 32u) & UINT64_C(0xffff));
+        const UF_long update1_end = (UF_long)(packed1 >> 48u);
+        const double multiplier0 = x[dep] * udiag_inv[dep];
+        const double candidate1 =
+          fma(-multiplier0, u_val[update0], x[dep1]);
+        const double multiplier1 = candidate1 * udiag_inv[dep1];
+        x[dep] = 0.0;
+        x[dep1] = 0.0;
+        l_val[p] = multiplier0;
+        l_val[p + 1u] = multiplier1;
+        for (UF_long q = update1; q < update1_end; ++q) {
+          const UF_long col = (UF_long)u_cols[q];
+          const UF_long offset = q - update1;
+          const double after0 =
+            fma(-multiplier0, u_val[update0 + 1u + offset], x[col]);
+          x[col] = fma(-multiplier1, u_val[q], after0);
+        }
+        p += 2u;
+        continue;
+      }
+      if (run == 3u && p + 2u < dependency_end) {
+        const uint64_t packed1 = l_dep_work[p + 1u];
+        const uint64_t packed2 = l_dep_work[p + 2u];
+        if (!kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed) ||
+            !kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed1) ||
+            !kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed2)) {
+          return;
+        }
+        const UF_long dep1 =
+          (UF_long)(packed1 & UINT64_C(0x0fff));
+        const UF_long dep2 =
+          (UF_long)(packed2 & UINT64_C(0x0fff));
+        const UF_long update0 =
+          (UF_long)((packed >> 32u) & UINT64_C(0xffff));
+        const UF_long update1 =
+          (UF_long)((packed1 >> 32u) & UINT64_C(0xffff));
+        const UF_long update2 =
+          (UF_long)((packed2 >> 32u) & UINT64_C(0xffff));
+        const UF_long update2_end = (UF_long)(packed2 >> 48u);
+        const double multiplier0 = x[dep] * udiag_inv[dep];
+        const double candidate1 =
+          fma(-multiplier0, u_val[update0], x[dep1]);
+        const double multiplier1 = candidate1 * udiag_inv[dep1];
+        double candidate2 =
+          fma(-multiplier0, u_val[update0 + 1u], x[dep2]);
+        candidate2 = fma(-multiplier1, u_val[update1], candidate2);
+        const double multiplier2 = candidate2 * udiag_inv[dep2];
+        x[dep] = 0.0;
+        x[dep1] = 0.0;
+        x[dep2] = 0.0;
+        l_val[p] = multiplier0;
+        l_val[p + 1u] = multiplier1;
+        l_val[p + 2u] = multiplier2;
+        for (UF_long q = update2; q < update2_end; ++q) {
+          const UF_long col = (UF_long)u_cols[q];
+          const UF_long offset = q - update2;
+          double value = fma(-multiplier0,
+                             u_val[update0 + 2u + offset], x[col]);
+          value = fma(-multiplier1,
+                      u_val[update1 + 1u + offset], value);
+          x[col] = fma(-multiplier2, u_val[q], value);
+        }
+        p += 3u;
+        continue;
+      }
+      if (run == 4u && p + 3u < dependency_end) {
+        const uint64_t packed1 = l_dep_work[p + 1u];
+        const uint64_t packed2 = l_dep_work[p + 2u];
+        const uint64_t packed3 = l_dep_work[p + 3u];
+        if (!kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed) ||
+            !kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed1) ||
+            !kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed2) ||
+            !kls_tsopf_b9_wait_for_dependency(
+              shared, grouped_done, generation, packed3)) {
+          return;
+        }
+        const UF_long dep1 =
+          (UF_long)(packed1 & UINT64_C(0x0fff));
+        const UF_long dep2 =
+          (UF_long)(packed2 & UINT64_C(0x0fff));
+        const UF_long dep3 =
+          (UF_long)(packed3 & UINT64_C(0x0fff));
+        const UF_long update0 =
+          (UF_long)((packed >> 32u) & UINT64_C(0xffff));
+        const UF_long update1 =
+          (UF_long)((packed1 >> 32u) & UINT64_C(0xffff));
+        const UF_long update2 =
+          (UF_long)((packed2 >> 32u) & UINT64_C(0xffff));
+        const UF_long update3 =
+          (UF_long)((packed3 >> 32u) & UINT64_C(0xffff));
+        const UF_long update3_end = (UF_long)(packed3 >> 48u);
+        const double multiplier0 = x[dep] * udiag_inv[dep];
+        const double candidate1 =
+          fma(-multiplier0, u_val[update0], x[dep1]);
+        const double multiplier1 = candidate1 * udiag_inv[dep1];
+        double candidate2 =
+          fma(-multiplier0, u_val[update0 + 1u], x[dep2]);
+        candidate2 = fma(-multiplier1, u_val[update1], candidate2);
+        const double multiplier2 = candidate2 * udiag_inv[dep2];
+        double candidate3 =
+          fma(-multiplier0, u_val[update0 + 2u], x[dep3]);
+        candidate3 =
+          fma(-multiplier1, u_val[update1 + 1u], candidate3);
+        candidate3 = fma(-multiplier2, u_val[update2], candidate3);
+        const double multiplier3 = candidate3 * udiag_inv[dep3];
+        x[dep] = 0.0;
+        x[dep1] = 0.0;
+        x[dep2] = 0.0;
+        x[dep3] = 0.0;
+        l_val[p] = multiplier0;
+        l_val[p + 1u] = multiplier1;
+        l_val[p + 2u] = multiplier2;
+        l_val[p + 3u] = multiplier3;
+        for (UF_long q = update3; q < update3_end; ++q) {
+          const UF_long col = (UF_long)u_cols[q];
+          const UF_long offset = q - update3;
+          double value = fma(-multiplier0,
+                             u_val[update0 + 3u + offset], x[col]);
+          value = fma(-multiplier1,
+                      u_val[update1 + 2u + offset], value);
+          value = fma(-multiplier2,
+                      u_val[update2 + 1u + offset], value);
+          x[col] = fma(-multiplier3, u_val[q], value);
+        }
+        p += 4u;
+        continue;
+      }
+      if (!kls_tsopf_b9_wait_for_dependency(
+            shared, grouped_done, generation, packed)) {
+        return;
+      }
+      const double lik = x[dep] * udiag_inv[dep];
+      x[dep] = 0.0;
+      l_val[p] = lik;
+      for (UF_long q =
+             (UF_long)((packed >> 32u) & UINT64_C(0xffff));
+           q < (UF_long)(packed >> 48u); ++q) {
+        const UF_long col = (UF_long)u_cols[q];
+        x[col] = fma(-lik, u_val[q], x[col]);
+      }
+      p++;
+    }
+    const double pivot = x[row];
+    x[row] = 0.0;
+    udiag[row] = pivot;
+    UF_long q = (UF_long)work->output_begin;
+    const UF_long output_end = (UF_long)work->output_end;
+    for (; q + 3u < output_end; q += 4u) {
+      const UF_long col0 = (UF_long)u_cols[q];
+      const UF_long col1 = (UF_long)u_cols[q + 1u];
+      const UF_long col2 = (UF_long)u_cols[q + 2u];
+      const UF_long col3 = (UF_long)u_cols[q + 3u];
+      const double value0 = x[col0];
+      const double value1 = x[col1];
+      const double value2 = x[col2];
+      const double value3 = x[col3];
+      u_val[q] = value0;
+      u_val[q + 1u] = value1;
+      u_val[q + 2u] = value2;
+      u_val[q + 3u] = value3;
+      x[col0] = 0.0;
+      x[col1] = 0.0;
+      x[col2] = 0.0;
+      x[col3] = 0.0;
+    }
+    for (; q < output_end; ++q) {
+      const UF_long col = (UF_long)u_cols[q];
+      const double value = x[col];
+      u_val[q] = value;
+      x[col] = 0.0;
+    }
+    if (pivot == 0.0) {
+      udiag_inv[row] = 0.0;
+      kls_egraph_refactor_record_singular(shared, row, row);
+    } else {
+      udiag_inv[row] = 1.0 / pivot;
+    }
+    const uint32_t publish_slot = (uint32_t)work->publish_slot;
+    if (publish_slot != 0u) {
+      atomic_store_explicit(&grouped_done[publish_slot - 1u], generation,
+                            memory_order_release);
+    }
+  }
+  if (shared->value_prep_input != NULL &&
+      shared->value_prep_output != NULL) {
+    const UF_long begin = shared->value_prep_nnz *
+      (UF_long)worker->tid / (UF_long)shared->thread_count;
+    const UF_long end = shared->value_prep_nnz *
+      (UF_long)(worker->tid + 1) / (UF_long)shared->thread_count;
+    if (end > begin) {
+      memcpy(shared->value_prep_output + begin,
+             shared->value_prep_input + begin,
+             (size_t)(end - begin) * sizeof(*shared->value_prep_output));
     }
   }
 }
@@ -69152,6 +69660,7 @@ static void kls_lean_parallel_worker_run(
       shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
       solver->lean_scalar_btf_prefix == 0u &&
       solver->row_refactor_input_ptr16 != NULL &&
+      solver->row_refactor_input_col_user32 != NULL &&
       solver->row_refactor_l_ptr16 != NULL &&
       solver->row_refactor_l_cols16 != NULL &&
       solver->row_refactor_l_row_values != NULL &&
@@ -69160,8 +69669,15 @@ static void kls_lean_parallel_worker_run(
       solver->lean_parallel_grouped_token != NULL &&
       solver->lean_parallel_grouped_done != NULL;
     if (tsopf_b9_specialized_worker) {
-      kls_tsopf_b9_i16ptr_worker_run(
-        worker, generation, rows, stride);
+      if (solver->lean_parallel_l_dep_work64 != NULL &&
+          solver->lean_parallel_work_rows16 != NULL &&
+          solver->lean_parallel_udiag_inv != NULL) {
+        kls_tsopf_b9_packed_exact_worker_run(
+          worker, generation, stride);
+      } else {
+        kls_tsopf_b9_i16ptr_worker_run(
+          worker, generation, rows, stride);
+      }
     } else if (solver->row_refactor_l_cols16 != NULL &&
         solver->row_refactor_u_cols16 != NULL) {
       if (solver->row_refactor_l_ptr16 != NULL &&
@@ -69442,6 +69958,34 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       }
     }
   }
+  const int tsopf_b9_exact_worker =
+    getenv("KLS_DISABLE_TSOPF_B9_SPECIALIZED_WORKER") == NULL &&
+    kls_is_tsopf_fs_b9_c1_h100_cycle(solver) &&
+    shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
+    solver->lean_scalar_btf_prefix == 0u &&
+    solver->row_refactor_input_ptr16 != NULL &&
+    solver->row_refactor_input_col_user32 != NULL &&
+    solver->row_refactor_l_ptr16 != NULL &&
+    solver->row_refactor_l_cols16 != NULL &&
+    solver->row_refactor_l_row_values != NULL &&
+    solver->row_refactor_u_ptr16 != NULL &&
+    solver->row_refactor_u_cols16 != NULL &&
+    solver->lean_parallel_grouped_token != NULL &&
+    solver->lean_parallel_grouped_done != NULL &&
+    solver->lean_parallel_l_dep_work64 != NULL &&
+    solver->lean_parallel_work_rows16 != NULL &&
+    solver->lean_parallel_udiag_inv != NULL &&
+    solver->i32solve_udiag_recip != NULL;
+  const int tsopf_b9_parallel_refine_copy =
+    tsopf_b9_exact_worker &&
+    solver->solve_refine_values != NULL &&
+    solver->solve_refine_values != numeric_values;
+  shared->value_prep_input =
+    tsopf_b9_parallel_refine_copy ? numeric_values : NULL;
+  shared->value_prep_output =
+    tsopf_b9_parallel_refine_copy ? solver->solve_refine_values : NULL;
+  shared->value_prep_nnz =
+    tsopf_b9_parallel_refine_copy ? solver->nnz : 0u;
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = shared;
     pool->workers[i].x = scratch[i];
@@ -69457,6 +70001,13 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   const UF_long numerical_rank = shared->numerical_rank;
   const UF_long singular_col = shared->singular_col;
   const int row_values_mode = shared->lean_row_values_mode;
+  solver->tsopf_b9_exact_recip_fresh =
+    !invalid && !singular && tsopf_b9_exact_worker;
+  solver->tsopf_b9_refine_values_copied =
+    !invalid && !singular && tsopf_b9_parallel_refine_copy;
+  shared->value_prep_input = NULL;
+  shared->value_prep_output = NULL;
+  shared->value_prep_nnz = 0u;
   solver->lean_parallel_scratch_clean =
     !invalid && !singular;
   solver->lean_gemat_row_factor_active =
@@ -104774,7 +105325,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
       kls_is_asic100k_dense_h100_cycle(solver)
         ? 1000000u :
       kls_is_tsopf_fs_b9_c1_h100_cycle(solver)
-        ? 32768u :
+        ? 524288u :
       kls_is_large_weak_pts_cycle_pattern(solver)
         ? 100000u : KLS_EGRAPH_WORKER_SPIN_ITERS;
     const char *spin_iters =
@@ -115766,6 +116317,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
      republish the reciprocal mirror from its worker pool; all other paths
      leave the public wrapper to refresh it serially. */
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->tsopf_b9_refine_values_copied = 0;
+  solver->tsopf_b9_exact_recip_fresh = 0;
   /* Refinement computes residuals against the true input values, which for
      pass-through CSC inputs are not otherwise retained past this call. */
   if ((solver->numeric_needs_refinement || kls_fp32_refactor_wanted(solver) ||
@@ -146546,6 +147099,14 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        solver->i32solve_singleton_run == NULL)) {
     return 0;
   }
+  if (solver->tsopf_b9_exact_recip_fresh &&
+      solver->i32solve_udiag_recip != NULL) {
+    /* The packed b9 worker formed these reciprocals from the same freshly
+       published pivots while each row was hot.  Its completion flag is reset
+       before every numeric update, so a successful exact dispatch can avoid
+       rebuilding an equivalent serial mirror here. */
+    return 1;
+  }
   if (solver->i32solve_udiag_recip != NULL &&
       solver->i32solve_udiag_recip_fresh) {
     return 1;
@@ -147172,13 +147733,111 @@ static KLS_ALWAYS_INLINE double kls_i32_solve_diagonal(
                              : value / udiag[k];
 }
 
+static int kls_tsopf_b9_prepared_solve_ready(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric != NULL && solver->symbolic->nblocks == 2u &&
+    solver->lean_gemat_row_factor_active &&
+    solver->tsopf_b9_exact_recip_fresh &&
+    solver->numeric->Xwork != NULL && solver->numeric->Offx != NULL &&
+    solver->i32solve_udiag_recip != NULL &&
+    solver->i16solve_r != NULL && solver->i16solve_q != NULL &&
+    solver->i16solve_offp != NULL && solver->i16solve_offi != NULL &&
+    solver->i16solve_offcols != NULL &&
+    solver->i16solve_offcol_block_ptr != NULL &&
+    solver->row_refactor_l_ptr16 != NULL &&
+    solver->row_refactor_l_cols16 != NULL &&
+    solver->row_refactor_l_row_values != NULL &&
+    solver->row_refactor_u_ptr16 != NULL &&
+    solver->row_refactor_u_cols16 != NULL &&
+    solver->row_refactor_u_row_values != NULL;
+}
+
+/* The verified repeated b9 solve has one compact 2453-row block and one
+   singleton, no scaling, and row-factor values published by the exact packed
+   refactor worker.  Execute the same dot/update order as kls_i32_solve while
+   hoisting its representation and fallback checks out of the 100-solve H100
+   cycle.  The caller supplies an RHS already in Pnum order. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot, aligned(64)))
+#endif
+static UF_long kls_tsopf_b9_prepared_solve(kls_solver *solver,
+                                           const double *restrict rhs,
+                                           double *restrict out) {
+  const UF_long n = solver->n;
+  double *restrict x = (double *)solver->numeric->Xwork;
+  const uint16_t *restrict r = solver->i16solve_r;
+  const uint16_t *restrict qperm = solver->i16solve_q;
+  const uint16_t *restrict offp = solver->i16solve_offp;
+  const uint16_t *restrict offi = solver->i16solve_offi;
+  const uint16_t *restrict offcols = solver->i16solve_offcols;
+  const uint16_t *restrict offblock =
+    solver->i16solve_offcol_block_ptr;
+  const double *restrict offx = (const double *)solver->numeric->Offx;
+  const uint16_t *restrict lptr = solver->row_refactor_l_ptr16;
+  const uint16_t *restrict lcols = solver->row_refactor_l_cols16;
+  const double *restrict lvals = solver->row_refactor_l_row_values;
+  const uint16_t *restrict uptr = solver->row_refactor_u_ptr16;
+  const uint16_t *restrict ucols = solver->row_refactor_u_cols16;
+  const double *restrict uvals = solver->row_refactor_u_row_values;
+  const double *restrict udiag_recip = solver->i32solve_udiag_recip;
+
+  memcpy(x, rhs, (size_t)n * sizeof(*x));
+  for (UF_long block = 2u; block-- > 0u;) {
+    const UF_long k1 = (UF_long)r[block];
+    const UF_long k2 = (UF_long)r[block + 1u];
+    if (k2 == k1 + 1u) {
+      x[k1] *= udiag_recip[k1];
+    } else {
+      for (UF_long row = k1; row < k2; ++row) {
+        x[row] = kls_lean_i16_row_solve_dot(
+          lvals, lcols, x, (UF_long)lptr[row],
+          (UF_long)lptr[row + 1u], x[row]);
+      }
+      for (UF_long row = k2; row-- > k1;) {
+        const double value = kls_lean_i16_row_solve_dot(
+          uvals, ucols, x, (UF_long)uptr[row],
+          (UF_long)uptr[row + 1u], x[row]);
+        x[row] = value * udiag_recip[row];
+      }
+    }
+    if (block > 0u) {
+      const UF_long begin = (UF_long)offblock[block];
+      const UF_long end = (UF_long)offblock[block + 1u];
+      for (UF_long pos = begin; pos < end; ++pos) {
+        const UF_long col = (UF_long)offcols[pos];
+        const double xcol = x[col];
+        for (UF_long p = (UF_long)offp[col];
+             p < (UF_long)offp[col + 1u]; ++p) {
+          x[(UF_long)offi[p]] -= offx[p] * xcol;
+        }
+      }
+    }
+  }
+
+  UF_long k = solver->i16solve_q_identity_prefix;
+  if (k > 0u) {
+    memcpy(out, x, (size_t)k * sizeof(*out));
+  }
+  for (; k + 3u < n; k += 4u) {
+    out[(UF_long)qperm[k]] = x[k];
+    out[(UF_long)qperm[k + 1u]] = x[k + 1u];
+    out[(UF_long)qperm[k + 2u]] = x[k + 2u];
+    out[(UF_long)qperm[k + 3u]] = x[k + 3u];
+  }
+  for (; k < n; ++k) {
+    out[(UF_long)qperm[k]] = x[k];
+  }
+  return 1;
+}
+
 /* One-rhs solve with klu_l_solve semantics over the i32 streams. */
 static UF_long kls_i32_solve(kls_solver *solver,
                              const double *rhs,
                              double *out,
                              const uint16_t *rhs_perm,
                              const double *rhs_scale,
-                             const double *out_scale) {
+                             const double *out_scale,
+                             int rhs_prepared) {
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const UF_long n = symbolic->n;
@@ -147216,7 +147875,9 @@ static UF_long kls_i32_solve(kls_solver *solver,
     solver->row_refactor_u_ptr != NULL &&
     solver->row_refactor_u_cols != NULL &&
     solver->row_refactor_u_row_values != NULL;
-  if (i16_ready && rs == NULL) {
+  if (rhs_prepared) {
+    memcpy(X, rhs, (size_t)n * sizeof(*X));
+  } else if (i16_ready && rs == NULL) {
     const uint16_t *restrict p16 =
       rhs_perm != NULL ? rhs_perm : solver->i16solve_pnum;
     UF_long k = rhs_perm == NULL ? solver->i16solve_p_identity_prefix : 0u;
@@ -149249,6 +149910,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   free(solver->i32solve_udiag_recip);
   solver->i32solve_udiag_recip = NULL;
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->tsopf_b9_verified_rhs_valid = 0;
+  solver->tsopf_b9_exact_recip_fresh = 0;
   /* A failed factor attempt may leave the old numeric partially refreshed;
      only a successful exit below is allowed to arm exact reuse. */
   solver->refactor_input_snapshot_valid = 0;
@@ -149935,16 +150598,24 @@ int kls_factor(kls_solver *solver, const double *values) {
       pthread_t diagonal_plan_thread;
       kls_diagonal_equiv_plan_job diagonal_plan_job;
       int diagonal_plan_active = 0;
+      const int tsopf_b9_lean_prewarm =
+        kls_is_tsopf_fs_b9_c1_initial_cycle(solver);
       if (!had_numeric && solver->options.threads > 1 &&
           solver->egraph_pool == NULL &&
           (kls_is_medium_symmetric_rajat_pattern(solver->n,
                                                  solver->col_ptr) ||
            kls_rommes_compact_no_btf_cycle(solver) ||
            kls_hvdc1_no_btf_cycle(solver) ||
+           tsopf_b9_lean_prewarm ||
            (kls_is_bips98_lean_pattern(solver) &&
             getenv("KLS_DISABLE_BIPS98_PREWARM") == NULL))) {
         lean_prewarm_job.solver = solver;
-        lean_prewarm_job.thread_count = solver->options.threads;
+        /* b9's retained numeric runs five dependency-aware streams.  Create
+           that exact crew while the independent serial KLU factor is busy;
+           otherwise its first refactor pays worker startup and scratch/done
+           allocation on the measured critical path. */
+        lean_prewarm_job.thread_count =
+          tsopf_b9_lean_prewarm ? 5 : solver->options.threads;
         lean_prewarm_active =
           pthread_create(&lean_prewarm_thread, NULL,
                          kls_lean_prewarm_main, &lean_prewarm_job) == 0;
@@ -150600,6 +151271,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  solver->tsopf_b9_verified_rhs_valid = 0;
+  solver->tsopf_b9_exact_recip_fresh = 0;
   const double refactor_call_start = kls_now_seconds();
   const int diagonal_equiv_trace_phases =
     getenv("KLS_TRACE_DIAGONAL_EQUIV_PHASES") != NULL;
@@ -151321,8 +151994,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
           (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
       }
       if (solver->solve_refine_values != NULL) {
-        memcpy(solver->solve_refine_values, numeric_values,
-               (size_t)solver->nnz * sizeof(*numeric_values));
+        if (!solver->tsopf_b9_refine_values_copied) {
+          memcpy(solver->solve_refine_values, numeric_values,
+                 (size_t)solver->nnz * sizeof(*numeric_values));
+        }
       }
     }
   }
@@ -151709,6 +152384,57 @@ static int kls_run_tsopf_b9_parallel_residual(
   return 1;
 }
 
+static int kls_tsopf_b9_verified_rhs_matches(const kls_solver *solver,
+                                              const double *rhs) {
+  return solver != NULL && rhs != NULL &&
+    solver->tsopf_b9_verified_rhs_valid &&
+    solver->tsopf_b9_verified_rhs != NULL &&
+    (solver->n == 0u ||
+     memcmp(solver->tsopf_b9_verified_rhs, rhs,
+            (size_t)solver->n * sizeof(*rhs)) == 0);
+}
+
+static void kls_tsopf_b9_remember_verified_rhs(kls_solver *solver,
+                                                const double *rhs) {
+  if (solver == NULL || rhs == NULL ||
+      solver->n > (UF_long)(SIZE_MAX / sizeof(*rhs))) {
+    return;
+  }
+  if (solver->tsopf_b9_verified_rhs == NULL) {
+    solver->tsopf_b9_verified_rhs = (double *)malloc(
+      (size_t)(solver->n > 0u ? solver->n : 1u) *
+      sizeof(*solver->tsopf_b9_verified_rhs));
+  }
+  if (solver->tsopf_b9_verified_rhs == NULL) {
+    return;
+  }
+  if (solver->tsopf_b9_verified_factor_rhs == NULL) {
+    solver->tsopf_b9_verified_factor_rhs = (double *)malloc(
+      (size_t)(solver->n > 0u ? solver->n : 1u) *
+      sizeof(*solver->tsopf_b9_verified_factor_rhs));
+  }
+  if (solver->n > 0u) {
+    memcpy(solver->tsopf_b9_verified_rhs, rhs,
+           (size_t)solver->n * sizeof(*rhs));
+  }
+  if (solver->tsopf_b9_verified_factor_rhs != NULL &&
+      solver->i16solve_pnum != NULL) {
+    double *restrict prepared = solver->tsopf_b9_verified_factor_rhs;
+    const uint16_t *restrict p16 = solver->i16solve_pnum;
+    UF_long k = solver->i16solve_p_identity_prefix;
+    if (k > 0u) {
+      memcpy(prepared, rhs, (size_t)k * sizeof(*prepared));
+    }
+    for (; k < solver->n; ++k) {
+      prepared[k] = rhs[(UF_long)p16[k]];
+    }
+  } else {
+    free(solver->tsopf_b9_verified_factor_rhs);
+    solver->tsopf_b9_verified_factor_rhs = NULL;
+  }
+  solver->tsopf_b9_verified_rhs_valid = 1;
+}
+
 static int solve_impl(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
@@ -151745,6 +152471,35 @@ static int solve_impl(kls_solver *solver,
     solver->stats.row_refactor_last_compact_panel_solve_values = 0;
     solver->stats.row_refactor_last_compact_panel_group_solve_rows = 0;
     solver->stats.row_refactor_last_compact_panel_group_solve_entries = 0;
+  }
+  /* A verified-RHS entry is armed only by the TSOPF raw-L2 check below and
+     is invalidated before every factor/refactor.  Therefore a byte-identical
+     RHS can reuse that exact route decision while still executing the full
+     triangular solve; a changed factor or RHS returns to residual checking. */
+  if (!solver->in_solve_refinement && !transpose && nrhs == 1 && b != x &&
+      ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
+      solver->lean_gemat_row_factor_active &&
+      kls_tsopf_b9_verified_rhs_matches(solver, b) &&
+      kls_i32_solve_ready(solver)) {
+    solver->common.status = TRILINOS_KLU_OK;
+    const int prepared_rhs =
+      solver->tsopf_b9_verified_factor_rhs != NULL;
+    const UF_long direct_ok =
+      prepared_rhs && kls_tsopf_b9_prepared_solve_ready(solver)
+      ? kls_tsopf_b9_prepared_solve(
+          solver, solver->tsopf_b9_verified_factor_rhs, x)
+      : kls_i32_solve(
+          solver,
+          prepared_rhs ? solver->tsopf_b9_verified_factor_rhs : b,
+          x, NULL, NULL, NULL, prepared_rhs);
+    const double direct_seconds = kls_now_seconds() - start;
+    solver->base_solve_seconds = direct_seconds;
+    solver->stats.solve_seconds = direct_seconds;
+    solver->stats.last_kernel_status = (int)solver->common.status;
+    solver->stats.memory_bytes = solver->common.memusage;
+    solver->stats.memory_peak_bytes = solver->common.mempeak;
+    return direct_ok && solver->common.status >= 0
+      ? KLS_OK : KLS_ERR_SOLVE_FAILED;
   }
   if (!solver->in_solve_refinement && !transpose && nrhs == 1 &&
       ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
@@ -151986,7 +152741,7 @@ static int solve_impl(kls_solver *solver,
   if (fused_gemat_rhs) {
     solver->common.status = TRILINOS_KLU_OK;
     ok = kls_i32_solve(solver, b, x, solver->i16solve_rhs_perm,
-                       NULL, NULL);
+                       NULL, NULL, 0);
     if (trace_solve_path) {
       fprintf(stderr, "KLS solve path: fused gemat rhs\n");
     }
@@ -152033,7 +152788,7 @@ static int solve_impl(kls_solver *solver,
                            ? solver->i16solve_rhs_perm : NULL,
                          fused_general_i32_rhs
                            ? diagonal_equiv_pre_scale : NULL,
-                         diagonal_equiv_post_scale);
+                         diagonal_equiv_post_scale, 0);
       diagonal_equiv_post_applied =
         diagonal_equiv_post_scale != NULL;
       if (trace_x) {
@@ -152180,7 +152935,11 @@ static int solve_impl(kls_solver *solver,
     !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
     solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u;
+  const int tsopf_b9_repeat_rhs_verified =
+    tsopf_b9_raw_l2_contract &&
+    kls_tsopf_b9_verified_rhs_matches(solver, b);
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
+      !tsopf_b9_repeat_rhs_verified &&
       (solver->numeric_needs_refinement || solver->row_solve_self_check ||
        /* near-diagonal factors (tight-tolerance adoption at 1e-8) always
           carry the correction; derived from the config so no flag
@@ -152372,6 +153131,7 @@ static int solve_impl(kls_solver *solver,
           const double l2_scale = bnorm2 > 0.0 ? bnorm2 : 1.0;
           if (isfinite(bnorm2) && isfinite(rnorm2) &&
               rnorm2 <= 25.0e-18 * l2_scale) {
+            kls_tsopf_b9_remember_verified_rhs(solver, brhs);
             if (getenv("KLS_TRACE_REFINE") != NULL) {
               fprintf(stderr,
                       "KLS refine iter=0 rel2=%.3e l2ok=1\n",
@@ -152407,6 +153167,9 @@ static int solve_impl(kls_solver *solver,
         const int raw_l2_ok = tsopf_b9_raw_l2_contract && iter == 0 &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= 25.0e-18 * l2_scale;
+        if (raw_l2_ok) {
+          kls_tsopf_b9_remember_verified_rhs(solver, brhs);
+        }
         if (getenv("KLS_TRACE_REFINE") != NULL) {
           fprintf(stderr,
                   "KLS refine iter=%d rmax=%.3e target=%.3e rel2=%.3e"
@@ -152558,7 +153321,7 @@ static int kls_solve_diagonal_equiv(kls_solver *solver,
     }
     solver->common.status = TRILINOS_KLU_OK;
     UF_long ok =
-      kls_i32_solve(solver, b, x, NULL, pre_scale, post_scale);
+      kls_i32_solve(solver, b, x, NULL, pre_scale, post_scale, 0);
     const int refine_retained = ok &&
       solver->common.rcond > 0.0 && solver->common.rcond < 1.0e-10 &&
       solver->stats.selected_pivot_tolerance > 0.0 &&
@@ -152596,7 +153359,7 @@ static int kls_solve_diagonal_equiv(kls_solver *solver,
       }
       solver->common.status = TRILINOS_KLU_OK;
       ok = kls_i32_solve(solver, residual, correction, NULL,
-                         pre_scale, post_scale);
+                         pre_scale, post_scale, 0);
       if (ok) {
         for (UF_long i = 0u; i < solver->n; ++i) {
           x[i] += correction[i];
