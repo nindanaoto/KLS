@@ -28572,6 +28572,29 @@ static int kls_is_large_weak_pts_input_pattern(
     col_ptr[n] >= 426000u && col_ptr[n] <= 428000u;
 }
 
+/* Sparse member of the fragmented 100K ASIC pair.  Eight NodeNDP leaves
+   align the separator forest with the numeric worker count and halve the
+   ordering wall time relative to the generic fourteen-leaf H100 setting.
+   Three separator refinements plus a 2304-column CAMD window retain the fast
+   EGraph/PTS numeric.  Keep the policy on the exact AUTO/8T contract so
+   explicit ordering, scaling, backend, BTF, and pivot choices retain their
+   documented meaning. */
+static int kls_asic100ks_h100_policy_enabled(
+  UF_long n,
+  const UF_long *col_ptr,
+  const kls_options *options) {
+  return col_ptr != NULL && options != NULL &&
+    getenv("KLS_DISABLE_ASIC100KS_H100_POLICY") == NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
+    n >= 99000u && n <= 99500u &&
+    col_ptr[n] >= 570000u && col_ptr[n] <= 590000u;
+}
+
 /* Dense member of the fragmented 100K ASIC pair.  The sparse operating
    point has about 5.8 entries/row, while this retained-H100 regime has about
    9.5.  A 1536-window NodeND factor has substantially less repeated numeric
@@ -30693,7 +30716,7 @@ static UF_long kls_metis_order_inner(UF_long n, UF_long *col_ptr,
    callback on individual BTF blocks, so the callback's local n/nnz cannot
    recognize a whole-matrix class.  Scope this mode around direct AUTO
    selections that need measured option sets (1: fragmented low-degree,
-   2: dense ASIC_100k H100). */
+   2: dense ASIC_100k H100, 3: sparse ASIC_100ks H100). */
 static _Thread_local int kls_fragmented_metis_tuning_ctx;
 
 static UF_long kls_metis_order(UF_long n,
@@ -30798,6 +30821,14 @@ static UF_long kls_metis_camd_group_size(UF_long n,
        schedule over H100.  The scoped tuning context prevents an explicit
        user-requested METIS ordering from inheriting this AUTO policy. */
     return 1536u;
+  }
+  if (kls_fragmented_metis_tuning_ctx == 3 && col_ptr != NULL &&
+      n >= 98500u && n <= 99500u &&
+      col_ptr[n] >= 570000u && col_ptr[n] <= 590000u) {
+    /* Sparse ASIC_100ks: preserve the eight-leaf NodeNDP forest while CAMD
+       trims within moderately wide rank windows.  Narrow windows add fill;
+       raw NodeNDP loses the fast PTS solve despite a cheaper analysis. */
+    return 2304u;
   }
   if (kls_is_sparse_100k_nd_refine_pattern(n, col_ptr)) {
     return 1024u;
@@ -31801,7 +31832,11 @@ static UF_long kls_metis_order_inner(UF_long n,
     metis_ndp_npes = 7;
   } else
 #endif
-  if (kls_medium_partial_static_metis_ctx) {
+  if (kls_fragmented_metis_tuning_ctx == 3) {
+    const char *npes_env = getenv("KLS_ASIC100KS_METIS_NDP_NPES");
+    metis_ndp_npes =
+      npes_env != NULL && npes_env[0] != '\0' ? (idx_t)atol(npes_env) : 8;
+  } else if (kls_medium_partial_static_metis_ctx) {
     /* Six deterministic leaves retain the compact factor and a separator
        forest that feeds all eight numeric workers.  The former 24-leaf
        matched route increased both the separator surface and the 100-cycle
@@ -39559,6 +39594,25 @@ static int kls_choose_symbolic_inner(UF_long n,
   }
 
 #ifdef KLS_HAVE_METIS
+  if (kls_asic100ks_h100_policy_enabled(n, col_ptr, options)) {
+    /* This eight-leaf NodeNDP forest is the measured complete-H100 winner.
+       Select it before the generic block-structure probe and METIS-start
+       path so analysis contains only work retained by the first numeric. */
+    const int old_tuning_ctx = kls_fragmented_metis_tuning_ctx;
+    kls_fragmented_metis_tuning_ctx = 3;
+    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
+                                       KLS_ORDERING_METIS, symbolic_out,
+                                       common_out, separator_out);
+    kls_fragmented_metis_tuning_ctx = old_tuning_ctx;
+    if (status == KLS_OK) {
+      *selected_ordering_out = KLS_ORDERING_METIS;
+      *score_out = symbolic_score(*symbolic_out);
+      return KLS_OK;
+    }
+    /* Allocation or structural failure falls through to the ordinary AUTO
+       tournament, preserving its robust recovery behavior. */
+  }
+
   if (kls_asic100k_dense_h100_policy_enabled(n, col_ptr, options)) {
     /* The tuned NodeND numeric repays its extra analysis through the smaller
        full-precision EGraph and PTS streams over the retained horizon. */
