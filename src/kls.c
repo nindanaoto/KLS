@@ -69906,6 +69906,15 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       solver->i16solve_loff != NULL && solver->i16solve_uoff != NULL &&
       getenv("KLS_DISABLE_GENERIC_LEAN_ROW_FACTOR") == NULL)) &&
     getenv("KLS_DISABLE_GEMAT_ROW_FACTOR") == NULL;
+  if (shared->lean_row_values_mode &&
+      kls_is_rajat27_fragmented_scaled_pattern(solver) &&
+      getenv("KLS_DISABLE_RAJAT27_DEFER_VALUE_SCATTER") == NULL) {
+    /* The retained solve consumes the flat row mirrors directly.  Avoid the
+       duplicate random stores through LU pointer mirrors on every numeric
+       generation; any later column-path consumer already publishes dirty
+       row values through kls_publish_row_refactor_values first. */
+    shared->row_refactor_defer_value_scatter = 1;
+  }
   shared->lean_refactor_mode = 1;
   shared->row_refactor_mode = 0;
   shared->row_solve_mode = 0;
