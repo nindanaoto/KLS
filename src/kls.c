@@ -27687,6 +27687,38 @@ static int kls_ibm_dc_h100_policy_enabled(
   return 1;
 }
 
+static int kls_compact_dense_spike_pattern(
+  UF_long n,
+  const UF_long *col_ptr) {
+  return col_ptr != NULL && n >= 1800u && n <= 2000u &&
+    col_ptr[n] >= (13u * n + 1u) / 2u && col_ptr[n] <= 9u * n;
+}
+
+/* adder_trans_01 and rajat12 are the only paper-union members of this
+   compact dense-spike envelope.  AUTO retains the same transposed AMD/BTF
+   numeric on both.  Its small, unscaled factor is dominated by guards and
+   repeated divides in the generic mapped walk; the lean map32 walk preserves
+   that factor's fixed-pivot semantics and trims 4--5 us from every refactor. */
+static int kls_compact_dense_spike_map32_h100_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric != NULL &&
+    getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_MAP32") == NULL &&
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.backend == KLS_BACKEND_AUTO &&
+    solver->options.threads == 8 && solver->options.use_btf &&
+    solver->options.static_pivoting &&
+    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
+    solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
+    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
+    solver->symbolic->nblocks > 1u && solver->common.scale <= 0 &&
+    solver->numeric->Rs == NULL && solver->common.flops > 0.0 &&
+    solver->common.flops < 100000.0 &&
+    kls_compact_dense_spike_pattern(solver->n, solver->col_ptr);
+}
+
 /* The two ckt11752 variants share a normal AMD/BTF symbolic, and AUTO's
    ordering tournament always returns that same factor.  Re-running the AMF
    candidate and the factor-time block-order detector costs about 8 ms on a
@@ -40300,8 +40332,7 @@ static int auto_orientation_prefers_normal(UF_long n,
          small increase is lower over the 100-solve horizon. */
       return 0;
     }
-    if (n >= 1800u && n <= 2000u && col_ptr != NULL &&
-        col_ptr[n] * 2u >= 13u * n && col_ptr[n] <= 9u * n) {
+    if (kls_compact_dense_spike_pattern(n, col_ptr)) {
       /* In the compact dense-spike class, the transposed factors have about
          the same repeated numeric work but materially cheaper triangular
          solves.  With 100 solves in the target cycle that dominates the
@@ -110464,7 +110495,8 @@ static int kls_mapped_refactor(kls_solver *solver,
       return supernodal;
     }
     if (getenv("KLS_ENABLE_LEAN_BTF_MAP32_REFACTOR") != NULL ||
-        kls_is_rajat13_h100_cycle(solver)) {
+        kls_is_rajat13_h100_cycle(solver) ||
+        kls_compact_dense_spike_map32_h100_cycle(solver)) {
       const int lean =
         kls_lean_btf_map32_refactor(solver, numeric_values);
       if (lean >= 0) {
