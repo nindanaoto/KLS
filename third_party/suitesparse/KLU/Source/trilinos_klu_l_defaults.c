@@ -71,5 +71,9 @@ Int TRILINOS_KLU_defaults
     Common->kls_dense_panels = 0 ;
     Common->kls_static_perturb = 0 ;
     Common->kls_perturb_count = 0 ;
+    Common->kls_zero_pivot_replacement = 0 ;
+    Common->kls_zero_pivots = NULL ;
+    Common->kls_zero_pivot_capacity = 0 ;
+    Common->kls_zero_pivot_count = 0 ;
     return (TRUE) ;
 }

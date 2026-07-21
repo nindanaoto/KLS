@@ -15695,6 +15695,131 @@ static int test_kls_first_parallel_pivoted_btf_fallback(void) {
   return ok;
 }
 
+static int test_consistent_singular_rank_completion(void) {
+  const int32_t ap[] = {0, 2, 4, 6, 8};
+  const int32_t ai[] = {0, 1, 0, 1, 2, 3, 2, 3};
+  const double ax0[] = {1.0, 1.0, 1.0, 1.0,
+                        2.0, 2.0, 2.0, 2.0};
+  const double ax1[] = {2.0, 2.0, 3.0, 3.0,
+                        4.0, 4.0, 5.0, 5.0};
+  const double b0[] = {2.0, 2.0, 4.0, 4.0};
+  const double b1[] = {5.0, 5.0, 9.0, 9.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+
+  const char *saved_enable_value =
+    getenv("KLS_ENABLE_SINGULAR_COMPLETION");
+  char *saved_enable = saved_enable_value != NULL
+    ? strdup(saved_enable_value) : NULL;
+  const int had_enable = saved_enable_value != NULL;
+  const char *saved_disable_value =
+    getenv("KLS_DISABLE_SINGULAR_COMPLETION");
+  char *saved_disable = saved_disable_value != NULL
+    ? strdup(saved_disable_value) : NULL;
+  const int had_disable = saved_disable_value != NULL;
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first = saved_first_value != NULL
+    ? strdup(saved_first_value) : NULL;
+  const int had_first = saved_first_value != NULL;
+
+  int ok = 1;
+  if ((had_enable && saved_enable == NULL) ||
+      (had_disable && saved_disable == NULL) ||
+      (had_first && saved_first == NULL)) {
+    fprintf(stderr, "failed to save singular-completion environment\n");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_SINGULAR_COMPLETION", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_SINGULAR_COMPLETION");
+    ok = 0;
+  }
+  if (ok && unsetenv("KLS_DISABLE_SINGULAR_COMPLETION") != 0) {
+    perror("unsetenv KLS_DISABLE_SINGULAR_COMPLETION");
+    ok = 0;
+  }
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
+    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR=0");
+    ok = 0;
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.use_btf = 1;
+  options.scale = 0;
+  options.static_pivoting = 0;
+  options.threads = 1;
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create singular completion")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, 4, ap, ai, 0, &options),
+                        "analyze singular completion")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor singular completion")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b0, 0, x, 0),
+                        "solve singular completion")) {
+    ok = 0;
+  }
+  for (int32_t generation = 0; ok && generation < 2; ++generation) {
+    const double *ax = generation == 0 ? ax0 : ax1;
+    const double *b = generation == 0 ? b0 : b1;
+    double max_rhs = 0.0;
+    double max_residual = 0.0;
+    for (int32_t row = 0; row < 4; ++row) {
+      double residual = -b[row];
+      max_rhs = fmax(max_rhs, fabs(b[row]));
+      for (int32_t col = 0; col < 4; ++col) {
+        for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+          if (ai[p] == row) {
+            residual += ax[p] * x[col];
+          }
+        }
+      }
+      max_residual = fmax(max_residual, fabs(residual));
+    }
+    if (max_residual / fmax(max_rhs, 1.0) > 1.0e-10) {
+      fprintf(stderr,
+              "singular completion residual too large at generation %d:"
+              " %.17g\n",
+              generation, max_residual / fmax(max_rhs, 1.0));
+      ok = 0;
+    }
+    if (generation == 0 && ok) {
+      if (!require_ok(kls_refactor(solver, ax1),
+                      "refactor singular completion") ||
+          !require_ok(kls_solve(solver, 1, b1, 0, x, 0),
+                      "solve refactored singular completion")) {
+        ok = 0;
+      }
+    }
+  }
+
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_ENABLE_SINGULAR_COMPLETION", had_enable,
+                         saved_enable != NULL ? saved_enable : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_SINGULAR_COMPLETION", had_disable,
+                         saved_disable != NULL ? saved_disable : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_first,
+                         saved_first != NULL ? saved_first : "")) {
+    ok = 0;
+  }
+  free(saved_enable);
+  free(saved_disable);
+  free(saved_first);
+  return ok;
+}
+
 static int test_parallel_btf_row_supernode_update(void) {
   const int32_t ap[] = {0, 3, 6, 9, 10};
   const int32_t ai[] = {
@@ -17421,6 +17546,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_parallel_pivoted_btf_fallback()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_consistent_singular_rank_completion()) {
     return EXIT_FAILURE;
   }
   if (!test_row_solve_from_numeric_after_klu_first()) {

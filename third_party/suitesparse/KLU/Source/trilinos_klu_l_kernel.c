@@ -453,6 +453,7 @@ static Int lpivot
     Entry x, pivot, *Lx ;
     double abs_pivot, xabs ;
     Int p, i, ppivrow, pdiag, pivrow, *Li, last_row_index, firstrow, len ;
+    Int kls_zero_replaced = FALSE ;
 
     pivrow = TRILINOS_KLU_EMPTY ;
     if (Llen [k] == 0)
@@ -476,10 +477,16 @@ static Int lpivot
 	ASSERT (pivrow >= 0 && pivrow < n) ;
 	CLEAR (pivot) ;
 	*p_pivrow = pivrow ;
+	if (Common->kls_zero_pivot_replacement > 0)
+	{
+	    pivot = Common->kls_zero_pivot_replacement ;
+	    kls_zero_replaced = TRUE ;
+	}
 	*p_pivot = pivot ;
-	*p_abs_pivot = 0 ;
+	*p_abs_pivot = kls_zero_replaced
+	    ? Common->kls_zero_pivot_replacement : 0 ;
 	*p_firstrow = firstrow ;
-	return (FALSE) ;
+	return (kls_zero_replaced ? 2 : FALSE) ;
     }
 
     pdiag = TRILINOS_KLU_EMPTY ;
@@ -572,6 +579,12 @@ static Int lpivot
     }
     CLEAR (X [last_row_index]) ;
 
+    if (IS_ZERO (pivot) && Common->kls_zero_pivot_replacement > 0)
+    {
+	pivot = Common->kls_zero_pivot_replacement ;
+	abs_pivot = Common->kls_zero_pivot_replacement ;
+	kls_zero_replaced = TRUE ;
+    }
     if (Common->kls_static_perturb > 0 && !IS_ZERO (pivot) &&
 	abs_pivot < Common->kls_static_perturb)
     {
@@ -601,7 +614,7 @@ static Int lpivot
 	DIV (Lx [p], Lx [p], pivot) ;
     }
 
-    return (TRUE) ;
+    return (kls_zero_replaced ? 2 : TRUE) ;
 }
 
 
@@ -1340,8 +1353,20 @@ Int KLS_KLU_KERNEL_STEP
 	return (0) ;
     }
 
-    if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU, Lip,
-		Llen, k, n, Pinv, &S->firstrow, Common))
+    {
+    const Int kls_pivot_status = lpivot (
+	diagrow, &pivrow, &pivot, &abs_pivot, S->tol, S->X, LU, Lip,
+	Llen, k, n, Pinv, &S->firstrow, Common) ;
+    if (kls_pivot_status == 2)
+    {
+	const Int slot = Common->kls_zero_pivot_count++ ;
+	if (Common->kls_zero_pivots != NULL &&
+	    slot < Common->kls_zero_pivot_capacity)
+	{
+	    Common->kls_zero_pivots [slot] = k + S->k1 ;
+	}
+    }
+    if (!kls_pivot_status)
     {
 	Common->status = TRILINOS_KLU_SINGULAR ;
 	if (Common->numerical_rank == TRILINOS_KLU_EMPTY)
@@ -1358,6 +1383,7 @@ Int KLS_KLU_KERNEL_STEP
 	{
 	    return (1) ;
 	}
+    }
     }
 
     S->Uip [k] = Lip [k] + UNITS (Int, Llen [k]) + UNITS (Entry, Llen [k]) ;

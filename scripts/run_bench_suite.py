@@ -73,6 +73,8 @@ def append_solver_options(cmd: list[str], args: argparse.Namespace) -> None:
         cmd.append("--no-fast-factor")
     if args.no_static_pivoting:
         cmd.append("--no-static-pivoting")
+    if args.no_transpose_solve:
+        cmd.append("--no-transpose-solve")
     if args.pivot_tol is not None:
         cmd.extend(["--pivot-tol", str(args.pivot_tol)])
     if args.row_refactor != "env":
@@ -341,6 +343,7 @@ def main() -> int:
     parser.add_argument("--no-btf", action="store_true")
     parser.add_argument("--no-fast-factor", action="store_true")
     parser.add_argument("--no-static-pivoting", action="store_true")
+    parser.add_argument("--no-transpose-solve", action="store_true")
     parser.add_argument("--require-metis", action="store_true")
     parser.add_argument("--require-scotch", action="store_true")
     parser.add_argument("--require-spral-scaling", action="store_true")

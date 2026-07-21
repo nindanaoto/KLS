@@ -223,6 +223,10 @@ typedef struct trilinos_klu_common_struct
     int kls_dense_panels ;
     double kls_static_perturb ;
     int kls_perturb_count ;
+    double kls_zero_pivot_replacement ;
+    int *kls_zero_pivots ;
+    int kls_zero_pivot_capacity ;
+    int kls_zero_pivot_count ;
 
 } trilinos_klu_common ;
 
@@ -269,6 +273,11 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
                                    magnitude (hard-static factorization;
                                    refinement recovers accuracy) */
     long kls_perturb_count ;    /* pivots perturbed in the last factor */
+    double kls_zero_pivot_replacement ; /* >0: discovery-only replacement
+                                           for exact zero pivots */
+    UF_long *kls_zero_pivots ;  /* optional discovered global pivot indices */
+    UF_long kls_zero_pivot_capacity ;
+    UF_long kls_zero_pivot_count ;
 
 } trilinos_klu_l_common ;
 

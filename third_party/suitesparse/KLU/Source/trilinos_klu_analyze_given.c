@@ -191,6 +191,9 @@ TRILINOS_KLU_symbolic *TRILINOS_KLU_analyze_given	    /* returns NULL if error, 
     do_btf = (do_btf) ? TRUE : FALSE ;
     Symbolic->ordering = 2 ;
     Symbolic->do_btf = do_btf ;
+    /* analyze_given only computes strongly connected components, not a
+       maximum transversal, so structural rank is unknown. */
+    Symbolic->structural_rank = TRILINOS_KLU_EMPTY ;
 
     /* ---------------------------------------------------------------------- */
     /* find the block triangular form, if requested */

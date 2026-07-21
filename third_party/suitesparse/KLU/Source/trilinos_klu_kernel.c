@@ -375,6 +375,7 @@ static Int lpivot
     Entry x, pivot, *Lx ;
     double abs_pivot, xabs ;
     Int p, i, ppivrow, pdiag, pivrow, *Li, last_row_index, firstrow, len ;
+    Int kls_zero_replaced = FALSE ;
 
     pivrow = TRILINOS_KLU_EMPTY ;
     if (Llen [k] == 0)
@@ -398,10 +399,16 @@ static Int lpivot
 	ASSERT (pivrow >= 0 && pivrow < n) ;
 	CLEAR (pivot) ;
 	*p_pivrow = pivrow ;
+	if (Common->kls_zero_pivot_replacement > 0)
+	{
+	    pivot = Common->kls_zero_pivot_replacement ;
+	    kls_zero_replaced = TRUE ;
+	}
 	*p_pivot = pivot ;
-	*p_abs_pivot = 0 ;
+	*p_abs_pivot = kls_zero_replaced
+	    ? Common->kls_zero_pivot_replacement : 0 ;
 	*p_firstrow = firstrow ;
-	return (FALSE) ;
+	return (kls_zero_replaced ? 2 : FALSE) ;
     }
 
     pdiag = TRILINOS_KLU_EMPTY ;
@@ -485,6 +492,12 @@ static Int lpivot
     }
     CLEAR (X [last_row_index]) ;
 
+    if (IS_ZERO (pivot) && Common->kls_zero_pivot_replacement > 0)
+    {
+	pivot = Common->kls_zero_pivot_replacement ;
+	abs_pivot = Common->kls_zero_pivot_replacement ;
+	kls_zero_replaced = TRUE ;
+    }
     *p_pivrow = pivrow ;
     *p_pivot = pivot ;
     *p_abs_pivot = abs_pivot ;
@@ -503,7 +516,7 @@ static Int lpivot
 	DIV (Lx [p], Lx [p], pivot) ;
     }
 
-    return (TRUE) ;
+    return (kls_zero_replaced ? 2 : TRUE) ;
 }
 
 
@@ -865,8 +878,20 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 	    k, diagrow, UNFLIP (diagrow))) ;
 
 	/* find a pivot and scale the pivot column */
-	if (!lpivot (diagrow, &pivrow, &pivot, &abs_pivot, tol, X, LU, Lip,
-		    Llen, k, n, Pinv, &firstrow, Common))
+	{
+	const Int kls_pivot_status = lpivot (
+	    diagrow, &pivrow, &pivot, &abs_pivot, tol, X, LU, Lip,
+	    Llen, k, n, Pinv, &firstrow, Common) ;
+	if (kls_pivot_status == 2)
+	{
+	    const Int slot = Common->kls_zero_pivot_count++ ;
+	    if (Common->kls_zero_pivots != NULL &&
+		slot < Common->kls_zero_pivot_capacity)
+	    {
+		Common->kls_zero_pivots [slot] = k + k1 ;
+	    }
+	}
+	if (!kls_pivot_status)
 	{
 	    /* matrix is structurally or numerically singular */
 	    Common->status = TRILINOS_KLU_SINGULAR ;
@@ -880,6 +905,7 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
 		/* do not continue the factorization */
 		return (lusize) ;
 	    }
+	}
 	}
 
 	/* we now have a valid pivot row, even if the column has NaN's or

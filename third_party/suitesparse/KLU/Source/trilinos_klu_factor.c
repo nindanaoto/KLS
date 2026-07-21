@@ -40,6 +40,8 @@ static void factor2
     /* initializations */
     /* ---------------------------------------------------------------------- */
 
+    Common->kls_zero_pivot_count = 0 ;
+
     /* get the contents of the Symbolic object */
     n = Symbolic->n ;
     P = Symbolic->P ;
@@ -198,6 +200,17 @@ static void factor2
 			PRINT_ENTRY (Ax[p]) ;
 			SCALE_DIV_ASSIGN (s, Ax [p], Rs [oldrow]) ;
 		    }
+		}
+	    }
+
+	    if (IS_ZERO (s) && Common->kls_zero_pivot_replacement > 0)
+	    {
+		Int slot = Common->kls_zero_pivot_count++ ;
+		s = Common->kls_zero_pivot_replacement ;
+		if (Common->kls_zero_pivots != NULL &&
+		    slot < Common->kls_zero_pivot_capacity)
+		{
+		    Common->kls_zero_pivots [slot] = k1 ;
 		}
 	    }
 

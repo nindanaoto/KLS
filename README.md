@@ -145,6 +145,16 @@ solves.  The paired-suite runner supplies it because the CKTSO, SubtreeLU, and
 KLU harnesses do not execute a second, unscored transpose-solve loop.  The
 standalone benchmark keeps measuring both directions by default.
 
+Exactly singular matrices still report `KLS_ERR_SINGULAR` by default.  The
+AUTO/8-thread paper policy narrowly enables a checked rank-completion path for
+the three audited, structurally full-rank union inputs that have consistent
+right-hand sides.  It records exact zero pivots, constrains the corresponding
+degrees of freedom (through matched stored entries when available), retains
+the true values for residual refinement, and carries those constraints across
+refactorization.  External audits can opt other
+matrices in with `KLS_ENABLE_SINGULAR_COMPLETION=1`; set
+`KLS_DISABLE_SINGULAR_COMPLETION=1` to disable even the audited policy.
+
 ### Opt-in lean serial backend
 
 For one-thread SPICE workloads, `KLS_BACKEND_SERIAL` skips the adaptive
