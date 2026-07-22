@@ -47,13 +47,27 @@ def field(row: dict[str, object], *names: str, default: float = 0.0) -> float:
 def components(row: dict[str, object]) -> dict[str, float]:
     analysis = field(row, "analysis_seconds")
     initial_factor = field(row, "initial_factor_seconds", "factor_seconds_avg")
-    refactor = field(row, "refactor_seconds_avg", "refactor_seconds")
+    refactor_first = field(
+        row, "refactor_first_seconds", "refactor_seconds_avg", "refactor_seconds"
+    )
+    refactor_steady = field(
+        row,
+        "refactor_steady_seconds_avg",
+        "refactor_seconds_avg",
+        "refactor_seconds",
+    )
     solve = field(row, "solve_seconds_avg", "solve_seconds")
+    refactor_solve_first = field(
+        row, "refactor_solve_first_seconds", default=solve
+    )
+    refactor_solve_steady = field(
+        row, "refactor_solve_steady_seconds_avg", default=solve
+    )
     return {
         "analysis": analysis,
         "initial_factor": initial_factor,
-        "refactor_99": 99.0 * refactor,
-        "solve_100": 100.0 * solve,
+        "refactor_99": refactor_first + 98.0 * refactor_steady,
+        "solve_100": solve + refactor_solve_first + 98.0 * refactor_solve_steady,
     }
 
 

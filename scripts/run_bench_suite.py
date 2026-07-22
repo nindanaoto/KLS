@@ -22,7 +22,20 @@ def spice_cycle_seconds(row: dict[str, object]) -> float:
     steady = float(
         row.get("refactor_steady_seconds_avg", row["refactor_seconds_avg"])
     )
-    return analysis + factor + first + 98.0 * steady + 100.0 * solve
+    refactor_solve_first = float(
+        row.get("refactor_solve_first_seconds", solve)
+    )
+    refactor_solve_steady = float(
+        row.get("refactor_solve_steady_seconds_avg", solve)
+    )
+    return (
+        analysis
+        + factor
+        + solve
+        + first
+        + refactor_solve_first
+        + 98.0 * (steady + refactor_solve_steady)
+    )
 
 
 def geometric_mean(values: list[float]) -> float:

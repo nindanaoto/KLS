@@ -2189,8 +2189,16 @@ numeric-owner gap.
 The suite metric is:
 
 ```text
-analysis + initial_factor + solve + 99 * (refactor + solve)
+analysis + initial_factor + final_state_solve
+  + (first_refactor + its_paired_solve)
+  + 98 * (steady_refactor + its_paired_solve)
 ```
+
+The refactor-following solves are measured with their corresponding changed
+numeric state rather than inferred from the final-state solve average.  JSON
+records expose `refactor_solve_first_seconds` and
+`refactor_solve_steady_seconds_avg`; this also charges any solve-side accuracy
+recovery to the generation that required it.
 
 Compare two JSONL runs by matrix basename:
 

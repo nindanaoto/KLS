@@ -52,12 +52,21 @@ def dominant_term(kls, ref, horizon):
     kls_front = kls["ana"] + kls["init"]
     ref_front = ref["ana"] + ref["init"]
     excess = {
-        "solve": (kls["solve"] - ref["solve"]) * horizon,
+        "solve": kls["solve"] - ref["solve"],
         "front": kls_front - ref_front,
     }
     if horizon > 1:
         excess["front"] += kls["rf"] - ref["rf"]
         excess["rs"] = (kls["rs"] - ref["rs"]) * (horizon - 2)
+        excess["solve"] += (
+            kls.get("rsolve_first", kls["solve"])
+            - ref.get("rsolve_first", ref["solve"])
+            + (horizon - 2)
+            * (
+                kls.get("rsolve_steady", kls["solve"])
+                - ref.get("rsolve_steady", ref["solve"])
+            )
+        )
     return max(excess, key=excess.get)
 
 

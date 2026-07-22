@@ -269,6 +269,8 @@ int main(int argc, char **argv) {
   long long factor_total = 0;
   long long refactor_total = 0;
   long long refactor_first = 0;
+  long long refactor_solve_total = 0;
+  long long refactor_solve_first = 0;
   long long solve_total = 0;
   long long refactor_wall_total = 0;
   long long solve_wall_total = 0;
@@ -293,8 +295,13 @@ int main(int argc, char **argv) {
     refactor_wall_total +=
       std::chrono::duration_cast<std::chrono::microseconds>(w1 - w0).count();
     /* Mirror the refactor/solve cadence used by the other adaptive
-       harnesses; this warm solve is not included in solve_total. */
+       harnesses.  These samples remain separate from the final-state solve
+       loop so the projection charges the solve paired with each numeric. */
     ret = solver.solve(b.data(), x.data());
+    if (ret == subtree_lu::E_OK) {
+      refactor_solve_total += parm[subtree_lu::O_SOLVE_TIME];
+      if (i == 0) refactor_solve_first = parm[subtree_lu::O_SOLVE_TIME];
+    }
   }
   for (int i = 0; i < repeat && ret == subtree_lu::E_OK; ++i) {
     const auto w0 = std::chrono::steady_clock::now();
@@ -321,10 +328,22 @@ int main(int argc, char **argv) {
         static_cast<double>(refactor_repeat - 1)
     : static_cast<double>(refactor_first);
   const double solve_us_avg = static_cast<double>(solve_total) / static_cast<double>(repeat);
+  const double refactor_solve_us_avg = refactor_repeat > 0
+    ? static_cast<double>(refactor_solve_total) /
+        static_cast<double>(refactor_repeat)
+    : solve_us_avg;
+  const double refactor_solve_first_us = refactor_repeat > 0
+    ? static_cast<double>(refactor_solve_first) : solve_us_avg;
+  const double refactor_solve_steady_us_avg = refactor_repeat > 1
+    ? static_cast<double>(refactor_solve_total - refactor_solve_first) /
+        static_cast<double>(refactor_repeat - 1)
+    : refactor_solve_first_us;
   const double spice_cycle_seconds =
     1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
               solve_us_avg + static_cast<double>(refactor_first) +
-              solve_us_avg + 98.0 * (refactor_steady_us_avg + solve_us_avg));
+              refactor_solve_first_us +
+              98.0 * (refactor_steady_us_avg +
+                      refactor_solve_steady_us_avg));
   {
     const char *dump = std::getenv("ST_DUMP_PERM");
     if (dump != nullptr) {
@@ -390,6 +409,9 @@ int main(int argc, char **argv) {
               "\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g,"
               "\"refactor_first_seconds\":%.9g,"
               "\"refactor_steady_seconds_avg\":%.9g,"
+              "\"refactor_solve_seconds_avg\":%.9g,"
+              "\"refactor_solve_first_seconds\":%.9g,"
+              "\"refactor_solve_steady_seconds_avg\":%.9g,"
               "\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g,"
               "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
@@ -407,6 +429,9 @@ int main(int argc, char **argv) {
               1.0e-6 * factor_us_avg, 1.0e-6 * refactor_us_avg,
               1.0e-6 * static_cast<double>(refactor_first),
               1.0e-6 * refactor_steady_us_avg,
+              1.0e-6 * refactor_solve_us_avg,
+              1.0e-6 * refactor_solve_first_us,
+              1.0e-6 * refactor_solve_steady_us_avg,
               1.0e-6 * solve_us_avg, spice_cycle_seconds,
               residual_l2, relative_residual,
               parm[subtree_lu::O_LNNZ], parm[subtree_lu::O_UNNZ],

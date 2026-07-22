@@ -249,6 +249,8 @@ int main(int argc, char **argv) {
   long long factor_total = 0;
   long long refactor_total = 0;
   long long refactor_first = 0;
+  long long refactor_solve_total = 0;
+  long long refactor_solve_first = 0;
   long long solve_total = 0;
   for (int i = 0; i < factor_repeat; ++i) {
     ret = CKTSO_Factorize(inst, a.values.data(), true);
@@ -267,8 +269,14 @@ int main(int argc, char **argv) {
     refactor_total += oparm[1];
     if (i == 0) refactor_first = oparm[1];
     /* Match a Newton loop and give adaptive solve paths the same one-solve
-       opportunity after every sampled refactor as KLS. */
+       opportunity after every sampled refactor as KLS.  Retain these
+       timings separately so the projected cycle charges the solve paired
+       with each changed numeric. */
     ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
+    if (ret >= 0) {
+      refactor_solve_total += oparm[2];
+      if (i == 0) refactor_solve_first = oparm[2];
+    }
   }
   for (int i = 0; i < repeat && ret >= 0; ++i) {
     ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
@@ -292,10 +300,22 @@ int main(int argc, char **argv) {
         static_cast<double>(refactor_repeat - 1)
     : static_cast<double>(refactor_first);
   const double solve_us_avg = static_cast<double>(solve_total) / static_cast<double>(repeat);
+  const double refactor_solve_us_avg = refactor_repeat > 0
+    ? static_cast<double>(refactor_solve_total) /
+        static_cast<double>(refactor_repeat)
+    : solve_us_avg;
+  const double refactor_solve_first_us = refactor_repeat > 0
+    ? static_cast<double>(refactor_solve_first) : solve_us_avg;
+  const double refactor_solve_steady_us_avg = refactor_repeat > 1
+    ? static_cast<double>(refactor_solve_total - refactor_solve_first) /
+        static_cast<double>(refactor_repeat - 1)
+    : refactor_solve_first_us;
   const double spice_cycle_seconds =
     1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
               solve_us_avg + static_cast<double>(refactor_first) +
-              solve_us_avg + 98.0 * (refactor_steady_us_avg + solve_us_avg));
+              refactor_solve_first_us +
+              98.0 * (refactor_steady_us_avg +
+                      refactor_solve_steady_us_avg));
   double relative_residual = 0.0;
   const double residual_l2 = residual(a, x, b, &relative_residual);
 
@@ -309,6 +329,9 @@ int main(int argc, char **argv) {
               "\"solve_us_avg\":%.9g,"
               "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
               "\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g,"
+              "\"refactor_solve_seconds_avg\":%.9g,"
+              "\"refactor_solve_first_seconds\":%.9g,"
+              "\"refactor_solve_steady_seconds_avg\":%.9g,"
               "\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g,"
               "\"refactor_first_seconds\":%.9g,\"refactor_steady_seconds_avg\":%.9g,"
               "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
@@ -331,6 +354,9 @@ int main(int argc, char **argv) {
               1.0e-6 * static_cast<double>(analysis_us),
               1.0e-6 * static_cast<double>(initial_factor_us),
               1.0e-6 * factor_us_avg, 1.0e-6 * refactor_us_avg,
+              1.0e-6 * refactor_solve_us_avg,
+              1.0e-6 * refactor_solve_first_us,
+              1.0e-6 * refactor_solve_steady_us_avg,
               1.0e-6 * solve_us_avg, spice_cycle_seconds,
               1.0e-6 * static_cast<double>(refactor_first),
               1.0e-6 * refactor_steady_us_avg,

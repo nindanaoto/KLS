@@ -1117,6 +1117,7 @@ int main(int argc, char **argv) {
 
   double factor_total = 0.0;
   double refactor_total = 0.0;
+  double refactor_solve_total = 0.0;
   double solve_total = 0.0;
   double tsolve_total = 0.0;
   double refactor_max_relative_residual = 0.0;
@@ -1150,6 +1151,7 @@ int main(int argc, char **argv) {
     CALLGRIND_ZERO_STATS;
   }
   double refactor_first = 0.0;
+  double refactor_solve_first = 0.0;
   for (int i = 0; i < refactor_repeat && status == KLS_OK; ++i) {
     if (generated_values != NULL) {
       make_refactor_values(&a, run_values, refactor_value_mode,
@@ -1169,10 +1171,19 @@ int main(int argc, char **argv) {
          cycle = shot + (first + solve) + 98*(steady + solve) */
       refactor_first = stats.refactor_seconds;
     }
-    /* SPICE-shaped: every refactor is followed by a solve so adaptive
-       engines can weigh the true refactor+solve pair. Not counted in
-       refactor_total; solve_avg is measured separately below. */
+    /* SPICE-shaped: every refactor is followed by a solve.  Keep these
+       solve samples separate from refactor_total so H100 can charge the
+       actual changed-numeric pairs, including any solve-side recovery,
+       while the repeated final-state loop below supplies the initial-state
+       solve sample. */
     status = kls_solve(solver, 1, b, 0, x, 0);
+    if (status == KLS_OK) {
+      kls_get_stats(solver, &stats);
+      refactor_solve_total += stats.solve_seconds;
+      if (i == 0) {
+        refactor_solve_first = stats.solve_seconds;
+      }
+    }
     if (status == KLS_OK && verify_each_refactor) {
       double relative = 0.0;
       (void)residual_norm_values(&a, current_values, x, b, &relative);
@@ -1284,6 +1295,18 @@ int main(int argc, char **argv) {
     ? (refactor_total - refactor_first) / (double)(refactor_repeat - 1)
     : refactor_first;
   const double solve_avg = solve_total / (double)repeat;
+  const double refactor_solve_avg = refactor_repeat > 0
+    ? refactor_solve_total / (double)refactor_repeat : solve_avg;
+  const double refactor_solve_first_effective = refactor_repeat > 0
+    ? refactor_solve_first : solve_avg;
+  const double refactor_solve_steady_avg = refactor_repeat > 1
+    ? (refactor_solve_total - refactor_solve_first) /
+        (double)(refactor_repeat - 1)
+    : refactor_solve_first_effective;
+  const double spice_cycle_seconds =
+    stats.analysis_seconds + initial_factor_seconds + solve_avg +
+    refactor_first + refactor_solve_first_effective +
+    98.0 * (refactor_steady_avg + refactor_solve_steady_avg);
   const double tsolve_avg = tsolve_total / (double)repeat;
 
   if (json) {
@@ -1439,7 +1462,11 @@ int main(int argc, char **argv) {
            ",\"kls_first_auto_skipped_scaled_single_block_count\":%" PRId64
            ",\"factor_seconds_avg\":%.9g,\"refactor_seconds_avg\":%.9g"
            ",\"refactor_first_seconds\":%.9g,\"refactor_steady_seconds_avg\":%.9g"
-           ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
+           ",\"refactor_solve_seconds_avg\":%.9g"
+           ",\"refactor_solve_first_seconds\":%.9g"
+           ",\"refactor_solve_steady_seconds_avg\":%.9g"
+           ",\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g"
+           ",\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
            ",\"verify_each_refactor\":%s"
            ",\"refactor_max_relative_residual\":%.9g"
@@ -1495,7 +1522,9 @@ int main(int argc, char **argv) {
            stats.kls_first_auto_skipped_scaled_single_block_count,
            factor_avg, refactor_avg,
            refactor_first, refactor_steady_avg,
-           solve_avg, tsolve_avg,
+           refactor_solve_avg, refactor_solve_first_effective,
+           refactor_solve_steady_avg,
+           solve_avg, spice_cycle_seconds, tsolve_avg,
            residual, rel_residual,
            verify_each_refactor ? "true" : "false",
            refactor_max_relative_residual,

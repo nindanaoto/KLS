@@ -2,8 +2,9 @@
 """Score paired paper-manifest runs at a requested solve horizon.
 
 H1   = analysis + initial factor + solve
-T100 = analysis + initial factor + first refactor + 98 * steady refactor
-       + 100 * solve
+T100 = analysis + initial factor + final-state solve
+       + first (refactor + paired solve)
+       + 98 * steady (refactor + paired solve)
 
 By default, each matrix is represented by the median valid pass. A pass is
 valid only when it completed and its reported relative residual is finite and
@@ -95,17 +96,38 @@ def score_record(record, residual_threshold, horizon=HORIZON):
             )
         )
         solve = float(record["solve_seconds_avg"])
+        refactor_solve_first = float(
+            record.get("refactor_solve_first_seconds", solve)
+        )
+        refactor_solve_steady = float(
+            record.get("refactor_solve_steady_seconds_avg", solve)
+        )
     except (TypeError, ValueError):
         return None, "non-numeric timing"
 
-    timings = (analysis, initial, first, steady, solve)
+    timings = (
+        analysis,
+        initial,
+        first,
+        steady,
+        solve,
+        refactor_solve_first,
+        refactor_solve_steady,
+    )
     if any(not math.isfinite(value) or value < 0.0 for value in timings):
         return None, "invalid timing"
 
     if horizon == 1:
         cycle = analysis + initial + solve
     else:
-        cycle = analysis + initial + first + (horizon - 2) * steady + horizon * solve
+        cycle = (
+            analysis
+            + initial
+            + solve
+            + first
+            + refactor_solve_first
+            + (horizon - 2) * (steady + refactor_solve_steady)
+        )
     return {
         "cycle": cycle,
         "ana": analysis,
@@ -113,6 +135,8 @@ def score_record(record, residual_threshold, horizon=HORIZON):
         "rf": first,
         "rs": steady,
         "solve": solve,
+        "rsolve_first": refactor_solve_first,
+        "rsolve_steady": refactor_solve_steady,
         "resid": residual,
         "path": record.get("last_refactor_path", ""),
         "ordering": record.get("ordering", ""),
