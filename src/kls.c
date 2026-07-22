@@ -153526,6 +153526,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  /* A correction verified for the preceding numeric cannot certify the
+     same one-shot exit after the values change.  Keep the armed contract
+     itself, but require the first solve of every new numeric to verify its
+     corrected residual; later solves against that unchanged numeric may
+     reuse the verdict. */
+  solver->solve_contract_verified = 0;
   const int direct_map32_h100_cycle =
     kls_compact_dense_spike_map32_h100_cycle(solver) ||
     kls_sandia_fpga_map32_h100_policy(solver);
@@ -154455,6 +154461,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_dense_tail_refactor_validate(solver, numeric_values);
 #endif
     if ((solver->solve_contract_probe == 2 ||
+         (solver->numeric_is_predicted &&
+          solver->row_solve_self_check) ||
          (solver->stats.selected_pivot_tolerance > 0.0 &&
           solver->stats.selected_pivot_tolerance <
             solver->options.pivot_tolerance &&
@@ -154462,10 +154470,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->row_perm == NULL &&
         solver->row_scale == NULL && solver->col_scale == NULL &&
         numeric_values != NULL && solver->nnz > 0) {
-      /* armed plain-frame numerics refine every solve: the residual must
+      /* Armed or predicted/self-checked plain-frame numerics refine against
+         the current matrix: the residual must
          run against THIS refactorization's input values — solver->values
          holds the analyze-time array, which goes stale under changing
-         values (the documented stale-refinement hazard).  The
+         values (the documented stale-refinement hazard).  A predicted first
+         factor already owns a reference copy, but its first changed
+         refactor arrives before the solve probe has armed the numeric; copy
+         that generation here as well.  The
          tolerance-promoted class (selected tol < requested) captures
          the same way: its solves carry the config-derived self-check
          (see the solve-side gate), which starves without values. */
@@ -155562,7 +155574,7 @@ static int solve_impl(kls_solver *solver,
         !retained_preconditioner_contract;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
       const int refinement_limit =
-        retained_preconditioner_contract ? 8 : 3;
+        retained_preconditioner_contract || self_check_only ? 8 : 3;
       for (int iter = 0; iter < refinement_limit; ++iter) {
         const int tsopf_b9_parallel_residual =
           tsopf_b9_raw_l2_contract && !kernel_transpose &&
@@ -155697,7 +155709,7 @@ static int solve_impl(kls_solver *solver,
           initial_rmax = rmax;
         }
         if (rmax <= target || raw_l2_ok || retained_preconditioner_l2_ok ||
-            !(rmax < (self_check_only ? 0.9 : 0.5) * last_rmax)) {
+            !(rmax < (self_check_only ? 0.999 : 0.5) * last_rmax)) {
           if (initial_rmax >= 0.0 && rmax > initial_rmax) {
             /* Refinement diverged: the factorization amplifies in this
                direction.  Restore the unrefined solution and stop trading

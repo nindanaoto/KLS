@@ -1176,6 +1176,11 @@ int main(int argc, char **argv) {
     if (status == KLS_OK && verify_each_refactor) {
       double relative = 0.0;
       (void)residual_norm_values(&a, current_values, x, b, &relative);
+      if (bench_env_enabled("KLS_BENCH_TRACE_EACH_REFACTOR_RESIDUAL")) {
+        fprintf(stderr,
+                "KLS refactor generation %d relative residual: %.17g\n",
+                i + 1, relative);
+      }
       if (relative > refactor_max_relative_residual) {
         refactor_max_relative_residual = relative;
       }
@@ -1436,6 +1441,8 @@ int main(int argc, char **argv) {
            ",\"refactor_first_seconds\":%.9g,\"refactor_steady_seconds_avg\":%.9g"
            ",\"solve_seconds_avg\":%.9g,\"transpose_solve_seconds_avg\":%.9g"
            ",\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g"
+           ",\"verify_each_refactor\":%s"
+           ",\"refactor_max_relative_residual\":%.9g"
            ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
            ",\"structural_rank\":%" PRId64 ",\"numerical_rank\":%" PRId64
            ",\"offdiag_pivots\":%" PRId64 ",\"reallocations\":%" PRId64
@@ -1489,7 +1496,10 @@ int main(int argc, char **argv) {
            factor_avg, refactor_avg,
            refactor_first, refactor_steady_avg,
            solve_avg, tsolve_avg,
-           residual, rel_residual, stats.nblocks, stats.max_block,
+           residual, rel_residual,
+           verify_each_refactor ? "true" : "false",
+           refactor_max_relative_residual,
+           stats.nblocks, stats.max_block,
            stats.structural_rank, stats.numerical_rank,
            stats.offdiag_pivots, stats.reallocations,
            stats.fast_rejected_pivot, stats.fast_rejected_pivot_col,

@@ -17,6 +17,9 @@ KLS_BACKEND=${KLS_BACKEND:-auto}
 TIMEOUT=${TIMEOUT:-120}
 PASSES=${PASSES:-1}
 ROTATE_SIDES=${ROTATE_SIDES:-0}
+# Optional explicit subset/order for pairwise audits.  The default preserves
+# the historical behavior inferred from the supplied harness paths.
+PAIRED_SIDES=${PAIRED_SIDES:-}
 SKIP=${SKIP:-0}
 SOLVE_REPEAT=${SOLVE_REPEAT:-1}
 INPUT_INDEX=${INPUT_INDEX:-64}
@@ -45,6 +48,41 @@ FACTOR_REPEAT=${FACTOR_REPEAT:-0}
 sides="kls ck"
 [ -n "$SUBTREELU_COMPARE" ] && sides="kls ck st"
 [ -n "$KLU_COMPARE" ] && sides="$sides klu"
+if [ -n "$PAIRED_SIDES" ]; then
+  selected_sides=""
+  for side in $PAIRED_SIDES; do
+    case "$side" in
+      kls) ;;
+      ck) ;;
+      st)
+        [ -n "$SUBTREELU_COMPARE" ] && [ -n "$OUT_ST" ] || {
+          echo "PAIRED_SIDES requests st without a SubtreeLU harness/output" >&2
+          exit 2
+        }
+        ;;
+      klu)
+        [ -n "$KLU_COMPARE" ] && [ -n "$OUT_KLU" ] || {
+          echo "PAIRED_SIDES requests klu without a KLU harness/output" >&2
+          exit 2
+        }
+        ;;
+      *) echo "invalid PAIRED_SIDES member: $side" >&2; exit 2;;
+    esac
+    case " $selected_sides " in
+      *" $side "*) echo "duplicate PAIRED_SIDES member: $side" >&2; exit 2;;
+    esac
+    selected_sides="${selected_sides:+$selected_sides }$side"
+  done
+  case " $selected_sides " in
+    *" kls "*) ;;
+    *) echo "PAIRED_SIDES must include kls" >&2; exit 2;;
+  esac
+  [ "${selected_sides#* }" != "$selected_sides" ] || {
+    echo "PAIRED_SIDES must select at least two solvers" >&2
+    exit 2
+  }
+  sides=$selected_sides
+fi
 passes_sides=""
 p=0
 while [ "$p" -lt "$PASSES" ]; do
