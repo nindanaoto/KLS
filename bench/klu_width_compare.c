@@ -82,6 +82,8 @@ typedef struct run_stats {
   double spice_cycle_seconds;
   double residual_l2;
   double relative_residual_l2;
+  double refactor_max_relative_residual;
+  int verify_each_refactor;
   int status;
   int nblocks;
   int64_t nnz_l;
@@ -382,6 +384,9 @@ static int run_klu32(matrix *a, const double *base_values,
                      run_stats *out) {
   memcpy(a->values, base_values, (size_t)a->nnz * sizeof(*a->values));
   matvec(a, x_true, rhs);
+  out->verify_each_refactor =
+    getenv("BENCH_VERIFY_EACH_REFACTOR") != NULL ||
+    getenv("KLS_BENCH_VERIFY_EACH_REFACTOR") != NULL;
   int *ap = NULL;
   int *ai = NULL;
   if (!copy_int_arrays(a, &ap, &ai)) return 0;
@@ -468,6 +473,15 @@ static int run_klu32(matrix *a, const double *base_values,
     const double solve_elapsed = now_seconds() - solve_start;
     refactor_solve_total += solve_elapsed;
     if (i == 0) out->refactor_solve_first_seconds = solve_elapsed;
+    if (solve_ok && common.status >= 0 && out->verify_each_refactor) {
+      double relative = 0.0;
+      (void)residual_norm(a, work, rhs, &relative);
+      if (!isfinite(relative)) {
+        out->refactor_max_relative_residual = INFINITY;
+      } else if (relative > out->refactor_max_relative_residual) {
+        out->refactor_max_relative_residual = relative;
+      }
+    }
     if (!solve_ok ||
         common.status < 0) {
       break;
@@ -532,6 +546,9 @@ static int run_klu64(matrix *a, const double *base_values,
                      run_stats *out) {
   memcpy(a->values, base_values, (size_t)a->nnz * sizeof(*a->values));
   matvec(a, x_true, rhs);
+  out->verify_each_refactor =
+    getenv("BENCH_VERIFY_EACH_REFACTOR") != NULL ||
+    getenv("KLS_BENCH_VERIFY_EACH_REFACTOR") != NULL;
   int64_t *ap = NULL;
   int64_t *ai = NULL;
   if (!copy_long_arrays(a, &ap, &ai)) return 0;
@@ -618,6 +635,15 @@ static int run_klu64(matrix *a, const double *base_values,
     const double solve_elapsed = now_seconds() - solve_start;
     refactor_solve_total += solve_elapsed;
     if (i == 0) out->refactor_solve_first_seconds = solve_elapsed;
+    if (solve_ok && common.status >= 0 && out->verify_each_refactor) {
+      double relative = 0.0;
+      (void)residual_norm(a, work, rhs, &relative);
+      if (!isfinite(relative)) {
+        out->refactor_max_relative_residual = INFINITY;
+      } else if (relative > out->refactor_max_relative_residual) {
+        out->refactor_max_relative_residual = relative;
+      }
+    }
     if (!solve_ok || common.status < 0) {
       break;
     }
@@ -691,6 +717,8 @@ static void print_stats_json(const char *name, const run_stats *s) {
          "\"refactor_solve_seconds_avg\":%.9g,\"solve_seconds_avg\":%.9g,"
          "\"spice_cycle_seconds\":%.9g,\"nblocks\":%d,"
          "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
+         "\"verify_each_refactor\":%s,"
+         "\"refactor_max_relative_residual\":%.9g,"
          "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}",
          name, s->status, s->analysis_seconds, s->initial_factor_seconds,
          s->factor_seconds_avg, s->refactor_first_seconds,
@@ -699,7 +727,9 @@ static void print_stats_json(const char *name, const run_stats *s) {
          s->refactor_solve_steady_seconds_avg,
          s->refactor_solve_seconds_avg,
          s->solve_seconds_avg, s->spice_cycle_seconds, s->nblocks,
-         s->residual_l2, s->relative_residual_l2, s->nnz_l, s->nnz_u);
+         s->residual_l2, s->relative_residual_l2,
+         s->verify_each_refactor ? "true" : "false",
+         s->refactor_max_relative_residual, s->nnz_l, s->nnz_u);
 }
 #endif
 
@@ -860,7 +890,9 @@ int main(int argc, char **argv) {
            "\"refactor_solve_steady_seconds_avg\":%.9g,"
            "\"refactor_solve_seconds_avg\":%.9g,\"solve_seconds_avg\":%.9g,"
            "\"spice_cycle_seconds\":%.9g,\"residual_l2\":%.9g,"
-           "\"relative_residual_l2\":%.9g,\"nblocks\":%d,"
+           "\"relative_residual_l2\":%.9g,"
+           "\"verify_each_refactor\":%s,"
+           "\"refactor_max_relative_residual\":%.9g,\"nblocks\":%d,"
            "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}\n",
            path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
            bench_refactor_value_mode_name(refactor_value_mode),
@@ -876,7 +908,10 @@ int main(int argc, char **argv) {
            s64.refactor_solve_steady_seconds_avg,
            s64.refactor_solve_seconds_avg,
            s64.solve_seconds_avg, s64.spice_cycle_seconds, s64.residual_l2,
-           s64.relative_residual_l2, s64.nblocks, s64.nnz_l, s64.nnz_u);
+           s64.relative_residual_l2,
+           s64.verify_each_refactor ? "true" : "false",
+           s64.refactor_max_relative_residual,
+           s64.nblocks, s64.nnz_l, s64.nnz_u);
 #else
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"

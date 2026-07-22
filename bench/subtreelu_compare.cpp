@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -274,6 +275,10 @@ int main(int argc, char **argv) {
   long long solve_total = 0;
   long long refactor_wall_total = 0;
   long long solve_wall_total = 0;
+  const bool verify_each_refactor =
+    std::getenv("BENCH_VERIFY_EACH_REFACTOR") != nullptr ||
+    std::getenv("KLS_BENCH_VERIFY_EACH_REFACTOR") != nullptr;
+  double refactor_max_relative_residual = 0.0;
   for (int i = 0; i < factor_repeat; ++i) {
     ret = solver.factorize(a.row_values.data());
     if (ret != subtree_lu::E_OK) break;
@@ -301,6 +306,16 @@ int main(int argc, char **argv) {
     if (ret == subtree_lu::E_OK) {
       refactor_solve_total += parm[subtree_lu::O_SOLVE_TIME];
       if (i == 0) refactor_solve_first = parm[subtree_lu::O_SOLVE_TIME];
+      if (verify_each_refactor) {
+        double relative = 0.0;
+        (void)residual(a, x, b, &relative);
+        if (!std::isfinite(relative)) {
+          refactor_max_relative_residual =
+            std::numeric_limits<double>::infinity();
+        } else if (relative > refactor_max_relative_residual) {
+          refactor_max_relative_residual = relative;
+        }
+      }
     }
   }
   for (int i = 0; i < repeat && ret == subtree_lu::E_OK; ++i) {
@@ -414,6 +429,8 @@ int main(int argc, char **argv) {
               "\"refactor_solve_steady_seconds_avg\":%.9g,"
               "\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g,"
               "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
+              "\"verify_each_refactor\":%s,"
+              "\"refactor_max_relative_residual\":%.9g,"
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
               "\"nsupernodes\":%lld,\"factorize_flops\":%lld}\n",
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
@@ -434,6 +451,8 @@ int main(int argc, char **argv) {
               1.0e-6 * refactor_solve_steady_us_avg,
               1.0e-6 * solve_us_avg, spice_cycle_seconds,
               residual_l2, relative_residual,
+              verify_each_refactor ? "true" : "false",
+              refactor_max_relative_residual,
               parm[subtree_lu::O_LNNZ], parm[subtree_lu::O_UNNZ],
               parm[subtree_lu::O_NSUPERNODES],
               parm[subtree_lu::O_FACTORIZE_FLOPS]);

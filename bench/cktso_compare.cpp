@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -252,6 +253,10 @@ int main(int argc, char **argv) {
   long long refactor_solve_total = 0;
   long long refactor_solve_first = 0;
   long long solve_total = 0;
+  const bool verify_each_refactor =
+    std::getenv("BENCH_VERIFY_EACH_REFACTOR") != nullptr ||
+    std::getenv("KLS_BENCH_VERIFY_EACH_REFACTOR") != nullptr;
+  double refactor_max_relative_residual = 0.0;
   for (int i = 0; i < factor_repeat; ++i) {
     ret = CKTSO_Factorize(inst, a.values.data(), true);
     if (ret < 0) break;
@@ -276,6 +281,16 @@ int main(int argc, char **argv) {
     if (ret >= 0) {
       refactor_solve_total += oparm[2];
       if (i == 0) refactor_solve_first = oparm[2];
+      if (verify_each_refactor) {
+        double relative = 0.0;
+        (void)residual(a, x, b, &relative);
+        if (!std::isfinite(relative)) {
+          refactor_max_relative_residual =
+            std::numeric_limits<double>::infinity();
+        } else if (relative > refactor_max_relative_residual) {
+          refactor_max_relative_residual = relative;
+        }
+      }
     }
   }
   for (int i = 0; i < repeat && ret >= 0; ++i) {
@@ -335,6 +350,8 @@ int main(int argc, char **argv) {
               "\"solve_seconds_avg\":%.9g,\"spice_cycle_seconds\":%.9g,"
               "\"refactor_first_seconds\":%.9g,\"refactor_steady_seconds_avg\":%.9g,"
               "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
+              "\"verify_each_refactor\":%s,"
+              "\"refactor_max_relative_residual\":%.9g,"
               "\"nnz_l\":%lld,\"nnz_u\":%lld,"
               "\"selected_ordering\":%lld,\"supernodes\":%lld,"
               "\"offdiagonal_pivots\":%lld,"
@@ -360,7 +377,10 @@ int main(int argc, char **argv) {
               1.0e-6 * solve_us_avg, spice_cycle_seconds,
               1.0e-6 * static_cast<double>(refactor_first),
               1.0e-6 * refactor_steady_us_avg,
-              residual_l2, relative_residual, oparm[5], oparm[6],
+              residual_l2, relative_residual,
+              verify_each_refactor ? "true" : "false",
+              refactor_max_relative_residual,
+              oparm[5], oparm[6],
               oparm[8], oparm[7], oparm[4], oparm[16], oparm[17],
               factor_flops, solve_flops, factor_mem, solve_mem,
               oparm[12], oparm[13]);

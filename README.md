@@ -2198,7 +2198,11 @@ The refactor-following solves are measured with their corresponding changed
 numeric state rather than inferred from the final-state solve average.  JSON
 records expose `refactor_solve_first_seconds` and
 `refactor_solve_steady_seconds_avg`; this also charges any solve-side accuracy
-recovery to the generation that required it.
+recovery to the generation that required it.  Set
+`BENCH_VERIFY_EACH_REFACTOR=1` to make every solver wrapper independently
+check every changed-value generation and emit
+`refactor_max_relative_residual`; the legacy
+`KLS_BENCH_VERIFY_EACH_REFACTOR` spelling enables the same audit.
 
 Compare two JSONL runs by matrix basename:
 
