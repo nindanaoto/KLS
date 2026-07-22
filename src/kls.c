@@ -155457,7 +155457,7 @@ static int solve_impl(kls_solver *solver,
           lifecycle can drop it. The 1e-6 line stays below the 1e-5/1e-4
           initial-tolerance heuristics whose factors are accurate without
           corrections (mac_econ-class regressed 2x on solves at 1e-4). */
-       solver->common.tol < 1.0e-6 ||
+      solver->common.tol < 1.0e-6 ||
        /* tolerance-promoted numerics (auto-pivtol 1e-4/1e-5 fill
           adoptions) carry the SELF-CHECK contract the same
           config-derived way: their accuracy is a pivot-draw lottery
@@ -155467,6 +155467,11 @@ static int solve_impl(kls_solver *solver,
           Self-check semantics, not needs_refinement: one residual
           SpMV per solve, correction only when above the 1e-9 line. */
        tight_tol_selected ||
+       /* A solve-triggered conservative refactor must verify the recovery
+          numeric before it can return success.  The full factor resets the
+          row/tolerance self-check flags, so retain the contract explicitly
+          across that guarded recursive solve. */
+       solver->solve_recovery_active ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL ||
        contract_probe_wanted || contract_armed) &&
       (solver->row_scale == NULL && solver->col_scale == NULL
@@ -155539,9 +155544,12 @@ static int solve_impl(kls_solver *solver,
       double *xrhs = x + rhs * ldx;
       const int self_check_only = (solver->row_solve_self_check ||
                                    tight_tol_selected ||
+                                   solver->solve_recovery_active ||
                                    contract_probe_wanted || contract_armed) &&
-        !solver->numeric_needs_refinement &&
-        !(solver->common.tol < 1.0e-6) &&
+        (solver->solve_recovery_active ||
+         !solver->numeric_needs_refinement) &&
+        (solver->solve_recovery_active ||
+         !(solver->common.tol < 1.0e-6)) &&
         getenv("KLS_ENABLE_SOLVE_REFINEMENT") == NULL;
       const int mac_econ_accuracy_contract = self_check_only &&
         !kernel_transpose && nrhs == 1 && b != x &&
@@ -155595,9 +155603,10 @@ static int solve_impl(kls_solver *solver,
                 solver->symbolic != NULL
                   ? (long)solver->symbolic->maxblock : -1L);
       }
-      /* The self-check enforces the solver contract (1e-9-relative
-         class), not maximal accuracy: a mac_econ-class solve at its
-         typical e-6 draw takes ONE correction to e-11..e-13 and exits
+      /* The self-check enforces a strict margin below the benchmark's
+         1e-8 relative-L2 contract rather than maximal accuracy.  A
+         mac_econ-class solve at its typical e-6 draw takes ONE correction
+         to e-11..e-13 and exits
          at the next residual pass, instead of iterating to the 1e-12
          line (measured 0.26s vs 0.066s base solve).  Reduced-precision
          factors under needs_refinement keep the tight target. */
@@ -155618,8 +155627,9 @@ static int solve_impl(kls_solver *solver,
       int retained_preconditioner_verified =
         !retained_preconditioner_contract;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
-      const int refinement_limit =
-        retained_preconditioner_contract || self_check_only ? 8 : 3;
+      const int refinement_limit = solver->solve_recovery_active
+        ? 16
+        : (retained_preconditioner_contract || self_check_only ? 8 : 3);
       for (int iter = 0; iter < refinement_limit; ++iter) {
         const int tsopf_b9_parallel_residual =
           tsopf_b9_raw_l2_contract && !kernel_transpose &&
@@ -155737,9 +155747,15 @@ static int solve_impl(kls_solver *solver,
           retained_preconditioner_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= 1.0e-18 * l2_scale;
+        /* Ordinary promoted numerics target 1e-9.  A recovery numeric may
+           stop at 5e-9: this retains a 2x margin below the audited 1e-8
+           validity line while avoiding another expensive full factor when
+           stationary refinement has already produced a valid answer. */
+        const double mac_econ_l2_limit_squared =
+          solver->solve_recovery_active ? 25.0e-18 : 1.0e-18;
         const int mac_econ_l2_ok = mac_econ_accuracy_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
-          rnorm2 <= 1.0e-18 * l2_scale;
+          rnorm2 <= mac_econ_l2_limit_squared * l2_scale;
         retained_preconditioner_verified |= retained_preconditioner_l2_ok;
         mac_econ_accuracy_verified |= mac_econ_l2_ok;
         if (raw_l2_ok) {
@@ -155857,9 +155873,9 @@ static int solve_impl(kls_solver *solver,
         /* Some 5e-5 mac_econ pivot draws are too ill-conditioned for
            stationary refinement, even with a damped correction.  Recover
            only after the measured residual proves that case: rebuild the
-           current numeric once at the conservative 5e-4 threshold, then
-           retry this solve.  The robust pivot sequence remains installed
-           for later refactors. */
+           current numeric through increasingly conservative pivot lines
+           until its solve verifies the strict recovery margin.  The first
+           successful robust factor remains installed for later solves. */
         if (!solver->solve_recovery_active && solver->nnz > 0u &&
             solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double))) {
           double *recovery_values = (double *)malloc(
@@ -155875,15 +155891,34 @@ static int solve_impl(kls_solver *solver,
             }
             const double saved_pivot_tolerance =
               solver->options.pivot_tolerance;
+            const double recovery_tolerances[] = {
+              5.0e-4, 1.0e-3, 1.0e-2, 1.0e-1
+            };
+            int recovery_status = KLS_ERR_SOLVE_FAILED;
             solver->solve_recovery_active = 1;
-            solver->options.pivot_tolerance = 5.0e-4;
-            const int factor_status = kls_factor(solver, recovery_values);
+            for (size_t attempt = 0u;
+                 attempt < sizeof(recovery_tolerances) /
+                             sizeof(recovery_tolerances[0]);
+                 ++attempt) {
+              solver->options.pivot_tolerance =
+                recovery_tolerances[attempt];
+              if (getenv("KLS_TRACE_REFINE") != NULL) {
+                fprintf(stderr,
+                        "KLS mac recovery refactor: pivot_tolerance=%.3g\n",
+                        recovery_tolerances[attempt]);
+              }
+              const int factor_status =
+                kls_factor(solver, recovery_values);
+              recovery_status = factor_status == KLS_OK
+                ? solve_impl(solver, transpose, 1, brhs, nloc,
+                             xrhs, nloc)
+                : factor_status;
+              if (recovery_status == KLS_OK) {
+                break;
+              }
+            }
             solver->options.pivot_tolerance = saved_pivot_tolerance;
             free(recovery_values);
-            const int recovery_status = factor_status == KLS_OK
-              ? solve_impl(solver, transpose, 1, brhs, nloc,
-                           xrhs, nloc)
-              : factor_status;
             solver->solve_recovery_active = 0;
             solver->base_solve_seconds = kls_now_seconds() - start;
             solver->stats.solve_seconds = solver->base_solve_seconds;
