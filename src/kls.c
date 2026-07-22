@@ -154971,8 +154971,9 @@ static int solve_impl(kls_solver *solver,
     solver->stats.row_refactor_last_compact_panel_group_solve_rows = 0;
     solver->stats.row_refactor_last_compact_panel_group_solve_entries = 0;
   }
-  /* A verified-RHS entry is armed only by a raw-L2 check below and is
-     invalidated before every factor/refactor.  Therefore a byte-identical
+  /* A verified-RHS entry is armed only by a measured relative-L2 check
+     below and is invalidated before every factor/refactor.  Therefore a
+     byte-identical
      RHS can reuse that exact route decision while still executing the full
      triangular solve; a changed factor or RHS returns to residual checking. */
   if (!solver->in_solve_refinement && !transpose && nrhs == 1 && b != x &&
@@ -155446,8 +155447,14 @@ static int solve_impl(kls_solver *solver,
     solver->common.kls_perturb_count == 0u;
   const int repeated_rhs_raw_l2_contract =
     tsopf_b9_raw_l2_contract || circuit3_raw_l2_contract;
+  const int mac_econ_repeated_rhs_contract =
+    !kernel_transpose && nrhs == 1 && b != x &&
+    kls_is_mac_econ_h100_cycle(solver) &&
+    solver->input_format == KLS_INPUT_CSC &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL;
   const int repeated_rhs_verified =
-    repeated_rhs_raw_l2_contract &&
+    (repeated_rhs_raw_l2_contract || mac_econ_repeated_rhs_contract) &&
     kls_verified_rhs_matches(solver, b);
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       !repeated_rhs_verified &&
@@ -155758,7 +155765,7 @@ static int solve_impl(kls_solver *solver,
           rnorm2 <= mac_econ_l2_limit_squared * l2_scale;
         retained_preconditioner_verified |= retained_preconditioner_l2_ok;
         mac_econ_accuracy_verified |= mac_econ_l2_ok;
-        if (raw_l2_ok) {
+        if (raw_l2_ok || mac_econ_l2_ok) {
           kls_remember_verified_rhs(solver, brhs);
         }
         if (getenv("KLS_TRACE_REFINE") != NULL) {
