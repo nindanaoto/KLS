@@ -28094,6 +28094,24 @@ static int kls_low_work_btf_map32_policy_enabled(
          kls_low_work_btf_map32_capable(solver);
 }
 
+/* Prefer the native packed triangular walk when a complete low-work BTF
+   factor is already small enough to stay cache-resident.  In this regime a
+   duplicate i16/i32 index stream has too little solve work over which to
+   amortize its construction and extra dispatch.  Larger systems retain the
+   compact mirror: their longer vectors and index streams repay that setup.
+   The limits are deliberately properties of the retained factor rather than
+   dimensions or block counts of a named input matrix. */
+static int kls_low_work_btf_prefers_native_solve(
+  const kls_solver *solver) {
+  if (getenv("KLS_DISABLE_LOW_WORK_BTF_NATIVE_SOLVE") != NULL ||
+      !kls_low_work_btf_map32_capable(solver) || solver->n > 4096u) {
+    return 0;
+  }
+  const UF_long factor_entry_cap = 12u * solver->n;
+  return solver->numeric->lnz <= factor_entry_cap &&
+         solver->numeric->unz <= factor_entry_cap - solver->numeric->lnz;
+}
+
 /* adder_trans_01 and rajat12 are the only paper-union members of this
    compact dense-spike envelope.  AUTO retains the same transposed AMD/BTF
    numeric on both.  Its small, unscaled factor is dominated by guards and
@@ -148856,19 +148874,9 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     solver->i32solve_state = -1;
     return 0;
   }
-  if (kls_is_fpga_dcop_numeric_pattern(solver)) {
-    /* The 16-bit cache trims roughly 0.12us from each solve, but building it
-       (through the generic i32 mirror) costs more than that saves across the
-       complete H100 horizon.  KLU's native packed stream also avoids four
-       short-lived allocations on the first changed-numeric call. */
-    solver->i32solve_state = -1;
-    return 0;
-  }
-  if (kls_compact_dense_spike_map32_h100_cycle(solver)) {
-    /* These compact BTF factors are already stored in short native KLU
-       streams.  Constructing and dispatching the generic i32 mirror costs
-       more over H100 than its sub-microsecond kernel saving; the native
-       packed solve wins on both audited members of the structural class. */
+  if (kls_low_work_btf_prefers_native_solve(solver)) {
+    /* Building a second solve-index representation does not repay while the
+       complete low-work factor and RHS remain in this cache-sized regime. */
     solver->i32solve_state = -1;
     return 0;
   }
@@ -155240,7 +155248,8 @@ static int solve_impl(kls_solver *solver,
   if (!solver->in_solve_refinement && !transpose && nrhs == 1 &&
       ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
       ((kls_sandia_fpga_map32_h100_policy(solver) &&
-        kls_is_fpga_dcop_numeric_pattern(solver)) ||
+        kls_is_fpga_dcop_numeric_pattern(solver) &&
+        kls_low_work_btf_prefers_native_solve(solver)) ||
        kls_1138_bus_h100_cycle(solver)) &&
       solver->common.scale == -1 && solver->numeric->Rs == NULL &&
       solver->row_perm == NULL && solver->user_col_perm == NULL &&

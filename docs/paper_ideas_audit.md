@@ -16681,3 +16681,27 @@ entrywise H100 protocol.  It does NOT mean every launch wins (the final HTC
 check was 8/9), does not extend to unsupported perturbation amplitudes, and is
 not an out-of-sample universality claim.  Release tests, clean ASan/LSan tests,
 and classifier-path sanitizer runs pass.
+
+GENERIC LOW-WORK BTF SOLVE-CACHE RETIER (2026-07-23).  Two compact-solve
+exclusions had encoded the exact FPGA-DCOP and Rajat/adder dense-spike
+envelopes even though the decision is made after numeric factorization.  They
+are now one retained-factor policy: an unscaled factor with no known
+structural deficiency and more than one BTF block.  Below 100K flops it
+uses KLU's native packed solve when
+`n <= 4096` and `lnz + unz <= 12n`; larger factors retain the compact i16/i32
+mirror.  This keeps input dimensions, nonzero counts, orientation, ordering,
+and benchmark identity out of the cache decision.  An environment override
+disables the native preference for paired diagnosis.
+
+With the rule frozen, fifteen alternating entrywise-H100 mirror/native pairs
+on the six eligible paper/development rows gave a 0.967 native/mirror
+geometric mean of per-side medians, with no matrix above 1.0 by more than
+noise.  The group-disjoint development row `Chem97ZtZ` improved 5.2%; the two
+larger low-work controls (`rajat13`, `TSOPF_RS_b9_c6`) were policy-invariant.
+The reserved 24-matrix SuiteSparse holdout was then consumed once without
+retuning.  All 24 completed; its only eligible row was `lung1`, a two-block
+CFD factor unlike the fragmented tuning cohort.  Fifteen alternating pairs
+were neutral-to-positive (0.995 native/mirror by per-side medians, native won
+11/15 paired launches), with worst final relative-L2 residual below 4.6e-16.
+This supports the generic crossover without claiming a universal solve-kernel
+win; the benefit is the H100 cache-construction/dispatch horizon.
