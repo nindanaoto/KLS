@@ -16889,3 +16889,50 @@ Finally, `add20` and `qh1484` each completed 1,000 independently verified
 entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000 changed
 systems); the worst relative-L2 residual was 1.04e-15.  Release and ASan/LSan
 test suites pass.
+
+SMALL-PIVOT LOW-WORK DOMINANT-BTF EGRAPH GENERALIZED (2026-07-23).  The exact
+`LeGresley_87936` selector admitted one 18.14M-flop factor below EGraph's
+generic 20M-flop crossover and exempted its 25 off-diagonal pivots from the
+zero-pivot rule.  It controlled parallel-refactor eligibility, dominant-BTF
+classification, and schedule construction.  Disabling it changed the H100
+route from EGraph to mapped and made the cycle about 2.2x slower, so the
+exception could not simply be deleted.
+
+The replacement is a retained-factor class rather than an AUTO/options or
+dimension/nnz fingerprint.  It requires a normal, unscaled, full or
+unknown-structural-rank BTF factor, a nonserial backend with at least two
+workers, `30000 <= n <= 120000`, at most `10n` input entries, 2--5,000 blocks,
+a 60K--90K dominant block covering at least 95% of the matrix, no more than 32
+off-diagonal pivots, and 10M--30M factor flops.  Most importantly, the already
+computed largest-block elimination tree must be no deeper than half the
+block.  That last condition expresses the branching needed to amortize
+EGraph synchronization before building its full dependency schedule.  The
+old environment switch remains a diagnostic alias for the new policy.
+
+Two deliberately broader proposals were rejected during construction.  A
+63K banded matrix met the size, BTF, work, and pivot bounds but had about 24
+input entries per row; forcing EGraph made its short run roughly 3x slower.
+Sparse strip-grid variants passed the input-density boundary but had
+60K--82K-level elimination trees and regressed by as much as 22%.  The final
+density and etree guards keep both families on their incumbent adaptive
+routes.  Conversely, a synthetic 63K sparse arrow matrix has a 60K dominant
+block, 3,000 scalar fringe blocks, 272,100 input entries, four off-diagonal
+pivots, 18.14M flops, and a 499-level etree.  It exercises the new class with
+explicit AMD/normal/unscaled options.  Twenty alternating saved/generic pairs
+put EGraph at 0.578 of the incumbent median; it won all 20 launches.
+
+Twenty alternating saved-exact/generic H100 pairs on `LeGresley_87936` put
+generic/exact at 0.987 by per-side medians and 0.985 by paired medians; the
+generic binary won 13/20 launches, retained EGraph throughout, and had a
+4.03e-14 worst final residual.  Nine nonmatching neighboring controls,
+including the two rejected synthetic shapes, measured 0.992 enabled/disabled
+geometric mean in the same generic binary, with no row above 1.005.  A further
+SuiteSparse extension downloaded seven candidates from Zhao, Norris,
+Schenk_IBMSDS, Sanghavi, Watson, and Chevron.  Five real inputs factored (one
+returned a 2.37e-6 residual and was reported rather than treated as valid),
+two complex inputs were reported as unsupported, and none met the complete
+retained-factor class.  Finally, the real and synthetic positive rows each
+completed 1,000 independently
+verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000
+systems); the worst relative-L2 residual was 2.79e-11.  Release and ASan/LSan
+test suites pass.

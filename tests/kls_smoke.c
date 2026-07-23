@@ -1266,6 +1266,163 @@ static int test_moderate_single_block_lean_policy(void) {
   return ok;
 }
 
+static int test_small_pivot_low_work_dominant_btf(void) {
+  enum {
+    CORE_N = 60000,
+    SEPARATOR_N = 300,
+    LEAF_N = CORE_N - SEPARATOR_N,
+    FRINGE_N = 3000,
+    N = CORE_N + FRINGE_N,
+    NNZ = CORE_N + 2 * LEAF_N +
+      SEPARATOR_N * (SEPARATOR_N - 1) + FRINGE_N
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || initial == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL) {
+    free(ap);
+    free(ai);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_names[] = {
+    "KLS_DISABLE_SMALL_PIVOT_LOW_WORK_DOMINANT_BTF",
+    "KLS_DISABLE_LEGRESLEY87936_H100_POLICY"
+  };
+  char *saved_env[2] = {NULL, NULL};
+  int had_env[2] = {0, 0};
+  int ok = 1;
+  for (size_t k = 0; k < 2u; ++k) {
+    const char *value = getenv(env_names[k]);
+    had_env[k] = value != NULL;
+    saved_env[k] = value != NULL ? strdup(value) : NULL;
+    if ((value != NULL && saved_env[k] == NULL) ||
+        unsetenv(env_names[k]) != 0) {
+      ok = 0;
+    }
+  }
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < LEAF_N; ++col) {
+    ai[p] = col;
+    initial[p] = 5.0;
+    changed[p] = 5.0 * (p % 97 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ai[p] = LEAF_N + col % SEPARATOR_N;
+    initial[p] = col < 4 ? -10000.0 : -1.0;
+    changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ap[col + 1] = p;
+  }
+  for (int32_t col = LEAF_N; col < CORE_N; ++col) {
+    const int32_t separator = col - LEAF_N;
+    for (int32_t row = separator; row < LEAF_N; row += SEPARATOR_N) {
+      ai[p] = row;
+      initial[p] = row < 4 ? -10000.0 : -1.0;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    for (int32_t row = LEAF_N; row < CORE_N; ++row) {
+      ai[p] = row;
+      initial[p] = row == col ? 5.0 : -1.0;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    ap[col + 1] = p;
+  }
+  for (int32_t col = CORE_N; col < N; ++col) {
+    ai[p] = col;
+    initial[p] = 1.0;
+    changed[p] = col % 97 == 0 ? 1.0005 : 1.0;
+    ++p;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    ok = 0;
+  }
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.5 + 0.03125 * (double)(col % 17);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  options.ordering = KLS_ORDERING_AMD;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create small-pivot dominant BTF")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze small-pivot dominant BTF")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor small-pivot dominant BTF")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor small-pivot dominant BTF")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve small-pivot dominant BTF")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats small-pivot dominant BTF")) ok = 0;
+  if (ok) {
+    ok = stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH &&
+      stats.nblocks > 1 && stats.nblocks <= 5000 &&
+      stats.max_block >= 60000 && stats.max_block < 90000 &&
+      stats.offdiag_pivots > 0 && stats.offdiag_pivots <= 32 &&
+      stats.factor_flops >= 1.0e7 && stats.factor_flops < 3.0e7 &&
+      stats.factor_etree_levels > 0 &&
+      2 * stats.factor_etree_levels <= stats.max_block;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected small-pivot dominant BTF result: path=%s "
+              "blocks=%" PRId64 " max=%" PRId64 " pivots=%" PRId64
+              " flops=%.17g x0=%.17g xlast=%.17g\n",
+              kls_refactor_path_name(stats.last_refactor_path),
+              stats.nblocks, stats.max_block, stats.offdiag_pivots,
+              stats.factor_flops, x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  for (size_t k = 0; k < 2u; ++k) {
+    if (!(had_env[k] && saved_env[k] == NULL) &&
+        !restore_env_value(env_names[k], had_env[k], saved_env[k])) {
+      ok = 0;
+    }
+    free(saved_env[k]);
+  }
+  free(ap);
+  free(ai);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_csr_forced_transpose_orientation(void) {
   const int64_t rp[] = {0, 3, 6, 8};
   const int64_t ci[] = {0, 1, 2, 0, 1, 2, 1, 2};
@@ -17942,6 +18099,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_moderate_single_block_lean_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_small_pivot_low_work_dominant_btf()) {
     return EXIT_FAILURE;
   }
   if (!test_transposed_low_work_btf_native_solve()) {
