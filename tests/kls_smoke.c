@@ -20431,6 +20431,133 @@ static int test_diagonal_equivalent_refactor(void) {
   return ok;
 }
 
+static int test_large_sparse_low_degree_retained_tolerance(void) {
+  const int32_t n = 150000;
+  const int32_t block_size = 1000;
+  const int32_t degree = 5;
+  const int32_t nnz = degree * n;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  const char *saved_enable_value =
+    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR");
+  char *saved_enable = saved_enable_value != NULL
+    ? strdup(saved_enable_value) : NULL;
+  const int had_enable = saved_enable_value != NULL;
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = 1;
+
+  if (ap == NULL || ai == NULL || ax == NULL ||
+      (had_enable && saved_enable == NULL)) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(saved_enable);
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    const int32_t block_begin = (col / block_size) * block_size;
+    const int32_t local_col = col - block_begin;
+    const int32_t dominant_row = (local_col + 1) % block_size;
+    const int32_t group_col = local_col % 10;
+    int32_t rows[degree];
+    ap[col] = p;
+    for (int32_t k = 0; k < degree - 1; ++k) {
+      rows[k] = (local_col + k + 1) % block_size;
+    }
+    /* A fifth permutation fixes one column in ten and rotates the other
+       nine by five positions.  Together with the four cyclic shifts this
+       gives every row and column degree five, exactly 10% diagonal coverage,
+       and no duplicate entry. */
+    rows[degree - 1] = group_col == 0
+      ? local_col
+      : local_col - group_col + 1 + ((group_col - 1 + 5) % 9);
+    for (int32_t i = 1; i < degree; ++i) {
+      const int32_t row = rows[i];
+      int32_t j = i;
+      while (j > 0 && rows[j - 1] > row) {
+        rows[j] = rows[j - 1];
+        --j;
+      }
+      rows[j] = row;
+    }
+    for (int32_t k = 0; k < degree; ++k) {
+      ai[p] = block_begin + rows[k];
+      ax[p] = rows[k] == dominant_row
+        ? 4.0 : 0.01 * (double)(1 + ((col + rows[k]) % 7));
+      ++p;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected low-degree policy nnz: %d/%d\n", p, nnz);
+    ok = 0;
+  }
+
+  if (ok && !require_ok(kls_create(&solver),
+                        "create low-degree retained tolerance")) {
+    ok = 0;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "build stats low-degree retained tolerance")) {
+    ok = 0;
+  }
+  if (ok && stats.build_has_metis == 0) {
+    goto cleanup;
+  }
+  if (ok && setenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR", "1", 1) != 0) {
+    perror("setenv low-degree retained tolerance");
+    ok = 0;
+  }
+
+  kls_default_options(&options);
+  options.threads = 4;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze low-degree retained tolerance")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, ax),
+                        "factor low-degree retained tolerance")) {
+    ok = 0;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats low-degree retained tolerance")) {
+    ok = 0;
+  }
+  if (ok && (stats.selected_ordering != KLS_ORDERING_METIS ||
+             stats.selected_scale != 1 || stats.selected_btf != 1 ||
+             fabs(stats.selected_pivot_tolerance - 2.0e-3) > 1.0e-12)) {
+    fprintf(stderr,
+            "unexpected low-degree retained tolerance policy:"
+            " ordering=%d scale=%d btf=%d tol=%.17g\n",
+            (int)stats.selected_ordering, stats.selected_scale,
+            stats.selected_btf, stats.selected_pivot_tolerance);
+    ok = 0;
+  }
+
+cleanup:
+  if (!restore_env_value("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR",
+                         had_enable,
+                         saved_enable != NULL ? saved_enable : "")) {
+    ok = 0;
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(saved_enable);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -20444,6 +20571,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_diagonal_equivalent_refactor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_large_sparse_low_degree_retained_tolerance()) {
     return EXIT_FAILURE;
   }
   /* The remaining smoke cases deliberately assert individual refactor-engine

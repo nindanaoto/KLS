@@ -30676,28 +30676,11 @@ static int kls_uses_structural_initial_pivot_tolerance(
      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr));
 }
 
-static int kls_is_mac_econ_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->col_ptr != NULL &&
-    solver->symbolic != NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 && solver->options.static_pivoting &&
-    solver->options.use_btf &&
-    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    getenv("KLS_DISABLE_MAC_ECON_H100_POLICY") == NULL &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-    solver->common.scale == 1 &&
-    solver->n >= 206450u && solver->n <= 206550u &&
-    solver->col_ptr[solver->n] >= 1273000u &&
-    solver->col_ptr[solver->n] <= 1274000u &&
-    solver->symbolic->do_btf && solver->symbolic->nblocks >= 30u &&
-    solver->symbolic->nblocks <= 40u &&
-    solver->symbolic->maxblock >= 206400u;
-}
-
+/* Keep this policy table out of factor_impl.  Its individual structural
+   clauses evolve independently of the numeric kernels; inlining the table
+   makes deleting a clause shift later hot code and creates layout-sensitive
+   performance changes with no numeric-policy change. */
+__attribute__((noinline))
 static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12) {
@@ -30780,13 +30763,6 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
   }
 
 #ifdef KLS_HAVE_METIS
-  if (kls_is_mac_econ_h100_cycle(solver)) {
-    /* The 5e-5 speed point has a rare parallel-pivot draw whose bounded
-       solve recovery can dominate an audited H100 pass.  At 1e-4, 24 pinned
-       entrywise passes kept every generation below 9.9e-10 relative L2 and
-       completed the median full cycle below CKTSO without recovery. */
-    return 1.0e-4;
-  }
   if (solver->options.ordering == KLS_ORDERING_AUTO &&
       solver->stats.selected_ordering == KLS_ORDERING_METIS &&
       is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
@@ -30795,11 +30771,12 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
       /* Retaining one numeric across diagonal-equivalent updates changes the
          accuracy requirement: a factor that is acceptable for its original
          right-hand-side direction can lose digits after the boundary
-         diagonals rotate that direction.  The old 1e-5 speed choice misses
-         the 1e-8 contract on this ill-conditioned structural class.  A
-         charged one-time factor at 5e-4 keeps the retained update valid while
-         remaining far cheaper over a repeated-numeric horizon. */
-      return 5.0e-4;
+         diagonals rotate that direction.  Both the old 5e-4 choice and the
+         requested 1e-3 threshold can miss the 1e-8 contract on this
+         ill-conditioned structural class.  A charged one-time factor at
+         2e-3 restores residual margin while remaining far cheaper over a
+         repeated-numeric horizon. */
+      return 2.0e-3;
     }
     /* Ordinary entrywise updates still need more pivot headroom than 1e-5:
        rare generations exhaust the bounded refinement loop.  The 1e-4

@@ -17508,3 +17508,62 @@ Finally, the original and four-block matrices each completed 1,000 verified
 entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000 changed systems
 total).  Every generation retained EGraph and the worst relative-L2 residual
 was 8.61e-14.  Release CTest and ASan/LSan CTest both pass all three tests.
+
+LARGE SPARSE LOW-DEGREE RETAINED TOLERANCE GENERALIZED (2026-07-23).  The
+remaining `mac_econ_fwd500` pivot-tolerance exception required the complete
+AUTO/static/BTF/eight-thread option tuple, 206,450--206,550 rows,
+1,273,000--1,274,000 entries, 30--40 BTF blocks, and a largest block of at
+least 206,400 rows.  Its ordinary entrywise result, `1e-4`, had become exactly
+redundant with the existing `is_large_sparse_diagonal_low_degree_pattern`
+policy.  Its only surviving effect was less defensible: when the explicitly
+enabled diagonal-equivalent engine asked the structural class for a safer
+tolerance, the exact branch still forced `1e-4` on this one benchmark shape.
+
+The exact predicate and its disable variable are now gone.  AUTO/METIS factors
+in the structural class use the same policy independent of thread count,
+backend, BTF decomposition, or exact dimensions: ordinary entrywise updates
+retain `1e-4`, while diagonal-equivalent retained updates use `2e-3`.  The
+latter value is an accuracy requirement rather than a speed retier.  On the
+real target, the exact parent's `1e-4` retained numeric ended one sampled
+trajectory at `1.72e-6` relative L2.  The previous generic `5e-4` choice still
+ended at `6.43e-8`, and an approximately `1e-3` explicit factor reached
+`1.81e-8` over ten checked updates.  At `2e-3`, six independent target runs
+covered 110 checked updates, amplitudes 0.001, 0.01, and 0.1, and two, four,
+and eight workers; the worst relative-L2 residual was `3.75e-9`.  Every run
+kept the diagonal-equivalent path.
+
+A deterministic metamorphic holdout appends 1,000 scalar diagonal components
+to the public matrix.  It has 207,500 rows, 1,274,389 entries, 1,034 BTF
+blocks, and the original 206,467-row numeric block, so it is outside the old
+dimension, entry-count, and block-count boxes while remaining inside the
+normalized sparse/low-degree classifier.  Over twenty amplitude-0.1 updates,
+the compiler-identical parent selected the old generic `5e-4` policy and
+reached `1.28e-8`; the new structural policy selected `2e-3` and bounded the
+same check at `2.59e-9`.  The charged factor grew from about 4.71s to 5.28s and
+the solve from 185ms to 196ms, while the retained update itself stayed about
+3.6ms.  That modest opt-in cost replaces an invalid result and remains far
+below repeating the ordinary numeric refactor.
+
+The smoke suite adds a non-benchmark positive at the lower class boundary:
+150,000 rows, exactly five entries per row and column, 10% diagonal coverage,
+maximum degree five, and 150 independent 1,000-row strongly connected blocks.
+With four AUTO workers and diagonal-equivalent reuse enabled, it must select
+METIS, sum scaling, BTF, and the generic `2e-3` tolerance.  A static scan of all
+243 locally installed Matrix Market cases found only `mac_econ_fwd500` inside
+the complete real-matrix class.  The pinned SuiteSparse metadata supplied five
+additional same-size/same-density challenges, downloaded to temporary storage:
+`thermomech_dM` and `c-73` have full diagonals, `cont-300` has 50.08% diagonal
+coverage, and `caidaRouterLevel`/`coAuthorsCiteseer` have no diagonal and
+maximum degrees above one thousand.  Local `hvdc2`, `transient`, and `scircuit`
+provide further high-diagonal or high-degree negatives.  All are rejected by
+the intended normalized boundaries rather than by names.
+
+Deleting the exact clause initially made the compiler inline the now-smaller
+tolerance table into `factor_impl`, shifting unrelated hot code and creating a
+spurious roughly 2.5% refactor movement.  The policy table is now explicitly
+out of line, so adding or removing a structural clause cannot change the
+factor/refactor caller's code layout.  Four fresh alternating pinned default
+entrywise pairs put new/parent at 0.9987 by median repeated-refactor time and
+0.9962 at steady state (1.451s versus 1.453s and 1.164s versus 1.168s).  Every
+run selected the unchanged `1e-4` tolerance and EGraph route.  Release and
+ASan/LSan CTest both pass all three tests.
