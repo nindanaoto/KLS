@@ -2553,6 +2553,241 @@ static int test_large_reciprocal_hub_amd_btf(void) {
   return ok;
 }
 
+static int run_balanced_moderate_hub_fixture(
+  int32_t core_n,
+  int32_t fringe_components,
+  int32_t core_step_a,
+  int32_t core_step_b,
+  int expect_btf,
+  int check_csr,
+  int expect_guarded) {
+  enum {
+    N = 16384,
+    HUB = 0,
+    HUB_FIRST = 2048,
+    HUB_LINKS = 512,
+    BASE_DEGREE = 5,
+    NNZ = BASE_DEGREE * N + 2 * HUB_LINKS
+  };
+  if (core_n <= HUB_FIRST + HUB_LINKS || core_n >= N ||
+      fringe_components <= 0 ||
+      (N - core_n) % fringe_components != 0) {
+    return 0;
+  }
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  int32_t *rp = (int32_t *)calloc((size_t)N + 1u, sizeof(*rp));
+  int32_t *ci = (int32_t *)malloc((size_t)NNZ * sizeof(*ci));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || rp == NULL || ci == NULL ||
+      initial == NULL || changed == NULL || expected == NULL || b == NULL ||
+      x == NULL) {
+    free(ap);
+    free(ai);
+    free(rp);
+    free(ci);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  int ok = 1;
+  int32_t p = 0;
+  const int32_t fringe_size = (N - core_n) / fringe_components;
+  ap[0] = 0;
+  for (int32_t col = 0; col < N; ++col) {
+    const int in_core = col < core_n;
+    const int32_t component_begin = in_core
+      ? 0 : core_n + ((col - core_n) / fringe_size) * fringe_size;
+    const int32_t component_size = in_core ? core_n : fringe_size;
+    const int32_t local = col - component_begin;
+    const int32_t step_a = in_core ? core_step_a : 1;
+    const int32_t step_b = in_core ? core_step_b : 2;
+    const int32_t rows[BASE_DEGREE] = {
+      col,
+      component_begin + (local + step_a) % component_size,
+      component_begin + (local + component_size - step_a) % component_size,
+      component_begin + (local + step_b) % component_size,
+      component_begin + (local + component_size - step_b) % component_size
+    };
+    for (int lane = 0; lane < BASE_DEGREE; ++lane) {
+      ai[p] = rows[lane];
+      initial[p] = rows[lane] == col ? 32.0 : -0.001;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    if (col == HUB) {
+      for (int32_t link = 0; link < HUB_LINKS; ++link) {
+        ai[p] = HUB_FIRST + link;
+        initial[p] = -0.001;
+        changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+        ++p;
+      }
+    } else if (col >= HUB_FIRST && col < HUB_FIRST + HUB_LINKS) {
+      ai[p] = HUB;
+      initial[p] = -0.001;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    ok = 0;
+  }
+
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    rp[ai[entry] + 1]++;
+  }
+  for (int32_t row = 0; row < N; ++row) {
+    rp[row + 1] += rp[row];
+  }
+  int32_t *next = (int32_t *)malloc((size_t)N * sizeof(*next));
+  if (next == NULL) {
+    ok = 0;
+  } else {
+    memcpy(next, rp, (size_t)N * sizeof(*next));
+    for (int32_t col = 0; col < N; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        ci[next[ai[entry]]++] = col;
+      }
+    }
+  }
+  free(next);
+
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.25 + 0.03125 * (double)(col % 23);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create balanced moderate hub")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze balanced moderate hub")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor balanced moderate hub")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor balanced moderate hub")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve balanced moderate hub")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats balanced moderate hub")) ok = 0;
+  if (ok) {
+    const int within_guard = stats.estimated_flops > 0.0 &&
+      stats.estimated_flops <= 1024.0 * (double)N &&
+      stats.nnz_l + stats.nnz_u <= 32 * (int64_t)N;
+    const int route_ok = stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+      stats.selected_ordering == KLS_ORDERING_AMD &&
+      stats.selected_btf == expect_btf &&
+      (expect_btf
+        ? stats.nblocks == fringe_components + 1 &&
+          stats.max_block == core_n && stats.structural_rank == N
+        : stats.nblocks == 1 && stats.max_block == N) &&
+      (expect_guarded ? within_guard : !within_guard);
+    ok = route_ok;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected balanced moderate-hub result: btf=%d "
+              "blocks=%" PRId64 " max=%" PRId64 " rank=%" PRId64
+              " work=%.17g fill=%" PRId64 " x0=%.17g xlast=%.17g\n",
+              stats.selected_btf, stats.nblocks, stats.max_block,
+              stats.structural_rank, stats.estimated_flops,
+              stats.nnz_l + stats.nnz_u, x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && check_csr &&
+      !require_ok(kls_create(&solver),
+                  "create CSR balanced moderate hub")) ok = 0;
+  if (ok && check_csr &&
+      !require_ok(kls_analyze_csr(
+                    solver, KLS_INDEX_INT32, N, rp, ci, 0, &options),
+                  "analyze CSR balanced moderate hub")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && check_csr &&
+      !require_ok(kls_get_stats(solver, &stats),
+                  "stats CSR balanced moderate hub")) ok = 0;
+  if (ok && check_csr &&
+      !(stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+        stats.selected_ordering == KLS_ORDERING_AMD &&
+        stats.selected_btf == expect_btf &&
+        (expect_btf
+          ? stats.nblocks == fringe_components + 1 &&
+            stats.max_block == core_n
+          : stats.nblocks == 1 && stats.max_block == N))) {
+    fprintf(stderr,
+            "unexpected CSR balanced moderate-hub route: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 "\n",
+            stats.selected_btf, stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  free(ap);
+  free(ai);
+  free(rp);
+  free(ci);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
+static int test_balanced_moderate_hub_amd(void) {
+  const char *env_name = "KLS_DISABLE_BALANCED_MODERATE_HUB_AMD";
+  const char *env_value = getenv(env_name);
+  const int had_env = env_value != NULL;
+  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
+  int ok = (env_value == NULL || saved_env != NULL) &&
+    unsetenv(env_name) == 0;
+  if (ok) {
+    /* A nearly spanning SCC retains BTF. */
+    ok = run_balanced_moderate_hub_fixture(
+      16320, 8, 1, 2, 1, 1, 1);
+  }
+  if (ok) {
+    /* A bounded collection of coarse fringe SCCs selects one-block AMD. */
+    ok = run_balanced_moderate_hub_fixture(
+      13824, 32, 1, 2, 0, 1, 1);
+  }
+  if (ok) {
+    /* Long chords preserve the profile but cross both symbolic guards. */
+    ok = run_balanced_moderate_hub_fixture(
+      16320, 8, 37, 1009, 1, 0, 0);
+  }
+  if (!(had_env && saved_env == NULL) &&
+      !restore_env_value(env_name, had_env, saved_env)) {
+    ok = 0;
+  }
+  free(saved_env);
+  return ok;
+}
+
 static int test_low_work_one_way_scalar_fringe_no_btf(void) {
   enum {
     CORE_N = 4480,
@@ -19596,6 +19831,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_large_reciprocal_hub_amd_btf()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_balanced_moderate_hub_amd()) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_one_way_scalar_fringe_no_btf()) {

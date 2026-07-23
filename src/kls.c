@@ -2388,6 +2388,9 @@ struct kls_solver {
   double *lean_scale_rs_snapshot;
   int lean_scale_input_state; /* 0 unarmed, 1 exact Rs input cached,
                                  -1 changed or declined for this numeric */
+  /* Cold policy state stays at the tail so it does not shift the established
+     alignment of hot refactor and solve fields above. */
+  int balanced_moderate_hub_amd_cycle; /* guarded AMD/BTF or AMD/no-BTF */
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -2460,6 +2463,10 @@ typedef struct kls_pattern_candidate {
   int sparse_diagonal_row_hub_no_btf_selected;
   int large_reciprocal_hub_amd_btf_class;
   int large_reciprocal_hub_amd_btf_selected;
+  int balanced_moderate_hub_amd_class;
+  int balanced_moderate_hub_amd_selected;
+  UF_long *balanced_moderate_hub_btf_storage;
+  UF_long balanced_moderate_hub_btf_nblocks;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -27415,6 +27422,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->partial_diagonal_many_block_no_btf_cycle = 0;
   solver->sparse_diagonal_row_hub_no_btf_cycle = 0;
   solver->large_reciprocal_hub_amd_btf_cycle = 0;
+  solver->balanced_moderate_hub_amd_cycle = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -28366,72 +28374,226 @@ static int kls_low_work_single_block_direct_csc_capable(
     solver->numeric->Rs == NULL;
 }
 
-/* The two ckt11752 variants share a normal AMD/BTF symbolic, and AUTO's
-   ordering tournament always returns that same factor.  Re-running the AMF
-   candidate and the factor-time block-order detector costs about 8 ms on a
-   0.36 s H100 cycle, enough to lose the near-boundary CKTSO comparison.
-   Select the already-audited verdict directly under the exact generic
-   numeric contract.  The structural envelope contains only ckt11752_dc_1
-   and ckt11752_tr_0 in the paper union; both retain AMD today. */
-static int kls_ckt11752_amd_h100_policy_enabled(
+enum {
+  KLS_BALANCED_MODERATE_HUB_NONE = 0,
+  KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF = 1,
+  KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF = 2
+};
+
+/* Degree-balanced sparse systems with a moderate two-way hub have two useful
+   AMD regimes.  A nearly spanning SCC retains BTF, while a 75--90% core plus
+   a bounded number of coarse fringe SCCs exposes substantially more repeated
+   numeric parallelism as one AMD block.  Full structural diagonal permits an
+   identity matching, so a direct strong-component pass classifies the two
+   regimes without a maximum-transversal or an ordering tournament.  The
+   degree and SCC predicates are invariant under transpose. */
+static int kls_balanced_moderate_hub_amd_profile(
   UF_long n,
   const UF_long *col_ptr,
+  const UF_long *row_idx,
+  UF_long **btf_storage_out,
+  UF_long *btf_nblocks_out) {
+  if (btf_storage_out != NULL) {
+    *btf_storage_out = NULL;
+  }
+  if (btf_nblocks_out != NULL) {
+    *btf_nblocks_out = 0u;
+  }
+  if (col_ptr == NULL || row_idx == NULL || n < 16384u || n > 262144u ||
+      n > UF_long_max / 10u || col_ptr[n] < 4u * n ||
+      col_ptr[n] > 10u * n ||
+      (size_t)n > SIZE_MAX / sizeof(UF_long)) {
+    return KLS_BALANCED_MODERATE_HUB_NONE;
+  }
+
+  UF_long *row_degree =
+    (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return KLS_BALANCED_MODERATE_HUB_NONE;
+  }
+  int full_diagonal = 1;
+  for (UF_long col = 0u; col < n && full_diagonal; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > col_ptr[n] || 8u * (end - begin) > n) {
+      full_diagonal = 0;
+      break;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n) {
+        full_diagonal = 0;
+        break;
+      }
+      row_degree[row]++;
+      has_diagonal |= row == col;
+    }
+    full_diagonal &= has_diagonal;
+  }
+
+  UF_long degree_imbalance = 0u;
+  int has_balanced_hub = 0;
+  for (UF_long node = 0u; node < n && full_diagonal; ++node) {
+    const UF_long column_degree =
+      col_ptr[node + 1u] - col_ptr[node];
+    const UF_long rdegree = row_degree[node];
+    if (8u * rdegree > n) {
+      full_diagonal = 0;
+      break;
+    }
+    degree_imbalance += column_degree >= rdegree
+      ? column_degree - rdegree : rdegree - column_degree;
+    has_balanced_hub |=
+      64u * column_degree >= n && 64u * rdegree >= n;
+  }
+  free(row_degree);
+  if (!full_diagonal || !has_balanced_hub ||
+      degree_imbalance > col_ptr[n] / 16u) {
+    return KLS_BALANCED_MODERATE_HUB_NONE;
+  }
+
+  if ((size_t)n > (SIZE_MAX / sizeof(UF_long) - 1u) / 6u) {
+    return KLS_BALANCED_MODERATE_HUB_NONE;
+  }
+  UF_long *storage = (UF_long *)malloc(
+    (6u * (size_t)n + 1u) * sizeof(*storage));
+  if (storage == NULL) {
+    return KLS_BALANCED_MODERATE_HUB_NONE;
+  }
+  UF_long *perm = storage;
+  UF_long *block_ptr = perm + n;
+  UF_long *work = block_ptr + n + 1u;
+  const UF_long nblocks = trilinos_btf_l_strongcomp(
+    n, (UF_long *)col_ptr, (UF_long *)row_idx, NULL,
+    perm, block_ptr, work);
+  UF_long maxblock = 0u;
+  if (nblocks > 0u && nblocks <= n) {
+    for (UF_long block = 0u; block < nblocks; ++block) {
+      if (block_ptr[block + 1u] < block_ptr[block] ||
+          block_ptr[block + 1u] > n) {
+        maxblock = 0u;
+        break;
+      }
+      const UF_long size =
+        block_ptr[block + 1u] - block_ptr[block];
+      if (size > maxblock) {
+        maxblock = size;
+      }
+    }
+  }
+  if (nblocks < 2u || nblocks > n / 64u || maxblock == 0u) {
+    free(storage);
+    return KLS_BALANCED_MODERATE_HUB_NONE;
+  }
+  if (100u * maxblock >= 98u * n) {
+    if (btf_storage_out != NULL && btf_nblocks_out != NULL) {
+      *btf_storage_out = storage;
+      *btf_nblocks_out = nblocks;
+    } else {
+      free(storage);
+    }
+    return KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF;
+  }
+  free(storage);
+  if (4u * maxblock >= 3u * n && 10u * maxblock <= 9u * n) {
+    return KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF;
+  }
+  return KLS_BALANCED_MODERATE_HUB_NONE;
+}
+
+static int kls_balanced_moderate_hub_amd_policy_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
-    getenv("KLS_DISABLE_CKT11752_AMD_H100_POLICY") == NULL &&
+  return options != NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
     fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 49650u && n <= 49750u &&
-    col_ptr[n] >= 332500u && col_ptr[n] <= 333500u;
+    getenv("KLS_DISABLE_BALANCED_MODERATE_HUB_AMD") == NULL;
 }
 
-/* The transient variant has a different retained-numeric optimum from dc_1.
-   Its one-block AMD factor at tol=1e-4 exposes enough dependency width for
-   EGraph, halves the repeated solve cost, and wins the complete H100 cycle.
-   Keep the input gate exact: dc_1 has the same dimension but 333029 retained
-   entries and remains faster on its scaled BTF policy. */
-static int kls_ckt11752_tr0_nobtf_h100_policy_enabled(
+static int kls_balanced_moderate_hub_amd_class_enabled(
+  const kls_options *options,
+  int profile_class) {
+  if (!kls_balanced_moderate_hub_amd_policy_enabled(options)) {
+    return 0;
+  }
+  if (profile_class == KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF) {
+    /* Former direct-AMD switch retained as a class-specific alias. */
+    return getenv("KLS_DISABLE_CKT11752_AMD_H100_POLICY") == NULL;
+  }
+  if (profile_class ==
+      KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF) {
+    /* Former transient no-BTF switch retained as a class-specific alias. */
+    return getenv("KLS_DISABLE_CKT11752_TR0_H100_POLICY") == NULL;
+  }
+  return 0;
+}
+
+static int kls_balanced_moderate_hub_amd_input_enabled(
   UF_long n,
   const UF_long *col_ptr,
+  const UF_long *row_idx,
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
-    getenv("KLS_DISABLE_CKT11752_TR0_H100_POLICY") == NULL &&
-    options->orientation == KLS_ORIENTATION_AUTO &&
-    options->ordering == KLS_ORDERING_AUTO &&
-    options->scale == KLS_SCALE_AUTO &&
-    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
-    options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n == 49702u && col_ptr[n] == 332807u;
+  if (!kls_balanced_moderate_hub_amd_policy_enabled(options)) {
+    return 0;
+  }
+  const int profile_class = kls_balanced_moderate_hub_amd_profile(
+    n, col_ptr, row_idx, NULL, NULL);
+  return kls_balanced_moderate_hub_amd_class_enabled(
+    options, profile_class);
 }
 
-static int kls_ckt11752_tr0_nobtf_h100_cycle(
-  const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    kls_ckt11752_tr0_nobtf_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->common.scale == -1 && !solver->symbolic->do_btf &&
-    solver->symbolic->nblocks == 1u &&
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+static int kls_balanced_moderate_hub_amd_cycle(
+  const kls_solver *solver,
+  int profile_class) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->balanced_moderate_hub_amd_cycle != profile_class ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD) {
+    return 0;
+  }
+  if (profile_class == KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF) {
+    return solver->symbolic->do_btf &&
+      solver->symbolic->structural_rank == solver->n &&
+      solver->symbolic->nblocks >= 2u &&
+      solver->symbolic->nblocks <= solver->n / 64u &&
+      100u * solver->symbolic->maxblock >= 98u * solver->n;
+  }
+  return profile_class ==
+      KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF &&
+    !solver->symbolic->do_btf && solver->symbolic->nblocks == 1u &&
     solver->symbolic->maxblock == solver->n;
 }
 
-static int kls_ckt11752_dc1_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    solver->numeric != NULL &&
-    kls_ckt11752_amd_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->n == 49702u && solver->nnz == 333029u &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->common.scale == 2 && solver->numeric->Rs != NULL &&
-    solver->symbolic->do_btf && solver->symbolic->nblocks == 172u &&
-    solver->symbolic->maxblock == 49371u;
+static int kls_balanced_moderate_hub_amd_btf_cycle(
+  const kls_solver *solver) {
+  return kls_balanced_moderate_hub_amd_cycle(
+    solver, KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF);
+}
+
+static int kls_balanced_moderate_hub_amd_no_btf_cycle(
+  const kls_solver *solver) {
+  return kls_balanced_moderate_hub_amd_cycle(
+    solver, KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF);
+}
+
+static int kls_balanced_moderate_hub_amd_selected_cycle(
+  const kls_solver *solver) {
+  return kls_balanced_moderate_hub_amd_btf_cycle(solver) ||
+    kls_balanced_moderate_hub_amd_no_btf_cycle(solver);
+}
+
+static int kls_balanced_moderate_hub_scaled_btf_cycle(
+  const kls_solver *solver) {
+  return kls_balanced_moderate_hub_amd_btf_cycle(solver) &&
+    solver->numeric != NULL && solver->common.scale == 2 &&
+    solver->numeric->Rs != NULL;
 }
 
 /* Candidate analyzes can run on independent threads.  Keep their structural
@@ -28457,6 +28619,10 @@ static _Thread_local int
   kls_large_reciprocal_hub_amd_btf_analyze_path;
 static _Thread_local int
   kls_large_reciprocal_hub_amd_btf_selected;
+static _Thread_local int
+  kls_balanced_moderate_hub_amd_analyze_class;
+static _Thread_local int
+  kls_balanced_moderate_hub_amd_selected;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -30466,7 +30632,7 @@ static int kls_is_small_initial_tolerance_class(const kls_solver *solver) {
 
 static int kls_uses_structural_initial_pivot_tolerance(
   const kls_solver *solver) {
-  return kls_ckt11752_tr0_nobtf_h100_cycle(solver) ||
+  return kls_balanced_moderate_hub_amd_no_btf_cycle(solver) ||
     kls_is_mc2depi_h100_cycle(solver) ||
     kls_is_small_initial_tolerance_class(solver) ||
     (solver != NULL &&
@@ -30531,11 +30697,11 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
     return 3.0e-8;
   }
 
-  if (kls_ckt11752_tr0_nobtf_h100_cycle(solver)) {
-    /* At the requested 1e-3 threshold this factor retains 23 off-diagonal
-       pivots and misses the single-block EGraph envelope.  The audited 1e-4
-       factor retains the same fill/work, stays at machine-precision residual,
-       and lowers the full repeated cycle below CKTSO. */
+  if (kls_balanced_moderate_hub_amd_no_btf_cycle(solver)) {
+    /* The coarse-fringe one-block route benefits from avoiding loose
+       off-diagonal pivots at the requested 1e-3 threshold.  The tighter
+       factor retains the guarded symbolic fill/work, while the structural
+       tolerance contract verifies changed numerics at solve time. */
     return 1.0e-4;
   }
 
@@ -39485,8 +39651,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
         solver->n, solver->col_ptr, &solver->options) ||
       kls_is_asic100k_dense_h100_cycle(solver) ||
       kls_large_reciprocal_hub_amd_btf_cycle(solver) ||
-      kls_ckt11752_amd_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) ||
+      kls_balanced_moderate_hub_amd_selected_cycle(solver) ||
       kls_circuit5m_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
       kls_freescale1_direct_h100_policy_enabled(
@@ -39677,7 +39842,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
       kls_large_low_degree_fragmented_pattern(n, col_ptr) ||
       (kls_large_reciprocal_hub_amd_btf_policy_enabled(options) &&
        kls_large_reciprocal_hub_amd_btf_profile(n, col_ptr, row_idx)) ||
-      kls_ckt11752_amd_h100_policy_enabled(n, col_ptr, options) ||
+      kls_balanced_moderate_hub_amd_input_enabled(
+        n, col_ptr, row_idx, options) ||
       kls_circuit5m_h100_policy_enabled(n, col_ptr, options) ||
       kls_freescale1_direct_h100_policy_enabled(n, col_ptr, options) ||
       kls_memchip_direct_h100_policy_enabled(n, col_ptr, options) ||
@@ -41585,16 +41751,63 @@ static int choose_symbolic_for_pattern(UF_long n,
     kls_separator_analysis_clear(separator_out);
     *score_out = DBL_MAX;
   }
-  if (kls_ckt11752_tr0_nobtf_h100_policy_enabled(
-        n, col_ptr, options)) {
-    /* This exact AUTO workload wins with a single AMD block.  The recursive
-       call carries explicit options, so the input policy cannot re-enter. */
+  if (kls_balanced_moderate_hub_amd_analyze_class !=
+        KLS_BALANCED_MODERATE_HUB_NONE &&
+      kls_balanced_moderate_hub_amd_class_enabled(
+        options, kls_balanced_moderate_hub_amd_analyze_class)) {
+    /* The structural SCC profile proposes either a dominant AMD/BTF factor
+       or a one-block AMD factor for a coarse fringe.  The measured symbolic
+       must still fit absolute work/fill bounds before it can bypass AUTO. */
+    const int profile_class =
+      kls_balanced_moderate_hub_amd_analyze_class;
     kls_options amd_options = *options;
     amd_options.ordering = KLS_ORDERING_AMD;
-    amd_options.use_btf = 0;
-    return choose_symbolic_for_pattern(
+    amd_options.use_btf =
+      profile_class == KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF;
+    const int status = choose_symbolic_for_pattern(
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
+    const int geometry_ok = status == KLS_OK && *symbolic_out != NULL &&
+      ((profile_class == KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
+        (*symbolic_out)->do_btf &&
+        (*symbolic_out)->structural_rank == n &&
+        (*symbolic_out)->nblocks >= 2u &&
+        (*symbolic_out)->nblocks <= n / 64u &&
+        100u * (*symbolic_out)->maxblock >= 98u * n) ||
+       (profile_class ==
+          KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF &&
+        !(*symbolic_out)->do_btf && (*symbolic_out)->nblocks == 1u &&
+        (*symbolic_out)->maxblock == n));
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS balanced moderate-hub AMD proposal: class=%d status=%d "
+              "btf=%d blocks=%ld max=%ld rank=%ld work=%.4e fill=%.4e "
+              "limits=(%.4e,%.4e)\n",
+              profile_class, status,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (int)(*symbolic_out)->do_btf : -1,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->nblocks : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->maxblock : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->structural_rank : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (*symbolic_out)->est_flops : -1.0,
+              status == KLS_OK ? *score_out : -1.0,
+              1024.0 * (double)n, 32.0 * (double)n);
+    }
+    if (geometry_ok && (*symbolic_out)->est_flops > 0.0 &&
+        (*symbolic_out)->est_flops <= 1024.0 * (double)n &&
+        *score_out > 0.0 && *score_out <= 32.0 * (double)n) {
+      kls_balanced_moderate_hub_amd_selected = profile_class;
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
   }
   if (kls_large_reciprocal_hub_amd_btf_analyze_path &&
       kls_large_reciprocal_hub_amd_btf_policy_enabled(options)) {
@@ -41640,15 +41853,6 @@ static int choose_symbolic_for_pattern(UF_long n,
     }
     kls_separator_analysis_clear(separator_out);
     *score_out = DBL_MAX;
-  }
-  if (kls_ckt11752_amd_h100_policy_enabled(n, col_ptr, options)) {
-    /* This audited variant retains the same AMD/BTF symbolic.  Select it
-       directly so analysis does not price a discarded ordering tournament. */
-    kls_options amd_options = *options;
-    amd_options.ordering = KLS_ORDERING_AMD;
-    return choose_symbolic_for_pattern(
-      n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
-      selected_ordering_out, score_out, separator_out);
   }
 #ifdef KLS_HAVE_METIS
   if (options != NULL &&
@@ -41983,6 +42187,7 @@ static void free_candidate(kls_pattern_candidate *candidate) {
   free(candidate->row_idx);
   free(candidate->input_to_csc);
   free(candidate->values);
+  free(candidate->balanced_moderate_hub_btf_storage);
   memset(candidate, 0, sizeof(*candidate));
 }
 
@@ -42252,6 +42457,13 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_large_reciprocal_hub_amd_btf_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->balanced_moderate_hub_amd_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL
+      ? kls_balanced_moderate_hub_amd_profile(
+          candidate->n, candidate->col_ptr, candidate->row_idx,
+          &candidate->balanced_moderate_hub_btf_storage,
+          &candidate->balanced_moderate_hub_btf_nblocks)
+      : KLS_BALANCED_MODERATE_HUB_NONE;
   return KLS_OK;
 }
 
@@ -42305,6 +42517,13 @@ static int transpose_candidate(const kls_pattern_candidate *source,
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_large_reciprocal_hub_amd_btf_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->balanced_moderate_hub_amd_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL
+      ? kls_balanced_moderate_hub_amd_profile(
+          candidate->n, candidate->col_ptr, candidate->row_idx,
+          &candidate->balanced_moderate_hub_btf_storage,
+          &candidate->balanced_moderate_hub_btf_nblocks)
+      : KLS_BALANCED_MODERATE_HUB_NONE;
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
   candidate->compact_partial_diagonal_column_fringe_class =
@@ -42353,6 +42572,11 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_large_reciprocal_hub_amd_btf_analyze_path;
   const int reciprocal_hub_selected_saved =
     kls_large_reciprocal_hub_amd_btf_selected;
+  const int balanced_hub_saved =
+    kls_balanced_moderate_hub_amd_analyze_class;
+  const int balanced_hub_selected_saved =
+    kls_balanced_moderate_hub_amd_selected;
+  const struct kls_btf_stash_s balanced_btf_stash_saved = kls_btf_stash;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
     kls_large_sparse_amf3_policy_enabled(options);
@@ -42381,6 +42605,31 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     candidate->large_reciprocal_hub_amd_btf_class &&
     kls_large_reciprocal_hub_amd_btf_policy_enabled(options);
   kls_large_reciprocal_hub_amd_btf_selected = 0;
+  kls_balanced_moderate_hub_amd_analyze_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_balanced_moderate_hub_amd_class_enabled(
+      options, candidate->balanced_moderate_hub_amd_class)
+      ? candidate->balanced_moderate_hub_amd_class
+      : KLS_BALANCED_MODERATE_HUB_NONE;
+  kls_balanced_moderate_hub_amd_selected =
+    KLS_BALANCED_MODERATE_HUB_NONE;
+  if (kls_balanced_moderate_hub_amd_analyze_class ==
+        KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
+      candidate->balanced_moderate_hub_btf_storage != NULL &&
+      candidate->balanced_moderate_hub_btf_nblocks > 0u &&
+      getenv("KLS_DISABLE_BALANCED_MODERATE_HUB_BTF_REUSE") == NULL) {
+    kls_btf_stash.P = candidate->balanced_moderate_hub_btf_storage;
+    /* The profile uses the full structural diagonal as an identity matching,
+       so strongcomp's symmetric permutation is both the row and column map. */
+    kls_btf_stash.Q = candidate->balanced_moderate_hub_btf_storage;
+    kls_btf_stash.R =
+      candidate->balanced_moderate_hub_btf_storage + candidate->n;
+    kls_btf_stash.nblocks =
+      candidate->balanced_moderate_hub_btf_nblocks;
+    kls_btf_stash.rank = candidate->n;
+    kls_btf_stash.n = candidate->n;
+    kls_btf_stash.active = 1;
+  }
   const int status =
     choose_symbolic_for_pattern(candidate->n, candidate->col_ptr,
                                 candidate->row_idx, options,
@@ -42388,6 +42637,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                 &candidate->selected_ordering,
                                 &candidate->score,
                                 &candidate->separator);
+  kls_btf_stash = balanced_btf_stash_saved;
   candidate->compact_partial_diagonal_column_fringe_no_btf_selected =
     kls_compact_partial_diagonal_column_fringe_no_btf_selected;
   candidate->partial_diagonal_many_block_no_btf_selected =
@@ -42396,6 +42646,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_sparse_diagonal_row_hub_no_btf_selected;
   candidate->large_reciprocal_hub_amd_btf_selected =
     kls_large_reciprocal_hub_amd_btf_selected;
+  candidate->balanced_moderate_hub_amd_selected =
+    kls_balanced_moderate_hub_amd_selected;
   kls_large_sparse_amf3_analyze_path = saved;
   kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
   kls_small_symmetric_no_btf_analyze_path = symmetric_saved;
@@ -42413,6 +42665,9 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
   kls_large_reciprocal_hub_amd_btf_analyze_path = reciprocal_hub_saved;
   kls_large_reciprocal_hub_amd_btf_selected =
     reciprocal_hub_selected_saved;
+  kls_balanced_moderate_hub_amd_analyze_class = balanced_hub_saved;
+  kls_balanced_moderate_hub_amd_selected =
+    balanced_hub_selected_saved;
   return status;
 }
 
@@ -42515,6 +42770,40 @@ static int select_candidate_inner(kls_pattern_candidate *normal,
       *chosen_out = transpose;
     }
     return status;
+  }
+
+  if (normal != NULL &&
+      normal->balanced_moderate_hub_amd_class !=
+        KLS_BALANCED_MODERATE_HUB_NONE &&
+      kls_balanced_moderate_hub_amd_class_enabled(
+        options, normal->balanced_moderate_hub_amd_class)) {
+    /* The transpose-invariant topology proposes normal coordinates, while
+       its symbolic work/fill guard remains authoritative.  Rejection resumes
+       ordinary AUTO orientation selection. */
+    const int normal_status = analyze_candidate(normal, options);
+    if (normal_status == KLS_OK &&
+        normal->balanced_moderate_hub_amd_selected !=
+          KLS_BALANCED_MODERATE_HUB_NONE) {
+      *chosen_out = normal;
+      return KLS_OK;
+    }
+    if (transpose != NULL) {
+      const int transpose_status = analyze_candidate(transpose, options);
+      if (transpose_status == KLS_OK) {
+        *chosen_out =
+          (normal_status != KLS_OK ||
+           auto_orientation_prefers_transpose(transpose->n) ||
+           transpose->score < normal->score) ? transpose : normal;
+        return KLS_OK;
+      }
+      if (normal_status != KLS_OK) {
+        return normal_status;
+      }
+    }
+    if (normal_status == KLS_OK) {
+      *chosen_out = normal;
+    }
+    return normal_status;
   }
 
   if (normal != NULL &&
@@ -42899,6 +43188,18 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     candidate->symbolic != NULL && candidate->symbolic->do_btf &&
     candidate->symbolic->nblocks > 1u &&
     candidate->symbolic->maxblock < candidate->n;
+  solver->balanced_moderate_hub_amd_cycle =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_AMD &&
+    candidate->symbolic != NULL &&
+    ((candidate->balanced_moderate_hub_amd_selected ==
+        KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
+      candidate->symbolic->do_btf) ||
+     (candidate->balanced_moderate_hub_amd_selected ==
+        KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF &&
+      !candidate->symbolic->do_btf))
+      ? candidate->balanced_moderate_hub_amd_selected
+      : KLS_BALANCED_MODERATE_HUB_NONE;
 
   candidate->col_ptr = NULL;
   candidate->row_idx = NULL;
@@ -46024,6 +46325,12 @@ int kls_analyze_csc(kls_solver *solver,
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     normal.large_reciprocal_hub_amd_btf_class &&
     kls_large_reciprocal_hub_amd_btf_policy_enabled(&normalized);
+  const int balanced_hub_prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    normal.balanced_moderate_hub_amd_class !=
+      KLS_BALANCED_MODERATE_HUB_NONE &&
+    kls_balanced_moderate_hub_amd_class_enabled(
+      &normalized, normal.balanced_moderate_hub_amd_class);
   const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     ((row_hub_prefer_auto_normal && normal.n <= 30000u) ||
@@ -46038,15 +46345,14 @@ int kls_analyze_csc(kls_solver *solver,
        normal.n, normal.col_ptr, &normalized) ||
      normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
-     kls_ckt11752_amd_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
                                      normal.row_idx));
   const int prefer_auto_normal = ordinary_prefer_auto_normal ||
     partial_column_fringe_prefer_auto_normal ||
     partial_many_block_prefer_auto_normal ||
     row_hub_prefer_auto_normal ||
-    reciprocal_hub_prefer_auto_normal;
+    reciprocal_hub_prefer_auto_normal ||
+    balanced_hub_prefer_auto_normal;
   if (normalized.orientation != KLS_ORIENTATION_NORMAL && !prefer_auto_normal) {
     status = transpose_candidate(&normal, KLS_ORIENTATION_TRANSPOSE, &transpose);
     if (status != KLS_OK) {
@@ -46061,6 +46367,7 @@ int kls_analyze_csc(kls_solver *solver,
       !partial_many_block_prefer_auto_normal &&
       !row_hub_prefer_auto_normal &&
       !reciprocal_hub_prefer_auto_normal &&
+      !balanced_hub_prefer_auto_normal &&
       !((normal.large_sparse_full_diagonal_amf3_class &&
          kls_large_sparse_amf3_policy_enabled(&normalized)) ||
         (normal.large_bounded_degree_no_btf_amf_class &&
@@ -46094,11 +46401,15 @@ int kls_analyze_csc(kls_solver *solver,
     (row_hub_prefer_auto_normal &&
      normal.sparse_diagonal_row_hub_no_btf_selected) ||
     (reciprocal_hub_prefer_auto_normal &&
-     normal.large_reciprocal_hub_amd_btf_selected);
+     normal.large_reciprocal_hub_amd_btf_selected) ||
+    (balanced_hub_prefer_auto_normal &&
+     normal.balanced_moderate_hub_amd_selected !=
+       KLS_BALANCED_MODERATE_HUB_NONE);
   if ((partial_column_fringe_prefer_auto_normal ||
        partial_many_block_prefer_auto_normal ||
        row_hub_prefer_auto_normal ||
-       reciprocal_hub_prefer_auto_normal) &&
+       reciprocal_hub_prefer_auto_normal ||
+       balanced_hub_prefer_auto_normal) &&
       !ordinary_prefer_auto_normal &&
       (status != KLS_OK || !guarded_normal_selected)) {
     /* The fast path intentionally avoided even constructing A^T.  If the
@@ -46197,6 +46508,8 @@ int kls_analyze_csr(kls_solver *solver,
     !(kls_large_reciprocal_hub_amd_btf_policy_enabled(&normalized) &&
       kls_large_reciprocal_hub_amd_btf_profile(
         transpose.n, transpose.col_ptr, transpose.row_idx)) &&
+    !kls_balanced_moderate_hub_amd_input_enabled(
+      transpose.n, transpose.col_ptr, transpose.row_idx, &normalized) &&
     !transpose.low_work_one_way_scalar_fringe_transpose_class &&
     auto_orientation_prefers_transpose((UF_long)n);
   if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE && !prefer_auto_transpose) {
@@ -46213,6 +46526,12 @@ int kls_analyze_csr(kls_solver *solver,
     normal.col_ptr != NULL &&
     normal.large_reciprocal_hub_amd_btf_class &&
     kls_large_reciprocal_hub_amd_btf_policy_enabled(&normalized);
+  const int balanced_hub_prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    normal.col_ptr != NULL && normal.balanced_moderate_hub_amd_class !=
+      KLS_BALANCED_MODERATE_HUB_NONE &&
+    kls_balanced_moderate_hub_amd_class_enabled(
+      &normalized, normal.balanced_moderate_hub_amd_class);
   const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO && normal.col_ptr != NULL &&
     ((normal.n <= 30000u &&
@@ -46229,21 +46548,27 @@ int kls_analyze_csr(kls_solver *solver,
        normal.n, normal.col_ptr, &normalized) ||
      normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
-     kls_ckt11752_amd_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
                                      normal.row_idx));
   const int prefer_auto_normal = ordinary_prefer_auto_normal ||
-    reciprocal_hub_prefer_auto_normal;
+    reciprocal_hub_prefer_auto_normal ||
+    balanced_hub_prefer_auto_normal;
   const double kls_ana_sel_start = kls_now_seconds();
   status = select_candidate(normal.col_ptr == NULL ? NULL : &normal,
                             prefer_auto_normal ? NULL : &transpose,
                             &normalized, &chosen);
-  if (reciprocal_hub_prefer_auto_normal &&
+  const int guarded_hub_prefer_auto_normal =
+    reciprocal_hub_prefer_auto_normal || balanced_hub_prefer_auto_normal;
+  const int guarded_hub_selected =
+    (reciprocal_hub_prefer_auto_normal &&
+     normal.large_reciprocal_hub_amd_btf_selected) ||
+    (balanced_hub_prefer_auto_normal &&
+     normal.balanced_moderate_hub_amd_selected !=
+       KLS_BALANCED_MODERATE_HUB_NONE);
+  if (guarded_hub_prefer_auto_normal &&
       !ordinary_prefer_auto_normal &&
-      (status != KLS_OK ||
-       !normal.large_reciprocal_hub_amd_btf_selected)) {
-    /* The reciprocal-hub fast path skipped analysis of the already-built
+      (status != KLS_OK || !guarded_hub_selected)) {
+    /* The guarded hub fast path skipped analysis of the already-built
        A-transpose candidate.  A rejected symbolic proposal resumes ordinary
        AUTO orientation selection without rebuilding either pattern. */
     const int transpose_status = analyze_candidate(&transpose, &normalized);
@@ -107014,7 +107339,7 @@ static void kls_tsopf_b9_residual_worker_run(
   }
 }
 
-static void kls_ckt11752_residual_worker_run(
+static void kls_balanced_moderate_hub_residual_worker_run(
   kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -107061,7 +107386,7 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
     return;
   }
   if (shared->row_solve_mode == 5) {
-    kls_ckt11752_residual_worker_run(worker);
+    kls_balanced_moderate_hub_residual_worker_run(worker);
     return;
   }
   if (shared->row_solve_mode == 2) {
@@ -146751,8 +147076,7 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   }
   if (kls_is_sandia_mult_dcop_pattern(solver) ||
       kls_large_reciprocal_hub_amd_btf_cycle(solver) ||
-      kls_ckt11752_amd_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) ||
+      kls_balanced_moderate_hub_amd_selected_cycle(solver) ||
       kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||
       kls_partial_diagonal_many_block_no_btf_cycle(solver)) {
     return;
@@ -155756,12 +156080,13 @@ static int kls_run_tsopf_b9_parallel_residual(
   return 1;
 }
 
-/* ckt11752_dc_1 must verify every changed numeric, but its serial CSC
-   residual is a material fraction of H100.  Retain a compact row stream so
-   the existing eight-worker pool can form the identical residual without
-   write conflicts.  The exact envelope keeps the 16-bit column field and
-   32-bit positions valid. */
-static int kls_prepare_ckt11752_refine_csr(kls_solver *solver) {
+/* A scaled dominant-BTF moderate-hub factor must verify changed numerics, but
+   its serial CSC residual can be a material fraction of a repeated horizon.
+   Retain a compact row stream so the existing eight-worker pool can form the
+   identical residual without write conflicts.  Explicit width checks guard
+   the 16-bit column field and 32-bit positions. */
+static int kls_prepare_balanced_moderate_hub_refine_csr(
+  kls_solver *solver) {
   if (solver == NULL) {
     return 0;
   }
@@ -155769,7 +156094,8 @@ static int kls_prepare_ckt11752_refine_csr(kls_solver *solver) {
     return solver->solve_refine_csr32_state > 0;
   }
   solver->solve_refine_csr32_state = -1;
-  if (!kls_ckt11752_dc1_h100_cycle(solver) ||
+  if (!kls_balanced_moderate_hub_scaled_btf_cycle(solver) ||
+      getenv("KLS_DISABLE_BALANCED_MODERATE_HUB_PARALLEL_RESIDUAL") != NULL ||
       getenv("KLS_DISABLE_CKT11752_PARALLEL_RESIDUAL") != NULL ||
       solver->n >= (UF_long)UINT16_MAX ||
       solver->nnz > (UF_long)UINT32_MAX || solver->col_ptr == NULL ||
@@ -155856,14 +156182,14 @@ static int kls_prepare_ckt11752_refine_csr(kls_solver *solver) {
   return 1;
 }
 
-static int kls_run_ckt11752_parallel_residual(
+static int kls_run_balanced_moderate_hub_parallel_residual(
   kls_solver *solver,
   const double *a,
   const double *b,
   const double *x,
   double *residual) {
   if (a == NULL || b == NULL || x == NULL || residual == NULL ||
-      !kls_prepare_ckt11752_refine_csr(solver)) {
+      !kls_prepare_balanced_moderate_hub_refine_csr(solver)) {
     return 0;
   }
   kls_egraph_refactor_pool *pool = solver->egraph_pool;
@@ -156530,10 +156856,10 @@ static int solve_impl(kls_solver *solver,
     const int tsopf_b9_parallel_residual_ready =
       tsopf_b9_raw_l2_contract &&
       kls_tsopf_b9_parallel_residual_ready(solver);
-    const int ckt11752_parallel_residual_ready =
+    const int balanced_hub_parallel_residual_ready =
       !kernel_transpose && nrhs == 1 && b != x &&
-      kls_ckt11752_dc1_h100_cycle(solver) &&
-      kls_prepare_ckt11752_refine_csr(solver);
+      kls_balanced_moderate_hub_scaled_btf_cycle(solver) &&
+      kls_prepare_balanced_moderate_hub_refine_csr(solver);
     const int tsopf_b9_refine_csc16 = tsopf_b9_raw_l2_contract &&
       !tsopf_b9_parallel_residual_ready &&
       kls_prepare_tsopf_b9_refine_csc16(solver);
@@ -156690,12 +157016,12 @@ static int solve_impl(kls_solver *solver,
           tsopf_b9_raw_l2_contract && !kernel_transpose &&
           kls_run_tsopf_b9_parallel_residual(
             solver, refine_a, brhs, xrhs, residual);
-        const int ckt11752_parallel_residual =
-          ckt11752_parallel_residual_ready &&
-          kls_run_ckt11752_parallel_residual(
+        const int balanced_hub_parallel_residual =
+          balanced_hub_parallel_residual_ready &&
+          kls_run_balanced_moderate_hub_parallel_residual(
             solver, refine_a, brhs, xrhs, residual);
         const int parallel_residual =
-          tsopf_b9_parallel_residual || ckt11752_parallel_residual;
+          tsopf_b9_parallel_residual || balanced_hub_parallel_residual;
         if (!parallel_residual) {
           memcpy(residual, brhs, (size_t)nloc * sizeof(*residual));
         }

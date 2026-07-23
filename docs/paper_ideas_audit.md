@@ -17265,3 +17265,68 @@ at amplitudes 0.001, 0.01, and 0.1, and each of the other four value sets
 completed 1,000 generations at amplitude 0.001 (7,000 changed systems total).
 The worst relative-L2 residual was 1.13e-11.  Release, CTest, and ASan/LSan
 smoke suites pass.
+
+BALANCED MODERATE-HUB AMD POLICY GENERALIZED (2026-07-23).  The two remaining
+`ckt11752` shortcuts encoded nearly the same benchmark twice: one used a
+49,650--49,750-row and 332,500--333,500-entry box to select normal AMD/BTF,
+while the transient shortcut required exactly 49,702 rows and 332,807 retained
+entries to select normal AMD without BTF.  The latter count depended on the
+loader removing 222 explicitly stored zero values.  Both choices are useful
+for their respective SCC geometry, but neither dimension/entry fingerprint
+expressed why.
+
+The replacement recognizes a transpose-invariant balanced moderate-hub
+topology under the same AUTO ordering/orientation/scaling/backend,
+static-pivot, requested-BTF, eight-worker, and 0.001-pivot-tolerance contract.
+It considers `16384 <= n <= 262144` and `4n <= nnz <= 10n`, requires a full
+structural diagonal, bounds every row and column degree by `n/8`, requires the
+same node to have row and column degree at least `n/64`, and bounds the total
+absolute row/column degree imbalance by `nnz/16`.  The full diagonal supplies
+a valid identity matching, so one linear-time strong-component pass can
+classify the graph directly.  Two through `n/64` SCCs with a largest component
+covering at least 98% propose AMD/BTF; a largest component covering 75--90%
+proposes one-block AMD.  The gap deliberately leaves intermediate geometries
+to ordinary AUTO.
+
+Topology remains only a proposal.  The selected symbolic must reproduce the
+expected BTF geometry and have positive estimated work no greater than
+`1024n` and fill no greater than `32n`; otherwise it is freed and ordinary
+AUTO ordering and orientation resume.  The dominant-BTF branch reuses the SCC
+permutation computed by the profile instead of repeating maximum-transversal
+and strong-component work.  Only an accepted proposal sets downstream race,
+block-order, tolerance, residual, and retained-numeric lifecycle state.  The
+former DC and transient disable variables remain class-specific diagnostic
+aliases, alongside the new generic disable switch.
+
+The smoke suite builds two independent 16,384-row positives.  A 16,320-row
+core plus eight fringe SCCs selects nine AMD/BTF blocks with about 589K
+estimated work and 164K fill; a 13,824-row core plus 32 coarse fringe SCCs
+selects one-block AMD with about 587K work and 163K fill.  Both factor,
+refactor, and solve changed values through CSC, and CSR reaches the same
+mathematical-normal route.  Replacing the first core's local edges with long
+chords preserves its size, density, diagonal, degrees, hub, and SCC profile,
+but raises the proposal to 66.5M work and 825K fill, beyond the 16.8M and 524K
+guards; the test verifies that ordinary AUTO takes over.
+
+A screen of all 243 local Matrix Market files found 63 conservative
+size/density candidates and 61 supported square patterns.  Only three pass the
+new profile: the two original inputs and Hamm's out-of-family `memplus`
+(17,758 rows, 99,147 retained entries).  `memplus` has 23 SCCs, a 17,736-row
+largest block, about 1.47M estimated work, and 140K fill, so it takes the
+dominant-BTF branch without sharing the old dimensions or entry count.  A
+parent/current analyze replay over all 61 supported patterns found identical
+orientation, ordering, BTF state, block geometry, structural rank, fill, and
+work on every case; the two unsupported Chevron complex inputs also retain
+their prior result.
+
+Five thousand independently verified entrywise generations covered both
+original matrices at amplitude 0.001 and `memplus` at amplitudes 0.001, 0.01,
+and 0.1.  The worst relative-L2 residual was 1.84e-10.  In the generalized
+binary, enabled/disabled 100-refactor ratios were 0.879 on the DC case, 0.485
+on the transient case, and 0.944 on `memplus`; the two original cases won all
+24 pairs and `memplus` won 19/20.  Against a compiler-identical binary of the
+immediate exact-selector parent, 20 pinned pairs per original input and 24 on
+`memplus` gave side-median ratios of 0.993, 1.002, and 0.942, respectively,
+for a 0.979 per-matrix geometric mean.  Separate 15-pair comparisons still put
+KLS ahead of CKTSO at 0.962 and 0.945 on the DC and transient inputs.  Release
+and ASan/LSan test suites pass.
