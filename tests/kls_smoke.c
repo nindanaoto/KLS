@@ -1266,6 +1266,357 @@ static int test_moderate_single_block_lean_policy(void) {
   return ok;
 }
 
+static int test_compact_partial_diagonal_column_fringe(void) {
+  enum {
+    N = 1400,
+    SCALAR_N = 140,
+    CORE_N = N - SCALAR_N,
+    HIGH_DEGREE_COLUMNS = 594,
+    NNZ = SCALAR_N + 10 * HIGH_DEGREE_COLUMNS +
+      3 * (CORE_N - HIGH_DEGREE_COLUMNS)
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  int32_t *rp = (int32_t *)calloc((size_t)N + 1u, sizeof(*rp));
+  int32_t *ci = (int32_t *)malloc((size_t)NNZ * sizeof(*ci));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || rp == NULL || ci == NULL ||
+      initial == NULL || changed == NULL || expected == NULL || b == NULL ||
+      x == NULL) {
+    free(ap);
+    free(ai);
+    free(rp);
+    free(ci);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_name =
+    "KLS_DISABLE_COMPACT_PARTIAL_DIAGONAL_COLUMN_FRINGE";
+  const char *env_value = getenv(env_name);
+  const int had_env = env_value != NULL;
+  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
+  int ok = (env_value == NULL || saved_env != NULL) &&
+    unsetenv(env_name) == 0;
+
+  int32_t core_nodes[CORE_N];
+  int32_t row_permutation[N];
+  int32_t high_extra_position[HIGH_DEGREE_COLUMNS];
+  int32_t high_core_rank[HIGH_DEGREE_COLUMNS];
+  int32_t core_count = 0;
+  for (int32_t node = 0; node < N; ++node) {
+    row_permutation[node] = node;
+    if (node % 10 != 4) {
+      core_nodes[core_count++] = node;
+    }
+  }
+  if (core_count != CORE_N) {
+    ok = 0;
+  }
+  /* Row-swap the first 308 core nodes in nine-row groups.  This leaves 78%
+     of columns explicitly diagonal without changing rank.  Degree-one
+     columns stay diagonal, while the surrounding band supplies every one
+     of their rows with an incoming edge. */
+  for (int32_t block = 0; block < 17; ++block) {
+    for (int32_t lane = 0; lane < 9; ++lane) {
+      const int32_t left = core_nodes[18 * block + lane];
+      const int32_t right = core_nodes[18 * block + 9 + lane];
+      row_permutation[left] = right;
+      row_permutation[right] = left;
+    }
+  }
+  row_permutation[core_nodes[306]] = core_nodes[315];
+  row_permutation[core_nodes[315]] = core_nodes[306];
+
+  static const int32_t high_offsets[9] = {
+    0, -1, 1, -2, 2, -3, 3, -4, 4
+  };
+  static const int32_t low_offsets[3] = {0, -1, 1};
+  int32_t p = 0;
+  int32_t core_rank = 0;
+  int32_t high_count = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < N; ++col) {
+    if (col % 10 == 4) {
+      ai[p] = col;
+      initial[p] = 5.0;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+      ap[col + 1] = p;
+      continue;
+    }
+
+    const int high_degree = core_rank % 17 < 8;
+    const int32_t *offsets = high_degree ? high_offsets : low_offsets;
+    const int32_t offset_count = high_degree ? 9 : 3;
+    for (int32_t entry = 0; entry < offset_count; ++entry) {
+      int32_t row_rank = core_rank + offsets[entry];
+      if (row_rank < 0) {
+        row_rank += CORE_N;
+      } else if (row_rank >= CORE_N) {
+        row_rank -= CORE_N;
+      }
+      ai[p] = row_permutation[core_nodes[row_rank]];
+      initial[p] = offsets[entry] == 0 ? 5.0 : -0.02;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    if (high_degree) {
+      high_extra_position[high_count] = p;
+      high_core_rank[high_count] = core_rank;
+      if (high_count < SCALAR_N) {
+        ai[p] = 10 * high_count + 4;
+      } else {
+        int32_t row_rank = core_rank + 5;
+        if (row_rank >= CORE_N) {
+          row_rank -= CORE_N;
+        }
+        ai[p] = row_permutation[core_nodes[row_rank]];
+      }
+      initial[p] = -0.02;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+      ++high_count;
+    }
+    ++core_rank;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ || core_rank != CORE_N ||
+      high_count != HIGH_DEGREE_COLUMNS) {
+    ok = 0;
+  }
+
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    rp[ai[entry] + 1]++;
+  }
+  for (int32_t row = 0; row < N; ++row) {
+    rp[row + 1] += rp[row];
+  }
+  int32_t *next = (int32_t *)malloc((size_t)N * sizeof(*next));
+  if (next == NULL) {
+    ok = 0;
+  } else {
+    memcpy(next, rp, (size_t)N * sizeof(*next));
+    for (int32_t col = 0; col < N; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        ci[next[ai[entry]]++] = col;
+      }
+    }
+  }
+  free(next);
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.75 + 0.015625 * (double)(col % 17);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create partial column fringe")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze partial column fringe")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor partial column fringe")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor partial column fringe")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve partial column fringe")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats partial column fringe")) ok = 0;
+  if (ok) {
+    ok = stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+      stats.selected_ordering == KLS_ORDERING_AMD &&
+      stats.selected_btf == 0 && stats.nblocks == 1 &&
+      stats.max_block == N && stats.estimated_flops > 0.0 &&
+      stats.estimated_flops <= 600000.0 &&
+      stats.nnz_l + stats.nnz_u <= 24 * (int64_t)N;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected partial column fringe result: orientation=%s "
+              "ordering=%s btf=%d blocks=%" PRId64 " max=%" PRId64
+              " est=%.17g fill=%" PRId64 " x0=%.17g xlast=%.17g\n",
+              kls_orientation_name(stats.selected_orientation),
+              kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+              stats.nblocks, stats.max_block, stats.estimated_flops,
+              stats.nnz_l + stats.nnz_u, x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create CSR partial column fringe")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csr(
+                          solver, KLS_INDEX_INT32, N, rp, ci, 0, &options),
+                        "analyze CSR partial column fringe")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats CSR partial column fringe")) ok = 0;
+  if (ok && !(stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+              stats.selected_ordering == KLS_ORDERING_AMD &&
+              stats.selected_btf == 0 && stats.nblocks == 1 &&
+              stats.max_block == N && stats.estimated_flops > 0.0 &&
+              stats.estimated_flops <= 600000.0)) {
+    fprintf(stderr,
+            "unexpected CSR partial column fringe route: orientation=%s "
+            "ordering=%s btf=%d blocks=%" PRId64 " max=%" PRId64
+            " est=%.17g\n",
+            kls_orientation_name(stats.selected_orientation),
+            kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+            stats.nblocks, stats.max_block, stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && setenv(env_name, "1", 1) != 0) ok = 0;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create partial column fringe BTF control")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze partial column fringe BTF control")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats partial column fringe BTF control")) ok = 0;
+  if (ok && !(stats.selected_btf == 1 &&
+              stats.nblocks == SCALAR_N + 1 &&
+              stats.max_block == CORE_N)) {
+    fprintf(stderr,
+            "unexpected partial column fringe BTF control: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 "\n",
+            stats.selected_btf, stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  /* Preserve the size and degree-one envelope, restore the full diagonal,
+     and replace six local edges in every high-degree column with deterministic
+     chords aimed at other high-degree nodes.  The positive degree covariance
+     still admits the profile, while the candidate AMD symbolic exceeds the
+     absolute work/fill guard. */
+  if (ok && unsetenv(env_name) != 0) ok = 0;
+  core_rank = 0;
+  for (int32_t col = 0; col < N; ++col) {
+    if (col % 10 == 4) {
+      continue;
+    }
+    const int32_t column_begin = ap[col];
+    ai[column_begin] = core_nodes[core_rank];
+    ai[column_begin + 1] =
+      core_nodes[core_rank == 0 ? CORE_N - 1 : core_rank - 1];
+    ai[column_begin + 2] =
+      core_nodes[core_rank + 1 == CORE_N ? 0 : core_rank + 1];
+    ++core_rank;
+  }
+  for (int32_t high = 0; high < HIGH_DEGREE_COLUMNS; ++high) {
+    const int32_t column_begin = high_extra_position[high] - 9;
+    for (int32_t lane = 0; lane < 6; ++lane) {
+      int32_t target =
+        (high * (37 + 2 * lane) + lane * 97 + 11) %
+        HIGH_DEGREE_COLUMNS;
+      int conflict;
+      do {
+        const int32_t row = core_nodes[high_core_rank[target]];
+        conflict = 0;
+        for (int32_t prior = column_begin;
+             prior < column_begin + 3 + lane; ++prior) {
+          conflict |= ai[prior] == row;
+        }
+        if (!conflict) {
+          ai[column_begin + 3 + lane] = row;
+        } else {
+          target += 13;
+          if (target >= HIGH_DEGREE_COLUMNS) {
+            target -= HIGH_DEGREE_COLUMNS;
+          }
+        }
+      } while (conflict);
+    }
+    if (high >= SCALAR_N) {
+      int32_t target =
+        (high * 53 + 19) % HIGH_DEGREE_COLUMNS;
+      int conflict;
+      do {
+        const int32_t row = core_nodes[high_core_rank[target]];
+        conflict = 0;
+        for (int32_t prior = column_begin;
+             prior < high_extra_position[high]; ++prior) {
+          conflict |= ai[prior] == row;
+        }
+        if (!conflict) {
+          ai[high_extra_position[high]] = row;
+        } else {
+          target += 17;
+          if (target >= HIGH_DEGREE_COLUMNS) {
+            target -= HIGH_DEGREE_COLUMNS;
+          }
+        }
+      } while (conflict);
+    }
+  }
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create high-fill partial fringe guard")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze high-fill partial fringe guard")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats high-fill partial fringe guard")) ok = 0;
+  if (ok && !(stats.selected_btf == 1 &&
+              stats.nblocks == SCALAR_N + 1 &&
+              stats.max_block == CORE_N &&
+              stats.estimated_flops > 20000000.0)) {
+    fprintf(stderr,
+            "unexpected high-fill partial fringe guard: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 " est=%.17g\n",
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  if (!(had_env && saved_env == NULL) &&
+      !restore_env_value(env_name, had_env, saved_env)) {
+    ok = 0;
+  }
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(rp);
+  free(ci);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_low_work_one_way_scalar_fringe_no_btf(void) {
   enum {
     CORE_N = 4480,
@@ -18297,6 +18648,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_moderate_single_block_lean_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_compact_partial_diagonal_column_fringe()) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_one_way_scalar_fringe_no_btf()) {

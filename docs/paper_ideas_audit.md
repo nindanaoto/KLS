@@ -16992,3 +16992,83 @@ entries, and the row-refactor path.  Finally, 3,000 independently verified
 entrywise generations at amplitudes 0.001, 0.01, and 0.1 completed with a
 worst relative-L2 residual of 1.46e-11.  Release and ASan/LSan test suites
 pass.
+
+CORRELATED DIAGONAL COLUMN-FRINGE NO-BTF GENERALIZED (2026-07-23).  The last
+member of the old four-entry symbolic exception, `circuit204`, still selected
+normal AMD without BTF from an exact 1,010--1,030-row and 5,850--5,920-entry
+box.  Separate exact input and retained-factor predicates then controlled its
+worker count, affinity order, spin policy, solve-index preparation, pool
+prewarm, and paired row-refactor choice.  Removing the complete exception had
+slowed the changed-value H100 cycle by 20.4%, so deleting it without replacing
+the topology was not performance-preserving.
+
+The replacement classifies a directed structural property during the
+mandatory compressed-index copy.  Under AUTO ordering/orientation/scaling,
+requested BTF and static pivoting, a nonserial backend, and at least four
+workers, it considers `768 <= n <= 2300` and `4n <= nnz <= 8n`.  Row and column
+degrees are bounded by 64, at least 65% of columns contain their diagonal, and
+5--20% of columns have degree one with that sole entry on the diagonal.  Those
+one-way scalar columns must outnumber degree-one rows by at least two to one.
+Finally, the nodewise row/column degrees must have nonnegative covariance,
+expressed without floating point as
+`n * sum(row_degree[i] * column_degree[i]) >= nnz * nnz`.  This last condition
+separates a coherent dominant core from fragmented banded counterexamples.
+The profile is swapped for CSR input, so the same mathematical orientation is
+selected through either public API.  Two bounded stack arrays collect the row
+degrees and diagonal flags; there is no second input traversal or heap
+allocation.
+
+A matching normal AMD/no-BTF symbolic is a proposal, not a verdict.  AUTO
+retains it only with positive estimated work at most 20M flops and a fill score
+at most `128n`.  Otherwise it frees the proposal and resumes the pre-policy
+orientation choice; CSC constructs the transpose lazily only after such a
+rejection, keeping the accepted path's analyze cost unchanged.  The wider
+analyze-time bounds are intentionally separate from the specialized lifecycle.
+Only an unscaled normal AMD one-block factor below 600K estimated flops and
+`24n` fill receives the former compact affinity/prewarm/paired-row choices.
+The generic BTF fallback has the same low-work bounds plus full structural
+rank, 64--512 blocks, and a dominant block covering 75--95% of the rows.  Thus
+larger admitted no-BTF factors use the ordinary retained-numeric engines rather
+than inheriting a schedule tuned to one benchmark.  The former environment
+switches remain diagnostic aliases.
+
+Several broader variants were rejected rather than patched with matrix
+identities.  Random partial-fringe patterns with 238M--486M-flop no-BTF
+symbolics have degree covariance just below zero and never pay for the trial.
+A fragmented banded seed also fails that covariance test; twelve pinned pairs
+put forced no-BTF at 1.027 of guarded BTF.  Conversely, four independent
+1,400-row, 8,078-entry positive constructions span local, repeated-scalar,
+moderate-chord, and long-chord cores with 101K, 1.10M, 1.30M, and 9.71M
+estimated no-BTF work.  Twelve enabled/BTF pairs put their median ratios at
+0.638, 0.803, 0.371, and 0.445, all winning every launch.  That evidence moved
+the analyze-time cap above the old 600K lifecycle limit.  Correlated random
+full-diagonal variants at roughly 40M--62M work were neutral to 0.9% slower
+without BTF and remain beyond the final 20M guard.  Forcing row-metadata
+preparation on every matching low-work factor was also rejected: thirty pairs
+made `circuit204` 2.8% slower.  The final path lets the existing row model
+prepare metadata when its retained graph supports the paired engine and falls
+back to KLU otherwise.
+
+The smoke suite constructs the local 1,400-row positive case through both CSC
+and CSR, verifies its changed-value solve, and observes one AMD block instead
+of the disabled policy's 141 BTF blocks with a 1,260-row core.  It then rewires
+the same size/degree-one envelope into a full-diagonal, positively correlated
+high-work graph and verifies that the symbolic guard retains BTF.  Across all
+18 locally available real matrices in the size/density envelope, only
+`circuit204` changes symbolic route.  A SuiteSparse extension added Bai's
+`rdb968`, HB's `orsirr_1` and `orsirr_2`, and Sandia's `fpga_dcop_04`; none
+matches, all factor, and their relative-L2 residuals range from 2.16e-16 to
+1.52e-14.  Twenty enabled/disabled H100 pairs on four nearby nonmatching
+controls have paired ratios 0.9971--1.0025.
+
+Against a compiler-flag-matched binary of the immediate exact-selector parent,
+60 alternating pinned eight-worker H100 pairs put generic/exact at 1.0035 by
+side medians and 1.0019 by paired medians.  Both sides retain the identical
+normal AMD factor (242,700 estimated flops, 7,787 L entries, 8,309 U entries)
+and paired row-refactor path.  In the final binary, 30 enabled/BTF pairs put
+the generic route at 0.8253 by paired medians, winning all 30 launches.  The
+four-worker AUTO and KLS-backend ratios are 0.9776 and 0.9805; their
+eight-worker ratios are 0.8269 and 0.8255.  Finally, the real and smoke
+positive cases each completed 1,000 independently verified entrywise
+generations at amplitudes 0.001, 0.01, and 0.1 (6,000 systems); the worst
+relative-L2 residual was 7.56e-11.  Release and ASan/LSan test suites pass.

@@ -2188,6 +2188,7 @@ struct kls_solver {
   int auto_scale_checked;
   int auto_scale_deferred;
   int auto_amd_shortcut;
+  int compact_partial_diagonal_column_fringe;
   int exact_matching_selected;
   int exact_matching_scaling_selected;
   int spral_matching_selected;
@@ -2447,6 +2448,9 @@ typedef struct kls_pattern_candidate {
   int large_sparse_full_diagonal_amf3_class;
   int large_bounded_degree_no_btf_amf_class;
   int small_symmetric_no_btf_class;
+  int compact_partial_diagonal_column_fringe_class;
+  int compact_partial_diagonal_column_fringe_transpose_class;
+  int compact_partial_diagonal_column_fringe_no_btf_selected;
   int low_work_one_way_scalar_fringe_class;
   int low_work_one_way_scalar_fringe_transpose_class;
 } kls_pattern_candidate;
@@ -21341,7 +21345,7 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
   solver->lean_parallel_grouped_stride = 0u;
 }
 
-static int kls_is_circuit204_single_block_h100_cycle(
+static int kls_compact_partial_diagonal_column_fringe_single_block_cycle(
   const kls_solver *solver);
 
 /* Build a dependency-aware static worker order for the compact retained-row
@@ -21351,7 +21355,8 @@ static int kls_is_circuit204_single_block_h100_cycle(
 static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
                                                      int thread_count) {
   const int affinity_cycle = kls_is_tsopf_fs_b9_c1_h100_cycle(solver) ||
-    (kls_is_circuit204_single_block_h100_cycle(solver) &&
+    (kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver) &&
+     getenv("KLS_DISABLE_COMPACT_PARTIAL_COLUMN_FRINGE_AFFINITY") == NULL &&
      getenv("KLS_DISABLE_CIRCUIT204_AFFINITY_SCHEDULE") == NULL);
   if (!affinity_cycle || thread_count < 2 ||
       thread_count > 8 ||
@@ -21377,12 +21382,15 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
     return solver->row_refactor_level_rows;
   }
 
-  const int circuit204_cycle =
-    kls_is_circuit204_single_block_h100_cycle(solver);
-  double dependency_base_weight = circuit204_cycle ? 1.0 : 0.64784;
-  double dependency_output_weight = circuit204_cycle ? 1.0 : 0.06639;
-  double input_weight = circuit204_cycle ? 1.0 : 0.06292;
-  double row_output_weight = circuit204_cycle ? 2.0 : 0.92651;
+  const int partial_column_fringe_cycle =
+    kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver);
+  double dependency_base_weight =
+    partial_column_fringe_cycle ? 1.0 : 0.64784;
+  double dependency_output_weight =
+    partial_column_fringe_cycle ? 1.0 : 0.06639;
+  double input_weight = partial_column_fringe_cycle ? 1.0 : 0.06292;
+  double row_output_weight =
+    partial_column_fringe_cycle ? 2.0 : 0.92651;
   const char *weight_override = getenv("KLS_TSOPF_B9_SCHEDULE_WEIGHTS");
   if (weight_override != NULL) {
     double db = 0.0;
@@ -27389,6 +27397,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_scale_checked = 0;
   solver->auto_scale_deferred = 0;
   solver->auto_amd_shortcut = 0;
+  solver->compact_partial_diagonal_column_fringe = 0;
   solver->exact_matching_selected = 0;
   solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
@@ -28321,6 +28330,10 @@ static int kls_ckt11752_dc1_h100_cycle(const kls_solver *solver) {
 static _Thread_local int kls_large_sparse_amf3_analyze_path;
 static _Thread_local int kls_large_bounded_no_btf_amf_analyze_path;
 static _Thread_local int kls_small_symmetric_no_btf_analyze_path;
+static _Thread_local int
+  kls_compact_partial_diagonal_column_fringe_analyze_path;
+static _Thread_local int
+  kls_compact_partial_diagonal_column_fringe_no_btf_selected;
 static _Thread_local int kls_low_work_one_way_scalar_fringe_analyze_path;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
@@ -29807,63 +29820,55 @@ static int kls_is_compact_small_circuit_pattern(UF_long n,
          col_ptr[n] >= 5u * n && col_ptr[n] <= 7u * n;
 }
 
-static int kls_is_circuit204_h100_input_pattern(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    solver->col_ptr != NULL &&
-    getenv("KLS_DISABLE_CIRCUIT204_H100_POLICY") == NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 && solver->options.use_btf &&
-    solver->options.static_pivoting &&
-    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->common.scale == -1 && solver->n >= 1010u &&
-    solver->n <= 1030u && solver->nnz >= 5850u && solver->nnz <= 5920u &&
-    solver->col_ptr[solver->n] == solver->nnz &&
-    solver->symbolic->do_btf &&
-    solver->symbolic->structural_rank == solver->n &&
-    solver->symbolic->nblocks >= 150u &&
-    solver->symbolic->nblocks <= 165u &&
-    solver->symbolic->maxblock >= 850u &&
-    solver->symbolic->maxblock <= 880u;
-}
-
-static int kls_circuit204_single_block_amd_h100_policy_enabled(
+static int kls_compact_partial_diagonal_column_fringe_options_enabled(
   UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options) {
-  if (options == NULL || col_ptr == NULL ||
-      options->ordering != KLS_ORDERING_AUTO ||
-      options->orientation != KLS_ORIENTATION_AUTO ||
-      options->scale != KLS_SCALE_AUTO || options->threads != 8 ||
-      options->backend != KLS_BACKEND_AUTO || !options->static_pivoting ||
-      !options->use_btf ||
-      fabs(options->pivot_tolerance - 0.001) > 1.0e-12 ||
-      getenv("KLS_DISABLE_SMALL_SINGLE_BLOCK_AMD_H100_POLICY") != NULL) {
+  UF_long nnz,
+  const kls_options *options);
+static int kls_compact_partial_diagonal_column_fringe_profile_enabled(
+  UF_long n,
+  UF_long nnz,
+  const kls_options *options);
+
+static int kls_compact_partial_diagonal_column_fringe_btf_cycle(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
+      !solver->compact_partial_diagonal_column_fringe ||
+      getenv("KLS_DISABLE_COMPACT_PARTIAL_DIAGONAL_COLUMN_FRINGE") != NULL ||
+      getenv("KLS_DISABLE_CIRCUIT204_H100_POLICY") != NULL ||
+      !kls_compact_partial_diagonal_column_fringe_profile_enabled(
+        solver->n, solver->nnz, &solver->options) ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->common.scale != -1 || !solver->symbolic->do_btf ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->nblocks < 64u ||
+      solver->symbolic->nblocks > 512u ||
+      solver->symbolic->maxblock * 4u < 3u * solver->n ||
+      solver->symbolic->maxblock * 20u > 19u * solver->n ||
+      solver->symbolic->est_flops <= 0.0 ||
+      solver->symbolic->est_flops > 600000.0) {
     return 0;
   }
-  const UF_long nnz = col_ptr[n];
-  /* circuit204 remains an exact follow-up target: unlike the generic scalar-
-     fringe retry, its BTF form removes 15% of the rows and 23% of the factor
-     work, while its one-block win depends on a separately tuned row schedule. */
-  return n >= 1010u && n <= 1030u && nnz >= 5850u && nnz <= 5920u;
+  const double fill = solver->symbolic->lnz + solver->symbolic->unz;
+  return fill > 0.0 && fill <= 24.0 * (double)solver->n;
 }
 
-static int kls_is_circuit204_single_block_h100_cycle(
+static int kls_compact_partial_diagonal_column_fringe_single_block_cycle(
   const kls_solver *solver) {
-  return solver != NULL && solver->col_ptr != NULL &&
-    kls_circuit204_single_block_amd_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->n >= 1010u && solver->n <= 1030u &&
-    solver->nnz >= 5850u && solver->nnz <= 5920u &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->common.scale == -1 && solver->symbolic != NULL &&
-    !solver->symbolic->do_btf && solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
+      !solver->compact_partial_diagonal_column_fringe ||
+      !kls_compact_partial_diagonal_column_fringe_options_enabled(
+        solver->n, solver->nnz, &solver->options) ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->common.scale != -1 || solver->symbolic->do_btf ||
+      solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n ||
+      solver->symbolic->est_flops <= 0.0 ||
+      solver->symbolic->est_flops > 600000.0) {
+    return 0;
+  }
+  const double fill = solver->symbolic->lnz + solver->symbolic->unz;
+  return fill > 0.0 && fill <= 24.0 * (double)solver->n;
 }
 
 static int kls_is_gemat_power_sequence_pattern(
@@ -33508,6 +33513,33 @@ static UF_long count_pattern_diagonal(UF_long n,
     }
   }
   return diagonal;
+}
+
+static int kls_compact_partial_diagonal_column_fringe_profile_enabled(
+  UF_long n,
+  UF_long nnz,
+  const kls_options *options) {
+  return options != NULL &&
+      options->ordering == KLS_ORDERING_AUTO &&
+      options->orientation == KLS_ORIENTATION_AUTO &&
+      options->scale == KLS_SCALE_AUTO &&
+      options->backend != KLS_BACKEND_SERIAL && options->threads >= 4 &&
+      options->use_btf && options->static_pivoting &&
+      fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
+      n >= 768u && n <= 2300u && n <= UF_long_max / 8u &&
+      nnz >= 4u * n && nnz <= 8u * n;
+}
+
+static int kls_compact_partial_diagonal_column_fringe_options_enabled(
+  UF_long n,
+  UF_long nnz,
+  const kls_options *options) {
+  return
+    getenv("KLS_DISABLE_COMPACT_PARTIAL_DIAGONAL_COLUMN_FRINGE") == NULL &&
+    /* Retain the former exact-selector switch as a diagnostic alias. */
+    getenv("KLS_DISABLE_SMALL_SINGLE_BLOCK_AMD_H100_POLICY") == NULL &&
+    kls_compact_partial_diagonal_column_fringe_profile_enabled(
+      n, nnz, options);
 }
 
 static int kls_low_work_one_way_scalar_fringe_options_enabled(
@@ -41334,16 +41366,31 @@ static int choose_symbolic_for_pattern(UF_long n,
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
   }
-  if (kls_circuit204_single_block_amd_h100_policy_enabled(
-        n, col_ptr, options)) {
-    /* This exact AUTO horizon favors a normal one-block AMD numeric.  The
-       explicit recursive options prevent the policy from re-entering. */
-    kls_options amd_options = *options;
-    amd_options.ordering = KLS_ORDERING_AMD;
-    amd_options.use_btf = 0;
-    return choose_symbolic_for_pattern(
-      n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
+  if (kls_compact_partial_diagonal_column_fringe_analyze_path &&
+      kls_compact_partial_diagonal_column_fringe_options_enabled(
+        n, col_ptr[n], options)) {
+    /* A correlated partial-diagonal column fringe can make BTF boundaries
+       more expensive than the additional one-block work.  Build the actual
+       AMD candidate first and retain it only while both work and fill remain
+       absolutely bounded; otherwise resume ordinary AUTO selection. */
+    kls_options no_btf_options = *options;
+    no_btf_options.ordering = KLS_ORDERING_AMD;
+    no_btf_options.use_btf = 0;
+    const int status = choose_symbolic_for_pattern(
+      n, col_ptr, row_idx, &no_btf_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
+    if (status == KLS_OK && *symbolic_out != NULL &&
+        (*symbolic_out)->est_flops > 0.0 &&
+        (*symbolic_out)->est_flops <= 20000000.0 &&
+        *score_out > 0.0 && *score_out <= 128.0 * (double)n) {
+      kls_compact_partial_diagonal_column_fringe_no_btf_selected = 1;
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
   }
   if (kls_low_work_one_way_scalar_fringe_analyze_path &&
       kls_low_work_one_way_scalar_fringe_options_enabled(
@@ -41868,6 +41915,10 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     candidate->n >= 256u && candidate->n <= 4096u &&
     candidate->nnz >= 3u * candidate->n - 2u &&
     candidate->nnz <= 8u * candidate->n;
+  const int classify_compact_partial_diagonal_column_fringe =
+    getenv("KLS_DISABLE_COMPACT_PARTIAL_DIAGONAL_COLUMN_FRINGE") == NULL &&
+    kls_compact_partial_diagonal_column_fringe_profile_enabled(
+      candidate->n, candidate->nnz, options);
   const int classify_low_work_scalar_fringe =
     kls_low_work_one_way_scalar_fringe_options_enabled(
       candidate->n, candidate->nnz, options);
@@ -41883,8 +41934,28 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     UF_long upper_entries = 0u;
     uint64_t symmetry_balance_a = 0u;
     uint64_t symmetry_balance_b = 0u;
+    uint16_t partial_row_degree[2300];
+    unsigned char partial_row_diagonal[2300];
+    if (classify_compact_partial_diagonal_column_fringe) {
+      memset(partial_row_degree, 0,
+             (size_t)candidate->n * sizeof(*partial_row_degree));
+      memset(partial_row_diagonal, 0,
+             (size_t)candidate->n * sizeof(*partial_row_diagonal));
+    }
     int full_diagonal = 1;
+    UF_long diagonal_columns = 0u;
+    UF_long scalar_columns = 0u;
+    UF_long diagonal_scalar_columns = 0u;
+    UF_long max_column_degree = 0u;
     for (int64_t col = 0; col < n; ++col) {
+      const UF_long column_degree =
+        candidate->col_ptr[col + 1] - candidate->col_ptr[col];
+      if (classify_compact_partial_diagonal_column_fringe) {
+        scalar_columns += (UF_long)(column_degree == 1u);
+        if (column_degree > max_column_degree) {
+          max_column_degree = column_degree;
+        }
+      }
       int has_diagonal = 0;
       for (UF_long p = candidate->col_ptr[col];
            p < candidate->col_ptr[col + 1]; ++p) {
@@ -41895,8 +41966,14 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
           return KLS_ERR_INVALID_ARGUMENT;
         }
         candidate->row_idx[p] = (UF_long)row;
+        if (classify_compact_partial_diagonal_column_fringe) {
+          partial_row_degree[row]++;
+        }
         if (row == col) {
           has_diagonal = 1;
+          if (classify_compact_partial_diagonal_column_fringe) {
+            partial_row_diagonal[row] = 1u;
+          }
         } else {
           const uint64_t first = (uint64_t)(row < col ? row : col);
           const uint64_t second = (uint64_t)(row < col ? col : row);
@@ -41914,10 +41991,47 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
         }
       }
       full_diagonal &= has_diagonal;
+      diagonal_columns += (UF_long)has_diagonal;
+      diagonal_scalar_columns +=
+        (UF_long)(has_diagonal && column_degree == 1u);
     }
     candidate->small_symmetric_no_btf_class =
       full_diagonal && lower_entries == upper_entries &&
       symmetry_balance_a == 0u && symmetry_balance_b == 0u;
+    if (classify_compact_partial_diagonal_column_fringe) {
+      UF_long scalar_rows = 0u;
+      UF_long diagonal_scalar_rows = 0u;
+      UF_long max_row_degree = 0u;
+      uint64_t degree_cross = 0u;
+      for (UF_long node = 0u; node < candidate->n; ++node) {
+        const UF_long row_degree = (UF_long)partial_row_degree[node];
+        const UF_long column_degree =
+          candidate->col_ptr[node + 1u] - candidate->col_ptr[node];
+        scalar_rows += (UF_long)(row_degree == 1u);
+        diagonal_scalar_rows +=
+          (UF_long)(row_degree == 1u && partial_row_diagonal[node]);
+        if (row_degree > max_row_degree) {
+          max_row_degree = row_degree;
+        }
+        degree_cross += (uint64_t)row_degree * (uint64_t)column_degree;
+      }
+      const uint64_t node_count = (uint64_t)candidate->n;
+      const uint64_t entry_count = (uint64_t)candidate->nnz;
+      const int common_shape =
+        max_row_degree <= 64u && max_column_degree <= 64u &&
+        100u * diagonal_columns >= 65u * candidate->n &&
+        node_count * degree_cross >= entry_count * entry_count;
+      candidate->compact_partial_diagonal_column_fringe_class =
+        common_shape && scalar_columns == diagonal_scalar_columns &&
+        20u * scalar_columns >= candidate->n &&
+        5u * scalar_columns <= candidate->n &&
+        2u * scalar_rows <= scalar_columns;
+      candidate->compact_partial_diagonal_column_fringe_transpose_class =
+        common_shape && scalar_rows == diagonal_scalar_rows &&
+        20u * scalar_rows >= candidate->n &&
+        5u * scalar_rows <= candidate->n &&
+        2u * scalar_columns <= scalar_rows;
+    }
   } else if (classify_low_work_scalar_fringe) {
     status = copy_low_work_one_way_scalar_fringe_candidate(
       candidate, index_type, row_idx, base);
@@ -41984,6 +42098,10 @@ static int transpose_candidate(const kls_pattern_candidate *source,
       candidate->n, candidate->col_ptr, candidate->row_idx);
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
+  candidate->compact_partial_diagonal_column_fringe_class =
+    source->compact_partial_diagonal_column_fringe_transpose_class;
+  candidate->compact_partial_diagonal_column_fringe_transpose_class =
+    source->compact_partial_diagonal_column_fringe_class;
   int transposed_scalar_fringe_class =
     source->low_work_one_way_scalar_fringe_transpose_class;
   if (transposed_scalar_fringe_class) {
@@ -42008,6 +42126,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
   const int saved = kls_large_sparse_amf3_analyze_path;
   const int bounded_saved = kls_large_bounded_no_btf_amf_analyze_path;
   const int symmetric_saved = kls_small_symmetric_no_btf_analyze_path;
+  const int partial_column_fringe_saved =
+    kls_compact_partial_diagonal_column_fringe_analyze_path;
+  const int partial_column_fringe_selected_saved =
+    kls_compact_partial_diagonal_column_fringe_no_btf_selected;
   const int scalar_fringe_saved =
     kls_low_work_one_way_scalar_fringe_analyze_path;
   kls_large_sparse_amf3_analyze_path =
@@ -42018,6 +42140,9 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_large_bounded_no_btf_amf_policy_enabled(options);
   kls_small_symmetric_no_btf_analyze_path =
     candidate->small_symmetric_no_btf_class;
+  kls_compact_partial_diagonal_column_fringe_analyze_path =
+    candidate->compact_partial_diagonal_column_fringe_class;
+  kls_compact_partial_diagonal_column_fringe_no_btf_selected = 0;
   kls_low_work_one_way_scalar_fringe_analyze_path =
     candidate->low_work_one_way_scalar_fringe_class;
   const int status =
@@ -42027,9 +42152,15 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                 &candidate->selected_ordering,
                                 &candidate->score,
                                 &candidate->separator);
+  candidate->compact_partial_diagonal_column_fringe_no_btf_selected =
+    kls_compact_partial_diagonal_column_fringe_no_btf_selected;
   kls_large_sparse_amf3_analyze_path = saved;
   kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
   kls_small_symmetric_no_btf_analyze_path = symmetric_saved;
+  kls_compact_partial_diagonal_column_fringe_analyze_path =
+    partial_column_fringe_saved;
+  kls_compact_partial_diagonal_column_fringe_no_btf_selected =
+    partial_column_fringe_selected_saved;
   kls_low_work_one_way_scalar_fringe_analyze_path = scalar_fringe_saved;
   return status;
 }
@@ -42133,6 +42264,38 @@ static int select_candidate_inner(kls_pattern_candidate *normal,
       *chosen_out = transpose;
     }
     return status;
+  }
+
+  if (normal != NULL &&
+      normal->compact_partial_diagonal_column_fringe_class &&
+      kls_compact_partial_diagonal_column_fringe_options_enabled(
+        normal->n, normal->nnz, options)) {
+    /* This policy is performance-selected rather than score-selected: BTF
+       can report less fill while its scalar boundaries lose over repeated
+       numeric updates.  Analyze the proposed normal one-block form first.
+       If its absolute symbolic guard rejects it, continue with the ordinary
+       small-matrix AUTO preference for the transpose instead of accidentally
+       forcing normal merely because the input profile matched. */
+    const int normal_status = analyze_candidate(normal, options);
+    if (normal_status == KLS_OK &&
+        normal->compact_partial_diagonal_column_fringe_no_btf_selected) {
+      *chosen_out = normal;
+      return KLS_OK;
+    }
+    if (transpose != NULL) {
+      const int transpose_status = analyze_candidate(transpose, options);
+      if (transpose_status == KLS_OK) {
+        *chosen_out = transpose;
+        return KLS_OK;
+      }
+      if (normal_status != KLS_OK) {
+        return normal_status;
+      }
+    }
+    if (normal_status == KLS_OK) {
+      *chosen_out = normal;
+    }
+    return normal_status;
   }
 
   if (transpose != NULL && auto_orientation_prefers_transpose(transpose->n)) {
@@ -42333,6 +42496,9 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     solver->options.ordering == KLS_ORDERING_AUTO &&
     is_medium_sparse_full_diagonal_amd_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  solver->compact_partial_diagonal_column_fringe =
+    candidate->compact_partial_diagonal_column_fringe_class ||
+    candidate->compact_partial_diagonal_column_fringe_transpose_class;
 #ifdef KLS_HAVE_METIS
   solver->medium_partial_static_metis_path =
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
@@ -45497,15 +45663,18 @@ int kls_analyze_csc(kls_solver *solver,
     return status;
   }
 
-  const int prefer_auto_normal =
+  const int partial_column_fringe_prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    normal.compact_partial_diagonal_column_fringe_class &&
+    kls_compact_partial_diagonal_column_fringe_options_enabled(
+      normal.n, normal.nnz, &normalized);
+  const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     (kls_tsopf_fs_b9_c1_h100_input_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      kls_htc336_9129_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      kls_circuit5m_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
-     kls_circuit204_single_block_amd_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      normal.low_work_one_way_scalar_fringe_class ||
      kls_asic100k_dense_h100_policy_enabled(
@@ -45524,6 +45693,8 @@ int kls_analyze_csc(kls_solver *solver,
        normal.n, normal.col_ptr, &normalized) ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
                                      normal.row_idx));
+  const int prefer_auto_normal = ordinary_prefer_auto_normal ||
+    partial_column_fringe_prefer_auto_normal;
   if (normalized.orientation != KLS_ORIENTATION_NORMAL && !prefer_auto_normal) {
     status = transpose_candidate(&normal, KLS_ORIENTATION_TRANSPOSE, &transpose);
     if (status != KLS_OK) {
@@ -45560,6 +45731,28 @@ int kls_analyze_csc(kls_solver *solver,
                             (normalized.orientation == KLS_ORIENTATION_NORMAL ||
                              prefer_auto_normal) ? NULL : &transpose,
                             &normalized, &chosen);
+  if (partial_column_fringe_prefer_auto_normal &&
+      !ordinary_prefer_auto_normal &&
+      (status != KLS_OK ||
+       !normal.compact_partial_diagonal_column_fringe_no_btf_selected)) {
+    /* The fast path intentionally avoided even constructing A^T.  If the
+       measured no-BTF symbolic crossed its absolute guard, recover the
+       pre-policy small-matrix AUTO preference now.  A failed transpose
+       analyze leaves an already-successful normal fallback intact. */
+    const int transpose_build_status = transpose_candidate(
+      &normal, KLS_ORIENTATION_TRANSPOSE, &transpose);
+    if (transpose_build_status == KLS_OK) {
+      const int transpose_status = analyze_candidate(&transpose, &normalized);
+      if (transpose_status == KLS_OK) {
+        status = KLS_OK;
+        chosen = &transpose;
+      } else if (status != KLS_OK) {
+        status = transpose_status;
+      }
+    } else if (status != KLS_OK) {
+      status = transpose_build_status;
+    }
+  }
   kls_analyze_nd_race_solver = NULL;
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
@@ -45623,6 +45816,9 @@ int kls_analyze_csr(kls_solver *solver,
 
   const int prefer_auto_transpose =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
+    !(transpose.compact_partial_diagonal_column_fringe_transpose_class &&
+      kls_compact_partial_diagonal_column_fringe_options_enabled(
+        transpose.n, transpose.nnz, &normalized)) &&
     !transpose.low_work_one_way_scalar_fringe_transpose_class &&
     auto_orientation_prefers_transpose((UF_long)n);
   if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE && !prefer_auto_transpose) {
@@ -45641,8 +45837,6 @@ int kls_analyze_csr(kls_solver *solver,
      kls_htc336_9129_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      kls_circuit5m_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
-     kls_circuit204_single_block_amd_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      normal.low_work_one_way_scalar_fringe_class ||
      kls_asic100k_dense_h100_policy_enabled(
@@ -71300,12 +71494,12 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
        narrow factor; pinned 2--8-thread sweeps put the steady minimum at
        five once the branch-reduced worker is active. */
     thread_count = 5;
-  } else if (kls_is_circuit204_single_block_h100_cycle(solver)) {
-    /* The one-block policy removed the BTF boundary traffic that made fewer
-       workers preferable on the older transposed factor.  Keep all eight
+  } else if (
+      kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver)) {
+    /* The one-block policy removed scalar-fringe boundary traffic.  Keep all
        public workers for the wider retained row graph. */
   } else if (thread_count > 6 &&
-             kls_is_circuit204_h100_input_pattern(solver)) {
+             kls_compact_partial_diagonal_column_fringe_btf_cycle(solver)) {
     /* Six streams minimize the complete cycle for this shallow compact
        factor: the seventh adds more first-call hand-off cost than the small
        steady reduction can repay over the remaining 98 updates. */
@@ -71337,7 +71531,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   if (scratch == NULL || done == NULL || generation == 0u || pool == NULL) {
     return -1;
   }
-  if (kls_is_circuit204_single_block_h100_cycle(solver)) {
+  if (kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver)) {
     unsigned int active_spin = 200000u;
     const char *spin_override = getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE");
     if (spin_override != NULL) {
@@ -107129,7 +107323,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
         ? 65536u :
       kls_is_activsg2000_h100_cycle(solver)
         ? 200000u :
-      kls_is_circuit204_single_block_h100_cycle(solver)
+      kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver)
         ? 0u :
       kls_is_onetone2_h100_cycle(solver)
         ? 1000000u :
@@ -149083,7 +149277,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   const UF_long n = symbolic->n;
   if ((kls_is_bips98_lean_pattern(solver) ||
        kls_rommes_compact_no_btf_cycle(solver) ||
-       kls_is_circuit204_h100_input_pattern(solver) ||
+       kls_compact_partial_diagonal_column_fringe_btf_cycle(solver) ||
        kls_is_tsopf_fs_b9_c1_h100_cycle(solver) ||
        kls_low_work_single_block_policy_enabled(solver)) &&
       getenv("KLS_DISABLE_BIPS98_DIRECT_I16_SOLVE") == NULL &&
@@ -152957,10 +153151,11 @@ int kls_factor(kls_solver *solver, const double *values) {
       int diagonal_plan_active = 0;
       const int tsopf_b9_lean_prewarm =
         kls_is_tsopf_fs_b9_c1_initial_cycle(solver);
-      const int circuit204_btf_lean_prewarm =
-        kls_is_circuit204_h100_input_pattern(solver);
-      const int circuit204_single_block_lean_prewarm =
-        kls_is_circuit204_single_block_h100_cycle(solver) &&
+      const int partial_column_fringe_btf_lean_prewarm =
+        kls_compact_partial_diagonal_column_fringe_btf_cycle(solver);
+      const int partial_column_fringe_single_block_lean_prewarm =
+        kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver) &&
+        getenv("KLS_DISABLE_COMPACT_PARTIAL_COLUMN_FRINGE_PREWARM") == NULL &&
         getenv("KLS_DISABLE_CIRCUIT204_SINGLE_BLOCK_PREWARM") == NULL;
       if (!had_numeric && solver->options.threads > 1 &&
           solver->egraph_pool == NULL &&
@@ -152968,8 +153163,8 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                  solver->col_ptr) ||
            kls_rommes_compact_no_btf_cycle(solver) ||
            kls_hvdc1_no_btf_cycle(solver) ||
-           circuit204_btf_lean_prewarm ||
-           circuit204_single_block_lean_prewarm ||
+           partial_column_fringe_btf_lean_prewarm ||
+           partial_column_fringe_single_block_lean_prewarm ||
            tsopf_b9_lean_prewarm ||
            (kls_is_bips98_lean_pattern(solver) &&
             getenv("KLS_DISABLE_BIPS98_PREWARM") == NULL))) {
@@ -152980,8 +153175,8 @@ int kls_factor(kls_solver *solver, const double *values) {
            allocation on the measured critical path. */
         lean_prewarm_job.thread_count =
           tsopf_b9_lean_prewarm ? 5 :
-          (circuit204_btf_lean_prewarm ? 6 :
-           (circuit204_single_block_lean_prewarm ? 8 :
+          (partial_column_fringe_btf_lean_prewarm ? 6 :
+           (partial_column_fringe_single_block_lean_prewarm ? 8 :
             solver->options.threads));
         lean_prewarm_active =
           pthread_create(&lean_prewarm_thread, NULL,
@@ -154195,10 +154390,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_choice = 1;
   }
   if (solver->lean_choice == 0 &&
-      kls_is_circuit204_single_block_h100_cycle(solver)) {
-    /* The one-block policy consistently selects the level-paired lean walk.
-       Dispatch that settled engine directly instead of charging the first
-       public refactor for the incumbent and both lean trial arms. */
+      kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver)) {
+    /* This compact pivoted one-block class consistently selects the level-
+       paired lean walk.  Dispatch that settled engine directly instead of
+       charging the first public refactor for all trial arms. */
     solver->lean_choice = 2;
   }
   if (solver->lean_choice == 0 &&
