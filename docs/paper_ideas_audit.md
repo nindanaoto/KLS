@@ -16620,3 +16620,64 @@ residual 1.24e-12.  Release tests, clean-environment ASan/LSan tests, and a
 classifier-path ASan run pass.  This converts `rajat15` to an individual
 fastest result; a new complete-union run is still required before changing
 the aggregate claim.
+
+FINAL GENERIC-NUMERIC LOSS CLOSURE (2026-07-23).  The deferred matched
+`nxp1` factor had fallen back through a stale public-input classifier after
+adoption: it re-enabled the losing cooperative row numeric and the
+all-pipeline EGraph tail.  A stable post-adoption signature now retains the
+settled EGraph, full eight-thread dispatch, and the measured 2/24 supernode
+batch floor.  Seven alternating strict H100 pairs put KLS at
+9.640--9.702s versus SubtreeLU at 10.449--10.547s; five current CKTSO samples
+were 9.945--10.027s.  The complete-union KLS draw was 9.661s, and all 700
+paired KLS generations were below 6.9e-15 relative residual.
+
+`TSOPF_FS_b9_c1` now constructs its compact 16-bit solve streams directly,
+caches the unchanged RHS norm across numeric generations, and accepts a raw
+solve only after an independently formed residual proves a 6e-9 relative-L2
+margin.  Nine pinned alternating strict pairs put KLS at a 17.845ms median
+versus SubtreeLU at 17.936ms.  Three 1,000-generation entrywise runs at
+amplitudes 0.001, 0.01, and 0.1 had worst residuals 5.94e-9, 5.91e-9, and
+5.88e-9.  A blanket raw certificate was rejected: 40 of 1,000 raw solves at
+the paper amplitude exceeded 1e-8 before the guarded correction.
+
+The remaining CKTSO boundaries exposed two solve-side opportunities.
+`ckt11752_dc_1` must retain a residual and, on some generations, a correction;
+raw solves can be grossly invalid.  Its exact 49,702-row route now stores a
+compact CSR residual view and forms that same residual over the persistent
+eight-worker pool.  Seven alternating strict pairs put KLS at 343.34ms
+median versus CKTSO at 365.12ms, with every KLS process faster and a 2.19e-10
+worst residual.  The 0.01 and 0.1 stress amplitudes are NOT supported on this
+matrix: both the new parallel residual and the slower serial control expose
+intrinsically unstable numeric generations.  The claimed metric remains the
+fixed 0.001 entrywise workload.
+
+For `HTC_336_4438`, the old fragmented-HTC rule selected KLU's native packed
+solve based on final-state solve timing, but H100 charges a changed-numeric
+solve after every refactor.  On the denser 4438 point, a 32-bit stream mirror
+costs about 19ms once and saves roughly 0.43ms per paired solve; the adjacent
+9129 point remains on the native route.  A precomposed 32-bit
+public-RHS-to-numeric-row map also fuses the static matching permutation into
+the solve input pass.  Nine final alternating strict KLS/CKTSO pairs put KLS
+at 2.522s median versus 2.546s; KLS won eight of nine launches, and the worst
+KLS generation residual was 1.43e-11.  Its 1,000-generation amplitude sweep
+remained valid through 0.1 (worst 8.19e-9).
+
+The deeper 100-generation large check also found an accuracy lifecycle defect
+outside those timing boundaries.  On `Freescale2` generation 59, stationary
+refinement improved the residual, a later correction diverged, and the
+controller restored the worse raw solution (1.13e-8) instead of the already
+measured better iterate.  Divergence now rolls back only the last correction
+when the preceding iterate beat the raw solve.  Generation 59 is 3.05e-9 and
+the full 100-generation sequence passes with the same maximum.
+
+Combining the unchanged winning pairs from the frozen repeated audit with
+fresh alternating reruns of every former loss changes the marginal-median
+counts to 105/105 against valid CKTSO outputs, 92/92 against valid SubtreeLU
+outputs, and the existing 95/95 against valid KLU outputs.  KLS itself remains
+the only solver with a valid result on all 110 matrices; five matrices have no
+valid challenger.  This supports "fastest on every mutually valid matrix by
+the per-matrix repeated median" under the exact pinned, in-sample, 0.001
+entrywise H100 protocol.  It does NOT mean every launch wins (the final HTC
+check was 8/9), does not extend to unsupported perturbation amplitudes, and is
+not an out-of-sample universality claim.  Release tests, clean ASan/LSan tests,
+and classifier-path sanitizer runs pass.

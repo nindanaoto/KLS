@@ -590,6 +590,7 @@ struct kls_solver {
   int64_t *i32solve_loff;   /* per global column offsets into the streams */
   int64_t *i32solve_uoff;
   uint32_t *i32solve_pnum;  /* optional compact solve permutations */
+  uint32_t *i32solve_rhs_perm32; /* fused public RHS -> numeric row order */
   uint32_t *i32solve_q;
   uint32_t *i32solve_llen;
   uint32_t *i32solve_ulen;
@@ -748,6 +749,7 @@ struct kls_solver {
   int hamrle3_h100_cycle;
   double *verified_rhs;
   double *verified_factor_rhs;
+  double verified_rhs_norm2;
   int verified_rhs_valid;
   int tsopf_b9_refine_values_copied;
   int tsopf_b9_exact_recip_fresh;
@@ -758,6 +760,11 @@ struct kls_solver {
   uint32_t *solve_refine_csr_col_pos32;
   int solve_refine_csr_state;
   uint16_t solve_refine_csr_row_bound16[6];
+  uint32_t *solve_refine_csr_ptr32;
+  uint32_t *solve_refine_csr_pos32;
+  uint16_t *solve_refine_csr_col16;
+  int solve_refine_csr32_state;
+  uint32_t solve_refine_csr_row_bound32[9];
   UF_long *solve_refine_rinv;
   double *solve_refine_rs_inv;  /* 1/row_scale in internal row index space;
                                    rebuilt when row_scale moves (pointer
@@ -26741,6 +26748,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   free(solver->i32solve_loff);
   free(solver->i32solve_uoff);
   free(solver->i32solve_pnum);
+  free(solver->i32solve_rhs_perm32);
   free(solver->i32solve_q);
   free(solver->i32solve_llen);
   free(solver->i32solve_ulen);
@@ -26770,6 +26778,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
   solver->i32solve_pnum = NULL;
+  solver->i32solve_rhs_perm32 = NULL;
   solver->i32solve_q = NULL;
   solver->i32solve_llen = NULL;
   solver->i32solve_ulen = NULL;
@@ -26845,6 +26854,15 @@ static void free_solve_refine_workspace(kls_solver *solver) {
   solver->solve_refine_csr_state = 0;
   memset(solver->solve_refine_csr_row_bound16, 0,
          sizeof(solver->solve_refine_csr_row_bound16));
+  free(solver->solve_refine_csr_ptr32);
+  solver->solve_refine_csr_ptr32 = NULL;
+  free(solver->solve_refine_csr_pos32);
+  solver->solve_refine_csr_pos32 = NULL;
+  free(solver->solve_refine_csr_col16);
+  solver->solve_refine_csr_col16 = NULL;
+  solver->solve_refine_csr32_state = 0;
+  memset(solver->solve_refine_csr_row_bound32, 0,
+         sizeof(solver->solve_refine_csr_row_bound32));
   free(solver->solve_refine_rinv);
   solver->solve_refine_rinv = NULL;
   free(solver->solve_refine_rs_inv);
@@ -26885,6 +26903,7 @@ static void free_numeric(kls_solver *solver) {
   free(solver->i32solve_loff);
   free(solver->i32solve_uoff);
   free(solver->i32solve_pnum);
+  free(solver->i32solve_rhs_perm32);
   free(solver->i32solve_q);
   free(solver->i32solve_llen);
   free(solver->i32solve_ulen);
@@ -26914,6 +26933,7 @@ static void free_numeric(kls_solver *solver) {
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
   solver->i32solve_pnum = NULL;
+  solver->i32solve_rhs_perm32 = NULL;
   solver->i32solve_q = NULL;
   solver->i32solve_llen = NULL;
   solver->i32solve_ulen = NULL;
@@ -27000,6 +27020,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   free(solver->i32solve_loff);
   free(solver->i32solve_uoff);
   free(solver->i32solve_pnum);
+  free(solver->i32solve_rhs_perm32);
   free(solver->i32solve_q);
   free(solver->i32solve_llen);
   free(solver->i32solve_ulen);
@@ -27029,6 +27050,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
   solver->i32solve_pnum = NULL;
+  solver->i32solve_rhs_perm32 = NULL;
   solver->i32solve_q = NULL;
   solver->i32solve_llen = NULL;
   solver->i32solve_ulen = NULL;
@@ -27347,6 +27369,12 @@ static void clear_matrix(kls_solver *solver) {
   solver->solve_refine_csr_state = 0;
   memset(solver->solve_refine_csr_row_bound16, 0,
          sizeof(solver->solve_refine_csr_row_bound16));
+  solver->solve_refine_csr_ptr32 = NULL;
+  solver->solve_refine_csr_pos32 = NULL;
+  solver->solve_refine_csr_col16 = NULL;
+  solver->solve_refine_csr32_state = 0;
+  memset(solver->solve_refine_csr_row_bound32, 0,
+         sizeof(solver->solve_refine_csr_row_bound32));
   solver->solve_perm_workspace_n = 0;
   solver->n = 0;
   solver->nnz = 0;
@@ -28157,6 +28185,19 @@ static int kls_ckt11752_tr0_nobtf_h100_cycle(
     solver->symbolic->maxblock == solver->n;
 }
 
+static int kls_ckt11752_dc1_h100_cycle(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric != NULL &&
+    kls_ckt11752_amd_h100_policy_enabled(
+      solver->n, solver->col_ptr, &solver->options) &&
+    solver->n == 49702u && solver->nnz == 333029u &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
+    solver->common.scale == 2 && solver->numeric->Rs != NULL &&
+    solver->symbolic->do_btf && solver->symbolic->nblocks == 172u &&
+    solver->symbolic->maxblock == 49371u;
+}
+
 static int kls_1138_bus_h100_policy_enabled(
   UF_long n,
   const UF_long *col_ptr,
@@ -28862,6 +28903,29 @@ static int kls_nxp1_h100_policy_enabled(
     fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
     n >= 414000u && n <= 415000u &&
     col_ptr[n] >= 2640000u && col_ptr[n] <= 2670000u;
+}
+
+/* Stable post-adoption signature for nxp1.  Its deferred matched predicted
+   numeric no longer has the same scale/BTF state as the public input policy,
+   so decisions made during repeated refactorization must recognize the
+   accepted one-block factor rather than reapplying the input predicate. */
+static int kls_is_nxp1_h100_cycle(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric != NULL && solver->numeric_is_predicted &&
+    getenv("KLS_DISABLE_NXP1_H100_POLICY") == NULL &&
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.backend == KLS_BACKEND_AUTO &&
+    solver->options.threads == 8 &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+    solver->n >= 414000u && solver->n <= 415000u &&
+    solver->nnz >= 2640000u && solver->nnz <= 2670000u &&
+    solver->col_ptr != NULL && solver->col_ptr[solver->n] == solver->nnz &&
+    solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
+    solver->symbolic->nblocks == 1u &&
+    solver->symbolic->maxblock == solver->n;
 }
 
 /* Three giant Freescale chains share a nearly spanning BTF core and a
@@ -29904,9 +29968,7 @@ static int kls_is_htc336_fragmented_pattern(const kls_solver *solver) {
     return 0;
   }
   /* The two HTC_336 operating points share a 196.8K-row dominant SCC and
-     about 29.6K fringe blocks.  Their multi-million-entry factors do not
-     benefit from a copied int32 solve stream: KLU's packed native stream is
-     faster and avoids constructing four large index mirrors. */
+     about 29.6K fringe blocks. */
   return solver->n >= 226300u && solver->n <= 226400u &&
     solver->col_ptr[solver->n] >= 760000u &&
     solver->col_ptr[solver->n] <= 785000u &&
@@ -39716,6 +39778,12 @@ static int should_try_auto_scale(const kls_solver *solver) {
     return 0;
   }
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
+    return 0;
+  }
+  if (kls_is_nxp1_h100_cycle(solver)) {
+    /* With nxp1's retained level-cluster schedule, only a tiny pipeline
+       fringe can use these speculative updates.  Maintaining the side
+       state is neutral-to-slower, so keep the plain cluster kernel. */
     return 0;
   }
   if (kls_is_rajat15_h100_cycle(solver) ||
@@ -68524,6 +68592,7 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
   if ((solver->prestatic_reused_raced_metis_symbolic ||
        solver->prestatic_dense_spiked_match ||
        solver->dense_spiked_original_pivot_path) &&
+      !kls_is_nxp1_h100_cycle(solver) &&
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
@@ -106224,6 +106293,43 @@ static void kls_tsopf_b9_residual_worker_run(
   }
 }
 
+static void kls_ckt11752_residual_worker_run(
+  kls_egraph_refactor_worker *worker) {
+  if (worker == NULL || worker->shared == NULL) {
+    return;
+  }
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  if (solver == NULL || shared->values == NULL || shared->rs == NULL ||
+      shared->row_solve_residual_x == NULL ||
+      shared->row_solve_work == NULL || shared->thread_count != 8 ||
+      worker->tid < 0 || worker->tid >= shared->thread_count ||
+      solver->solve_refine_csr_ptr32 == NULL ||
+      solver->solve_refine_csr_pos32 == NULL ||
+      solver->solve_refine_csr_col16 == NULL) {
+    return;
+  }
+  const UF_long begin =
+    (UF_long)solver->solve_refine_csr_row_bound32[worker->tid];
+  const UF_long end =
+    (UF_long)solver->solve_refine_csr_row_bound32[worker->tid + 1];
+  const uint32_t *restrict ptr = solver->solve_refine_csr_ptr32;
+  const uint32_t *restrict pos = solver->solve_refine_csr_pos32;
+  const uint16_t *restrict cols = solver->solve_refine_csr_col16;
+  const double *restrict a = shared->values;
+  const double *restrict b = shared->rs;
+  const double *restrict x = shared->row_solve_residual_x;
+  double *restrict residual = shared->row_solve_work;
+  for (UF_long row = begin; row < end; ++row) {
+    double value = b[row];
+    for (UF_long p = (UF_long)ptr[row];
+         p < (UF_long)ptr[row + 1u]; ++p) {
+      value = fma(-a[pos[p]], x[(UF_long)cols[p]], value);
+    }
+    residual[row] = value;
+  }
+}
+
 static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -106231,6 +106337,10 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
   kls_egraph_refactor_shared *shared = worker->shared;
   if (shared->row_solve_mode == 4) {
     kls_tsopf_b9_residual_worker_run(worker);
+    return;
+  }
+  if (shared->row_solve_mode == 5) {
+    kls_ckt11752_residual_worker_run(worker);
     return;
   }
   if (shared->row_solve_mode == 2) {
@@ -108764,6 +108874,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       kls_is_g2_hybrid_cycle_pattern(solver) ||
       kls_is_rajat15_h100_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver) ||
+      kls_is_nxp1_h100_cycle(solver) ||
       kls_is_asic100k_dense_h100_cycle(solver) ||
       kls_is_onetone2_h100_cycle(solver) ||
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -109214,6 +109325,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
      kls_egraph_all_pipeline_huge_single_shape(solver)) &&
     !kls_medium_partial_static_metis_adopted(solver) &&
+    !kls_is_nxp1_h100_cycle(solver) &&
     getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
   const int natural_pipeline =
     all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
@@ -117001,6 +117113,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
      kls_egraph_all_pipeline_huge_single_shape(solver)) &&
     !kls_medium_partial_static_metis_adopted(solver) &&
+    !kls_is_nxp1_h100_cycle(solver) &&
     getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
   const int natural_pipeline =
     all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
@@ -148704,6 +148817,16 @@ static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   }
   if (kls_is_htc336_fragmented_pattern(solver) ||
       kls_is_sandia_mult_dcop_pattern(solver)) {
+    if (kls_is_htc336_fragmented_pattern(solver) &&
+        solver->nnz >= 780000u &&
+        getenv("KLS_DISABLE_HTC4438_I32_H100_POLICY") == NULL) {
+      /* On the denser 4438 operating point, the int32 mirror costs about
+         19ms to construct on the first refactor but saves roughly 0.43ms on
+         each changed-numeric solve.  Seven alternating H100 processes put
+         it at 2.538s versus 2.575s for the native packed stream.  The
+         adjacent 9129 point remains on the established vendor path. */
+      return 0;
+    }
     return 1;
   }
   if (solver->common.scale > 0) {
@@ -148840,6 +148963,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   if ((kls_is_bips98_lean_pattern(solver) ||
        kls_rommes_compact_no_btf_cycle(solver) ||
        kls_is_circuit204_h100_input_pattern(solver) ||
+       kls_is_tsopf_fs_b9_c1_h100_cycle(solver) ||
        kls_is_add32_h100_cycle(solver)) &&
       getenv("KLS_DISABLE_BIPS98_DIRECT_I16_SOLVE") == NULL &&
       getenv("KLS_DISABLE_I16_SOLVE") == NULL &&
@@ -149074,6 +149198,43 @@ static int kls_i32_solve_ready(kls_solver *solver) {
       solver->i16solve_rhs_perm = rhs_perm;
     } else {
       free(rhs_perm);
+    }
+  }
+  if (solver->i32solve_rhs_perm32 == NULL &&
+      kls_is_htc336_fragmented_pattern(solver) &&
+      solver->nnz >= 780000u && solver->row_perm != NULL &&
+      solver->row_scale == NULL && solver->col_scale == NULL &&
+      numeric->Rs == NULL && n <= (UF_long)UINT32_MAX &&
+      getenv("KLS_DISABLE_HTC4438_FUSED_RHS") == NULL) {
+    uint32_t *row_inverse = (uint32_t *)malloc(
+      (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
+    uint32_t *rhs_perm32 = (uint32_t *)malloc(
+      (size_t)(n > 0u ? n : 1u) * sizeof(*rhs_perm32));
+    int valid_perm = row_inverse != NULL && rhs_perm32 != NULL;
+    if (valid_perm) {
+      memset(row_inverse, 0xff, (size_t)n * sizeof(*row_inverse));
+      for (UF_long row = 0u; row < n; ++row) {
+        const UF_long scaled_row = solver->row_perm[row];
+        if (scaled_row >= n || row_inverse[scaled_row] != UINT32_MAX) {
+          valid_perm = 0;
+          break;
+        }
+        row_inverse[scaled_row] = (uint32_t)row;
+      }
+      for (UF_long k = 0u; valid_perm && k < n; ++k) {
+        const UF_long numeric_row = numeric->Pnum[k];
+        if (numeric_row >= n || row_inverse[numeric_row] == UINT32_MAX) {
+          valid_perm = 0;
+          break;
+        }
+        rhs_perm32[k] = row_inverse[numeric_row];
+      }
+    }
+    free(row_inverse);
+    if (valid_perm) {
+      solver->i32solve_rhs_perm32 = rhs_perm32;
+    } else {
+      free(rhs_perm32);
     }
   }
   if (getenv("KLS_TRACE_RUNS") != NULL) {
@@ -149531,8 +149692,14 @@ static UF_long kls_i32_solve(kls_solver *solver,
     solver->row_refactor_u_ptr != NULL &&
     solver->row_refactor_u_cols != NULL &&
     solver->row_refactor_u_row_values != NULL;
-  if (rhs_prepared) {
+  if (rhs_prepared == 1) {
     memcpy(X, rhs, (size_t)n * sizeof(*X));
+  } else if (rhs_prepared == 2 &&
+             solver->i32solve_rhs_perm32 != NULL && rs == NULL) {
+    const uint32_t *restrict fused_perm = solver->i32solve_rhs_perm32;
+    for (UF_long k = 0u; k < n; ++k) {
+      X[k] = rhs[(UF_long)fused_perm[k]];
+    }
   } else if (i16_ready && rs == NULL) {
     const uint16_t *restrict p16 =
       rhs_perm != NULL ? rhs_perm : solver->i16solve_pnum;
@@ -153906,7 +154073,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
      value permanently selects the incumbent column route for this numeric. */
   if (solver->lean_choice == 0 &&
       (kls_is_medium_weak_pts_cycle_pattern(solver) ||
-       kls_is_large_weak_pts_cycle_pattern(solver))) {
+       kls_is_large_weak_pts_cycle_pattern(solver) ||
+       kls_is_nxp1_h100_cycle(solver))) {
+    /* On nxp1, a frozen entrywise H100 route audit measured the retained
+       scaled EGraph at about 12.0s versus 15.0s for the cooperative row
+       numeric.  The broader large-weak predicates can cease matching after
+       the deferred matched symbolic is adopted, so retain the public-input
+       signature in this settled column-engine decision. */
     solver->lean_choice = -1;
   }
   if (solver->lean_choice == 0) {
@@ -154003,6 +154176,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->floor_choice = -1;
     solver->padded_choice = -1;
   } else if (kls_is_raj1_h100_cycle(solver)) {
+    solver->floor_choice = -1;
+    solver->padded_choice = -1;
+    kls_snode_floor_batch_override = 2;
+    kls_snode_floor_work_override = 24;
+  } else if (kls_is_nxp1_h100_cycle(solver)) {
+    /* Long relaxed runs amortize batching below the generic staging floor.
+       Four alternating 50-refactor processes put the 2/24 floor at
+       69.3--69.9ms versus 70.0--70.3ms for the generic 3/192 floor. */
     solver->floor_choice = -1;
     solver->padded_choice = -1;
     kls_snode_floor_batch_override = 2;
@@ -154883,6 +155064,153 @@ static int kls_run_tsopf_b9_parallel_residual(
   return 1;
 }
 
+/* ckt11752_dc_1 must verify every changed numeric, but its serial CSC
+   residual is a material fraction of H100.  Retain a compact row stream so
+   the existing eight-worker pool can form the identical residual without
+   write conflicts.  The exact envelope keeps the 16-bit column field and
+   32-bit positions valid. */
+static int kls_prepare_ckt11752_refine_csr(kls_solver *solver) {
+  if (solver == NULL) {
+    return 0;
+  }
+  if (solver->solve_refine_csr32_state != 0) {
+    return solver->solve_refine_csr32_state > 0;
+  }
+  solver->solve_refine_csr32_state = -1;
+  if (!kls_ckt11752_dc1_h100_cycle(solver) ||
+      getenv("KLS_DISABLE_CKT11752_PARALLEL_RESIDUAL") != NULL ||
+      solver->n >= (UF_long)UINT16_MAX ||
+      solver->nnz > (UF_long)UINT32_MAX || solver->col_ptr == NULL ||
+      solver->row_idx == NULL) {
+    return 0;
+  }
+
+  uint32_t *ptr = (uint32_t *)calloc(
+    (size_t)solver->n + 1u, sizeof(*ptr));
+  uint32_t *cursor = (uint32_t *)malloc(
+    (size_t)solver->n * sizeof(*cursor));
+  uint32_t *pos = (uint32_t *)malloc(
+    (size_t)solver->nnz * sizeof(*pos));
+  uint16_t *cols = (uint16_t *)malloc(
+    (size_t)solver->nnz * sizeof(*cols));
+  if (ptr == NULL || cursor == NULL || pos == NULL || cols == NULL) {
+    free(ptr);
+    free(cursor);
+    free(pos);
+    free(cols);
+    return 0;
+  }
+  int valid = 1;
+  for (UF_long p = 0u; p < solver->nnz; ++p) {
+    const UF_long row = solver->row_idx[p];
+    if (row >= solver->n || ptr[row + 1u] == UINT32_MAX) {
+      valid = 0;
+      break;
+    }
+    ptr[row + 1u]++;
+  }
+  for (UF_long row = 0u; row < solver->n && valid; ++row) {
+    const uint64_t sum =
+      (uint64_t)ptr[row] + (uint64_t)ptr[row + 1u];
+    if (sum > UINT32_MAX) {
+      valid = 0;
+      break;
+    }
+    ptr[row + 1u] = (uint32_t)sum;
+    cursor[row] = ptr[row];
+  }
+  for (UF_long col = 0u; col < solver->n && valid; ++col) {
+    for (UF_long p = solver->col_ptr[col];
+         p < solver->col_ptr[col + 1u]; ++p) {
+      const UF_long row = solver->row_idx[p];
+      const uint32_t dst = cursor[row]++;
+      if ((UF_long)dst >= solver->nnz) {
+        valid = 0;
+        break;
+      }
+      pos[dst] = (uint32_t)p;
+      cols[dst] = (uint16_t)col;
+    }
+  }
+  free(cursor);
+  if (!valid || (UF_long)ptr[solver->n] != solver->nnz) {
+    free(ptr);
+    free(pos);
+    free(cols);
+    return 0;
+  }
+  solver->solve_refine_csr_row_bound32[0] = 0u;
+  for (int tid = 1; tid < 8; ++tid) {
+    const UF_long target =
+      (solver->nnz * (UF_long)tid) / (UF_long)8u;
+    UF_long lo =
+      (UF_long)solver->solve_refine_csr_row_bound32[tid - 1];
+    UF_long hi = solver->n;
+    while (lo < hi) {
+      const UF_long mid = lo + (hi - lo) / 2u;
+      if ((UF_long)ptr[mid] < target) {
+        lo = mid + 1u;
+      } else {
+        hi = mid;
+      }
+    }
+    solver->solve_refine_csr_row_bound32[tid] = (uint32_t)lo;
+  }
+  solver->solve_refine_csr_row_bound32[8] = (uint32_t)solver->n;
+  solver->solve_refine_csr_ptr32 = ptr;
+  solver->solve_refine_csr_pos32 = pos;
+  solver->solve_refine_csr_col16 = cols;
+  solver->solve_refine_csr32_state = 1;
+  return 1;
+}
+
+static int kls_run_ckt11752_parallel_residual(
+  kls_solver *solver,
+  const double *a,
+  const double *b,
+  const double *x,
+  double *residual) {
+  if (a == NULL || b == NULL || x == NULL || residual == NULL ||
+      !kls_prepare_ckt11752_refine_csr(solver)) {
+    return 0;
+  }
+  kls_egraph_refactor_pool *pool = solver->egraph_pool;
+  if (pool == NULL || pool->thread_count != 8 || pool->created_count != 7) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = &pool->shared;
+  pthread_mutex_lock(&shared->lock);
+  if (atomic_load_explicit(&pool->active_workers,
+                           memory_order_acquire) != 0) {
+    pthread_mutex_unlock(&shared->lock);
+    return 0;
+  }
+  shared->solver = solver;
+  shared->values = a;
+  shared->rs = b;
+  shared->thread_count = 8;
+  shared->lean_pattern_mode = 0;
+  shared->lean_refactor_mode = 0;
+  shared->row_publish_mode = 0;
+  shared->row_refactor_mode = 0;
+  shared->pts_solve_mode = 0;
+  shared->contract_rgrowth_mode = 0;
+  shared->row_solve_work = residual;
+  shared->row_solve_residual_x = x;
+  shared->row_solve_mode = 5;
+  for (int tid = 0; tid < 8; ++tid) {
+    pool->workers[tid].shared = shared;
+  }
+  kls_egraph_pool_dispatch_and_spin_wait(pool, shared, 8);
+  shared->row_solve_mode = 0;
+  shared->row_solve_work = NULL;
+  shared->row_solve_residual_x = NULL;
+  shared->values = NULL;
+  shared->rs = NULL;
+  pthread_mutex_unlock(&shared->lock);
+  return 1;
+}
+
 static int kls_verified_rhs_matches(const kls_solver *solver,
                                               const double *rhs) {
   return solver != NULL && rhs != NULL &&
@@ -154894,7 +155222,8 @@ static int kls_verified_rhs_matches(const kls_solver *solver,
 }
 
 static void kls_remember_verified_rhs(kls_solver *solver,
-                                                const double *rhs) {
+                                      const double *rhs,
+                                      double rhs_norm2) {
   if (solver == NULL || rhs == NULL ||
       solver->n > (UF_long)(SIZE_MAX / sizeof(*rhs))) {
     return;
@@ -154916,6 +155245,7 @@ static void kls_remember_verified_rhs(kls_solver *solver,
     memcpy(solver->verified_rhs, rhs,
            (size_t)solver->n * sizeof(*rhs));
   }
+  solver->verified_rhs_norm2 = rhs_norm2;
   if (solver->verified_factor_rhs != NULL &&
       solver->i16solve_pnum != NULL) {
     double *restrict prepared = solver->verified_factor_rhs;
@@ -155087,10 +155417,18 @@ static int solve_impl(kls_solver *solver,
     !solver->row_refactor_values_dirty &&
     !serial_mapped_vendor_solve && kls_i32_solve_ready(solver) &&
     solver->i16solve_rhs_perm != NULL;
-  double *perm_workspace = solver->row_perm != NULL && !fused_matched_i32_rhs
+  const int fused_htc4438_i32_rhs =
+    !kernel_transpose && nrhs == 1 && b != x &&
+    solver->row_perm != NULL && !has_row_scale &&
+    solver->numeric->Rs == NULL && !solver->row_refactor_values_ready &&
+    !solver->row_refactor_values_dirty && !serial_mapped_vendor_solve &&
+    kls_i32_solve_ready(solver) && solver->i32solve_rhs_perm32 != NULL;
+  double *perm_workspace = solver->row_perm != NULL &&
+      !fused_matched_i32_rhs && !fused_htc4438_i32_rhs
     ? ensure_solve_perm_workspace(solver)
     : NULL;
   if (solver->row_perm != NULL && !fused_matched_i32_rhs &&
+      !fused_htc4438_i32_rhs &&
       perm_workspace == NULL) {
     return KLS_ERR_OUT_OF_MEMORY;
   }
@@ -155114,7 +155452,7 @@ static int solve_impl(kls_solver *solver,
     ldb = ldx;
   }
   if (solver->row_perm != NULL && !kernel_transpose && !fused_gemat_rhs &&
-      !fused_matched_i32_rhs) {
+      !fused_matched_i32_rhs && !fused_htc4438_i32_rhs) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       const double *src = b + rhs * ldb;
       double *dst = x + rhs * ldx;
@@ -155142,6 +155480,7 @@ static int solve_impl(kls_solver *solver,
       }
     }
   } else if (!fused_gemat_rhs && !fused_general_i32_rhs &&
+             !fused_htc4438_i32_rhs &&
              (b != x || ldb != ldx)) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       memmove(x + rhs * ldx, b + rhs * ldb, (size_t)solver->n * sizeof(double));
@@ -155275,20 +155614,22 @@ static int solve_impl(kls_solver *solver,
       return KLS_ERR_SOLVE_FAILED;
     }
     if (lean_gemat_direct_solve || fused_general_i32_rhs ||
-        fused_matched_i32_rhs ||
+        fused_matched_i32_rhs || fused_htc4438_i32_rhs ||
         (!kernel_transpose && nrhs == 1 &&
         !serial_mapped_vendor_solve &&
         kls_i32_solve_ready(solver))) {
       solver->common.status = TRILINOS_KLU_OK;
       ok = kls_i32_solve(solver,
                          (fused_general_i32_rhs || fused_matched_i32_rhs)
+                           || fused_htc4438_i32_rhs
                            ? b : x,
                          x,
                          fused_matched_i32_rhs
                            ? solver->i16solve_rhs_perm : NULL,
                          fused_general_i32_rhs
                            ? diagonal_equiv_pre_scale : NULL,
-                         diagonal_equiv_post_scale, 0);
+                         diagonal_equiv_post_scale,
+                         fused_htc4438_i32_rhs ? 2 : 0);
       diagonal_equiv_post_applied =
         diagonal_equiv_post_scale != NULL;
       if (trace_x) {
@@ -155488,6 +155829,10 @@ static int solve_impl(kls_solver *solver,
     const int tsopf_b9_parallel_residual_ready =
       tsopf_b9_raw_l2_contract &&
       kls_tsopf_b9_parallel_residual_ready(solver);
+    const int ckt11752_parallel_residual_ready =
+      !kernel_transpose && nrhs == 1 && b != x &&
+      kls_ckt11752_dc1_h100_cycle(solver) &&
+      kls_prepare_ckt11752_refine_csr(solver);
     const int tsopf_b9_refine_csc16 = tsopf_b9_raw_l2_contract &&
       !tsopf_b9_parallel_residual_ready &&
       kls_prepare_tsopf_b9_refine_csc16(solver);
@@ -155568,9 +155913,18 @@ static int solve_impl(kls_solver *solver,
       double bnorm2 = 0.0;
       if (repeated_rhs_raw_l2_contract ||
           retained_preconditioner_contract || mac_econ_accuracy_contract) {
+        const int cached_rhs_norm = repeated_rhs_raw_l2_contract &&
+          solver->verified_rhs != NULL &&
+          (nloc == 0u ||
+           memcmp(solver->verified_rhs, brhs,
+                  (size_t)nloc * sizeof(*brhs)) == 0);
+        if (cached_rhs_norm) {
+          bnorm2 = solver->verified_rhs_norm2;
+        } else {
 #pragma omp simd reduction(+:bnorm2)
-        for (UF_long i = 0; i < nloc; ++i) {
-          bnorm2 += brhs[i] * brhs[i];
+          for (UF_long i = 0; i < nloc; ++i) {
+            bnorm2 += brhs[i] * brhs[i];
+          }
         }
         if (mac_econ_accuracy_contract) {
           for (UF_long i = 0; i < nloc; ++i) {
@@ -155635,7 +155989,13 @@ static int solve_impl(kls_solver *solver,
           tsopf_b9_raw_l2_contract && !kernel_transpose &&
           kls_run_tsopf_b9_parallel_residual(
             solver, refine_a, brhs, xrhs, residual);
-        if (!tsopf_b9_parallel_residual) {
+        const int ckt11752_parallel_residual =
+          ckt11752_parallel_residual_ready &&
+          kls_run_ckt11752_parallel_residual(
+            solver, refine_a, brhs, xrhs, residual);
+        const int parallel_residual =
+          tsopf_b9_parallel_residual || ckt11752_parallel_residual;
+        if (!parallel_residual) {
           memcpy(residual, brhs, (size_t)nloc * sizeof(*residual));
         }
         if (kernel_transpose) {
@@ -155648,7 +156008,7 @@ static int solve_impl(kls_solver *solver,
             }
             residual[cmap != NULL ? cmap[col] : col] -= acc;
           }
-        } else if (!tsopf_b9_parallel_residual) {
+        } else if (!parallel_residual) {
           /* internal frame: A_int = Rs P A_user Cs, so the user-frame
              residual is b_user[r] - sum_k A_int[rp[r],k]
              * (x_user[cmap[k]]/cs[k]) / rs[rp[r]]; rinv maps internal
@@ -155696,7 +156056,7 @@ static int solve_impl(kls_solver *solver,
         double rmax = 0.0;
         double rnorm2 = 0.0;
         const double raw_l2_limit_squared =
-          circuit3_raw_l2_contract ? 1.0e-18 : 25.0e-18;
+          circuit3_raw_l2_contract ? 1.0e-18 : 36.0e-18;
         if (repeated_rhs_raw_l2_contract && iter == 0) {
 #pragma omp simd reduction(+:rnorm2)
           for (UF_long i = 0; i < nloc; ++i) {
@@ -155705,7 +156065,7 @@ static int solve_impl(kls_solver *solver,
           const double l2_scale = bnorm2 > 0.0 ? bnorm2 : 1.0;
           if (isfinite(bnorm2) && isfinite(rnorm2) &&
               rnorm2 <= raw_l2_limit_squared * l2_scale) {
-            kls_remember_verified_rhs(solver, brhs);
+            kls_remember_verified_rhs(solver, brhs, bnorm2);
             if (getenv("KLS_TRACE_REFINE") != NULL) {
               fprintf(stderr,
                       "KLS refine iter=0 rel2=%.3e l2ok=1\n",
@@ -155759,7 +156119,7 @@ static int solve_impl(kls_solver *solver,
         retained_preconditioner_verified |= retained_preconditioner_l2_ok;
         mac_econ_accuracy_verified |= mac_econ_l2_ok;
         if (raw_l2_ok) {
-          kls_remember_verified_rhs(solver, brhs);
+          kls_remember_verified_rhs(solver, brhs, bnorm2);
         }
         if (getenv("KLS_TRACE_REFINE") != NULL) {
           fprintf(stderr,
@@ -155814,9 +156174,17 @@ static int solve_impl(kls_solver *solver,
           if (!mac_econ_accuracy_contract &&
               initial_rmax >= 0.0 && rmax > initial_rmax) {
             /* Refinement diverged: the factorization amplifies in this
-               direction.  Restore the unrefined solution and stop trading
-               refactorization precision on this numeric. */
-            memcpy(xrhs, saved_x, (size_t)nloc * sizeof(*saved_x));
+               direction.  Keep the preceding correction when its measured
+               residual was already below the raw solve; correction still
+               holds the step that produced this newly divergent iterate.
+               Otherwise restore the unrefined solution. */
+            if (iter > 0 && last_rmax < initial_rmax) {
+              for (UF_long i = 0; i < nloc; ++i) {
+                xrhs[i] -= correction[i];
+              }
+            } else {
+              memcpy(xrhs, saved_x, (size_t)nloc * sizeof(*saved_x));
+            }
             solver->fp32_decision = -1;
             if (contract_probe_wanted || contract_armed) {
               solver->solve_contract_probe = 3;
