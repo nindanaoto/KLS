@@ -138,7 +138,11 @@ default `kls_bench` uses `--input-index auto`, which passes 32-bit CSC indices
 when the MatrixMarket problem fits the public `KLS_INDEX_INT32` API and falls
 back to 64-bit otherwise; use `--input-index 64` or `--input-index 32` for
 forced A/B runs. Use `--analyze-only` to measure symbolic analysis and ordering
-decisions without running numeric factorization.
+decisions without running numeric factorization. JSON fields
+`compact_solve_index_bytes` and `compact_solve_fused_rhs` report whether a
+2- or 4-byte triangular-solve mirror was prepared and whether its public-RHS
+permutation was precomposed; zero index bytes means the native factor storage
+was retained.
 
 Use `--no-transpose-solve` when a comparison protocol scores only normal
 solves.  The paired-suite runner supplies it because the CKTSO, SubtreeLU, and
@@ -1666,6 +1670,19 @@ batched path available for wider solves. Solve-only seeding builds only the
 row-major `L`/`U` solve structure and KLU value-pointer arrays; the heavier
 row-refactor group, segment, and scheduler metadata is left to the refactor
 paths that actually need it.
+
+For sparse, normal-orientation AMD factors with a dominant BTF core and a
+10--20% block fringe, KLS selects the column-solve representation from retained
+numeric state rather than matrix dimensions. Moderate-work unscaled factors
+without static matching keep KLU's native packed indices; a retained static
+matching permutation selects the 32-bit mirror and precomposes public RHS rows
+with numeric rows. The class is bounded by normalized input density, core
+coverage, factor fill/work, rank, and pivot-stability checks. Its analyze-time
+counterpart also suppresses a speculative METIS/scale race only when symbolic
+fill and work fall in the same moderate band. Set
+`KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION=1`,
+`KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE=1`, or
+`KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS=1` for independent A/B diagnosis.
 
 When row refactor has retained exact compact dense groups, normal and transpose
 row solves consume complete groups as row-major triangular panels for one RHS

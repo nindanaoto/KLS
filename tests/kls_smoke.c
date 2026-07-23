@@ -20558,6 +20558,202 @@ cleanup:
   return ok;
 }
 
+static int run_sparse_fragmented_grid_solve_case(
+  int32_t n,
+  const int32_t *ap,
+  const int32_t *ai,
+  const double *factor_values,
+  const double *refactor_values,
+  const double *expected,
+  double *b,
+  double *x,
+  int expected_index_bytes) {
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = require_ok(kls_create(&solver), "create fragmented grid solve");
+
+  kls_default_options(&options);
+  options.threads = 4;
+  options.ordering = KLS_ORDERING_AMD;
+  options.scale = -1;
+  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze fragmented grid solve")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_factor(solver, factor_values),
+                        "factor fragmented grid solve")) {
+    ok = 0;
+  }
+
+  for (int generation = 0; ok && generation < 2; ++generation) {
+    const double *values = generation == 0 ? factor_values : refactor_values;
+    if (generation != 0 &&
+        !require_ok(kls_refactor(solver, values),
+                    "refactor fragmented grid solve")) {
+      ok = 0;
+      break;
+    }
+    memset(b, 0, (size_t)n * sizeof(*b));
+    memset(x, 0, (size_t)n * sizeof(*x));
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        b[ai[p]] += values[p] * expected[col];
+      }
+    }
+    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                    "solve fragmented grid")) {
+      ok = 0;
+      break;
+    }
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    if (!require_ok(kls_get_stats(solver, &stats),
+                    "stats fragmented grid solve")) {
+      ok = 0;
+      break;
+    }
+    const double fill = (double)(stats.nnz_l + stats.nnz_u);
+    if (stats.selected_ordering != KLS_ORDERING_AMD ||
+        stats.selected_scale != -1 || stats.selected_btf != 1 ||
+        stats.nblocks < n / 10 || stats.nblocks > n / 5 ||
+        (double)stats.max_block < 0.80 * (double)n ||
+        (double)stats.max_block > 0.95 * (double)n ||
+        fill < 12.0 * (double)n || fill > 32.0 * (double)n ||
+        stats.factor_flops < 1000.0 * (double)n ||
+        stats.factor_flops > 4096.0 * (double)n ||
+        stats.compact_solve_index_bytes != expected_index_bytes ||
+        stats.compact_solve_fused_rhs != 0) {
+      fprintf(stderr,
+              "unexpected fragmented grid policy: order=%d scale=%d btf=%d"
+              " blocks=%" PRId64 " max=%" PRId64 " fill=%.0f flops=%.0f"
+              " compact=%d fused=%d expected_compact=%d\n",
+              (int)stats.selected_ordering, stats.selected_scale,
+              stats.selected_btf, stats.nblocks, stats.max_block, fill,
+              stats.factor_flops, stats.compact_solve_index_bytes,
+              stats.compact_solve_fused_rhs, expected_index_bytes);
+      ok = 0;
+      break;
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      if (!close_enough(x[row], expected[row])) {
+        fprintf(stderr,
+                "fragmented grid solve mismatch at %d: %.17g vs %.17g\n",
+                row, x[row], expected[row]);
+        ok = 0;
+        break;
+      }
+    }
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
+static int test_sparse_fragmented_dominant_btf_solve_policy(void) {
+  const int32_t grid_rows = 45;
+  const int32_t grid_cols = 1889;
+  const int32_t core = grid_rows * grid_cols;
+  const int32_t n = 100000;
+  const int32_t grid_edges =
+    grid_rows * (grid_cols - 1) + (grid_rows - 1) * grid_cols;
+  const int32_t nnz = n + 2 * grid_edges;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *ax_changed = (double *)malloc((size_t)nnz * sizeof(*ax_changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_force_value =
+    getenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE");
+  char *saved_force = saved_force_value != NULL
+    ? strdup(saved_force_value) : NULL;
+  const int had_force = saved_force_value != NULL;
+  int ok = 1;
+
+  if (ap == NULL || ai == NULL || ax == NULL || ax_changed == NULL ||
+      expected == NULL || b == NULL || x == NULL ||
+      (had_force && saved_force == NULL)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col < core) {
+      const int32_t row = col / grid_cols;
+      const int32_t grid_col = col % grid_cols;
+      if (row > 0) {
+        ai[p] = col - grid_cols;
+        ax[p++] = -1.0;
+      }
+      if (grid_col > 0) {
+        ai[p] = col - 1;
+        ax[p++] = -1.0;
+      }
+      ai[p] = col;
+      ax[p++] = 5.0;
+      if (grid_col + 1 < grid_cols) {
+        ai[p] = col + 1;
+        ax[p++] = -1.0;
+      }
+      if (row + 1 < grid_rows) {
+        ai[p] = col + grid_cols;
+        ax[p++] = -1.0;
+      }
+    } else {
+      ai[p] = col;
+      ax[p++] = 1.0;
+    }
+    expected[col] = 1.0 + 0.01 * (double)(col % 11);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected fragmented grid nnz: %d/%d\n", p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t q = 0; q < nnz; ++q) {
+    const int delta = q % 17 - 8;
+    ax_changed[q] = ax[q] * (1.0 + 1.0e-4 * (double)delta);
+  }
+
+  if (unsetenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE") != 0) {
+    perror("unsetenv fragmented grid native solve");
+    ok = 0;
+  }
+  if (ok && !run_sparse_fragmented_grid_solve_case(
+              n, ap, ai, ax, ax_changed, expected, b, x, 0)) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE", "1", 1) != 0) {
+    perror("setenv fragmented grid forced i32 solve");
+    ok = 0;
+  }
+  if (ok && !run_sparse_fragmented_grid_solve_case(
+              n, ap, ai, ax, ax_changed, expected, b, x, 4)) {
+    ok = 0;
+  }
+
+cleanup:
+  if (!restore_env_value("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE", had_force,
+                         saved_force != NULL ? saved_force : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(ax_changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_force);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -20574,6 +20770,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_large_sparse_low_degree_retained_tolerance()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_sparse_fragmented_dominant_btf_solve_policy()) {
     return EXIT_FAILURE;
   }
   /* The remaining smoke cases deliberately assert individual refactor-engine

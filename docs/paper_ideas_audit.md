@@ -17567,3 +17567,78 @@ entrywise pairs put new/parent at 0.9987 by median repeated-refactor time and
 0.9962 at steady state (1.451s versus 1.453s and 1.164s versus 1.168s).  Every
 run selected the unchanged `1e-4` tolerance and EGraph route.  Release and
 ASan/LSan CTest both pass all three tests.
+
+SPARSE FRAGMENTED DOMINANT-BTF SOLVE POLICY GENERALIZED (2026-07-23).  The
+remaining post-factor HTC selector recognized only 226,300--226,400 rows,
+760K--785K input entries, 29,500--29,650 BTF blocks, and a 196.5K--197K
+largest block.  It used that box three times: to keep the lower-density 9129
+case on KLU's native packed solve, to move the denser 4438 case to an i32
+mirror, and to build a fused public-RHS-to-numeric-row map for 4438.  Those
+were real wins, but input density was standing in for the post-factor state
+that actually changes the crossover.
+
+The replacement starts from one normalized structure: mathematical-normal
+AMD, at least 100K rows and 3--5 input entries per row, full structural rank
+when known, BTF blocks between 10% and 20% of the order, and a largest block
+covering 80%--95%.  Its numeric must be unscaled, have no external row/column
+scales, nudges, or perturbations, at most `n/1000` off-diagonal pivots,
+12--32 retained factor entries per row, and 1,000--4,096 factor flops per row.
+Within that class, absence of a retained static matching permutation selects
+the native packed stream.  Presence of the permutation selects i32 and
+precomposes the RHS permutation, so the actual reusable state—not raw input
+nonzeros—controls the representation.  The old HTC environment switches
+remain compatibility aliases; generic i32 and fused-RHS disables are now
+available separately.
+
+The first normalized prototype still used a `20n` fill crossover.  A
+metamorphic holdout falsified it: appending 1,000 scalar diagonal components to
+9129 changed the order to 227,340, the input count to 763,969, and the BTF
+count to 30,588, so the exact parent could not recognize it.  That transformed
+factor adopted static matching and had 4,113,590 retained entries (`18.10n`);
+i32 was about 4% faster than the prototype's native choice.  Switching the
+rule to the observed static-matching state made the fused i32 solve 4.45%
+faster than the exact parent and put the complete H100 metric at 0.9970 of the
+parent over four alternating pairs.  The analogous 4438+1,000 holdout has
+784,496 input entries and the same 30,588 blocks; its fused solve was 3.0%
+faster and its H100 metric was 0.9916 of the parent.  Thus both holdouts leave
+the old dimension/nonzero/block boxes while taking the state-appropriate
+branch.
+
+The same structural class supplies an analyze-time speculation guard.  When
+AMD's symbolic fill is 32--64 entries per row and symbolic work is
+1,000--8,192 flops per row, KLS skips the background METIS/scale race that
+would only contend with the incumbent factor and be rejected later.  The 9129
+factor fell from about 310ms to 107ms; four final alternating H100 pairs put
+new/parent at 0.8813 overall.  The 4438 path, which reaches its final AMD/BTF
+shape through static adoption, remained 1.0012 of the parent overall and its
+i32 solve remained 0.9983.  The race suppression has its own diagnostic
+override and does not alter the low-work `power197k` or high-work `twotone`
+controls.  Four-pair checks put those policy-invariant controls at about 0.999
+and 1.001 of the parent H100 result.  After the diagnostic fields were added,
+three final `power197k` pairs and six final (noisier) `twotone` pairs put the
+same ratios at 0.996 and 0.987, respectively.
+
+An independent 100,000-row smoke fixture prevents the normalized class from
+collapsing back onto HTC.  It contains a 45-by-1,889 sparse grid core plus
+14,995 scalar components: 436,152 input entries, 14,996 BTF blocks, an
+85,005-row core, 3,053,566 retained factor entries (`30.54n`), and 115.55M
+factor flops (`1155n`).  With forced AMD/unscaled analysis it selects native;
+the diagnostic control builds i32.  Eight alternating H100 pairs put native
+at 0.9802 of forced i32 overall and 0.8050 per changed-numeric solve.  Both
+initial and perturbed systems are solved in the smoke test, which asserts the
+new `compact_solve_index_bytes` and `compact_solve_fused_rhs` stats.  A
+30-by-2,833 grid has suitable fill but only `553n` work, while a 250-by-340
+grid has `45.30n` fill and `5509n` work; both are explicit rejected
+counterexamples and retain i32.  Across 182 successful saved numeric profiles
+drawn from the 243-input local corpus, only the two original HTC states enter
+the complete post-factor boundary; the independent grid and both transformed
+holdouts prove reach outside those identities.
+
+Finally, the two transformed matrices each completed 1,000 independently
+verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000
+changed systems).  The worst relative-L2 residual was `6.82e-9`, on
+4438+1,000 at amplitude 0.1; 9129+1,000 peaked at `3.77e-10`.  The generic
+policy functions remain out of the hot refactor loop, and the established
+EGraph column kernel retains explicit alignment so classifier growth does not
+change its instruction alignment.  Release and ASan/LSan CTest both pass all
+three tests.

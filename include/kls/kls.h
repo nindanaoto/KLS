@@ -1327,6 +1327,9 @@ typedef struct kls_stats {
   int64_t verified_rhs_reuse_count;
   int refactor_lean_choice;
   int64_t egraph_worker_spin_iters;
+  /* Zero means no compact triangular-solve mirror is prepared. */
+  int compact_solve_index_bytes;
+  int compact_solve_fused_rhs;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

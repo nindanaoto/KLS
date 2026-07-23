@@ -30301,22 +30301,6 @@ static int kls_is_rommes_mimo8_pattern(const kls_solver *solver) {
     solver->symbolic->maxblock <= 7850u;
 }
 
-static int kls_is_htc336_fragmented_pattern(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
-      solver->common.scale > 0) {
-    return 0;
-  }
-  /* The two HTC_336 operating points share a 196.8K-row dominant SCC and
-     about 29.6K fringe blocks. */
-  return solver->n >= 226300u && solver->n <= 226400u &&
-    solver->col_ptr[solver->n] >= 760000u &&
-    solver->col_ptr[solver->n] <= 785000u &&
-    solver->symbolic->nblocks >= 29500u &&
-    solver->symbolic->nblocks <= 29650u &&
-    solver->symbolic->maxblock >= 196500u &&
-    solver->symbolic->maxblock <= 197000u;
-}
-
 static int kls_htc336_9129_h100_policy_enabled(
   UF_long n,
   const UF_long *col_ptr,
@@ -39627,6 +39611,43 @@ static int kls_fragmented_medium_dominant_btf_shape(
          est_flops >= 1.0e8 && est_flops <= 2.0e9;
 }
 
+/* Sparse AMD analyses with a dominant core and a 10--20% scalar/block
+   fringe form a distinct fragmented-BTF class.  Keep this normalized
+   structural predicate shared by analyze-time speculation and post-factor
+   solve selection; the latter adds measured numeric-work requirements. */
+__attribute__((noinline, cold))
+static int kls_sparse_fragmented_dominant_btf_structure(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->n < 100000u || solver->nnz < 3u * solver->n ||
+      solver->nnz > 5u * solver->n || !solver->symbolic->do_btf ||
+      solver->symbolic->nblocks < solver->n / 10u ||
+      solver->symbolic->nblocks > solver->n / 5u ||
+      (double)solver->symbolic->maxblock < 0.80 * (double)solver->n ||
+      (double)solver->symbolic->maxblock > 0.95 * (double)solver->n ||
+      (solver->symbolic->structural_rank >= 0 &&
+       (UF_long)solver->symbolic->structural_rank != solver->n)) {
+    return 0;
+  }
+  return 1;
+}
+
+__attribute__((noinline, cold))
+static int kls_sparse_fragmented_dominant_btf_symbolic_work(
+  const kls_solver *solver) {
+  if (!kls_sparse_fragmented_dominant_btf_structure(solver)) {
+    return 0;
+  }
+  const double est_fill = solver->symbolic->lnz + solver->symbolic->unz;
+  const double est_flops = solver->symbolic->est_flops;
+  return est_fill >= 32.0 * (double)solver->n &&
+    est_fill <= 64.0 * (double)solver->n &&
+    est_flops >= 1000.0 * (double)solver->n &&
+    est_flops <= 8192.0 * (double)solver->n;
+}
+
 /* Analyze-time start: the METIS analyze stage needs only the pattern,
    so the worker launches when the analysis finishes and overlaps both
    the caller's gap to kls_factor and the whole main-side first factor.
@@ -39639,6 +39660,8 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
       kls_large_low_degree_fragmented_btf_shape(solver) ||
       kls_fragmented_medium_dominant_btf_shape(solver) ||
+      (kls_sparse_fragmented_dominant_btf_symbolic_work(solver) &&
+       getenv("KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION") == NULL) ||
       kls_is_rajat15_h100_input_pattern(solver) ||
       kls_is_raj1_h100_input_pattern(solver) ||
       kls_rajat29_h100_policy_enabled(
@@ -96057,6 +96080,7 @@ static int kls_egraph_refactor_btf_unscaled_plain_cluster_column(
   return 1;
 }
 
+__attribute__((aligned(32)))
 static int kls_egraph_refactor_btf_unscaled_column(
   kls_egraph_refactor_worker *worker,
   UF_long k,
@@ -149858,6 +149882,39 @@ static int kls_serial_mapped_prefers_vendor_solve(
     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED;
 }
 
+enum {
+  KLS_FRAGMENTED_BTF_SOLVE_OTHER = 0,
+  KLS_FRAGMENTED_BTF_SOLVE_NATIVE = 1,
+  KLS_FRAGMENTED_BTF_SOLVE_I32 = 2
+};
+
+__attribute__((noinline, cold))
+static int kls_moderate_work_fragmented_btf_solve_tier(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      !kls_sparse_fragmented_dominant_btf_structure(solver) ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->row_scale != NULL || solver->col_scale != NULL ||
+      solver->common.noffdiag > solver->n / 1000u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u) {
+    return 0;
+  }
+  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
+  if ((double)fill < 12.0 * (double)solver->n ||
+      (double)fill > 32.0 * (double)solver->n ||
+      solver->common.flops < 1000.0 * (double)solver->n ||
+      solver->common.flops > 4096.0 * (double)solver->n) {
+    return KLS_FRAGMENTED_BTF_SOLVE_OTHER;
+  }
+  if (solver->row_perm != NULL &&
+      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE") == NULL &&
+      getenv("KLS_DISABLE_HTC4438_I32_H100_POLICY") == NULL) {
+    return KLS_FRAGMENTED_BTF_SOLVE_I32;
+  }
+  return KLS_FRAGMENTED_BTF_SOLVE_NATIVE;
+}
+
 static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   if (getenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE") != NULL ||
       solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
@@ -149868,16 +149925,15 @@ static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   if (kls_low_work_btf_prefers_native_solve(solver)) {
     return 1;
   }
-  if (kls_is_htc336_fragmented_pattern(solver) ||
+  const int fragmented_tier =
+    kls_moderate_work_fragmented_btf_solve_tier(solver);
+  if (fragmented_tier != KLS_FRAGMENTED_BTF_SOLVE_OTHER ||
       kls_is_sandia_mult_dcop_pattern(solver)) {
-    if (kls_is_htc336_fragmented_pattern(solver) &&
-        solver->nnz >= 780000u &&
-        getenv("KLS_DISABLE_HTC4438_I32_H100_POLICY") == NULL) {
-      /* On the denser 4438 operating point, the int32 mirror costs about
-         19ms to construct on the first refactor but saves roughly 0.43ms on
-         each changed-numeric solve.  Seven alternating H100 processes put
-         it at 2.538s versus 2.575s for the native packed stream.  The
-         adjacent 9129 point remains on the established vendor path. */
+    if (fragmented_tier == KLS_FRAGMENTED_BTF_SOLVE_I32) {
+      /* A retained static matching permutation lets the i32 path precompose
+         public RHS rows with numeric rows.  That fused pass repays the mirror
+         construction over a repeated numeric horizon; without matching,
+         KLU's native packed stream remains faster and avoids the mirror. */
       return 0;
     }
     return 1;
@@ -150244,10 +150300,12 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
   }
   if (solver->i32solve_rhs_perm32 == NULL &&
-      kls_is_htc336_fragmented_pattern(solver) &&
-      solver->nnz >= 780000u && solver->row_perm != NULL &&
+      kls_moderate_work_fragmented_btf_solve_tier(solver) ==
+        KLS_FRAGMENTED_BTF_SOLVE_I32 &&
+      solver->row_perm != NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       numeric->Rs == NULL && n <= (UF_long)UINT32_MAX &&
+      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS") == NULL &&
       getenv("KLS_DISABLE_HTC4438_FUSED_RHS") == NULL) {
     uint32_t *row_inverse = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
@@ -157566,6 +157624,20 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
     ? requested_size
     : sizeof(kls_stats);
   memcpy(stats, &solver->stats, copy_size);
+  if (copy_size >= offsetof(kls_stats, compact_solve_index_bytes) +
+                   sizeof(stats->compact_solve_index_bytes)) {
+    stats->compact_solve_index_bytes = solver->i32solve_state > 0
+      ? ((solver->i16solve_l != NULL || solver->i16solve_u != NULL ||
+          solver->mixed_i16solve_l != NULL ||
+          solver->mixed_i16solve_u != NULL) ? 2 : 4)
+      : 0;
+  }
+  if (copy_size >= offsetof(kls_stats, compact_solve_fused_rhs) +
+                   sizeof(stats->compact_solve_fused_rhs)) {
+    stats->compact_solve_fused_rhs = solver->i32solve_state > 0 &&
+      (solver->i32solve_rhs_perm32 != NULL ||
+       solver->i16solve_rhs_perm != NULL);
+  }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;
 }
