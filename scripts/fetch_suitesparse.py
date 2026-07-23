@@ -28,8 +28,8 @@ class MatrixInfo:
 def read_manifest(path: pathlib.Path) -> list[str]:
     names: list[str] = []
     for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+        line = line.split("#", 1)[0].strip()
+        if not line:
             continue
         names.append(line)
     return names

@@ -15695,6 +15695,154 @@ static int test_kls_first_parallel_pivoted_btf_fallback(void) {
   return ok;
 }
 
+static int test_benchmark_shape_does_not_enable_singular_completion(void) {
+  enum {
+    n = 15066,
+    lower_n = 15064,
+    extra_columns = 1938,
+    nnz = 62198
+  };
+  int32_t *ap = (int32_t *)malloc((size_t)(n + 1) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+
+  const char *saved_enable_value =
+    getenv("KLS_ENABLE_SINGULAR_COMPLETION");
+  char *saved_enable = saved_enable_value != NULL
+    ? strdup(saved_enable_value) : NULL;
+  const int had_enable = saved_enable_value != NULL;
+  const char *saved_disable_value =
+    getenv("KLS_DISABLE_SINGULAR_COMPLETION");
+  char *saved_disable = saved_disable_value != NULL
+    ? strdup(saved_disable_value) : NULL;
+  const int had_disable = saved_disable_value != NULL;
+  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
+  char *saved_first = saved_first_value != NULL
+    ? strdup(saved_first_value) : NULL;
+  const int had_first = saved_first_value != NULL;
+
+  int ok = 1;
+  if (ap == NULL || ai == NULL || ax == NULL) {
+    fprintf(stderr, "failed to allocate singular fingerprint regression\n");
+    ok = 0;
+  }
+  if ((had_enable && saved_enable == NULL) ||
+      (had_disable && saved_disable == NULL) ||
+      (had_first && saved_first == NULL)) {
+    fprintf(stderr, "failed to save singular fingerprint environment\n");
+    ok = 0;
+  }
+
+  int32_t position = 0;
+  for (int32_t col = 0; ok && col < n; ++col) {
+    ap[col] = position;
+    int32_t rows[5];
+    double values[5];
+    int32_t count = 0;
+    if (col < 2) {
+      rows[count] = 0;
+      values[count++] = 1.0;
+      rows[count] = 1;
+      values[count++] = 1.0;
+    } else {
+      const int32_t local = col - 2;
+      rows[count] = col;
+      values[count++] = 4.0;
+      rows[count] = 2 + (local + 1) % lower_n;
+      values[count++] = 0.01;
+      rows[count] = 2 + (local + 37) % lower_n;
+      values[count++] = -0.02;
+      rows[count] = 2 + (local + 701) % lower_n;
+      values[count++] = 0.015;
+      if (local < extra_columns) {
+        rows[count] = 2 + (local + 1901) % lower_n;
+        values[count++] = 0.005;
+      }
+    }
+    for (int32_t i = 1; i < count; ++i) {
+      const int32_t row = rows[i];
+      const double value = values[i];
+      int32_t j = i;
+      while (j > 0 && rows[j - 1] > row) {
+        rows[j] = rows[j - 1];
+        values[j] = values[j - 1];
+        --j;
+      }
+      rows[j] = row;
+      values[j] = value;
+    }
+    if (position > nnz - count) {
+      fprintf(stderr, "singular fingerprint generator overflow\n");
+      ok = 0;
+      break;
+    }
+    for (int32_t i = 0; i < count; ++i) {
+      ai[position] = rows[i];
+      ax[position++] = values[i];
+    }
+  }
+  if (ok) {
+    ap[n] = position;
+    if (position != nnz) {
+      fprintf(stderr,
+              "singular fingerprint generator produced %d entries, expected %d\n",
+              position, nnz);
+      ok = 0;
+    }
+  }
+
+  if (ok && (unsetenv("KLS_ENABLE_SINGULAR_COMPLETION") != 0 ||
+             unsetenv("KLS_DISABLE_SINGULAR_COMPLETION") != 0 ||
+             setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0)) {
+    perror("configure singular fingerprint regression");
+    ok = 0;
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create singular fingerprint regression")) {
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, n, ap, ai, 0, &options),
+                        "analyze singular fingerprint regression")) {
+    ok = 0;
+  }
+  if (ok) {
+    const int status = kls_factor(solver, ax);
+    if (status != KLS_ERR_SINGULAR) {
+      fprintf(stderr,
+              "benchmark-shaped singular input was implicitly completed: %d\n",
+              status);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_ENABLE_SINGULAR_COMPLETION", had_enable,
+                         saved_enable != NULL ? saved_enable : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_SINGULAR_COMPLETION", had_disable,
+                         saved_disable != NULL ? saved_disable : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_first,
+                         saved_first != NULL ? saved_first : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(saved_enable);
+  free(saved_disable);
+  free(saved_first);
+  return ok;
+}
+
 static int test_consistent_singular_rank_completion(void) {
   const int32_t ap[] = {0, 2, 4, 6, 8};
   const int32_t ai[] = {0, 1, 0, 1, 2, 3, 2, 3};
@@ -17546,6 +17694,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_parallel_pivoted_btf_fallback()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_benchmark_shape_does_not_enable_singular_completion()) {
     return EXIT_FAILURE;
   }
   if (!test_consistent_singular_rank_completion()) {

@@ -662,6 +662,14 @@ if(KLS_BUILD_TESTS)
       COMMAND "${Python3_EXECUTABLE}"
               "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_license_boundary.py"
               --root "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(
+      NAME kls_generalization_manifests
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_generalization_manifests.py"
+              --development
+              "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_dev_manifest.txt"
+              --holdout
+              "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_holdout_manifest.txt")
   endif()
   add_executable(kls_smoke
     tests/kls_smoke.c)

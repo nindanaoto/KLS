@@ -19,7 +19,8 @@ ENV_B=${ENV_B:-}
 : > "$OUT_A"; : > "$OUT_B"
 pass=1
 while [ "$pass" -le "$PASSES" ]; do
-  grep -v '^#' "$MAN" | while read -r name; do
+  sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$/d' "$MAN" |
+    while read -r name; do
     [ -z "$name" ] && continue
     case " $SKIP " in *" $name "*) continue;; esac
     matrix=$(find "$DIR" -iname "${name}.mtx" | head -1)

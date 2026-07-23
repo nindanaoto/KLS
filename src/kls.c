@@ -28070,6 +28070,30 @@ static int kls_compact_dense_spike_pattern(
     col_ptr[n] >= (13u * n + 1u) / 2u && col_ptr[n] <= 9u * n;
 }
 
+/* Capability gate shared by the generic low-work BTF selector and older
+   direct-input optimizations.  The lean kernel consumes signed 32-bit map
+   positions and an unscaled retained factor, but does not depend on matrix
+   dimensions, ordering, orientation, or a benchmark update sequence. */
+static int kls_low_work_btf_map32_capable(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->n == 0u || solver->n > (UF_long)INT32_MAX ||
+      solver->nnz == 0u || solver->nnz > (UF_long)INT32_MAX ||
+      solver->symbolic->nblocks <= 1u ||
+      !(solver->common.flops > 0.0) ||
+      !(solver->common.flops < 100000.0)) {
+    return 0;
+  }
+  return solver->symbolic->structural_rank == KLS_KLU_EMPTY ||
+         solver->symbolic->structural_rank == solver->n;
+}
+
+static int kls_low_work_btf_map32_policy_enabled(
+  const kls_solver *solver) {
+  return getenv("KLS_DISABLE_LOW_WORK_BTF_MAP32_POLICY") == NULL &&
+         kls_low_work_btf_map32_capable(solver);
+}
+
 /* adder_trans_01 and rajat12 are the only paper-union members of this
    compact dense-spike envelope.  AUTO retains the same transposed AMD/BTF
    numeric on both.  Its small, unscaled factor is dominated by guards and
@@ -28077,8 +28101,7 @@ static int kls_compact_dense_spike_pattern(
    that factor's fixed-pivot semantics and trims 4--5 us from every refactor. */
 static int kls_compact_dense_spike_map32_h100_cycle(
   const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    solver->numeric != NULL &&
+  return kls_low_work_btf_map32_capable(solver) &&
     getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_MAP32") == NULL &&
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
     solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -28089,45 +28112,29 @@ static int kls_compact_dense_spike_map32_h100_cycle(
     fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
     solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
     solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->symbolic->nblocks > 1u && solver->common.scale <= 0 &&
-    solver->numeric->Rs == NULL && solver->common.flops > 0.0 &&
-    solver->common.flops < 100000.0 &&
     kls_compact_dense_spike_pattern(solver->n, solver->col_ptr);
 }
 
-/* Pattern-level gate is usable before the first numeric exists, when the
-   structured-update plan would otherwise be built. */
-static int kls_add32_h100_input_policy_enabled(const kls_solver *solver) {
-  return solver != NULL && solver->col_ptr != NULL &&
-    getenv("KLS_DISABLE_ADD32_H100_POLICY") == NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 && solver->options.use_btf &&
-    solver->options.static_pivoting &&
-    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    solver->n >= 4950u && solver->n <= 4970u &&
-    solver->nnz >= 19800u && solver->nnz <= 19900u &&
-    solver->col_ptr[solver->n] == solver->nnz;
-}
-
-/* The paper-union add32 operating point is a full-rank, unscaled single
-   block whose fixed-pivot factor has fewer than 50K modeled flops.  Generic
-   structured-plan construction, mapped-consumer probes, repeated L divides,
-   and an intermediate i32 solve cache are individually small but dominate
-   this millisecond-scale H100 cycle.  Keep the settled path on the exact
-   AUTO/8T contract so explicit API choices retain their documented meaning. */
-static int kls_is_add32_h100_cycle(const kls_solver *solver) {
-  return kls_add32_h100_input_policy_enabled(solver) &&
-    solver->symbolic != NULL &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->common.scale == -1 &&
-    solver->symbolic->do_btf &&
-    solver->symbolic->structural_rank == solver->n &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
+/* Select the compact fixed-pivot machinery from properties of the retained
+   factor, not from an input dimension fingerprint.  The kernel is useful
+   when bookkeeping dominates a genuinely low-work, unscaled single block;
+   its map uses signed 32-bit positions. */
+static int kls_low_work_single_block_policy_enabled(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_POLICY") != NULL ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->n == 0u || solver->n > (UF_long)INT32_MAX ||
+      solver->nnz == 0u || solver->nnz > (UF_long)INT32_MAX ||
+      solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n ||
+      !(solver->common.flops > 0.0) ||
+      !(solver->common.flops < 100000.0)) {
+    return 0;
+  }
+  return solver->symbolic->structural_rank == KLS_KLU_EMPTY ||
+         solver->symbolic->structural_rank == solver->n;
 }
 
 /* The two ckt11752 variants share a normal AMD/BTF symbolic, and AUTO's
@@ -28996,34 +29003,13 @@ static int kls_is_fullchip_h100_symbolic_cycle(const kls_solver *solver) {
     solver->symbolic->maxblock == solver->n;
 }
 
-/* The paper union contains three structurally full-rank (or no-BTF), exactly
-   cancellation-singular inputs for which every comparison solver otherwise
-   aborts.  The completion is kept on their unique public structure envelopes
-   and the exact AUTO/8-thread protocol; callers can disable it explicitly.
-   A general opt-in remains available for external auditing. */
+/* Rank completion changes the mathematical problem by constraining degrees
+   of freedom at zero pivots.  It must therefore be a deliberate caller
+   choice, never an automatic decision based on an input fingerprint. */
 static int kls_singular_completion_enabled(const kls_solver *solver) {
-  if (solver == NULL || solver->col_ptr == NULL ||
-      getenv("KLS_DISABLE_SINGULAR_COMPLETION") != NULL) {
-    return 0;
-  }
-  if (getenv("KLS_ENABLE_SINGULAR_COMPLETION") != NULL) {
-    return 1;
-  }
-  const kls_options *options = &solver->options;
-  if (options->orientation != KLS_ORIENTATION_AUTO ||
-      options->ordering != KLS_ORDERING_AUTO ||
-      options->scale != KLS_SCALE_AUTO ||
-      options->backend != KLS_BACKEND_AUTO || options->threads != 8 ||
-      !options->use_btf || !options->static_pivoting ||
-      fabs(options->pivot_tolerance - 0.001) > 1.0e-12) {
-    return 0;
-  }
-  return
-    (solver->n == 15066u && solver->col_ptr[solver->n] == 62198u) ||
-    (solver->n == 2999349u &&
-     solver->col_ptr[solver->n] == 14313235u) ||
-    (solver->n == 2987012u &&
-     solver->col_ptr[solver->n] == 26621983u);
+  return solver != NULL &&
+         getenv("KLS_DISABLE_SINGULAR_COMPLETION") == NULL &&
+         getenv("KLS_ENABLE_SINGULAR_COMPLETION") != NULL;
 }
 
 /* The full Circuit5M matrix is the one dense member of the Freescale
@@ -29851,19 +29837,6 @@ static int kls_is_gemat_power_sequence_pattern(
          col_ptr[n] >= 32900u && col_ptr[n] <= 33300u;
 }
 
-static int kls_gemat_h100_policy_enabled(const kls_solver *solver) {
-  return solver != NULL && solver->col_ptr != NULL &&
-    getenv("KLS_DISABLE_GEMAT_H100_POLICY") == NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 && solver->options.use_btf &&
-    solver->options.static_pivoting &&
-    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr);
-}
-
 static int kls_is_legresley87936_h100_cycle(const kls_solver *solver) {
   /* This retained numeric sits just below the generic 20M-flop EGraph gate
      after 25 harmless off-diagonal pivots.  Its measured dependency forest
@@ -30115,34 +30088,6 @@ static int kls_is_fpga_trans_numeric_pattern(const kls_solver *solver) {
     solver->symbolic->nblocks <= 140u &&
     solver->symbolic->maxblock >= 1080u &&
     solver->symbolic->maxblock <= 1100u;
-}
-
-static int kls_is_adder_dcop_01_h100_cycle(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
-      solver->options.orientation != KLS_ORIENTATION_AUTO ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->options.scale != KLS_SCALE_AUTO ||
-      solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 || !solver->options.use_btf ||
-      !solver->options.static_pivoting ||
-      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      !solver->symbolic->do_btf) {
-    return 0;
-  }
-  /* The compact adder dc operating point has hundreds of tiny SCCs.  Its
-     retained mapped numeric wins the arbitrary-entrywise H100 horizon, but
-     eagerly building a diagonal-equivalence forest costs more than the
-     complete first factor.  The tight structural envelope is unique in the
-     paper union and leaves the opt-in structured-update path available. */
-  return solver->n >= 1800u && solver->n <= 1825u &&
-    solver->col_ptr[solver->n] >= 11100u &&
-    solver->col_ptr[solver->n] <= 11200u &&
-    solver->symbolic->nblocks >= 460u &&
-    solver->symbolic->nblocks <= 480u &&
-    solver->symbolic->maxblock >= 100u &&
-    solver->symbolic->maxblock <= 120u;
 }
 
 static int kls_is_activsg2000_h100_cycle(const kls_solver *solver) {
@@ -112953,7 +112898,7 @@ static int kls_mapped_refactor(kls_solver *solver,
     }
   }
   if (!check_pivots && !scaled &&
-      (kls_is_add32_h100_cycle(solver) ||
+      (kls_low_work_single_block_policy_enabled(solver) ||
        getenv("KLS_ENABLE_LEAN_SINGLE_BLOCK_MAP32_REFACTOR") != NULL)) {
     const int lean_single =
       kls_lean_single_block_map32_refactor(solver, numeric_values);
@@ -112968,11 +112913,7 @@ static int kls_mapped_refactor(kls_solver *solver,
       return supernodal;
     }
     if (getenv("KLS_ENABLE_LEAN_BTF_MAP32_REFACTOR") != NULL ||
-        (kls_is_adder_dcop_01_h100_cycle(solver) &&
-         getenv("KLS_DISABLE_ADDER_DCOP_MAP32_H100_POLICY") == NULL) ||
-        kls_is_rajat13_h100_cycle(solver) ||
-        kls_compact_dense_spike_map32_h100_cycle(solver) ||
-        kls_sandia_fpga_map32_h100_policy(solver)) {
+        kls_low_work_btf_map32_policy_enabled(solver)) {
       const int lean =
         kls_lean_btf_map32_refactor(solver, numeric_values);
       if (lean >= 0) {
@@ -148862,7 +148803,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        !kls_is_rajat15_h100_cycle(solver) &&
        !kls_is_tsopf_fs_b9_c1_h100_cycle(solver) &&
        !kls_is_add20_h100_cycle(solver) &&
-       !kls_is_add32_h100_cycle(solver) &&
+       !kls_low_work_single_block_policy_enabled(solver) &&
        !(kls_is_asic320k_dominant_btf_cycle(solver) &&
          getenv("KLS_DISABLE_ASIC320K_PTS_RECIP") == NULL) &&
        solver->i32solve_singleton_run == NULL)) {
@@ -148964,7 +148905,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
        kls_rommes_compact_no_btf_cycle(solver) ||
        kls_is_circuit204_h100_input_pattern(solver) ||
        kls_is_tsopf_fs_b9_c1_h100_cycle(solver) ||
-       kls_is_add32_h100_cycle(solver)) &&
+       kls_low_work_single_block_policy_enabled(solver)) &&
       getenv("KLS_DISABLE_BIPS98_DIRECT_I16_SOLVE") == NULL &&
       getenv("KLS_DISABLE_I16_SOLVE") == NULL &&
       n <= (UF_long)UINT16_MAX &&
@@ -150523,42 +150464,8 @@ static void kls_diagonal_equiv_reset_plan(kls_solver *solver) {
 static int kls_diagonal_equiv_plan_eligible(const kls_solver *solver) {
   return solver != NULL &&
     getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
-    /* gemat11/12 immediately replace the almost-diagonal input with their
-       compact matched numeric.  On the generic H100 contract, eagerly
-       building and then rejecting a structured-update forest costs about
-       0.9 ms across factor/refactor setup, enough to lose gemat11.  Keep the
-       specialized plan opt-in for callers that actually supply separable
-       diagonal updates. */
-    (!kls_gemat_h100_policy_enabled(solver) ||
-     getenv("KLS_ENABLE_GEMAT_DIAGONAL_EQUIV_PLAN") != NULL) &&
-    /* These two millisecond-scale Sandia cycles select a faster retained
-       map32 numeric after an ordinary changed-value update.  Eagerly
-       constructing a diagonal-equivalent forest beside their tiny first
-       factor, only to reject it on entrywise data, costs 4.7--6.9% of H100.
-       Keep the structured plan available to callers that explicitly opt in. */
-    (!kls_sandia_fpga_map32_h100_policy(solver) ||
-     getenv("KLS_ENABLE_SANDIA_FPGA_DIAGONAL_EQUIV_PLAN") != NULL) &&
-    /* These two tiny audited cycles receive arbitrary entrywise updates.
-       Their rejected forest setup is visible in a 2--4ms total horizon. */
-    (!kls_1138_bus_h100_policy_enabled(
-       solver->n, solver->col_ptr, &solver->options) ||
-     getenv("KLS_ENABLE_1138_BUS_DIAGONAL_EQUIV_PLAN") != NULL) &&
-    (!kls_is_adder_dcop_01_h100_cycle(solver) ||
-     getenv("KLS_ENABLE_ADDER_DCOP_DIAGONAL_EQUIV_PLAN") != NULL) &&
-    /* Native NodeND already gives the dense ASIC_100k cycle a retained
-       EGraph factor.  Building an O(nnz) structured-update plan beside its
-       first factor, then rejecting it on entrywise data, cannot amortize. */
-    (!kls_is_asic100k_dense_h100_cycle(solver) ||
-     getenv("KLS_ENABLE_ASIC100K_DIAGONAL_EQUIV_PLAN") != NULL) &&
-    /* This entrywise H100 class always rejects the structured plan.  Its
-       construction alone is a material fraction of the millisecond cycle. */
-    (!kls_add32_h100_input_policy_enabled(solver) ||
-     getenv("KLS_ENABLE_ADD32_DIAGONAL_EQUIV_PLAN") != NULL) &&
-    /* nxp1's arbitrary entrywise updates reject this O(nnz) plan, while its
-       deferred matching/METIS route selects a faster unscaled row numeric. */
-    (!kls_nxp1_h100_policy_enabled(
-       solver->n, solver->col_ptr, &solver->options) ||
-     getenv("KLS_ENABLE_NXP1_DIAGONAL_EQUIV_PLAN") != NULL) &&
+    /* This is already an explicit update-protocol opt-in.  Do not silently
+       override the caller using assumptions about benchmark value streams. */
     solver->diagonal_equiv_plan_state >= 0 &&
     solver->input_format == KLS_INPUT_CSC &&
     solver->col_ptr != NULL &&
@@ -151751,9 +151658,8 @@ static int kls_try_diagonal_equiv_refactor(kls_solver *solver,
 
 /* Complete an exactly singular, but structurally full-rank, KLU factor by
    perturbing the matched entries at the reported zero pivots.  Automatic
-   enrollment is restricted to the audited paper-union envelopes above;
-   other inputs retain the ordinary singular error unless explicitly opted
-   in with KLS_ENABLE_SINGULAR_COMPLETION.
+   enrollment is deliberately forbidden: callers must explicitly opt in
+   with KLS_ENABLE_SINGULAR_COMPLETION.
 
    Each retry starts from the true input and reapplies every retained nudge.
    Later refactors use the same retained list in kls_parallel_refactor(), and
@@ -154153,9 +154059,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
        Keep the incumbent without running the consultation. */
     solver->lean_choice = -1;
   }
-  if (kls_is_add32_h100_cycle(solver)) {
-    /* The guard-reduced mapped walk is already the settled fixed-pivot
-       engine; optional consumer probes only add discarded numeric passes. */
+  if (kls_low_work_single_block_policy_enabled(solver)) {
+    /* For a low-work retained factor, optional consumer trials cost more
+       work than the fixed-pivot numeric they are trying to optimize. */
     solver->floor_choice = -1;
     solver->padded_choice = -1;
   } else if (kls_is_asic100k_dense_h100_cycle(solver)) {

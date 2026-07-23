@@ -145,15 +145,14 @@ solves.  The paired-suite runner supplies it because the CKTSO, SubtreeLU, and
 KLU harnesses do not execute a second, unscored transpose-solve loop.  The
 standalone benchmark keeps measuring both directions by default.
 
-Exactly singular matrices still report `KLS_ERR_SINGULAR` by default.  The
-AUTO/8-thread paper policy narrowly enables a checked rank-completion path for
-the three audited, structurally full-rank union inputs that have consistent
-right-hand sides.  It records exact zero pivots, constrains the corresponding
-degrees of freedom (through matched stored entries when available), retains
-the true values for residual refinement, and carries those constraints across
-refactorization.  External audits can opt other
-matrices in with `KLS_ENABLE_SINGULAR_COMPLETION=1`; set
-`KLS_DISABLE_SINGULAR_COMPLETION=1` to disable even the audited policy.
+Exactly singular matrices report `KLS_ERR_SINGULAR` by default, regardless of
+their dimensions or selected AUTO policy.  Callers that deliberately want a
+checked rank-completion path can opt in with
+`KLS_ENABLE_SINGULAR_COMPLETION=1`.  It records exact zero pivots, constrains
+the corresponding degrees of freedom (through matched stored entries when
+available), retains the true values for residual refinement, and carries those
+constraints across refactorization.  `KLS_DISABLE_SINGULAR_COMPLETION=1`
+overrides the opt-in.
 
 ### Opt-in lean serial backend
 
@@ -2094,6 +2093,36 @@ medium caps, including the largest KLU/NICSLU/SubtreeLU labels:
 python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_paper_large_manifest.txt --out data/suitesparse-paper-large
 ```
 
+The paper corpus is a compatibility suite, not an independent generalization
+test. `scripts/build_generalization_manifests.py` deterministically builds two
+additional 24-matrix suites from SuiteSparse metadata. It excludes every
+SuiteSparse group represented in the paper corpus, partitions the remaining
+groups before selecting matrices, admits at most one matrix per group, and
+round-robins across size, density, and structural-symmetry strata. Thus the
+development and holdout manifests are SuiteSparse-group-disjoint from each
+other and from the benchmark-derived corpus. The collection group is used as
+a conservative, reproducible proxy for matrix family:
+
+```sh
+python3 scripts/build_generalization_manifests.py
+python3 scripts/fetch_suitesparse.py \
+  --manifest bench/suitesparse_generalization_dev_manifest.txt \
+  --out data/suitesparse-generalization-dev
+python3 scripts/fetch_suitesparse.py \
+  --manifest bench/suitesparse_generalization_holdout_manifest.txt \
+  --out data/suitesparse-generalization-holdout
+```
+
+Use `bench/suitesparse_generalization_dev_manifest.txt` while changing
+selectors. Freeze the policy and thresholds before running
+`bench/suitesparse_generalization_holdout_manifest.txt`, and report failures
+as well as successful timing rows. The holdout is procedural rather than
+secret: repeatedly tuning against it turns it into another development set.
+Use `--index path/to/ssstats.csv` to regenerate from a pinned SuiteSparse
+metadata snapshot. Generated manifests record the index timestamp and SHA-256;
+`python3 scripts/build_generalization_manifests.py --check` verifies that the
+committed files still match the selected metadata and seed.
+
 For SubtreeLU-specific tuning, `bench/suitesparse_subtreelu_manifest.txt`
 contains the exact 46 public SuiteSparse circuit labels from SubtreeLU Fig. 7.
 Fetch it into its own directory when running the full set, so the suite runners
@@ -2104,10 +2133,10 @@ python3 scripts/fetch_suitesparse.py --manifest bench/suitesparse_subtreelu_mani
 python3 scripts/audit_paper_manifest.py --manifest bench/suitesparse_subtreelu_manifest.txt --source SubtreeLU
 ```
 
-Use the medium paper suite as the normal inner loop for solver-policy changes.
-Use the large supplement as an overnight or pre-merge generalization gate with
-explicit timeouts; a retained change should improve the paper geomean or a
-defensible structural class, not just one large matrix name:
+Use the medium paper suite as the compatibility loop and the group-disjoint
+development suite for solver-policy changes. Use the large paper supplement
+as an overnight compatibility gate with explicit timeouts; a retained change
+should improve a defensible structural class, not just one matrix name:
 
 ```sh
 python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse-paper-large --orientation auto --threads 4 --timeout 900 --jsonl build/kls_paper_large.jsonl
