@@ -918,6 +918,79 @@ static int test_balanced_diagonal_spike_auto_orientation(void) {
   return ok;
 }
 
+static int test_transposed_low_work_btf_native_solve(void) {
+  const int32_t n = 6;
+  const int32_t ap[7] = {0, 2, 5, 8, 10, 13, 16};
+  const int32_t ai[16] = {
+    0, 1, 0, 1, 2, 0, 1, 2,
+    3, 4, 3, 4, 5, 3, 4, 5
+  };
+  const double initial[16] = {
+    4.0, 1.0, 2.0, 3.0, 5.0, 7.0, 1.0, 2.0,
+    5.0, 2.0, 1.0, 4.0, 3.0, 2.0, 1.0, 6.0
+  };
+  const double expected[6] = {1.0, -2.0, 0.5, 3.0, -1.0, 2.0};
+  double changed[16];
+  double b[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double x[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  memcpy(changed, initial, sizeof(changed));
+  changed[0] *= 1.01;
+  changed[11] *= 0.99;
+  for (int col = 0; col < n; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += changed[p] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_TRANSPOSE;
+  options.scale = -1;
+  options.use_btf = 1;
+  options.static_pivoting = 0;
+
+  kls_solver *solver = NULL;
+  int ok = require_ok(kls_create(&solver), "create transposed low-work BTF") &&
+    require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                               &options),
+               "analyze transposed low-work BTF") &&
+    require_ok(kls_factor(solver, initial),
+               "factor transposed low-work BTF") &&
+    require_ok(kls_refactor(solver, changed),
+               "refactor transposed low-work BTF") &&
+    require_ok(kls_solve(solver, 1, b, 0, x, 0),
+               "solve transposed low-work BTF");
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok) {
+    ok = require_ok(kls_get_stats(solver, &stats),
+                    "stats transposed low-work BTF");
+  }
+  if (ok) {
+    ok = stats.selected_orientation == KLS_ORIENTATION_TRANSPOSE &&
+      stats.nblocks >= 2 && fabs(stats.estimated_flops) < 100000.0 &&
+      stats.nnz_l + stats.nnz_u <= 12 * n;
+    for (int row = 0; ok && row < n; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected transposed low-work BTF result: orientation=%s "
+              "blocks=%" PRId64 " flops=%.17g fill=%" PRId64
+              " x=(%.17g %.17g %.17g %.17g %.17g %.17g)\n",
+              kls_orientation_name(stats.selected_orientation), stats.nblocks,
+              stats.estimated_flops, stats.nnz_l + stats.nnz_u,
+              x[0], x[1], x[2], x[3], x[4], x[5]);
+    }
+  }
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_csr_forced_transpose_orientation(void) {
   const int64_t rp[] = {0, 3, 6, 8};
   const int64_t ci[] = {0, 1, 2, 0, 1, 2, 1, 2};
@@ -17588,6 +17661,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_balanced_diagonal_spike_auto_orientation()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_transposed_low_work_btf_native_solve()) {
     return EXIT_FAILURE;
   }
   if (!test_forced_transpose_orientation()) {

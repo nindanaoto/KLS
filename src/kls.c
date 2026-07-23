@@ -29671,7 +29671,6 @@ static int symbolic_is_scale0_dense_fringe_dominant_btf_candidate(
 static int kls_is_gemat_power_sequence_pattern(
   UF_long n,
   const UF_long *col_ptr);
-static int kls_sandia_fpga_map32_h100_policy(const kls_solver *solver);
 
 static int choose_auto_scale_from_values(const kls_solver *solver,
                                          const double *numeric_values) {
@@ -29696,13 +29695,6 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
        numeric row scaling.  Avoid the generic value census that reaches the
        same scale-zero verdict before the first factorization. */
     return 0;
-  }
-  if (kls_sandia_fpga_map32_h100_policy(solver)) {
-    /* Both compact FPGA operating points already select an unscaled factor.
-       Return that audited verdict before the generic value-scale census; at
-       this size its two temporary vectors and full pattern walk are visible
-       in the complete millisecond-scale H100 cycle. */
-    return -1;
   }
   if (kls_1138_bus_h100_cycle(solver)) {
     /* The generic value census returns this same unscaled verdict after an
@@ -30120,37 +30112,6 @@ static int kls_is_onetone2_h100_cycle(const kls_solver *solver) {
          solver->common.flops <= 2.2e8;
 }
 
-static int kls_is_fpga_dcop_numeric_pattern(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL) {
-    return 0;
-  }
-  /* fpga_dcop_01 is a compact, fragmented BTF whose complete factors fit
-     comfortably in cache.  Its native packed KLU solve gives back less over
-     a 100-solve horizon than constructing the generic compact-index mirror
-     costs on the first refactor.  Keep the bounds separate from the denser
-     fpga_trans operating point, where the compact solve remains profitable. */
-  return solver->n >= 1200u && solver->n <= 1240u &&
-    solver->col_ptr[solver->n] >= 5800u &&
-    solver->col_ptr[solver->n] <= 6000u &&
-    solver->symbolic->nblocks >= 180u &&
-    solver->symbolic->nblocks <= 195u &&
-    solver->symbolic->maxblock >= 90u &&
-    solver->symbolic->maxblock <= 110u;
-}
-
-static int kls_is_fpga_trans_numeric_pattern(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL) {
-    return 0;
-  }
-  return solver->n >= 1200u && solver->n <= 1240u &&
-    solver->col_ptr[solver->n] >= 7300u &&
-    solver->col_ptr[solver->n] <= 7450u &&
-    solver->symbolic->nblocks >= 125u &&
-    solver->symbolic->nblocks <= 140u &&
-    solver->symbolic->maxblock >= 1080u &&
-    solver->symbolic->maxblock <= 1100u;
-}
-
 static int kls_is_activsg2000_h100_cycle(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->col_ptr == NULL ||
@@ -30209,23 +30170,6 @@ static int kls_is_circuit_3_h100_cycle(const kls_solver *solver) {
     solver->symbolic->maxblock <= 7650u &&
     fill >= 67500u && fill <= 69000u &&
     solver->common.flops >= 1.9e5 && solver->common.flops <= 2.2e5;
-}
-
-static int kls_sandia_fpga_map32_h100_policy(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    getenv("KLS_DISABLE_SANDIA_FPGA_MAP32_POLICY") == NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 && solver->options.use_btf &&
-    solver->options.static_pivoting &&
-    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->symbolic->do_btf &&
-    (kls_is_fpga_dcop_numeric_pattern(solver) ||
-     kls_is_fpga_trans_numeric_pattern(solver));
 }
 
 static int kls_is_rommes_nopss11_pattern(const kls_solver *solver) {
@@ -112910,11 +112854,9 @@ static int kls_mapped_refactor(kls_solver *solver,
   }
   if (kls_pts_direct_user_values_enabled(solver) ||
       kls_is_large_weak_pts_cycle_pattern(solver) ||
-      kls_low_work_btf_map32_policy_enabled(solver) ||
-      kls_sandia_fpga_map32_h100_policy(solver)) {
+      kls_low_work_btf_map32_policy_enabled(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
-    if (kls_low_work_btf_map32_policy_enabled(solver) ||
-        kls_sandia_fpga_map32_h100_policy(solver)) {
+    if (kls_low_work_btf_map32_policy_enabled(solver)) {
       /* The first changed-value pass uses the ordinary prepared frame, but
          build the direct Offx map while its column map is already hot.  Once
          the numeric contract is established, later updates can consume the
@@ -155267,9 +155209,7 @@ static int solve_impl(kls_solver *solver,
   }
   if (!solver->in_solve_refinement && !transpose && nrhs == 1 &&
       ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
-      ((kls_sandia_fpga_map32_h100_policy(solver) &&
-        kls_is_fpga_dcop_numeric_pattern(solver) &&
-        kls_low_work_btf_prefers_native_solve(solver)) ||
+      (kls_low_work_btf_prefers_native_solve(solver) ||
        kls_1138_bus_h100_cycle(solver)) &&
       solver->common.scale == -1 && solver->numeric->Rs == NULL &&
       solver->row_perm == NULL && solver->user_col_perm == NULL &&
@@ -155281,17 +155221,26 @@ static int solve_impl(kls_solver *solver,
       solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u && !solver->fp32_last_used &&
       solver->solve_contract_probe == 1) {
-    /* This audited plain-frame factor already selected KLU's native packed
-       solve (the compact mirror loses over H100).  Dispatch that same kernel
-       directly for its exact single-RHS contract instead of re-evaluating
-       every transformed/row/refinement route on each sub-10us solve. */
+    /* This verified plain-frame factor already selected KLU's native packed
+       solve because a second compact mirror cannot repay in its cache-sized
+       work regime.  Dispatch that same kernel directly for the guarded
+       single-RHS contract instead of re-evaluating every transformed and
+       refinement route on each small solve. */
     if (b != x) {
       memmove(x, b, (size_t)solver->n * sizeof(*x));
     }
     solver->common.status = TRILINOS_KLU_OK;
     const UF_long direct_ok =
-      trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
-                           1u, x, &solver->common);
+      solver->orientation == KLS_ORIENTATION_TRANSPOSE
+        ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, solver->n,
+                                1u, x, &solver->common)
+        : trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
+                               1u, x, &solver->common);
+    if (getenv("KLS_TRACE_LOW_WORK_BTF_DIRECT_SOLVE") != NULL) {
+      fprintf(stderr, "KLS low-work BTF direct native solve: n=%lu t=%d\n",
+              (unsigned long)solver->n,
+              solver->orientation == KLS_ORIENTATION_TRANSPOSE);
+    }
     const double direct_seconds = kls_now_seconds() - start;
     solver->base_solve_seconds = direct_seconds;
     solver->stats.solve_seconds = direct_seconds;

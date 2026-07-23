@@ -16787,3 +16787,30 @@ the other five failed identically before and after.  Finally, all six valid
 affected rows completed 1,000 independently verified entrywise generations
 at amplitudes 0.001, 0.01, and 0.1.  Worst relative residuals were 5.49e-14,
 1.76e-13, and 3.01e-12 respectively.
+
+LOW-WORK BTF NATIVE SOLVE DISPATCH GENERALIZED (2026-07-23).  A final
+Sandia-FPGA selector encoded narrow dimension, nnz, block-count, and maximum-
+block ranges.  It duplicated three decisions already supported by retained
+factor state: skipping an AUTO-scale census whose verdict is still unscaled,
+building the direct refactor maps, and bypassing the general solve wrapper for
+the native packed kernel.  The generic value census now makes the scale
+decision, low-work BTF map ownership controls map construction, and the shared
+low-work native-solve policy controls the guarded single-RHS bypass.  No FPGA
+input dimensions or block fingerprint remain in these runtime decisions.
+
+Extending the bypass beyond the original normal-orientation row exposed an
+implicit kernel-orientation assumption: a transposed retained factor must use
+KLU's transpose solve even for the public API's normal solve.  Dispatch now
+follows the selected factor orientation.  A nonsymmetric two-block synthetic
+smoke case forces that transposed, low-work route through factor, changed-value
+refactor, and solve; it would fail under the former hard-coded normal kernel.
+
+Twenty alternating saved-selector/generic H100 pairs on each affected row put
+the eight valid paper/development/holdout comparisons at 1.002 generic/exact
+geometric mean, with no regression over 2%.  The raw `fpga_dcop_01` timings
+were likewise unchanged, but that supplied value set has a 4.43e-2 residual
+under both binaries and is therefore reported separately rather than included
+as valid evidence.  All nine affected rows then completed 1,000 independently
+verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (27,000
+changed numeric systems total); worst relative residuals were 5.49e-14,
+5.99e-14, and 5.36e-13 respectively.
