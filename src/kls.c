@@ -28063,11 +28063,67 @@ static int kls_ibm_dc_h100_policy_enabled(
   return 1;
 }
 
-static int kls_compact_dense_spike_pattern(
+/* Prefer transposed coordinates for sparse, nearly diagonal hub patterns whose
+   directed degree flow is balanced at each node.  The balance test separates
+   structurally symmetric/equilibrated spikes from equally dense one-way
+   circuit graphs, for which transpose changes the retained pivot walk.  This
+   is intentionally an input-structure rule: it admits nearby orders and
+   sparsities without identifying a benchmark matrix. */
+static int kls_balanced_diagonal_spike_prefers_transpose(
   UF_long n,
-  const UF_long *col_ptr) {
-  return col_ptr != NULL && n >= 1800u && n <= 2000u &&
-    col_ptr[n] >= (13u * n + 1u) / 2u && col_ptr[n] <= 9u * n;
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 1000u || n > 30000u ||
+      n > UF_long_max / 10u || col_ptr[n] < 4u * n || col_ptr[n] > 10u * n ||
+      getenv("KLS_DISABLE_BALANCED_DIAGONAL_SPIKE_ORIENTATION") != NULL) {
+    return 0;
+  }
+
+  UF_long *row_degree =
+    (UF_long *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+
+  UF_long diagonal_columns = 0u;
+  UF_long max_col_degree = 0u;
+  int valid = 1;
+  for (UF_long col = 0u; col < n && valid; ++col) {
+    const UF_long degree = col_ptr[col + 1u] - col_ptr[col];
+    int has_diagonal = 0;
+    if (degree > max_col_degree) {
+      max_col_degree = degree;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UF_long_max) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      has_diagonal |= row == col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+
+  UF_long max_row_degree = 0u;
+  UF_long degree_imbalance = 0u;
+  for (UF_long node = 0u; node < n && valid; ++node) {
+    const UF_long col_degree = col_ptr[node + 1u] - col_ptr[node];
+    const UF_long row = row_degree[node];
+    if (row > max_row_degree) {
+      max_row_degree = row;
+    }
+    degree_imbalance += row > col_degree
+      ? row - col_degree : col_degree - row;
+  }
+  free(row_degree);
+
+  const UF_long nnz = col_ptr[n];
+  return valid && 100u * diagonal_columns >= 95u * n &&
+         5u * max_col_degree >= n && 5u * max_col_degree <= 4u * n &&
+         5u * max_row_degree >= n && 5u * max_row_degree <= 4u * n &&
+         100u * degree_imbalance <= 3u * nnz;
 }
 
 /* Capability gate shared by the generic low-work BTF selector and older
@@ -41862,11 +41918,11 @@ static int auto_orientation_prefers_normal(UF_long n,
          small increase is lower over the 100-solve horizon. */
       return 0;
     }
-    if (kls_compact_dense_spike_pattern(n, col_ptr)) {
-      /* In the compact dense-spike class, the transposed factors have about
-         the same repeated numeric work but materially cheaper triangular
-         solves.  With 100 solves in the target cycle that dominates the
-         small refactor increase (rajat12 and adder_trans_01). */
+    if (kls_balanced_diagonal_spike_prefers_transpose(
+          n, col_ptr, row_idx)) {
+      /* Balanced diagonal spikes retain comparable numeric work in either
+         frame, while transposed coordinates can materially shorten the
+         triangular streams over a repeated-solve horizon. */
       return 0;
     }
     /* small-class orientation: adopting NORMAL keeps the single-

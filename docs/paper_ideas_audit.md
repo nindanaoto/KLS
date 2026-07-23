@@ -16755,3 +16755,35 @@ generations at amplitudes 0.001, 0.01, and 0.1 on every row; worst relative
 residuals were again 5.49e-14, 5.99e-14, and 5.36e-13.  This removes the exact
 post-factor runtime selector; the earlier pre-analysis orientation heuristic
 for the same two paper inputs remains a separate generalization target.
+
+BALANCED DIAGONAL-SPIKE ORIENTATION GENERALIZED (2026-07-23).  AUTO's last
+compact dense-spike orientation exception used only `n=1800..2000` and
+`6.5n..9n` to send `rajat12` and `adder_trans_01` through transposed
+coordinates.  It is now an input-structure rule for small/medium sparse
+systems: density `4n..10n`, at least 95% diagonal coverage, maximum incoming
+and outgoing degree in `0.2n..0.8n`, and aggregate nodewise incoming/outgoing
+degree imbalance at most 3% of nnz.  This expresses the balanced hub shape
+that preserves comparable factor work in either frame while separating the
+nearby one-way `adder_dcop_01` structure (38.8% imbalance).  A new synthetic
+1,200-row smoke matrix enforces the rule outside every benchmark dimension.
+
+The development corpus was extended with 29 additional SuiteSparse matrices
+covering circuit, optimization, mesh, semiconductor, and graph families.
+Across all local paper, development, prior holdout, and extension data, the
+new predicate selected eight rows rather than the old two.  Six factor
+successfully (`coupled`, `rajat13`, `rajat12`, `rajat04`, and the two
+`adder_trans` value sets); `rajat01` and `rajat02` were singular under both
+the saved exact-selector binary and the generic candidate and are reported as
+failures.  Thus the broader rule found three valid behaviors not selected by
+the old dimension box, including a different IBM_Austin matrix family.
+
+Fifteen CPU-0--7 alternating saved-exact/generic pairs put the six valid
+affected rows at 0.963 geometric mean H100.  `rajat13`, `rajat04`, and
+`coupled` improved by 15.2%, 5.6%, and 3.5%; the original two rows and
+`adder_trans_02` remained within 1.3%, with no affected regression over 2%.
+On 13 independent small development rows that do not match the predicate,
+eight valid comparisons measured 0.998 geometric mean with no 2% regression;
+the other five failed identically before and after.  Finally, all six valid
+affected rows completed 1,000 independently verified entrywise generations
+at amplitudes 0.001, 0.01, and 0.1.  Worst relative residuals were 5.49e-14,
+1.76e-13, and 3.01e-12 respectively.

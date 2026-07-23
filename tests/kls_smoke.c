@@ -829,6 +829,95 @@ static int test_forced_transpose_orientation(void) {
   return ok;
 }
 
+static int test_balanced_diagonal_spike_auto_orientation(void) {
+  enum { n = 1200, hub_neighbors = 300 };
+  const size_t capacity = (size_t)(5 * n + 2 * hub_neighbors);
+  int32_t *ap = (int32_t *)calloc((size_t)n + 1u, sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(capacity * sizeof(*ai));
+  double *ax = (double *)malloc(capacity * sizeof(*ax));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  if (ap == NULL || ai == NULL || ax == NULL || b == NULL || x == NULL) {
+    free(ap);
+    free(ai);
+    free(ax);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  size_t nnz = 0u;
+  for (int col = 0; col < n; ++col) {
+    for (int row = 0; row < n; ++row) {
+      int distance = row - col;
+      if (distance < 0) {
+        distance = -distance;
+      }
+      const int ring = distance <= 2 || distance >= n - 2;
+      const int hub =
+        (col == 0 && row >= 1 && row <= hub_neighbors) ||
+        (row == 0 && col >= 1 && col <= hub_neighbors);
+      if (!ring && !hub) {
+        continue;
+      }
+      if (nnz >= capacity) {
+        free(ap);
+        free(ai);
+        free(ax);
+        free(b);
+        free(x);
+        return 0;
+      }
+      ai[nnz] = (int32_t)row;
+      ax[nnz] = row == col ? 1.0 : -1.0e-3;
+      b[row] += ax[nnz];
+      nnz++;
+    }
+    ap[col + 1] = (int32_t)nnz;
+  }
+
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  int ok = require_ok(kls_create(&solver), "create balanced spike") &&
+    require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                               &options),
+               "analyze balanced spike") &&
+    require_ok(kls_factor(solver, ax), "factor balanced spike") &&
+    require_ok(kls_solve(solver, 1, b, 0, x, 0), "solve balanced spike");
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok) {
+    ok = require_ok(kls_get_stats(solver, &stats), "stats balanced spike");
+  }
+  if (ok) {
+    double max_error = 0.0;
+    for (int row = 0; row < n; ++row) {
+      const double error = fabs(x[row] - 1.0);
+      if (error > max_error) {
+        max_error = error;
+      }
+    }
+    ok = stats.selected_orientation == KLS_ORIENTATION_TRANSPOSE &&
+      max_error <= 1.0e-9;
+    if (!ok) {
+      fprintf(stderr,
+              "balanced diagonal spike selected %s with max error %.17g\n",
+              kls_orientation_name(stats.selected_orientation), max_error);
+    }
+  }
+
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_csr_forced_transpose_orientation(void) {
   const int64_t rp[] = {0, 3, 6, 8};
   const int64_t ci[] = {0, 1, 2, 0, 1, 2, 1, 2};
@@ -17496,6 +17585,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_diagonal_auto_scale()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_balanced_diagonal_spike_auto_orientation()) {
     return EXIT_FAILURE;
   }
   if (!test_forced_transpose_orientation()) {
