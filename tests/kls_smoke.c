@@ -2285,6 +2285,274 @@ static int test_sparse_diagonal_row_hub_no_btf(void) {
   return ok;
 }
 
+static int test_large_reciprocal_hub_amd_btf(void) {
+  enum {
+    N = 16384,
+    FRINGE_N = 32,
+    CORE_N = N - FRINGE_N,
+    HUB = 0,
+    CORE_COLUMN_DEGREE = 5,
+    NNZ = CORE_N + CORE_COLUMN_DEGREE * (CORE_N - 1) + FRINGE_N
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  int32_t *rp = (int32_t *)calloc((size_t)N + 1u, sizeof(*rp));
+  int32_t *ci = (int32_t *)malloc((size_t)NNZ * sizeof(*ci));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || rp == NULL || ci == NULL ||
+      initial == NULL || changed == NULL || expected == NULL || b == NULL ||
+      x == NULL) {
+    free(ap);
+    free(ai);
+    free(rp);
+    free(ci);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_name = "KLS_DISABLE_LARGE_RECIPROCAL_HUB_AMD_BTF";
+  const char *env_value = getenv(env_name);
+  const int had_env = env_value != NULL;
+  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
+  int ok = (env_value == NULL || saved_env != NULL) &&
+    unsetenv(env_name) == 0;
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    if (col == HUB) {
+      for (int32_t row = 0; row < CORE_N; ++row) {
+        ai[p] = row;
+        initial[p] = row == HUB ? 64.0 : -0.001;
+        changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+        ++p;
+      }
+    } else {
+      ai[p] = col;
+      initial[p] = 8.0;
+      changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+      ++p;
+      ai[p] = HUB;
+      initial[p] = -0.001;
+      changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+      ++p;
+      for (int32_t lane = 1; lane <= 3; ++lane) {
+        ai[p] = 1 + (col - 1 + lane) % (CORE_N - 1);
+        initial[p] = -0.001;
+        changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+        ++p;
+      }
+    }
+    ap[col + 1] = p;
+  }
+  for (int32_t col = CORE_N; col < N; ++col) {
+    ai[p] = col;
+    initial[p] = 3.0;
+    changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    ok = 0;
+  }
+
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    rp[ai[entry] + 1]++;
+  }
+  for (int32_t row = 0; row < N; ++row) {
+    rp[row + 1] += rp[row];
+  }
+  int32_t *next = (int32_t *)malloc((size_t)N * sizeof(*next));
+  if (next == NULL) {
+    ok = 0;
+  } else {
+    memcpy(next, rp, (size_t)N * sizeof(*next));
+    for (int32_t col = 0; col < N; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        ci[next[ai[entry]]++] = col;
+      }
+    }
+  }
+  free(next);
+
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.5 + 0.03125 * (double)(col % 17);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create large reciprocal hub")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze large reciprocal hub")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor large reciprocal hub")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor large reciprocal hub")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve large reciprocal hub")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats large reciprocal hub")) ok = 0;
+  if (ok) {
+    ok = stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+      stats.selected_ordering == KLS_ORDERING_AMD && stats.selected_btf == 1 &&
+      stats.nblocks == FRINGE_N + 1 && stats.max_block == CORE_N &&
+      stats.structural_rank == N && stats.estimated_flops > 0.0 &&
+      stats.estimated_flops <= 512.0 * (double)N &&
+      stats.nnz_l + stats.nnz_u <= 20 * (int64_t)N;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected large reciprocal-hub result: orientation=%s "
+              "ordering=%s btf=%d blocks=%" PRId64 " max=%" PRId64
+              " rank=%" PRId64 " est=%.17g fill=%" PRId64
+              " x0=%.17g xlast=%.17g\n",
+              kls_orientation_name(stats.selected_orientation),
+              kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+              stats.nblocks, stats.max_block, stats.structural_rank,
+              stats.estimated_flops, stats.nnz_l + stats.nnz_u,
+              x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create CSR large reciprocal hub")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csr(
+                          solver, KLS_INDEX_INT32, N, rp, ci, 0, &options),
+                        "analyze CSR large reciprocal hub")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats CSR large reciprocal hub")) ok = 0;
+  if (ok && !(stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+              stats.selected_ordering == KLS_ORDERING_AMD &&
+              stats.selected_btf == 1 &&
+              stats.nblocks == FRINGE_N + 1 &&
+              stats.max_block == CORE_N)) {
+    fprintf(stderr,
+            "unexpected CSR reciprocal-hub route: orientation=%s "
+            "ordering=%s btf=%d blocks=%" PRId64 " max=%" PRId64 "\n",
+            kls_orientation_name(stats.selected_orientation),
+            kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+            stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  /* Preserve the reciprocal hub, full diagonal, density, block geometry,
+     and dimension while rewiring the local core into long chords.  Its AMD
+     proposal must cross the absolute work/fill guard. */
+  for (int32_t col = 1; col < CORE_N; ++col) {
+    const int32_t multipliers[3] = {37, 73, 109};
+    for (int32_t lane = 0; lane < 3; ++lane) {
+      int32_t row = 1 + (int32_t)(
+        ((int64_t)(col - 1) * multipliers[lane] +
+         97 * (lane + 1) + 11) % (CORE_N - 1));
+      int conflict;
+      do {
+        conflict = row == col;
+        for (int32_t prior = 0; prior < lane; ++prior) {
+          conflict |= ai[ap[col] + 2 + prior] == row;
+        }
+        if (!conflict) {
+          break;
+        }
+        row = row + 1 == CORE_N ? 1 : row + 1;
+      } while (1);
+      ai[ap[col] + 2 + lane] = row;
+    }
+  }
+
+  kls_options forced_amd = options;
+  forced_amd.orientation = KLS_ORIENTATION_NORMAL;
+  forced_amd.ordering = KLS_ORDERING_AMD;
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create reciprocal-hub AMD guard")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0,
+                          &forced_amd),
+                        "analyze reciprocal-hub AMD guard")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats reciprocal-hub AMD guard")) ok = 0;
+  if (ok && !(stats.selected_ordering == KLS_ORDERING_AMD &&
+              stats.selected_btf == 1 &&
+              (stats.estimated_flops > 512.0 * (double)N ||
+               stats.nnz_l + stats.nnz_u > 20 * (int64_t)N))) {
+    fprintf(stderr,
+            "unexpected reciprocal-hub AMD proposal: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 " est=%.17g fill=%" PRId64
+            "\n", stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.estimated_flops, stats.nnz_l + stats.nnz_u);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create reciprocal-hub guarded fallback")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze reciprocal-hub guarded fallback")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats reciprocal-hub guarded fallback")) ok = 0;
+  if (ok && stats.selected_ordering == KLS_ORDERING_AMD &&
+      stats.selected_btf == 1 &&
+      stats.estimated_flops <= 512.0 * (double)N &&
+      stats.nnz_l + stats.nnz_u <= 20 * (int64_t)N) {
+    fprintf(stderr,
+            "reciprocal-hub high-work proposal was unexpectedly retained: "
+            "blocks=%" PRId64 " max=%" PRId64 " est=%.17g fill=%" PRId64
+            "\n", stats.nblocks, stats.max_block, stats.estimated_flops,
+            stats.nnz_l + stats.nnz_u);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  if (!(had_env && saved_env == NULL) &&
+      !restore_env_value(env_name, had_env, saved_env)) {
+    ok = 0;
+  }
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(rp);
+  free(ci);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_low_work_one_way_scalar_fringe_no_btf(void) {
   enum {
     CORE_N = 4480,
@@ -19325,6 +19593,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_diagonal_row_hub_no_btf()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_large_reciprocal_hub_amd_btf()) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_one_way_scalar_fringe_no_btf()) {

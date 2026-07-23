@@ -17196,3 +17196,72 @@ geometric mean across their paired medians, with the largest at 1.0051.  Finally
 1,000 independently verified entrywise generations at amplitudes 0.001, 0.01,
 and 0.1 completed (3,000 changed systems); the worst relative-L2 residual was
 4.44e-13.  Release, CTest, and ASan/LSan smoke suites pass.
+
+FULL-DIAGONAL RECIPROCAL-HUB AMD/BTF GENERALIZED (2026-07-23).  The
+`dc1`, `dc2`, `dc3`, `trans4`, and `trans5` analysis shortcut still used a
+116,800--116,900-row and 749,000--767,000-entry box.  It selected normal
+AMD/BTF directly, avoiding a discarded nested-dissection race that otherwise
+roughly doubled analysis time and contended with the initial factor.  The five
+inputs share one pattern, but identifying its dimensions and entry count made
+the optimization a benchmark-family fingerprint.
+
+The replacement recognizes a normalized reciprocal-hub topology.  Under the
+same AUTO ordering/orientation/scaling/backend, static-pivot, requested-BTF,
+eight-worker, and 0.001-pivot-tolerance contract, it considers
+`16384 <= n <= 262144` and `4n <= nnz <= 10n`.  Every column must contain its
+diagonal.  At least one node's column must contain at least 90% of all row
+indices, and that same node's row must occur in at least 90% of all columns.
+Thus the same node is a macroscopic hub in both directed senses.  The
+implementation collects at most eleven possible hub columns from the
+compressed pointers and counts per-column row coverage without heap storage.
+Expressing existence of
+the same two-way hub, rather than selecting only the maximum degree, makes the
+profile exactly transpose-invariant; CSC and CSR therefore select the same
+mathematical-normal route.
+
+The topology only proposes normal AMD/BTF.  KLS retains that symbolic when it
+has full structural rank, 2 through `n/128` blocks, a largest block covering
+at least 95% of the matrix, positive estimated work no greater than `512n`,
+and fill no greater than `20n`.  A failed proposal is freed and ordinary AUTO
+ordering and orientation selection resumes.  Only a guarded symbolic sets the
+solver lifecycle flag that suppresses the discarded METIS race and
+block-structured ordering trial.  The old IBM switch remains a diagnostic
+alias for `KLS_DISABLE_LARGE_RECIPROCAL_HUB_AMD_BTF`.
+
+The independent smoke construction has 16,384 rows, 98,139 entries, a
+16,352-row reciprocal-hub core, and 32 scalar fringe components.  Through
+both CSC and CSR it selects 33 AMD/BTF blocks, 1.72M estimated flops, and about
+262K fill, then factors, refactors, and solves the changed values accurately.
+Rewiring the same dimension, density, full diagonal, hub coverage, and block
+geometry into deterministic long chords raises the AMD proposal to 276B
+flops and 56.4M fill; the guard rejects it and resumes AUTO.  The closest real
+counterexamples fail independently: `ASIC_100k` is not fully diagonal and its
+forced AMD candidate is 1.23B flops with roughly 3.60M fill, while
+`mult_dcop_01` decomposes into 7,417 blocks with a largest block of only 70.
+
+A static screen of all 55 locally available square patterns in the actual
+size/density envelope selected exactly the five IBM value sets.  A conservative
+enabled/disabled analyze replay covered 58 header-eligible local files: all 56
+supported cases retained identical orientation, ordering, BTF geometry, rank,
+fill, and work, while two Chevron complex inputs remained unsupported on both
+sides.  This includes the group-disjoint development and holdout downloads;
+the synthetic positive supplies a different order, density, and component
+count rather than another member of the IBM family.
+
+Against a compiler-flag-matched build of the immediate exact-selector parent,
+30 alternating pinned H100 pairs on `dc1` put generic/exact at 0.9996 by paired
+median and 0.9990 by per-side medians.  Twelve pairs on each of the other four
+value sets gave paired ratios from 0.9944 through 1.0056; the five-matrix
+geometric mean was 0.9997.  The generic structure pass adds about one
+millisecond to the 15--16ms direct analysis, but does not change the retained
+factor or numeric engines.  In the generic binary, enabled/disabled paired
+medians were 0.9369, 0.9558, 0.9392, 0.9403, and 0.9563, respectively, with the
+shortcut winning all 52 launches and a 0.9457 geometric mean.  Five
+nonmatching controls retained their routes; their parent/generic paired ratios
+ranged from 0.9527 through 1.0155 and had a 0.9920 geometric mean.
+
+Finally, `dc1` completed 1,000 independently verified entrywise generations
+at amplitudes 0.001, 0.01, and 0.1, and each of the other four value sets
+completed 1,000 generations at amplitude 0.001 (7,000 changed systems total).
+The worst relative-L2 residual was 1.13e-11.  Release, CTest, and ASan/LSan
+smoke suites pass.
