@@ -28104,12 +28104,20 @@ static int kls_low_work_btf_map32_policy_enabled(
 static int kls_low_work_btf_prefers_native_solve(
   const kls_solver *solver) {
   if (getenv("KLS_DISABLE_LOW_WORK_BTF_NATIVE_SOLVE") != NULL ||
-      !kls_low_work_btf_map32_capable(solver) || solver->n > 4096u) {
+      !kls_low_work_btf_map32_capable(solver) || solver->n > 16384u) {
     return 0;
   }
   const UF_long factor_entry_cap = 12u * solver->n;
-  return solver->numeric->lnz <= factor_entry_cap &&
-         solver->numeric->unz <= factor_entry_cap - solver->numeric->lnz;
+  if (solver->numeric->lnz > factor_entry_cap ||
+      solver->numeric->unz > factor_entry_cap - solver->numeric->lnz) {
+    return 0;
+  }
+  /* A short vector cannot repay a second index representation.  In the
+     larger cache tier, retain native block-packed streams only when BTF
+     components average at least 32 rows; highly fragmented factors instead
+     benefit from the compact mirror's flatter, narrower traversal. */
+  return solver->n <= 4096u ||
+         solver->symbolic->nblocks <= solver->n / 32u;
 }
 
 /* adder_trans_01 and rajat12 are the only paper-union members of this
@@ -30229,42 +30237,6 @@ static int kls_is_medium_symmetric_rajat_pattern(
      fused lean row walk) differs from the broad small-matrix default. */
   return col_ptr != NULL && n >= 7500u && n <= 7700u &&
          col_ptr[n] >= 32000u && col_ptr[n] <= 33500u;
-}
-
-/* Stable AUTO/8T H100 envelope for the compact rajat13 BTF factor.  Its
-   fixed-pivot numeric has only about 58K flops, so repeated generic consumer
-   tests and one divide per L entry cost more than the arithmetic itself.
-   The lean map32 walk plus KLU's native solve beats the previous mapped/i16
-   combination and CKTSO at the 100-numeric horizon. */
-static int kls_is_rajat13_h100_cycle(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->col_ptr == NULL ||
-      getenv("KLS_DISABLE_RAJAT13_H100_POLICY") != NULL ||
-      solver->options.orientation != KLS_ORIENTATION_AUTO ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->options.scale != KLS_SCALE_AUTO ||
-      solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 || !solver->options.use_btf ||
-      !solver->options.static_pivoting ||
-      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->common.scale != -1 || solver->numeric->Rs != NULL ||
-      solver->n < 7590u || solver->n > 7610u ||
-      solver->nnz < 48700u || solver->nnz > 48820u ||
-      solver->col_ptr[solver->n] != solver->nnz ||
-      !solver->symbolic->do_btf ||
-      solver->symbolic->structural_rank != solver->n ||
-      solver->symbolic->nblocks < 130u ||
-      solver->symbolic->nblocks > 138u ||
-      solver->symbolic->maxblock < 610u ||
-      solver->symbolic->maxblock > 630u ||
-      solver->common.noffdiag != 0u) {
-    return 0;
-  }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 39500u && fill <= 39900u &&
-    solver->common.flops >= 57000.0 && solver->common.flops <= 58500.0;
 }
 
 /* Stable pattern envelope for the 37K one-block Rajat operating point.
@@ -118029,7 +118001,15 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   kls_clear_egraph_refactor_last_stats(solver);
   kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_NONE);
-  if (!check_pivots && kls_is_rajat13_h100_cycle(solver) &&
+  /* Enter the lean walk early only after the first changed numeric has
+     established its accuracy contract.  A direct user-position map or a
+     live partial-BTF plan is durable evidence that a more specialized
+     input-consuming route owns this factor; preserve it without naming its
+     matrix. */
+  if (!check_pivots && kls_low_work_btf_map32_policy_enabled(solver) &&
+      solver->solve_contract_probe != 0 &&
+      solver->refactor_input_user_pos32 == NULL &&
+      solver->partial_btf_reference_valid == 0 &&
       solver->snb == NULL && solver->lean_probe_arm <= 0 &&
       !solver->row_refactor_values_ready &&
       !solver->row_refactor_values_dirty &&
@@ -148771,7 +148751,7 @@ static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
       solver->options.threads <= 1) {
     return 0;
   }
-  if (kls_is_rajat13_h100_cycle(solver)) {
+  if (kls_low_work_btf_prefers_native_solve(solver)) {
     return 1;
   }
   if (kls_is_htc336_fragmented_pattern(solver) ||
@@ -154084,7 +154064,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        known-losing lower-floor and padded-panel consultations. */
     solver->floor_choice = -1;
     solver->padded_choice = -1;
-  } else if (kls_is_rajat13_h100_cycle(solver)) {
+  } else if (kls_low_work_btf_map32_policy_enabled(solver)) {
     /* The retained lean BTF walk has no optional batched/padded consumers;
        their generic timing probes can only add discarded refactors. */
     solver->floor_choice = -1;

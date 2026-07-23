@@ -16705,3 +16705,31 @@ were neutral-to-positive (0.995 native/mirror by per-side medians, native won
 11/15 paired launches), with worst final relative-L2 residual below 4.6e-16.
 This supports the generic crossover without claiming a universal solve-kernel
 win; the benefit is the H100 cache-construction/dispatch horizon.
+
+RAJAT13 FINGERPRINT RETIRED (2026-07-23).  The exact AUTO/8T classifier for
+the 7,598-row input had controlled three independent choices: early lean-map32
+refactor dispatch, native packed solve selection, and suppression of irrelevant
+consumer probes.  Disabling the complete classifier cost 8.0% over H100, so
+simply deleting it would not preserve the performance claim.  Those choices
+now follow the shared low-work BTF contract.  Its larger solve-cache tier keeps
+native block-packed streams when `n <= 16384`, total factor entries are at most
+`12n`, and BTF components average at least 32 rows; more fragmented factors
+retain the flat compact mirror.  Early map32 dispatch waits until the first
+changed numeric establishes the accuracy contract and proceeds only when that
+pass did not build a specialized direct user-position map.  This durable state
+test preserves existing direct-input routes without referring to their matrix
+dimensions or names.
+
+Fifteen alternating exact-baseline/generic entrywise-H100 pairs across every
+affected paper row plus `Chem97ZtZ` and `lung1` put the generic/exact geometric
+mean at 0.988.  Four rows improved by more than 2%, none regressed by more than
+2%.  A longer paper-affinity check resolved `rajat13`'s process noise: 24
+alternating CPU-0--7 pairs put generic/exact at 1.001 by side medians and 1.001
+by paired medians (11/24 generic wins), preserving the exact selector's result
+to one tenth of one percent.  A deterministic expansion added all 27 remaining
+groups from the development partition; a size-based screen of its thirteen new
+small matrices plus two medium semiconductor cases found no additional factor
+meeting the low-work BTF contract (five singular/factor failures were reported,
+not discarded).  On the nine affected valid rows, 1,000 independently verified
+entrywise generations at amplitudes 0.001, 0.01, and 0.1 all completed; the
+worst relative residuals were 5.49e-14, 5.99e-14, and 5.36e-13 respectively.
