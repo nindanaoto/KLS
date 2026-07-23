@@ -16733,3 +16733,25 @@ meeting the low-work BTF contract (five singular/factor failures were reported,
 not discarded).  On the nine affected valid rows, 1,000 independently verified
 entrywise generations at amplitudes 0.001, 0.01, and 0.1 all completed; the
 worst relative residuals were 5.49e-14, 5.99e-14, and 5.36e-13 respectively.
+
+LOW-WORK BTF DIRECT-INPUT LIFECYCLE GENERALIZED (2026-07-23).  The remaining
+runtime dense-spike classifier selected direct user-position/Offx map
+construction, one bounded warm pass, and the later wrapper-bypass refactor for
+only `rajat12` and `adder_trans_01`.  Disabling that lifecycle cost 9.4% by
+geometric mean on those rows, so its map ownership and first-call sequencing
+were performance-critical even though the map32 kernel itself was already
+generic.  All low-work BTF factors now build those maps beside their first
+ordinary prepared-frame refactor.  Once the accuracy contract is established,
+the presence of the completed maps—not an input fingerprint—enables direct
+caller-value consumption and the guarded wrapper bypass.  Legacy environment
+names remain accepted as diagnostic aliases, but no longer select the class.
+
+Fifteen CPU-0--7 alternating exact-lifecycle/generic pairs across the full
+nine-row affected cohort put generic/exact H100 at 0.992 geometric mean.
+`rajat12` and `adder_trans_01` remained within 1%, no row regressed by 2%, and
+the unrelated `Chem97ZtZ`, `lung1`, and `adder_dcop_01` improved by 2.5--2.7%.
+The final direct-input implementation then completed 1,000 verified entrywise
+generations at amplitudes 0.001, 0.01, and 0.1 on every row; worst relative
+residuals were again 5.49e-14, 5.99e-14, and 5.36e-13.  This removes the exact
+post-factor runtime selector; the earlier pre-analysis orientation heuristic
+for the same two paper inputs remains a separate generalization target.

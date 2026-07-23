@@ -28120,27 +28120,6 @@ static int kls_low_work_btf_prefers_native_solve(
          solver->symbolic->nblocks <= solver->n / 32u;
 }
 
-/* adder_trans_01 and rajat12 are the only paper-union members of this
-   compact dense-spike envelope.  AUTO retains the same transposed AMD/BTF
-   numeric on both.  Its small, unscaled factor is dominated by guards and
-   repeated divides in the generic mapped walk; the lean map32 walk preserves
-   that factor's fixed-pivot semantics and trims 4--5 us from every refactor. */
-static int kls_compact_dense_spike_map32_h100_cycle(
-  const kls_solver *solver) {
-  return kls_low_work_btf_map32_capable(solver) &&
-    getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_MAP32") == NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 && solver->options.use_btf &&
-    solver->options.static_pivoting &&
-    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    kls_compact_dense_spike_pattern(solver->n, solver->col_ptr);
-}
-
 /* Select the compact fixed-pivot machinery from properties of the retained
    factor, not from an input dimension fingerprint.  The kernel is useful
    when bookkeeping dominates a genuinely low-work, unscaled single block;
@@ -112875,15 +112854,15 @@ static int kls_mapped_refactor(kls_solver *solver,
   }
   if (kls_pts_direct_user_values_enabled(solver) ||
       kls_is_large_weak_pts_cycle_pattern(solver) ||
-      kls_compact_dense_spike_map32_h100_cycle(solver) ||
+      kls_low_work_btf_map32_policy_enabled(solver) ||
       kls_sandia_fpga_map32_h100_policy(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
-    if (kls_sandia_fpga_map32_h100_policy(solver)) {
+    if (kls_low_work_btf_map32_policy_enabled(solver) ||
+        kls_sandia_fpga_map32_h100_policy(solver)) {
       /* The first changed-value pass uses the ordinary prepared frame, but
-         build the direct Offx map while its column map is already hot.  All
-         later H100 updates can then consume the caller's entrywise values
-         without an O(nnz) permutation copy or a one-off map build leaking
-         into the measured steady window. */
+         build the direct Offx map while its column map is already hot.  Once
+         the numeric contract is established, later updates can consume the
+         caller's entrywise values without another permutation copy. */
       (void)kls_build_lean_btf_off_map(solver, 1);
     }
   }
@@ -153595,9 +153574,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
      corrected residual; later solves against that unchanged numeric may
      reuse the verdict. */
   solver->solve_contract_verified = 0;
-  const int direct_map32_h100_cycle =
-    kls_compact_dense_spike_map32_h100_cycle(solver) ||
-    kls_sandia_fpga_map32_h100_policy(solver);
+  const int direct_low_work_btf_map32 =
+    kls_low_work_btf_map32_policy_enabled(solver);
   if (getenv("KLS_DISABLE_ADD20_DIRECT_REFACTOR") == NULL &&
       kls_is_add20_h100_cycle(solver) && solver->lean_choice == 1 &&
       solver->solve_contract_probe == 1 &&
@@ -153690,8 +153668,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
     return KLS_OK;
   }
-  if (getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_FAST_REFACTOR") == NULL &&
-      direct_map32_h100_cycle &&
+  if (getenv("KLS_DISABLE_LOW_WORK_BTF_DIRECT_REFACTOR") == NULL &&
+      getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_FAST_REFACTOR") == NULL &&
+      direct_low_work_btf_map32 &&
       solver->solve_contract_probe == 1 &&
       solver->refactor_input_user_pos32 != NULL &&
       solver->lean_btf_off_user_pos != NULL &&
@@ -153721,8 +153700,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->adaptive_refactor_seconds = kls_now_seconds() - start;
     solver->stats.refactor_seconds = solver->adaptive_refactor_seconds;
     fill_numeric_stats(solver);
-    if (getenv("KLS_TRACE_COMPACT_DENSE_SPIKE_FAST_REFACTOR") != NULL) {
-      fprintf(stderr, "KLS compact dense-spike direct refactor: %.3fus\n",
+    if (getenv("KLS_TRACE_LOW_WORK_BTF_DIRECT_REFACTOR") != NULL ||
+        getenv("KLS_TRACE_COMPACT_DENSE_SPIKE_FAST_REFACTOR") != NULL) {
+      fprintf(stderr, "KLS low-work BTF direct refactor: %.3fus\n",
               1e6 * solver->stats.refactor_seconds);
     }
     if (ok <= 0 || solver->common.status < 0) {
@@ -153829,9 +153809,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
      solver->prepared_value_scale != NULL) &&
     !solver->prestatic_deferred && !solver->rowmatch_deferred &&
     !solver->factor_preps_deferred;
-  const int compact_dense_spike_direct_values =
+  const int low_work_btf_direct_values =
+    getenv("KLS_DISABLE_LOW_WORK_BTF_DIRECT_VALUES") == NULL &&
     getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_DIRECT_VALUES") == NULL &&
-    kls_compact_dense_spike_map32_h100_cycle(solver) &&
+    kls_low_work_btf_map32_policy_enabled(solver) &&
     solver->input_to_csc != NULL && solver->row_scale == NULL &&
     solver->col_scale == NULL && solver->numeric->Rs == NULL &&
     solver->refactor_input_user_pos32 != NULL &&
@@ -153843,7 +153824,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   } else if (diagonal_equiv_values != NULL) {
     numeric_values = diagonal_equiv_values;
   } else if (pts_direct_values || large_weak_direct_values ||
-             compact_dense_spike_direct_values) {
+             low_work_btf_direct_values) {
     numeric_values = (double *)values;
     solver->refactor_direct_user_values_active = 1;
   } else {
@@ -154167,16 +154148,19 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
   if (ok && solver->common.status >= 0 &&
-      !compact_dense_spike_direct_values &&
+      !low_work_btf_direct_values &&
       solver->solve_contract_probe == 0 &&
-      kls_compact_dense_spike_map32_h100_cycle(solver) &&
+      kls_low_work_btf_map32_policy_enabled(solver) &&
       solver->refactor_input_user_pos32 != NULL) {
     const char *prewarm_env =
-      getenv("KLS_COMPACT_DENSE_SPIKE_DIRECT_PREWARM");
-    /* One charged direct pass warms the user-position and Offx maps before
-       the benchmark's steady window.  A 0--8 sweep on both class members
-       placed the complete-cycle minimum at one; further passes merely move
-       already-warm work into the first-refactor term. */
+      getenv("KLS_LOW_WORK_BTF_DIRECT_PREWARM");
+    if (prewarm_env == NULL) {
+      prewarm_env = getenv("KLS_COMPACT_DENSE_SPIKE_DIRECT_PREWARM");
+    }
+    /* One charged direct pass validates the just-built user-position and
+       Offx maps and leaves their compact streams hot.  The low-work policy
+       bounds this setup by the same factor-work limit used by the kernel;
+       further passes only move steady work into first-call preparation. */
     int prewarm = prewarm_env != NULL ? atoi(prewarm_env) : 1;
     if (prewarm < 0) {
       prewarm = 0;
