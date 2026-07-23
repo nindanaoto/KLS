@@ -16851,3 +16851,41 @@ changed systems).  Worst relative residuals were 4.64e-12, 4.28e-10, and
 1.55e-10 respectively.  This retires the exact `1138_bus` lifecycle selector
 without extending the result into a claim that BTF is never useful for small
 symmetric inputs.
+
+MODERATE SINGLE-BLOCK LEAN LIFECYCLE GENERALIZED (2026-07-23).  The exact
+`add20` post-factor selector had encoded its dimension, input nnz, options,
+factor fill, and flop range in order to retain the scalar-row numeric form and
+bypass the settled refactor wrapper.  Disabling that lifecycle cost 11.3% over
+H100, so deletion alone did not preserve the benchmark result.  It is now a
+retained-factor policy for normal, unscaled, structurally full one-block
+systems: `1024 <= n <= 4096`, input nnz and numeric fill at most `10n`, factor
+work from 100K through 250K flops, and at least two requested workers.  The direct
+caller-value entry remains separately gated on a plain, unpermuted CSC frame,
+the first changed numeric's established accuracy contract, and the absence of
+deferred preparation, refinement, or pivot repair.  A 4,096-row banded
+synthetic smoke matrix exercises this route with natural ordering, outside the
+former input fingerprint.
+
+The four-entry symbolic exception was audited independently.  Removing all
+four entries slowed `circuit204` by 20.4% and `LeGresley_4908` by 6.4%, so
+those two narrow pre-factor choices remain explicit follow-up targets.
+`qh1484` and `add20` were neutral without that exception and have been removed:
+`qh1484` now retains its three BTF blocks and mapped refactor, while `add20`
+naturally resolves to one block and enters the generic retained-factor policy.
+A broader degree-one-fringe proposal was also rejected rather than tuned
+around failures.  The official SuiteSparse index reduced 241 metadata
+candidates to eleven SCC-fringe shapes; seven newly downloaded matrices from
+HB, Hollinger, and Pajek exposed regressions from 2.2% through 2.07x, including
+39--45% on the two `g7jac010` value sets.
+
+Thirty alternating saved-exact/generic H100 pairs on each of the original
+four rows put generic/exact at 0.996 geometric mean of per-side medians; every
+row was neutral or faster, with `add20` at 0.993.  A 48-matrix local screen in
+the policy's size tier produced 42 valid factors and six reported failures;
+only `add20` met the complete retained-factor envelope.  Fifteen alternating
+pairs on twelve nonmatching negative controls measured 0.999 geometric mean,
+with the largest apparent slowdown 1.010, bounding ordinary launch noise.
+Finally, `add20` and `qh1484` each completed 1,000 independently verified
+entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000 changed
+systems); the worst relative-L2 residual was 1.04e-15.  Release and ASan/LSan
+test suites pass.

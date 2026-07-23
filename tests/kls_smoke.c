@@ -1132,6 +1132,140 @@ static int test_small_symmetric_no_btf_policy(void) {
   return ok;
 }
 
+static int test_moderate_single_block_lean_policy(void) {
+  const int32_t n = 4096;
+  const int32_t half_band = 4;
+  const int32_t nnz = (2 * half_band + 1) * n -
+    half_band * (half_band + 1);
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *initial = (double *)malloc((size_t)nnz * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  if (ap == NULL || ai == NULL || initial == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL) {
+    free(ap);
+    free(ai);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_names[] = {
+    "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_POLICY",
+    "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR",
+    "KLS_DISABLE_ADD20_DIRECT_REFACTOR"
+  };
+  char *saved_env[3] = {NULL, NULL, NULL};
+  int had_env[3] = {0, 0, 0};
+  int ok = 1;
+  for (size_t k = 0; k < 3u; ++k) {
+    const char *value = getenv(env_names[k]);
+    had_env[k] = value != NULL;
+    saved_env[k] = value != NULL ? strdup(value) : NULL;
+    if ((value != NULL && saved_env[k] == NULL) ||
+        unsetenv(env_names[k]) != 0) {
+      ok = 0;
+    }
+  }
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    const int32_t first = col > half_band ? col - half_band : 0;
+    const int32_t last = col + half_band < n ? col + half_band : n - 1;
+    for (int32_t row = first; row <= last; ++row) {
+      ai[p] = row;
+      initial[p] = row == col ? 20.0 : -1.0;
+      changed[p] = initial[p] *
+        (row == col && col % 53 == 0 ? 1.001 : 1.0);
+      ++p;
+    }
+    ap[col + 1] = p;
+    expected[col] = 0.75 + 0.03125 * (double)(col % 11);
+  }
+  if (p != nnz) {
+    ok = 0;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.use_btf = 0;
+  options.static_pivoting = 0;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create moderate single-block lean")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, n, ap, ai, 0, &options),
+                        "analyze moderate single-block lean")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor moderate single-block lean")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "first moderate single-block lean refactor")) ok = 0;
+
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      const int32_t row = ai[entry];
+      changed[entry] = initial[entry] *
+        (row == col && col % 47 == 0 ? 1.002 : 1.0);
+      b[row] += changed[entry] * expected[col];
+    }
+  }
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "steady moderate single-block lean refactor")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve moderate single-block lean")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats moderate single-block lean")) ok = 0;
+  if (ok) {
+    ok = stats.last_refactor_path == KLS_REFACTOR_PATH_ROW &&
+      stats.factor_flops >= 100000.0 && stats.factor_flops <= 250000.0 &&
+      stats.nnz_l + stats.nnz_u <= 10 * (int64_t)n;
+    for (int32_t row = 0; ok && row < n; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected moderate single-block lean result: path=%s "
+              "flops=%.17g fill=%" PRId64 " x0=%.17g xlast=%.17g\n",
+              kls_refactor_path_name(stats.last_refactor_path),
+              stats.factor_flops, stats.nnz_l + stats.nnz_u,
+              x[0], x[n - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  for (size_t k = 0; k < 3u; ++k) {
+    if (!(had_env[k] && saved_env[k] == NULL) &&
+        !restore_env_value(env_names[k], had_env[k], saved_env[k])) {
+      ok = 0;
+    }
+    free(saved_env[k]);
+  }
+  free(ap);
+  free(ai);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_csr_forced_transpose_orientation(void) {
   const int64_t rp[] = {0, 3, 6, 8};
   const int64_t ci[] = {0, 1, 2, 0, 1, 2, 1, 2};
@@ -17805,6 +17939,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_small_symmetric_no_btf_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_moderate_single_block_lean_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_transposed_low_work_btf_native_solve()) {

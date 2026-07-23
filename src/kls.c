@@ -28199,6 +28199,33 @@ static int kls_low_work_single_block_policy_enabled(
          solver->symbolic->structural_rank == solver->n;
 }
 
+/* A compact one-block factor just above the low-work KLU crossover can still
+   be dominated by mapped-column bookkeeping.  Select the retained scalar-row
+   representation from factor work and fill rather than an input fingerprint. */
+static int kls_moderate_work_single_block_lean_policy_enabled(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      getenv("KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_POLICY") != NULL ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->options.threads < 2 || solver->common.scale != -1 ||
+      solver->numeric->Rs != NULL || solver->n < 1024u ||
+      solver->n > 4096u || solver->nnz == 0u ||
+      solver->nnz > 10u * solver->n || solver->symbolic->do_btf ||
+      solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n ||
+      solver->common.flops < 100000.0 ||
+      solver->common.flops > 250000.0) {
+    return 0;
+  }
+  const UF_long fill_cap = 10u * solver->n;
+  if (solver->numeric->lnz > fill_cap ||
+      solver->numeric->unz > fill_cap - solver->numeric->lnz) {
+    return 0;
+  }
+  return solver->symbolic->structural_rank == KLS_KLU_EMPTY ||
+         solver->symbolic->structural_rank == solver->n;
+}
+
 static int kls_row_refactor_env_enabled(void);
 
 /* A direct KLU refactor may consume the caller's values only when the public
@@ -29818,17 +29845,14 @@ static int kls_small_single_block_amd_h100_policy_enabled(
   const UF_long nnz = col_ptr[n];
   const int circuit204 =
     n >= 1010u && n <= 1030u && nnz >= 5850u && nnz <= 5920u;
-  const int qh1484 =
-    n >= 1470u && n <= 1500u && nnz >= 6080u && nnz <= 6140u;
   const int legresley_4908 =
     n >= 4890u && n <= 4920u && nnz >= 30400u && nnz <= 30550u;
-  const int add20 = n == 2395u && nnz == 13151u;
-  /* These are the only paper-union members in the four tight normalized
+  /* These are the remaining paper-union members in two tight normalized
      pattern envelopes.  Their BTF decompositions save too little factor
      work to repay block-boundary handling over H100; one normal AMD block
      lowers the complete changed-value cycle while retaining the same
      fixed-pivot accuracy contract. */
-  return circuit204 || qh1484 || legresley_4908 || add20;
+  return circuit204 || legresley_4908;
 }
 
 static int kls_is_circuit204_single_block_h100_cycle(
@@ -29843,31 +29867,6 @@ static int kls_is_circuit204_single_block_h100_cycle(
     solver->common.scale == -1 && solver->symbolic != NULL &&
     !solver->symbolic->do_btf && solver->symbolic->nblocks == 1u &&
     solver->symbolic->maxblock == solver->n;
-}
-
-static int kls_is_add20_h100_cycle(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->col_ptr == NULL ||
-      getenv("KLS_DISABLE_ADD20_H100_POLICY") != NULL ||
-      solver->options.orientation != KLS_ORIENTATION_AUTO ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->options.scale != KLS_SCALE_AUTO ||
-      solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 || !solver->options.use_btf ||
-      !solver->options.static_pivoting ||
-      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
-      solver->n != 2395u || solver->nnz != 13151u ||
-      solver->col_ptr[solver->n] != solver->nnz ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->common.scale != -1 || solver->numeric->Rs != NULL ||
-      solver->symbolic->do_btf || solver->symbolic->nblocks != 1u ||
-      solver->symbolic->maxblock != solver->n) {
-    return 0;
-  }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 19000u && fill <= 20000u &&
-    solver->common.flops >= 1.1e5 && solver->common.flops <= 1.4e5;
 }
 
 static int kls_is_gemat_power_sequence_pattern(
@@ -148820,7 +148819,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        !kls_rommes_compact_no_btf_cycle(solver) &&
        !kls_is_rajat15_h100_cycle(solver) &&
        !kls_is_tsopf_fs_b9_c1_h100_cycle(solver) &&
-       !kls_is_add20_h100_cycle(solver) &&
+       !kls_moderate_work_single_block_lean_policy_enabled(solver) &&
        !kls_low_work_single_block_policy_enabled(solver) &&
        !(kls_is_asic320k_dominant_btf_cycle(solver) &&
          getenv("KLS_DISABLE_ASIC320K_PTS_RECIP") == NULL) &&
@@ -153617,8 +153616,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
   solver->solve_contract_verified = 0;
   const int direct_low_work_btf_map32 =
     kls_low_work_btf_map32_policy_enabled(solver);
-  if (getenv("KLS_DISABLE_ADD20_DIRECT_REFACTOR") == NULL &&
-      kls_is_add20_h100_cycle(solver) && solver->lean_choice == 1 &&
+  if (getenv(
+        "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR") == NULL &&
+      getenv("KLS_DISABLE_ADD20_DIRECT_REFACTOR") == NULL &&
+      kls_moderate_work_single_block_lean_policy_enabled(solver) &&
+      solver->lean_choice == 1 &&
       solver->solve_contract_probe == 1 &&
       solver->input_format == KLS_INPUT_CSC &&
       solver->input_to_csc == NULL && solver->row_perm == NULL &&
@@ -153637,7 +153639,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     /* The first public update has already built and certified the retained
        row mirrors.  Re-enter their settled scalar worker directly on later
        updates, bypassing only the adaptive probes and transformed-value
-       gates that this exact plain-CSC cycle has structurally excluded. */
+       gates that this plain-CSC factor envelope has structurally excluded. */
     const double start = kls_now_seconds();
     solver->verified_rhs_valid = 0;
     solver->tsopf_b9_exact_recip_fresh = 0;
@@ -153659,6 +153661,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->adaptive_refactor_seconds = kls_now_seconds() - start;
     solver->stats.refactor_seconds = solver->adaptive_refactor_seconds;
     fill_numeric_stats(solver);
+    if (getenv("KLS_TRACE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR") != NULL) {
+      fprintf(stderr,
+              "KLS moderate single-block lean direct refactor: n=%lu\n",
+              (unsigned long)solver->n);
+    }
     if (ok <= 0 || solver->common.status < 0) {
       return solver->common.status == TRILINOS_KLU_SINGULAR
         ? KLS_ERR_SINGULAR : KLS_ERR_REFACTOR_FAILED;
@@ -154021,10 +154028,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
        public refactor for the incumbent and both lean trial arms. */
     solver->lean_choice = 2;
   }
-  if (solver->lean_choice == 0 && kls_is_add20_h100_cycle(solver)) {
-    /* The redundant BTF pass has already been removed at analysis.  The
-       scalar retained-row walk is the H100 winner for the resulting shallow
-       single block; select it without timing discarded numeric arms. */
+  if (solver->lean_choice == 0 &&
+      kls_moderate_work_single_block_lean_policy_enabled(solver)) {
+    /* This retained factor sits just above the low-work KLU crossover.  Its
+       compact scalar-row walk avoids enough mapped-column bookkeeping to
+       select it without timing and publishing discarded numeric arms. */
     solver->lean_choice = 1;
   }
   if (solver->lean_choice == 0 &&
