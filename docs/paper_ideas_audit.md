@@ -17072,3 +17072,71 @@ eight-worker ratios are 0.8269 and 0.8255.  Finally, the real and smoke
 positive cases each completed 1,000 independently verified entrywise
 generations at amplitudes 0.001, 0.01, and 0.1 (6,000 systems); the worst
 relative-L2 residual was 7.56e-11.  Release and ASan/LSan test suites pass.
+
+PARTIAL-DIAGONAL MANY-BLOCK NO-BTF GENERALIZED (2026-07-23).  Four separate
+AUTO/8T selectors still identified `bips98_1142`, `bips07_1693`,
+`zeros_nopss_13k`, and `nopss_11k` through narrow dimension, input-nnz,
+diagonal-count, and maximum-degree boxes.  Two matrix-specific solver flags
+then carried the selected one-block AMD factor through scale selection,
+block-order and tolerance-trial suppression, compact solve construction,
+pool prewarm, deferred-preparation suppression, and the direct lean row
+refactor.  The no-BTF route is a real H100 win on all four, so deleting those
+selectors would have removed useful performance rather than benchmark debt.
+
+The replacement recognizes a normalized sparse-fringe topology.  Under the
+same public AUTO ordering/orientation/scaling, static-pivot, requested-BTF,
+AUTO-backend, eight-worker contract, it considers `4096 <= n <= UINT16_MAX`
+and `3n <= nnz <= 6n`.  Every column must be nonempty and bounded by 256
+entries, 95--98.5% of columns must contain their diagonal, and 5--12.5% of
+columns must have degree one.  Those proportions describe the fragmented
+partial-diagonal regime without a matrix dimension or nonzero fingerprint.
+The profile is evaluated only in mathematical normal coordinates.  CSR first
+checks the equivalent row-degree statistics on its initial A-transpose copy,
+then recomputes the profile after reconstructing normal CSC, so it reaches the
+same route without allowing a transpose-only match to activate the policy.
+The former per-matrix environment switches remain diagnostic aliases for the
+single generic switch.
+
+The topology is only a proposal.  AUTO constructs normal AMD without BTF and
+retains it only when the symbolic estimates positive work no greater than
+500K flops and fill no greater than `10n`; a rejected proposal is freed and
+ordinary AUTO orientation/ordering resumes.  This absolute guard prevents a
+bounded-degree lookalike from inheriting a costly one-block factor.  Only a
+successfully guarded one-block symbolic sets the generic solver lifecycle
+flag.  The retained class is unscaled, avoiding the former `n < 12000`
+matrix-size split; nine paired scale comparisons on all nonsingular members
+put unscaled/scale-zero at 0.994 geometric mean.
+
+The full 110-matrix local topology screen selected exactly twelve patterns:
+all twelve available Rommes BIPS, MIMO, no-PSS, reference, Itaipu, and
+zero-no-PSS operating points.  An enabled/disabled analyze replay covered all
+58 square matrices at or below the policy's dimension ceiling.  Exactly those
+twelve changed from fragmented BTF to one AMD block; the other 46 retained
+identical orientation, ordering, BTF state, block geometry, and estimated
+work.  The remaining 52 matrices are structurally outside the dimension
+ceiling.  `bips07_1998` remains the same known numeric-singularity failure on
+both sides.  Thus the generic rule expands the optimized set from four named
+rows to eleven valid factors plus one consistently reported singular input,
+without changing any of the 98 nonmatching local matrices.
+
+The smoke suite constructs an independent 4,608-row example with a 4,208-row
+banded core, 400 degree-one fringe columns, 200 missing diagonals, and 17,232
+entries.  It verifies changed-value CSC factor/refactor/solve accuracy and the
+same normal one-block route through CSR.  Disabling the policy exposes the
+fragmented BTF form.  Rewiring the same raw size, density, diagonal, and
+degree-one profile with deterministic long chords raises the symbolic work
+above 500K and verifies that the proposal is rejected in favor of BTF.  A
+transpose-only profile lookalike also verifies that the rule cannot activate
+outside mathematical normal coordinates.
+
+Nine alternating enabled/BTF H100 pairs on each of the eleven valid real
+matrices put the geometric mean of per-matrix paired ratios at 0.721.  Every
+matrix won; ratios ranged from 0.557 (`zeros_nopss_13k`) through 0.947
+(`bips98_606`).  The seven newly admitted valid rows have a 0.769 geometric
+ratio against the immediate parent.  On the four formerly exact rows, 60
+compiler-flag-matched parent/generic pairs per matrix put generic/exact at
+1.012 by side medians and 1.009 by paired medians, retaining the prior route
+within about one percent while removing all four fingerprints.  Finally, all
+99 entrywise changes on each of the eleven valid rows were independently
+verified (1,089 systems); the worst relative-L2 residual was 2.13e-16.
+Release, CTest, and ASan/LSan smoke suites pass.

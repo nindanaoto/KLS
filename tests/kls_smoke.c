@@ -1617,6 +1617,347 @@ static int test_compact_partial_diagonal_column_fringe(void) {
   return ok;
 }
 
+static int test_partial_diagonal_many_block_no_btf(void) {
+  enum {
+    N = 4608,
+    FRINGE_N = 400,
+    CORE_N = N - FRINGE_N,
+    MISSING_DIAGONAL_FRINGE_N = 200,
+    CORE_DEGREE = 4,
+    NNZ = CORE_DEGREE * CORE_N + FRINGE_N
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  int32_t *rp = (int32_t *)calloc((size_t)N + 1u, sizeof(*rp));
+  int32_t *ci = (int32_t *)malloc((size_t)NNZ * sizeof(*ci));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || rp == NULL || ci == NULL ||
+      initial == NULL || changed == NULL || expected == NULL || b == NULL ||
+      x == NULL) {
+    free(ap);
+    free(ai);
+    free(rp);
+    free(ci);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_name =
+    "KLS_DISABLE_PARTIAL_DIAGONAL_MANY_BLOCK_NO_BTF";
+  const char *env_value = getenv(env_name);
+  const int had_env = env_value != NULL;
+  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
+  int ok = (env_value == NULL || saved_env != NULL) &&
+    unsetenv(env_name) == 0;
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    int32_t rows[CORE_DEGREE];
+    rows[0] = col;
+    if (col == 0) {
+      rows[1] = 1;
+      rows[2] = 2;
+      rows[3] = 3;
+    } else if (col == CORE_N - 1) {
+      rows[1] = col - 1;
+      rows[2] = col - 2;
+      rows[3] = col - 3;
+    } else if (col == CORE_N - 2) {
+      rows[1] = col - 1;
+      rows[2] = col + 1;
+      rows[3] = col - 2;
+    } else {
+      rows[1] = col - 1;
+      rows[2] = col + 1;
+      rows[3] = col + 2;
+    }
+    for (int32_t lane = 0; lane < CORE_DEGREE; ++lane) {
+      ai[p] = rows[lane];
+      initial[p] = lane == 0 ? 8.0 : -0.125;
+      changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    ap[col + 1] = p;
+  }
+  for (int32_t col = CORE_N; col < N; ++col) {
+    const int32_t fringe = col - CORE_N;
+    ai[p] = fringe < MISSING_DIAGONAL_FRINGE_N
+      ? CORE_N + (fringe ^ 1)
+      : col;
+    initial[p] = 3.0;
+    changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    ok = 0;
+  }
+
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    rp[ai[entry] + 1]++;
+  }
+  for (int32_t row = 0; row < N; ++row) {
+    rp[row + 1] += rp[row];
+  }
+  int32_t *next = (int32_t *)malloc((size_t)N * sizeof(*next));
+  if (next == NULL) {
+    ok = 0;
+  } else {
+    memcpy(next, rp, (size_t)N * sizeof(*next));
+    for (int32_t col = 0; col < N; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        ci[next[ai[entry]]++] = col;
+      }
+    }
+  }
+  free(next);
+
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.75 + 0.03125 * (double)(col % 13);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create partial-diagonal many-block")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze partial-diagonal many-block")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor partial-diagonal many-block")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor partial-diagonal many-block")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve partial-diagonal many-block")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats partial-diagonal many-block")) ok = 0;
+  if (ok) {
+    ok = stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+      stats.selected_ordering == KLS_ORDERING_AMD &&
+      stats.selected_btf == 0 && stats.nblocks == 1 &&
+      stats.max_block == N && stats.estimated_flops > 0.0 &&
+      stats.estimated_flops <= 500000.0 &&
+      stats.nnz_l + stats.nnz_u <= 10 * (int64_t)N &&
+      stats.last_refactor_path == KLS_REFACTOR_PATH_ROW;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected partial-diagonal many-block result: "
+              "orientation=%s ordering=%s btf=%d blocks=%" PRId64
+              " max=%" PRId64 " est=%.17g fill=%" PRId64
+              " path=%s x0=%.17g xlast=%.17g\n",
+              kls_orientation_name(stats.selected_orientation),
+              kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+              stats.nblocks, stats.max_block, stats.estimated_flops,
+              stats.nnz_l + stats.nnz_u,
+              kls_refactor_path_name(stats.last_refactor_path),
+              x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create CSR partial-diagonal many-block")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csr(
+                          solver, KLS_INDEX_INT32, N, rp, ci, 0, &options),
+                        "analyze CSR partial-diagonal many-block")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats CSR partial-diagonal many-block")) ok = 0;
+  if (ok && !(stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+              stats.selected_ordering == KLS_ORDERING_AMD &&
+              stats.selected_btf == 0 && stats.nblocks == 1 &&
+              stats.max_block == N && stats.estimated_flops > 0.0 &&
+              stats.estimated_flops <= 500000.0)) {
+    fprintf(stderr,
+            "unexpected CSR partial-diagonal many-block route: "
+            "orientation=%s ordering=%s btf=%d blocks=%" PRId64
+            " max=%" PRId64 " est=%.17g\n",
+            kls_orientation_name(stats.selected_orientation),
+            kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+            stats.nblocks, stats.max_block, stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && setenv(env_name, "1", 1) != 0) ok = 0;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create partial-diagonal BTF control")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze partial-diagonal BTF control")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats partial-diagonal BTF control")) ok = 0;
+  if (ok && !(stats.selected_btf == 1 && stats.nblocks > 1 &&
+              stats.max_block < N)) {
+    fprintf(stderr,
+            "unexpected partial-diagonal BTF control: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 "\n",
+            stats.selected_btf, stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  /* Preserve the raw profile but replace the bounded core bands with
+     deterministic long chords.  The one-block trial must reject this much
+     larger symbolic workload and fall back to ordinary BTF AUTO. */
+  if (ok && unsetenv(env_name) != 0) ok = 0;
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    for (int32_t lane = 1; lane < CORE_DEGREE; ++lane) {
+      int32_t row =
+        (int32_t)(((int64_t)col * (37 + 12 * lane) + 97 * lane + 11) %
+                  CORE_N);
+      int conflict;
+      do {
+        conflict = row == col;
+        for (int32_t prior = 1; prior < lane; ++prior) {
+          conflict |= ai[ap[col] + prior] == row;
+        }
+        if (!conflict) {
+          break;
+        }
+        row = row + 1 == CORE_N ? 0 : row + 1;
+      } while (1);
+      ai[ap[col] + lane] = row;
+    }
+  }
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create high-work partial-diagonal guard")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze high-work partial-diagonal guard")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats high-work partial-diagonal guard")) ok = 0;
+  if (ok && !(stats.selected_btf == 1 &&
+              stats.estimated_flops > 500000.0)) {
+    fprintf(stderr,
+            "unexpected high-work partial-diagonal guard: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 " est=%.17g\n",
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  kls_options forced_no_btf = options;
+  forced_no_btf.orientation = KLS_ORIENTATION_NORMAL;
+  forced_no_btf.ordering = KLS_ORDERING_AMD;
+  forced_no_btf.scale = -1;
+  forced_no_btf.use_btf = 0;
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create forced high-work no-BTF guard")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0,
+                          &forced_no_btf),
+                        "analyze forced high-work no-BTF guard")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats forced high-work no-BTF guard")) ok = 0;
+  if (ok && !(stats.selected_btf == 0 && stats.nblocks == 1 &&
+              stats.max_block == N && stats.estimated_flops > 500000.0)) {
+    fprintf(stderr,
+            "unexpected forced high-work no-BTF proposal: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 " est=%.17g\n",
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  /* A-transpose can have the same cheap column profile even when A itself
+     does not.  Concentrate A's off-diagonal rows, then interpret this CSC as
+     CSR(A-transpose): its normal-coordinate degree bound fails while the
+     initial transpose candidate matches the raw profile.  AUTO may retain
+     that transpose, but the no-BTF policy must not activate there. */
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    for (int32_t lane = 1; lane < CORE_DEGREE; ++lane) {
+      int32_t row = lane - 1;
+      int conflict;
+      do {
+        conflict = row == col;
+        for (int32_t prior = 1; prior < lane; ++prior) {
+          conflict |= ai[ap[col] + prior] == row;
+        }
+        if (!conflict) {
+          break;
+        }
+        ++row;
+      } while (1);
+      ai[ap[col] + lane] = row;
+    }
+  }
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create transpose-only partial profile")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csr(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze transpose-only partial profile")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats transpose-only partial profile")) ok = 0;
+  if (ok && !(stats.selected_orientation == KLS_ORIENTATION_TRANSPOSE &&
+              stats.selected_btf == 1 && stats.nblocks > 1)) {
+    fprintf(stderr,
+            "unexpected transpose-only partial profile route: "
+            "orientation=%s ordering=%s btf=%d blocks=%" PRId64
+            " max=%" PRId64 " est=%.17g\n",
+            kls_orientation_name(stats.selected_orientation),
+            kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+            stats.nblocks, stats.max_block, stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  if (!(had_env && saved_env == NULL) &&
+      !restore_env_value(env_name, had_env, saved_env)) {
+    ok = 0;
+  }
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(rp);
+  free(ci);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_low_work_one_way_scalar_fringe_no_btf(void) {
   enum {
     CORE_N = 4480,
@@ -18651,6 +18992,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_compact_partial_diagonal_column_fringe()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_partial_diagonal_many_block_no_btf()) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_one_way_scalar_fringe_no_btf()) {
