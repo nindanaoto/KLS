@@ -1266,6 +1266,204 @@ static int test_moderate_single_block_lean_policy(void) {
   return ok;
 }
 
+static int test_low_work_one_way_scalar_fringe_no_btf(void) {
+  enum {
+    CORE_N = 4480,
+    FRINGE_N = 128,
+    N = CORE_N + FRINGE_N,
+    NNZ = 5 * CORE_N - 6 + 2 * FRINGE_N
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  int32_t *rp = (int32_t *)calloc((size_t)N + 1u, sizeof(*rp));
+  int32_t *ci = (int32_t *)malloc((size_t)NNZ * sizeof(*ci));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || rp == NULL || ci == NULL ||
+      initial == NULL || changed == NULL || expected == NULL || b == NULL ||
+      x == NULL) {
+    free(ap);
+    free(ai);
+    free(rp);
+    free(ci);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_name = "KLS_DISABLE_LOW_WORK_SCALAR_FRINGE_NO_BTF";
+  const char *env_value = getenv(env_name);
+  const int had_env = env_value != NULL;
+  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
+  int ok = (env_value == NULL || saved_env != NULL) &&
+    unsetenv(env_name) == 0;
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    const int32_t first = col > 2 ? col - 2 : 0;
+    const int32_t last = col + 2 < CORE_N ? col + 2 : CORE_N - 1;
+    for (int32_t row = first; row <= last; ++row) {
+      ai[p] = row;
+      initial[p] = row == col ? 8.0 : -0.25;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    ap[col + 1] = p;
+  }
+  for (int32_t col = CORE_N; col < N; ++col) {
+    ai[p] = (col - CORE_N) % CORE_N;
+    initial[p] = -0.125;
+    changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ai[p] = col;
+    initial[p] = 2.0;
+    changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    ok = 0;
+  }
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    rp[ai[entry] + 1]++;
+  }
+  for (int32_t row = 0; row < N; ++row) {
+    rp[row + 1] += rp[row];
+  }
+  int32_t *next = (int32_t *)malloc((size_t)N * sizeof(*next));
+  if (next == NULL) {
+    ok = 0;
+  } else {
+    memcpy(next, rp, (size_t)N * sizeof(*next));
+    for (int32_t col = 0; col < N; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        ci[next[ai[entry]]++] = col;
+      }
+    }
+  }
+  free(next);
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.625 + 0.03125 * (double)(col % 13);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create one-way scalar fringe")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze one-way scalar fringe")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor one-way scalar fringe")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor one-way scalar fringe")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve one-way scalar fringe")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats one-way scalar fringe")) ok = 0;
+  if (ok) {
+    ok = stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+      stats.selected_ordering == KLS_ORDERING_AMD &&
+      stats.selected_btf == 0 && stats.nblocks == 1 &&
+      stats.max_block == N && stats.estimated_flops > 0.0 &&
+      stats.estimated_flops <= 500000.0 &&
+      stats.nnz_l + stats.nnz_u <= 12 * (int64_t)N;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected one-way scalar fringe result: orientation=%s "
+              "ordering=%s btf=%d blocks=%" PRId64 " max=%" PRId64
+              " est=%.17g fill=%" PRId64 " x0=%.17g xlast=%.17g\n",
+              kls_orientation_name(stats.selected_orientation),
+              kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+              stats.nblocks, stats.max_block, stats.estimated_flops,
+              stats.nnz_l + stats.nnz_u, x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create CSR one-way scalar fringe")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csr(
+                          solver, KLS_INDEX_INT32, N, rp, ci, 0, &options),
+                        "analyze CSR one-way scalar fringe")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats CSR one-way scalar fringe")) ok = 0;
+  if (ok && !(stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+              stats.selected_ordering == KLS_ORDERING_AMD &&
+              stats.selected_btf == 0 && stats.nblocks == 1 &&
+              stats.max_block == N && stats.estimated_flops > 0.0 &&
+              stats.estimated_flops <= 500000.0)) {
+    fprintf(stderr,
+            "unexpected CSR scalar fringe route: orientation=%s ordering=%s "
+            "btf=%d blocks=%" PRId64 " max=%" PRId64 " est=%.17g\n",
+            kls_orientation_name(stats.selected_orientation),
+            kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+            stats.nblocks, stats.max_block, stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && setenv(env_name, "1", 1) != 0) ok = 0;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create scalar fringe BTF control")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze scalar fringe BTF control")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats scalar fringe BTF control")) ok = 0;
+  if (ok && !(stats.selected_btf == 1 && stats.nblocks == FRINGE_N + 1 &&
+              stats.max_block == CORE_N)) {
+    fprintf(stderr,
+            "unexpected scalar fringe BTF control: btf=%d blocks=%" PRId64
+            " max=%" PRId64 "\n",
+            stats.selected_btf, stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  if (!(had_env && saved_env == NULL) &&
+      !restore_env_value(env_name, had_env, saved_env)) {
+    ok = 0;
+  }
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(rp);
+  free(ci);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_small_pivot_low_work_dominant_btf(void) {
   enum {
     CORE_N = 60000,
@@ -18099,6 +18297,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_moderate_single_block_lean_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_low_work_one_way_scalar_fringe_no_btf()) {
     return EXIT_FAILURE;
   }
   if (!test_small_pivot_low_work_dominant_btf()) {

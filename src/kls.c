@@ -2447,6 +2447,8 @@ typedef struct kls_pattern_candidate {
   int large_sparse_full_diagonal_amf3_class;
   int large_bounded_degree_no_btf_amf_class;
   int small_symmetric_no_btf_class;
+  int low_work_one_way_scalar_fringe_class;
+  int low_work_one_way_scalar_fringe_transpose_class;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -28319,6 +28321,7 @@ static int kls_ckt11752_dc1_h100_cycle(const kls_solver *solver) {
 static _Thread_local int kls_large_sparse_amf3_analyze_path;
 static _Thread_local int kls_large_bounded_no_btf_amf_analyze_path;
 static _Thread_local int kls_small_symmetric_no_btf_analyze_path;
+static _Thread_local int kls_low_work_one_way_scalar_fringe_analyze_path;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -29828,7 +29831,7 @@ static int kls_is_circuit204_h100_input_pattern(const kls_solver *solver) {
     solver->symbolic->maxblock <= 880u;
 }
 
-static int kls_small_single_block_amd_h100_policy_enabled(
+static int kls_circuit204_single_block_amd_h100_policy_enabled(
   UF_long n,
   const UF_long *col_ptr,
   const kls_options *options) {
@@ -29843,22 +29846,16 @@ static int kls_small_single_block_amd_h100_policy_enabled(
     return 0;
   }
   const UF_long nnz = col_ptr[n];
-  const int circuit204 =
-    n >= 1010u && n <= 1030u && nnz >= 5850u && nnz <= 5920u;
-  const int legresley_4908 =
-    n >= 4890u && n <= 4920u && nnz >= 30400u && nnz <= 30550u;
-  /* These are the remaining paper-union members in two tight normalized
-     pattern envelopes.  Their BTF decompositions save too little factor
-     work to repay block-boundary handling over H100; one normal AMD block
-     lowers the complete changed-value cycle while retaining the same
-     fixed-pivot accuracy contract. */
-  return circuit204 || legresley_4908;
+  /* circuit204 remains an exact follow-up target: unlike the generic scalar-
+     fringe retry, its BTF form removes 15% of the rows and 23% of the factor
+     work, while its one-block win depends on a separately tuned row schedule. */
+  return n >= 1010u && n <= 1030u && nnz >= 5850u && nnz <= 5920u;
 }
 
 static int kls_is_circuit204_single_block_h100_cycle(
   const kls_solver *solver) {
   return solver != NULL && solver->col_ptr != NULL &&
-    kls_small_single_block_amd_h100_policy_enabled(
+    kls_circuit204_single_block_amd_h100_policy_enabled(
       solver->n, solver->col_ptr, &solver->options) &&
     solver->n >= 1010u && solver->n <= 1030u &&
     solver->nnz >= 5850u && solver->nnz <= 5920u &&
@@ -33511,6 +33508,22 @@ static UF_long count_pattern_diagonal(UF_long n,
     }
   }
   return diagonal;
+}
+
+static int kls_low_work_one_way_scalar_fringe_options_enabled(
+  UF_long n,
+  UF_long nnz,
+  const kls_options *options) {
+  return options != NULL &&
+      getenv("KLS_DISABLE_LOW_WORK_SCALAR_FRINGE_NO_BTF") == NULL &&
+      options->ordering == KLS_ORDERING_AUTO &&
+      options->orientation == KLS_ORIENTATION_AUTO &&
+      options->scale == KLS_SCALE_AUTO &&
+      options->backend != KLS_BACKEND_SERIAL && options->threads >= 4 &&
+      options->use_btf && options->static_pivoting &&
+      fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
+      n > 4096u && n <= 16384u && n <= UF_long_max / 10u &&
+      nnz >= 4u * n && nnz <= 10u * n;
 }
 
 static int btf_low_work_many_block_retry_shape_is_allowed(
@@ -41321,7 +41334,7 @@ static int choose_symbolic_for_pattern(UF_long n,
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
   }
-  if (kls_small_single_block_amd_h100_policy_enabled(
+  if (kls_circuit204_single_block_amd_h100_policy_enabled(
         n, col_ptr, options)) {
     /* This exact AUTO horizon favors a normal one-block AMD numeric.  The
        explicit recursive options prevent the policy from re-entering. */
@@ -41331,6 +41344,30 @@ static int choose_symbolic_for_pattern(UF_long n,
     return choose_symbolic_for_pattern(
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
+  }
+  if (kls_low_work_one_way_scalar_fringe_analyze_path &&
+      kls_low_work_one_way_scalar_fringe_options_enabled(
+        n, col_ptr[n], options)) {
+    /* The degree-one rows establish the scalar fringe without building its
+       BTF ordering.  Build the candidate that would actually be retained,
+       then keep it only when its absolute symbolic work remains cache-sized. */
+    kls_options no_btf_options = *options;
+    no_btf_options.ordering = KLS_ORDERING_AMD;
+    no_btf_options.use_btf = 0;
+    const int status = choose_symbolic_for_pattern(
+      n, col_ptr, row_idx, &no_btf_options, symbolic_out, common_out,
+      selected_ordering_out, score_out, separator_out);
+    if (status == KLS_OK && *symbolic_out != NULL &&
+        (*symbolic_out)->est_flops > 0.0 &&
+        (*symbolic_out)->est_flops <= 500000.0 &&
+        *score_out > 0.0 && *score_out <= 12.0 * (double)n) {
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
   }
   if (kls_rajat29_h100_policy_enabled(n, col_ptr, options)) {
     /* The pre-static trial used to replace the analyze result, so AUTO built
@@ -41717,13 +41754,95 @@ static void free_candidate(kls_pattern_candidate *candidate) {
   memset(candidate, 0, sizeof(*candidate));
 }
 
+/* A diagonal-only row is a provable singleton SCC.  For the narrow input
+   envelope that can benefit from bypassing BTF, classify those rows while
+   performing the mandatory index copy: the bitmap records only rows seen
+   off diagonal, so it avoids a second pattern pass or an n-entry counter. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+static int copy_low_work_one_way_scalar_fringe_candidate(
+  kls_pattern_candidate *candidate,
+  kls_index_type index_type,
+  const void *row_idx,
+  int64_t base) {
+  enum { MAX_ROW_BITMAP_WORDS = (16384u + 63u) / 64u };
+  const size_t row_bitmap_words =
+    ((size_t)candidate->n + 63u) / 64u;
+  if (row_bitmap_words > MAX_ROW_BITMAP_WORDS) {
+    for (UF_long p = 0u; p < candidate->nnz; ++p) {
+      const int64_t row = read_index(index_type, row_idx, (int64_t)p) - base;
+      if (row < 0 || row >= (int64_t)candidate->n) {
+        return KLS_ERR_INVALID_ARGUMENT;
+      }
+      candidate->row_idx[p] = (UF_long)row;
+    }
+    return KLS_OK;
+  }
+
+  uint64_t row_profile[2u * MAX_ROW_BITMAP_WORDS];
+  memset(row_profile, 0, 2u * row_bitmap_words * sizeof(*row_profile));
+  uint64_t *row_has_offdiagonal = row_profile;
+  uint64_t *row_has_diagonal = row_profile + row_bitmap_words;
+  int bounded_columns = 1;
+  UF_long diagonal_columns = 0u;
+  UF_long scalar_columns = 0u;
+  UF_long diagonal_scalar_columns = 0u;
+  for (UF_long col = 0u; col < candidate->n; ++col) {
+    const UF_long column_degree =
+      candidate->col_ptr[col + 1u] - candidate->col_ptr[col];
+    scalar_columns += (UF_long)(column_degree == 1u);
+    if (column_degree == 0u || column_degree > 64u) {
+      bounded_columns = 0;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = candidate->col_ptr[col];
+         p < candidate->col_ptr[col + 1u]; ++p) {
+      const int64_t row = read_index(index_type, row_idx, (int64_t)p) - base;
+      if (row < 0 || row >= (int64_t)candidate->n) {
+        return KLS_ERR_INVALID_ARGUMENT;
+      }
+      candidate->row_idx[p] = (UF_long)row;
+      const size_t word = (size_t)row >> 6u;
+      const uint64_t bit = UINT64_C(1) << ((unsigned int)row & 63u);
+      if (row == (int64_t)col) {
+        has_diagonal = 1;
+        row_has_diagonal[word] |= bit;
+      } else {
+        row_has_offdiagonal[word] |= bit;
+      }
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+    diagonal_scalar_columns +=
+      (UF_long)(has_diagonal && column_degree == 1u);
+  }
+
+  if (bounded_columns &&
+      1000u * diagonal_columns >= 995u * candidate->n) {
+    UF_long scalar_rows = 0u;
+    for (size_t word = 0u; word < row_bitmap_words; ++word) {
+      scalar_rows += (UF_long)__builtin_popcountll(
+        row_has_diagonal[word] & ~row_has_offdiagonal[word]);
+    }
+    candidate->low_work_one_way_scalar_fringe_class =
+      scalar_columns == 0u && scalar_rows >= 32u &&
+      20u * scalar_rows <= candidate->n;
+    candidate->low_work_one_way_scalar_fringe_transpose_class =
+      scalar_columns == diagonal_scalar_columns &&
+      diagonal_scalar_columns >= 32u &&
+      20u * diagonal_scalar_columns <= candidate->n;
+  }
+  return KLS_OK;
+}
+
 static int copy_compressed_candidate(kls_pattern_candidate *candidate,
                                      kls_index_type index_type,
                                      int64_t n,
                                      const void *col_ptr,
                                      const void *row_idx,
                                      int index_base,
-                                     kls_orientation orientation) {
+                                     kls_orientation orientation,
+                                     const kls_options *options) {
   const int64_t base = index_base;
   const int64_t nnz = read_index(index_type, col_ptr, n) - base;
   if (nnz < 0) {
@@ -41749,6 +41868,9 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     candidate->n >= 256u && candidate->n <= 4096u &&
     candidate->nnz >= 3u * candidate->n - 2u &&
     candidate->nnz <= 8u * candidate->n;
+  const int classify_low_work_scalar_fringe =
+    kls_low_work_one_way_scalar_fringe_options_enabled(
+      candidate->n, candidate->nnz, options);
   if (classify_small_symmetric) {
     /* Fold a structural-symmetry signature into the mandatory input copy.
        The 12-bit packing is collision-free in this size tier; matching the
@@ -41796,6 +41918,13 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     candidate->small_symmetric_no_btf_class =
       full_diagonal && lower_entries == upper_entries &&
       symmetry_balance_a == 0u && symmetry_balance_b == 0u;
+  } else if (classify_low_work_scalar_fringe) {
+    status = copy_low_work_one_way_scalar_fringe_candidate(
+      candidate, index_type, row_idx, base);
+    if (status != KLS_OK) {
+      free_candidate(candidate);
+      return status;
+    }
   } else {
     for (int64_t p = 0; p < nnz; ++p) {
       const int64_t row = read_index(index_type, row_idx, p) - base;
@@ -41855,6 +41984,22 @@ static int transpose_candidate(const kls_pattern_candidate *source,
       candidate->n, candidate->col_ptr, candidate->row_idx);
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
+  int transposed_scalar_fringe_class =
+    source->low_work_one_way_scalar_fringe_transpose_class;
+  if (transposed_scalar_fringe_class) {
+    for (UF_long col = 0u; col < candidate->n; ++col) {
+      const UF_long degree =
+        candidate->col_ptr[col + 1u] - candidate->col_ptr[col];
+      if (degree <= 1u || degree > 64u) {
+        transposed_scalar_fringe_class = 0;
+        break;
+      }
+    }
+  }
+  candidate->low_work_one_way_scalar_fringe_class =
+    transposed_scalar_fringe_class;
+  candidate->low_work_one_way_scalar_fringe_transpose_class =
+    source->low_work_one_way_scalar_fringe_class;
   return KLS_OK;
 }
 
@@ -41863,6 +42008,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
   const int saved = kls_large_sparse_amf3_analyze_path;
   const int bounded_saved = kls_large_bounded_no_btf_amf_analyze_path;
   const int symmetric_saved = kls_small_symmetric_no_btf_analyze_path;
+  const int scalar_fringe_saved =
+    kls_low_work_one_way_scalar_fringe_analyze_path;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
     kls_large_sparse_amf3_policy_enabled(options);
@@ -41871,6 +42018,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_large_bounded_no_btf_amf_policy_enabled(options);
   kls_small_symmetric_no_btf_analyze_path =
     candidate->small_symmetric_no_btf_class;
+  kls_low_work_one_way_scalar_fringe_analyze_path =
+    candidate->low_work_one_way_scalar_fringe_class;
   const int status =
     choose_symbolic_for_pattern(candidate->n, candidate->col_ptr,
                                 candidate->row_idx, options,
@@ -41881,6 +42030,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
   kls_large_sparse_amf3_analyze_path = saved;
   kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
   kls_small_symmetric_no_btf_analyze_path = symmetric_saved;
+  kls_low_work_one_way_scalar_fringe_analyze_path = scalar_fringe_saved;
   return status;
 }
 
@@ -45340,7 +45490,8 @@ int kls_analyze_csc(kls_solver *solver,
   kls_pattern_candidate *chosen = NULL;
 
   status = copy_compressed_candidate(&normal, index_type, n, col_ptr, row_idx,
-                                     index_base, KLS_ORIENTATION_NORMAL);
+                                     index_base, KLS_ORIENTATION_NORMAL,
+                                     &normalized);
   if (status != KLS_OK) {
     clear_matrix(solver);
     return status;
@@ -45354,8 +45505,9 @@ int kls_analyze_csc(kls_solver *solver,
        normal.n, normal.col_ptr, &normalized) ||
      kls_circuit5m_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
-     kls_small_single_block_amd_h100_policy_enabled(
+     kls_circuit204_single_block_amd_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
+     normal.low_work_one_way_scalar_fringe_class ||
      kls_asic100k_dense_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      normal.large_sparse_full_diagonal_amf3_class ||
@@ -45462,7 +45614,8 @@ int kls_analyze_csr(kls_solver *solver,
   kls_pattern_candidate *chosen = NULL;
 
   status = copy_compressed_candidate(&transpose, index_type, n, row_ptr, col_idx,
-                                     index_base, KLS_ORIENTATION_TRANSPOSE);
+                                     index_base, KLS_ORIENTATION_TRANSPOSE,
+                                     &normalized);
   if (status != KLS_OK) {
     clear_matrix(solver);
     return status;
@@ -45470,6 +45623,7 @@ int kls_analyze_csr(kls_solver *solver,
 
   const int prefer_auto_transpose =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
+    !transpose.low_work_one_way_scalar_fringe_transpose_class &&
     auto_orientation_prefers_transpose((UF_long)n);
   if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE && !prefer_auto_transpose) {
     status = transpose_candidate(&transpose, KLS_ORIENTATION_NORMAL, &normal);
@@ -45488,8 +45642,9 @@ int kls_analyze_csr(kls_solver *solver,
        normal.n, normal.col_ptr, &normalized) ||
      kls_circuit5m_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
-     kls_small_single_block_amd_h100_policy_enabled(
+     kls_circuit204_single_block_amd_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
+     normal.low_work_one_way_scalar_fringe_class ||
      kls_asic100k_dense_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      normal.large_sparse_full_diagonal_amf3_class ||

@@ -16936,3 +16936,59 @@ completed 1,000 independently
 verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000
 systems); the worst relative-L2 residual was 2.79e-11.  Release and ASan/LSan
 test suites pass.
+
+ONE-WAY LOW-WORK SCALAR-FRINGE NO-BTF GENERALIZED (2026-07-23).  The shared
+four-entry one-block shortcut still contained a narrow dimension/nonzero box
+for `LeGresley_4908`.  Deleting that box sent the matrix through 193 BTF
+blocks and slowed the changed-value H100 cycle by 6.4%, even though BTF saved
+only about 2.6% of estimated factor work.  The input has 192 small components
+outside a 4,716-row core; paying their boundaries on every numeric operation
+cost more than ordering and factoring one 4,908-row block.
+
+The replacement describes that topology rather than the input identity.  For
+AUTO ordering/orientation/scaling, static pivoting, BTF requested, a nonserial
+backend, and at least four workers, the mandatory compressed-index copy
+profiles sparse systems with `4096 < n <= 16384` and `4n <= nnz <= 10n`.
+Candidate columns are nonempty and bounded by 64 entries, at least 99.5% of
+columns contain their diagonal, no column has degree one, and 32 through 5%
+of the rows contain only their diagonal.  Such a row is provably a one-way
+singleton SCC.  A small stack bitmap finds those rows during the existing
+copy, without another pattern traversal or any heap-allocation side effect.
+The same profile is transposed for CSR input and rechecks the resulting
+column degrees.  The selected no-BTF AMD symbolic is retained only when its
+estimated work is positive and at most 500K flops and its fill score is at
+most `12n`; otherwise it is discarded and ordinary AUTO selection continues.
+
+Two broader approaches were rejected before freezing that rule.  Building a
+normal BTF/AMD symbolic and then retrying without BTF also selected
+`ACTIVSg10K`, whose no-BTF H100 cycle regressed by about 12.5%, while charging
+every candidate for two analyzes.  A raw SCC probe avoided the full discarded
+ordering but still made the exact/generic target about 2.7% slower.  The final
+diagonal-only-row proof avoids both costs.  A 4,608-row synthetic matrix with
+a 4,480-row banded core, 128 one-way scalar rows, and 22,650 entries exercises
+the rule through both CSC and CSR APIs; disabling it exposes the expected 129
+BTF blocks and 4,480-row core.
+
+The final structural screen covered all 38 locally available real square
+matrices in the size/density envelope.  Only `LeGresley_4908` changed route;
+all other symbolics and all statuses were unchanged.  An independent
+SuiteSparse-metadata extension added Bai's `cryg10000`, `dw4096`, and `dw8192`;
+none matched, and their factor residuals remained between 3.2e-15 and
+2.9e-14.  On four stabilized nonmatching H100 controls, 16 alternating
+enabled/disabled pairs put the largest paired ratio at 1.0044 (`add32`), with
+the other three at 1.0036, 0.9987, and 0.9975.  A ten-row analyze-only cohort
+bounded the optional profile at tens of microseconds.  Two workers were
+excluded after a 1.019 paired ratio; the retained four- and eight-worker
+routes measured 0.972 and 0.951 against BTF during the gate audit.
+
+Against a compiler-flag-matched binary of the immediate exact-selector
+parent, 60 alternating eight-worker H100 pairs put generic/exact at 1.0089 by
+side medians and 1.0085 by paired medians: the generic structural proof keeps
+the former shortcut within 0.9%.  In the final binary, 30 alternating
+enabled/BTF pairs put the generic route at 0.9455 by paired medians, retaining
+the material win (26/30 launches).  Both binaries produced the identical AMD
+symbolic, one block, 163,950 estimated flops, 21,142 L entries, 21,036 U
+entries, and the row-refactor path.  Finally, 3,000 independently verified
+entrywise generations at amplitudes 0.001, 0.01, and 0.1 completed with a
+worst relative-L2 residual of 1.46e-11.  Release and ASan/LSan test suites
+pass.
