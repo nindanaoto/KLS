@@ -17140,3 +17140,59 @@ within about one percent while removing all four fingerprints.  Finally, all
 99 entrywise changes on each of the eleven valid rows were independently
 verified (1,089 systems); the worst relative-L2 residual was 2.13e-16.
 Release, CTest, and ASan/LSan smoke suites pass.
+
+SPARSE DIAGONAL ROW-HUB NO-BTF GENERALIZED (2026-07-23).  The remaining
+`hvdc1` shortcut used an exact 24,800--24,900-row, 158,000--159,000-entry
+fingerprint together with its diagonal count and maximum input degree.  It
+selected normal AMD without BTF and carried a dedicated solver flag through
+scaling, ordering setup, pool prewarm, and the lean row-refactor lifecycle.
+Disabling that shortcut restores a 31-block BTF decomposition whose largest
+block has 24,508 rows, but makes the repeated-value H100 cycle materially
+slower.
+
+The replacement describes the mathematical-normal topology instead.  Under
+AUTO ordering/orientation/scaling/backend, static pivoting, requested BTF,
+eight workers, and the default 0.001 pivot tolerance, it considers
+`8192 <= n <= UINT16_MAX` and `4n <= nnz <= 10n`.  Every row and column must
+be nonempty; at least 95% of columns must contain their diagonal; normal
+column degree is bounded by 64; normal row degree is bounded by `n/64`; and
+the maximum row degree must be at least twice the maximum column degree.
+These normalized conditions identify a sparse, strongly diagonal core with a
+row hub without encoding an input size or nonzero count.  CSC and CSR compute
+the same statistics in mathematical-normal coordinates.  A raw pattern that
+matches only after transposition cannot activate the policy.  The old
+environment switch remains an alias for the generic
+`KLS_DISABLE_SPARSE_DIAGONAL_ROW_HUB_NO_BTF` diagnostic.
+
+As with the other generalized BTF selectors, the structural match is only a
+proposal.  KLS constructs a normal AMD/no-BTF symbolic and retains it only
+when estimated work is positive and at most `128n` and symbolic fill is at
+most `16n`; rejection frees that candidate and resumes ordinary AUTO
+selection.  Only a guarded one-block result enters the unscaled, direct lean
+row-refactor lifecycle.  The independent 9,216-row smoke construction has a
+localized banded core, 256 off-diagonal fringe columns, and one bounded row
+hub.  Its proposal has about 596K estimated work and 117K fill, below the
+1.18M and 147K limits.  Rewiring the same dimension, density, diagonal ratio,
+degree bounds, and hub into deterministic long chords raises work to about
+56.7B and fill to 19.9M, so the guard demonstrably rejects a structural
+lookalike.  The smoke suite also verifies changed-value CSC and CSR solves,
+the disabled 257-block fallback, and transpose-only rejection.
+
+A static profile scan over the local SuiteSparse corpus selected only `hvdc1`.
+An enabled/disabled analyze replay then covered all 46 locally available real
+or complex square files in the policy's size/density envelope.  Forty-five
+retained identical results, including the same unsupported-complex result for
+`Chevron1`; only `hvdc1` changed route.  Its accepted no-BTF factor has one
+24,842-row block, 249,072 fill score, and 1,369,362 estimated flops.  The BTF
+fallback has 31 blocks, 270,646 fill score, and 1,718,742 estimated flops.
+
+Against a compiler-flag-matched binary of the immediate exact-selector parent,
+60 alternating pinned eight-worker H100 pairs put generic/exact at 0.9981 by
+paired median; the generic binary won 33/60 launches and retained the same
+numeric route.  In the final binary, 30 enabled/BTF pairs put the generalized
+route at 0.7046 by paired median, winning all 30 launches.  Sixteen alternating
+parent/generic pairs on each of five nonmatching H100 controls measured 0.9941
+geometric mean across their paired medians, with the largest at 1.0051.  Finally,
+1,000 independently verified entrywise generations at amplitudes 0.001, 0.01,
+and 0.1 completed (3,000 changed systems); the worst relative-L2 residual was
+4.44e-13.  Release, CTest, and ASan/LSan smoke suites pass.

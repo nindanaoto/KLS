@@ -1958,6 +1958,333 @@ static int test_partial_diagonal_many_block_no_btf(void) {
   return ok;
 }
 
+static int test_sparse_diagonal_row_hub_no_btf(void) {
+  enum {
+    N = 9216,
+    FRINGE_N = 256,
+    CORE_N = N - FRINGE_N,
+    HUB_ADDITIONS = 48,
+    HUB_ROW = CORE_N / 2,
+    CORE_DEGREE = 5,
+    NNZ = CORE_DEGREE * CORE_N + FRINGE_N
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  int32_t *rp = (int32_t *)calloc((size_t)N + 1u, sizeof(*rp));
+  int32_t *ci = (int32_t *)malloc((size_t)NNZ * sizeof(*ci));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || rp == NULL || ci == NULL ||
+      initial == NULL || changed == NULL || expected == NULL || b == NULL ||
+      x == NULL) {
+    free(ap);
+    free(ai);
+    free(rp);
+    free(ci);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_name =
+    "KLS_DISABLE_SPARSE_DIAGONAL_ROW_HUB_NO_BTF";
+  const char *env_value = getenv(env_name);
+  const int had_env = env_value != NULL;
+  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
+  int ok = (env_value == NULL || saved_env != NULL) &&
+    unsetenv(env_name) == 0;
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    int32_t rows[CORE_DEGREE];
+    rows[0] = col;
+    rows[1] = col + 1 == CORE_N ? 0 : col + 1;
+    rows[2] = col == 0 ? CORE_N - 1 : col - 1;
+    rows[3] = col + 2 >= CORE_N ? col + 2 - CORE_N : col + 2;
+    rows[4] = col < HUB_ADDITIONS
+      ? HUB_ROW
+      : (col + 3 >= CORE_N ? col + 3 - CORE_N : col + 3);
+    int conflict;
+    do {
+      conflict = 0;
+      for (int32_t lane = 0; lane < CORE_DEGREE - 1; ++lane) {
+        conflict |= rows[lane] == rows[4];
+      }
+      if (!conflict) {
+        break;
+      }
+      rows[4] = rows[4] + 1 == CORE_N ? 0 : rows[4] + 1;
+    } while (1);
+    for (int32_t lane = 0; lane < CORE_DEGREE; ++lane) {
+      ai[p] = rows[lane];
+      initial[p] = lane == 0 ? 8.0 : -0.03125;
+      changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    ap[col + 1] = p;
+  }
+  for (int32_t col = CORE_N; col < N; ++col) {
+    ai[p] = CORE_N + ((col - CORE_N) ^ 1);
+    initial[p] = 3.0;
+    changed[p] = initial[p] * (p % 97 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    ok = 0;
+  }
+
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    rp[ai[entry] + 1]++;
+  }
+  for (int32_t row = 0; row < N; ++row) {
+    rp[row + 1] += rp[row];
+  }
+  int32_t *next = (int32_t *)malloc((size_t)N * sizeof(*next));
+  if (next == NULL) {
+    ok = 0;
+  } else {
+    memcpy(next, rp, (size_t)N * sizeof(*next));
+    for (int32_t col = 0; col < N; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        ci[next[ai[entry]]++] = col;
+      }
+    }
+  }
+  free(next);
+
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.75 + 0.03125 * (double)(col % 13);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create sparse diagonal row hub")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze sparse diagonal row hub")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor sparse diagonal row hub")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor sparse diagonal row hub")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve sparse diagonal row hub")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats sparse diagonal row hub")) ok = 0;
+  if (ok) {
+    ok = stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+      stats.selected_ordering == KLS_ORDERING_AMD &&
+      stats.selected_btf == 0 && stats.nblocks == 1 &&
+      stats.max_block == N && stats.estimated_flops > 0.0 &&
+      stats.estimated_flops <= 128.0 * (double)N &&
+      stats.nnz_l + stats.nnz_u <= 16 * (int64_t)N &&
+      stats.last_refactor_path == KLS_REFACTOR_PATH_ROW;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected sparse diagonal row-hub result: "
+              "orientation=%s ordering=%s btf=%d blocks=%" PRId64
+              " max=%" PRId64 " est=%.17g fill=%" PRId64
+              " path=%s x0=%.17g xlast=%.17g\n",
+              kls_orientation_name(stats.selected_orientation),
+              kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+              stats.nblocks, stats.max_block, stats.estimated_flops,
+              stats.nnz_l + stats.nnz_u,
+              kls_refactor_path_name(stats.last_refactor_path),
+              x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create CSR sparse diagonal row hub")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csr(
+                          solver, KLS_INDEX_INT32, N, rp, ci, 0, &options),
+                        "analyze CSR sparse diagonal row hub")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats CSR sparse diagonal row hub")) ok = 0;
+  if (ok && !(stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+              stats.selected_ordering == KLS_ORDERING_AMD &&
+              stats.selected_btf == 0 && stats.nblocks == 1 &&
+              stats.max_block == N)) {
+    fprintf(stderr,
+            "unexpected CSR sparse diagonal row-hub route: "
+            "orientation=%s ordering=%s btf=%d blocks=%" PRId64
+            " max=%" PRId64 " est=%.17g\n",
+            kls_orientation_name(stats.selected_orientation),
+            kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+            stats.nblocks, stats.max_block, stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  /* The same compressed arrays describe CSR(A-transpose).  Its internal
+     transpose candidate has A's raw row-hub profile, but the policy is only
+     valid in mathematical normal coordinates and must not activate. */
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create transpose-only sparse row hub")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csr(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze transpose-only sparse row hub")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats transpose-only sparse row hub")) ok = 0;
+  if (ok && !(stats.selected_orientation == KLS_ORIENTATION_TRANSPOSE &&
+              stats.selected_btf == 1 && stats.nblocks == FRINGE_N + 1 &&
+              stats.max_block == CORE_N)) {
+    fprintf(stderr,
+            "unexpected transpose-only sparse row-hub route: "
+            "orientation=%s ordering=%s btf=%d blocks=%" PRId64
+            " max=%" PRId64 " est=%.17g\n",
+            kls_orientation_name(stats.selected_orientation),
+            kls_ordering_name(stats.selected_ordering), stats.selected_btf,
+            stats.nblocks, stats.max_block, stats.estimated_flops);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  if (ok && setenv(env_name, "1", 1) != 0) ok = 0;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create sparse row-hub BTF control")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze sparse row-hub BTF control")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats sparse row-hub BTF control")) ok = 0;
+  if (ok && !(stats.selected_btf == 1 &&
+              stats.nblocks == FRINGE_N + 1 &&
+              stats.max_block == CORE_N)) {
+    fprintf(stderr,
+            "unexpected sparse row-hub BTF control: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 "\n",
+            stats.selected_btf, stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  /* Preserve size, density, diagonal coverage, bounded column degree, and
+     moderate row hubs, but replace the local bands with deterministic long
+     chords.  The one-block symbolic must cross an absolute guard. */
+  if (ok && unsetenv(env_name) != 0) ok = 0;
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    for (int32_t lane = 1; lane < CORE_DEGREE; ++lane) {
+      if (lane == CORE_DEGREE - 1 && col < HUB_ADDITIONS) {
+        ai[ap[col] + lane] = HUB_ROW;
+        continue;
+      }
+      int32_t row =
+        (int32_t)(((int64_t)col * (37 + 12 * lane) + 97 * lane + 11) %
+                  CORE_N);
+      int conflict;
+      do {
+        conflict = row == col;
+        for (int32_t prior = 1; prior < lane; ++prior) {
+          conflict |= ai[ap[col] + prior] == row;
+        }
+        conflict |= col < HUB_ADDITIONS && row == HUB_ROW;
+        if (!conflict) {
+          break;
+        }
+        row = row + 1 == CORE_N ? 0 : row + 1;
+      } while (1);
+      ai[ap[col] + lane] = row;
+    }
+  }
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create high-work sparse row-hub guard")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze high-work sparse row-hub guard")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats high-work sparse row-hub guard")) ok = 0;
+  if (ok && !(stats.selected_btf == 1 && stats.nblocks > 1)) {
+    fprintf(stderr,
+            "unexpected high-work sparse row-hub guard: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 " est=%.17g fill=%" PRId64
+            "\n", stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.estimated_flops, stats.nnz_l + stats.nnz_u);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  kls_options forced_no_btf = options;
+  forced_no_btf.orientation = KLS_ORIENTATION_NORMAL;
+  forced_no_btf.ordering = KLS_ORDERING_AMD;
+  forced_no_btf.scale = -1;
+  forced_no_btf.use_btf = 0;
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create forced sparse row-hub no-BTF")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0,
+                          &forced_no_btf),
+                        "analyze forced sparse row-hub no-BTF")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats forced sparse row-hub no-BTF")) ok = 0;
+  if (ok && !(stats.selected_btf == 0 && stats.nblocks == 1 &&
+              stats.max_block == N &&
+              (stats.estimated_flops > 128.0 * (double)N ||
+               stats.nnz_l + stats.nnz_u > 16 * (int64_t)N))) {
+    fprintf(stderr,
+            "unexpected forced sparse row-hub proposal: btf=%d "
+            "blocks=%" PRId64 " max=%" PRId64 " est=%.17g fill=%" PRId64
+            "\n", stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.estimated_flops, stats.nnz_l + stats.nnz_u);
+    ok = 0;
+  }
+  kls_destroy(solver);
+
+  if (!(had_env && saved_env == NULL) &&
+      !restore_env_value(env_name, had_env, saved_env)) {
+    ok = 0;
+  }
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(rp);
+  free(ci);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_low_work_one_way_scalar_fringe_no_btf(void) {
   enum {
     CORE_N = 4480,
@@ -18995,6 +19322,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_partial_diagonal_many_block_no_btf()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_sparse_diagonal_row_hub_no_btf()) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_one_way_scalar_fringe_no_btf()) {
