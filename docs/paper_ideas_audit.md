@@ -17384,3 +17384,57 @@ and 30.66 ms for the parent.  Finally, `circuit_3` and the three independent
 positives each completed 1,000 verified entrywise generations at amplitudes
 0.001, 0.01, and 0.1 (12,000 changed systems); the worst relative-L2 residual
 was 1.16e-10.  Release and ASan/LSan test suites pass.
+
+SMALL-COMPACT DEEP-FILL WORKER SPIN GENERALIZED (2026-07-23).  The remaining
+`ACTIVSg2000` repeated-cycle shortcut required a 3,990--4,010-row,
+28,450--28,550-entry input, 255--270 BTF blocks, a 3,720--3,750-row largest
+block, 83,000--84,000 factor entries, and 1.9M--2.1M factor flops.  Its direct
+scalar-lean selection was redundant: the existing small-compact dominant-BTF
+rule independently reaches the same lean engine.  Its only unique effect was
+extending the eight-worker idle-spin window from 4,096 to 200,000 iterations.
+
+The first normalized replacement was deliberately challenged before it was
+retained.  A 4,608-row dense-separator construction passed its component,
+work, and fill caps but lost 6.4% in the projected cycle and 9.3% at steady
+state with the long spin.  A second layered construction closely matched the
+target's block count, coverage, and work per row yet lost 2.6% and 4.2%.
+Those counterexamples showed that compact dominant-BTF geometry alone was
+still a benchmark proxy.  A bounded runtime crossover probe was also tested
+and discarded: changing the sleep state during calibration cost more than
+the sub-percent policy win and its short alternating samples did not predict
+the settled 100-update rate.
+
+The retained policy instead describes the factor and its executable
+dependency schedule.  It starts from the established small-compact
+dominant-BTF class, requires the mathematical-normal unscaled frame, full
+structural rank, no off-diagonal pivots, nudges, or perturbations, and exactly
+eight non-serial workers.  Factor fill must be at least `16n`, factor work at
+most `2048n`, dependency depth at least `ceil(n/20)`, and maximum dependency
+width at most `n/2`.  These normalized boundaries separate a deep,
+fill-amplifying numeric from the shallow or almost fully wide counterexamples;
+only that state receives the 200,000-iteration window.  The former
+matrix-specific disable variable remains an alias for
+`KLS_DISABLE_SMALL_COMPACT_DOMINANT_BTF_WORKER_SPIN`.
+
+The smoke suite supplies an independent positive rather than resizing the
+power-grid input.  Its 4,608 rows contain a 4,350-row strongly connected core,
+350 deterministic sparse-expander separators, 1,000 four-row chains, and 258
+scalar fringe blocks.  AMD produces 259 blocks, a 4,350-row largest block,
+about 7.93M flops, 78,702 factor entries, 234 dependency levels, and maximum
+width 1,258.  Enabled eight-worker execution selects the long window; the
+generic disable, compatibility alias, and four-worker control retain the
+default window.  Every mode refactors and solves changed values accurately.
+
+A historical-profile scan over all 243 local Matrix Market files found only
+`ACTIVSg2000` inside the complete normalized real-matrix boundary; the
+independent expander proves reach outside the old dimensions, density, block
+count, fill, and work ranges.  The low-fill layered and wide constructions
+remain explicit negative benchmarks and retain 4,096 iterations.  Thirty-six
+alternating pinned AUTO H100 comparisons put generic/exact-parent at 0.9978 by
+paired projected-cycle median and 0.9970 at steady state; generic/disabled was
+0.9932 and 0.9891.  On the independent expander, 30 pairs put generic at
+0.9978 of the exact-selector parent and 0.9969 of its disabled control for the
+projected cycle.  Finally, the target and expander each completed 1,000
+verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000
+changed systems total); the worst relative-L2 residual was 1.30e-10.  Release,
+CTest, and ASan/LSan smoke suites pass.

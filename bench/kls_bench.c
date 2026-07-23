@@ -2117,7 +2117,9 @@ int main(int argc, char **argv) {
            ",\"row_refactor_last_row_solve\":%d"
            ",\"row_refactor_row_solve_run_count\":%" PRId64
            ",\"verified_rhs_reused\":%d"
-           ",\"verified_rhs_reuse_count\":%" PRId64,
+           ",\"verified_rhs_reuse_count\":%" PRId64
+           ",\"refactor_lean_choice\":%d"
+           ",\"egraph_worker_spin_iters\":%" PRId64,
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2338,7 +2340,9 @@ int main(int argc, char **argv) {
            stats.row_refactor_last_row_solve,
            stats.row_refactor_row_solve_run_count,
            stats.verified_rhs_reused,
-           stats.verified_rhs_reuse_count);
+           stats.verified_rhs_reuse_count,
+           stats.refactor_lean_choice,
+           stats.egraph_worker_spin_iters);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64

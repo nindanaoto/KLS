@@ -30408,34 +30408,34 @@ static int kls_is_onetone2_h100_cycle(const kls_solver *solver) {
          solver->common.flops <= 2.2e8;
 }
 
-static int kls_is_activsg2000_h100_cycle(const kls_solver *solver) {
+/* A high-fill compact factor with a deep, moderately wide dependency graph
+   keeps the scalar lean crew useful across the short solve/update gap.  The
+   normalized fill, work, depth, and width boundary covers both the power-grid
+   case that motivated the policy and an independently generated sparse
+   expander, while rejecting equally sized shallow/low-fill counterexamples. */
+static int kls_small_compact_deep_fill_worker_spin_policy_enabled(
+  const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->col_ptr == NULL ||
+      getenv("KLS_DISABLE_SMALL_COMPACT_DOMINANT_BTF_WORKER_SPIN") != NULL ||
+      /* Keep the former diagnostic switch as an alias for the generic
+         policy instead of retaining a matrix-specific selector. */
       getenv("KLS_DISABLE_ACTIVSG2000_H100_POLICY") != NULL ||
-      solver->options.orientation != KLS_ORIENTATION_AUTO ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->options.scale != KLS_SCALE_AUTO ||
-      solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 || !solver->options.use_btf ||
-      !solver->options.static_pivoting ||
-      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
+      solver->options.threads != 8 ||
+      solver->options.backend == KLS_BACKEND_SERIAL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->common.scale != -1 || solver->numeric->Rs != NULL ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
       !solver->symbolic->do_btf ||
-      solver->symbolic->structural_rank != solver->n) {
+      solver->symbolic->structural_rank != solver->n ||
+      solver->common.noffdiag != 0u || solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !kls_egraph_small_compact_dominant_btf_shape(solver) ||
+      solver->refactor_level_count < (solver->n + 19u) / 20u ||
+      2u * solver->refactor_level_max_width > solver->n ||
+      solver->common.flops > 2048.0 * (double)solver->n) {
     return 0;
   }
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return solver->n >= 3990u && solver->n <= 4010u &&
-    solver->col_ptr[solver->n] >= 28450u &&
-    solver->col_ptr[solver->n] <= 28550u &&
-    solver->symbolic->nblocks >= 255u &&
-    solver->symbolic->nblocks <= 270u &&
-    solver->symbolic->maxblock >= 3720u &&
-    solver->symbolic->maxblock <= 3750u &&
-    fill >= 83000u && fill <= 84000u &&
-    solver->common.flops >= 1.9e6 && solver->common.flops <= 2.1e6;
+  return fill >= 16u * solver->n;
 }
 
 /* Reusing a residual verdict depends on the factor epoch and numeric frame,
@@ -43663,6 +43663,9 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 static void fill_numeric_stats(kls_solver *solver) {
   kls_dbg_snapshot_numeric(solver);
   fill_build_stats(&solver->stats);
+  solver->stats.refactor_lean_choice = solver->lean_choice;
+  solver->stats.egraph_worker_spin_iters = solver->egraph_pool != NULL
+    ? (int64_t)solver->egraph_pool->worker_spin_iters : 0;
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.selected_scale = (int)solver->common.scale;
   solver->stats.selected_pivot_tolerance = solver->common.tol;
@@ -108044,7 +108047,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
         ? 200000u :
       kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr)
         ? 65536u :
-      kls_is_activsg2000_h100_cycle(solver)
+      kls_small_compact_deep_fill_worker_spin_policy_enabled(solver)
         ? 200000u :
       kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver)
         ? 0u :
@@ -155122,13 +155125,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     /* This retained factor sits just above the low-work KLU crossover.  Its
        compact scalar-row walk avoids enough mapped-column bookkeeping to
        select it without timing and publishing discarded numeric arms. */
-    solver->lean_choice = 1;
-  }
-  if (solver->lean_choice == 0 &&
-      kls_is_activsg2000_h100_cycle(solver)) {
-    /* This moderately wide power-network block benefits from all eight
-       streams, but the scalar row walk avoids the paired walk's second
-       workspace and synchronization traffic. */
     solver->lean_choice = 1;
   }
   if (solver->lean_choice == 0 &&

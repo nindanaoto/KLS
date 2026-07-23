@@ -5880,6 +5880,246 @@ static int test_verified_rhs_reuse_contract(void) {
   return ok;
 }
 
+static int test_small_compact_deep_fill_worker_spin(void) {
+  enum {
+    CORE_N = 4350,
+    SEPARATOR_N = 350,
+    LEAF_N = 4000,
+    GROUP_N = LEAF_N / 4,
+    FRINGE_N = 258,
+    N = CORE_N + FRINGE_N,
+    NNZ = N + 12 * GROUP_N
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || initial == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL) {
+    free(ap);
+    free(ai);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_names[] = {
+    "KLS_DISABLE_SMALL_COMPACT_DOMINANT_BTF_WORKER_SPIN",
+    "KLS_DISABLE_ACTIVSG2000_H100_POLICY",
+    "KLS_LEAN_CHOICE",
+    "KLS_EGRAPH_WORKER_SPIN_OVERRIDE"
+  };
+  enum { ENV_COUNT = (int)(sizeof(env_names) / sizeof(env_names[0])) };
+  char *saved_env[ENV_COUNT];
+  int had_env[ENV_COUNT];
+  int ok = 1;
+  for (int i = 0; i < ENV_COUNT; ++i) {
+    const char *value = getenv(env_names[i]);
+    had_env[i] = value != NULL;
+    saved_env[i] = value != NULL ? strdup(value) : NULL;
+    if ((value != NULL && saved_env[i] == NULL) ||
+        unsetenv(env_names[i]) != 0) {
+      ok = 0;
+    }
+  }
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < LEAF_N; ++col) {
+    const int32_t lane = col % 4;
+    if (lane > 0) {
+      ai[p] = col - 1;
+      initial[p++] = -0.15;
+    }
+    ai[p] = col;
+    initial[p++] = 16.0;
+    if (lane < 3) {
+      ai[p] = col + 1;
+      initial[p++] = -0.15;
+    } else {
+      const int32_t group = col / 4;
+      int32_t endpoints[3];
+      endpoints[0] = group % SEPARATOR_N;
+      if (group < SEPARATOR_N) {
+        endpoints[1] = (endpoints[0] + 1) % SEPARATOR_N;
+        endpoints[2] = (endpoints[0] + 17) % SEPARATOR_N;
+      } else {
+        endpoints[1] = (group * 37 + 17) % SEPARATOR_N;
+        endpoints[2] = (group * 73 + 29) % SEPARATOR_N;
+      }
+      for (int k = 1; k < 3; ++k) {
+        while (endpoints[k] == endpoints[0] ||
+               (k == 2 && endpoints[k] == endpoints[1])) {
+          endpoints[k] = (endpoints[k] + 1) % SEPARATOR_N;
+        }
+      }
+      for (int i = 0; i < 2; ++i) {
+        for (int j = i + 1; j < 3; ++j) {
+          if (endpoints[j] < endpoints[i]) {
+            const int32_t swap = endpoints[i];
+            endpoints[i] = endpoints[j];
+            endpoints[j] = swap;
+          }
+        }
+      }
+      for (int k = 0; k < 3; ++k) {
+        ai[p] = LEAF_N + endpoints[k];
+        initial[p++] = -0.15;
+      }
+    }
+    ap[col + 1] = p;
+  }
+  for (int32_t col = LEAF_N; col < CORE_N; ++col) {
+    const int32_t separator = col - LEAF_N;
+    for (int32_t group = 0; group < GROUP_N; ++group) {
+      int32_t endpoints[3];
+      endpoints[0] = group % SEPARATOR_N;
+      if (group < SEPARATOR_N) {
+        endpoints[1] = (endpoints[0] + 1) % SEPARATOR_N;
+        endpoints[2] = (endpoints[0] + 17) % SEPARATOR_N;
+      } else {
+        endpoints[1] = (group * 37 + 17) % SEPARATOR_N;
+        endpoints[2] = (group * 73 + 29) % SEPARATOR_N;
+      }
+      for (int k = 1; k < 3; ++k) {
+        while (endpoints[k] == endpoints[0] ||
+               (k == 2 && endpoints[k] == endpoints[1])) {
+          endpoints[k] = (endpoints[k] + 1) % SEPARATOR_N;
+        }
+      }
+      if (separator == endpoints[0] || separator == endpoints[1] ||
+          separator == endpoints[2]) {
+        ai[p] = 4 * group + 3;
+        initial[p++] = -0.15;
+      }
+    }
+    ai[p] = col;
+    initial[p++] = 16.0;
+    ap[col + 1] = p;
+  }
+  for (int32_t col = CORE_N; col < N; ++col) {
+    ai[p] = col;
+    initial[p++] = 2.0;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    fprintf(stderr, "unexpected compact dominant BTF nnz: %d/%d\n",
+            (int)p, (int)NNZ);
+    ok = 0;
+  }
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    changed[entry] = initial[entry] *
+      (1.0 + 1.0e-4 * (double)(entry % 11 - 5));
+  }
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.5 + 0.03125 * (double)(col % 17);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  /* Enabled, generic-disable, compatibility-alias, and a four-worker
+     concurrency control all retain the same factor and scalar lean engine.
+     Only the eligible eight-worker case extends the crew's spin window. */
+  for (int mode = 0; ok && mode < 4; ++mode) {
+    if (mode == 1 && setenv(env_names[0], "1", 1) != 0) {
+      ok = 0;
+    }
+    if (mode == 2 && setenv(env_names[1], "1", 1) != 0) {
+      ok = 0;
+    }
+    kls_options options;
+    kls_default_options(&options);
+    options.threads = mode == 3 ? 4 : 8;
+    options.ordering = KLS_ORDERING_AMD;
+    options.orientation = KLS_ORIENTATION_NORMAL;
+    options.scale = -1;
+    options.static_pivoting = 0;
+
+    kls_solver *solver = NULL;
+    if (ok && !require_ok(kls_create(&solver),
+                          "create compact dominant BTF spin")) ok = 0;
+    if (ok && !require_ok(kls_analyze_csc(
+                            solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                          "analyze compact dominant BTF spin")) ok = 0;
+    if (ok && !require_ok(kls_factor(solver, initial),
+                          "factor compact dominant BTF spin")) ok = 0;
+    if (ok && !require_ok(kls_refactor(solver, changed),
+                          "refactor compact dominant BTF spin")) ok = 0;
+    memset(x, 0, (size_t)N * sizeof(*x));
+    if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                          "solve compact dominant BTF spin")) ok = 0;
+
+    kls_stats stats;
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    if (ok && !require_ok(kls_get_stats(solver, &stats),
+                          "stats compact dominant BTF spin")) ok = 0;
+    const int enabled = mode == 0;
+    if (ok && !(stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+                stats.selected_ordering == KLS_ORDERING_AMD &&
+                stats.selected_scale == -1 && stats.selected_btf == 1 &&
+                stats.nblocks == FRINGE_N + 1 &&
+                stats.max_block == CORE_N && stats.offdiag_pivots == 0 &&
+                stats.factor_flops >= 2.0e6 &&
+                stats.factor_flops <= 2048.0 * (double)N &&
+                stats.nnz_l + stats.nnz_u >= 16 * N &&
+                stats.refactor_dependency_levels >= (N + 19) / 20 &&
+                2 * stats.refactor_dependency_max_width <= N &&
+                stats.refactor_lean_choice == 1 &&
+                (enabled
+                   ? stats.egraph_worker_spin_iters == 200000
+                   : stats.egraph_worker_spin_iters != 200000))) {
+      fprintf(stderr,
+              "unexpected compact dominant BTF spin mode %d: blocks=%" PRId64
+              " max=%" PRId64 " flops=%.17g fill=%" PRId64
+              " levels=%" PRId64 " width=%" PRId64
+              " lean=%d spin=%" PRId64 "\n",
+              mode, stats.nblocks, stats.max_block, stats.factor_flops,
+              stats.nnz_l + stats.nnz_u,
+              stats.refactor_dependency_levels,
+              stats.refactor_dependency_max_width,
+              stats.refactor_lean_choice, stats.egraph_worker_spin_iters);
+      ok = 0;
+    }
+    for (int32_t row = 0; ok && row < N; ++row) {
+      if (fabs(x[row] - expected[row]) >
+          1.0e-8 * (1.0 + fabs(expected[row]))) {
+        fprintf(stderr,
+                "unexpected compact dominant BTF solution at %d:"
+                " %.17g != %.17g\n",
+                (int)row, x[row], expected[row]);
+        ok = 0;
+      }
+    }
+    kls_destroy(solver);
+    if (mode == 1 && unsetenv(env_names[0]) != 0) ok = 0;
+    if (mode == 2 && unsetenv(env_names[1]) != 0) ok = 0;
+  }
+
+  for (int i = 0; i < ENV_COUNT; ++i) {
+    if (!(had_env[i] && saved_env[i] == NULL) &&
+        !restore_env_value(env_names[i], had_env[i], saved_env[i])) {
+      ok = 0;
+    }
+    free(saved_env[i]);
+  }
+  free(ap);
+  free(ai);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_btf_singleton_row_refactor_pattern(void) {
   const int32_t ap[] = {0, 1, 3, 5, 6};
   const int32_t ai[] = {0, 1, 2, 1, 2, 3};
@@ -20144,6 +20384,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_verified_rhs_reuse_contract()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_small_compact_deep_fill_worker_spin()) {
     return EXIT_FAILURE;
   }
   if (!test_btf_singleton_row_refactor_pattern()) {
