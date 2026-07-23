@@ -30438,34 +30438,34 @@ static int kls_is_activsg2000_h100_cycle(const kls_solver *solver) {
     solver->common.flops >= 1.9e6 && solver->common.flops <= 2.1e6;
 }
 
-static int kls_is_circuit_3_h100_cycle(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->col_ptr == NULL ||
-      getenv("KLS_DISABLE_CIRCUIT3_H100_POLICY") != NULL ||
-      solver->options.orientation != KLS_ORIENTATION_AUTO ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->options.scale != KLS_SCALE_AUTO ||
-      solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 || !solver->options.use_btf ||
-      !solver->options.static_pivoting ||
-      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->common.scale != -1 || solver->numeric->Rs != NULL ||
-      !solver->symbolic->do_btf ||
-      solver->symbolic->structural_rank != solver->n) {
-    return 0;
-  }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return solver->n >= 12100u && solver->n <= 12150u &&
-    solver->col_ptr[solver->n] >= 48000u &&
-    solver->col_ptr[solver->n] <= 48300u &&
-    solver->symbolic->nblocks >= 4500u &&
-    solver->symbolic->nblocks <= 4550u &&
-    solver->symbolic->maxblock >= 7550u &&
-    solver->symbolic->maxblock <= 7650u &&
-    fill >= 67500u && fill <= 69000u &&
-    solver->common.flops >= 1.9e5 && solver->common.flops <= 2.2e5;
+/* Reusing a residual verdict depends on the factor epoch and numeric frame,
+   not on a matrix fingerprint.  A solve already covered by an ordinary
+   self-check first has to pass it.  Only a byte-identical RHS against that
+   unchanged, plain-fp64 factor can then reuse the verdict; factor/refactor
+   entry invalidates it.  The selected triangular solve still runs in full;
+   only its redundant residual check is reused. */
+static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric != NULL && solver->col_ptr != NULL &&
+    getenv("KLS_DISABLE_VERIFIED_RHS_REUSE") == NULL &&
+    /* Retain the former diagnostic switch as an alias for the generic
+       capability rather than a matrix-specific selector. */
+    getenv("KLS_DISABLE_CIRCUIT3_H100_POLICY") == NULL &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    !solver->diagonal_equiv_active && !solver->numeric_is_predicted &&
+    !solver->fp32_last_used && !solver->numeric_needs_refinement &&
+    !solver->tight_tol_refine && !solver->solve_recovery_active &&
+    solver->pivot_nudge_count == 0u &&
+    solver->common.kls_perturb_count == 0u &&
+    solver->common.tol >= 1.0e-6 &&
+    /* Either the retained row numeric or the generic factor contract must
+       already require a residual.  Reuse never creates a new accuracy
+       shortcut for a factor that was not being checked. */
+    (solver->row_solve_self_check || solver->solve_contract_probe == 2) &&
+    (solver->solve_refine_values != NULL || solver->values != NULL);
 }
 
 static int kls_is_bips98_lean_pattern(const kls_solver *solver) {
@@ -156318,17 +156318,18 @@ static int solve_impl(kls_solver *solver,
     solver->stats.row_refactor_last_compact_panel_solve_values = 0;
     solver->stats.row_refactor_last_compact_panel_group_solve_rows = 0;
     solver->stats.row_refactor_last_compact_panel_group_solve_entries = 0;
+    solver->stats.verified_rhs_reused = 0;
   }
-  /* A verified-RHS entry is armed only by a raw-L2 check below and is
-     invalidated before every factor/refactor.  Therefore a byte-identical
-     RHS can reuse that exact route decision while still executing the full
-     triangular solve; a changed factor or RHS returns to residual checking. */
+  /* The lean GEMAT route owns an independently verified i32 solve stream.
+     The generic verified-RHS capability below deliberately does not enter
+     here: reusing a residual verdict must not switch solve engines. */
   if (!solver->in_solve_refinement && !transpose && nrhs == 1 && b != x &&
       ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
-      (solver->lean_gemat_row_factor_active ||
-       kls_is_circuit_3_h100_cycle(solver)) &&
+      solver->lean_gemat_row_factor_active &&
       kls_verified_rhs_matches(solver, b) &&
       kls_i32_solve_ready(solver)) {
+    solver->stats.verified_rhs_reused = 1;
+    solver->stats.verified_rhs_reuse_count++;
     solver->common.status = TRILINOS_KLU_OK;
     const int prepared_rhs =
       solver->verified_factor_rhs != NULL;
@@ -156803,20 +156804,20 @@ static int solve_impl(kls_solver *solver,
     !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
     solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u;
-  const int circuit3_raw_l2_contract =
+  const int verified_rhs_cache_candidate =
     !kernel_transpose && nrhs == 1 && b != x &&
-    kls_is_circuit_3_h100_cycle(solver) &&
-    solver->row_perm == NULL && solver->user_col_perm == NULL &&
-    solver->row_scale == NULL && solver->col_scale == NULL &&
-    !solver->numeric_is_predicted && !solver->fp32_last_used &&
-    !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
-    solver->pivot_nudge_count == 0u &&
-    solver->common.kls_perturb_count == 0u;
+    kls_verified_rhs_reuse_capable(solver);
   const int repeated_rhs_raw_l2_contract =
-    tsopf_b9_raw_l2_contract || circuit3_raw_l2_contract;
+    tsopf_b9_raw_l2_contract;
+  const int verified_rhs_contract =
+    repeated_rhs_raw_l2_contract || verified_rhs_cache_candidate;
   const int repeated_rhs_verified =
-    repeated_rhs_raw_l2_contract &&
+    verified_rhs_contract &&
     kls_verified_rhs_matches(solver, b);
+  if (repeated_rhs_verified) {
+    solver->stats.verified_rhs_reused = 1;
+    solver->stats.verified_rhs_reuse_count++;
+  }
   if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       !repeated_rhs_verified &&
       (solver->numeric_needs_refinement || solver->row_solve_self_check ||
@@ -156938,9 +156939,9 @@ static int solve_impl(kls_solver *solver,
         solver->symbolic->maxblock >= 206400u;
       double bmax = 0.0;
       double bnorm2 = 0.0;
-      if (repeated_rhs_raw_l2_contract ||
+      if (verified_rhs_contract ||
           retained_preconditioner_contract || mac_econ_accuracy_contract) {
-        const int cached_rhs_norm = repeated_rhs_raw_l2_contract &&
+        const int cached_rhs_norm = verified_rhs_contract &&
           solver->verified_rhs != NULL &&
           (nloc == 0u ||
            memcmp(solver->verified_rhs, brhs,
@@ -156953,7 +156954,7 @@ static int solve_impl(kls_solver *solver,
             bnorm2 += brhs[i] * brhs[i];
           }
         }
-        if (mac_econ_accuracy_contract) {
+        if (mac_econ_accuracy_contract || verified_rhs_cache_candidate) {
           for (UF_long i = 0; i < nloc; ++i) {
             const double av = fabs(brhs[i]);
             bmax = bmax < av ? av : bmax;
@@ -157082,8 +157083,7 @@ static int solve_impl(kls_solver *solver,
         }
         double rmax = 0.0;
         double rnorm2 = 0.0;
-        const double raw_l2_limit_squared =
-          circuit3_raw_l2_contract ? 1.0e-18 : 36.0e-18;
+        const double raw_l2_limit_squared = 36.0e-18;
         if (repeated_rhs_raw_l2_contract && iter == 0) {
 #pragma omp simd reduction(+:rnorm2)
           for (UF_long i = 0; i < nloc; ++i) {
@@ -157113,7 +157113,7 @@ static int solve_impl(kls_solver *solver,
           for (UF_long i = 0; i < nloc; ++i) {
             const double av = fabs(residual[i]);
             rmax = rmax < av ? av : rmax;
-            if (repeated_rhs_raw_l2_contract ||
+            if (verified_rhs_contract ||
                 retained_preconditioner_contract ||
                 mac_econ_accuracy_contract) {
               rnorm2 += residual[i] * residual[i];
@@ -157130,6 +157130,14 @@ static int solve_impl(kls_solver *solver,
         const int raw_l2_ok = repeated_rhs_raw_l2_contract && iter == 0 &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= raw_l2_limit_squared * l2_scale;
+        /* The ordinary row self-check remains authoritative.  Merely record
+           its raw-solve verdict when that same accepted solution also has a
+           strict relative-L2 margin; a miss follows the unchanged refinement
+           controller and is not cached. */
+        const int verified_rhs_cache_ok =
+          verified_rhs_cache_candidate && iter == 0 && rmax <= target &&
+          isfinite(bnorm2) && isfinite(rnorm2) &&
+          rnorm2 <= 1.0e-18 * l2_scale;
         const int retained_preconditioner_l2_ok =
           retained_preconditioner_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
@@ -157145,7 +157153,7 @@ static int solve_impl(kls_solver *solver,
           rnorm2 <= mac_econ_l2_limit_squared * l2_scale;
         retained_preconditioner_verified |= retained_preconditioner_l2_ok;
         mac_econ_accuracy_verified |= mac_econ_l2_ok;
-        if (raw_l2_ok) {
+        if (raw_l2_ok || verified_rhs_cache_ok) {
           kls_remember_verified_rhs(solver, brhs, bnorm2);
         }
         if (getenv("KLS_TRACE_REFINE") != NULL) {
@@ -157153,11 +157161,12 @@ static int solve_impl(kls_solver *solver,
                   "KLS refine iter=%d rmax=%.3e target=%.3e rel2=%.3e"
                   " l2ok=%d\n",
                   iter, rmax, target,
-                  (repeated_rhs_raw_l2_contract ||
+                  (verified_rhs_contract ||
                    retained_preconditioner_contract ||
                    mac_econ_accuracy_contract)
                     ? sqrt(rnorm2 / l2_scale) : -1.0,
-                  raw_l2_ok || retained_preconditioner_l2_ok ||
+                  raw_l2_ok || verified_rhs_cache_ok ||
+                    retained_preconditioner_l2_ok ||
                     mac_econ_l2_ok);
         }
         if (initial_rmax < 0.0) {

@@ -17330,3 +17330,57 @@ immediate exact-selector parent, 20 pinned pairs per original input and 24 on
 for a 0.979 per-matrix geometric mean.  Separate 15-pair comparisons still put
 KLS ahead of CKTSO at 0.962 and 0.945 on the DC and transient inputs.  Release
 and ASan/LSan test suites pass.
+
+VERIFIED IDENTICAL-RHS REUSE GENERALIZED (2026-07-23).  The remaining
+`circuit_3` solve shortcut recognized one H100 point through narrow ranges for
+dimension, input entries, BTF block count, largest block, numeric fill, and
+factor flops.  After one raw solve passed a relative-L2 check, byte-identical
+right-hand sides could avoid a repeated residual pass.  The optimization was
+useful, but the eligibility test described the benchmark rather than the
+property that made reuse safe.
+
+The replacement is a factor-epoch capability.  It is available only in the
+mathematical-normal, unscaled and unpermuted frame, with a plain FP64 numeric:
+no predicted factor, diagonal-equivalent wrapper, refinement debt, recovery,
+pivot nudge, or perturbation is allowed.  The retained row numeric or generic
+factor contract must already require a residual check.  The first raw solve
+must satisfy its unchanged max-norm acceptance rule and also prove a strict
+relative-L2 residual no greater than `1e-9`.  A later call can reuse that
+verdict only for a byte-identical RHS and the same factor epoch.  Factor and
+refactor entry invalidate the record, and a different RHS returns to the full
+check.  Importantly, reuse suppresses only the redundant residual SpMV: the
+same selected triangular-solve engine still executes in full.
+
+That last invariant came from an adversarial check, not an assumption.  An
+early draft allowed the generic record to enter a different retained-i32
+solve stream.  The group-disjoint holdout matrix `iprob` exposed the error
+under an explicitly enabled row route: its top-level residual changed from
+about `3.1e-16` to `5.9e-1`.  Removing the engine switch restored enabled and
+disabled results to `3.1e-16` while retaining the residual-pass saving.  The
+smoke suite now checks the same-route invariant as well as identical-RHS
+reuse, changed-RHS rejection, factor-epoch invalidation, the generic disable
+switch, and the former circuit-specific switch as a compatibility alias.
+Two tail statistics expose whether the last solve reused a verdict and the
+cumulative reuse count.
+
+The default-route screen covered all 25 extended-circuit inputs and the 40
+successful members of the independently sampled development and holdout
+manifests; the latter sets contain no paper-benchmark groups.  Only
+`circuit_3` already selected an eligible checked route under AUTO, while the
+other 64 successful cases remained conservative non-activations.  A separate
+explicit checked-row screen across twelve small development/holdout matrices
+activated the same generic contract on three unrelated patterns:
+`t3dl_e` (20,360 diagonal rows), `iprob` (3,001 rows and 9,000 entries), and
+`lung1` (1,650 rows and 7,419 entries).  Thus the rule is not a renamed size
+box even though AUTO currently needs it on only one paper case.
+
+Twenty alternating pinned enabled/disabled pairs on each of those three
+out-of-family positives put repeated-solve ratios at 0.743, 0.745, and 0.760;
+reuse won all 60 launches.  Sixteen pinned comparisons on `circuit_3` put the
+generic implementation at 1.009 of the compiler-identical exact-policy parent
+by paired solve median, while generic/disabled was 0.533 and won all sixteen
+launches.  The median projected cycles were 30.62 ms for the generic binary
+and 30.66 ms for the parent.  Finally, `circuit_3` and the three independent
+positives each completed 1,000 verified entrywise generations at amplitudes
+0.001, 0.01, and 0.1 (12,000 changed systems); the worst relative-L2 residual
+was 1.16e-10.  Release and ASan/LSan test suites pass.

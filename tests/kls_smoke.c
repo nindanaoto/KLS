@@ -5645,6 +5645,241 @@ static int test_btf_row_refactor_offblock_refresh(void) {
          run_btf_row_refactor_offblock_refresh(2);
 }
 
+static int test_verified_rhs_reuse_contract(void) {
+  const int32_t ap[] = {0, 2, 4, 7, 9};
+  const int32_t ai[] = {0, 1, 0, 1, 0, 2, 3, 2, 3};
+  const double ax0[] = {
+    2.0, 1.0, 1.0, 2.0,
+    0.5, 2.0, 1.0, 1.0, 2.0
+  };
+  const double ax1[] = {
+    2.5, 1.2, 0.8, 2.25,
+    1.75, 3.0, 0.5, 0.75, 2.75
+  };
+  const double ax2[] = {
+    2.75, 1.0, 0.625, 2.5,
+    1.5, 3.25, 0.375, 0.5, 3.0
+  };
+  const double expected1[] = {1.0, -2.0, 0.5, 3.0};
+  const double expected2[] = {-0.75, 1.25, 2.0, -1.5};
+  const char *env_names[] = {
+    "KLS_ENABLE_ROW_REFACTOR",
+    "KLS_DISABLE_VERIFIED_RHS_REUSE",
+    "KLS_DISABLE_CIRCUIT3_H100_POLICY"
+  };
+  enum { ENV_COUNT = (int)(sizeof(env_names) / sizeof(env_names[0])) };
+  char *saved_env[ENV_COUNT];
+  int had_env[ENV_COUNT];
+  int ok = 1;
+  for (int i = 0; i < ENV_COUNT; ++i) {
+    const char *value = getenv(env_names[i]);
+    had_env[i] = value != NULL;
+    saved_env[i] = value != NULL ? strdup(value) : NULL;
+    if ((value != NULL && saved_env[i] == NULL) ||
+        unsetenv(env_names[i]) != 0) {
+      ok = 0;
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create verified RHS reuse")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, 4, ap, ai, 0, &options),
+                        "analyze verified RHS reuse")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor verified RHS reuse")) ok = 0;
+  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
+    perror("setenv verified RHS row refactor");
+    ok = 0;
+  }
+  if (ok && !require_ok(kls_refactor(solver, ax1),
+                        "refactor verified RHS reuse")) ok = 0;
+
+  double b[4] = {0.0, 0.0, 0.0, 0.0};
+  double x[4] = {0.0, 0.0, 0.0, 0.0};
+  for (int32_t col = 0; col < 4; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected1[col];
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "first verified RHS solve")) ok = 0;
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "first verified RHS stats")) ok = 0;
+  const int64_t first_row_solve_count =
+    stats.row_refactor_row_solve_run_count;
+  if (ok && (stats.row_refactor_last_row_solve != 1 ||
+             first_row_solve_count < 1 || stats.verified_rhs_reused ||
+             stats.verified_rhs_reuse_count != 0)) {
+    fprintf(stderr,
+            "first verified RHS did not use the checked row solve: %d/%" PRId64
+            "\n", stats.row_refactor_last_row_solve,
+            first_row_solve_count);
+    ok = 0;
+  }
+
+  memset(x, 0, sizeof(x));
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "reused verified RHS solve")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "reused verified RHS stats")) ok = 0;
+  if (ok && (!stats.verified_rhs_reused ||
+             stats.verified_rhs_reuse_count != 1)) {
+    fprintf(stderr,
+            "identical verified RHS was not reused: reused=%d/%" PRId64
+            ", row=%d/%" PRId64 "\n",
+            stats.verified_rhs_reused,
+            stats.verified_rhs_reuse_count,
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count);
+    ok = 0;
+  }
+  const int64_t reused_row_solve_count =
+    stats.row_refactor_row_solve_run_count;
+  if (ok && reused_row_solve_count != first_row_solve_count + 1) {
+    fprintf(stderr,
+            "verified RHS reuse changed solve engines: %" PRId64
+            " -> %" PRId64 "\n",
+            first_row_solve_count, reused_row_solve_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < 4; ++i) {
+    if (!close_enough(x[i], expected1[i])) {
+      fprintf(stderr,
+              "unexpected reused RHS solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected1[i]);
+      ok = 0;
+    }
+  }
+
+  int64_t checked_row_solve_count = reused_row_solve_count;
+  for (int env_i = 1; ok && env_i < ENV_COUNT; ++env_i) {
+    if (setenv(env_names[env_i], "1", 1) != 0) {
+      perror("setenv verified RHS disable");
+      ok = 0;
+      break;
+    }
+    memset(x, 0, sizeof(x));
+    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                    "disabled verified RHS solve")) {
+      ok = 0;
+    }
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    if (ok && !require_ok(kls_get_stats(solver, &stats),
+                          "disabled verified RHS stats")) ok = 0;
+    checked_row_solve_count++;
+    if (ok && (stats.verified_rhs_reused ||
+               stats.verified_rhs_reuse_count != 1 ||
+               stats.row_refactor_last_row_solve != 1 ||
+               stats.row_refactor_row_solve_run_count !=
+                 checked_row_solve_count)) {
+      fprintf(stderr, "%s did not disable verified RHS reuse\n",
+              env_names[env_i]);
+      ok = 0;
+    }
+    for (int32_t i = 0; ok && i < 4; ++i) {
+      if (!close_enough(x[i], expected1[i])) {
+        fprintf(stderr,
+                "unexpected disabled-reuse solution at %d: %.17g != %.17g\n",
+                (int)i, x[i], expected1[i]);
+        ok = 0;
+      }
+    }
+    if (unsetenv(env_names[env_i]) != 0) {
+      perror("unsetenv verified RHS disable");
+      ok = 0;
+    }
+  }
+
+  memset(b, 0, sizeof(b));
+  memset(x, 0, sizeof(x));
+  for (int32_t col = 0; col < 4; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax1[p] * expected2[col];
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "changed verified RHS solve")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "changed verified RHS stats")) ok = 0;
+  if (ok && (stats.verified_rhs_reused ||
+             stats.verified_rhs_reuse_count != 1 ||
+             stats.row_refactor_last_row_solve != 1 ||
+             stats.row_refactor_row_solve_run_count !=
+               checked_row_solve_count + 1)) {
+    fprintf(stderr,
+            "changed RHS incorrectly reused a verdict: %d/%" PRId64 "\n",
+            stats.row_refactor_last_row_solve,
+            stats.row_refactor_row_solve_run_count);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < 4; ++i) {
+    if (!close_enough(x[i], expected2[i])) {
+      fprintf(stderr,
+              "unexpected changed RHS solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected2[i]);
+      ok = 0;
+    }
+  }
+
+  if (ok && !require_ok(kls_refactor(solver, ax2),
+                        "changed factor verified RHS reuse")) ok = 0;
+  memset(b, 0, sizeof(b));
+  memset(x, 0, sizeof(x));
+  for (int32_t col = 0; col < 4; ++col) {
+    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+      b[ai[p]] += ax2[p] * expected1[col];
+    }
+  }
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "invalidated verified RHS solve")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "invalidated verified RHS stats")) ok = 0;
+  if (ok && (stats.verified_rhs_reused ||
+             stats.verified_rhs_reuse_count != 1 ||
+             stats.row_refactor_last_row_solve != 1)) {
+    fprintf(stderr, "changed factor incorrectly retained its RHS verdict\n");
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < 4; ++i) {
+    if (!close_enough(x[i], expected1[i])) {
+      fprintf(stderr,
+              "unexpected invalidated RHS solution at %d: %.17g != %.17g\n",
+              (int)i, x[i], expected1[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  for (int i = 0; i < ENV_COUNT; ++i) {
+    if (!(had_env[i] && saved_env[i] == NULL) &&
+        !restore_env_value(env_names[i], had_env[i], saved_env[i])) {
+      ok = 0;
+    }
+    free(saved_env[i]);
+  }
+  return ok;
+}
+
 static int test_btf_singleton_row_refactor_pattern(void) {
   const int32_t ap[] = {0, 1, 3, 5, 6};
   const int32_t ai[] = {0, 1, 2, 1, 2, 3};
@@ -19906,6 +20141,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_btf_row_refactor_offblock_refresh()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_verified_rhs_reuse_contract()) {
     return EXIT_FAILURE;
   }
   if (!test_btf_singleton_row_refactor_pattern()) {

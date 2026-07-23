@@ -1323,6 +1323,8 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_group_state_exec_not_ready_current_count;
   int64_t refactor_btf_scalar_run_group_state_exec_owned_ready_current_count;
   int64_t refactor_btf_scalar_run_group_state_exec_late_ready_current_count;
+  int verified_rhs_reused;
+  int64_t verified_rhs_reuse_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
