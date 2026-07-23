@@ -16814,3 +16814,40 @@ as valid evidence.  All nine affected rows then completed 1,000 independently
 verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (27,000
 changed numeric systems total); worst relative residuals were 5.49e-14,
 5.99e-14, and 5.36e-13 respectively.
+
+SMALL SYMMETRIC SINGLE-BLOCK LIFECYCLE GENERALIZED (2026-07-23).  The exact
+`1138_bus` selector had coupled four decisions to one dimension/nonzero/options
+fingerprint: skipping BTF, bypassing the AUTO-scale value census, omitting the
+refactor map, and entering direct refactor/solve kernels.  Removing it outright
+cost about 7% over H100.  The scale shortcut is now gone, while the remaining
+choices use two generic stages.  During the mandatory compressed-input copy,
+small AUTO candidates (`256 <= n <= 4096`, `3n-2 <= nnz <= 8n`) collect a
+full-diagonal structural-symmetry signature from directed edge counts and two
+signed pair moments.  Matching candidates skip BTF in the existing small AMD
+path.  After factorization, an unscaled, structurally full-rank single block
+below 100K flops can use the direct lifecycle only when the caller already
+supplies the retained plain CSC frame and no transformation, refinement, or
+specialized refactor opt-in owns the update.  A synthetic 300-row cyclic
+tridiagonal smoke case exercises the positive rule; a diagonal-only matrix
+guards the density boundary and retained BTF behavior.
+
+The first broad screen found that `bibd_81_2`, a diagonal-only disconnected
+pattern, lost 29% under an earlier unrestricted symmetry rule.  The `3n-2`
+floor is the necessary edge count for a connected full-diagonal symmetric
+graph and removes that class without naming it.  The development corpus was
+then extended with SuiteSparse's `494_bus`, `662_bus`, `685_bus`, and
+`bcspwr04`--`bcspwr08`.  The three numeric bus matrices completed; the five
+pattern-only power matrices were singular with their supplied unit values in
+both binaries and are reported rather than timed as valid cases.
+
+Twenty alternating saved-exact/generic H100 pairs over the twelve valid
+affected paper/development rows put generic/exact at 0.998 geometric mean,
+with no matrix regressing by 2%.  Fifteen alternating pairs on a disjoint
+negative-control cohort produced thirteen valid comparisons at 1.008
+geometric mean, again with no 2% regression; two inputs failed under both
+binaries.  Finally, all twelve affected rows completed 1,000 independently
+verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (36,000
+changed systems).  Worst relative residuals were 4.64e-12, 4.28e-10, and
+1.55e-10 respectively.  This retires the exact `1138_bus` lifecycle selector
+without extending the result into a claim that BTF is never useful for small
+symmetric inputs.

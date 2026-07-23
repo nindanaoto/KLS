@@ -991,6 +991,147 @@ static int test_transposed_low_work_btf_native_solve(void) {
   return ok;
 }
 
+static int test_small_symmetric_no_btf_policy(void) {
+  const int32_t n = 300;
+  const int32_t nnz = 3 * n;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *initial = (double *)malloc((size_t)nnz * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)calloc((size_t)n, sizeof(*x));
+  if (ap == NULL || ai == NULL || initial == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL) {
+    free(ap);
+    free(ai);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    int32_t rows[3] = {(col + n - 1) % n, col, (col + 1) % n};
+    for (int left = 0; left < 2; ++left) {
+      for (int right = left + 1; right < 3; ++right) {
+        if (rows[right] < rows[left]) {
+          const int32_t swap = rows[left];
+          rows[left] = rows[right];
+          rows[right] = swap;
+        }
+      }
+    }
+    for (int k = 0; k < 3; ++k) {
+      ai[p] = rows[k];
+      initial[p] = rows[k] == col ? 4.0 : -1.0;
+      changed[p] = initial[p];
+      if (rows[k] == col && col % 37 == 0) {
+        changed[p] *= 1.01;
+      }
+      ++p;
+    }
+    ap[col + 1] = p;
+    expected[col] = 1.0 + 0.125 * (double)(col % 7);
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+
+  kls_solver *solver = NULL;
+  int ok = require_ok(kls_create(&solver), "create small symmetric no-BTF") &&
+    require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                               &options),
+               "analyze small symmetric no-BTF") &&
+    require_ok(kls_factor(solver, initial),
+               "factor small symmetric no-BTF") &&
+    require_ok(kls_refactor(solver, changed),
+               "refactor small symmetric no-BTF") &&
+    require_ok(kls_solve(solver, 1, b, 0, x, 0),
+               "solve small symmetric no-BTF");
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok) {
+    ok = require_ok(kls_get_stats(solver, &stats),
+                    "stats small symmetric no-BTF");
+  }
+  if (ok) {
+    ok = stats.selected_btf == 0 && stats.nblocks == 1;
+    for (int32_t row = 0; ok && row < n; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected small symmetric no-BTF result: btf=%d "
+              "blocks=%" PRId64 " x0=%.17g xlast=%.17g\n",
+              stats.selected_btf, stats.nblocks, x[0], x[n - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  memset(b, 0, (size_t)n * sizeof(*b));
+  memset(x, 0, (size_t)n * sizeof(*x));
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = col;
+    ai[col] = col;
+    initial[col] = 2.0;
+    changed[col] = col % 41 == 0 ? 2.02 : 2.0;
+    b[col] = changed[col] * expected[col];
+  }
+  ap[n] = n;
+  solver = NULL;
+  ok = ok &&
+    require_ok(kls_create(&solver), "create sparse symmetric BTF control") &&
+    require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                               &options),
+               "analyze sparse symmetric BTF control") &&
+    require_ok(kls_factor(solver, initial),
+               "factor sparse symmetric BTF control") &&
+    require_ok(kls_refactor(solver, changed),
+               "refactor sparse symmetric BTF control") &&
+    require_ok(kls_solve(solver, 1, b, 0, x, 0),
+               "solve sparse symmetric BTF control");
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok) {
+    ok = require_ok(kls_get_stats(solver, &stats),
+                    "stats sparse symmetric BTF control");
+  }
+  if (ok) {
+    ok = stats.selected_btf == 1 && stats.nblocks == n;
+    for (int32_t row = 0; ok && row < n; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected sparse symmetric BTF control: btf=%d "
+              "blocks=%" PRId64 " x0=%.17g xlast=%.17g\n",
+              stats.selected_btf, stats.nblocks, x[0], x[n - 1]);
+    }
+  }
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_csr_forced_transpose_orientation(void) {
   const int64_t rp[] = {0, 3, 6, 8};
   const int64_t ci[] = {0, 1, 2, 0, 1, 2, 1, 2};
@@ -17661,6 +17802,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_balanced_diagonal_spike_auto_orientation()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_small_symmetric_no_btf_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_transposed_low_work_btf_native_solve()) {

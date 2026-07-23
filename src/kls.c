@@ -2446,6 +2446,7 @@ typedef struct kls_pattern_candidate {
   kls_separator_analysis separator;
   int large_sparse_full_diagonal_amf3_class;
   int large_bounded_degree_no_btf_amf_class;
+  int small_symmetric_no_btf_class;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -28198,6 +28199,25 @@ static int kls_low_work_single_block_policy_enabled(
          solver->symbolic->structural_rank == solver->n;
 }
 
+static int kls_row_refactor_env_enabled(void);
+
+/* A direct KLU refactor may consume the caller's values only when the public
+   matrix is already the retained, untransformed CSC frame.  Keep this
+   lifecycle capability separate from the low-work kernel crossover so CSR,
+   permutation, scaling, and diagonal-equivalence users retain their ordinary
+   preparation paths. */
+static int kls_low_work_single_block_direct_csc_capable(
+  const kls_solver *solver) {
+  return kls_low_work_single_block_policy_enabled(solver) &&
+    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL &&
+    !kls_row_refactor_env_enabled() &&
+    solver->input_format == KLS_INPUT_CSC && solver->input_to_csc == NULL &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    !solver->diagonal_equiv_active && solver->common.scale == -1 &&
+    solver->numeric->Rs == NULL;
+}
+
 /* The two ckt11752 variants share a normal AMD/BTF symbolic, and AUTO's
    ordering tournament always returns that same factor.  Re-running the AMF
    candidate and the factor-time block-order detector costs about 8 ms on a
@@ -28266,37 +28286,12 @@ static int kls_ckt11752_dc1_h100_cycle(const kls_solver *solver) {
     solver->symbolic->maxblock == 49371u;
 }
 
-static int kls_1138_bus_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
-    getenv("KLS_DISABLE_1138_BUS_H100_POLICY") == NULL &&
-    options->orientation == KLS_ORIENTATION_AUTO &&
-    options->ordering == KLS_ORDERING_AUTO &&
-    options->scale == KLS_SCALE_AUTO &&
-    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
-    options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n == 1138u && col_ptr[n] == 4054u;
-}
-
-static int kls_1138_bus_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    kls_1138_bus_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->common.scale == -1 && !solver->symbolic->do_btf &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
-}
-
 /* Candidate analyzes can run on independent threads.  Keep their structural
    policy local to the analyze call so an AMF trial for another orientation
    cannot inherit this class verdict. */
 static _Thread_local int kls_large_sparse_amf3_analyze_path;
 static _Thread_local int kls_large_bounded_no_btf_amf_analyze_path;
+static _Thread_local int kls_small_symmetric_no_btf_analyze_path;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -29695,11 +29690,6 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
        numeric row scaling.  Avoid the generic value census that reaches the
        same scale-zero verdict before the first factorization. */
     return 0;
-  }
-  if (kls_1138_bus_h100_cycle(solver)) {
-    /* The generic value census returns this same unscaled verdict after an
-       O(nnz) scan.  On a two-millisecond horizon, select it structurally. */
-    return -1;
   }
   if (kls_asic100k_dense_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) &&
@@ -40529,6 +40519,10 @@ static int kls_choose_symbolic_inner(UF_long n,
        rule: TSOPF_FS_b9_c1's AMD factor has 2.6x the fill. */
     kls_options amd_opts = *options;
     amd_opts.ordering = KLS_ORDERING_AMD;
+    if (kls_small_symmetric_no_btf_analyze_path &&
+        getenv("KLS_DISABLE_SMALL_SYMMETRIC_NO_BTF") == NULL) {
+      amd_opts.use_btf = 0;
+    }
     int status = analyze_with_ordering(n, col_ptr, row_idx, &amd_opts,
                                        KLS_ORDERING_AMD, symbolic_out,
                                        common_out, separator_out);
@@ -41360,16 +41354,6 @@ static int choose_symbolic_for_pattern(UF_long n,
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
   }
-  if (kls_1138_bus_h100_policy_enabled(n, col_ptr, options)) {
-    /* BTF returns one block on this exact matrix, so retain the same AMD
-       permutation without paying the decomposition or mapped metadata. */
-    kls_options amd_options = *options;
-    amd_options.ordering = KLS_ORDERING_AMD;
-    amd_options.use_btf = 0;
-    return choose_symbolic_for_pattern(
-      n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
-      selected_ordering_out, score_out, separator_out);
-  }
   if (kls_ibm_dc_h100_policy_enabled(n, col_ptr, options) ||
       kls_ckt11752_amd_h100_policy_enabled(n, col_ptr, options)) {
     /* These audited variants retain this same AMD/BTF symbolic.  Select it
@@ -41744,13 +41728,66 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     candidate->col_ptr[j] = (UF_long)ptr;
     prev = ptr;
   }
-  for (int64_t p = 0; p < nnz; ++p) {
-    const int64_t row = read_index(index_type, row_idx, p) - base;
-    if (row < 0 || row >= n) {
-      free_candidate(candidate);
-      return KLS_ERR_INVALID_ARGUMENT;
+  const int classify_small_symmetric =
+    candidate->n >= 256u && candidate->n <= 4096u &&
+    candidate->nnz >= 3u * candidate->n - 2u &&
+    candidate->nnz <= 8u * candidate->n;
+  if (classify_small_symmetric) {
+    /* Fold a structural-symmetry signature into the mandatory input copy.
+       The 12-bit packing is collision-free in this size tier; matching the
+       directed counts plus two unsigned moments avoids a second search or
+       per-row workspace.  A moment collision can only choose the optional
+       no-BTF performance path: the full diagonal still makes that symbolic
+       choice correctness-safe.  The lower density bound is the necessary
+       edge count for a connected symmetric graph with a full diagonal. */
+    UF_long lower_entries = 0u;
+    UF_long upper_entries = 0u;
+    uint64_t symmetry_balance_a = 0u;
+    uint64_t symmetry_balance_b = 0u;
+    int full_diagonal = 1;
+    for (int64_t col = 0; col < n; ++col) {
+      int has_diagonal = 0;
+      for (UF_long p = candidate->col_ptr[col];
+           p < candidate->col_ptr[col + 1]; ++p) {
+        const int64_t row =
+          read_index(index_type, row_idx, (int64_t)p) - base;
+        if (row < 0 || row >= n) {
+          free_candidate(candidate);
+          return KLS_ERR_INVALID_ARGUMENT;
+        }
+        candidate->row_idx[p] = (UF_long)row;
+        if (row == col) {
+          has_diagonal = 1;
+        } else {
+          const uint64_t first = (uint64_t)(row < col ? row : col);
+          const uint64_t second = (uint64_t)(row < col ? col : row);
+          const uint64_t pair = (first << 12u) | second;
+          const uint64_t pair_square = pair * pair;
+          if (row > col) {
+            ++lower_entries;
+            symmetry_balance_a += pair;
+            symmetry_balance_b += pair_square;
+          } else {
+            ++upper_entries;
+            symmetry_balance_a -= pair;
+            symmetry_balance_b -= pair_square;
+          }
+        }
+      }
+      full_diagonal &= has_diagonal;
     }
-    candidate->row_idx[p] = (UF_long)row;
+    candidate->small_symmetric_no_btf_class =
+      full_diagonal && lower_entries == upper_entries &&
+      symmetry_balance_a == 0u && symmetry_balance_b == 0u;
+  } else {
+    for (int64_t p = 0; p < nnz; ++p) {
+      const int64_t row = read_index(index_type, row_idx, p) - base;
+      if (row < 0 || row >= n) {
+        free_candidate(candidate);
+        return KLS_ERR_INVALID_ARGUMENT;
+      }
+      candidate->row_idx[p] = (UF_long)row;
+    }
   }
   candidate->large_sparse_full_diagonal_amf3_class =
     is_large_sparse_full_diagonal_amf3_pattern(
@@ -41799,6 +41836,8 @@ static int transpose_candidate(const kls_pattern_candidate *source,
   candidate->large_bounded_degree_no_btf_amf_class =
     is_large_bounded_degree_no_btf_amf_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->small_symmetric_no_btf_class =
+    source->small_symmetric_no_btf_class;
   return KLS_OK;
 }
 
@@ -41806,12 +41845,15 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                              const kls_options *options) {
   const int saved = kls_large_sparse_amf3_analyze_path;
   const int bounded_saved = kls_large_bounded_no_btf_amf_analyze_path;
+  const int symmetric_saved = kls_small_symmetric_no_btf_analyze_path;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
     kls_large_sparse_amf3_policy_enabled(options);
   kls_large_bounded_no_btf_amf_analyze_path =
     candidate->large_bounded_degree_no_btf_amf_class &&
     kls_large_bounded_no_btf_amf_policy_enabled(options);
+  kls_small_symmetric_no_btf_analyze_path =
+    candidate->small_symmetric_no_btf_class;
   const int status =
     choose_symbolic_for_pattern(candidate->n, candidate->col_ptr,
                                 candidate->row_idx, options,
@@ -41821,6 +41863,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                 &candidate->separator);
   kls_large_sparse_amf3_analyze_path = saved;
   kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
+  kls_small_symmetric_no_btf_analyze_path = symmetric_saved;
   return status;
 }
 
@@ -116382,7 +116425,7 @@ static void maybe_prepare_refactor_map(kls_solver *solver,
                                        double *elapsed) {
   const int pool_map = kls_refactor_pool_map_is_worthwhile(solver);
   if (solver == NULL || elapsed == NULL ||
-      kls_1138_bus_h100_cycle(solver) ||
+      kls_low_work_single_block_direct_csc_capable(solver) ||
       (kls_is_bips98_lean_pattern(solver) &&
        getenv("KLS_DISABLE_BIPS98_DIRECT_ROW_PATTERN") == NULL) ||
       solver->refactor_col_ptr != NULL ||
@@ -118096,7 +118139,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
        crossover down to ~1e6 total flops (re-measured 2026-07).  Prefer
        the serial mapped refactor under it and keep the EGraph for
        shapes it cannot cover. */
-    if (kls_1138_bus_h100_cycle(solver)) {
+    if (kls_low_work_single_block_direct_csc_capable(solver)) {
       const UF_long serial_ok =
         kls_serial_klu_refactor_dense_tail(solver, numeric_values, 0);
       kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
@@ -153622,14 +153665,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
     return KLS_OK;
   }
-  if (getenv("KLS_DISABLE_1138_BUS_DIRECT_REFACTOR") == NULL &&
-      kls_1138_bus_h100_cycle(solver) &&
+  if (getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_DIRECT_REFACTOR") == NULL &&
+      kls_low_work_single_block_direct_csc_capable(solver) &&
       solver->solve_contract_probe == 1 &&
-      solver->input_format == KLS_INPUT_CSC &&
-      solver->input_to_csc == NULL && solver->row_perm == NULL &&
-      solver->user_col_perm == NULL && solver->row_scale == NULL &&
-      solver->col_scale == NULL && !solver->diagonal_equiv_active &&
-      solver->common.scale == -1 && solver->numeric->Rs == NULL &&
       solver->unchanged_refactor_state < 0 &&
       !solver->factor_preps_deferred && !solver->prestatic_deferred &&
       !solver->rowmatch_deferred && !solver->metis_race_deferred &&
@@ -153639,8 +153677,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->common.kls_perturb_count == 0u &&
       getenv("KLS_DUMP_UDIAG") == NULL &&
       getenv("KLS_TRACE_REFACTOR_US") == NULL) {
-    /* The first changed refactor has already certified this exact plain CSC
-       factor and discharged all deferred preparation.  Later entrywise
+    /* The first changed refactor has already certified this plain CSC factor
+       and discharged all deferred preparation.  Later entrywise
        updates can therefore enter KLU's fixed-pattern numeric walk directly:
        the caller values are already in retained CSC order, and no adaptive
        engine, transformed-value, or accuracy state remains to maintain. */
@@ -153660,6 +153698,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->adaptive_refactor_seconds = kls_now_seconds() - start;
     solver->stats.refactor_seconds = solver->adaptive_refactor_seconds;
     fill_numeric_stats(solver);
+    if (getenv("KLS_TRACE_LOW_WORK_SINGLE_BLOCK_DIRECT_REFACTOR") != NULL) {
+      fprintf(stderr,
+              "KLS low-work single-block direct refactor: n=%lu\n",
+              (unsigned long)solver->n);
+    }
     if (!ok || solver->common.status < 0) {
       return solver->common.status == TRILINOS_KLU_SINGULAR
         ? KLS_ERR_SINGULAR : KLS_ERR_REFACTOR_FAILED;
@@ -155210,7 +155253,7 @@ static int solve_impl(kls_solver *solver,
   if (!solver->in_solve_refinement && !transpose && nrhs == 1 &&
       ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
       (kls_low_work_btf_prefers_native_solve(solver) ||
-       kls_1138_bus_h100_cycle(solver)) &&
+       kls_low_work_single_block_policy_enabled(solver)) &&
       solver->common.scale == -1 && solver->numeric->Rs == NULL &&
       solver->row_perm == NULL && solver->user_col_perm == NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
@@ -155236,8 +155279,9 @@ static int solve_impl(kls_solver *solver,
                                 1u, x, &solver->common)
         : trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
                                1u, x, &solver->common);
-    if (getenv("KLS_TRACE_LOW_WORK_BTF_DIRECT_SOLVE") != NULL) {
-      fprintf(stderr, "KLS low-work BTF direct native solve: n=%lu t=%d\n",
+    if (getenv("KLS_TRACE_LOW_WORK_DIRECT_SOLVE") != NULL ||
+        getenv("KLS_TRACE_LOW_WORK_BTF_DIRECT_SOLVE") != NULL) {
+      fprintf(stderr, "KLS low-work direct native solve: n=%lu t=%d\n",
               (unsigned long)solver->n,
               solver->orientation == KLS_ORIENTATION_TRANSPOSE);
     }
