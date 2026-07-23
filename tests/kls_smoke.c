@@ -3143,6 +3143,188 @@ static int test_small_pivot_low_work_dominant_btf(void) {
   return ok;
 }
 
+static int test_dense_group_near_single_btf_stays_mapped(void) {
+  enum {
+    DENSE_GROUPS = 450,
+    DENSE_N = 82,
+    ACTIVE_N = DENSE_GROUPS * DENSE_N,
+    CORE_N = 60000,
+    HUB = CORE_N - 1,
+    LEAF_N = HUB - ACTIVE_N,
+    N = CORE_N + 1,
+    NNZ = DENSE_GROUPS * DENSE_N * DENSE_N + 2 * DENSE_GROUPS +
+      3 * LEAF_N + 2
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || initial == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL) {
+    free(ap);
+    free(ai);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_names[] = {
+    "KLS_DISABLE_HIGH_WORK_NEAR_SINGLE_BTF_EGRAPH",
+    "KLS_DISABLE_TSOPF_B39_C19_H100_POLICY"
+  };
+  char *saved_env[2] = {NULL, NULL};
+  int had_env[2] = {0, 0};
+  int ok = 1;
+  for (size_t k = 0; k < 2u; ++k) {
+    const char *value = getenv(env_names[k]);
+    had_env[k] = value != NULL;
+    saved_env[k] = value != NULL ? strdup(value) : NULL;
+    if ((value != NULL && saved_env[k] == NULL) ||
+        unsetenv(env_names[k]) != 0) {
+      ok = 0;
+    }
+  }
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t group = 0; group < DENSE_GROUPS; ++group) {
+    const int32_t begin = group * DENSE_N;
+    const int32_t end = begin + DENSE_N;
+    for (int32_t col = begin; col < end; ++col) {
+      for (int32_t row = begin; row < end; ++row) {
+        ai[p] = row;
+        initial[p++] = row == col ? 64.0 : -0.01;
+      }
+      if (col == begin) {
+        ai[p] = HUB;
+        initial[p++] = -0.05;
+      }
+      ap[col + 1] = p;
+    }
+  }
+  for (int32_t col = ACTIVE_N; col < HUB; ++col) {
+    ai[p] = col;
+    initial[p++] = 4.0;
+    ai[p] = HUB;
+    initial[p++] = -0.1;
+    ap[col + 1] = p;
+  }
+  for (int32_t group = 0; group < DENSE_GROUPS; ++group) {
+    ai[p] = group * DENSE_N;
+    initial[p++] = -0.05;
+  }
+  for (int32_t row = ACTIVE_N; row < HUB; ++row) {
+    ai[p] = row;
+    initial[p++] = -0.1;
+  }
+  ai[p] = HUB;
+  initial[p++] = 64.0;
+  ap[CORE_N] = p;
+  ai[p] = CORE_N;
+  initial[p++] = 3.0;
+  ap[N] = p;
+  if (p != NNZ) {
+    fprintf(stderr, "unexpected near-single BTF nnz: %d/%d\n",
+            (int)p, (int)NNZ);
+    ok = 0;
+  }
+  for (int32_t entry = 0; entry < NNZ; ++entry) {
+    changed[entry] = initial[entry] *
+      (1.0 + 1.0e-4 * (double)(entry % 13 - 6));
+  }
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.5 + 0.03125 * (double)(col % 17);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.static_pivoting = 0;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create dense-group near-single BTF")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze dense-group near-single BTF")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor dense-group near-single BTF")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor dense-group near-single BTF")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve dense-group near-single BTF")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats dense-group near-single BTF")) ok = 0;
+  const double factor_entries =
+    (double)stats.nnz_l + (double)stats.nnz_u;
+  if (ok && !(stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+              stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+              stats.selected_ordering == KLS_ORDERING_NATURAL &&
+              stats.selected_scale == -1 && stats.selected_btf == 1 &&
+              stats.nblocks > 1 && stats.nblocks < 8 &&
+              stats.max_block >= 60000 && stats.max_block < 90000 &&
+              stats.offdiag_pivots == 0 &&
+              stats.factor_flops >= 1.0e8 &&
+              stats.factor_flops >= 1024.0 * (double)N &&
+              stats.factor_flops <= 4096.0 * (double)N &&
+              stats.nnz_l + stats.nnz_u >= 48 * N &&
+              stats.factor_flops > 40.0 * factor_entries &&
+              stats.refactor_dependency_work == 0.0)) {
+    fprintf(stderr,
+            "unexpected dense-group near-single BTF state: path=%s "
+            "blocks=%" PRId64 " max=%" PRId64 " flops=%.17g "
+            "fill=%" PRId64 " dep=%.17g\n",
+            kls_refactor_path_name(stats.last_refactor_path),
+            stats.nblocks, stats.max_block, stats.factor_flops,
+            stats.nnz_l + stats.nnz_u,
+            stats.refactor_dependency_work);
+    ok = 0;
+  }
+  for (int32_t row = 0; ok && row < N; ++row) {
+    if (fabs(x[row] - expected[row]) >
+        1.0e-8 * (1.0 + fabs(expected[row]))) {
+      fprintf(stderr,
+              "unexpected dense-group near-single solution at %d: "
+              "%.17g != %.17g\n",
+              (int)row, x[row], expected[row]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  for (size_t k = 0; k < 2u; ++k) {
+    if (!(had_env[k] && saved_env[k] == NULL) &&
+        !restore_env_value(env_names[k], had_env[k], saved_env[k])) {
+      ok = 0;
+    }
+    free(saved_env[k]);
+  }
+  free(ap);
+  free(ai);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_csr_forced_transpose_orientation(void) {
   const int64_t rp[] = {0, 3, 6, 8};
   const int64_t ci[] = {0, 1, 2, 0, 1, 2, 1, 2};
@@ -20315,6 +20497,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_small_pivot_low_work_dominant_btf()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_dense_group_near_single_btf_stays_mapped()) {
     return EXIT_FAILURE;
   }
   if (!test_transposed_low_work_btf_native_solve()) {

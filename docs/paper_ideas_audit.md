@@ -17438,3 +17438,73 @@ projected cycle.  Finally, the target and expander each completed 1,000
 verified entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000
 changed systems total); the worst relative-L2 residual was 1.30e-10.  Release,
 CTest, and ASan/LSan smoke suites pass.
+
+HIGH-WORK NEAR-SINGLE-BTF EGRAPH ADMISSION GENERALIZED (2026-07-23).  The
+remaining `TSOPF_FS_b39_c19` shortcut coupled an exact 76,216-row,
+1,977,600-entry input fingerprint to the complete AUTO/8-thread option tuple.
+It performed three related bypasses: two BTF blocks were allowed through the
+parallel-refactor gate, the 76,215-row block was admitted as a dominant-BTF
+EGraph shape, and its 90.93M dependency work bypassed the generic 100M floor.
+The result was useful, but none of those decisions actually depended on the
+matrix name, its exact input count, or AUTO having selected the factor.
+
+The replacement recognizes retained numeric state.  It requires at least four
+non-serial workers, mathematical-normal unscaled execution, two through seven
+BTF blocks, full structural rank when rank was computed, no off-diagonal
+pivots, nudges, or perturbations, and a largest block of 60K--90K rows covering
+at least 99% of the matrix.  Factor work must be at least 100M and between
+`1024n` and `4096n`, retained fill must be at least `48n`, and work must be no
+more than 40 times retained entries.  The last ratio distinguishes sparse
+irregular factors from cache-local dense groups.  After schedule construction,
+the measured dependency work must be at least 80M, dependency depth no more
+than `n/8`, and maximum width at least `n/16`.  The former TSOPF disable switch
+remains a compatibility alias for
+`KLS_DISABLE_HIGH_WORK_NEAR_SINGLE_BTF_EGRAPH`.
+
+The real target has 178.37M factor flops, 5,426,191 retained entries (32.87
+flops per retained entry), 1,236 dependency levels, maximum width 17,301, and
+90.93M dependency work.  Its larger SuiteSparse sibling
+`TSOPF_FS_b39_c30` supplies continuity evidence rather than another exception:
+at 120,216 rows it has the same 32.88 work/entry ratio and 1,236 levels, while
+143.48M dependency work and a 120,215-row block already clear the older generic
+large-block thresholds.  A deterministic holdout made by appending two scalar
+diagonal components to `c19` changes the order to 76,218 and the BTF count from
+two to four while preserving the 76,215-row numeric.  The exact parent cannot
+recognize it; the normalized rule does.
+
+Two independent synthetic counterexamples materially narrowed the policy.  A
+60,001-row core made from 53 dense 240-row work groups plus a long chain had
+493.18M factor flops, 3.28M retained entries, and 247.44M dependency work, but
+its graph was 47,280 levels deep and only 55 columns wide.  EGraph was about
+26 times slower than the mapped walk, so the work-per-row and depth/width
+guards reject it.  A second construction used 450 dense 82-row groups around
+one hub.  It was broad and shallow (83 levels, width 23,550), with 170.05M
+flops, 3,228,900 retained entries, and 85.86M dependency work, yet EGraph was
+roughly 13--15 times slower because the mapped walk retained dense-group
+locality.  Its 52.66 flops per retained entry motivated the final ratio cap.
+That second construction remains in the smoke suite as an explicit mapped-path
+negative and also factors, refactors, and solves changed values accurately.
+
+A saved-profile rescan covering all 243 local Matrix Market files found only
+`c19` inside the complete real-matrix boundary.  The independently sampled,
+paper-group-disjoint generalization development and holdout manifests added 40
+successful current runs: all 24 holdout cases and 16 of 24 development cases;
+the other eight hit their existing setup errors or 30-second caps before this
+post-factor policy.  None of the 40 completed factors entered the new class.
+This gives conservative nonactivation evidence, while the four-block holdout
+and four-worker execution prove reach beyond the old matrix and option tuple.
+
+Sixteen rotated pinned target triplets put the generic implementation at
+1.0057 of the compiler-identical exact parent by paired projected-cycle median
+and 0.9985 at steady refactor; the corresponding per-side medians were
+1.634s versus 1.600s and 12.168ms versus 11.909ms.  Against the generic disable,
+the ratios were 0.3700 and 0.3034, with the EGraph route winning all 16 pairs.
+On the four-block holdout, twelve pairs moved the parent mapped path to EGraph
+and put generic/parent at 0.3738 for the projected cycle and 0.3063 at steady
+state, winning all twelve.  Eight four-worker pairs put enabled/disabled at
+0.4680 and 0.4102; a two-worker control remains mapped.
+
+Finally, the original and four-block matrices each completed 1,000 verified
+entrywise generations at amplitudes 0.001, 0.01, and 0.1 (6,000 changed systems
+total).  Every generation retained EGraph and the worst relative-L2 residual
+was 8.61e-14.  Release CTest and ASan/LSan CTest both pass all three tests.

@@ -30203,25 +30203,42 @@ static int kls_small_pivot_low_work_dominant_btf_shape(
   return 1;
 }
 
-static int kls_is_tsopf_b39_c19_h100_cycle(const kls_solver *solver) {
-  /* The block-structured factor has one scalar block and one 76K-row block.
-     Its 90.9M-work dependency forest misses the generic 100M EGraph floor by
-     less than ten percent, while the complete 100-cycle measurement strongly
-     favors EGraph over the serial mapped refactor. */
-  return solver != NULL && solver->symbolic != NULL &&
-    solver->col_ptr != NULL &&
-    getenv("KLS_DISABLE_TSOPF_B39_C19_H100_POLICY") == NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 && solver->options.use_btf &&
-    solver->options.static_pivoting &&
-    fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    solver->common.scale == -1 && solver->n == 76216u &&
-    solver->nnz == 1977600u && solver->col_ptr[solver->n] == solver->nnz &&
-    solver->symbolic->nblocks == 2u &&
-    solver->symbolic->maxblock == 76215u;
+/* Close the fixed absolute-work gap immediately below the large dominant-BTF
+   EGraph window.  These factors are effectively one high-work block plus a
+   handful of scalar blocks.  Bounded work per row and per retained entry
+   separate the sparse irregular class from dense-group factors whose mapped
+   local walk is much cheaper.  The final admission also requires at least
+   80M measured dependency work in a broad, shallow graph after the schedule
+   has been built.  None of these tests use input nonzero counts or an exact
+   dimension/option fingerprint. */
+static int kls_high_work_near_single_btf_shape(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      getenv("KLS_DISABLE_HIGH_WORK_NEAR_SINGLE_BTF_EGRAPH") != NULL ||
+      getenv("KLS_DISABLE_TSOPF_B39_C19_H100_POLICY") != NULL ||
+      solver->options.backend == KLS_BACKEND_SERIAL ||
+      solver->options.threads < 4 ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      !solver->symbolic->do_btf || solver->symbolic->nblocks <= 1u ||
+      solver->symbolic->nblocks >= 8u ||
+      (solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
+       solver->symbolic->structural_rank != solver->n) ||
+      solver->symbolic->maxblock < 60000u ||
+      solver->symbolic->maxblock >= 90000u || solver->n == 0u ||
+      solver->common.noffdiag != 0u || solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u) {
+    return 0;
+  }
+  const double coverage =
+    (double)solver->symbolic->maxblock / (double)solver->n;
+  const double factor_entries =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return coverage >= 0.99 &&
+         solver->common.flops >= 1.0e8 &&
+         solver->common.flops >= 1024.0 * (double)solver->n &&
+         solver->common.flops <= 4096.0 * (double)solver->n &&
+         factor_entries >= 48.0 * (double)solver->n &&
+         solver->common.flops <= 40.0 * factor_entries;
 }
 
 static int kls_is_rajat27_fragmented_scaled_pattern(
@@ -46913,10 +46930,10 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
     return 0;
   }
-  const int tsopf_two_block_probe =
-    kls_is_tsopf_b39_c19_h100_cycle(solver);
+  const int high_work_near_single_btf =
+    kls_high_work_near_single_btf_shape(solver);
   if (solver->options.threads <= 1 ||
-      (solver->symbolic->nblocks < 8u && !tsopf_two_block_probe)) {
+      (solver->symbolic->nblocks < 8u && !high_work_near_single_btf)) {
     return 0;
   }
   if (solver->n < 5000u || solver->symbolic->maxblock == solver->n) {
@@ -46928,7 +46945,7 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
   }
   if ((solver->symbolic->nblocks < 64u ||
        solver->symbolic->maxblock * 4u < solver->n * 3u) &&
-      !tsopf_two_block_probe) {
+      !high_work_near_single_btf) {
     return 0;
   }
   if (solver->symbolic->nblocks >= 1024u &&
@@ -109663,7 +109680,7 @@ static int kls_egraph_dominant_btf_shape(const kls_solver *solver) {
       solver->symbolic->nblocks <= 1u || solver->n == 0u) {
     return 0;
   }
-  if (kls_is_tsopf_b39_c19_h100_cycle(solver)) {
+  if (kls_high_work_near_single_btf_shape(solver)) {
     return 1;
   }
   const double coverage =
@@ -109819,6 +109836,16 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     kls_egraph_moderate_single_block_shape(solver);
   const int low_work_single =
     kls_egraph_low_work_single_block_shape(solver);
+  const int high_work_near_single_btf =
+    kls_high_work_near_single_btf_shape(solver);
+  if (high_work_near_single_btf &&
+      ((double)solver->refactor_level_count > 0.125 * (double)solver->n ||
+       (double)solver->refactor_level_max_width <
+         0.0625 * (double)solver->n)) {
+    /* Fixed total work is not enough: deep/narrow dense-group experiments
+       lose to the mapped local walk despite clearing the absolute floor. */
+    return 0;
+  }
   if (low_work_single &&
       kls_row_thin_low_work_single_block_shape(solver) &&
       getenv("KLS_DISABLE_THIN_LOW_WORK_ROW") == NULL) {
@@ -109839,6 +109866,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     non_dominant_many_block ? 2.0e8 :
     (dominant_btf || all_pipeline_btf)
       ? (medium_heavy_btf || all_pipeline_btf ? 8.0e7 :
+         high_work_near_single_btf ? 8.0e7 :
          scaled_medium_btf ? 1.5e7 :
          small_compact_btf ? 5.0e5 :
          low_work_btf ? 1.0e6 :
@@ -109846,8 +109874,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
          solver->medium_spike_minfill_path ? 8.0e7 : 1.0e8)
       : (moderate_single ? 2.0e7 :
          low_work_single ? 1.0e6 : 1.5e8);
-  if (solver->refactor_dependency_work < min_dependency_work &&
-      !kls_is_tsopf_b39_c19_h100_cycle(solver)) {
+  if (solver->refactor_dependency_work < min_dependency_work) {
     return 0;
   }
   if (!single_block &&
