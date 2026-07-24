@@ -30548,21 +30548,85 @@ static int kls_is_rommes_mimo8_pattern(const kls_solver *solver) {
     solver->symbolic->maxblock <= 7850u;
 }
 
-static int kls_is_sandia_mult_dcop_pattern(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL) {
+static int kls_low_work_tiny_block_btf_policy_disabled(void) {
+  return getenv("KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY") != NULL;
+}
+
+/* A sparse full-rank matrix split into thousands of genuinely tiny SCCs has
+   less total numeric work than the global ordering, matching, and tolerance
+   trials that generic medium matrices can amortize.  Select that resource
+   regime from normalized BTF geometry and symbolic work rather than the
+   dimensions of one operating-point family. */
+__attribute__((noinline))
+static int kls_low_work_tiny_block_btf_symbolic_profile(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
+      kls_low_work_tiny_block_btf_policy_disabled() ||
+      solver->options.orientation != KLS_ORIENTATION_AUTO ||
+      solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->options.scale != KLS_SCALE_AUTO ||
+      solver->options.backend != KLS_BACKEND_AUTO ||
+      solver->options.threads != 8 || !solver->options.use_btf ||
+      !solver->options.static_pivoting ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->n < 16384u || solver->n > 131072u ||
+      solver->n > UF_long_max / 12u ||
+      solver->nnz < 6u * solver->n ||
+      solver->nnz > 12u * solver->n ||
+      solver->col_ptr[solver->n] != solver->nnz ||
+      !solver->symbolic->do_btf ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->nblocks < solver->n / 8u ||
+      solver->symbolic->nblocks > solver->n / 2u ||
+      solver->symbolic->maxblock < 2u ||
+      solver->symbolic->maxblock > 256u ||
+      solver->symbolic->maxblock > solver->n / 128u ||
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      !(solver->symbolic->est_flops > 0.0)) {
     return 0;
   }
-  /* The three mult_dcop operating points consist of roughly 7.4K tiny BTF
-     blocks (none wider than 70).  Their incumbent AMD factors are already
-     compact; global block-order, tight-pivot, and Hungarian-match trials are
-     all rejected after costing more than the complete factorization. */
-  return solver->n >= 25180u && solver->n <= 25200u &&
-    solver->col_ptr[solver->n] >= 193000u &&
-    solver->col_ptr[solver->n] <= 193400u &&
-    solver->symbolic->nblocks >= 7400u &&
-    solver->symbolic->nblocks <= 7460u &&
-    solver->symbolic->maxblock >= 60u &&
-    solver->symbolic->maxblock <= 80u;
+  const double n = (double)solver->n;
+  const double fill = solver->symbolic->lnz + solver->symbolic->unz;
+  return fill >= 4.0 * n && fill <= 12.0 * n &&
+    solver->symbolic->est_flops >= 4.0 * n &&
+    solver->symbolic->est_flops <= 64.0 * n &&
+    solver->symbolic->est_flops <= 8.0e6 &&
+    solver->symbolic->lnz <= 2.0 * solver->symbolic->unz &&
+    solver->symbolic->unz <= 2.0 * solver->symbolic->lnz;
+}
+
+/* Recurring solve and accuracy decisions additionally require the compact,
+   full-precision factor that justified skipping the speculative trials.
+   Value changes that leave this bounded regime lose the shortcut. */
+__attribute__((noinline))
+static int kls_low_work_tiny_block_btf_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_low_work_tiny_block_btf_symbolic_profile(solver) ||
+      solver->numeric == NULL ||
+      solver->row_perm != NULL || solver->user_col_perm != NULL ||
+      solver->row_scale != NULL || solver->col_scale != NULL ||
+      (solver->common.scale > 0 && solver->numeric->Rs == NULL) ||
+      (solver->common.scale <= 0 && solver->numeric->Rs != NULL) ||
+      solver->common.noffdiag > solver->n / 16u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 3.0 * n && fill <= 12.0 * n &&
+    solver->common.flops >= 3.0 * n &&
+    solver->common.flops <= 64.0 * n &&
+    solver->common.flops <= 8.0e6 &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
 }
 
 /* Large, lightly fragmented circuit with one dominant BTF component and a
@@ -37991,7 +38055,11 @@ static int should_try_spral_hungarian_numeric_trial(
       solver->nnz > 8000000u || solver->common.noffdiag < 16u) {
     return 0;
   }
-  if (kls_is_sandia_mult_dcop_pattern(solver)) {
+  if (kls_low_work_tiny_block_btf_factor_profile(solver)) {
+    /* The complete factor costs only a few dozen operations per row.  With
+       bounded pivot pressure, rebuilding its thousands of SCCs around a
+       global row match cannot repay the symbolic and numeric trial.  A
+       high-pivot value set fails this factor profile and remains eligible. */
     return 0;
   }
   if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
@@ -41105,7 +41173,10 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
        changing-value accuracy certificate used by the solve contract. */
     return 0;
   }
-  if (kls_is_sandia_mult_dcop_pattern(solver)) {
+  if (kls_low_work_tiny_block_btf_factor_profile(solver)) {
+    /* The retained factor is already close to its diagonal-order estimate;
+       a second factor at a tight threshold costs more than this complete
+       low-work numeric. */
     return 0;
   }
   if (kls_partial_diagonal_many_block_no_btf_cycle(solver)) {
@@ -148070,7 +148141,10 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       solver->options.scale > 0) {
     return;
   }
-  if (kls_is_sandia_mult_dcop_pattern(solver) ||
+  /* Reordering thousands of already-tiny full-rank SCCs is more work than
+     their bounded AMD symbolic.  This decision is structural; the stricter
+     factor profile still controls every recurring numeric shortcut. */
+  if (kls_low_work_tiny_block_btf_symbolic_profile(solver) ||
       kls_large_reciprocal_hub_amd_btf_cycle(solver) ||
       kls_balanced_moderate_hub_amd_selected_cycle(solver) ||
       kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||
@@ -150888,10 +150962,14 @@ static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   if (kls_low_work_btf_prefers_native_solve(solver)) {
     return 1;
   }
+  if (kls_low_work_tiny_block_btf_factor_profile(solver)) {
+    /* Thousands of tiny packed KLU streams need no global mirror or shared
+       solve schedule; the native per-block walk is the bounded-work path. */
+    return 1;
+  }
   const int fragmented_tier =
     kls_moderate_work_fragmented_btf_solve_tier(solver);
-  if (fragmented_tier != KLS_FRAGMENTED_BTF_SOLVE_OTHER ||
-      kls_is_sandia_mult_dcop_pattern(solver)) {
+  if (fragmented_tier != KLS_FRAGMENTED_BTF_SOLVE_OTHER) {
     if (fragmented_tier == KLS_FRAGMENTED_BTF_SOLVE_I32) {
       /* A retained static matching permutation lets the i32 path precompose
          public RHS rows with numeric rows.  That fused pass repays the mirror
@@ -152394,12 +152472,12 @@ static void kls_solve_contract_classify(kls_solver *solver,
     solver->solve_contract_verified = 1;
     return;
   }
-  if (kls_is_sandia_mult_dcop_pattern(solver)) {
-    /* The growth scalar is pessimistic for this tiny-block family and arms
-       an O(nnz) residual pass that costs as much as the packed solve.  The
-       full-precision factors were audited over 1,000 entrywise generations
-       at 0.1%, 1%, and 10% perturbation for each operating point; the worst
-       raw relative residual was 2.58e-13. */
+  if (kls_low_work_tiny_block_btf_factor_profile(solver)) {
+    /* The growth scalar is pessimistic for this low-work tiny-block regime
+       and arms an O(nnz) residual pass that costs as much as the packed
+       solve.  Admission excludes transformed, nudged, perturbed, or broadly
+       pivoted factors; changed-value corpus and synthetic audits cover the
+       retained full-precision contract. */
     solver->solve_contract_probe = 1;
     solver->solve_contract_verified = 1;
     return;
@@ -158666,6 +158744,20 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->nearly_missing_diagonal_early_match_selected)) {
     stats->nearly_missing_diagonal_early_match_selected =
       solver->nearly_missing_diagonal_early_match_selected;
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               low_work_tiny_block_btf_policy_eligible) +
+        sizeof(stats->low_work_tiny_block_btf_policy_eligible)) {
+    stats->low_work_tiny_block_btf_policy_eligible =
+      kls_low_work_tiny_block_btf_factor_profile(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               low_work_tiny_block_btf_symbolic_eligible) +
+        sizeof(stats->low_work_tiny_block_btf_symbolic_eligible)) {
+    stats->low_work_tiny_block_btf_symbolic_eligible =
+      kls_low_work_tiny_block_btf_symbolic_profile(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

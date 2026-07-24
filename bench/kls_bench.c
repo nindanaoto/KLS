@@ -917,6 +917,7 @@ int main(int argc, char **argv) {
              ",\"parallel_task_flow_finish_time\":%.9g"
              ",\"parallel_task_flow_speedup\":%.9g"
              ",\"parallel_task_flow_recommends_parallel\":%d"
+             ",\"low_work_tiny_block_btf_symbolic_eligible\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
              kls_backend_name(options.backend),
@@ -963,7 +964,8 @@ int main(int argc, char **argv) {
              stats.parallel_task_flow_work,
              stats.parallel_task_flow_finish_time,
              stats.parallel_task_flow_speedup,
-             stats.parallel_task_flow_recommends_parallel);
+             stats.parallel_task_flow_recommends_parallel,
+             stats.low_work_tiny_block_btf_symbolic_eligible);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -1015,6 +1017,9 @@ int main(int argc, char **argv) {
       printf("estimated nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n",
              stats.nnz_l, stats.nnz_u);
       printf("estimated flops: %.6e\n", stats.estimated_flops);
+      printf("low-work tiny-block BTF symbolic eligible: %s\n",
+             stats.low_work_tiny_block_btf_symbolic_eligible
+               ? "yes" : "no");
       printf("parallel model R1/R2: %.6g / %.6g, recommends parallel: %s\n",
              stats.parallel_model_r1,
              stats.parallel_model_r2,
@@ -2130,7 +2135,9 @@ int main(int argc, char **argv) {
            ",\"low_work_many_fringe_btf_pts_policy_eligible\":%d"
            ",\"high_work_tiny_scalar_fringe_policy_eligible\":%d"
            ",\"low_work_hubbed_scalar_fringe_pts_policy_eligible\":%d"
-           ",\"nearly_missing_diagonal_early_match_selected\":%d",
+           ",\"nearly_missing_diagonal_early_match_selected\":%d"
+           ",\"low_work_tiny_block_btf_policy_eligible\":%d"
+           ",\"low_work_tiny_block_btf_symbolic_eligible\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2364,7 +2371,9 @@ int main(int argc, char **argv) {
            stats.low_work_many_fringe_btf_pts_policy_eligible,
            stats.high_work_tiny_scalar_fringe_policy_eligible,
            stats.low_work_hubbed_scalar_fringe_pts_policy_eligible,
-           stats.nearly_missing_diagonal_early_match_selected);
+           stats.nearly_missing_diagonal_early_match_selected,
+           stats.low_work_tiny_block_btf_policy_eligible,
+           stats.low_work_tiny_block_btf_symbolic_eligible);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64

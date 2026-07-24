@@ -1358,6 +1358,12 @@ typedef struct kls_stats {
   /* A nearly-missing-diagonal one-block symbolic selected value-aware
      matching before the first numeric factor. */
   int nearly_missing_diagonal_early_match_selected;
+  /* The retained factor has low work spread across many genuinely tiny BTF
+     blocks and uses the bounded tiny-block lifecycle. */
+  int low_work_tiny_block_btf_policy_eligible;
+  /* The selected symbolic has low estimated work spread across many tiny BTF
+     blocks, independent of the later numeric pivot verdict. */
+  int low_work_tiny_block_btf_symbolic_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

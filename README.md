@@ -109,6 +109,22 @@ reports `nearly_missing_diagonal_early_match_selected`; set
 `KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY=1` to restore deferred
 evaluation.  The former Hamrle2-specific input check is removed.
 
+For an AUTO/8-thread normal-AMD symbolic whose full-rank BTF consists of many
+genuinely tiny components, KLS avoids global block-ordering work that costs
+more than the complete factor.  The structural contract covers
+16,384--131,072 rows, 6--12 input entries per row, one BTF block per 2--8
+rows, a largest block no wider than 256 or 1/128 of the matrix, 4--12
+estimated factor entries per row, and 4--64 estimated flops per row below an
+8M-work ceiling.  Recurring matching, tolerance, solve, and accuracy choices
+use a stricter factor contract: no coordinate transform, no nudging or
+perturbation, at most one off-diagonal pivot per 16 rows, 3--12 factor entries
+and 3--64 flops per row.  A high-pivot value set therefore keeps the useful
+matching trial even when its pattern shares the structural class.  Benchmark
+JSON reports `low_work_tiny_block_btf_symbolic_eligible` and
+`low_work_tiny_block_btf_policy_eligible`; set
+`KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY=1` to restore all generic trials.
+The former Sandia operating-point input box is removed.
+
 For very large pre-static candidates, KLS uses SPRAL's auction
 matching/scaling path instead of exact Hungarian matching, except on
 mostly-missing-diagonal patterns where the auction predictably falls short of

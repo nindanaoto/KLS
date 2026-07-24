@@ -18480,3 +18480,98 @@ sanitized changed-value runs additionally cover the original, the 128-node
 out-of-window positive, and the 256-node diagonal-threshold rejection.  They
 retain decisions `1/1/0`; their maximum verified residuals are respectively
 `5.68e-13`, `5.92e-12`, and `2.33e-10`.
+
+LOW-WORK TINY-BLOCK BTF LIFECYCLE GENERALIZED (2026-07-24).  The remaining
+`mult_dcop` shortcut recognized a 25,180--25,200-row,
+193,000--193,400-entry input box, then required 7,400--7,460 BTF blocks and
+a largest block between 60 and 80 rows.  That identity suppressed the
+post-factor Hungarian match and tight-pivot trials, skipped block-structured
+ordering, selected the native packed BTF solve, and bypassed a pessimistic
+residual probe.  The three benchmark operating points share nearly identical
+patterns, but not the numeric behavior needed to justify every one of those
+decisions: the first two have 12 and 1,132 off-diagonal pivots, while the
+third has 2,216 and benefits from the matching trial that the exact shortcut
+previously suppressed.
+
+The replacement separates structural cost from retained-factor safety.  A
+symbolic proposal requires the standard AUTO orientation, ordering, scale,
+and backend contract with eight threads, BTF, static pivoting, and the
+requested `0.001` tolerance.  The selected result must be normal AMD and
+full-rank, with 16,384--131,072 rows, 6--12 input entries per row, one BTF
+block per 2--8 rows, and a largest block between 2 and 256 rows and no wider
+than `n/128`.  Balanced estimated L/U storage must total 4--12 entries per
+row; estimated work must be 4--64 flops per row and at most 8M flops.  These
+normalized bounds skip only the global block-ordering trial whose setup
+cannot be amortized by the complete tiny-block symbolic.
+
+The four post-factor choices require a stricter numeric certificate in
+addition to that proposal.  There can be no row or user-column permutation,
+external row or column scaling, pivot nudges, or perturbations; the KLU scale
+state must be internally consistent, and off-diagonal pivots cannot exceed
+`n/16`.  Balanced numeric L/U storage must total 3--12 entries per row and
+measured work must be 3--64 flops per row and at most 8M flops.  Thus a
+same-pattern value set can retain the cheap structural ordering decision but
+lose every recurring shortcut.  On `mult_dcop_03` the factor profile rejects
+the incumbent, matching is accepted, and the resulting unscaled factor has
+no off-diagonal pivots.  This corrects the old pattern-wide assumption rather
+than merely widening it.
+
+The two stages are observable as
+`low_work_tiny_block_btf_symbolic_eligible` and
+`low_work_tiny_block_btf_policy_eligible` in `kls_stats`, analyze-only output,
+and benchmark JSON.  `KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY=1` disables
+both stages and restores all generic trials.  Explicit orientation,
+ordering, scale, backend, BTF, pivot, tolerance, or thread choices remain
+authoritative and report both fields as zero.  No matrix-specific
+compatibility alias was added.
+
+The smoke suite constructs an independent 16,384-row matrix from 2,048 dense
+8-by-8 diagonal components, with 131,072 entries.  AUTO selects normal AMD,
+full-rank BTF, exactly 2,048 blocks, and a largest block of eight; both policy
+stages report one.  It completes an initial changed-value refactor and 24
+additional independent value generations reaching plus or minus 10%, forms
+each right-hand side independently, and checks every solution.  A
+same-topology control swaps the dominant first two pivots in every component;
+it retains symbolic eligibility but crosses the `n/16` pivot boundary and
+reports factor eligibility zero.  Explicit AMD, the generic disable switch,
+and an equal-size/equal-density cyclic eight-band matrix provide option,
+switch, and topology negatives; the cyclic control has one 16,384-row SCC
+and reports `0/0`.
+
+Two connected metamorphic holdouts append 2,048 rows to an original pattern,
+moving it to 27,235 rows and 199,420 entries, outside the former row window.
+The direct extension has 7,479 blocks, a largest block of 70, and 33
+off-diagonal pivots; a deterministic complete simultaneous shuffle changes
+the factor to 29 pivots and different fill/work.  Both remain `1/1`, use the
+native mapped lifecycle, and solve correctly.  These cases independently
+exercise size, connectivity, and ordering invariance rather than copying the
+old dimensions.
+
+Corpus replay first screened all 243 local Matrix Market files by the broad
+order and density bounds, leaving 36 square candidates.  Two are complex and
+unsupported by the real solver.  Among the 34 supported candidates, only
+the three `mult_dcop` patterns pass the complete symbolic profile; every
+other input falls through on measured BTF geometry or symbolic resources.
+Factor replay admits the first two operating points.  The third is the sole
+value-dependent rejection and takes the now-useful generic matching path, so
+the new rule expands structurally without creating unrelated positives.
+
+Twenty interleaved standard-amplitude pairs put generalized/parent modeled
+cycle at `0.9919`, `0.9848`, and `0.9782` on the three originals, for a
+three-case geometric mean of `0.9850`.  Analysis remains within 2.8% of the
+parent and the retained factor/refactor/solve phases preserve or improve the
+complete horizon; the third case's accepted match reduces its first factor
+ratio to `0.1754`.  Ten same-binary enabled/disabled pairs put modeled cycle
+at `0.9394`, `0.6611`, and `0.9700` on the originals and at `0.9231` and
+`0.6445` on the connected and shuffled out-of-window holdouts.  All five
+therefore benefit from the policy relative to the generic trials it replaces.
+
+The three originals and two metamorphic positives each completed 100
+verified entrywise generations at amplitudes 0.001, 0.01, and 0.1.  Across
+all 1,500 changed systems the worst per-generation relative-L2 residual was
+`3.43e-12`, far below the `1e-8` contract; every decision remained stable.
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+changed-value runs additionally cover the admitted first operating point,
+the third operating point's symbolic-only/matched branch, and both connected
+out-of-window holdouts.  They retain decisions `1/1`, `1/0`, `1/1`, and
+`1/1`; the worst verified residual in those runs was `1.45e-15`.

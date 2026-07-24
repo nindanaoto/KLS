@@ -13503,6 +13503,345 @@ cleanup:
   return ok;
 }
 
+static int test_low_work_tiny_block_btf_policy(void) {
+  const int32_t block_width = 8;
+  const int32_t block_count = 2048;
+  const int32_t n = block_width * block_count;
+  const int32_t nnz = block_width * n;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *ax_changed =
+    (double *)malloc((size_t)nnz * sizeof(*ax_changed));
+  double *ax_pivoted =
+    (double *)malloc((size_t)nnz * sizeof(*ax_pivoted));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *control_solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
+    ax_pivoted != NULL && expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv("KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY") != 0) {
+    perror("configure low-work tiny-block BTF policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    const int32_t block_begin = (col / block_width) * block_width;
+    ap[col] = p;
+    for (int32_t local_row = 0; local_row < block_width; ++local_row) {
+      const int32_t row = block_begin + local_row;
+      ai[p] = row;
+      ax[p] = row == col
+        ? 16.0
+        : -0.0625 * (double)(1 + ((local_row + col) % 3));
+      ++p;
+    }
+    expected[col] = 0.25 + 0.015625 * (double)(col % 23);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr,
+            "unexpected low-work tiny-block BTF nnz: %d/%d\n", p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t entry = 0; entry < nnz; ++entry) {
+    ax_changed[entry] = ax[entry] *
+      (1.0 + 1.0e-5 * (double)(entry % 13 - 6));
+  }
+  memcpy(ax_pivoted, ax, (size_t)nnz * sizeof(*ax_pivoted));
+  for (int32_t block = 0; block < block_count; ++block) {
+    const int32_t first_col = block * block_width;
+    const int32_t second_col = first_col + 1;
+    ax_pivoted[first_col * block_width] = 1.0e-12;
+    ax_pivoted[second_col * block_width + 1] = 1.0e-12;
+    ax_pivoted[first_col * block_width + 1] = 16.0;
+    ax_pivoted[second_col * block_width] = 16.0;
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create low-work tiny-block BTF policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze low-work tiny-block BTF policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor low-work tiny-block BTF policy") ||
+      !require_ok(kls_refactor(solver, ax_changed),
+                  "refactor low-work tiny-block BTF policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats low-work tiny-block BTF policy") ||
+      stats.low_work_tiny_block_btf_symbolic_eligible != 1 ||
+      stats.low_work_tiny_block_btf_policy_eligible != 1 ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      !stats.selected_btf || stats.structural_rank != n ||
+      stats.nblocks != block_count || stats.max_block != block_width) {
+    fprintf(stderr,
+            "unexpected low-work tiny-block BTF policy: symbolic=%d"
+            " factor=%d orientation=%d ordering=%d btf=%d"
+            " blocks=%" PRId64 " max=%" PRId64 " rank=%" PRId64 "\n",
+            stats.low_work_tiny_block_btf_symbolic_eligible,
+            stats.low_work_tiny_block_btf_policy_eligible,
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.structural_rank);
+    ok = 0;
+    goto cleanup;
+  }
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += ax_changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve low-work tiny-block BTF policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "low-work tiny-block BTF solve mismatch at %d: %.17g"
+              " vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* Exercise the factor-side accuracy certificate across independent value
+     generations, including changes much larger than the benchmark default. */
+  for (int generation = 1; generation <= 24; ++generation) {
+    for (int32_t entry = 0; entry < nnz; ++entry) {
+      const int delta = (entry * 17 + generation * 29) % 101 - 50;
+      ax_changed[entry] = ax[entry] * (1.0 + 0.002 * (double)delta);
+    }
+    if (!require_ok(kls_refactor(solver, ax_changed),
+                    "repeat low-work tiny-block BTF refactor")) {
+      ok = 0;
+      goto cleanup;
+    }
+    memset(b, 0, (size_t)n * sizeof(*b));
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        b[ai[entry]] += ax_changed[entry] * expected[col];
+      }
+    }
+    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                    "repeat low-work tiny-block BTF solve")) {
+      ok = 0;
+      goto cleanup;
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      if (!close_enough(x[row], expected[row])) {
+        fprintf(stderr,
+                "repeated low-work tiny-block BTF solve mismatch"
+                " at generation %d row %d: %.17g vs %.17g\n",
+                generation, row, x[row], expected[row]);
+        ok = 0;
+        goto cleanup;
+      }
+    }
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "repeated stats low-work tiny-block BTF policy") ||
+      stats.low_work_tiny_block_btf_symbolic_eligible != 1 ||
+      stats.low_work_tiny_block_btf_policy_eligible != 1) {
+    fprintf(stderr,
+            "low-work tiny-block policy did not survive value changes\n");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(solver);
+  solver = NULL;
+
+  /* The same symbolic topology with widespread pivot pressure remains a
+     proposal, but it must not inherit the retained-factor shortcuts. */
+  if (!require_ok(kls_create(&control_solver),
+                  "create low-work tiny-block pivot control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze low-work tiny-block pivot control") ||
+      !require_ok(kls_factor(control_solver, ax_pivoted),
+                  "factor low-work tiny-block pivot control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats low-work tiny-block pivot control") ||
+      stats.low_work_tiny_block_btf_symbolic_eligible != 1 ||
+      stats.low_work_tiny_block_btf_policy_eligible != 0 ||
+      stats.offdiag_pivots <= n / 16) {
+    fprintf(stderr,
+            "pivoted low-work tiny-block control retained factor policy:"
+            " symbolic=%d factor=%d pivots=%" PRId64 "\n",
+            stats.low_work_tiny_block_btf_symbolic_eligible,
+            stats.low_work_tiny_block_btf_policy_eligible,
+            stats.offdiag_pivots);
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+
+  /* An explicit ordering request must not inherit an AUTO lifecycle even
+     when it happens to produce the same AMD factor. */
+  kls_options explicit_options = options;
+  explicit_options.ordering = KLS_ORDERING_AMD;
+  if (!require_ok(kls_create(&control_solver),
+                  "create low-work tiny-block explicit control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &explicit_options),
+                  "analyze low-work tiny-block explicit control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor low-work tiny-block explicit control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats low-work tiny-block explicit control") ||
+      stats.low_work_tiny_block_btf_symbolic_eligible != 0 ||
+      stats.low_work_tiny_block_btf_policy_eligible != 0) {
+    fprintf(stderr,
+            "explicit low-work tiny-block control selected policy\n");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+
+  if (setenv("KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_create(&control_solver),
+                  "create low-work tiny-block disabled control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze low-work tiny-block disabled control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor low-work tiny-block disabled control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats low-work tiny-block disabled control") ||
+      stats.low_work_tiny_block_btf_symbolic_eligible != 0 ||
+      stats.low_work_tiny_block_btf_policy_eligible != 0) {
+    fprintf(stderr,
+            "disabled low-work tiny-block control selected policy\n");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+  if (unsetenv("KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY") != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Preserve order and density but connect the columns into one cyclic SCC.
+     A low-work band is not a many-tiny-block lifecycle. */
+  p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    int32_t rows[8];
+    ap[col] = p;
+    for (int32_t offset = 0; offset < block_width; ++offset) {
+      rows[offset] = (col + offset) % n;
+    }
+    for (int32_t i = 1; i < block_width; ++i) {
+      const int32_t row = rows[i];
+      int insert = i;
+      while (insert > 0 && rows[insert - 1] > row) {
+        rows[insert] = rows[insert - 1];
+        --insert;
+      }
+      rows[insert] = row;
+    }
+    for (int32_t i = 0; i < block_width; ++i) {
+      ai[p] = rows[i];
+      ax[p] = rows[i] == col ? 16.0 : -0.125;
+      ++p;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz ||
+      !require_ok(kls_create(&control_solver),
+                  "create low-work tiny-block structural control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze low-work tiny-block structural control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor low-work tiny-block structural control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats low-work tiny-block structural control") ||
+      stats.low_work_tiny_block_btf_symbolic_eligible != 0 ||
+      stats.low_work_tiny_block_btf_policy_eligible != 0 ||
+      stats.nblocks != 1 || stats.max_block != n) {
+    fprintf(stderr,
+            "cyclic low-work tiny-block control selected policy:"
+            " symbolic=%d factor=%d blocks=%" PRId64
+            " max=%" PRId64 "\n",
+            stats.low_work_tiny_block_btf_symbolic_eligible,
+            stats.low_work_tiny_block_btf_policy_eligible,
+            stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(control_solver);
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY",
+                         had_policy,
+                         saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(ax_changed);
+  free(ax_pivoted);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  return ok;
+}
+
 static int test_pre_static_pivoting(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -22450,6 +22789,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_nearly_missing_diagonal_early_match_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_low_work_tiny_block_btf_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_high_work_tiny_scalar_fringe_policy()) {
