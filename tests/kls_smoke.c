@@ -25221,6 +25221,237 @@ cleanup:
   return ok;
 }
 
+static int32_t hybrid_grid_nnz(int32_t rows, int32_t cols) {
+  return rows * cols +
+    2 * (rows * (cols - 1) + (rows - 1) * cols);
+}
+
+static int build_hybrid_huge_single_grid_fixture(
+  int32_t rows,
+  int32_t cols,
+  int32_t *ap,
+  int32_t *ai,
+  double *ax) {
+  const int32_t n = rows * cols;
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    const int32_t grid_row = col / cols;
+    const int32_t grid_col = col % cols;
+    ap[col] = p;
+    if (grid_row > 0) {
+      ai[p] = col - cols;
+      ax[p++] = -0.125;
+    }
+    if (grid_col > 0) {
+      ai[p] = col - 1;
+      ax[p++] = -0.125;
+    }
+    ai[p] = col;
+    ax[p++] = 4.0;
+    if (grid_col + 1 < cols) {
+      ai[p] = col + 1;
+      ax[p++] = -0.125;
+    }
+    if (grid_row + 1 < rows) {
+      ai[p] = col + cols;
+      ax[p++] = -0.125;
+    }
+  }
+  ap[n] = p;
+  return p == hybrid_grid_nnz(rows, cols);
+}
+
+static int test_hybrid_huge_single_egraph_policy(void) {
+  enum {
+    positive_rows = 128,
+    positive_cols = 256,
+    control_rows = 16,
+    control_cols = 2048,
+    n = positive_rows * positive_cols
+  };
+  const int32_t positive_nnz =
+    hybrid_grid_nnz(positive_rows, positive_cols);
+  const int32_t control_nnz =
+    hybrid_grid_nnz(control_rows, control_cols);
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)positive_nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)positive_nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)positive_nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  int32_t *control_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*control_ap));
+  int32_t *control_ai =
+    (int32_t *)malloc((size_t)control_nnz * sizeof(*control_ai));
+  double *control_ax =
+    (double *)malloc((size_t)control_nnz * sizeof(*control_ax));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *control_solver = NULL;
+  kls_solver *disabled_solver = NULL;
+  int ok = ap != NULL && ai != NULL && ax != NULL && changed != NULL &&
+    expected != NULL && b != NULL && x != NULL && control_ap != NULL &&
+    control_ai != NULL && control_ax != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    build_hybrid_huge_single_grid_fixture(
+      positive_rows, positive_cols, ap, ai, ax) &&
+    build_hybrid_huge_single_grid_fixture(
+      control_rows, control_cols, control_ap, control_ai, control_ax);
+  if (!ok ||
+      unsetenv("KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY") != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  for (int32_t entry = 0; entry < positive_nnz; ++entry) {
+    changed[entry] = ax[entry] *
+      (1.0 + 1.0e-5 * (double)(entry % 17 - 8));
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.5 + 0.001953125 * (double)(col % 31);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.ordering = KLS_ORDERING_METIS;
+  options.scale = -1;
+  options.use_btf = 0;
+  if (!require_ok(kls_create(&solver),
+                  "create hybrid huge-single grid") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze hybrid huge-single grid") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor hybrid huge-single grid")) {
+    ok = 0;
+    goto cleanup;
+  }
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats hybrid huge-single grid") ||
+      stats.hybrid_huge_single_egraph_factor_eligible != 1) {
+    fprintf(stderr,
+            "unexpected hybrid huge-single grid: ordering=%d scale=%d"
+            " btf=%d blocks=%" PRId64 " max=%" PRId64
+            " fill=%" PRId64 "/%" PRId64 " work=%.0f"
+            " sep=%" PRId64 "/%" PRId64 "/%" PRId64
+            " private=%" PRId64 " pipeline=%" PRId64 " eligible=%d\n",
+            (int)stats.selected_ordering, stats.selected_scale,
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.nnz_l, stats.nnz_u, stats.factor_flops,
+            stats.separator_component_count,
+            stats.separator_private_components,
+            stats.separator_pipeline_components,
+            stats.separator_private_rows, stats.separator_pipeline_rows,
+            stats.hybrid_huge_single_egraph_factor_eligible);
+    ok = 0;
+    goto cleanup;
+  }
+  if (!require_ok(kls_refactor(solver, changed),
+                  "refactor hybrid huge-single grid") ||
+      !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve hybrid huge-single grid")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "refactor stats hybrid huge-single grid") ||
+      stats.hybrid_huge_single_egraph_factor_eligible != 1 ||
+      stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+    fprintf(stderr, "hybrid huge-single grid did not retain EGraph\n");
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (fabs(x[row] - expected[row]) >
+        1.0e-8 * (1.0 + fabs(expected[row]))) {
+      fprintf(stderr,
+              "hybrid huge-single solve mismatch at %d: %.17g vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* A same-order, same-density strip has much lower treewidth and therefore
+     fails the measured fill/work gate despite the same coarse input shape. */
+  if (!require_ok(kls_create(&control_solver),
+                  "create narrow hybrid grid control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  control_ap, control_ai, 0, &options),
+                  "analyze narrow hybrid grid control") ||
+      !require_ok(kls_factor(control_solver, control_ax),
+                  "factor narrow hybrid grid control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats narrow hybrid grid control") ||
+      stats.hybrid_huge_single_egraph_factor_eligible != 0) {
+    fprintf(stderr, "narrow hybrid grid control became eligible\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (setenv("KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_create(&disabled_solver),
+                  "create disabled hybrid grid control") ||
+      !require_ok(kls_analyze_csc(disabled_solver, KLS_INDEX_INT32, n, ap, ai,
+                                  0, &options),
+                  "analyze disabled hybrid grid control") ||
+      !require_ok(kls_factor(disabled_solver, ax),
+                  "factor disabled hybrid grid control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(disabled_solver, &stats),
+                  "stats disabled hybrid grid control") ||
+      stats.hybrid_huge_single_egraph_factor_eligible != 0) {
+    fprintf(stderr, "disabled hybrid grid control became eligible\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(disabled_solver);
+  kls_destroy(control_solver);
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY",
+                         had_policy,
+                         saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(control_ap);
+  free(control_ai);
+  free(control_ax);
+  free(saved_policy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -25282,6 +25513,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_dense_fragmented_scaled_row_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_hybrid_huge_single_egraph_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

@@ -19586,3 +19586,109 @@ findings.  Source searches find no exact policy function, exact dimension
 window, exact BTF block window, or exact fill/work window from the former
 selector; only documented compatibility environment spellings and historical
 performance comments retain the matrix name.
+
+HYBRID HUGE-SINGLE EGRAPH LIFECYCLE GENERALIZED (2026-07-24).  A remaining
+post-factor `G2_circuit` predicate required 150,000--150,200 rows,
+726,000--727,500 input entries, 12--14 million factor entries, and 2.5--4.0
+billion measured operations.  That identity was consulted after every
+changed-value factor to settle full EGraph width, disable pair fusion, extend
+the clustered-prefix/dependency-pipeline boundary with a width multiplier of
+40, retain the PTS cut, and suppress later floor and padded-panel probes.  It
+also bypassed the ordinary predicted-factor solve contract without measuring a
+residual.  The absolute coordinates were therefore authorizing both
+performance scheduling and an accuracy certificate.
+
+The replacement is a cached adopted-factor capability.  The backend must be
+parallel with eight requested workers, and the retained factor must be normal
+METIS, one full-matrix component, unscaled, free of row/column transforms,
+off-diagonal pivots, nudges, and perturbations.  Its order is bounded to
+32,768--524,288 rows to keep the schedule economics material, while input
+density is expressed as three--eight entries per row.  L and U must be
+nonempty and balanced within 2x; combined fill is 40--128 entries per row and
+measured work is 3,072--32,768 operations per row.  No-BTF or predicted
+symbolics may carry KLU's unknown structural-rank sentinel, but every observed
+rank must be full.
+
+The separator supplies a distinct representation proof.  It must cover the
+complete order, account exactly for every component and row, provide at least
+one private component per worker, assign at least 31/32 of rows privately, and
+assign at most 1/32 to the pipeline.  The largest private component is bounded
+by `n/4`; the largest pipeline component is bounded by `n/48`.  This rejects a
+large-factor lookalike whose separator does not expose the intended parallel
+front.  The verdict is computed after each numeric, cached as `-1/1`, and
+invalidated in numeric free, replacement, repeated factor, and matrix-clear
+paths so transient reuse of `Common.noffdiag` after refactor cannot change it.
+The small recurring accessor is deliberately non-inlined: paired measurements
+found this large EGraph kernel sensitive to surrounding code generation even
+when every schedule counter was identical.
+
+All old scheduling consumers now read
+`kls_hybrid_huge_single_egraph_factor_cycle`: the all-pipeline exclusion,
+immediate full-width choice, 40x cluster boundary, PTS cut, and settled
+batch-floor and padded-panel decisions.  The exact G2 predicate, its order and
+entry windows, and its absolute fill/work windows are gone.  The master
+same-binary control is
+`KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY=1`, and
+`hybrid_huge_single_egraph_factor_eligible` is appended to `kls_stats` and both
+full and analyze-only benchmark JSON.  Analyze-only naturally reports zero
+because no numeric has yet proved the capability.
+
+The named solve-contract bypass is removed rather than generalized.  A
+predicted member starts with the existing structural-risk state and its first
+out-of-place solve computes the ordinary residual.  A traced target run
+reported raw `rmax=6.480e-11` against a `2.527e-5` contract target, set the
+numeric's probe state to clean, and skipped repeated residual work thereafter.
+This makes the accuracy decision depend on the actual factor and right-hand
+side rather than membership in the performance class.
+
+The independent smoke positive is a 128-by-256 five-point grid: 32,768 rows,
+163,072 input entries, normal explicit METIS/no-BTF, balanced factor streams of
+777,194 entries each, and 126,995,082 measured operations.  Its complete
+15-component separator has eight private and seven pipeline components,
+32,173 private rows, and 595 pipeline rows.  It passes the normalized gate,
+refactors changed values through EGraph, and recovers an independently formed
+solution.  A 16-by-2,048 strip keeps the same order and nearly identical input
+density but has lower treewidth and correctly rejects on measured factor
+economics.  A fresh positive under the master disable also rejects.  These
+tests do not contain target-derived coordinates or values.
+
+The SuiteSparse corpus screen over the saved 110-matrix factor artifact finds
+only `G2_circuit` and `nxp1` inside all coarse order/density/fill/work/separator
+bounds.  A current `nxp1` replay rejects because its selected SPRAL match has a
+row permutation, while `G2_circuit` reports the complete factor capability.
+Corpus uniqueness is treated as compatibility evidence only; the independent
+grid and metamorphic cases provide the generalization evidence.
+
+Appending 4,096 weak, diagonal, reciprocally coupled vertices to the target
+produces 154,198 rows and 738,962 entries, outside the old order and entry
+windows while preserving one strongly connected factor.  It reports eligible
+with 6,502,872 entries in each factor stream, 3.154 billion operations, 152,717
+private rows, 1,481 pipeline rows, a 36-level clustered prefix, and an
+18,665-column dependency pipeline.  An adjacent-swap relabeling reports
+6,417,163 entries per stream and 3.063 billion operations; a complete shuffled
+relabeling reports 6,505,250 and 3.128 billion.  Both remain eligible based on
+their measured representations rather than the original labels.
+
+The target and coupled extension each completed 100 independently verified
+entrywise generations at amplitudes 0.001, 0.01, and 0.1.  All 600 generations
+retained predicted-first/EGraph execution and the factor capability.  Worst
+per-generation relative-L2 residuals were `8.3617e-13` on the target and
+`2.3464e-13` on the extension.  Leak-enabled ASan/UBSan/LSan runs at 10%
+amplitude additionally covered the target, extension, and complete shuffled
+relabeling; residuals were `2.10e-15`, `2.28e-15`, and `1.43e-10`, with no
+sanitizer findings.
+
+Timing used alternating prior-exact/current processes pinned to cores 0--7,
+one initial factor, and 40 changed-value refactors per process.  Eight target
+pairs preserve the exact 37-level/18,332-column schedule and put the robust
+median paired ratios at `1.0013` for analysis, `1.0026` for initial factor,
+`1.0228` for first refactor, `1.0054` for steady refactor, and `1.0035` for the
+complete modeled cycle.  Six extension pairs change the parent's generic
+boundary to the measured hybrid schedule; median ratios are `0.9369` for first
+refactor, `0.9325` for steady refactor, and `0.9462` for the modeled cycle.
+Occasional host stalls affected either binary by 2--2.6x, so paired medians are
+reported rather than allowing those stalls to dominate a geometric mean.  Six
+same-binary enabled/disabled pairs on the independent grid put geometric
+current/control ratios at `0.8471` for steady refactor, `0.3252` for steady
+solve, and `0.7951` for the complete cycle (`0.7749` median), with worst final
+residual `3.32e-16`.  Release and ASan/UBSan/LSan CTest pass all four tests.

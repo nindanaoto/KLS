@@ -2400,6 +2400,7 @@ struct kls_solver {
   int sparse_full_diagonal_metis_row_numeric_eligible; /* -1/0/1 */
   int giant_symmetric_scalar_fringe_metis_row_candidate; /* topology proposal */
   int giant_symmetric_scalar_fringe_metis_row_numeric_eligible; /* -1/0/1 */
+  int hybrid_huge_single_egraph_numeric_eligible; /* -1/0/1 */
   int symmetric_scalar_fringe_amd_lean_cycle; /* guarded transpose AMD/BTF */
   int symmetric_scalar_fringe_numeric_eligible; /* -1 reject, 0 unknown, 1 */
   const trilinos_klu_l_symbolic *symmetric_scalar_fringe_symbolic_identity;
@@ -3265,6 +3266,12 @@ static int kls_circuit5m_h100_policy_enabled(
   const UF_long *col_ptr,
   const kls_options *options);
 static int kls_dense_fragmented_scaled_row_factor_cycle(
+  const kls_solver *solver);
+static __attribute__((cold, noinline)) int
+kls_hybrid_huge_single_egraph_factor_profile(
+  const kls_solver *solver);
+static __attribute__((noinline)) int
+kls_hybrid_huge_single_egraph_factor_cycle(
   const kls_solver *solver);
 static int is_medium_prestatic_partial_missing_pattern(
   UF_long n,
@@ -27136,6 +27143,7 @@ static void free_numeric(kls_solver *solver) {
   solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
+  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
@@ -27266,6 +27274,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
+  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
@@ -27586,6 +27595,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_candidate = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
+  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_amd_lean_cycle = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_symbolic_identity = NULL;
@@ -45986,6 +45996,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_sparse_full_diagonal_metis_row_factor_profile(solver) ? 1 : -1;
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible =
     kls_giant_symmetric_scalar_fringe_metis_row_factor_profile(solver) ? 1 : -1;
+  solver->hybrid_huge_single_egraph_numeric_eligible =
+    kls_hybrid_huge_single_egraph_factor_profile(solver) ? 1 : -1;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible =
     kls_high_work_tiny_scalar_fringe_amd_factor_profile(solver) ? 1 : -1;
   kls_dbg_snapshot_numeric(solver);
@@ -111848,56 +111860,73 @@ static int kls_egraph_all_pipeline_dominant_btf_shape(
          solver->common.flops >= 1.0e8;
 }
 
-/* Large, low-degree single-SCC circuits have a very wide dependency front
-   followed by a small serializing tail.  Pure natural-order speculation
-   repeatedly stalls on that tail; CKTSO's clustered-level idea is the
-   better schedule here.  Keep this class deliberately narrow because its
-   choice also controls a handful of one-time policy probes. */
-static int kls_egraph_hybrid_huge_single_shape(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->symbolic->nblocks != 1u || solver->n < 125000u ||
-      solver->n > 175000u || solver->col_ptr == NULL ||
-      solver->common.scale > 0 || solver->common.noffdiag > 0) {
-    return 0;
-  }
-  const double entries_per_row =
-    (double)solver->col_ptr[solver->n] / (double)solver->n;
-  const double fill =
-    (double)solver->numeric->lnz + (double)solver->numeric->unz;
-  return solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-         entries_per_row >= 4.0 && entries_per_row <= 5.0 &&
-         solver->common.flops >= 2.5e9 && solver->common.flops <= 4.5e9 &&
-         fill >= 1.0e7 && fill <= 1.6e7;
-}
-
-/* Stable public-cycle signature for G2_circuit.  The broader hybrid EGraph
-   scheduling predicate above also consults Common.noffdiag, which is valid
-   while the retained factor is selected but is transient diagnostic state
-   after a values-only refactor.  Policies applied in the refactor epilogue
-   therefore use this immutable pattern/factor envelope instead. */
-static int kls_is_g2_hybrid_cycle_pattern(const kls_solver *solver) {
+/* Sparse one-component factors with a nearly all-private separator have a
+   wide dependency front followed by a small serializing tail.  Extending the
+   dependency-driven suffix and settling on the full worker width amortizes
+   barriers for this retained representation.  Classify the adopted factor
+   and separator rather than a public matrix identity; the cached verdict is
+   stable even when Common.noffdiag is reused as transient diagnostic state
+   after a values-only refactor. */
+static __attribute__((cold, noinline)) int
+kls_hybrid_huge_single_egraph_factor_profile(
+  const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->col_ptr == NULL ||
-      solver->options.orientation != KLS_ORIENTATION_AUTO ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->options.scale != KLS_SCALE_AUTO ||
-      solver->options.backend != KLS_BACKEND_AUTO ||
+      getenv("KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY") != NULL ||
+      solver->options.backend == KLS_BACKEND_SERIAL ||
       solver->options.threads != 8 ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->stats.selected_ordering != KLS_ORDERING_METIS ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
-      solver->n < 150000u || solver->n > 150200u ||
-      solver->col_ptr[solver->n] < 726000u ||
-      solver->col_ptr[solver->n] > 727500u ||
       solver->symbolic->nblocks != 1u ||
-      solver->symbolic->maxblock != solver->n) {
+      solver->symbolic->maxblock != solver->n ||
+      (solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
+       solver->symbolic->structural_rank != solver->n) ||
+      solver->n < 32768u || solver->n > 524288u ||
+      solver->n > UF_long_max / 128u ||
+      solver->col_ptr[solver->n] < 3u * solver->n ||
+      solver->col_ptr[solver->n] > 8u * solver->n ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->row_perm != NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL || solver->common.noffdiag > 0 ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->numeric->lnz == 0u || solver->numeric->unz == 0u) {
     return 0;
   }
+  const double n = (double)solver->n;
+  const double lnz = (double)solver->numeric->lnz;
+  const double unz = (double)solver->numeric->unz;
   const double fill =
-    (double)solver->numeric->lnz + (double)solver->numeric->unz;
-  return fill >= 1.2e7 && fill <= 1.4e7 &&
-         solver->common.flops >= 2.5e9 &&
-         solver->common.flops <= 4.0e9;
+    lnz + unz;
+  const kls_separator_analysis *separator = &solver->separator;
+  return lnz <= 2.0 * unz && unz <= 2.0 * lnz &&
+    fill >= 40.0 * n && fill <= 128.0 * n &&
+    solver->common.flops >= 3072.0 * n &&
+    solver->common.flops <= 32768.0 * n &&
+    separator->n == solver->n && separator->global_range_valid &&
+    separator->global_begin == 0u && separator->global_end == solver->n &&
+    separator->thread_count == solver->options.threads &&
+    separator->component_count > 0u &&
+    separator->private_component_count >=
+      (UF_long)solver->options.threads &&
+    separator->private_component_count +
+      separator->pipeline_component_count == separator->component_count &&
+    separator->private_rows + separator->pipeline_rows == solver->n &&
+    32u * separator->private_rows >= 31u * solver->n &&
+    32u * separator->pipeline_rows <= solver->n &&
+    separator->private_max_rows <= solver->n / 4u &&
+    separator->pipeline_max_rows <= solver->n / 48u;
+}
+
+static __attribute__((noinline)) int
+kls_hybrid_huge_single_egraph_factor_cycle(
+  const kls_solver *solver) {
+  if (solver == NULL) {
+    return 0;
+  }
+  return solver->hybrid_huge_single_egraph_numeric_eligible != 0
+    ? solver->hybrid_huge_single_egraph_numeric_eligible > 0
+    : kls_hybrid_huge_single_egraph_factor_profile(solver);
 }
 
 static int kls_egraph_all_pipeline_huge_single_shape(
@@ -111916,7 +111945,7 @@ static int kls_egraph_all_pipeline_huge_single_shape(
     return 0;
   }
   return solver->common.flops >= 1.0e9 &&
-         !kls_egraph_hybrid_huge_single_shape(solver);
+         !kls_hybrid_huge_single_egraph_factor_cycle(solver);
 }
 
 static int kls_egraph_non_dominant_many_block_shape(
@@ -112343,7 +112372,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
   }
   if (solver->medium_spike_minfill_path ||
       kls_medium_partial_static_metis_adopted(solver) ||
-      kls_is_g2_hybrid_cycle_pattern(solver) ||
+      kls_hybrid_huge_single_egraph_factor_cycle(solver) ||
       kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_high_work_tiny_scalar_fringe_amd_factor_cycle(solver) ||
       kls_sparse_spiked_predicted_clustered_cycle(solver) ||
@@ -121122,7 +121151,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
      sits beyond the cut, and extending the dependency-driven pipeline from
      about 9K to 18K columns avoids many low-width level barriers. */
   double cluster_width_alpha =
-    kls_is_g2_hybrid_cycle_pattern(solver) ? 40.0 :
+    kls_hybrid_huge_single_egraph_factor_cycle(solver) ? 40.0 :
     kls_high_work_tiny_scalar_fringe_amd_factor_cycle(solver) ? 48.0 :
     kls_pivoted_high_work_single_block_factor_cycle(solver) ? 4.0 :
     kls_moderate_work_fragmented_dominant_btf_cycle(solver) ? 24.0 :
@@ -150611,7 +150640,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ? 1.0 :
       kls_symmetric_partial_diagonal_match_factor_cycle(solver) ? 0.9 :
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ? 0.9 :
-      (kls_egraph_hybrid_huge_single_shape(solver) ||
+      (kls_hybrid_huge_single_egraph_factor_cycle(solver) ||
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) ? 1.0 :
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_PTS_CUT") == NULL) ? 1.5 :
@@ -153814,26 +153843,6 @@ static int kls_serial_factor(kls_solver *solver,
    1.3e-7). */
 static void kls_solve_contract_classify(kls_solver *solver,
                                         const double *numeric_values) {
-  if (solver != NULL && solver->solve_contract_probe == 0 &&
-      solver->row_perm == NULL && solver->row_scale == NULL &&
-      solver->col_scale == NULL && solver->pivot_nudge_count == 0u &&
-      solver->common.kls_perturb_count == 0u && !solver->fp32_last_used &&
-      solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH &&
-      kls_is_g2_hybrid_cycle_pattern(solver) &&
-      getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") == NULL &&
-      getenv("KLS_DISABLE_G2_CONTRACT_BYPASS") == NULL) {
-    /* Reciprocal growth is pessimistic for this unscaled huge-single
-       retained-pattern EGraph factor.  It otherwise recopies the complete
-       input on every refactor and runs an unnecessary residual SpMV on every
-       solve.  The raw solve was audited over 1,000 entrywise generations at
-       0.1%, 1%, and 10% perturbation; the worst observed relative residual
-       was below 1.6e-12.  Keep all mutable factor-risk modes excluded above
-       while allowing this certificate to cover the audited predicted
-       pattern. */
-    solver->solve_contract_probe = 1;
-    solver->solve_contract_verified = 1;
-    return;
-  }
   if (solver == NULL || solver->solve_contract_probe != 0 ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->pivot_nudge_count > 0 ||
@@ -155668,6 +155677,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
+  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
@@ -157712,7 +157722,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_snode_floor_work_override = 24;
   }
   if ((getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL ||
-       kls_egraph_hybrid_huge_single_shape(solver) ||
+       kls_hybrid_huge_single_egraph_factor_cycle(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_pivoted_high_work_single_block_factor_cycle(solver) ||
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
@@ -157724,7 +157734,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->floor_choice = -1;
   }
   if ((getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL ||
-       kls_egraph_hybrid_huge_single_shape(solver) ||
+       kls_hybrid_huge_single_egraph_factor_cycle(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_pivoted_high_work_single_block_factor_cycle(solver) ||
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
@@ -160313,6 +160323,12 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->giant_symmetric_scalar_fringe_metis_row_factor_eligible)) {
     stats->giant_symmetric_scalar_fringe_metis_row_factor_eligible =
       kls_giant_symmetric_scalar_fringe_metis_row_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, hybrid_huge_single_egraph_factor_eligible) +
+        sizeof(stats->hybrid_huge_single_egraph_factor_eligible)) {
+    stats->hybrid_huge_single_egraph_factor_eligible =
+      kls_hybrid_huge_single_egraph_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

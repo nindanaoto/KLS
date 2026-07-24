@@ -1432,6 +1432,10 @@ typedef struct kls_stats {
   /* The retained unscaled fixed-pivot factor also passed normalized numeric
      fill/work, balance, and pivot-repair guards for recurring row updates. */
   int giant_symmetric_scalar_fringe_metis_row_factor_eligible;
+  /* The retained sparse, one-block METIS factor and its separator have the
+     balanced fill/work and nearly all-private geometry used by the hybrid
+     clustered-prefix/dependency-pipeline EGraph schedule. */
+  int hybrid_huge_single_egraph_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -4028,6 +4028,53 @@ extension pairs reduce the modeled-cycle ratio to `0.5803`. Release and
 ASan/UBSan/LSan CTest pass all four tests; leak-enabled target and extension
 factor/refactor/solve runs are clean.
 
+## Hybrid huge-single EGraph lifecycle
+
+The former `G2_circuit` recurring scheduler no longer recognizes a
+150,000--150,200-row, 726,000--727,500-entry identity followed by absolute
+fill and work boxes. The replacement is a cached factor capability. It accepts
+normal METIS factors with 32,768--524,288 rows, three--eight input entries per
+row, one full-matrix component, no scaling transform or pivot repair, balanced
+L/U streams totaling 40--128 entries per row, and 3,072--32,768 measured
+operations per row. A no-BTF or predicted symbolic may retain the unknown
+structural-rank sentinel; an observed rank must be full.
+
+The separator is independently checked before the capability is admitted. It
+must cover every row and component, expose at least one private component per
+worker, place at least 31/32 of rows in private components, keep total pipeline
+rows below 1/32, and bound the largest private and pipeline components by
+`n/4` and `n/48`. Only this settled representation receives the hybrid
+clustered-prefix/dependency-pipeline schedule, full-width EGraph dispatch, and
+the associated settled floor/panel decisions. Numeric replacement invalidates
+and recomputes the verdict.
+
+`KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY=1` provides a same-binary
+control. `hybrid_huge_single_egraph_factor_eligible` exposes the accepted
+factor through `kls_stats` and benchmark JSON. The old G2-only solve-contract
+bypass is removed: predicted factors now run the ordinary first-solve residual
+probe. On the target, that probe measured a `6.48e-11` maximum residual,
+certified the numeric, and allowed later solves to use the normal clean-factor
+fast path.
+
+The smoke test constructs an independent 32,768-row five-point grid under
+explicit METIS/no-BTF analysis, refactors changed values through EGraph, and
+checks its solution entrywise. A same-order, same-density narrow strip has
+lower measured fill/work and rejects; the master-disable control also rejects.
+A 4,096-node reciprocally coupled extension of `G2_circuit` has 154,198 rows,
+outside the former identity, and reports eligible with a 36-level prefix and
+18,665-column dependency pipeline. Adjacent and full simultaneous relabelings
+also retain the capability from their measured factors.
+
+Six hundred independently verified entrywise generations across the target
+and coupled extension at 0.1%, 1%, and 10% amplitude had worst relative-L2
+residual `8.37e-13`. Eight alternating target pairs put the median paired
+current/parent modeled-cycle ratio at `1.0035`; six extension pairs put the
+median at `0.9462`, with first and steady-refactor medians of `0.9369` and
+`0.9325`. Six same-binary grid pairs put the enabled/disabled modeled-cycle
+ratio at `0.7951` geometrically (`0.7749` median) and the steady solve ratio at
+`0.3252`. Release and ASan/UBSan/LSan tests pass, and leak-enabled target,
+extension, and shuffled-relabeling runs are clean.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
