@@ -18677,3 +18677,93 @@ contract; all eligibility decisions remained stable.  Release and
 ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized runs also
 cover all four positives and both rejections with expected decisions; their
 worst verified residual was `4.62e-13`.
+
+COMPACT SINGLETON-RUN SOLVE CACHE GENERALIZED (2026-07-24).  Two remaining
+Rommes predicates encoded adjacent power-network operating points directly.
+The Itaipu selector required 13,240--13,260 rows, 48,700--48,780 entries,
+5,180--5,210 BTF blocks, and a 7,770--7,790-row largest block.  The MIMO8
+selector used a second 13,300--13,320-row, 48,800--48,950-entry box with
+5,200--5,220 blocks and a 7,800--7,850-row largest block.  They enabled a
+compact singleton-run solve table and diagonal reciprocals, but also selected
+unrelated parallel row-pattern construction, 16-bit row indices, or a direct
+lean refactor choice depending on which named box matched.
+
+The current AUTO policy already sends this complete Rommes topology class to
+normal AMD without BTF.  Its retained symbolic has one full-matrix block, so
+both old predicates are false on the scored factor and their unique
+singleton-BTF behavior is unreachable.  The generic no-BTF lifecycle already
+selects the compact row indices, direct lean refactor, and diagonal
+reciprocals needed by that route.  The named row-engine terms were therefore
+removed rather than widened into another input envelope.
+
+The useful explicit-BTF behavior is now a solve-representation capability.
+KLS scans the selected block boundaries only when the matrix order and block
+count fit `uint16_t`, requires at least 512 blocks, at least 75% singleton
+blocks, and a consecutive singleton run of at least 256 blocks.  Those bounds
+express the cost of a two-byte run entry per block and the loop overhead it
+must amortize.  A table is allocated only inside a compact 16-bit solve cache,
+after both factor index streams have independently fit `UINT16_MAX`; a factor
+that retains native or 32-bit storage therefore pays nothing.  The reciprocal
+refresh is keyed from the adopted table pointer, not from matrix dimensions.
+This makes the behavior independent of orientation/order selection history,
+scaling choice, input name, and raw nonzero count while keeping the existing
+representation validation.
+
+`KLS_DISABLE_COMPACT_SINGLETON_RUN_SOLVE=1` provides a same-binary control.
+`compact_solve_singleton_run_eligible`,
+`compact_solve_singleton_run_blocks`, and
+`compact_solve_singleton_run_max` are exposed through `kls_stats`, normal
+benchmark JSON, and analyze-only JSON where applicable.  The first field
+reports the structural proposal; the latter two remain zero until a solve has
+actually built and adopted the compact table.  `KLS_TRACE_I16_CACHE=1` now
+also prints the maximum run and whether it was cached.
+
+The smoke test constructs an independent 8,192-row, 10,240-entry matrix with
+a 2,048-row directed-cycle core and 6,144 scalar BTF components.  Natural BTF
+produces 6,145 blocks, the compact cache records all 6,144 singleton blocks,
+and changed-value factor/refactor/solve returns the constructed solution.  A
+disable-switch run preserves the same factor and solution with no run table.
+A same-order, same-entry-count topology guard then rewires two thirds of the
+fringe into independent two-cycles.  It retains a long singleton run but only
+50% singleton-block coverage, produces 4,097 blocks, and correctly declines
+the table.  This independently exercises an out-of-window positive, the
+switch, the 75% boundary, reciprocal refresh, and solution accuracy.
+
+The expanded local SuiteSparse screen considered all 179 supported real
+square inputs at or below the 16-bit order ceiling under explicit normal AMD
+with BTF.  Forty-four symbolics pass the deliberately representation-only
+block census; 23 also have symbolic L and U estimates within the 16-bit
+stream limit.  Numeric replay actually adopts the table on 18 factors: all
+eleven nonsingular Rommes cases plus independent `bibd_81_2`, `t3dl_e`,
+`extr1b`, `shyy41`, `circuit_2`, `circuit_3`, and `powersim`.  This is a real
+cross-family expansion rather than a relaxed Rommes box.  The explicit
+`shyy41` changed-value row route is already invalid in the parent and in the
+disabled-cache control (relative residual about `3.15e7`), so it is recorded
+as a pre-existing refactor defect and excluded from performance and accuracy
+claims for this cache.
+
+Five pinned enabled/disabled solve pairs on each of the eleven valid Rommes
+factors (55 pairs, 200 solves per process) put the generic-cache solve ratio
+at `0.83150`; every matrix wins, with per-matrix ratios from `0.80200` to
+`0.87116` and worst relative residual `1.45e-16`.  The six independent valid
+holdouts above completed 30 equivalent pairs with 500 solves per process and
+a `0.74958` geometric ratio; individual ratios range from `0.53269` on
+`t3dl_e` to `0.88457` on `extr1b`, with worst residual `2.34e-12`.
+
+Default AUTO remains the generic one-block no-BTF route.  Fifteen pinned
+parent/current pairs on the three former exact targets show zero orientation,
+ordering, BTF, or block-geometry changes and current/parent analysis, factor,
+and solve ratios of `0.9938`, `0.9964`, and `1.0032`.  For the diagnostic BTF
+route where the old predicates were active, fifteen longer parent/current
+pairs put analysis/factor/refactor/solve ratios at `1.0002`, `0.9994`,
+`0.9857`, and `1.0301`, with a modeled-cycle ratio of `0.9769` and worst
+residual `1.35e-16`.  Thus removing the unrelated named row choices preserves
+the complete established route while the generic run cache extends its solve
+win.
+
+A 100-generation, independently checked, 10%-amplitude entrywise run on
+`mimo8x8_system` kept all 5,148 cached singleton blocks and had maximum
+per-generation relative residual `1.93e-16`.  Release and
+ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized runs also
+exercise `mimo8x8_system` and independent `circuit_3` positives with 5,148 and
+4,520 cached singleton blocks; their residuals are `9.58e-17` and `5.98e-15`.

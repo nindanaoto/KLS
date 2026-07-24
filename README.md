@@ -144,6 +144,21 @@ trials, or
 the policy while disabling only deferred publication.  The former rajat27-
 specific input box is removed.
 
+Compact 16-bit triangular solves now cache consecutive singleton BTF runs
+from the selected block structure instead of recognizing two Rommes input
+boxes.  The two-byte-per-block table is built only when block pointers and
+factor indices fit the 16-bit representation, there are at least 512 blocks,
+at least 75% are singletons, and one consecutive run spans at least 256
+blocks.  An adopted table also enables refreshed diagonal reciprocals from
+the representation itself.  This applies to explicit as well as automatic
+BTF choices and to scaled or unscaled numerics; factors that do not build the
+compact mirror pay no table cost.  Set
+`KLS_DISABLE_COMPACT_SINGLETON_RUN_SOLVE=1` to disable the capability.
+`kls_stats` and benchmark JSON report structural eligibility, the number of
+cached singleton blocks, and the longest cached run.  The former Itaipu and
+MIMO8 dimension/nonzero/block fingerprints and their unrelated row-engine
+overrides are removed.
+
 For very large pre-static candidates, KLS uses SPRAL's auction
 matching/scaling path instead of exact Hungarian matching, except on
 mostly-missing-diagonal patterns where the auction predictably falls short of
@@ -189,7 +204,10 @@ decisions without running numeric factorization. JSON fields
 `compact_solve_index_bytes` and `compact_solve_fused_rhs` report whether a
 2- or 4-byte triangular-solve mirror was prepared and whether its public-RHS
 permutation was precomposed; zero index bytes means the native factor storage
-was retained.
+was retained.  `compact_solve_singleton_run_eligible`,
+`compact_solve_singleton_run_blocks`, and
+`compact_solve_singleton_run_max` expose the generic singleton-run candidate
+and the representation actually adopted after a solve.
 
 Use `--no-transpose-solve` when a comparison protocol scores only normal
 solves.  The paired-suite runner supplies it because the CKTSO, SubtreeLU, and

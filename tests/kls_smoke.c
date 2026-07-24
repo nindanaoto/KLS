@@ -991,6 +991,245 @@ static int test_transposed_low_work_btf_native_solve(void) {
   return ok;
 }
 
+static int test_compact_singleton_run_solve(void) {
+  enum {
+    N = 8192,
+    CORE_N = 2048,
+    FRINGE_N = N - CORE_N,
+    NNZ = 2 * CORE_N + FRINGE_N
+  };
+  int32_t *ap = (int32_t *)malloc(((size_t)N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)NNZ * sizeof(*ai));
+  double *initial = (double *)malloc((size_t)NNZ * sizeof(*initial));
+  double *changed = (double *)malloc((size_t)NNZ * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)N * sizeof(*expected));
+  double *b = (double *)calloc((size_t)N, sizeof(*b));
+  double *x = (double *)calloc((size_t)N, sizeof(*x));
+  if (ap == NULL || ai == NULL || initial == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL) {
+    free(ap);
+    free(ai);
+    free(initial);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
+    return 0;
+  }
+
+  const char *env_name = "KLS_DISABLE_COMPACT_SINGLETON_RUN_SOLVE";
+  const char *env_value = getenv(env_name);
+  const int had_env = env_value != NULL;
+  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
+  int ok = (env_value == NULL || saved_env != NULL) &&
+    unsetenv(env_name) == 0;
+
+  int32_t p = 0;
+  ap[0] = 0;
+  for (int32_t col = 0; col < CORE_N; ++col) {
+    const int32_t successor = col + 1 == CORE_N ? 0 : col + 1;
+    if (successor < col) {
+      ai[p] = successor;
+      initial[p] = -0.125;
+      changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    ai[p] = col;
+    initial[p] = 4.0;
+    changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+    ++p;
+    if (successor > col) {
+      ai[p] = successor;
+      initial[p] = -0.125;
+      changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+      ++p;
+    }
+    ap[col + 1] = p;
+  }
+  for (int32_t col = CORE_N; col < N; ++col) {
+    ai[p] = col;
+    initial[p] = 2.0;
+    changed[p] = initial[p] * (p % 101 == 0 ? 1.0005 : 1.0);
+    ++p;
+    ap[col + 1] = p;
+  }
+  if (p != NNZ) {
+    ok = 0;
+  }
+  for (int32_t col = 0; col < N; ++col) {
+    expected[col] = 0.75 + 0.03125 * (double)(col % 17);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.use_btf = 1;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve compact singleton runs")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats compact singleton runs")) ok = 0;
+  if (ok) {
+    ok = stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+      stats.selected_ordering == KLS_ORDERING_NATURAL &&
+      stats.selected_btf == 1 && stats.nblocks == FRINGE_N + 1 &&
+      stats.max_block == CORE_N && stats.compact_solve_index_bytes == 2 &&
+      stats.compact_solve_singleton_run_blocks == FRINGE_N &&
+      stats.compact_solve_singleton_run_max >= FRINGE_N / 2 &&
+      stats.compact_solve_singleton_run_eligible == 1;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected compact singleton-run result: btf=%d "
+              "blocks=%" PRId64 " max=%" PRId64 " compact=%d "
+              "singletons=%" PRId64 " run=%" PRId64 " eligible=%d"
+              " x0=%.17g xlast=%.17g\n",
+              stats.selected_btf, stats.nblocks, stats.max_block,
+              stats.compact_solve_index_bytes,
+              stats.compact_solve_singleton_run_blocks,
+              stats.compact_solve_singleton_run_max,
+              stats.compact_solve_singleton_run_eligible, x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  solver = NULL;
+  memset(x, 0, (size_t)N * sizeof(*x));
+  if (ok && setenv(env_name, "1", 1) != 0) ok = 0;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create disabled compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze disabled compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor disabled compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor disabled compact singleton runs")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve disabled compact singleton runs")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats disabled compact singleton runs")) ok = 0;
+  if (ok) {
+    ok = stats.compact_solve_index_bytes == 2 &&
+      stats.compact_solve_singleton_run_blocks == 0 &&
+      stats.compact_solve_singleton_run_max == 0 &&
+      stats.compact_solve_singleton_run_eligible == 0;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected disabled compact singleton-run result: "
+              "compact=%d singletons=%" PRId64 " run=%" PRId64
+              " eligible=%d"
+              " x0=%.17g xlast=%.17g\n",
+              stats.compact_solve_index_bytes,
+              stats.compact_solve_singleton_run_blocks,
+              stats.compact_solve_singleton_run_max,
+              stats.compact_solve_singleton_run_eligible, x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  /* Keep the same order and entry count, but turn two thirds of the scalar
+     fringe into independent two-cycles.  The longest scalar run remains
+     large, while singleton coverage falls below the representation's 75%
+     payoff boundary. */
+  enum { PAIRED_FRINGE_BEGIN = CORE_N + FRINGE_N / 3 };
+  if (ok && unsetenv(env_name) != 0) ok = 0;
+  for (int32_t col = PAIRED_FRINGE_BEGIN; col < N; col += 2) {
+    ai[ap[col]] = col + 1;
+    ai[ap[col + 1]] = col;
+  }
+  memset(b, 0, (size_t)N * sizeof(*b));
+  memset(x, 0, (size_t)N * sizeof(*x));
+  for (int32_t col = 0; col < N; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+
+  solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create paired-fringe singleton guard")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze paired-fringe singleton guard")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, initial),
+                        "factor paired-fringe singleton guard")) ok = 0;
+  if (ok && !require_ok(kls_refactor(solver, changed),
+                        "refactor paired-fringe singleton guard")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve paired-fringe singleton guard")) ok = 0;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats paired-fringe singleton guard")) ok = 0;
+  if (ok) {
+    const int64_t expected_blocks =
+      1 + FRINGE_N / 3 + (FRINGE_N - FRINGE_N / 3) / 2;
+    ok = stats.selected_btf == 1 && stats.nblocks == expected_blocks &&
+      stats.max_block == CORE_N && stats.compact_solve_index_bytes == 2 &&
+      stats.compact_solve_singleton_run_blocks == 0 &&
+      stats.compact_solve_singleton_run_max == 0 &&
+      stats.compact_solve_singleton_run_eligible == 0;
+    for (int32_t row = 0; ok && row < N; ++row) {
+      ok = close_enough(x[row], expected[row]);
+    }
+    if (!ok) {
+      fprintf(stderr,
+              "unexpected paired-fringe singleton guard: btf=%d "
+              "blocks=%" PRId64 "/%" PRId64 " max=%" PRId64
+              " compact=%d singletons=%" PRId64 " run=%" PRId64
+              " eligible=%d x0=%.17g xlast=%.17g\n",
+              stats.selected_btf, stats.nblocks, expected_blocks,
+              stats.max_block, stats.compact_solve_index_bytes,
+              stats.compact_solve_singleton_run_blocks,
+              stats.compact_solve_singleton_run_max,
+              stats.compact_solve_singleton_run_eligible, x[0], x[N - 1]);
+    }
+  }
+  kls_destroy(solver);
+
+  if (!(had_env && saved_env == NULL) &&
+      !restore_env_value(env_name, had_env, saved_env)) {
+    ok = 0;
+  }
+  free(saved_env);
+  free(ap);
+  free(ai);
+  free(initial);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_small_symmetric_no_btf_policy(void) {
   const int32_t n = 300;
   const int32_t nnz = 3 * n;
@@ -23233,6 +23472,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_transposed_low_work_btf_native_solve()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_compact_singleton_run_solve()) {
     return EXIT_FAILURE;
   }
   if (!test_forced_transpose_orientation()) {

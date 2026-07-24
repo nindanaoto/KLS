@@ -30562,43 +30562,60 @@ static int kls_scaled_fragmented_compact_row_factor_profile(
     (double)solver->numeric->unz <= 2.0 * (double)solver->numeric->lnz;
 }
 
-static int kls_is_rommes_itaipu_sequence_pattern(
-  const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
-      solver->common.scale > 0) {
+/* A compact triangular-solve mirror can collapse a long consecutive run of
+   singleton BTF blocks into one backward loop.  Select that representation
+   from its actual block geometry: the run table costs two bytes per block,
+   so require both broad coverage and a long enough run to amortize its build
+   over repeated solves.  The bounds are representation/cost limits rather
+   than an input dimension or nonzero fingerprint. */
+static int kls_compact_singleton_run_solve_profile(
+  const kls_solver *solver,
+  UF_long *singleton_blocks_out,
+  UF_long *max_run_out) {
+  if (singleton_blocks_out != NULL) {
+    *singleton_blocks_out = 0u;
+  }
+  if (max_run_out != NULL) {
+    *max_run_out = 0u;
+  }
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->symbolic->R == NULL || !solver->symbolic->do_btf ||
+      solver->n == 0u || solver->n > (UF_long)UINT16_MAX ||
+      solver->symbolic->nblocks < 512u ||
+      solver->symbolic->nblocks > (UF_long)UINT16_MAX ||
+      solver->symbolic->R[0] != 0u ||
+      solver->symbolic->R[solver->symbolic->nblocks] != solver->n ||
+      getenv("KLS_DISABLE_COMPACT_SINGLETON_RUN_SOLVE") != NULL) {
     return 0;
   }
-  /* ww_vref_6405 and xingo_afonso_itaipu are consecutive variants of the
-     same sparse power-network factor.  Their row L/U streams contain only
-     about 28K entries apiece, so compact row pointers and indices reduce
-     both repeated factor traffic and solve traffic enough to repay their
-     one-time construction within the 99-refactor horizon. */
-  return solver->n >= 13240u && solver->n <= 13260u &&
-    solver->col_ptr[solver->n] >= 48700u &&
-    solver->col_ptr[solver->n] <= 48780u &&
-    solver->symbolic->nblocks >= 5180u &&
-    solver->symbolic->nblocks <= 5210u &&
-    solver->symbolic->maxblock >= 7770u &&
-    solver->symbolic->maxblock <= 7790u;
-}
 
-static int kls_is_rommes_mimo8_pattern(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
-      solver->common.scale > 0) {
-    return 0;
+  const UF_long nblocks = solver->symbolic->nblocks;
+  UF_long singleton_blocks = 0u;
+  UF_long run = 0u;
+  UF_long max_run = 0u;
+  for (UF_long block = 0u; block < nblocks; ++block) {
+    const UF_long begin = solver->symbolic->R[block];
+    const UF_long end = solver->symbolic->R[block + 1u];
+    if (end <= begin || end > solver->n) {
+      return 0;
+    }
+    if (end == begin + 1u) {
+      singleton_blocks++;
+      run++;
+      if (run > max_run) {
+        max_run = run;
+      }
+    } else {
+      run = 0u;
+    }
   }
-  /* The 8x8 operating point has the same fragmented power-network shape as
-     the Itaipu sequence, with a 7.8K-row dominant block and more than 5K
-     singleton BTF blocks, but is slightly larger than those adjacent files.
-     Keep it separate: its packed row-input stream measured neutral, while
-     compact singleton runs and solve-diagonal reciprocals are decisive. */
-  return solver->n >= 13300u && solver->n <= 13320u &&
-    solver->col_ptr[solver->n] >= 48800u &&
-    solver->col_ptr[solver->n] <= 48950u &&
-    solver->symbolic->nblocks >= 5200u &&
-    solver->symbolic->nblocks <= 5220u &&
-    solver->symbolic->maxblock >= 7800u &&
-    solver->symbolic->maxblock <= 7850u;
+  if (singleton_blocks_out != NULL) {
+    *singleton_blocks_out = singleton_blocks;
+  }
+  if (max_run_out != NULL) {
+    *max_run_out = max_run;
+  }
+  return singleton_blocks * 4u >= nblocks * 3u && max_run >= 256u;
 }
 
 static int kls_low_work_tiny_block_btf_policy_disabled(void) {
@@ -65463,7 +65480,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
       (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
        kls_scaled_fragmented_compact_row_factor_profile(solver) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
-       kls_is_rommes_mimo8_pattern(solver) ||
        (getenv("KLS_DISABLE_GENERIC_PARALLEL_LEAN_PATTERN") == NULL &&
         (kls_is_bips98_lean_pattern(solver) ||
          getenv("KLS_ENABLE_GENERIC_PARALLEL_LEAN_PATTERN") != NULL))) &&
@@ -73615,7 +73631,6 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
        kls_is_bips98_lean_pattern(solver) ||
        kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver) ||
-       kls_is_rommes_itaipu_sequence_pattern(solver) ||
        getenv("KLS_ENABLE_LEAN_I16_INDICES") != NULL) &&
       !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver)) {
     (void)kls_build_lean_row_i16_indices(solver);
@@ -150629,8 +150644,9 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
   uint16_t *rptr = nblocks <= (UF_long)UINT16_MAX
     ? (uint16_t *)malloc(((size_t)nblocks + 1u) * sizeof(*rptr)) : NULL;
   const int compact_singleton_runs =
-    kls_is_rommes_itaipu_sequence_pattern(solver) ||
-    kls_is_rommes_mimo8_pattern(solver);
+    kls_compact_singleton_run_solve_profile(solver, NULL, NULL);
+  /* This table is optional: allocation failure retains the ordinary compact
+     mirror instead of rejecting all of its larger, already allocated data. */
   uint16_t *singleton_run = compact_singleton_runs
     ? (uint16_t *)malloc((size_t)nblocks * sizeof(*singleton_run)) : NULL;
   uint16_t *rhs_perm = NULL;
@@ -150651,7 +150667,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
            pnum != NULL && q != NULL && rptr != NULL && offp != NULL &&
            offi != NULL &&
            offcols != NULL && offcol_block_ptr != NULL &&
-           (!compact_singleton_runs || singleton_run != NULL) &&
            (n == 0u || (lx != NULL && ux != NULL));
   if (!ok) {
     goto cleanup;
@@ -150900,6 +150915,8 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
     UF_long singleton_prefix = 0u;
     UF_long singleton_suffix = 0u;
     UF_long nontrivial_blocks = 0u;
+    UF_long current_singleton_run = 0u;
+    UF_long max_singleton_run = 0u;
     for (UF_long k = 0u; k < n; ++k) {
       p_identity += (UF_long)(pnum[k] == k);
       q_identity += (UF_long)(q[k] == k);
@@ -150909,6 +150926,14 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
         symbolic->R[block] + 1u;
       singleton_blocks += (UF_long)singleton;
       nontrivial_blocks += (UF_long)!singleton;
+      if (singleton) {
+        current_singleton_run++;
+        if (current_singleton_run > max_singleton_run) {
+          max_singleton_run = current_singleton_run;
+        }
+      } else {
+        current_singleton_run = 0u;
+      }
     }
     while (singleton_prefix < nblocks &&
            symbolic->R[singleton_prefix + 1u] ==
@@ -150922,10 +150947,12 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
     }
     fprintf(stderr,
             "KLS i16 cache: n=%ld L=%ld U=%ld off=%ld offcols=%ld"
-            " blocks=%ld singleton=%ld prefix=%ld suffix=%ld nontrivial=%ld"
+            " blocks=%ld singleton=%ld runmax=%ld cached=%d"
+            " prefix=%ld suffix=%ld nontrivial=%ld"
             " Pid=%ld/%ld Qid=%ld/%ld source=%s\n",
             (long)n, (long)lcount, (long)ucount, (long)offcount,
             (long)offcol_count, (long)nblocks, (long)singleton_blocks,
+            (long)max_singleton_run, singleton_run != NULL,
             (long)singleton_prefix, (long)singleton_suffix,
             (long)nontrivial_blocks, (long)p_identity,
             (long)p_identity_prefix, (long)q_identity,
@@ -151061,8 +151088,6 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
       (getenv("KLS_ENABLE_I32_UDIAG_RECIP") == NULL &&
        !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
        !kls_scaled_fragmented_compact_row_factor_profile(solver) &&
-       !kls_is_rommes_itaipu_sequence_pattern(solver) &&
-       !kls_is_rommes_mimo8_pattern(solver) &&
        !kls_partial_diagonal_many_block_no_btf_cycle(solver) &&
        !kls_pivoted_high_work_single_block_factor_cycle(solver) &&
        !kls_compact_amf_two_block_factor_cycle(solver) &&
@@ -151070,6 +151095,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        !kls_low_work_single_block_policy_enabled(solver) &&
        !(kls_is_asic320k_dominant_btf_cycle(solver) &&
          getenv("KLS_DISABLE_ASIC320K_PTS_RECIP") == NULL) &&
+       solver->i16solve_singleton_run == NULL &&
        solver->i32solve_singleton_run == NULL)) {
     return 0;
   }
@@ -156302,7 +156328,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
         (kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr) ||
          kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver))) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
-       kls_is_rommes_mimo8_pattern(solver) ||
        kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
        kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||
        kls_egraph_small_compact_dominant_btf_shape(solver))) {
@@ -158821,6 +158846,36 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->scaled_fragmented_compact_row_policy_eligible)) {
     stats->scaled_fragmented_compact_row_policy_eligible =
       kls_scaled_fragmented_compact_row_factor_profile(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, compact_solve_singleton_run_blocks) +
+        sizeof(stats->compact_solve_singleton_run_blocks)) {
+    int64_t singleton_blocks = 0;
+    int64_t max_run = 0;
+    if (solver->symbolic != NULL &&
+        solver->i16solve_singleton_run != NULL) {
+      for (UF_long block = 0u;
+           block < solver->symbolic->nblocks; ++block) {
+        const int64_t run =
+          (int64_t)solver->i16solve_singleton_run[block];
+        singleton_blocks += run != 0;
+        if (run > max_run) {
+          max_run = run;
+        }
+      }
+    }
+    stats->compact_solve_singleton_run_blocks = singleton_blocks;
+    if (copy_size >=
+        offsetof(kls_stats, compact_solve_singleton_run_max) +
+          sizeof(stats->compact_solve_singleton_run_max)) {
+      stats->compact_solve_singleton_run_max = max_run;
+    }
+  }
+  if (copy_size >=
+      offsetof(kls_stats, compact_solve_singleton_run_eligible) +
+        sizeof(stats->compact_solve_singleton_run_eligible)) {
+    stats->compact_solve_singleton_run_eligible =
+      kls_compact_singleton_run_solve_profile(solver, NULL, NULL);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

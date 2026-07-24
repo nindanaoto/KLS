@@ -1367,6 +1367,14 @@ typedef struct kls_stats {
   /* The retained scaled fragmented factor fits the compact paired-row
      representation and its bounded-work lifecycle. */
   int scaled_fragmented_compact_row_policy_eligible;
+  /* Singleton BTF blocks represented by the compact solve run cache, and
+     the longest consecutive cached run.  Both are zero until a solve builds
+     and adopts that optional representation. */
+  int64_t compact_solve_singleton_run_blocks;
+  int64_t compact_solve_singleton_run_max;
+  /* The selected BTF geometry can amortize the compact singleton-run
+     representation if a compact solve mirror is later built. */
+  int compact_solve_singleton_run_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

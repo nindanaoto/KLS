@@ -918,6 +918,7 @@ int main(int argc, char **argv) {
              ",\"parallel_task_flow_speedup\":%.9g"
              ",\"parallel_task_flow_recommends_parallel\":%d"
              ",\"low_work_tiny_block_btf_symbolic_eligible\":%d"
+             ",\"compact_solve_singleton_run_eligible\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
              kls_backend_name(options.backend),
@@ -965,7 +966,8 @@ int main(int argc, char **argv) {
              stats.parallel_task_flow_finish_time,
              stats.parallel_task_flow_speedup,
              stats.parallel_task_flow_recommends_parallel,
-             stats.low_work_tiny_block_btf_symbolic_eligible);
+             stats.low_work_tiny_block_btf_symbolic_eligible,
+             stats.compact_solve_singleton_run_eligible);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -982,6 +984,8 @@ int main(int argc, char **argv) {
       printf("row solve control: %s\n", row_solve_control);
       printf("requested btf: %s\n", options.use_btf ? "on" : "off");
       printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
+      printf("compact singleton-run solve eligible: %s\n",
+             stats.compact_solve_singleton_run_eligible ? "yes" : "no");
       printf("analysis: %.6f s\n", stats.analysis_seconds);
       printf("blocks: %" PRId64 ", max block: %" PRId64 "\n",
              stats.nblocks, stats.max_block);
@@ -2138,7 +2142,10 @@ int main(int argc, char **argv) {
            ",\"nearly_missing_diagonal_early_match_selected\":%d"
            ",\"low_work_tiny_block_btf_policy_eligible\":%d"
            ",\"low_work_tiny_block_btf_symbolic_eligible\":%d"
-           ",\"scaled_fragmented_compact_row_policy_eligible\":%d",
+           ",\"scaled_fragmented_compact_row_policy_eligible\":%d"
+           ",\"compact_solve_singleton_run_blocks\":%" PRId64
+           ",\"compact_solve_singleton_run_max\":%" PRId64
+           ",\"compact_solve_singleton_run_eligible\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2375,7 +2382,10 @@ int main(int argc, char **argv) {
            stats.nearly_missing_diagonal_early_match_selected,
            stats.low_work_tiny_block_btf_policy_eligible,
            stats.low_work_tiny_block_btf_symbolic_eligible,
-           stats.scaled_fragmented_compact_row_policy_eligible);
+           stats.scaled_fragmented_compact_row_policy_eligible,
+           stats.compact_solve_singleton_run_blocks,
+           stats.compact_solve_singleton_run_max,
+           stats.compact_solve_singleton_run_eligible);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64
