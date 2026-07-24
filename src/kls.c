@@ -2394,6 +2394,8 @@ struct kls_solver {
   int dense_reciprocal_hub_metis_cycle; /* guarded retained NodeNDP order */
   int sparse_symmetric_fragmented_metis_cycle; /* guarded sparse NodeNDP */
   int sparse_symmetric_fragmented_metis_numeric_eligible; /* -1/0/1 */
+  int sparse_spiked_predicted_candidate; /* cached public input topology */
+  int sparse_spiked_predicted_numeric_eligible; /* -1/0/1 */
   int symmetric_scalar_fringe_amd_lean_cycle; /* guarded transpose AMD/BTF */
   int symmetric_scalar_fringe_numeric_eligible; /* -1 reject, 0 unknown, 1 */
   const trilinos_klu_l_symbolic *symmetric_scalar_fringe_symbolic_identity;
@@ -2495,6 +2497,7 @@ typedef struct kls_pattern_candidate {
   int dense_reciprocal_hub_metis_class;
   int dense_reciprocal_hub_metis_selected;
   int sparse_symmetric_fragmented_metis_selected;
+  int sparse_spiked_predicted_class;
   int symmetric_scalar_fringe_class;
   int symmetric_partial_diagonal_match_class;
   int low_work_hubbed_scalar_fringe_class;
@@ -27130,6 +27133,7 @@ static void free_numeric(kls_solver *solver) {
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
+  solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
@@ -27257,6 +27261,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
+  solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
@@ -27571,6 +27576,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->dense_reciprocal_hub_metis_cycle = 0;
   solver->sparse_symmetric_fragmented_metis_cycle = 0;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
+  solver->sparse_spiked_predicted_candidate = 0;
+  solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_amd_lean_cycle = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_symbolic_identity = NULL;
@@ -28877,6 +28884,7 @@ static _Thread_local int
   kls_sparse_symmetric_fragmented_metis_analyze_path;
 static _Thread_local int
   kls_sparse_symmetric_fragmented_metis_selected;
+static _Thread_local int kls_sparse_spiked_predicted_input_detected;
 static _Thread_local int
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
 static _Thread_local int
@@ -29141,6 +29149,7 @@ static int is_large_nearly_diagonal_spiked_metis_pattern(
   int valid = 1;
   for (UF_long col = 0; col < n && valid; ++col) {
     const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
+    int has_diagonal = 0;
     if (col_degree > max_col_degree) {
       max_col_degree = col_degree;
     }
@@ -29152,9 +29161,10 @@ static int is_large_nearly_diagonal_spiked_metis_pattern(
       }
       row_degree[row]++;
       if (row == col) {
-        diagonal_count++;
+        has_diagonal = 1;
       }
     }
+    diagonal_count += (UF_long)has_diagonal;
   }
 
   UF_long max_row_degree = 0;
@@ -30015,49 +30025,118 @@ static int kls_dense_reciprocal_hub_metis_symbolic_cycle(
 static int kls_dense_reciprocal_hub_metis_factor_cycle(
   const kls_solver *solver);
 
-/* Nearly diagonal Freescale cycle whose arbitrary entrywise updates reject
-   the retained diagonal-equivalent numeric.  Deferring NodeND lets the
-   foreground matching work overlap its METIS analysis; the accepted matched
-   predicted factor then exposes the cooperative row refactor that wins the
-   complete H100 horizon.  Keep the exception on the exact AUTO/8T contract
-   and a tight public structure envelope (unique in the paper union: nxp1). */
-static int kls_nxp1_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
+/* A nearly diagonal sparse graph with one or a few moderate spikes can
+   overlap matching with NodeND, then build a fixed-pivot predicted numeric.
+   Keep the public contract separate from the topology and from the later
+   measured factor: no input dimension authorizes the recurring engine. */
+static int kls_sparse_spiked_predicted_options_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY") == NULL &&
     getenv("KLS_DISABLE_NXP1_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 414000u && n <= 415000u &&
-    col_ptr[n] >= 2640000u && col_ptr[n] <= 2670000u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
 }
 
-/* Stable post-adoption signature for nxp1.  Its deferred matched predicted
-   numeric no longer has the same scale/BTF state as the public input policy,
-   so decisions made during repeated refactorization must recognize the
-   accepted one-block factor rather than reapplying the input predicate. */
-static int kls_is_nxp1_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    solver->numeric != NULL && solver->numeric_is_predicted &&
-    getenv("KLS_DISABLE_NXP1_H100_POLICY") == NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-    solver->n >= 414000u && solver->n <= 415000u &&
-    solver->nnz >= 2640000u && solver->nnz <= 2670000u &&
-    solver->col_ptr != NULL && solver->col_ptr[solver->n] == solver->nnz &&
-    solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
+static int kls_sparse_spiked_predicted_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  return n <= 750000u &&
+    is_large_sparse_nearly_diagonal_spiked_metis_pattern(
+      n, col_ptr, row_idx);
+}
+
+static int kls_sparse_spiked_predicted_input_policy_enabled(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const kls_options *options) {
+  return kls_sparse_spiked_predicted_options_enabled(options) &&
+    kls_sparse_spiked_predicted_input_profile(n, col_ptr, row_idx);
+}
+
+static int kls_sparse_spiked_predicted_candidate_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->sparse_spiked_predicted_candidate &&
+    kls_sparse_spiked_predicted_options_enabled(&solver->options);
+}
+
+/* The matched pattern no longer has the public input coordinates.  Recurring
+   dispatch therefore starts from the cached input proposal, but still needs
+   the real predicted factor, its separator, and normalized fill/work bounds. */
+__attribute__((noinline, cold))
+static int kls_sparse_spiked_predicted_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_sparse_spiked_predicted_candidate_cycle(solver) ||
+      solver->input_format != KLS_INPUT_CSC || solver->symbolic == NULL ||
+      solver->numeric == NULL || !solver->numeric_is_predicted ||
+      !solver->spral_matching_selected || solver->row_perm == NULL ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  if (solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_METIS ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->symbolic->do_btf || solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->numeric->lnz == 0u ||
+      solver->numeric->lnz != solver->numeric->unz ||
+      solver->separator.n != solver->n ||
+      !solver->separator.global_range_valid ||
+      solver->separator.global_begin != 0u ||
+      solver->separator.global_end != solver->n ||
+      solver->separator.thread_count < 2u ||
+      solver->separator.private_rows > solver->n ||
+      solver->separator.pipeline_rows > solver->n ||
+      solver->separator.private_rows + solver->separator.pipeline_rows !=
+        solver->n) {
+    return 0;
+  }
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 32.0 * (double)solver->n &&
+    fill <= 192.0 * (double)solver->n &&
+    solver->common.flops >= 2048.0 * (double)solver->n &&
+    solver->common.flops <= 131072.0 * (double)solver->n;
+}
+
+static int kls_sparse_spiked_predicted_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_sparse_spiked_predicted_candidate_cycle(solver)) {
+    return 0;
+  }
+  return solver->sparse_spiked_predicted_numeric_eligible != 0
+    ? solver->sparse_spiked_predicted_numeric_eligible > 0
+    : kls_sparse_spiked_predicted_factor_profile(solver);
+}
+
+/* A nearly all-private separator with moderate predicted work benefits from
+   the retained cluster forest and the lower relaxed-consume floors.  Denser
+   factors and wider separator pipelines keep the generic measured schedule. */
+static int kls_sparse_spiked_predicted_clustered_cycle(
+  const kls_solver *solver) {
+  if (!kls_sparse_spiked_predicted_factor_cycle(solver) ||
+      solver->separator.private_component_count <
+        solver->separator.thread_count ||
+      solver->separator.private_component_count +
+          solver->separator.pipeline_component_count !=
+        solver->separator.component_count ||
+      100u * solver->separator.private_rows < 99u * solver->n ||
+      100u * solver->separator.pipeline_rows > solver->n ||
+      solver->separator.pipeline_max_rows > solver->n / 512u) {
+    return 0;
+  }
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill <= 96.0 * (double)solver->n &&
+    solver->common.flops <= 32768.0 * (double)solver->n;
 }
 
 /* Three giant Freescale chains share a nearly spanning BTF core and a
@@ -41327,8 +41406,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->input_to_csc == NULL &&
       !kls_freescale_chain_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) &&
-      !kls_nxp1_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
+      !kls_sparse_spiked_predicted_candidate_cycle(solver)) {
     /* The diagonal-equivalent engine retains the incumbent numeric and
        settles every later changed matrix with boundary maps.  A speculative
        replacement numeric therefore cannot repay its NodeND/factor work;
@@ -41517,7 +41595,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
       orientation == KLS_ORIENTATION_NORMAL &&
       !kls_freescale_chain_h100_policy_enabled(n, col_ptr, options) &&
       !kls_rajat31_h100_policy_enabled(n, col_ptr, options) &&
-      !kls_nxp1_h100_policy_enabled(n, col_ptr, options)) {
+      !kls_sparse_spiked_predicted_input_policy_enabled(
+        n, col_ptr, row_idx, options)) {
     return;
   }
   if (kls_symmetric_scalar_fringe_policy_enabled(options) &&
@@ -41672,10 +41751,10 @@ static int should_try_auto_scale(const kls_solver *solver) {
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
     return 0;
   }
-  if (kls_is_nxp1_h100_cycle(solver)) {
-    /* With nxp1's retained level-cluster schedule, only a tiny pipeline
-       fringe can use these speculative updates.  Maintaining the side
-       state is neutral-to-slower, so keep the plain cluster kernel. */
+  if (kls_sparse_spiked_predicted_factor_cycle(solver)) {
+    /* Matching already produced and validated the unscaled fixed-pivot
+       numeric.  Alternative scaling would discard that measured state and
+       cannot repay another complete factor on the update horizon. */
     return 0;
   }
   if (kls_pivoted_high_work_single_block_factor_cycle(solver) ||
@@ -42705,6 +42784,9 @@ static int kls_choose_symbolic_inner(UF_long n,
 #ifdef KLS_HAVE_METIS
   const int large_spiked_metis_no_btf =
     is_large_nearly_diagonal_spiked_metis_pattern(n, col_ptr, row_idx);
+  if (large_spiked_metis_no_btf && n <= 750000u && col_ptr[n] < 8u * n) {
+    kls_sparse_spiked_predicted_input_detected = 1;
+  }
 #else
   const int large_spiked_metis_no_btf = 0;
 #endif
@@ -44346,6 +44428,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_sparse_symmetric_fragmented_metis_analyze_path;
   const int sparse_symmetric_fragmented_selected_saved =
     kls_sparse_symmetric_fragmented_metis_selected;
+  const int sparse_spiked_predicted_detected_saved =
+    kls_sparse_spiked_predicted_input_detected;
   const int low_work_hubbed_scalar_fringe_saved =
     kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
   const int symmetric_partial_diagonal_match_saved =
@@ -44403,6 +44487,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_sparse_symmetric_fragmented_metis_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
   kls_sparse_symmetric_fragmented_metis_selected = 0;
+  kls_sparse_spiked_predicted_input_detected = 0;
   candidate->low_work_hubbed_scalar_fringe_class =
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_low_work_hubbed_scalar_fringe_input_profile(
@@ -44440,6 +44525,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
                                 &candidate->selected_ordering,
                                 &candidate->score,
                                 &candidate->separator);
+  candidate->sparse_spiked_predicted_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_sparse_spiked_predicted_options_enabled(options) &&
+    kls_sparse_spiked_predicted_input_detected;
   kls_btf_stash = balanced_btf_stash_saved;
   candidate->compact_partial_diagonal_column_fringe_no_btf_selected =
     kls_compact_partial_diagonal_column_fringe_no_btf_selected;
@@ -44489,6 +44578,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     sparse_symmetric_fragmented_saved;
   kls_sparse_symmetric_fragmented_metis_selected =
     sparse_symmetric_fragmented_selected_saved;
+  kls_sparse_spiked_predicted_input_detected =
+    sparse_spiked_predicted_detected_saved;
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path =
     low_work_hubbed_scalar_fringe_saved;
   kls_symmetric_partial_diagonal_match_analyze_path =
@@ -44896,14 +44987,14 @@ static int select_candidate(kls_pattern_candidate *normal,
          survives every validated update.  Do not mask the existing direct-
          METIS classifier for the general nearly-diagonal spike class: its
          minimum-degree bootstrap can pass the base RHS yet lose several
-         digits on a boundary-scaled RHS.  nxp1 is the measured exception:
-         it still uses METIS, but overlaps NodeND with matching and settles on
-         the verified matched row numeric. */
+         digits on a boundary-scaled RHS.  The normalized sparse-spike
+         proposal is the measured exception: it still uses METIS, but overlaps
+         NodeND with matching and settles on a verified predicted numeric. */
       !(getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
         is_large_nearly_diagonal_spiked_metis_pattern(
           ref->n, ref->col_ptr, ref->row_idx) &&
-        !kls_nxp1_h100_policy_enabled(
-          ref->n, ref->col_ptr, options)) &&
+        !kls_sparse_spiked_predicted_input_policy_enabled(
+          ref->n, ref->col_ptr, ref->row_idx, options)) &&
       getenv("KLS_DISABLE_ANA_ND_DEFER") == NULL) {
     defer = 1;
   }
@@ -45069,6 +45160,8 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     kls_sparse_symmetric_fragmented_metis_symbolic_profile(
       candidate->n, candidate->nnz, candidate->orientation,
       candidate->selected_ordering, candidate->symbolic, &solver->separator);
+  solver->sparse_spiked_predicted_candidate =
+    candidate->sparse_spiked_predicted_class;
   solver->symmetric_scalar_fringe_amd_lean_cycle =
     kls_symmetric_scalar_fringe_policy_enabled(&solver->options) &&
     candidate->symmetric_scalar_fringe_class &&
@@ -45559,6 +45652,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_low_work_many_fringe_dominant_btf_pts_factor_profile(solver) ? 1 : -1;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible =
     kls_sparse_symmetric_fragmented_metis_factor_profile(solver) ? 1 : -1;
+  solver->sparse_spiked_predicted_numeric_eligible =
+    kls_sparse_spiked_predicted_factor_profile(solver) ? 1 : -1;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible =
     kls_high_work_tiny_scalar_fringe_amd_factor_profile(solver) ? 1 : -1;
   kls_dbg_snapshot_numeric(solver);
@@ -71572,7 +71667,7 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
   if ((solver->prestatic_reused_raced_metis_symbolic ||
        solver->prestatic_dense_spiked_match ||
        solver->dense_spiked_original_pivot_path) &&
-      !kls_is_nxp1_h100_cycle(solver) &&
+      !kls_sparse_spiked_predicted_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
@@ -111913,7 +112008,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       kls_is_g2_hybrid_cycle_pattern(solver) ||
       kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_high_work_tiny_scalar_fringe_amd_factor_cycle(solver) ||
-      kls_is_nxp1_h100_cycle(solver) ||
+      kls_sparse_spiked_predicted_clustered_cycle(solver) ||
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
       kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -112372,7 +112467,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
      kls_egraph_all_pipeline_huge_single_shape(solver)) &&
     !kls_medium_partial_static_metis_adopted(solver) &&
-    !kls_is_nxp1_h100_cycle(solver) &&
+    !kls_sparse_spiked_predicted_clustered_cycle(solver) &&
     getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
   const int natural_pipeline =
     all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
@@ -120154,7 +120249,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (kls_egraph_all_pipeline_dominant_btf_shape(solver) ||
      kls_egraph_all_pipeline_huge_single_shape(solver)) &&
     !kls_medium_partial_static_metis_adopted(solver) &&
-    !kls_is_nxp1_h100_cycle(solver) &&
+    !kls_sparse_spiked_predicted_clustered_cycle(solver) &&
     getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
   const int natural_pipeline =
     all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
@@ -155232,6 +155327,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
+  solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
@@ -157157,12 +157253,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->lean_choice == 0 &&
       (kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
        kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
-       kls_is_nxp1_h100_cycle(solver))) {
-    /* On nxp1, a frozen entrywise H100 route audit measured the retained
-       scaled EGraph at about 12.0s versus 15.0s for the cooperative row
-       numeric.  The broader large-weak predicates can cease matching after
-       the deferred matched symbolic is adopted, so retain the public-input
-       signature in this settled column-engine decision. */
+       kls_sparse_spiked_predicted_factor_cycle(solver))) {
+    /* The accepted sparse-spike predicted factors amortize direct EGraph over
+       H100 while the generic row consultation executes several discarded
+       numerics.  Matching replaces public coordinates, so this decision uses
+       the cached input proposal plus the measured retained factor. */
     solver->lean_choice = -1;
   }
   if (solver->lean_choice == 0) {
@@ -157265,10 +157360,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->padded_choice = -1;
     kls_snode_floor_batch_override = 2;
     kls_snode_floor_work_override = 24;
-  } else if (kls_is_nxp1_h100_cycle(solver)) {
-    /* Long relaxed runs amortize batching below the generic staging floor.
-       Four alternating 50-refactor processes put the 2/24 floor at
-       69.3--69.9ms versus 70.0--70.3ms for the generic 3/192 floor. */
+  } else if (kls_sparse_spiked_predicted_clustered_cycle(solver)) {
+    /* Long relaxed runs in the nearly-all-private, moderate-work subclass
+       amortize batching below the generic staging floor.  Four alternating
+       50-refactor nxp1 processes put the 2/24 floor at 69.3--69.9ms versus
+       70.0--70.3ms for the generic 3/192 floor. */
     solver->floor_choice = -1;
     solver->padded_choice = -1;
     kls_snode_floor_batch_override = 2;
@@ -159815,6 +159911,24 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->sparse_symmetric_fragmented_metis_policy_eligible)) {
     stats->sparse_symmetric_fragmented_metis_policy_eligible =
       kls_sparse_symmetric_fragmented_metis_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, sparse_spiked_predicted_candidate) +
+        sizeof(stats->sparse_spiked_predicted_candidate)) {
+    stats->sparse_spiked_predicted_candidate =
+      kls_sparse_spiked_predicted_candidate_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, sparse_spiked_predicted_factor_eligible) +
+        sizeof(stats->sparse_spiked_predicted_factor_eligible)) {
+    stats->sparse_spiked_predicted_factor_eligible =
+      kls_sparse_spiked_predicted_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, sparse_spiked_predicted_clustered_eligible) +
+        sizeof(stats->sparse_spiked_predicted_clustered_eligible)) {
+    stats->sparse_spiked_predicted_clustered_eligible =
+      kls_sparse_spiked_predicted_clustered_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

@@ -24107,6 +24107,258 @@ cleanup:
   return ok;
 }
 
+enum {
+  SPARSE_SPIKE_FIXTURE_N = 200000,
+  SPARSE_SPIKE_FIXTURE_WIDTH = 447,
+  SPARSE_SPIKE_FIXTURE_CONNECTION_START = 50000,
+  SPARSE_SPIKE_FIXTURE_CONNECTION_COUNT = 20000,
+  SPARSE_SPIKE_FIXTURE_NNZ =
+    7 * SPARSE_SPIKE_FIXTURE_N +
+    2 * SPARSE_SPIKE_FIXTURE_CONNECTION_COUNT
+};
+
+static int build_sparse_spiked_predicted_fixture(
+  int32_t *ap,
+  int32_t *ai,
+  double *ax,
+  int spiked) {
+  int32_t p = 0;
+  for (int32_t col = 0; col < SPARSE_SPIKE_FIXTURE_N; ++col) {
+    ap[col] = p;
+    ai[p++] = col;
+    ai[p++] = (col + 1) % SPARSE_SPIKE_FIXTURE_N;
+    ai[p++] = (col + 2) % SPARSE_SPIKE_FIXTURE_N;
+    ai[p++] = (col + SPARSE_SPIKE_FIXTURE_WIDTH) %
+      SPARSE_SPIKE_FIXTURE_N;
+    ai[p++] = (col + SPARSE_SPIKE_FIXTURE_N - 1) %
+      SPARSE_SPIKE_FIXTURE_N;
+    ai[p++] = (col + SPARSE_SPIKE_FIXTURE_N - 2) %
+      SPARSE_SPIKE_FIXTURE_N;
+    ai[p++] = (col + SPARSE_SPIKE_FIXTURE_N -
+               SPARSE_SPIKE_FIXTURE_WIDTH) % SPARSE_SPIKE_FIXTURE_N;
+    if (spiked) {
+      if (col == 0) {
+        for (int32_t offset = 0;
+             offset < SPARSE_SPIKE_FIXTURE_CONNECTION_COUNT; ++offset) {
+          ai[p++] = SPARSE_SPIKE_FIXTURE_CONNECTION_START + offset;
+        }
+      } else if (col >= SPARSE_SPIKE_FIXTURE_CONNECTION_START &&
+                 col < SPARSE_SPIKE_FIXTURE_CONNECTION_START +
+                   SPARSE_SPIKE_FIXTURE_CONNECTION_COUNT) {
+        ai[p++] = 0;
+      }
+    } else if (col >= SPARSE_SPIKE_FIXTURE_CONNECTION_START &&
+               col < SPARSE_SPIKE_FIXTURE_CONNECTION_START +
+                 SPARSE_SPIKE_FIXTURE_CONNECTION_COUNT) {
+      ai[p++] = col + 50000;
+    } else if (col >= SPARSE_SPIKE_FIXTURE_CONNECTION_START + 50000 &&
+               col < SPARSE_SPIKE_FIXTURE_CONNECTION_START + 50000 +
+                 SPARSE_SPIKE_FIXTURE_CONNECTION_COUNT) {
+      ai[p++] = col - 50000;
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+    if (ax != NULL) {
+      for (int32_t entry = ap[col]; entry < p; ++entry) {
+        const int32_t row = ai[entry];
+        ax[entry] = row == col ? 4.0
+          : (spiked && (row == 0 || col == 0) ? -1.0e-5 : -0.1);
+      }
+    }
+  }
+  ap[SPARSE_SPIKE_FIXTURE_N] = p;
+  return p == SPARSE_SPIKE_FIXTURE_NNZ;
+}
+
+static int test_sparse_spiked_predicted_policy(void) {
+  const int32_t n = SPARSE_SPIKE_FIXTURE_N;
+  const int32_t nnz = SPARSE_SPIKE_FIXTURE_NNZ;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  int32_t *control_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*control_ap));
+  int32_t *control_ai =
+    (int32_t *)malloc((size_t)nnz * sizeof(*control_ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY");
+  const char *saved_legacy_value = getenv("KLS_DISABLE_NXP1_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *control_solver = NULL;
+  kls_solver *disabled_solver = NULL;
+  int ok = ap != NULL && ai != NULL && control_ap != NULL &&
+    control_ai != NULL && ax != NULL && changed != NULL && expected != NULL &&
+    b != NULL && x != NULL && (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok || !build_sparse_spiked_predicted_fixture(ap, ai, ax, 1) ||
+      !build_sparse_spiked_predicted_fixture(
+        control_ap, control_ai, NULL, 0)) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t entry = 0; entry < nnz; ++entry) {
+    const int variation = entry % 17 - 8;
+    changed[entry] = ax[entry] * (1.0 + 1.0e-5 * (double)variation);
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.125 + 0.001953125 * (double)(col % 31);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+  if (unsetenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_NXP1_H100_POLICY") != 0) {
+    perror("configure sparse spiked predicted policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create sparse spiked predicted policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze sparse spiked predicted policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor sparse spiked predicted policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats sparse spiked predicted policy") ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_METIS ||
+      stats.selected_scale != -1 || stats.selected_btf ||
+      stats.nblocks != 1 || stats.max_block != n ||
+      stats.last_factor_path != KLS_FACTOR_PATH_PREDICTED_FIRST ||
+      stats.sparse_spiked_predicted_candidate != 1 ||
+      stats.sparse_spiked_predicted_factor_eligible != 1 ||
+      stats.sparse_spiked_predicted_clustered_eligible != 0) {
+    fprintf(stderr,
+            "unexpected sparse spiked predicted factor: orientation=%d"
+            " ordering=%d scale=%d btf=%d blocks=%" PRId64
+            " max=%" PRId64 " path=%d stages=%d/%d/%d fill=%" PRId64
+            "/%" PRId64 " work=%.0f\n",
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.selected_scale, stats.selected_btf, stats.nblocks,
+            stats.max_block, (int)stats.last_factor_path,
+            stats.sparse_spiked_predicted_candidate,
+            stats.sparse_spiked_predicted_factor_eligible,
+            stats.sparse_spiked_predicted_clustered_eligible,
+            stats.nnz_l, stats.nnz_u, stats.factor_flops);
+    ok = 0;
+    goto cleanup;
+  }
+  if (!require_ok(kls_refactor(solver, changed),
+                  "refactor sparse spiked predicted policy") ||
+      !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve sparse spiked predicted policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "refactor stats sparse spiked predicted policy") ||
+      stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+    fprintf(stderr, "sparse spiked predicted policy did not use EGraph\n");
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (fabs(x[row] - expected[row]) >
+        1.0e-8 * (1.0 + fabs(expected[row]))) {
+      fprintf(stderr,
+              "sparse spiked predicted solve mismatch at %d: %.17g"
+              " vs %.17g\n", row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* Keep order, entry count, diagonal coverage, and bounded degrees fixed,
+     but distribute the extra edges so no moderate spike exists. */
+  if (!require_ok(kls_create(&control_solver),
+                  "create unspiked predicted control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  control_ap, control_ai, 0, &options),
+                  "analyze unspiked predicted control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats unspiked predicted control") ||
+      stats.sparse_spiked_predicted_candidate != 0 ||
+      stats.sparse_spiked_predicted_factor_eligible != 0 ||
+      stats.sparse_spiked_predicted_clustered_eligible != 0) {
+    fprintf(stderr, "unspiked predicted control became eligible\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (setenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_create(&disabled_solver),
+                  "create disabled sparse spiked predicted control") ||
+      !require_ok(kls_analyze_csc(disabled_solver, KLS_INDEX_INT32, n, ap, ai,
+                                  0, &options),
+                  "analyze disabled sparse spiked predicted control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(disabled_solver, &stats),
+                  "stats disabled sparse spiked predicted control") ||
+      stats.sparse_spiked_predicted_candidate != 0 ||
+      stats.sparse_spiked_predicted_factor_eligible != 0 ||
+      stats.sparse_spiked_predicted_clustered_eligible != 0) {
+    fprintf(stderr, "disabled sparse spiked predicted control became eligible\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(disabled_solver);
+  kls_destroy(control_solver);
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY",
+                         had_policy,
+                         saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_NXP1_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(control_ap);
+  free(control_ai);
+  free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -24156,6 +24408,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_symmetric_fragmented_metis_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_sparse_spiked_predicted_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

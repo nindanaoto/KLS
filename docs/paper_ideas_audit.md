@@ -19053,3 +19053,98 @@ Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
 entrywise factor/refactor/solve runs also cover the original target, the
 99,702-row positive extension, and the 101,238-row boundary rejection with
 stage decisions `1/1`, `1/1`, and `0/0` and no sanitizer findings.
+
+SPARSE-SPIKE PREDICTED LIFECYCLE GENERALIZED (2026-07-24).  The remaining
+`nxp1` H100 policy began from an exact 414,000--415,000-row and
+2,640,000--2,670,000-entry box.  That fingerprint exempted the matrix from the
+diagonal-equivalent METIS-race and analysis-deferral rules.  After factorization
+the same coordinates, together with an unscaled one-block predicted numeric,
+suppressed the scale trial, bypassed cooperative-row consultation in favor of
+EGraph, retained a cluster forest rather than the generic all-pipeline
+schedule, pinned the complete worker width, and selected the 2/24 relaxed-
+consume floors.  A single benchmark identity therefore authorized unrelated
+analysis, factor-engine, and scheduling decisions.
+
+The replacement separates those capabilities into three stages.  The input
+proposal applies only to the normal candidate under the standard eight-thread
+AUTO orientation/ordering/scaling/backend contract with BTF, static pivoting,
+and `1e-3` tolerance.  It requires 200,000--750,000 rows, six--eight stored
+entries per row, a structural diagonal in at least 99.5% of columns, no empty
+row, and a maximum row or column degree between 5% and 25% of the order.  The
+diagonal census counts columns rather than duplicate diagonal entries.  The
+proposal reuses the existing AUTO sparse-spike scan and caches its result on
+the adopted solver, so it does not add a second O(nnz) proof pass.  The old
+order and entry windows no longer occur in executable policy logic.
+
+The second stage inspects the real retained factor rather than trusting the
+input proposal.  It requires CSC input, selected SPRAL row matching, normal
+METIS, a real unscaled predicted numeric with no numeric `Rs`, one full-size
+non-BTF block, no pivot nudge or perturbation, equal nonzero L/U counts, and a
+complete separator partition with at least two workers.  Total fill must lie
+between 32 and 192 entries per row and measured work between 2,048 and 131,072
+operations per row.  Only this measured verdict suppresses the redundant scale
+trial and chooses direct EGraph rather than accepting the generic row-engine
+consultation.  The verdict is cached for that numeric and invalidated on every
+factor reset or replacement.
+
+The cluster schedule is a narrower third stage.  Private and pipeline
+components must account for the full factor, private components must number at
+least the worker count, at least 99% of rows must be private, at most 1% may be
+pipeline rows, and the largest pipeline component is bounded by `n/512`.
+Fill is further limited to 96 entries per row and work to 32,768 operations
+per row.  Only this stage retains the cluster forest, full worker width, and
+2/24 relaxed-consume floors.  A broader accepted predicted factor keeps the
+ordinary measured all-pipeline schedule, demonstrating that one predicate no
+longer grants every downstream optimization.
+
+The generic same-binary control is
+`KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY=1`; the former
+`KLS_DISABLE_NXP1_H100_POLICY` spelling remains a compatibility alias.  Public
+`sparse_spiked_predicted_candidate`,
+`sparse_spiked_predicted_factor_eligible`, and
+`sparse_spiked_predicted_clustered_eligible` fields expose all three stages in
+`kls_stats`, full benchmark JSON, and analyze-only JSON.
+
+An independent smoke fixture has 200,000 rows and 1,440,000 entries.  A
+symmetric seven-diagonal cyclic band is augmented with 20,000 reciprocal
+connections to one moderate hub.  It selects normal METIS, no BTF, scale
+`-1`, and the predicted-first factor path, reports stages `1/1/0`, refactors
+through EGraph, and recovers an independently constructed solution.  Its
+control preserves the order, entry count, full diagonal, regular band, and
+bounded degrees but distributes the additional connections so no moderate
+spike exists; it reports `0/0/0`.  The unchanged positive under the master
+disable also reports `0/0/0`.
+
+The nearby local SuiteSparse cohort was screened across the 200,000--750,000-
+row, six--eight-entry density envelope.  `Freescale/nxp1` is the only input
+proposal; `Rajat/rajat29` and `GHS_psdef/mac_econ_fwd500` reject on topology.
+That corpus result is compatibility evidence only.  A 1,024-row independent
+diagonal extension produces a 415,628-row target outside the old order window
+and retains stages `1/1/1`.  A simultaneous row/column relabeling retains the
+input proposal but its real factor reports `1/0/0` and follows KLU/row fallback,
+providing a measured-stage rejection rather than another tailored positive.
+The independent smoke topology supplies the non-derived positive family.
+
+`nxp1`, its 1,024-row extension, and the independent fixture each completed
+100 independently checked entrywise generations at amplitudes `0.001`,
+`0.01`, and `0.1`, for 900 positive generations.  Their worst per-generation
+relative-L2 residuals were `5.0861e-11`, `5.3255e-11`, and `5.4384e-16`.
+The relabeled measured-stage rejection completed 32 generations at amplitude
+`0.1` with worst residual `2.5015e-10`.
+
+Six alternating prior-exact/current target pairs pinned to quiet cores, with
+three factor repetitions and 20 refactors per process, put geometric
+current/parent ratios at `1.00713` for analysis, `1.01529` for initial factor,
+`1.00533` for first refactor, `1.00648` for steady refactor, `1.00430` for
+changed-numeric solve, `1.00002` for repeated solve, and `1.00735` for the
+complete modeled cycle.  Four alternating extension pairs measured a modeled-
+cycle ratio of `0.70155`, including `0.10977` for first refactor and `0.90385`
+for steady refactor.  Four independent-fixture pairs measured `0.61000` for
+the cycle, `0.13542` for first refactor, and `0.65338` for steady refactor.
+The generalized route therefore preserves target compatibility within 0.8%
+while materially helping both out-of-box positives.
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+factor/refactor/solve runs cover `nxp1`, its extension, the independent
+positive, and the relabeled `1/0/0` rejection with no findings.  The legacy
+disable alias was separately checked and suppresses all three stages.

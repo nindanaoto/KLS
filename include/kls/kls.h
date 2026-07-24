@@ -1401,6 +1401,15 @@ typedef struct kls_stats {
   /* That retained symbolic also produced an unscaled, no-pivot numeric inside
      the measured balanced fill/work regime. */
   int sparse_symmetric_fragmented_metis_policy_eligible;
+  /* The original normal AUTO input is a nearly diagonal sparse graph with a
+     moderate spike, suitable for overlapped matching and NodeND. */
+  int sparse_spiked_predicted_candidate;
+  /* Matching produced an accepted one-block predicted METIS numeric inside
+     the normalized fill/work and separator bounds. */
+  int sparse_spiked_predicted_factor_eligible;
+  /* That factor also has the nearly all-private moderate-work separator for
+     which the retained cluster schedule and relaxed-consume floors apply. */
+  int sparse_spiked_predicted_clustered_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

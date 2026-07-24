@@ -921,6 +921,9 @@ int main(int argc, char **argv) {
              ",\"compact_solve_singleton_run_eligible\":%d"
              ",\"sparse_symmetric_fragmented_metis_symbolic_eligible\":%d"
              ",\"sparse_symmetric_fragmented_metis_policy_eligible\":%d"
+             ",\"sparse_spiked_predicted_candidate\":%d"
+             ",\"sparse_spiked_predicted_factor_eligible\":%d"
+             ",\"sparse_spiked_predicted_clustered_eligible\":%d"
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
              kls_backend_name(options.backend),
@@ -971,7 +974,10 @@ int main(int argc, char **argv) {
              stats.low_work_tiny_block_btf_symbolic_eligible,
              stats.compact_solve_singleton_run_eligible,
              stats.sparse_symmetric_fragmented_metis_symbolic_eligible,
-             stats.sparse_symmetric_fragmented_metis_policy_eligible);
+             stats.sparse_symmetric_fragmented_metis_policy_eligible,
+             stats.sparse_spiked_predicted_candidate,
+             stats.sparse_spiked_predicted_factor_eligible,
+             stats.sparse_spiked_predicted_clustered_eligible);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -2158,7 +2164,10 @@ int main(int argc, char **argv) {
            ",\"symmetric_partial_diagonal_factor_eligible\":%d"
            ",\"symmetric_partial_diagonal_low_work_eligible\":%d"
            ",\"sparse_symmetric_fragmented_metis_symbolic_eligible\":%d"
-           ",\"sparse_symmetric_fragmented_metis_policy_eligible\":%d",
+           ",\"sparse_symmetric_fragmented_metis_policy_eligible\":%d"
+           ",\"sparse_spiked_predicted_candidate\":%d"
+           ",\"sparse_spiked_predicted_factor_eligible\":%d"
+           ",\"sparse_spiked_predicted_clustered_eligible\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2407,7 +2416,10 @@ int main(int argc, char **argv) {
            stats.symmetric_partial_diagonal_factor_eligible,
            stats.symmetric_partial_diagonal_low_work_eligible,
            stats.sparse_symmetric_fragmented_metis_symbolic_eligible,
-           stats.sparse_symmetric_fragmented_metis_policy_eligible);
+           stats.sparse_symmetric_fragmented_metis_policy_eligible,
+           stats.sparse_spiked_predicted_candidate,
+           stats.sparse_spiked_predicted_factor_eligible,
+           stats.sparse_spiked_predicted_clustered_eligible);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64

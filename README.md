@@ -3840,6 +3840,43 @@ Twenty alternating parent/current target pairs put the modeled-cycle ratio at
 `0.8525`. Release and ASan/UBSan/LSan CTest pass all four tests, including
 leak-enabled target, positive-extension, and boundary-rejection runs.
 
+## Sparse-spike predicted lifecycle
+
+The former `nxp1` H100 route no longer recognizes a 414,000--415,000-row,
+2.64--2.67-million-entry benchmark box. Under the standard eight-thread AUTO
+contract, it now starts from a bounded topology proposal: a 200,000--750,000-
+row nearly diagonal graph with six--eight entries per row and a moderate row
+or column spike. The proposal reuses the topology census already required by
+AUTO rather than adding another full sparse-matrix pass.
+
+Later capabilities have independent measured gates. The accepted factor must
+be a matched, unscaled, one-block predicted METIS numeric with complete
+separator coverage, no pivot repair, and normalized fill/work bounds before
+KLS skips the scale trial and selects direct EGraph updates. Retaining the
+cluster forest, full worker width, and lower relaxed-consume floors additionally
+requires a nearly all-private, low-pipeline separator and tighter fill/work
+bounds. A topology or factor that fails either measured stage follows the
+ordinary AUTO schedule.
+
+`KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY=1` is the generic same-binary
+control; `KLS_DISABLE_NXP1_H100_POLICY` remains a compatibility alias. The
+candidate, factor, and clustered decisions are exposed through `kls_stats`
+and benchmark JSON as `sparse_spiked_predicted_candidate`,
+`sparse_spiked_predicted_factor_eligible`, and
+`sparse_spiked_predicted_clustered_eligible`.
+
+Validation includes an independent 200,000-row sparse-spike fixture and its
+same-size, same-density unspiked control, a 1,024-row `nxp1` extension beyond
+the old order window, and a simultaneous relabeling that proposes the topology
+but is rejected by the measured factor gate. Nine hundred positive entrywise
+generations through 10% amplitude had worst relative-L2 residual
+`5.33e-11`; the measured rejection remained accurate through another 32
+generations. Six alternating quiet-core target pairs put the complete modeled-
+cycle ratio at `1.0074` versus the former exact policy, while the extension and
+independent fixture measured `0.7016` and `0.6100`. Release and
+ASan/UBSan/LSan CTest pass all four tests, including leak-enabled positive and
+measured-rejection runs.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
