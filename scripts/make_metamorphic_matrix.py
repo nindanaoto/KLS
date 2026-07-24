@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a deterministic simultaneous row/column permutation holdout."""
+"""Create a deterministic structural metamorphic matrix holdout."""
 
 from __future__ import annotations
 
@@ -104,6 +104,29 @@ def permute_entries(
     return transformed
 
 
+def append_diagonal_blocks(
+    entries: list[tuple[int, int, tuple[str, ...]]],
+    order: int,
+    block_count: int,
+    value_kind: str,
+) -> tuple[int, list[tuple[int, int, tuple[str, ...]]]]:
+    if block_count < 0:
+        raise ValueError("diagonal block count must be nonnegative")
+    if value_kind == "pattern":
+        diagonal_value: tuple[str, ...] = ()
+    elif value_kind in {"real", "integer"}:
+        diagonal_value = ("1",)
+    elif value_kind == "complex":
+        diagonal_value = ("1", "0")
+    else:
+        raise ValueError(f"unsupported MatrixMarket value kind: {value_kind}")
+    transformed = list(entries)
+    for index in range(order, order + block_count):
+        transformed.append((index, index, diagonal_value))
+    transformed.sort(key=lambda entry: (entry[1], entry[0]))
+    return order + block_count, transformed
+
+
 def write_coordinate_matrix(
     path: pathlib.Path,
     comments: list[str],
@@ -112,16 +135,13 @@ def write_coordinate_matrix(
     order: int,
     entries: list[tuple[int, int, tuple[str, ...]]],
     transformation: str,
-    seed: int,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as output:
         output.write(
             f"%%MatrixMarket matrix coordinate {value_kind} {symmetry}\n"
         )
-        output.write(
-            f"% metamorphic simultaneous permutation: {transformation} seed={seed}\n"
-        )
+        output.write(f"% metamorphic transformation: {transformation}\n")
         for comment in comments:
             output.write(f"{comment}\n")
         output.write(f"{order} {order} {len(entries)}\n")
@@ -141,6 +161,12 @@ def main() -> int:
         action="store_true",
         help="apply a complete deterministic random relabeling",
     )
+    mode.add_argument(
+        "--append-diagonal-blocks",
+        type=int,
+        metavar="COUNT",
+        help="append COUNT independent 1x1 unit-diagonal blocks",
+    )
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     if args.input.resolve() == args.output.resolve():
@@ -149,15 +175,25 @@ def main() -> int:
         comments, value_kind, symmetry, order, entries = read_coordinate_matrix(
             args.input
         )
-        if args.shuffle:
+        if args.append_diagonal_blocks is not None:
+            order, transformed = append_diagonal_blocks(
+                entries, order, args.append_diagonal_blocks, value_kind
+            )
+            transformation = (
+                f"append_diagonal_blocks={args.append_diagonal_blocks}"
+            )
+        elif args.shuffle:
             permutation = shuffled_permutation(order, args.seed)
-            transformation = "shuffle"
+            transformed = permute_entries(entries, permutation, symmetry)
+            transformation = f"shuffle seed={args.seed}"
         else:
             permutation = adjacent_permutation(
                 order, args.adjacent_swaps, args.seed
             )
-            transformation = f"adjacent_swaps={args.adjacent_swaps}"
-        transformed = permute_entries(entries, permutation, symmetry)
+            transformed = permute_entries(entries, permutation, symmetry)
+            transformation = (
+                f"adjacent_swaps={args.adjacent_swaps} seed={args.seed}"
+            )
         write_coordinate_matrix(
             args.output,
             comments,
@@ -166,7 +202,6 @@ def main() -> int:
             order,
             transformed,
             transformation,
-            args.seed,
         )
     except (OSError, ValueError) as error:
         parser.error(str(error))

@@ -17915,3 +17915,91 @@ Release and ASan/UBSan CTest pass all three tests.  Leak-enabled sanitized
 runs also exercised the original positive, the 512-block out-of-box positive,
 and the nearby sparse rejection under independently verified 0.1-amplitude
 entrywise updates.
+
+SYMMETRIC SCALAR-FRINGE AMD LEAN POLICY GENERALIZED (2026-07-24).  The
+remaining `rajat03` lifecycle selector admitted only AUTO/8-thread inputs in a
+7,500--7,700-row and 32,000--33,500-entry box.  Twenty-four decisions then
+reused that identity to force transpose AMD, scale zero, a `1e-6` pivot
+tolerance, analysis-race suppression, worker spin, scratch reuse, preparation
+suppression, a hoisted row worker, and the settled lean refactor lifecycle.
+Although some downstream checks inspected the factor, the exact input window
+remained the authority for the complete route.
+
+The replacement starts with an exact structural capability.  A proposal must
+have 4,096--32,768 rows, 3--6 input entries per row, no empty column, maximum
+column degree 64, and multiplicity-aware structural symmetry.  Every
+missing-diagonal column must have degree one, at least `n/256` diagonals must
+be missing, and all scalar columns together may cover at most `n/28`.  The
+reciprocity check is exact for unsorted input and duplicate entries.  It is
+computed once while the mandatory candidate copy is built, then carried
+through transpose candidates and adoption instead of rescanning topology at
+hot decision sites.
+
+Topology can only propose the route.  Under the unchanged AUTO orientation,
+ordering, scale and backend contract with eight threads, BTF, static pivoting,
+and the default requested `0.001` tolerance, the selected candidate must be
+transpose AMD/BTF with full structural rank.  Its outside-core fringe must be
+between `n/256` and `n/28`; at least seven eighths of that surface must appear
+as separate fringe blocks.  Estimated fill must be 16--48 entries per row,
+estimated work 512--4,096 flops per row, and the estimated L/U streams must be
+within 2:1.  Recurring decisions require the selected scale-zero numeric to
+have no `Rs`, off-diagonal pivots, nudges, or perturbations, plus the same
+actual normalized fill, work, and balance bounds.  The accepted symbolic
+identity and cached numeric verdict are invalidated on factor replacement or
+free, preventing a stale capability from reaching a new factor.
+
+The route is observable as `symmetric_scalar_fringe_policy_eligible` in
+`kls_stats` and benchmark JSON.  Its generic diagnostic is
+`KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY`; separate generic
+controls cover clean scratch, the hoisted worker, and skipped generic
+preparations.  The old `KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY` and
+Rajat clean-scratch, hoisted-worker, and preparation controls remain A/B
+aliases but no longer classify an input.
+
+The smoke suite constructs an independent 8,192-row matrix with a 48-by-165
+symmetric grid core and 136 reciprocal missing-diagonal pairs.  It has 39,446
+entries and lies outside the old size box.  AUTO selects transpose AMD,
+scale zero, tolerance `1e-6`, 273 BTF blocks, and a 7,920-row core; normalized
+symbolic and numeric guards pass, the generic public field is one, and a
+changed-value refactor and solve meet the residual contract.  A same-order
+negative control turns the fringe pairs into diagonal singletons.  It retains
+the broad density and degree shape but removes the required missing-diagonal
+surface and reports eligibility zero.
+
+Metamorphic holdouts exercise both normalized boundaries.  Appending 128
+independent diagonal blocks to `rajat03` changes its order to 7,730 and its
+BTF shape to 231 blocks around the unchanged 7,500-row core; it remains
+eligible despite leaving the former order box.  Appending 256 blocks produces
+359 blocks at order 7,858, pushes scalar coverage beyond `n/28`, and cleanly
+falls back to normal AMD, automatic scaling, and the requested `0.001`
+tolerance.  A complete simultaneous random row/column shuffle with seed
+20260724 also remains eligible, with changed fill and work.  The metamorphic
+utility now provides `--append-diagonal-blocks COUNT` in addition to adjacent
+swaps and full shuffles.
+
+Corpus scans show that the rule is selective for structural reasons.  None of
+24 independent development matrices entered even the coarse order/density/
+degree band.  Of 24 held-out matrices, only `cell2` and `shyy41` entered that
+band; the former has no missing-diagonal fringe and both are asymmetric.  In
+the complete 110-matrix local paper union, eleven matrices entered the coarse
+band and only `rajat03` passed.  The other ten were rejected for a full
+diagonal, asymmetry, or missing-diagonal columns whose degree was not one.
+
+Twenty interleaved H100 pairs on the original matrix put generic/parent at
+`0.9971` by paired geometric mean (`0.9957` median), so the broader classifier
+keeps the established target performance.  Relative to the exact-selector
+parent, median modeled-cycle ratios were `0.842` on the new 128-block
+positive, `0.835` on the independent 48-by-165 grid, and `0.772` on a second
+independent 88-by-90 grid.  A first implementation repeatedly rescanned exact
+symmetry and raised analysis time about 15%; persisting the candidate verdict
+reduced that overhead to roughly 4% while keeping the check outside recurring
+kernels.
+
+The original, 128-block extension, and independent grid each completed 100
+verified entrywise generations at amplitudes 0.001, 0.01, and 0.1.  Across all
+900 changed systems, the worst per-generation relative-L2 residual was
+`2.22e-12`, below the `1e-8` contract.  Release CTest and ASan/UBSan/LSan
+CTest pass all three tests.  Leak-enabled sanitizer runs additionally
+exercised changed-value refactors on the original, the out-of-box 128-block
+positive, and the 256-block rejection; all three retained their expected
+policy decisions and verified residuals.

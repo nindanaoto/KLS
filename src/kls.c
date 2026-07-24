@@ -2393,6 +2393,9 @@ struct kls_solver {
   int balanced_moderate_hub_amd_cycle; /* guarded AMD/BTF or AMD/no-BTF */
   int sparse_partial_diagonal_amd_btf_cycle; /* symbolic-guarded direct AMD */
   int dense_reciprocal_hub_metis_cycle; /* guarded retained NodeNDP order */
+  int symmetric_scalar_fringe_amd_lean_cycle; /* guarded transpose AMD/BTF */
+  int symmetric_scalar_fringe_numeric_eligible; /* -1 reject, 0 unknown, 1 */
+  const trilinos_klu_l_symbolic *symmetric_scalar_fringe_symbolic_identity;
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -2473,6 +2476,7 @@ typedef struct kls_pattern_candidate {
   int sparse_partial_diagonal_amd_btf_selected;
   int dense_reciprocal_hub_metis_class;
   int dense_reciprocal_hub_metis_selected;
+  int symmetric_scalar_fringe_class;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -2841,6 +2845,7 @@ typedef struct kls_egraph_refactor_shared {
   int lean_pattern_mode;
   int lean_refactor_mode;
   int lean_gemat_mode;
+  int lean_symmetric_scalar_fringe_mode;
   int lean_parallel_offdiag_mode;
   int lean_grouped_done_mode;
   int lean_row_values_mode;
@@ -3200,9 +3205,17 @@ static void kls_egraph_refactor_record_singular(
   UF_long numerical_rank,
   UF_long singular_col);
 static int kls_is_bips98_lean_pattern(const kls_solver *solver);
-static int kls_is_medium_symmetric_rajat_pattern(
+static __attribute__((cold, noinline)) int
+kls_symmetric_scalar_fringe_input_profile(
   UF_long n,
-  const UF_long *col_ptr);
+  const UF_long *col_ptr,
+  const UF_long *row_idx);
+static KLS_ALWAYS_INLINE int
+kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(
+  const kls_solver *solver);
+static KLS_ALWAYS_INLINE int
+kls_symmetric_scalar_fringe_amd_lean_factor_cycle(
+  const kls_solver *solver);
 static int kls_sparse_partial_diagonal_amd_btf_cycle(
   const kls_solver *solver);
 static int kls_freescale_chain_h100_policy_enabled(
@@ -27050,6 +27063,7 @@ static void free_numeric(kls_solver *solver) {
   solver->solve_contract_verified = 0;
   solver->verified_rhs_valid = 0;
   solver->compact_amf_two_block_exact_recip_fresh = 0;
+  solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -27172,6 +27186,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
   solver->verified_rhs_valid = 0;
+  solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
   if (solver->hamrle3_h100_cycle) {
@@ -27483,6 +27498,9 @@ static void clear_matrix(kls_solver *solver) {
   solver->balanced_moderate_hub_amd_cycle = 0;
   solver->sparse_partial_diagonal_amd_btf_cycle = 0;
   solver->dense_reciprocal_hub_metis_cycle = 0;
+  solver->symmetric_scalar_fringe_amd_lean_cycle = 0;
+  solver->symmetric_scalar_fringe_numeric_eligible = 0;
+  solver->symmetric_scalar_fringe_symbolic_identity = NULL;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -30197,7 +30215,7 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
     return -1;
   }
   if (solver->options.scale == KLS_SCALE_AUTO &&
-      kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr)) {
+      kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)) {
     /* Scale zero keeps KLU's structural checks but avoids a numeric row-scale
        pass.  It preserves this class's diagonal pivot sequence and trims the
        cold factor/refactor setup without changing the fused kernel. */
@@ -30646,14 +30664,188 @@ static int kls_is_bips98_lean_pattern(const kls_solver *solver) {
     maxblock * 4u >= n * 3u && maxblock * 20u <= n * 17u;
 }
 
-static int kls_is_medium_symmetric_rajat_pattern(
+/* A bounded-degree, structurally symmetric core can carry a small collection
+   of missing-diagonal degree-one columns.  BTF matching turns that surface
+   into scalar components around a dominant core.  In this normalized regime
+   transpose AMD plus the persistent lean row walk repays its setup over a
+   repeated factor/solve horizon.  This proposal deliberately uses topology,
+   not matrix order or a narrow nnz fingerprint; the real AMD symbolic and
+   numeric must pass the independent guards below before recurring kernels
+   are selected. */
+static __attribute__((cold, noinline)) int
+kls_symmetric_scalar_fringe_input_profile(
   UF_long n,
-  const UF_long *col_ptr) {
-  /* The paper-union member is a nearly symmetric 7.5K-row dominant block.
-     Keep the range tight: its repeated-numeric optimum (transpose plus the
-     fused lean row walk) differs from the broad small-matrix default. */
-  return col_ptr != NULL && n >= 7500u && n <= 7700u &&
-         col_ptr[n] >= 32000u && col_ptr[n] <= 33500u;
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 4096u || n > 32768u ||
+      n > UF_long_max / 6u || col_ptr[n] < 3u * n ||
+      col_ptr[n] > 6u * n) {
+    return 0;
+  }
+
+  const UF_long nnz = col_ptr[n];
+  UF_long missing_diagonal = 0u;
+  UF_long scalar_columns = 0u;
+  UF_long lower_entries = 0u;
+  UF_long upper_entries = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > nnz || end - begin > 64u) {
+      return 0;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      if (row_idx[p] >= n) {
+        return 0;
+      }
+      has_diagonal |= row_idx[p] == col;
+      lower_entries += (UF_long)(row_idx[p] > col);
+      upper_entries += (UF_long)(row_idx[p] < col);
+    }
+    if (!has_diagonal) {
+      if (end - begin != 1u) {
+        return 0;
+      }
+      missing_diagonal++;
+    }
+    scalar_columns += (UF_long)(end - begin == 1u);
+  }
+
+  /* The lower bound makes the fringe material; the scalar-column ceiling
+     admits nearby diagonal-block extensions but rejects a matrix whose
+     dominant core no longer spans the intended operating regime. */
+  if (256u * missing_diagonal < n || 28u * scalar_columns > n ||
+      lower_entries != upper_entries) {
+    return 0;
+  }
+
+  /* Degrees are capped above, so an exact multiplicity-aware reciprocal
+     check is O(64*nnz) without allocating a transpose.  This remains exact
+     for unsorted input and duplicate entries; it is not a hash signature. */
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row <= col) {
+        continue;
+      }
+      int already_checked = 0;
+      for (UF_long q = begin; q < p; ++q) {
+        already_checked |= row_idx[q] == row;
+      }
+      if (already_checked) {
+        continue;
+      }
+      UF_long forward_count = 0u;
+      UF_long reciprocal_count = 0u;
+      for (UF_long q = begin; q < end; ++q) {
+        forward_count += (UF_long)(row_idx[q] == row);
+      }
+      for (UF_long q = col_ptr[row]; q < col_ptr[row + 1u]; ++q) {
+        reciprocal_count += (UF_long)(row_idx[q] == col);
+      }
+      if (forward_count != reciprocal_count) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static __attribute__((cold, noinline)) int
+kls_symmetric_scalar_fringe_policy_disabled(void) {
+  return
+    getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY") != NULL ||
+    /* Retain the former benchmark-specific switch as a diagnostic alias. */
+    getenv("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY") != NULL;
+}
+
+static __attribute__((cold, noinline)) int
+kls_symmetric_scalar_fringe_policy_enabled(
+  const kls_options *options) {
+  return options != NULL &&
+    !kls_symmetric_scalar_fringe_policy_disabled() &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
+}
+
+static __attribute__((cold, noinline)) int
+kls_symmetric_scalar_fringe_amd_lean_symbolic_profile(
+  UF_long n,
+  UF_long nnz,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (n < 4096u || n > 32768u || n > UF_long_max / 6u ||
+      nnz < 3u * n || nnz > 6u * n ||
+      orientation != KLS_ORIENTATION_TRANSPOSE ||
+      ordering != KLS_ORDERING_AMD || symbolic == NULL ||
+      !symbolic->do_btf || symbolic->structural_rank != n ||
+      symbolic->nblocks < 2u || symbolic->maxblock >= n ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
+      !(symbolic->est_flops > 0.0)) {
+    return 0;
+  }
+  const UF_long fringe = n - symbolic->maxblock;
+  const UF_long fringe_blocks = symbolic->nblocks - 1u;
+  const double fill = symbolic->lnz + symbolic->unz;
+  return 256u * fringe >= n && 28u * fringe <= n &&
+    fringe_blocks <= fringe && 8u * fringe_blocks >= 7u * fringe &&
+    fill >= 16.0 * (double)n && fill <= 48.0 * (double)n &&
+    symbolic->est_flops >= 512.0 * (double)n &&
+    symbolic->est_flops <= 4096.0 * (double)n &&
+    symbolic->lnz <= 2.0 * symbolic->unz &&
+    symbolic->unz <= 2.0 * symbolic->lnz;
+}
+
+static KLS_ALWAYS_INLINE int
+kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->symmetric_scalar_fringe_amd_lean_cycle &&
+    solver->symbolic == solver->symmetric_scalar_fringe_symbolic_identity;
+}
+
+/* Kernel admission is stricter than the topology proposal.  Numeric scaling,
+   pivoting, fill, and work must still describe the balanced retained factor
+   on which the lean lifecycle was measured. */
+static int kls_symmetric_scalar_fringe_amd_lean_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver) ||
+      solver->numeric == NULL || solver->common.scale != 0 ||
+      solver->numeric->Rs != NULL || solver->common.noffdiag != 0u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->common.flops <= 0.0) {
+    return 0;
+  }
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 16.0 * (double)solver->n &&
+    fill <= 48.0 * (double)solver->n &&
+    solver->common.flops >= 512.0 * (double)solver->n &&
+    solver->common.flops <= 4096.0 * (double)solver->n &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
+}
+
+static KLS_ALWAYS_INLINE int
+kls_symmetric_scalar_fringe_amd_lean_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)) {
+    return 0;
+  }
+  return solver->symmetric_scalar_fringe_numeric_eligible != 0
+    ? solver->symmetric_scalar_fringe_numeric_eligible > 0
+    : kls_symmetric_scalar_fringe_amd_lean_factor_profile(solver);
 }
 
 /* Stable pattern envelope for the 37K one-block Rajat operating point.
@@ -30811,8 +31003,7 @@ static int kls_uses_structural_initial_pivot_tolerance(
      ((solver->common.scale == -1 &&
        kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr)) ||
       (solver->common.scale == 0 &&
-       kls_is_medium_symmetric_rajat_pattern(solver->n,
-                                             solver->col_ptr)))) ||
+       kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)))) ||
     (solver != NULL &&
      solver->options.orientation == KLS_ORIENTATION_AUTO &&
      solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -30886,8 +31077,7 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
       ((solver->common.scale == -1 &&
         kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr)) ||
        (solver->common.scale == 0 &&
-        kls_is_medium_symmetric_rajat_pattern(solver->n,
-                                              solver->col_ptr)))) {
+        kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)))) {
     /* These diagonal, nearly symmetric classes retain the same pivot
        sequence at 1e-6.  Starting there avoids an unnecessary solve-side
        tolerance contract and keeps their fast column solves. */
@@ -40125,7 +40315,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
                                        kls_orientation orientation,
                                        UF_long n,
                                        UF_long *col_ptr,
-                                       UF_long *row_idx) {
+                                       UF_long *row_idx,
+                                       int symmetric_scalar_fringe_class) {
   /* The sync-ND class: any matrix that would pay a synchronous NodeND
      in analyze overlaps it with the (predicted-bootstrap) first factor
      instead and adopts through the promotion, which below the giant
@@ -40169,7 +40360,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
       !kls_nxp1_h100_policy_enabled(n, col_ptr, options)) {
     return;
   }
-  if (kls_is_medium_symmetric_rajat_pattern(n, col_ptr)) {
+  if (kls_symmetric_scalar_fringe_policy_enabled(options) &&
+      symmetric_scalar_fringe_class) {
     /* This class's METIS analysis saves less across 98 fused refactors than
        the worker/join costs once.  The AMD transpose path is the measured
        full-horizon winner, so do not create a race that the first public
@@ -42814,6 +43006,9 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_dense_reciprocal_hub_metis_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->symmetric_scalar_fringe_class =
+    kls_symmetric_scalar_fringe_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
@@ -42882,6 +43077,8 @@ static int transpose_candidate(const kls_pattern_candidate *source,
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_dense_reciprocal_hub_metis_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->symmetric_scalar_fringe_class =
+    source->symmetric_scalar_fringe_class;
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
   candidate->compact_partial_diagonal_column_fringe_class =
@@ -43084,14 +43281,17 @@ static int auto_orientation_prefers_transpose(UF_long n) {
 
 static int auto_orientation_prefers_normal(UF_long n,
                                            const UF_long *col_ptr,
-                                           const UF_long *row_idx) {
+                                           const UF_long *row_idx,
+                                           int symmetric_scalar_fringe_class,
+                                           const kls_options *options) {
   if (n >= 1000 && n <= 30000) {
     if (kls_is_compact_small_circuit_pattern(n, col_ptr)) {
       /* Its transpose cuts both factor work and the 100 repeated solves;
          the lightweight pipeline amortizes the extra row metadata. */
       return 0;
     }
-    if (kls_is_medium_symmetric_rajat_pattern(n, col_ptr)) {
+    if (kls_symmetric_scalar_fringe_policy_enabled(options) &&
+        symmetric_scalar_fringe_class) {
       /* The factors have equal fill in either frame, while transpose trims
          roughly 14us from each triangular solve.  The fused lean refactor's
          small increase is lower over the 100-solve horizon. */
@@ -43603,6 +43803,15 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
       candidate->n, candidate->nnz, candidate->orientation,
       candidate->selected_ordering, candidate->symbolic,
       &solver->separator);
+  solver->symmetric_scalar_fringe_amd_lean_cycle =
+    kls_symmetric_scalar_fringe_policy_enabled(&solver->options) &&
+    candidate->symmetric_scalar_fringe_class &&
+    kls_symmetric_scalar_fringe_amd_lean_symbolic_profile(
+      candidate->n, candidate->nnz, candidate->orientation,
+      candidate->selected_ordering, candidate->symbolic);
+  solver->symmetric_scalar_fringe_symbolic_identity =
+    solver->symmetric_scalar_fringe_amd_lean_cycle
+      ? candidate->symbolic : NULL;
 
   candidate->col_ptr = NULL;
   candidate->row_idx = NULL;
@@ -44064,6 +44273,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 }
 
 static void fill_numeric_stats(kls_solver *solver) {
+  solver->symmetric_scalar_fringe_numeric_eligible =
+    kls_symmetric_scalar_fringe_amd_lean_factor_profile(solver) ? 1 : -1;
   kls_dbg_snapshot_numeric(solver);
   fill_build_stats(&solver->stats);
   solver->stats.refactor_lean_choice = solver->lean_choice;
@@ -46754,7 +46965,9 @@ int kls_analyze_csc(kls_solver *solver,
      normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
-                                     normal.row_idx));
+                                     normal.row_idx,
+                                     normal.symmetric_scalar_fringe_class,
+                                     &normalized));
   const int prefer_auto_normal = ordinary_prefer_auto_normal ||
     partial_column_fringe_prefer_auto_normal ||
     partial_many_block_prefer_auto_normal ||
@@ -46788,7 +47001,8 @@ int kls_analyze_csc(kls_solver *solver,
        transfers these arrays by pointer so they outlive the race */
     kls_start_metis_race_early(solver, &normalized, normal.orientation,
                                normal.n,
-                               normal.col_ptr, normal.row_idx);
+                               normal.col_ptr, normal.row_idx,
+                               normal.symmetric_scalar_fringe_class);
   } else if (normalized.orientation == KLS_ORIENTATION_AUTO &&
              transpose.col_ptr != NULL &&
              auto_orientation_prefers_transpose(transpose.n)) {
@@ -46797,7 +47011,8 @@ int kls_analyze_csc(kls_solver *solver,
        (the selection-mismatch abandon below covers the fallback) */
     kls_start_metis_race_early(solver, &normalized, transpose.orientation,
                                transpose.n,
-                               transpose.col_ptr, transpose.row_idx);
+                               transpose.col_ptr, transpose.row_idx,
+                               transpose.symmetric_scalar_fringe_class);
   }
 
   kls_analyze_nd_race_solver = solver;
@@ -46973,7 +47188,9 @@ int kls_analyze_csr(kls_solver *solver,
      normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
-                                     normal.row_idx));
+                                     normal.row_idx,
+                                     normal.symmetric_scalar_fringe_class,
+                                     &normalized));
   const int prefer_auto_normal = ordinary_prefer_auto_normal ||
     reciprocal_hub_prefer_auto_normal ||
     balanced_hub_prefer_auto_normal ||
@@ -52335,7 +52552,7 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
     return 1;
   }
   if (solver != NULL &&
-      (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
+      (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_bips98_lean_pattern(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver))) {
@@ -52649,7 +52866,7 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
     return 1;
   }
   if (solver != NULL &&
-      (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
+      (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_bips98_lean_pattern(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver))) {
@@ -52743,7 +52960,7 @@ static int kls_ensure_refactor_u_index32_cache(kls_solver *solver) {
     return 1;
   }
   if (solver != NULL &&
-      (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
+      (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_bips98_lean_pattern(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver))) {
@@ -56243,14 +56460,14 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   const int build_l_index32 =
     kls_refactor_l_index32_env_enabled() &&
     solver->n <= (UF_long)INT32_MAX &&
-    !kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) &&
+    !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) &&
     !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
     !kls_is_bips98_lean_pattern(solver) &&
     !kls_compact_amf_two_block_factor_cycle(solver);
   const int build_u_index32 =
     kls_refactor_u_index32_env_enabled() &&
     solver->n <= (UF_long)INT32_MAX &&
-    !kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) &&
+    !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) &&
     !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
     !kls_is_bips98_lean_pattern(solver) &&
     !kls_compact_amf_two_block_factor_cycle(solver);
@@ -64802,7 +65019,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
   }
 
   if (lean_only &&
-      (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) ||
+      (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
        kls_is_rajat27_fragmented_scaled_pattern(solver) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_rommes_mimo8_pattern(solver) ||
@@ -71085,8 +71302,8 @@ static KLS_ALWAYS_INLINE int kls_lean_parallel_process_row(
   double *restrict udiag = (double *)solver->numeric->Udiag;
   const int retain_l_row_values =
     shared->row_refactor_defer_value_scatter ||
-    (!kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) &&
-     !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr));
+    (!shared->lean_symmetric_scalar_fringe_mode &&
+     !shared->lean_gemat_mode);
   const double row_rs_inv = shared->rs != NULL
     ? 1.0 / shared->rs[solver->numeric->Pnum[row]] : 1.0;
 
@@ -71557,7 +71774,7 @@ static void kls_gemat_hoisted_worker_run(
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, hot))
 #endif
-static void kls_rajat_hoisted_worker_run(
+static void kls_symmetric_scalar_fringe_hoisted_worker_run(
   kls_egraph_refactor_worker *worker,
   unsigned int generation,
   const UF_long *restrict rows,
@@ -72451,15 +72668,16 @@ static void kls_lean_parallel_worker_run(
     kls_egraph_refactor_record_invalid(shared);
     return;
   }
-  const int rajat_lean_class =
+  const int symmetric_scalar_fringe_lean_class =
     !shared->lean_gemat_mode &&
-    kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr);
+    kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver);
   const int clean_scratch_disabled =
     getenv("KLS_DISABLE_LEAN_CLEAN_SCRATCH") != NULL ||
     (shared->lean_gemat_mode &&
      getenv("KLS_DISABLE_GEMAT_CLEAN_SCRATCH") != NULL) ||
-    (rajat_lean_class &&
-     getenv("KLS_DISABLE_RAJAT_CLEAN_SCRATCH") != NULL);
+    (symmetric_scalar_fringe_lean_class &&
+     (getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_CLEAN_SCRATCH") != NULL ||
+      getenv("KLS_DISABLE_RAJAT_CLEAN_SCRATCH") != NULL));
   if (!solver->lean_parallel_scratch_clean || clean_scratch_disabled) {
     memset(worker->x, 0, (size_t)solver->n * sizeof(*worker->x));
   }
@@ -72467,9 +72685,10 @@ static void kls_lean_parallel_worker_run(
   const UF_long *restrict rows = shared->lean_rows != NULL
     ? shared->lean_rows : solver->row_refactor_level_rows;
   const UF_long stride = (UF_long)shared->thread_count;
-  const int rajat_hoisted_worker =
+  const int symmetric_scalar_fringe_hoisted_worker =
+    getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_HOISTED_WORKER") == NULL &&
     getenv("KLS_DISABLE_RAJAT_HOISTED_WORKER") == NULL &&
-    rajat_lean_class && shared->rs == NULL &&
+    symmetric_scalar_fringe_lean_class && shared->rs == NULL &&
     solver->row_refactor_input_ptr != NULL &&
     solver->row_refactor_input_cols != NULL &&
     solver->row_refactor_input_pos != NULL &&
@@ -72481,8 +72700,9 @@ static void kls_lean_parallel_worker_run(
     solver->row_refactor_u_values != NULL &&
     solver->row_refactor_u_row_values != NULL &&
     solver->numeric != NULL && solver->numeric->Udiag != NULL;
-  if (rajat_hoisted_worker) {
-    kls_rajat_hoisted_worker_run(worker, generation, rows, stride);
+  if (symmetric_scalar_fringe_hoisted_worker) {
+    kls_symmetric_scalar_fringe_hoisted_worker_run(
+      worker, generation, rows, stride);
     if (!kls_lean_parallel_refresh_offdiag_worker(worker, stride)) {
       kls_egraph_refactor_record_invalid(shared);
     }
@@ -72490,7 +72710,8 @@ static void kls_lean_parallel_worker_run(
   }
   const int generic_hoisted_worker =
     getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
-    !shared->lean_gemat_mode && !rajat_lean_class && shared->rs == NULL &&
+    !shared->lean_gemat_mode &&
+    !symmetric_scalar_fringe_lean_class && shared->rs == NULL &&
     solver->lean_snode_run == NULL &&
     solver->row_refactor_input_ptr != NULL &&
     solver->row_refactor_input_cols != NULL &&
@@ -72734,9 +72955,11 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_parallel_offdiag_mode =
     !solver->lean_user_values_active &&
     kls_generic_parallel_offdiag_shape(solver);
-  const int rajat_lean_mode =
+  const int symmetric_scalar_fringe_lean_mode =
     !shared->lean_gemat_mode &&
-    kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr);
+    kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver);
+  shared->lean_symmetric_scalar_fringe_mode =
+    symmetric_scalar_fringe_lean_mode;
   /* In the low-work, thousands-of-BTF-block cohort, the row schedule can
      revisit an owner stream in an order the compact token scoreboard does
      not represent.  Keep its original per-row completion records; using the
@@ -72762,14 +72985,14 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     grouped_done_ready &&
     ((shared->lean_gemat_mode &&
       getenv("KLS_DISABLE_GEMAT_GROUPED_DONE") == NULL) ||
-     (!shared->lean_gemat_mode && !rajat_lean_mode &&
+     (!shared->lean_gemat_mode && !symmetric_scalar_fringe_lean_mode &&
       !fragmented_grouped_hazard && rs == NULL &&
       solver->lean_snode_run == NULL &&
       getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
       getenv("KLS_DISABLE_GENERIC_GROUPED_DONE") == NULL));
   shared->lean_row_values_mode =
     (shared->lean_gemat_mode ||
-     (!rajat_lean_mode &&
+     (!symmetric_scalar_fringe_lean_mode &&
       (rs == NULL ||
        scaled_fragmented_row_shape ||
        getenv("KLS_ENABLE_SCALED_LEAN_ROW_FACTOR") != NULL) &&
@@ -72799,7 +73022,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   solver->lean_scalar_btf_prefix = 0u;
   if (getenv("KLS_DISABLE_LEAN_SCALAR_PREFIX") == NULL && rs == NULL &&
       !shared->lean_gemat_mode &&
-      !kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr) &&
+      !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) &&
       solver->lean_snode_run == NULL && solver->symbolic != NULL &&
       solver->symbolic->R != NULL) {
     UF_long block = 0u;
@@ -72894,6 +73117,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     row_values_mode && !invalid && !singular;
   shared->lean_refactor_mode = 0;
   shared->lean_gemat_mode = 0;
+  shared->lean_symmetric_scalar_fringe_mode = 0;
   shared->lean_parallel_offdiag_mode = 0;
   shared->lean_grouped_done_mode = 0;
   shared->lean_row_values_mode = 0;
@@ -72949,7 +73173,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
        kls_compact_amf_two_block_factor_cycle(solver) ||
        kls_is_rommes_itaipu_sequence_pattern(solver) ||
        getenv("KLS_ENABLE_LEAN_I16_INDICES") != NULL) &&
-      !kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr)) {
+      !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver)) {
     (void)kls_build_lean_row_i16_indices(solver);
   }
   const double trace_pattern = trace_phases ? kls_now_seconds() : 0.0;
@@ -73028,7 +73252,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   }
   const int supernode_values =
     getenv("KLS_ENABLE_LEAN_SNODE") != NULL ||
-    kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr);
+    kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver);
   if (supernode_values) {
     kls_lean_row_refactor_ensure_snode_runs(solver);
   }
@@ -108473,7 +108697,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     pool->worker_spin_iters =
       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)
         ? 200000u :
-      kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr)
+      kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)
         ? 65536u :
       kls_small_compact_deep_fill_worker_spin_policy_enabled(solver)
         ? 200000u :
@@ -150439,7 +150663,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     solver->i32solve_state = -1;
     return 0;
   }
-  if (kls_is_medium_symmetric_rajat_pattern(solver->n, solver->col_ptr)) {
+  if (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver)) {
     /* The transposed column solve already runs at the same 72--74us with
        native indices.  Building four conversion arrays costs about 0.8ms
        in the first refactor and has no horizon payoff for this class. */
@@ -153660,6 +153884,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver->hamrle3_h100_cycle) {
     kls_clear_retained_preconditioner(solver);
   }
+  solver->symmetric_scalar_fringe_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
      mirror up front so no later solve can consume pivots from the preceding
@@ -154374,8 +154599,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         getenv("KLS_DISABLE_CIRCUIT204_SINGLE_BLOCK_PREWARM") == NULL;
       if (!had_numeric && solver->options.threads > 1 &&
           solver->egraph_pool == NULL &&
-          (kls_is_medium_symmetric_rajat_pattern(solver->n,
-                                                 solver->col_ptr) ||
+          (kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver) ||
            kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
            kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||
            partial_column_fringe_btf_lean_prewarm ||
@@ -154894,9 +155118,10 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       (void)kls_i32_solve_ready(solver);
       return;
     }
-    if (getenv("KLS_DISABLE_RAJAT_SKIP_GENERIC_PREPS") == NULL &&
-        kls_is_medium_symmetric_rajat_pattern(solver->n,
-                                              solver->col_ptr)) {
+    if (getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_SKIP_GENERIC_PREPS") ==
+          NULL &&
+        getenv("KLS_DISABLE_RAJAT_SKIP_GENERIC_PREPS") == NULL &&
+        kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver)) {
       return;
     }
     double preps_elapsed = 0.0;
@@ -155621,8 +155846,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->lean_choice == 0 &&
       ((kls_uses_structural_initial_pivot_tolerance(solver) &&
         (kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr) ||
-         kls_is_medium_symmetric_rajat_pattern(solver->n,
-                                               solver->col_ptr))) ||
+         kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver))) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_rommes_mimo8_pattern(solver) ||
        kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
@@ -158084,6 +158308,12 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->dense_reciprocal_hub_policy_eligible)) {
     stats->dense_reciprocal_hub_policy_eligible =
       kls_dense_reciprocal_hub_metis_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, symmetric_scalar_fringe_policy_eligible) +
+        sizeof(stats->symmetric_scalar_fringe_policy_eligible)) {
+    stats->symmetric_scalar_fringe_policy_eligible =
+      kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

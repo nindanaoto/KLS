@@ -1739,6 +1739,21 @@ off-diagonal pivots or numeric `Rs`, 24--48 factor entries per row, and
 `KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY=1` for an A/B fallback. The
 former `KLS_DISABLE_ASIC100K_DENSE_H100_POLICY` switch remains an alias.
 
+A symmetric scalar-fringe AMD policy replaces the former `rajat03` size and
+nonzero window. Under the standard AUTO/8-thread BTF/static-pivoting contract,
+it proposes transpose AMD only for bounded-degree, exactly structurally
+symmetric inputs with 3--6 entries per row and a material but small surface of
+missing-diagonal degree-one columns. The selected symbolic must be full-rank,
+place a 1/256--1/28 fringe outside a dominant core, expose nearly all of that
+surface as scalar BTF blocks, and stay within normalized fill/work and L/U
+balance bounds. Recurring lean kernels additionally require an unscaled
+numeric with no off-diagonal pivots, nudges, perturbations, or numeric `Rs`
+array and the same measured factor bounds. Benchmark JSON exposes
+`symmetric_scalar_fringe_policy_eligible`; set
+`KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY=1` for an A/B fallback.
+The former `KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY` switch remains an
+alias.
+
 The metamorphic holdout utility can produce deterministic simultaneous
 row/column relabelings without checking generated matrices into the tree. For
 example, the compact positive used by the policy audit is reproduced with:
@@ -1751,8 +1766,11 @@ python3 scripts/make_metamorphic_matrix.py \
 ```
 
 Use `--shuffle --seed N` instead of `--adjacent-swaps` for a complete
-deterministic random relabeling. This is useful for detecting classifiers or
-separator policies that accidentally depend on the original vertex numbers.
+deterministic random relabeling. `--append-diagonal-blocks COUNT` adds
+independent unit diagonal components as a separate transformation mode. These
+transformations are useful for detecting classifiers or separator policies
+that accidentally depend on the original vertex numbers or an exact matrix
+order.
 
 For the corresponding AUTO analysis problem, a 40--60% structural diagonal
 and three-to-five input entries per row only propose a direct AMD/BTF

@@ -21053,6 +21053,241 @@ cleanup:
   return ok;
 }
 
+static int test_symmetric_scalar_fringe_amd_lean_policy(void) {
+  const int32_t grid_rows = 48;
+  const int32_t grid_cols = 165;
+  const int32_t core = grid_rows * grid_cols;
+  const int32_t fringe_pairs = 136;
+  const int32_t n = core + 2 * fringe_pairs;
+  const int32_t grid_edges =
+    grid_rows * (grid_cols - 1) + (grid_rows - 1) * grid_cols;
+  const int32_t nnz = core + 2 * grid_edges + 2 * fringe_pairs;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *ax_changed =
+    (double *)malloc((size_t)nnz * sizeof(*ax_changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *negative_solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
+    expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY") != 0) {
+    perror("unsetenv symmetric scalar fringe policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < core; ++col) {
+    const int32_t row = col / grid_cols;
+    const int32_t grid_col = col % grid_cols;
+    ap[col] = p;
+    if (row > 0) {
+      ai[p] = col - grid_cols;
+      ax[p++] = -1.0;
+    }
+    if (grid_col > 0) {
+      ai[p] = col - 1;
+      ax[p++] = -1.0;
+    }
+    ai[p] = col;
+    ax[p++] = 5.0;
+    if (grid_col + 1 < grid_cols) {
+      ai[p] = col + 1;
+      ax[p++] = -1.0;
+    }
+    if (row + 1 < grid_rows) {
+      ai[p] = col + grid_cols;
+      ax[p++] = -1.0;
+    }
+  }
+  for (int32_t pair = 0; pair < fringe_pairs; ++pair) {
+    const int32_t first = core + 2 * pair;
+    const int32_t second = first + 1;
+    ap[first] = p;
+    ai[p] = second;
+    ax[p++] = 1.0;
+    ap[second] = p;
+    ai[p] = first;
+    ax[p++] = 1.0;
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected symmetric scalar fringe nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t entry = 0; entry < nnz; ++entry) {
+    const double multiplier =
+      1.0 + 1.0e-4 * (double)((entry % 7) - 3);
+    ax_changed[entry] = ax[entry] * multiplier;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    expected[row] = 1.0 + 0.025 * (double)(row % 11);
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create symmetric scalar fringe policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze symmetric scalar fringe policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor symmetric scalar fringe policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  for (int generation = 0; ok && generation < 2; ++generation) {
+    const double *values = generation == 0 ? ax : ax_changed;
+    if (generation != 0 &&
+        !require_ok(kls_refactor(solver, values),
+                    "refactor symmetric scalar fringe policy")) {
+      ok = 0;
+      break;
+    }
+    memset(b, 0, (size_t)n * sizeof(*b));
+    memset(x, 0, (size_t)n * sizeof(*x));
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        b[ai[entry]] += values[entry] * expected[col];
+      }
+    }
+    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                    "solve symmetric scalar fringe policy")) {
+      ok = 0;
+      break;
+    }
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    if (!require_ok(kls_get_stats(solver, &stats),
+                    "stats symmetric scalar fringe policy")) {
+      ok = 0;
+      break;
+    }
+    const double fill = (double)(stats.nnz_l + stats.nnz_u);
+    if (stats.selected_orientation != KLS_ORIENTATION_TRANSPOSE ||
+        stats.selected_ordering != KLS_ORDERING_AMD ||
+        stats.selected_scale != 0 || stats.selected_btf != 1 ||
+        fabs(stats.selected_pivot_tolerance - 1.0e-6) > 1.0e-12 ||
+        stats.nblocks != 273 || stats.max_block != core ||
+        stats.structural_rank != n ||
+        fill < 16.0 * (double)n || fill > 48.0 * (double)n ||
+        stats.factor_flops < 512.0 * (double)n ||
+        stats.factor_flops > 4096.0 * (double)n ||
+        stats.symmetric_scalar_fringe_policy_eligible != 1 ||
+        stats.egraph_worker_spin_iters != 65536 ||
+        (generation != 0 &&
+         (stats.last_refactor_path != KLS_REFACTOR_PATH_ROW ||
+          stats.refactor_lean_choice != 1))) {
+      fprintf(stderr,
+              "unexpected symmetric scalar fringe policy: orientation=%d"
+              " ordering=%d scale=%d btf=%d tol=%.17g blocks=%" PRId64
+              " max=%" PRId64 " rank=%" PRId64 " fill=%.0f flops=%.0f"
+              " eligible=%d spin=%" PRId64 " path=%d lean=%d\n",
+              (int)stats.selected_orientation,
+              (int)stats.selected_ordering, stats.selected_scale,
+              stats.selected_btf, stats.selected_pivot_tolerance,
+              stats.nblocks, stats.max_block, stats.structural_rank,
+              fill, stats.factor_flops,
+              stats.symmetric_scalar_fringe_policy_eligible,
+              stats.egraph_worker_spin_iters, (int)stats.last_refactor_path,
+              stats.refactor_lean_choice);
+      ok = 0;
+      break;
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      if (!close_enough(x[row], expected[row])) {
+        fprintf(stderr,
+                "symmetric scalar fringe solve mismatch at %d: %.17g"
+                " vs %.17g\n",
+                row, x[row], expected[row]);
+        ok = 0;
+        break;
+      }
+    }
+  }
+
+  /* Give every fringe column its own diagonal.  The order, density, core,
+     and scalar count remain similar, but the missing-diagonal symmetric
+     surface is gone; the structural proposal must reject it. */
+  for (int32_t col = core; ok && col < n; ++col) {
+    ai[ap[col]] = col;
+    ax[ap[col]] = 1.0;
+  }
+  if (ok &&
+      (!require_ok(kls_create(&negative_solver),
+                   "create symmetric scalar fringe negative") ||
+       !require_ok(kls_analyze_csc(negative_solver, KLS_INDEX_INT32, n,
+                                   ap, ai, 0, &options),
+                   "analyze symmetric scalar fringe negative") ||
+       !require_ok(kls_factor(negative_solver, ax),
+                   "factor symmetric scalar fringe negative"))) {
+    ok = 0;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok &&
+      !require_ok(kls_get_stats(negative_solver, &stats),
+                  "stats symmetric scalar fringe negative")) {
+    ok = 0;
+  }
+  if (ok && stats.symmetric_scalar_fringe_policy_eligible != 0) {
+    fprintf(stderr,
+            "full-diagonal control unexpectedly selected symmetric scalar"
+            " fringe policy\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(negative_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY",
+                         had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(ax_changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -21072,6 +21307,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_partial_diagonal_direct_amd_analysis()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_symmetric_scalar_fringe_amd_lean_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {
