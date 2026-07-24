@@ -4236,6 +4236,71 @@ steady solve to `0.2325x`, improving the complete workload. All verified
 target and holdout residuals are below `4.13e-16`. Release and leak-enabled
 ASan/UBSan/LSan CTest pass all four tests.
 
+## Near-symmetric mega-hub AMD lifecycle
+
+The former `circuit5M` selector no longer compares the input order and entry
+count with a SuiteSparse coordinate. Under the standard AUTO, eight-worker,
+BTF, static-pivoting contract, a topology proposal accepts 131,072--8,388,608
+rows and eight--sixteen stored entries per row. Every row and column must be
+nonempty, almost every column must contain its diagonal, scalar rows and
+columns are bounded, and the maximum in- and out-degree must each lie between
+`n/8` and `n/2`. A nonzero but bounded set of in/out-degree mismatches proves
+directed asymmetry without depending on CSC order, transpose, or vertex
+labels. A column-pointer pass rejects inputs with no plausible hub before the
+classifier allocates row degrees or scans all nonzeros.
+
+Topology only proposes normal AMD/BTF. The resulting symbolic must have at
+least 1,048,576 rows, full structural rank, two through `n/1024+1` blocks, a
+proper dominant core covering at least 1023/1024 of the matrix, and a fringe
+between `n/4096` and `n/512+8` rows. Balanced symbolic L/U fill must total
+32--64 entries per row and estimated work must be 512--4,096 operations per
+row. If any measurement fails, KLS discards the trial and resumes the complete
+AUTO tournament.
+
+The installed numeric independently preserves the accepted symbolic identity,
+normal AMD/BTF representation, caller pivot threshold, and max-row scaling.
+It must remain nonsingular and have no row permutation, nudge, or perturbation,
+few off-diagonal pivots, balanced L/U streams totaling 8--24 entries per row,
+and measured work of 64--512 operations per row. Only that accepted numeric
+suppresses redundant scale, METIS, predicted-pattern, and diagonal-equivalent
+trials and retains the row-scale vector across changed-value EGraph refactors.
+
+Set `KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY=1` for a generic
+same-binary control. `KLS_DISABLE_CIRCUIT5M_H100_POLICY` remains a
+compatibility alias. `kls_stats` and benchmark JSON expose
+`near_symmetric_mega_hub_amd_candidate`,
+`near_symmetric_mega_hub_amd_symbolic_eligible`, and
+`near_symmetric_mega_hub_amd_factor_eligible`.
+
+The independent smoke family uses generated 131,072- and 135,168-row
+circulant cores, a quarter-order reciprocal hub, one unmatched directed edge,
+and disconnected two-node fringe components. It covers equivalent CSR,
+unsorted storage, a nearby size, exact-symmetric and oversized-hub negatives,
+a connected proposal that fails the symbolic stage, and both disable
+switches. These compact fixtures deliberately lie below the production
+symbolic floor, so they prove invariant proposal and fallback behavior rather
+than serving as a second large factor-positive family.
+
+The development manifest adds `FullChip`, `Freescale2`, and `circuit5M_dc` as
+near-family controls. The cross-family holdout manifest adds `kkt_power`,
+`CurlCurl_3`, `StocF-1465`, `Transport`, and `wikipedia-20051105`; all reject
+at the input stage for independent diagonal, hub, degree-balance, or density
+reasons. `FullChip` also retains its existing METIS/no-BTF symbolic exactly;
+a final frozen/current pair measured 7.107 versus 7.066 seconds of analysis,
+showing that the early hub rejection removes material classifier overhead.
+
+Appending 512 generated coupled nodes to the positive creates a 5,558,838-row
+holdout outside the old identity. It reports `1/1/1`, retains a 5,556,264-row
+dominant BTF core, and preserves identical 33,760,986/33,760,248 L/U counts.
+With two factors and three independently checked refactors, its modeled cycle
+falls from 53.59 seconds in the frozen exact parent to 42.01 seconds; the
+worst relative-L2 residual is `1.26e-14`. On the original input, two pinned
+alternating pairs keep identical factors and residuals, analysis within 0.3%,
+and a geometric current/parent modeled-cycle ratio of about 1.03, within the
+observed cold-factor/first-refactor variation. Thus the exact identity is gone
+without materially changing the established workload, while the moved-size
+positive demonstrates useful behavior outside the benchmark coordinate.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

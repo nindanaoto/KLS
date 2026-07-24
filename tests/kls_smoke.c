@@ -25424,6 +25424,271 @@ cleanup:
 }
 
 enum {
+  NEAR_SYMMETRIC_MEGA_HUB_FIXTURE_N = 131072,
+  NEAR_SYMMETRIC_MEGA_HUB_FIXTURE_FRINGE = 64,
+  NEAR_SYMMETRIC_MEGA_HUB_EXTENSION_N = 135168,
+  NEAR_SYMMETRIC_MEGA_HUB_EXTENSION_FRINGE = 66
+};
+
+/* Independent near-symmetric family: a nontrivially fragmented reciprocal
+   circulant, one quarter-order hub, and one unmatched directed edge.  The
+   small absolute order deliberately stops at the symbolic economics floor. */
+static int build_near_symmetric_mega_hub_fixture(
+  int32_t n,
+  int32_t fringe,
+  int symmetric_control,
+  int oversized_hub_control,
+  int32_t *ap,
+  int32_t *ai) {
+  if (n <= fringe || fringe < 0 || (fringe & 1) != 0 ||
+      ap == NULL || ai == NULL) {
+    return 0;
+  }
+  const int32_t core = n - fringe;
+  const int32_t hub = 0;
+  const int32_t hub_count = oversized_hub_control ? (3 * n) / 5 : n / 4;
+  const int32_t hub_begin = oversized_hub_control ? core / 8 : core / 4;
+  const int32_t asym_col = 1;
+  const int32_t asym_row = (3 * core) / 4;
+  if (hub_begin + hub_count >= core || asym_row == hub ||
+      (asym_row >= hub_begin && asym_row < hub_begin + hub_count)) {
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col < core) {
+      for (int32_t offset = -4; offset <= 4; ++offset) {
+        int32_t row = col + offset;
+        if (row < 0) {
+          row += core;
+        } else if (row >= core) {
+          row -= core;
+        }
+        ai[p++] = row;
+      }
+      if (col == hub) {
+        for (int32_t k = 0; k < hub_count; ++k) {
+          ai[p++] = hub_begin + k;
+        }
+      } else if (col >= hub_begin && col < hub_begin + hub_count) {
+        ai[p++] = hub;
+      }
+      if (col == asym_col) {
+        ai[p++] = asym_row;
+      }
+      if (symmetric_control && col == asym_row) {
+        ai[p++] = asym_col;
+      }
+    } else {
+      ai[p++] = col;
+      ai[p++] = core + ((col - core) ^ 1);
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+  }
+  ap[n] = p;
+  return p;
+}
+
+static int check_near_symmetric_mega_hub_stages(
+  kls_solver *solver,
+  const char *label,
+  int expected_candidate) {
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), label) ||
+      stats.near_symmetric_mega_hub_amd_candidate != expected_candidate ||
+      stats.near_symmetric_mega_hub_amd_symbolic_eligible != 0 ||
+      stats.near_symmetric_mega_hub_amd_factor_eligible != 0) {
+    fprintf(stderr,
+            "unexpected near-symmetric mega-hub stages for %s: %d/%d/%d\n",
+            label, stats.near_symmetric_mega_hub_amd_candidate,
+            stats.near_symmetric_mega_hub_amd_symbolic_eligible,
+            stats.near_symmetric_mega_hub_amd_factor_eligible);
+    return 0;
+  }
+  return 1;
+}
+
+static int test_near_symmetric_mega_hub_amd_policy(void) {
+  const int32_t n = NEAR_SYMMETRIC_MEGA_HUB_FIXTURE_N;
+  const int32_t fringe = NEAR_SYMMETRIC_MEGA_HUB_FIXTURE_FRINGE;
+  const int32_t extension_n = NEAR_SYMMETRIC_MEGA_HUB_EXTENSION_N;
+  const int32_t extension_fringe =
+    NEAR_SYMMETRIC_MEGA_HUB_EXTENSION_FRINGE;
+  const size_t capacity = (size_t)11 * (size_t)n + 4u;
+  const size_t extension_capacity =
+    (size_t)11 * (size_t)extension_n + 4u;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(capacity * sizeof(*ai));
+  int32_t *unsorted_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*unsorted_ap));
+  int32_t *unsorted_ai = (int32_t *)malloc(capacity * sizeof(*unsorted_ai));
+  int32_t *symmetric_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*symmetric_ap));
+  int32_t *symmetric_ai =
+    (int32_t *)malloc(capacity * sizeof(*symmetric_ai));
+  int32_t *oversized_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*oversized_ap));
+  int32_t *oversized_ai =
+    (int32_t *)malloc(capacity * sizeof(*oversized_ai));
+  int32_t *single_block_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*single_block_ap));
+  int32_t *single_block_ai =
+    (int32_t *)malloc(capacity * sizeof(*single_block_ai));
+  int32_t *extension_ap = (int32_t *)malloc(
+    ((size_t)extension_n + 1u) * sizeof(*extension_ap));
+  int32_t *extension_ai =
+    (int32_t *)malloc(extension_capacity * sizeof(*extension_ai));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *extension_solver = NULL;
+  kls_solver *csr_solver = NULL;
+  kls_solver *unsorted_solver = NULL;
+  kls_solver *symmetric_solver = NULL;
+  kls_solver *oversized_solver = NULL;
+  kls_solver *single_block_solver = NULL;
+  kls_solver *disabled_solver = NULL;
+  kls_solver *legacy_disabled_solver = NULL;
+  int ok = ap != NULL && ai != NULL && unsorted_ap != NULL &&
+    unsorted_ai != NULL && symmetric_ap != NULL && symmetric_ai != NULL &&
+    oversized_ap != NULL && oversized_ai != NULL &&
+    single_block_ap != NULL && single_block_ai != NULL &&
+    extension_ap != NULL && extension_ai != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+  int32_t nnz = 0;
+  if (ok) {
+    nnz = build_near_symmetric_mega_hub_fixture(
+      n, fringe, 0, 0, ap, ai);
+    const int32_t symmetric_nnz = build_near_symmetric_mega_hub_fixture(
+      n, fringe, 1, 0, symmetric_ap, symmetric_ai);
+    const int32_t oversized_nnz = build_near_symmetric_mega_hub_fixture(
+      n, fringe, 0, 1, oversized_ap, oversized_ai);
+    const int32_t single_block_nnz = build_near_symmetric_mega_hub_fixture(
+      n, 0, 0, 0, single_block_ap, single_block_ai);
+    const int32_t extension_nnz = build_near_symmetric_mega_hub_fixture(
+      extension_n, extension_fringe, 0, 0, extension_ap, extension_ai);
+    ok = nnz > 0 && symmetric_nnz > 0 && oversized_nnz > 0 &&
+      single_block_nnz > 0 && extension_nnz > 0;
+  }
+  if (!ok) {
+    goto cleanup;
+  }
+  memcpy(unsorted_ap, ap, ((size_t)n + 1u) * sizeof(*ap));
+  memcpy(unsorted_ai, ai, (size_t)nnz * sizeof(*ai));
+  {
+    const int32_t first = unsorted_ap[2];
+    const int32_t swap = unsorted_ai[first];
+    unsorted_ai[first] = unsorted_ai[first + 1];
+    unsorted_ai[first + 1] = swap;
+  }
+  if (unsetenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY") != 0) {
+    perror("configure near-symmetric mega-hub AMD policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+#define ANALYZE_MEGA_HUB(target, label, input_n, input_ap, input_ai, csr, expect) \
+  do { \
+    if (!require_ok(kls_create(&(target)), "create " label) || \
+        !require_ok((csr) \
+          ? kls_analyze_csr((target), KLS_INDEX_INT32, (input_n), \
+                            (input_ap), (input_ai), 0, &options) \
+          : kls_analyze_csc((target), KLS_INDEX_INT32, (input_n), \
+                            (input_ap), (input_ai), 0, &options), \
+          "analyze " label) || \
+        !check_near_symmetric_mega_hub_stages( \
+          (target), "stats " label, (expect))) { \
+      ok = 0; \
+      goto cleanup; \
+    } \
+  } while (0)
+
+  ANALYZE_MEGA_HUB(solver, "near-symmetric mega-hub proposal",
+                   n, ap, ai, 0, 1);
+  ANALYZE_MEGA_HUB(extension_solver, "extended mega-hub proposal",
+                   extension_n, extension_ap, extension_ai, 0, 1);
+  ANALYZE_MEGA_HUB(csr_solver, "CSR mega-hub proposal",
+                   n, ap, ai, 1, 1);
+  ANALYZE_MEGA_HUB(unsorted_solver, "unsorted mega-hub proposal",
+                   n, unsorted_ap, unsorted_ai, 0, 1);
+  ANALYZE_MEGA_HUB(symmetric_solver, "symmetric mega-hub control",
+                   n, symmetric_ap, symmetric_ai, 0, 0);
+  ANALYZE_MEGA_HUB(oversized_solver, "oversized mega-hub control",
+                   n, oversized_ap, oversized_ai, 0, 0);
+  /* Cheap topology may propose this connected variant, but the direct AMD
+     symbolic cannot prove the required nontrivial BTF fringe. */
+  ANALYZE_MEGA_HUB(single_block_solver, "single-block mega-hub control",
+                   n, single_block_ap, single_block_ai, 0, 1);
+
+  if (setenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY", "1", 1)
+        != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+  ANALYZE_MEGA_HUB(disabled_solver, "disabled mega-hub control",
+                   n, ap, ai, 0, 0);
+  if (unsetenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY") != 0 ||
+      setenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY", "1", 1) != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+  ANALYZE_MEGA_HUB(legacy_disabled_solver,
+                   "legacy-disabled mega-hub control", n, ap, ai, 0, 0);
+#undef ANALYZE_MEGA_HUB
+
+cleanup:
+  kls_destroy(legacy_disabled_solver);
+  kls_destroy(disabled_solver);
+  kls_destroy(single_block_solver);
+  kls_destroy(oversized_solver);
+  kls_destroy(symmetric_solver);
+  kls_destroy(unsorted_solver);
+  kls_destroy(csr_solver);
+  kls_destroy(extension_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY", had_policy,
+        saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_CIRCUIT5M_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(extension_ai);
+  free(extension_ap);
+  free(single_block_ai);
+  free(single_block_ap);
+  free(oversized_ai);
+  free(oversized_ap);
+  free(symmetric_ai);
+  free(symmetric_ap);
+  free(unsorted_ai);
+  free(unsorted_ap);
+  free(ai);
+  free(ap);
+  free(saved_legacy);
+  free(saved_policy);
+  return ok;
+}
+
+enum {
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_N = 1048576,
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_FRINGE = 512,
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_CORE =
@@ -26276,6 +26541,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_asymmetric_bounded_degree_direct_metis_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_near_symmetric_mega_hub_amd_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_giant_symmetric_scalar_fringe_metis_row_policy()) {

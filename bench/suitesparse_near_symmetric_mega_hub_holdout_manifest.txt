@@ -1,0 +1,9 @@
+# Cross-family SuiteSparse controls selected from the same giant density band.
+# These cover exact reciprocity, missing diagonals, bounded degree, fragmented
+# SCCs, and strongly asymmetric directed graphs without using Freescale data.
+
+kkt_power
+CurlCurl_3
+StocF-1465
+Transport
+wikipedia-20051105

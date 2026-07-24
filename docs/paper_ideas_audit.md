@@ -19979,3 +19979,105 @@ pair retains identical 24,618,098-entry L/U factors and measures 34.1774 versus
 34.1709 seconds. All target and holdout changed-value checks remain below
 `4.13e-16` relative L2. Release and leak-enabled ASan/UBSan/LSan CTest pass all
 four tests.
+
+NEAR-SYMMETRIC MEGA-HUB AMD LIFECYCLE GENERALIZED (2026-07-24). The remaining
+`circuit5M` policy recognized one exact `(n,nnz)` coordinate under the
+eight-worker AUTO/BTF/static-pivoting configuration. That identity directly
+selected normal AMD/BTF and max-row scaling, suppressed both synchronous and
+deferred METIS competition, skipped predicted-pattern and diagonal-equivalent
+trials, and retained the original scale vector across recurring row
+refactors. Those choices were measured wins for the target, but no input,
+symbolic, or numeric property proved that the complete lifecycle applied.
+
+The replacement is a three-stage capability. Its input proposal accepts
+131,072--8,388,608 rows at density eight--sixteen, requires no empty row or
+column, allows at most `n/1024+8` missing diagonal columns and at most
+`n/4096+16` scalar rows or columns, and requires maximum row and column degree
+between `n/8` and `n/2`. At least one, but no more than `n/32768+32`, vertices
+must have unequal in/out degree, and their total absolute degree imbalance is
+positive and bounded by the same limit. This invariant mismatch is a strict
+structural-asymmetry proof; it does not claim exact edge-level reciprocity.
+The tests and documentation therefore use “near-symmetric” for this narrow
+degree-level proposal, not as an unmeasured theorem about every edge.
+
+All input predicates are ratios or resource limits and are invariant under
+transpose, simultaneous relabeling, and sorted versus unsorted storage. The
+implementation first validates column pointers, scalar-column count, and the
+maximum out-degree in O(n). It allocates row degrees and performs the O(nnz)
+scan only after a plausible bounded hub survives. This staging is important:
+the neighboring `FullChip` input exceeds the upper hub bound, and the external
+bounded-degree controls fall below the lower bound, so neither pays a second
+giant nonzero pass.
+
+The proposal directly measures normal AMD/BTF once. To be retained, that
+symbolic must have at least 1,048,576 rows, full structural rank, two through
+`n/1024+1` blocks, a proper largest block covering at least 1023/1024 of the
+order, and a fringe between `n/4096` and `n/512+8`. Estimated L+U must total
+32n--64n with 2x balance, and estimated work must be 512n--4096n. Failure frees
+the trial symbolic and its candidate state, disables direct selection for that
+candidate, and runs the complete ordinary AUTO tournament. Input topology can
+therefore suggest the old fast route but cannot commit it.
+
+The installed factor independently must preserve that symbolic pointer,
+normal AMD/BTF representation, max-row scaling and scaling vector, caller
+threshold, full numerical rank, and lack of a row permutation. It bounds
+off-diagonal pivots by `n/4096+16`, rejects every nudge or perturbation,
+requires measured L+U of
+8n--24n with 2x balance, and requires 64n--512n measured operations. Its
+tri-state verdict is recomputed whenever a numeric is installed. Only an
+accepted numeric suppresses auto-scale and deferred-METIS promotion,
+predicted-first factorization, and diagonal-equivalent setup and preserves the
+row scale across changed-value EGraph execution. Thus every recurring shortcut
+is attached to the representation that supplied its evidence.
+
+Three public stats and both analyze/full benchmark JSON records expose input,
+symbolic, and numeric acceptance. The generic control is
+`KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY=1`;
+`KLS_DISABLE_CIRCUIT5M_H100_POLICY` remains only as a compatibility alias for
+existing same-binary scripts. The old matrix predicate and its exact order and
+entry-count constants are absent from solver, header, benchmark, and smoke
+sources.
+
+The independent smoke graph has a reciprocal nine-point circulant core, one
+quarter-order reciprocal hub, one unmatched directed edge, and disconnected
+reciprocal fringe pairs. Generated orders 131,072 and 135,168 both pass the
+input proposal. Equivalent CSR (the transposed graph) and deliberately
+unsorted CSC also pass. Adding the missing reciprocal edge rejects the exact-
+symmetric control, enlarging the hub beyond `n/2` rejects another, and joining
+the fringe into the core passes topology but fails the required symbolic
+geometry and completes ordinary AUTO fallback. Both disable variables reject.
+The fixtures are deliberately below the million-row symbolic floor, which
+keeps smoke bounded and directly tests fallback; they are not counted as a
+second full-lifecycle positive.
+
+Two explicit manifests separate tuning from controls. The development family
+contains `circuit5M`, `FullChip`, `Freescale2`, and `circuit5M_dc`. The
+cross-family holdout contains `kkt_power`, `CurlCurl_3`, `StocF-1465`,
+`Transport`, and `wikipedia-20051105`, selected from giant matrices near the
+density band but spanning exact symmetry, missing diagonals, bounded degree,
+fragmentation, and directed-web structure. Every external control reports
+`0/0/0`. The final early-rejection check on `FullChip` preserves the parent's
+normal METIS/no-BTF symbolic and measures 7.0659 seconds versus 7.1067 seconds
+for the frozen parent, rather than the roughly 0.7-second classifier regression
+seen before the column-only rejection stage.
+
+The real positive holdout appends 512 generated coupled nodes, producing
+5,558,838 rows and 59,525,827 entries outside the old identity. It reports
+`1/1/1`, with 1,114 BTF blocks and a 5,556,264-row dominant core. Frozen-parent
+and generalized runs use identical 33,760,986/33,760,248 L/U counts. Under two
+factors and three checked changed-value refactors, the parent measures a
+53.5906-second modeled cycle and the generalized policy measures 42.0136
+seconds (`0.7840x`); worst relative-L2 residual is `1.2598e-14`.
+
+Two pinned alternating pairs on the original target retain identical factors
+and approximately `1.26e-14` residuals. The geometric analysis ratio is about
+`1.0024`, while the complete modeled-cycle ratio is about `1.030`; the latter
+is dominated by cold-factor and first-refactor dispersion rather than a
+changed recurring route. This evidence supports removal of the exact
+coordinate while preserving the benchmark behavior. The remaining limitation
+is explicit: the only million-row factor-positive outside the original
+coordinate is a coupled metamorphic extension of the same family. The five
+cross-family matrices are rejection controls, not independent positives, so a
+future naturally occurring positive should widen or recalibrate the capability
+only from its measured symbolic/numeric stages rather than by adding another
+identity exception.

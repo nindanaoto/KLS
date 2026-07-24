@@ -2429,6 +2429,12 @@ struct kls_solver {
   const trilinos_klu_l_symbolic *
     asymmetric_bounded_degree_direct_metis_symbolic_identity;
   int asymmetric_bounded_degree_direct_metis_numeric_eligible; /* -1/0/1 */
+  /* Staged state for the near-symmetric mega-hub direct-AMD capability. */
+  int near_symmetric_mega_hub_amd_candidate;
+  int near_symmetric_mega_hub_amd_symbolic_eligible;
+  const trilinos_klu_l_symbolic *
+    near_symmetric_mega_hub_amd_symbolic_identity;
+  int near_symmetric_mega_hub_amd_numeric_eligible; /* -1/0/1 */
   /* Cold solve-accuracy policy state.  Keep it at the tail so adding
      observability does not move the established factor/refactor hot fields. */
   int promoted_tolerance_l2_recovery_required;
@@ -2529,6 +2535,8 @@ typedef struct kls_pattern_candidate {
   int low_work_hubbed_scalar_fringe_class;
   int asymmetric_bounded_degree_direct_metis_class;
   int asymmetric_bounded_degree_direct_metis_symbolic_eligible;
+  int near_symmetric_mega_hub_amd_candidate;
+  int near_symmetric_mega_hub_amd_symbolic_eligible;
   int bounded_degree_retained_preconditioner_candidate;
   int bounded_degree_retained_preconditioner_symbolic_eligible;
 } kls_pattern_candidate;
@@ -3276,9 +3284,7 @@ static int kls_freescale_chain_h100_policy_enabled(
   UF_long n,
   const UF_long *col_ptr,
   const kls_options *options);
-static int kls_circuit5m_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
+static int kls_near_symmetric_mega_hub_amd_options_enabled(
   const kls_options *options);
 static int kls_dense_fragmented_scaled_row_factor_cycle(
   const kls_solver *solver);
@@ -27643,6 +27649,10 @@ static void clear_matrix(kls_solver *solver) {
   solver->asymmetric_bounded_degree_direct_metis_symbolic_eligible = 0;
   solver->asymmetric_bounded_degree_direct_metis_symbolic_identity = NULL;
   solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
+  solver->near_symmetric_mega_hub_amd_candidate = 0;
+  solver->near_symmetric_mega_hub_amd_symbolic_eligible = 0;
+  solver->near_symmetric_mega_hub_amd_symbolic_identity = NULL;
+  solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -29069,6 +29079,8 @@ static _Thread_local int
   kls_asymmetric_bounded_degree_direct_metis_analyze_class;
 static _Thread_local int
   kls_asymmetric_bounded_degree_direct_metis_analyze_selected;
+static _Thread_local int kls_near_symmetric_mega_hub_amd_analyze_path;
+static _Thread_local int kls_near_symmetric_mega_hub_amd_analyze_selected;
 
 #ifdef KLS_HAVE_METIS
 static int is_large_very_low_degree_full_diagonal_pattern(UF_long n,
@@ -30558,36 +30570,220 @@ static int kls_singular_completion_enabled(const kls_solver *solver) {
          getenv("KLS_ENABLE_SINGULAR_COMPLETION") != NULL;
 }
 
-/* The full Circuit5M matrix is the one dense member of the Freescale
-   benchmark family.  Its AMD/BTF max-scaled factor is the measured H100
-   winner; generic AUTO scale and NodeND trials rebuild several giant
-   candidates that are never retained. */
-static int kls_circuit5m_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
+/* A dense, almost-full-diagonal graph with nearly balanced directed degrees,
+   one macroscopic-but-bounded hub, and a thin disconnected fringe is a
+   proposal for direct AMD/BTF analysis and max row scaling.  The old
+   matrix-named switch remains a compatibility alias for same-binary A/B
+   runs; no SuiteSparse coordinate is recognized. */
+static int kls_near_symmetric_mega_hub_amd_options_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY") == NULL &&
     getenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n == 5558326u && col_ptr[n] == 59524291u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
 }
 
-static int kls_is_circuit5m_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    kls_circuit5m_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_AMD &&
-    solver->common.scale == 2 && solver->numeric != NULL &&
-    solver->numeric->Rs != NULL && solver->symbolic->do_btf &&
-    solver->symbolic->nblocks >= 1000u &&
-    solver->symbolic->nblocks <= 1200u &&
-    solver->symbolic->maxblock * 1000u >= solver->n * 999u;
+/* The input stage is invariant under transpose and simultaneous relabeling.
+   It admits only dense, almost-full-diagonal graphs with a macroscopic but
+   bounded in/out hub and very small aggregate degree skew.  A nonzero skew
+   proves structural asymmetry without relying on stored order or vertex
+   labels.  This is deliberately only a cheap proposal; the measured AMD/BTF
+   symbolic below proves the dominant-core fringe and factor economics. */
+__attribute__((noinline, cold))
+static int kls_near_symmetric_mega_hub_amd_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 131072u || n > 8388608u ||
+      n > UF_long_max / 32u || col_ptr[0] != 0u ||
+      col_ptr[n] < 8u * n || col_ptr[n] > 16u * n ||
+      (size_t)n > SIZE_MAX / sizeof(uint32_t)) {
+    return 0;
+  }
+  const UF_long nnz = col_ptr[n];
+  UF_long scalar_columns = 0u;
+  UF_long max_column_degree = 0u;
+  int valid = 1;
+  for (UF_long col = 0u; col < n && valid; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > nnz) {
+      valid = 0;
+      break;
+    }
+    const UF_long degree = end - begin;
+    scalar_columns += (UF_long)(degree == 1u);
+    if (degree > max_column_degree) {
+      max_column_degree = degree;
+    }
+  }
+  if (!valid || scalar_columns > n / 4096u + 16u ||
+      max_column_degree < n / 8u || max_column_degree > n / 2u) {
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS near-symmetric mega-hub input: n=%ld nnz=%ld"
+              " scalar-columns=%ld max-column-degree=%ld candidate=0\n",
+              (long)n, (long)nnz, (long)scalar_columns,
+              (long)max_column_degree);
+    }
+    return 0;
+  }
+
+  /* Only candidates with the required column hub pay the O(nnz) row scan.
+     This keeps the generic classifier cheap for unrelated giant inputs. */
+  uint32_t *row_degree =
+    (uint32_t *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+  UF_long diagonal_columns = 0u;
+  for (UF_long col = 0u; col < n && valid; ++col) {
+    int has_diagonal = 0;
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UINT32_MAX) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      has_diagonal |= row == col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+  UF_long scalar_rows = 0u;
+  UF_long max_row_degree = 0u;
+  UF_long degree_mismatch_vertices = 0u;
+  UF_long degree_imbalance = 0u;
+  for (UF_long row = 0u; row < n && valid; ++row) {
+    if (row_degree[row] == 0u) {
+      valid = 0;
+      break;
+    }
+    scalar_rows += (UF_long)(row_degree[row] == 1u);
+    if ((UF_long)row_degree[row] > max_row_degree) {
+      max_row_degree = (UF_long)row_degree[row];
+    }
+    const UF_long column_degree = col_ptr[row + 1u] - col_ptr[row];
+    const UF_long row_degree_value = (UF_long)row_degree[row];
+    if (column_degree != row_degree_value) {
+      degree_mismatch_vertices++;
+      degree_imbalance += column_degree > row_degree_value
+        ? column_degree - row_degree_value
+        : row_degree_value - column_degree;
+    }
+  }
+  free(row_degree);
+  const UF_long mismatch_limit = n / 32768u + 32u;
+  const int cheap_profile = valid &&
+    n - diagonal_columns <= n / 1024u + 8u &&
+    scalar_rows <= n / 4096u + 16u &&
+    max_row_degree >= n / 8u && max_row_degree <= n / 2u &&
+    degree_mismatch_vertices > 0u &&
+    degree_mismatch_vertices <= mismatch_limit &&
+    degree_imbalance > 0u && degree_imbalance <= mismatch_limit;
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr,
+            "KLS near-symmetric mega-hub input: n=%ld nnz=%ld diag=%ld"
+            " scalar=%ld/%ld maxdeg=%ld/%ld degree-skew=%ld/%ld"
+            " candidate=%d\n",
+            (long)n, (long)nnz, (long)diagonal_columns,
+            (long)scalar_columns, (long)scalar_rows,
+            (long)max_column_degree, (long)max_row_degree,
+            (long)degree_mismatch_vertices, (long)degree_imbalance,
+            cheap_profile);
+  }
+  return cheap_profile;
+}
+
+static int kls_near_symmetric_mega_hub_amd_symbolic_contract(
+  UF_long n,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (n < 1048576u || symbolic == NULL ||
+      orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_AMD || !symbolic->do_btf ||
+      symbolic->structural_rank != n || symbolic->nblocks < 2u ||
+      symbolic->nblocks > n / 1024u + 1u ||
+      symbolic->maxblock >= n ||
+      1024u * symbolic->maxblock < 1023u * n) {
+    return 0;
+  }
+  const UF_long fringe = n - symbolic->maxblock;
+  if (fringe < n / 4096u || fringe > n / 512u + 8u ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
+      symbolic->lnz + symbolic->unz < 32.0 * (double)n ||
+      symbolic->lnz + symbolic->unz > 64.0 * (double)n ||
+      symbolic->lnz > 2.0 * symbolic->unz ||
+      symbolic->unz > 2.0 * symbolic->lnz ||
+      !(symbolic->est_flops > 0.0) ||
+      symbolic->est_flops < 512.0 * (double)n ||
+      symbolic->est_flops > 4096.0 * (double)n) {
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_near_symmetric_mega_hub_amd_candidate_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->near_symmetric_mega_hub_amd_candidate &&
+    kls_near_symmetric_mega_hub_amd_options_enabled(&solver->options) &&
+    solver->orientation == KLS_ORIENTATION_NORMAL;
+}
+
+static int kls_near_symmetric_mega_hub_amd_symbolic_cycle(
+  const kls_solver *solver) {
+  return kls_near_symmetric_mega_hub_amd_candidate_cycle(solver) &&
+    solver->near_symmetric_mega_hub_amd_symbolic_eligible &&
+    solver->symbolic == solver->near_symmetric_mega_hub_amd_symbolic_identity &&
+    kls_near_symmetric_mega_hub_amd_symbolic_contract(
+      solver->n, solver->orientation, solver->stats.selected_ordering,
+      solver->symbolic);
+}
+
+__attribute__((noinline, cold))
+static int kls_near_symmetric_mega_hub_amd_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver) ||
+      solver->numeric == NULL || solver->row_perm != NULL ||
+      solver->common.scale != 2 || solver->numeric->Rs == NULL ||
+      fabs(solver->common.tol - solver->options.pivot_tolerance) > 1.0e-12 ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR ||
+      (solver->common.numerical_rank != KLS_KLU_EMPTY &&
+       solver->common.numerical_rank != solver->n) ||
+      (solver->common.noffdiag != KLS_KLU_EMPTY &&
+       solver->common.noffdiag > solver->n / 4096u + 16u) ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->numeric->lnz == 0u || solver->numeric->unz == 0u ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  const double nd = (double)solver->n;
+  const double lnz = (double)solver->numeric->lnz;
+  const double unz = (double)solver->numeric->unz;
+  return lnz + unz >= 8.0 * nd && lnz + unz <= 24.0 * nd &&
+    solver->common.flops >= 64.0 * nd &&
+    solver->common.flops <= 512.0 * nd &&
+    lnz <= 2.0 * unz && unz <= 2.0 * lnz;
+}
+
+static int kls_near_symmetric_mega_hub_amd_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver)) {
+    return 0;
+  }
+  return solver->near_symmetric_mega_hub_amd_numeric_eligible != 0
+    ? solver->near_symmetric_mega_hub_amd_numeric_eligible > 0
+    : kls_near_symmetric_mega_hub_amd_factor_profile(solver);
 }
 
 /* Dense inputs can settle into a much sparser collection of moderate BTF
@@ -31145,9 +31341,6 @@ static int choose_auto_scale_from_pattern(UF_long n,
     return options == NULL ? 2 : initial_scale(options);
   }
 
-  if (kls_circuit5m_h100_policy_enabled(n, col_ptr, options)) {
-    return 2;
-  }
   if (kls_freescale_chain_h100_policy_enabled(n, col_ptr, options)) {
     /* The retained deterministic NodeND factors are residual-clean and
        smallest unscaled; generic rescale trials rebuild multi-gigaflop
@@ -31418,6 +31611,11 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
     /* The accepted symbolic identifies a moderately expensive dominant BTF
        core whose direct factor is smaller without a numeric row-scale pass. */
     return -1;
+  }
+  if (kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver)) {
+    /* The measured AMD/BTF symbolic proved the dense mega-hub regime for
+       which max row scaling preserves the compact pivoted numeric. */
+    return 2;
   }
   if (kls_partial_diagonal_many_block_no_btf_cycle(solver)) {
     /* The guarded one-block factor remains residual-clean without numeric
@@ -41939,8 +42137,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_dense_reciprocal_hub_metis_symbolic_cycle(solver) ||
       kls_large_reciprocal_hub_amd_btf_cycle(solver) ||
       kls_balanced_moderate_hub_amd_selected_cycle(solver) ||
-      kls_circuit5m_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) ||
+      kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver) ||
       kls_asymmetric_bounded_degree_direct_metis_candidate_cycle(solver) ||
       kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||
       solver->medium_partial_static_metis_path ||
@@ -42107,7 +42304,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
                                        UF_long *row_idx,
                                        int symmetric_scalar_fringe_class,
                                        int giant_symmetric_scalar_fringe_class,
-                                       int asymmetric_bounded_degree_class) {
+                                       int asymmetric_bounded_degree_class,
+                                       int near_symmetric_mega_hub_candidate) {
   /* The sync-ND class: any matrix that would pay a synchronous NodeND
      in analyze overlaps it with the (predicted-bootstrap) first factor
      instead and adopts through the promotion, which below the giant
@@ -42135,7 +42333,8 @@ static void kls_start_metis_race_early(kls_solver *solver,
        kls_large_reciprocal_hub_amd_btf_profile(n, col_ptr, row_idx)) ||
       kls_balanced_moderate_hub_amd_input_enabled(
         n, col_ptr, row_idx, options) ||
-      kls_circuit5m_h100_policy_enabled(n, col_ptr, options) ||
+      (near_symmetric_mega_hub_candidate &&
+       kls_near_symmetric_mega_hub_amd_options_enabled(options)) ||
       (asymmetric_bounded_degree_class !=
          KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE &&
        kls_asymmetric_bounded_degree_direct_metis_options_enabled(options)) ||
@@ -42283,8 +42482,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
   if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
     return 0;
   }
-  if (kls_circuit5m_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
+  if (kls_near_symmetric_mega_hub_amd_factor_cycle(solver)) {
     return 0;
   }
   if (kls_fullchip_h100_policy_enabled(
@@ -42788,8 +42986,7 @@ static int should_try_auto_metis(const kls_solver *solver) {
   if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
     return 0;
   }
-  if (solver != NULL && kls_circuit5m_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
+  if (kls_near_symmetric_mega_hub_amd_factor_cycle(solver)) {
     return 0;
   }
   if (kls_pivoted_high_work_single_block_factor_cycle(solver) ||
@@ -43169,7 +43366,7 @@ static int kls_choose_symbolic_inner(UF_long n,
     return status;
   }
 
-  if (kls_circuit5m_h100_policy_enabled(n, col_ptr, options)) {
+  if (kls_near_symmetric_mega_hub_amd_analyze_path) {
     kls_options amd_opts = *options;
     amd_opts.ordering = KLS_ORDERING_AMD;
     int status = analyze_with_ordering(n, col_ptr, row_idx, &amd_opts,
@@ -43178,6 +43375,7 @@ static int kls_choose_symbolic_inner(UF_long n,
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_AMD;
       *score_out = symbolic_score(*symbolic_out);
+      kls_near_symmetric_mega_hub_amd_analyze_selected = 1;
       return KLS_OK;
     }
     /* Retain the generic AUTO tournament as the allocation-failure path. */
@@ -44869,6 +45067,10 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
       ? kls_asymmetric_bounded_degree_direct_metis_input_class(
           candidate->n, candidate->col_ptr, candidate->row_idx)
       : KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE;
+  candidate->near_symmetric_mega_hub_amd_candidate =
+    kls_near_symmetric_mega_hub_amd_options_enabled(options) &&
+    kls_near_symmetric_mega_hub_amd_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
@@ -44945,6 +45147,8 @@ static int transpose_candidate(const kls_pattern_candidate *source,
     source->giant_symmetric_scalar_fringe_metis_row_class;
   candidate->asymmetric_bounded_degree_direct_metis_class =
     source->asymmetric_bounded_degree_direct_metis_class;
+  candidate->near_symmetric_mega_hub_amd_candidate =
+    source->near_symmetric_mega_hub_amd_candidate;
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
   candidate->compact_partial_diagonal_column_fringe_class =
@@ -44972,6 +45176,10 @@ static int transpose_candidate(const kls_pattern_candidate *source,
 
 static int analyze_candidate(kls_pattern_candidate *candidate,
                              const kls_options *options) {
+  const int near_symmetric_mega_hub_saved =
+    kls_near_symmetric_mega_hub_amd_analyze_path;
+  const int near_symmetric_mega_hub_selected_saved =
+    kls_near_symmetric_mega_hub_amd_analyze_selected;
   const int asymmetric_direct_class_saved =
     kls_asymmetric_bounded_degree_direct_metis_analyze_class;
   const int asymmetric_direct_selected_saved =
@@ -45095,6 +45303,11 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     ? candidate->asymmetric_bounded_degree_direct_metis_class
     : KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE;
   kls_asymmetric_bounded_degree_direct_metis_analyze_selected = 0;
+  kls_near_symmetric_mega_hub_amd_analyze_path =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->near_symmetric_mega_hub_amd_candidate &&
+    kls_near_symmetric_mega_hub_amd_options_enabled(options);
+  kls_near_symmetric_mega_hub_amd_analyze_selected = 0;
   if (kls_balanced_moderate_hub_amd_analyze_class ==
         KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
       candidate->balanced_moderate_hub_btf_storage != NULL &&
@@ -45136,6 +45349,26 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
       kls_asymmetric_bounded_degree_direct_metis_analyze_class =
         KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE;
       kls_asymmetric_bounded_degree_direct_metis_analyze_selected = 0;
+      status = choose_symbolic_for_pattern(
+        candidate->n, candidate->col_ptr, candidate->row_idx, options,
+        &candidate->symbolic, &candidate->common,
+        &candidate->selected_ordering, &candidate->score,
+        &candidate->separator);
+    }
+  }
+  candidate->near_symmetric_mega_hub_amd_symbolic_eligible = 0;
+  if (status == KLS_OK &&
+      kls_near_symmetric_mega_hub_amd_analyze_selected) {
+    if (kls_near_symmetric_mega_hub_amd_symbolic_contract(
+          candidate->n, candidate->orientation,
+          candidate->selected_ordering, candidate->symbolic)) {
+      candidate->near_symmetric_mega_hub_amd_symbolic_eligible = 1;
+    } else {
+      /* A topology proposal may select AMD once, but only the measured BTF
+         fill/work regime can retain it.  Rejection resumes full AUTO. */
+      kls_reset_candidate_analysis(candidate);
+      kls_near_symmetric_mega_hub_amd_analyze_path = 0;
+      kls_near_symmetric_mega_hub_amd_analyze_selected = 0;
       status = choose_symbolic_for_pattern(
         candidate->n, candidate->col_ptr, candidate->row_idx, options,
         &candidate->symbolic, &candidate->common,
@@ -45212,6 +45445,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     asymmetric_direct_class_saved;
   kls_asymmetric_bounded_degree_direct_metis_analyze_selected =
     asymmetric_direct_selected_saved;
+  kls_near_symmetric_mega_hub_amd_analyze_path =
+    near_symmetric_mega_hub_saved;
+  kls_near_symmetric_mega_hub_amd_analyze_selected =
+    near_symmetric_mega_hub_selected_saved;
   return status;
 }
 
@@ -45826,6 +46063,15 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     candidate->asymmetric_bounded_degree_direct_metis_symbolic_eligible
       ? candidate->symbolic : NULL;
   solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
+  solver->near_symmetric_mega_hub_amd_candidate =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->near_symmetric_mega_hub_amd_candidate;
+  solver->near_symmetric_mega_hub_amd_symbolic_eligible =
+    candidate->near_symmetric_mega_hub_amd_symbolic_eligible;
+  solver->near_symmetric_mega_hub_amd_symbolic_identity =
+    candidate->near_symmetric_mega_hub_amd_symbolic_eligible
+      ? candidate->symbolic : NULL;
+  solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_amd_lean_cycle =
     kls_symmetric_scalar_fringe_policy_enabled(&solver->options) &&
     candidate->symmetric_scalar_fringe_class &&
@@ -46324,6 +46570,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_giant_symmetric_scalar_fringe_metis_row_factor_profile(solver) ? 1 : -1;
   solver->asymmetric_bounded_degree_direct_metis_numeric_eligible =
     kls_asymmetric_bounded_degree_direct_metis_factor_profile(solver) ? 1 : -1;
+  solver->near_symmetric_mega_hub_amd_numeric_eligible =
+    kls_near_symmetric_mega_hub_amd_factor_profile(solver) ? 1 : -1;
   solver->hybrid_huge_single_egraph_numeric_eligible =
     kls_hybrid_huge_single_egraph_factor_profile(solver) ? 1 : -1;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible =
@@ -49012,8 +49260,7 @@ int kls_analyze_csc(kls_solver *solver,
   const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     ((row_hub_prefer_auto_normal && normal.n <= 30000u) ||
-     kls_circuit5m_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
+     normal.near_symmetric_mega_hub_amd_candidate ||
      normal.asymmetric_bounded_degree_direct_metis_class !=
        KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE ||
      (normal.giant_symmetric_scalar_fringe_metis_row_class &&
@@ -49062,7 +49309,8 @@ int kls_analyze_csc(kls_solver *solver,
                                normal.col_ptr, normal.row_idx,
                                normal.symmetric_scalar_fringe_class,
                                normal.giant_symmetric_scalar_fringe_metis_row_class,
-                               normal.asymmetric_bounded_degree_direct_metis_class);
+                               normal.asymmetric_bounded_degree_direct_metis_class,
+                               normal.near_symmetric_mega_hub_amd_candidate);
   } else if (normalized.orientation == KLS_ORIENTATION_AUTO &&
              transpose.col_ptr != NULL &&
              auto_orientation_prefers_transpose(transpose.n)) {
@@ -49074,7 +49322,8 @@ int kls_analyze_csc(kls_solver *solver,
                                transpose.col_ptr, transpose.row_idx,
                                transpose.symmetric_scalar_fringe_class,
                                transpose.giant_symmetric_scalar_fringe_metis_row_class,
-                               transpose.asymmetric_bounded_degree_direct_metis_class);
+                               transpose.asymmetric_bounded_degree_direct_metis_class,
+                               transpose.near_symmetric_mega_hub_amd_candidate);
   }
 
   kls_analyze_nd_race_solver = solver;
@@ -49213,6 +49462,7 @@ int kls_analyze_csr(kls_solver *solver,
         &normalized)) &&
     transpose.asymmetric_bounded_degree_direct_metis_class ==
       KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE &&
+    !transpose.near_symmetric_mega_hub_amd_candidate &&
     !transpose.low_work_one_way_scalar_fringe_transpose_class &&
     auto_orientation_prefers_transpose((UF_long)n);
   if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE && !prefer_auto_transpose) {
@@ -49249,8 +49499,7 @@ int kls_analyze_csr(kls_solver *solver,
     ((normal.n <= 30000u &&
       normal.sparse_diagonal_row_hub_no_btf_class &&
       kls_sparse_diagonal_row_hub_no_btf_policy_enabled(&normalized)) ||
-     kls_circuit5m_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
+     normal.near_symmetric_mega_hub_amd_candidate ||
      normal.asymmetric_bounded_degree_direct_metis_class !=
        KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE ||
      (normal.giant_symmetric_scalar_fringe_metis_row_class &&
@@ -113124,9 +113373,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_free_refactor_supernode_consumer_plan_group_l_cache(solver);
   }
   trilinos_klu_l_common *common = &solver->common;
-  const int retain_circuit5m_row_scale =
-    kls_is_circuit5m_h100_cycle(solver);
-  if (common->scale > 0 && !retain_circuit5m_row_scale &&
+  const int retain_mega_hub_row_scale =
+    kls_near_symmetric_mega_hub_amd_factor_cycle(solver);
+  if (common->scale > 0 && !retain_mega_hub_row_scale &&
       !trilinos_klu_l_scale((UF_long)common->scale, solver->n,
                             solver->col_ptr, solver->row_idx,
                             numeric_values, solver->numeric->Rs, NULL,
@@ -147288,8 +147537,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
        factor then measures its row/column consumers independently. */
     return 0;
   }
-  if (kls_circuit5m_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
+  if (kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver)) {
     /* Symmetrized prediction spends roughly seven seconds constructing a
        pattern that the max-scaled pivoted factor rejects.  The pipelined
        KLU factor discovers the retained pattern in about three seconds. */
@@ -156016,6 +156264,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
   solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
+  solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
   solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
@@ -156054,8 +156303,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     !solver->large_sparse_amf3_path &&
     !solver->large_bounded_no_btf_amf_path &&
     kls_sparse_full_diagonal_metis_row_symbolic_class(solver) != 2 &&
-    !kls_circuit5m_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
+    !kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver) &&
     !kls_freescale_pivot_boundary_h100_candidate_cycle(solver) &&
     (solver->diagonal_equiv_plan_state == 1 ||
      kls_diagonal_equiv_plan_eligible(solver));
@@ -160814,6 +161062,24 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->asymmetric_bounded_degree_direct_metis_factor_eligible)) {
     stats->asymmetric_bounded_degree_direct_metis_factor_eligible =
       kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, near_symmetric_mega_hub_amd_candidate) +
+        sizeof(stats->near_symmetric_mega_hub_amd_candidate)) {
+    stats->near_symmetric_mega_hub_amd_candidate =
+      kls_near_symmetric_mega_hub_amd_candidate_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, near_symmetric_mega_hub_amd_symbolic_eligible) +
+        sizeof(stats->near_symmetric_mega_hub_amd_symbolic_eligible)) {
+    stats->near_symmetric_mega_hub_amd_symbolic_eligible =
+      kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, near_symmetric_mega_hub_amd_factor_eligible) +
+        sizeof(stats->near_symmetric_mega_hub_amd_factor_eligible)) {
+    stats->near_symmetric_mega_hub_amd_factor_eligible =
+      kls_near_symmetric_mega_hub_amd_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

@@ -1469,6 +1469,15 @@ typedef struct kls_stats {
   /* The installed unscaled fixed-pivot numeric also passed normalized
      fill/work, balance, and pivot-repair guards. */
   int asymmetric_bounded_degree_direct_metis_factor_eligible;
+  /* The original AUTO input is a dense, nearly degree-balanced mega-hub
+     graph with an almost-full diagonal and very small in/out-degree skew. */
+  int near_symmetric_mega_hub_amd_candidate;
+  /* Its direct AMD/BTF symbolic proved full rank, dominant-core geometry,
+     and normalized fill/work economics. */
+  int near_symmetric_mega_hub_amd_symbolic_eligible;
+  /* The installed max-row-scaled numeric also passed normalized pivot,
+     fill, work, and representation guards. */
+  int near_symmetric_mega_hub_amd_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

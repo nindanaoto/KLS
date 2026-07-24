@@ -1,0 +1,8 @@
+# Development family for the staged near-symmetric mega-hub AMD policy.
+# circuit5M is the motivating positive; its closest structural neighbors are
+# deliberate negatives for hub magnitude and SCC-fringe density.
+
+circuit5M
+FullChip
+Freescale2
+circuit5M_dc
