@@ -79,6 +79,15 @@ def adjacent_permutation(order: int, swaps: int, seed: int) -> list[int]:
     return old_to_new
 
 
+def shuffled_permutation(order: int, seed: int) -> list[int]:
+    permutation = list(range(order))
+    random.Random(seed).shuffle(permutation)
+    old_to_new = [0] * order
+    for new, old in enumerate(permutation):
+        old_to_new[old] = new
+    return old_to_new
+
+
 def permute_entries(
     entries: list[tuple[int, int, tuple[str, ...]]],
     old_to_new: list[int],
@@ -102,7 +111,7 @@ def write_coordinate_matrix(
     symmetry: str,
     order: int,
     entries: list[tuple[int, int, tuple[str, ...]]],
-    swaps: int,
+    transformation: str,
     seed: int,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +120,7 @@ def write_coordinate_matrix(
             f"%%MatrixMarket matrix coordinate {value_kind} {symmetry}\n"
         )
         output.write(
-            f"% metamorphic simultaneous permutation: adjacent_swaps={swaps} seed={seed}\n"
+            f"% metamorphic simultaneous permutation: {transformation} seed={seed}\n"
         )
         for comment in comments:
             output.write(f"{comment}\n")
@@ -125,7 +134,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=pathlib.Path)
     parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--adjacent-swaps", type=int, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--adjacent-swaps", type=int)
+    mode.add_argument(
+        "--shuffle",
+        action="store_true",
+        help="apply a complete deterministic random relabeling",
+    )
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     if args.input.resolve() == args.output.resolve():
@@ -134,9 +149,14 @@ def main() -> int:
         comments, value_kind, symmetry, order, entries = read_coordinate_matrix(
             args.input
         )
-        permutation = adjacent_permutation(
-            order, args.adjacent_swaps, args.seed
-        )
+        if args.shuffle:
+            permutation = shuffled_permutation(order, args.seed)
+            transformation = "shuffle"
+        else:
+            permutation = adjacent_permutation(
+                order, args.adjacent_swaps, args.seed
+            )
+            transformation = f"adjacent_swaps={args.adjacent_swaps}"
         transformed = permute_entries(entries, permutation, symmetry)
         write_coordinate_matrix(
             args.output,
@@ -145,7 +165,7 @@ def main() -> int:
             symmetry,
             order,
             transformed,
-            args.adjacent_swaps,
+            transformation,
             args.seed,
         )
     except (OSError, ValueError) as error:

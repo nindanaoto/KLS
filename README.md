@@ -1724,6 +1724,21 @@ exposes `compact_amf_two_block_policy_eligible`. Set
 without its specialized worker; the former `KLS_*TSOPF_B9*` controls remain
 diagnostic aliases.
 
+A dense reciprocal-hub METIS policy replaces the former dense-ASIC size
+window. Normal AUTO input with at least 65,536 rows only proposes the route
+when it has 8--12 entries per row, at least a 99.5% structural diagonal, and a
+vertex covering at least seven eighths of the graph in both row and column
+directions. The actual NodeNDP symbolic must then be full-rank, have both its
+BTF fringe and block count between `n/512` and `n/64`, and expose a complete
+separator forest with useful private and pipeline components. Rejection
+resumes ordinary AUTO orientation and ordering selection. Recurring kernel
+defaults additionally require the measured unscaled factor to have no
+off-diagonal pivots or numeric `Rs`, 24--48 factor entries per row, and
+4,096--8,192 factor flops per row. Benchmark JSON exposes
+`dense_reciprocal_hub_policy_eligible`; set
+`KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY=1` for an A/B fallback. The
+former `KLS_DISABLE_ASIC100K_DENSE_H100_POLICY` switch remains an alias.
+
 The metamorphic holdout utility can produce deterministic simultaneous
 row/column relabelings without checking generated matrices into the tree. For
 example, the compact positive used by the policy audit is reproduced with:
@@ -1734,6 +1749,10 @@ python3 scripts/make_metamorphic_matrix.py \
   /tmp/TSOPF_FS_b9_c1_local_holdout.mtx \
   --adjacent-swaps 100 --seed 211
 ```
+
+Use `--shuffle --seed N` instead of `--adjacent-swaps` for a complete
+deterministic random relabeling. This is useful for detecting classifiers or
+separator policies that accidentally depend on the original vertex numbers.
 
 For the corresponding AUTO analysis problem, a 40--60% structural diagonal
 and three-to-five input entries per row only propose a direct AMD/BTF

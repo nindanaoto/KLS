@@ -1337,6 +1337,9 @@ typedef struct kls_stats {
      and all recurring accuracy checks; individual packed kernels still
      validate their derived representations before dispatch. */
   int compact_amf_two_block_policy_eligible;
+  /* The retained NodeNDP numeric passed the reciprocal-hub proposal,
+     symbolic BTF/separator acceptance, and normalized factor work limits. */
+  int dense_reciprocal_hub_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

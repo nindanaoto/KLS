@@ -17844,3 +17844,74 @@ systems the worst per-generation relative-L2 residual was `5.997e-9`, below
 the `1e-8` contract.  Release CTest and ASan/LSan CTest pass all three tests;
 sanitized 100-generation runs also exercised the original positive, the
 metamorphic positive, and the measured-numeric rejection path.
+
+DENSE RECIPROCAL-HUB METIS POLICY GENERALIZED (2026-07-24).  The dense
+`ASIC_100k` H100 bundle was proposed by an AUTO/8-thread input box of
+99,000--99,500 rows and 900,000--960,000 entries, then confirmed with exact
+399-ish BTF and 98.8K-core bounds.  Twenty-six recurring decisions reused that
+identity for scaling/race suppression, native NodeNDP retention, EGraph
+variants, worker spin, compact metadata, PTS construction and scatter, solve
+preparation, and adaptive-probe settlement.  The neighboring sparse operating
+point has the same order and core, illustrating why a slightly wider size box
+would still describe benchmark membership rather than the execution regime.
+
+The replacement is a three-stage admission.  The input proposal requires at
+least 65,536 rows, 8--12 entries per row, at least 99.5% structural-diagonal
+coverage, and one reciprocal mega-hub whose row and column each cover at least
+seven eighths of the order.  The proposal runs the retained native NodeNDP
+candidate, but accepts it only with full structural rank; BTF block count and
+outside-core fringe each between `n/512` and `n/64`; and a separator analysis
+covering every row with at least one worker team's worth of both private and
+pipeline components.  Private rows must cover at least 15/16 of the order,
+the largest private component is bounded by `n/3`, and the largest pipeline
+component by `n/64`.  A rejected candidate is freed and ordinary AUTO
+orientation/ordering selection resumes.  Thus the proposal cannot force the
+route merely from input topology.
+
+Pre-numeric scale and ordering-race decisions use the persisted accepted
+symbolic state.  Recurring kernels require an actual unscaled numeric with no
+`Rs` array or off-diagonal pivots, 24--48 retained factor entries per row,
+4,096--8,192 factor flops per row, and balanced L/U stream sizes.  This late
+gate is observable as `dense_reciprocal_hub_policy_eligible` in `kls_stats`
+and benchmark JSON.  The generic master switch is
+`KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY`; generic component switches
+cover CAMD refinement, PTS run scatter, compact permutations/stream metadata,
+and low consume floors.  The old `KLS_*ASIC100K*` switches remain diagnostic
+aliases without participating in classification.
+
+The generic boundary produces positives outside the former box.  Appending
+256, 512, or 1,024 independent diagonal blocks changes the order to
+99,596--100,364 and raises the BTF block count to 655--1,423; all three pass
+the normalized core/fringe and factor checks.  Appending 2,048 or 4,096 blocks
+pushes the fringe beyond `n/64`, rejects the proposal, and cleanly returns to
+the ordinary refined-METIS factor.  A complete random simultaneous row/column
+shuffle (`--shuffle --seed 704`) also passes, with 1.630M entries per
+triangular stream and 581.0M factor flops, showing that vertex numbering is not
+part of admission.  The metamorphic utility now supports that full-shuffle
+mode in addition to local adjacent swaps.
+
+A structural scan of all 110 local SuiteSparse matrices found six in the
+coarse order/density band; only the motivating topology reached the proposal.
+The other five (`pre2`, `twotone`, `FullChip`, `circuit5M`, and `rajat30`)
+failed diagonal or reciprocal-hub checks.  Fresh independent matrices from the
+deterministic development and holdout partitions add two targeted negatives:
+the 100,000-row, 814,436-entry `uni_chimera_i4` occupies the same moderate
+density stratum but selects ordinary AMF, while the 112,211-row `Baumann`
+selects ordinary AMD.  `ASIC_100ks`, both 320K Sandia variants, and `twotone`
+also factor with public eligibility zero.
+
+After correcting an initially late block-order suppression gate, eight
+interleaved original H100 pairs put generic/parent at `0.9951` by paired
+geometric mean (`0.9954` median ratio).  Analysis improved to `0.9153x`,
+initial factor was `1.0016x`, and residuals were identical.  On the new
+512-block positive, six pairs put generic/parent at `0.6493`: median modeled
+cycle fell from 2.1602s to 1.3949s, refactor to `0.6538x`, and solve to
+`0.5395x`.  The old binary could not enter that path because its order was
+outside the exact box.  The original, 512-block extension, and full shuffle
+each completed 100 independently verified entrywise generations at amplitudes
+0.001, 0.01, and 0.1; the worst relative-L2 residual across all 900 changed
+systems was `4.20e-15`.
+Release and ASan/UBSan CTest pass all three tests.  Leak-enabled sanitized
+runs also exercised the original positive, the 512-block out-of-box positive,
+and the nearby sparse rejection under independently verified 0.1-amplitude
+entrywise updates.

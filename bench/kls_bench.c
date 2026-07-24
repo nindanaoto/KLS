@@ -2123,7 +2123,8 @@ int main(int argc, char **argv) {
            ",\"compact_solve_index_bytes\":%d"
            ",\"compact_solve_fused_rhs\":%d"
            ",\"moderate_fragmented_policy_eligible\":%d"
-           ",\"compact_amf_two_block_policy_eligible\":%d",
+           ",\"compact_amf_two_block_policy_eligible\":%d"
+           ",\"dense_reciprocal_hub_policy_eligible\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2350,7 +2351,8 @@ int main(int argc, char **argv) {
            stats.compact_solve_index_bytes,
            stats.compact_solve_fused_rhs,
            stats.moderate_fragmented_policy_eligible,
-           stats.compact_amf_two_block_policy_eligible);
+           stats.compact_amf_two_block_policy_eligible,
+           stats.dense_reciprocal_hub_policy_eligible);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64

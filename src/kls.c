@@ -2392,6 +2392,7 @@ struct kls_solver {
      alignment of hot refactor and solve fields above. */
   int balanced_moderate_hub_amd_cycle; /* guarded AMD/BTF or AMD/no-BTF */
   int sparse_partial_diagonal_amd_btf_cycle; /* symbolic-guarded direct AMD */
+  int dense_reciprocal_hub_metis_cycle; /* guarded retained NodeNDP order */
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -2470,6 +2471,8 @@ typedef struct kls_pattern_candidate {
   UF_long balanced_moderate_hub_btf_nblocks;
   int sparse_partial_diagonal_amd_btf_class;
   int sparse_partial_diagonal_amd_btf_selected;
+  int dense_reciprocal_hub_metis_class;
+  int dense_reciprocal_hub_metis_selected;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -27479,6 +27482,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->large_reciprocal_hub_amd_btf_cycle = 0;
   solver->balanced_moderate_hub_amd_cycle = 0;
   solver->sparse_partial_diagonal_amd_btf_cycle = 0;
+  solver->dense_reciprocal_hub_metis_cycle = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -28225,6 +28229,81 @@ static int kls_large_reciprocal_hub_amd_btf_profile(
   return 0;
 }
 
+/* A reciprocal mega-hub can also occur just below a full structural
+   diagonal.  In the denser regime, that small diagonal defect produces a
+   fragmented BTF around a nearly spanning core, and retaining NodeNDP's
+   separator order is faster over repeated factors than refining it solely
+   for minimum fill.  This input predicate only proposes that route: the
+   actual rank, BTF coverage, and separator geometry are checked after the
+   candidate analyze.  All bounds are ratios so simultaneous relabelings and
+   nearby matrix orders retain the same decision. */
+static int kls_dense_reciprocal_hub_metis_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 65536u ||
+      n > UF_long_max / 12u || col_ptr[n] < 8u * n ||
+      col_ptr[n] > 12u * n) {
+    return 0;
+  }
+
+  enum { MAX_HUB_CANDIDATES = 14 };
+  UF_long hub_candidates[MAX_HUB_CANDIDATES];
+  UF_long hub_row_degrees[MAX_HUB_CANDIDATES];
+  UF_long hub_candidate_count = 0u;
+  memset(hub_row_degrees, 0, sizeof(hub_row_degrees));
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > col_ptr[n]) {
+      return 0;
+    }
+    if (8u * (end - begin) >= 7u * n) {
+      if (hub_candidate_count >= MAX_HUB_CANDIDATES) {
+        return 0;
+      }
+      hub_candidates[hub_candidate_count++] = col;
+    }
+  }
+  if (hub_candidate_count == 0u) {
+    return 0;
+  }
+
+  UF_long diagonal_columns = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    int has_diagonal = 0;
+    unsigned int hub_rows_seen = 0u;
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n) {
+        return 0;
+      }
+      has_diagonal |= row == col;
+      for (UF_long candidate = 0u; candidate < hub_candidate_count;
+           ++candidate) {
+        hub_rows_seen |=
+          (unsigned int)(row == hub_candidates[candidate]) << candidate;
+      }
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+    for (UF_long candidate = 0u; candidate < hub_candidate_count;
+         ++candidate) {
+      hub_row_degrees[candidate] +=
+        (UF_long)((hub_rows_seen >> candidate) & 1u);
+    }
+  }
+  if (1000.0 * (double)diagonal_columns < 995.0 * (double)n) {
+    return 0;
+  }
+  for (UF_long candidate = 0u; candidate < hub_candidate_count;
+       ++candidate) {
+    if (8u * hub_row_degrees[candidate] >= 7u * n) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static int kls_large_reciprocal_hub_amd_btf_policy_enabled(
   const kls_options *options) {
   return options != NULL &&
@@ -28683,6 +28762,10 @@ static _Thread_local int
   kls_sparse_partial_diagonal_amd_btf_analyze_path;
 static _Thread_local int
   kls_sparse_partial_diagonal_amd_btf_selected;
+static _Thread_local int
+  kls_dense_reciprocal_hub_metis_analyze_path;
+static _Thread_local int
+  kls_dense_reciprocal_hub_metis_selected;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -29314,28 +29397,27 @@ static int kls_asic100ks_h100_policy_enabled(
     col_ptr[n] >= 570000u && col_ptr[n] <= 590000u;
 }
 
-/* Dense member of the fragmented 100K ASIC pair.  The sparse operating
-   point has about 5.8 entries/row, while this retained-H100 regime has about
-   9.5.  A 1536-window NodeND factor has substantially less repeated numeric
-   work than AMF1; full-precision EGraph updates and a wide-top PTS solve make
-   that smaller factor the complete-horizon winner.  Keep the policy on the
-   exact AUTO/8T contract so explicit ordering, scaling, backend, BTF, and
-   pivot choices retain their documented meaning. */
-static int kls_asic100k_dense_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
+/* Capability contract for the guarded dense reciprocal-hub route.  Explicit
+   orientation, ordering, scaling, backend, BTF, and pivot choices retain
+   their documented meaning.  The former matrix-specific switch remains a
+   diagnostic alias for existing benchmark scripts. */
+static int kls_dense_reciprocal_hub_metis_policy_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY") == NULL &&
     getenv("KLS_DISABLE_ASIC100K_DENSE_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 99000u && n <= 99500u &&
-    col_ptr[n] >= 900000u && col_ptr[n] <= 960000u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
 }
+
+static int kls_dense_reciprocal_hub_metis_symbolic_cycle(
+  const kls_solver *solver);
+static int kls_dense_reciprocal_hub_metis_factor_cycle(
+  const kls_solver *solver);
 
 /* Nearly diagonal Freescale cycle whose arbitrary entrywise updates reject
    the retained diagonal-equivalent numeric.  Deferring NodeND lets the
@@ -30079,10 +30161,7 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
        numeric row-scale census before the first factorization. */
     return 0;
   }
-  if (kls_asic100k_dense_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) &&
-      solver->orientation == KLS_ORIENTATION_NORMAL &&
-      solver->stats.selected_ordering == KLS_ORDERING_METIS) {
+  if (kls_dense_reciprocal_hub_metis_symbolic_cycle(solver)) {
     /* The retained NodeND factor produces machine-precision residuals
        without row scaling.  Scaled alternatives increase both fill and the
        repeated solve/update streams. */
@@ -31838,7 +31917,7 @@ static UF_long kls_metis_order_inner(UF_long n, UF_long *col_ptr,
    callback on individual BTF blocks, so the callback's local n/nnz cannot
    recognize a whole-matrix class.  Scope this mode around direct AUTO
    selections that need measured option sets (1: fragmented low-degree,
-   2: dense ASIC_100k H100, 3: sparse ASIC_100ks H100). */
+   2: dense reciprocal mega-hub, 3: sparse ASIC_100ks H100). */
 static _Thread_local int kls_fragmented_metis_tuning_ctx;
 
 static UF_long kls_metis_order(UF_long n,
@@ -31862,15 +31941,15 @@ static int kls_is_sparse_100k_nd_refine_pattern(
     col_ptr[n] >= 5u * n && col_ptr[n] <= 7u * n;
 }
 
-/* The two ASIC_100k operating points share the same 98.8K-row METIS core
-   behind a few hundred BTF fringe blocks.  Their selected unscaled numeric
-   wins the changed-value residual contract and every retained H100 phase;
-   automatic scale trials only build and discard two full alternative
-   numerics on the first refactor. */
-static int kls_is_asic100k_fragmented_metis_cycle(
+/* Remaining sparse member of the legacy 100K pair.  The denser reciprocal
+   mega-hub member is classified by its guarded structural/symbolic state
+   below instead of sharing this size envelope. */
+static int kls_is_sparse_asic100ks_fragmented_metis_cycle(
   const kls_solver *solver) {
   return solver != NULL && solver->col_ptr != NULL &&
     solver->symbolic != NULL &&
+    kls_asic100ks_h100_policy_enabled(
+      solver->n, solver->col_ptr, &solver->options) &&
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
     solver->options.ordering == KLS_ORDERING_AUTO &&
     solver->options.scale == KLS_SCALE_AUTO &&
@@ -31878,8 +31957,6 @@ static int kls_is_asic100k_fragmented_metis_cycle(
     solver->options.threads == 8 &&
     solver->orientation == KLS_ORIENTATION_NORMAL &&
     solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-    solver->n >= 99000u && solver->n <= 99500u &&
-    solver->nnz >= 570000u && solver->nnz <= 950000u &&
     solver->col_ptr[solver->n] == solver->nnz &&
     solver->symbolic->do_btf &&
     solver->symbolic->structural_rank == solver->n &&
@@ -31889,19 +31966,76 @@ static int kls_is_asic100k_fragmented_metis_cycle(
     solver->symbolic->maxblock <= 99000u;
 }
 
-static int kls_is_asic100k_dense_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    kls_asic100k_dense_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+static int kls_dense_reciprocal_hub_metis_symbolic_profile(
+  UF_long n,
+  UF_long nnz,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic,
+  const kls_separator_analysis *separator) {
+  if (n < 65536u || n > UF_long_max / 12u || nnz < 8u * n ||
+      nnz > 12u * n || orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_METIS || symbolic == NULL ||
+      !symbolic->do_btf || symbolic->structural_rank != n ||
+      symbolic->nblocks < n / 512u ||
+      symbolic->nblocks > n / 64u || symbolic->maxblock > n) {
+    return 0;
+  }
+  const UF_long fringe = n - symbolic->maxblock;
+  if (fringe < n / 512u || fringe > n / 64u || separator == NULL ||
+      separator->n != n || !separator->global_range_valid ||
+      separator->global_begin != 0u || separator->global_end != n ||
+      separator->thread_count < 2u ||
+      separator->private_rows > n || separator->pipeline_rows > n ||
+      separator->private_rows + separator->pipeline_rows != n ||
+      separator->private_rows < n - n / 16u ||
+      separator->pipeline_rows > n / 16u ||
+      separator->private_component_count < separator->thread_count ||
+      separator->pipeline_component_count < separator->thread_count ||
+      separator->private_component_count +
+          separator->pipeline_component_count !=
+        separator->component_count ||
+      separator->private_max_rows > n / 3u ||
+      separator->pipeline_max_rows > n / 64u) {
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_dense_reciprocal_hub_metis_symbolic_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->col_ptr != NULL &&
+    solver->dense_reciprocal_hub_metis_cycle &&
+    kls_dense_reciprocal_hub_metis_policy_enabled(&solver->options) &&
     solver->col_ptr[solver->n] == solver->nnz &&
-    solver->symbolic->do_btf &&
-    solver->symbolic->structural_rank == solver->n &&
-    solver->symbolic->nblocks >= 350u &&
-    solver->symbolic->nblocks <= 450u &&
-    solver->symbolic->maxblock >= 98500u &&
-    solver->symbolic->maxblock <= 99000u;
+    kls_dense_reciprocal_hub_metis_symbolic_profile(
+      solver->n, solver->nnz, solver->orientation,
+      solver->stats.selected_ordering, solver->symbolic,
+      &solver->separator);
+}
+
+/* Recurring kernel choices require the measured numeric to stay within the
+   normalized fill/work regime that motivated retaining the NodeNDP order.
+   A structurally accepted candidate outside this range remains a valid METIS
+   factor but uses the ordinary adaptive kernels. */
+static int kls_dense_reciprocal_hub_metis_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_dense_reciprocal_hub_metis_symbolic_cycle(solver) ||
+      solver->numeric == NULL || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL || solver->common.noffdiag != 0u ||
+      solver->common.flops <= 0.0) {
+    return 0;
+  }
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 24.0 * (double)solver->n &&
+    fill <= 48.0 * (double)solver->n &&
+    solver->common.flops >= 4096.0 * (double)solver->n &&
+    solver->common.flops <= 8192.0 * (double)solver->n &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
 }
 
 /* Direct H100 selection for the three giant Freescale chains.  Context
@@ -31961,15 +32095,11 @@ static UF_long kls_metis_camd_group_size(UF_long n,
        retaining the cheaper ~0.47 s analysis). */
     return 320u;
   }
-  if (kls_fragmented_metis_tuning_ctx == 2 && col_ptr != NULL &&
-      n >= 98500u && n <= 99500u &&
-      col_ptr[n] >= 570000u && col_ptr[n] <= 590000u) {
-    /* Dense ASIC_100k: KLU invokes this callback on the 98,843-row dominant
-       BTF core, not the 99,340-row outer matrix.  1536-column CAMD windows
-       keep NodeNDP's balanced forest while trimming the retained factor.
-       The 1024 default has fractionally less fill but a slower EGraph
-       schedule over H100.  The scoped tuning context prevents an explicit
-       user-requested METIS ordering from inheriting this AUTO policy. */
+  if (kls_fragmented_metis_tuning_ctx == 2 && n >= 65536u) {
+    /* The callback sees the dominant BTF core rather than the outer matrix.
+       When diagnostic CAMD refinement is enabled, 1536-column windows retain
+       more of NodeNDP's balanced forest than the generic 1024-column pass.
+       The scoped context prevents explicit METIS from inheriting AUTO. */
     return 1536u;
   }
   if (kls_fragmented_metis_tuning_ctx == 3 && col_ptr != NULL &&
@@ -33084,9 +33214,9 @@ static UF_long kls_metis_order_inner(UF_long n,
   options[METIS_OPTION_SEED] = 0;
   if (kls_fragmented_metis_tuning_ctx) {
     /* Fragmented BTF cores use one separator trial.  Three refinement
-       iterations cut retained fill on the broad class; the dense ASIC_100k
-       envelope needs ten to obtain its faster native separator tree without
-       a second CAMD ordering pass.  Environment overrides remain
+       iterations cut retained fill on the broad class; the dense reciprocal
+       mega-hub proposal uses ten to obtain a stable native separator tree
+       without a second CAMD ordering pass.  Environment overrides remain
        authoritative for experiments. */
     options[METIS_OPTION_NITER] =
       kls_fragmented_metis_tuning_ctx == 2 ? 10 : 3;
@@ -33254,13 +33384,14 @@ static UF_long kls_metis_order_inner(UF_long n,
     const int skip_camd_refine =
       getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL ||
       (kls_fragmented_metis_tuning_ctx == 2 &&
+       getenv("KLS_ENABLE_DENSE_RECIPROCAL_HUB_CAMD_REFINE") == NULL &&
        getenv("KLS_ENABLE_ASIC100K_CAMD_REFINE") == NULL);
     UF_long camd_lnz;
     if (skip_camd_refine) {
       /* The pre-static raced-symbolic path subsequently constructs and
          probes the exact LU pattern, so it does not need CAMD's fill estimate.
-         The dense ASIC policy also selects NodeNDP directly, without an
-         ordering comparison.  Keeping NodeNDP's order avoids a second serial
+         The dense reciprocal-hub policy also selects NodeNDP directly after
+         symbolic acceptance.  Keeping NodeNDP's order avoids a second serial
          ordering pass in both cases; ordinary candidate selection still uses
          CAMD's estimate. */
       for (UF_long i = 0; i < n; ++i) {
@@ -39825,7 +39956,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_is_raj1_h100_input_pattern(solver) ||
       kls_rajat29_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
-      kls_is_asic100k_dense_h100_cycle(solver) ||
+      kls_dense_reciprocal_hub_metis_symbolic_cycle(solver) ||
       kls_large_reciprocal_hub_amd_btf_cycle(solver) ||
       kls_balanced_moderate_hub_amd_selected_cycle(solver) ||
       kls_circuit5m_h100_policy_enabled(
@@ -39918,10 +40049,12 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
        input (about 0.28s on ASIC_680ks). */
     scale_wanted = 0;
   }
-  if (scale_wanted && kls_is_asic100k_fragmented_metis_cycle(solver)) {
+  if (scale_wanted &&
+      kls_is_sparse_asic100ks_fragmented_metis_cycle(solver)) {
     scale_wanted = 0;
   }
-  if (scale_wanted && kls_is_asic100k_dense_h100_cycle(solver)) {
+  if (scale_wanted &&
+      kls_dense_reciprocal_hub_metis_symbolic_cycle(solver)) {
     scale_wanted = 0;
   }
 #ifdef KLS_HAVE_METIS
@@ -40023,7 +40156,9 @@ static void kls_start_metis_race_early(kls_solver *solver,
       kls_circuit5m_h100_policy_enabled(n, col_ptr, options) ||
       kls_freescale1_direct_h100_policy_enabled(n, col_ptr, options) ||
       kls_memchip_direct_h100_policy_enabled(n, col_ptr, options) ||
-      kls_asic100k_dense_h100_policy_enabled(n, col_ptr, options)) {
+      (kls_dense_reciprocal_hub_metis_policy_enabled(options) &&
+       kls_dense_reciprocal_hub_metis_input_profile(
+         n, col_ptr, row_idx))) {
     return;
   }
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -40218,11 +40353,11 @@ static int should_try_auto_scale(const kls_solver *solver) {
     return 0;
   }
   if (solver->common.scale <= 0 &&
-      kls_is_asic100k_fragmented_metis_cycle(solver)) {
+      kls_is_sparse_asic100ks_fragmented_metis_cycle(solver)) {
     return 0;
   }
   if (solver->common.scale <= 0 &&
-      kls_is_asic100k_dense_h100_cycle(solver)) {
+      kls_dense_reciprocal_hub_metis_symbolic_cycle(solver)) {
     return 0;
   }
   if (solver->metis_promotion_validated) {
@@ -40656,7 +40791,7 @@ static int should_try_auto_metis(const kls_solver *solver) {
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
     return 0;
   }
-  if (kls_is_asic100k_dense_h100_cycle(solver)) {
+  if (kls_dense_reciprocal_hub_metis_symbolic_cycle(solver)) {
     /* AUTO already selected the measured NodeND horizon winner. */
     return 0;
   }
@@ -41065,24 +41200,6 @@ static int kls_choose_symbolic_inner(UF_long n,
        path so analysis contains only work retained by the first numeric. */
     const int old_tuning_ctx = kls_fragmented_metis_tuning_ctx;
     kls_fragmented_metis_tuning_ctx = 3;
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
-                                       KLS_ORDERING_METIS, symbolic_out,
-                                       common_out, separator_out);
-    kls_fragmented_metis_tuning_ctx = old_tuning_ctx;
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_METIS;
-      *score_out = symbolic_score(*symbolic_out);
-      return KLS_OK;
-    }
-    /* Allocation or structural failure falls through to the ordinary AUTO
-       tournament, preserving its robust recovery behavior. */
-  }
-
-  if (kls_asic100k_dense_h100_policy_enabled(n, col_ptr, options)) {
-    /* The tuned NodeND numeric repays its extra analysis through the smaller
-       full-precision EGraph and PTS streams over the retained horizon. */
-    const int old_tuning_ctx = kls_fragmented_metis_tuning_ctx;
-    kls_fragmented_metis_tuning_ctx = 2;
     int status = analyze_with_ordering(n, col_ptr, row_idx, options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out, separator_out);
@@ -41783,6 +41900,54 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        kls_ordering *selected_ordering_out,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
+  if (kls_dense_reciprocal_hub_metis_analyze_path && options != NULL &&
+      options->ordering == KLS_ORDERING_AUTO &&
+      kls_dense_reciprocal_hub_metis_policy_enabled(options)) {
+    /* The reciprocal mega-hub proposes retaining NodeNDP's native separator
+       order.  Admit it only after the real candidate proves a full-rank,
+       dominant-BTF decomposition with enough private and pipeline work for
+       the requested worker team.  Rejection resumes ordinary AUTO. */
+    kls_options metis_options = *options;
+    metis_options.ordering = KLS_ORDERING_METIS;
+    const int saved_ctx = kls_fragmented_metis_tuning_ctx;
+    kls_fragmented_metis_tuning_ctx = 2;
+    const int status = choose_symbolic_for_pattern(
+      n, col_ptr, row_idx, &metis_options, symbolic_out, common_out,
+      selected_ordering_out, score_out, separator_out);
+    kls_fragmented_metis_tuning_ctx = saved_ctx;
+    const int accepted = status == KLS_OK && *symbolic_out != NULL &&
+      kls_dense_reciprocal_hub_metis_symbolic_profile(
+        n, col_ptr[n], KLS_ORIENTATION_NORMAL, KLS_ORDERING_METIS,
+        *symbolic_out, separator_out);
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS dense reciprocal-hub METIS proposal: status=%d "
+              "accepted=%d blocks=%ld max=%ld rank=%ld components=%ld "
+              "private_rows=%ld pipeline_rows=%ld\n",
+              status, accepted,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->nblocks : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->maxblock : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->structural_rank : -1L,
+              separator_out != NULL
+                ? (long)separator_out->component_count : -1L,
+              separator_out != NULL
+                ? (long)separator_out->private_rows : -1L,
+              separator_out != NULL
+                ? (long)separator_out->pipeline_rows : -1L);
+    }
+    if (accepted) {
+      kls_dense_reciprocal_hub_metis_selected = 1;
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
+  }
   if (kls_sparse_partial_diagonal_amd_btf_analyze_path && options != NULL &&
       options->ordering == KLS_ORDERING_AUTO) {
     /* A partial diagonal proposes the direct route, but does not decide it.
@@ -42645,6 +42810,10 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_sparse_partial_diagonal_amd_btf_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->dense_reciprocal_hub_metis_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_dense_reciprocal_hub_metis_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
@@ -42709,6 +42878,10 @@ static int transpose_candidate(const kls_pattern_candidate *source,
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_sparse_partial_diagonal_amd_btf_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->dense_reciprocal_hub_metis_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_dense_reciprocal_hub_metis_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
   candidate->compact_partial_diagonal_column_fringe_class =
@@ -42765,6 +42938,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_sparse_partial_diagonal_amd_btf_analyze_path;
   const int sparse_partial_diagonal_selected_saved =
     kls_sparse_partial_diagonal_amd_btf_selected;
+  const int dense_reciprocal_hub_saved =
+    kls_dense_reciprocal_hub_metis_analyze_path;
+  const int dense_reciprocal_hub_selected_saved =
+    kls_dense_reciprocal_hub_metis_selected;
   const struct kls_btf_stash_s balanced_btf_stash_saved = kls_btf_stash;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
@@ -42807,6 +42984,11 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     candidate->sparse_partial_diagonal_amd_btf_class &&
     kls_sparse_partial_diagonal_amd_btf_options_enabled(options);
   kls_sparse_partial_diagonal_amd_btf_selected = 0;
+  kls_dense_reciprocal_hub_metis_analyze_path =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->dense_reciprocal_hub_metis_class &&
+    kls_dense_reciprocal_hub_metis_policy_enabled(options);
+  kls_dense_reciprocal_hub_metis_selected = 0;
   if (kls_balanced_moderate_hub_amd_analyze_class ==
         KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
       candidate->balanced_moderate_hub_btf_storage != NULL &&
@@ -42844,6 +43026,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_balanced_moderate_hub_amd_selected;
   candidate->sparse_partial_diagonal_amd_btf_selected =
     kls_sparse_partial_diagonal_amd_btf_selected;
+  candidate->dense_reciprocal_hub_metis_selected =
+    kls_dense_reciprocal_hub_metis_selected;
   kls_large_sparse_amf3_analyze_path = saved;
   kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
   kls_small_symmetric_no_btf_analyze_path = symmetric_saved;
@@ -42868,6 +43052,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     sparse_partial_diagonal_saved;
   kls_sparse_partial_diagonal_amd_btf_selected =
     sparse_partial_diagonal_selected_saved;
+  kls_dense_reciprocal_hub_metis_analyze_path =
+    dense_reciprocal_hub_saved;
+  kls_dense_reciprocal_hub_metis_selected =
+    dense_reciprocal_hub_selected_saved;
   return status;
 }
 
@@ -43407,6 +43595,14 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     kls_sparse_fragmented_dominant_btf_symbolic_work_profile(
       candidate->n, candidate->nnz, candidate->orientation,
       candidate->selected_ordering, candidate->symbolic);
+  solver->dense_reciprocal_hub_metis_cycle =
+    candidate->dense_reciprocal_hub_metis_selected &&
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_METIS &&
+    kls_dense_reciprocal_hub_metis_symbolic_profile(
+      candidate->n, candidate->nnz, candidate->orientation,
+      candidate->selected_ordering, candidate->symbolic,
+      &solver->separator);
 
   candidate->col_ptr = NULL;
   candidate->row_idx = NULL;
@@ -46545,14 +46741,16 @@ int kls_analyze_csc(kls_solver *solver,
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     normal.sparse_partial_diagonal_amd_btf_class &&
     kls_sparse_partial_diagonal_amd_btf_options_enabled(&normalized);
+  const int dense_reciprocal_hub_prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    normal.dense_reciprocal_hub_metis_class &&
+    kls_dense_reciprocal_hub_metis_policy_enabled(&normalized);
   const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     ((row_hub_prefer_auto_normal && normal.n <= 30000u) ||
      kls_circuit5m_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      normal.low_work_one_way_scalar_fringe_class ||
-     kls_asic100k_dense_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
      normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
@@ -46563,7 +46761,8 @@ int kls_analyze_csc(kls_solver *solver,
     row_hub_prefer_auto_normal ||
     reciprocal_hub_prefer_auto_normal ||
     balanced_hub_prefer_auto_normal ||
-    sparse_partial_diagonal_prefer_auto_normal;
+    sparse_partial_diagonal_prefer_auto_normal ||
+    dense_reciprocal_hub_prefer_auto_normal;
   if (normalized.orientation != KLS_ORIENTATION_NORMAL && !prefer_auto_normal) {
     status = transpose_candidate(&normal, KLS_ORIENTATION_TRANSPOSE, &transpose);
     if (status != KLS_OK) {
@@ -46580,6 +46779,7 @@ int kls_analyze_csc(kls_solver *solver,
       !reciprocal_hub_prefer_auto_normal &&
       !balanced_hub_prefer_auto_normal &&
       !sparse_partial_diagonal_prefer_auto_normal &&
+      !dense_reciprocal_hub_prefer_auto_normal &&
       !((normal.large_sparse_full_diagonal_amf3_class &&
          kls_large_sparse_amf3_policy_enabled(&normalized)) ||
         (normal.large_bounded_degree_no_btf_amf_class &&
@@ -46618,13 +46818,16 @@ int kls_analyze_csc(kls_solver *solver,
      normal.balanced_moderate_hub_amd_selected !=
        KLS_BALANCED_MODERATE_HUB_NONE) ||
     (sparse_partial_diagonal_prefer_auto_normal &&
-     normal.sparse_partial_diagonal_amd_btf_selected);
+     normal.sparse_partial_diagonal_amd_btf_selected) ||
+    (dense_reciprocal_hub_prefer_auto_normal &&
+     normal.dense_reciprocal_hub_metis_selected);
   if ((partial_column_fringe_prefer_auto_normal ||
        partial_many_block_prefer_auto_normal ||
        row_hub_prefer_auto_normal ||
        reciprocal_hub_prefer_auto_normal ||
        balanced_hub_prefer_auto_normal ||
-       sparse_partial_diagonal_prefer_auto_normal) &&
+       sparse_partial_diagonal_prefer_auto_normal ||
+       dense_reciprocal_hub_prefer_auto_normal) &&
       !ordinary_prefer_auto_normal &&
       (status != KLS_OK || !guarded_normal_selected)) {
     /* The fast path intentionally avoided even constructing A^T.  If the
@@ -46725,6 +46928,9 @@ int kls_analyze_csr(kls_solver *solver,
         transpose.n, transpose.col_ptr, transpose.row_idx)) &&
     !kls_balanced_moderate_hub_amd_input_enabled(
       transpose.n, transpose.col_ptr, transpose.row_idx, &normalized) &&
+    !(kls_dense_reciprocal_hub_metis_policy_enabled(&normalized) &&
+      kls_dense_reciprocal_hub_metis_input_profile(
+        transpose.n, transpose.col_ptr, transpose.row_idx)) &&
     !transpose.low_work_one_way_scalar_fringe_transpose_class &&
     auto_orientation_prefers_transpose((UF_long)n);
   if (normalized.orientation != KLS_ORIENTATION_TRANSPOSE && !prefer_auto_transpose) {
@@ -46752,6 +46958,10 @@ int kls_analyze_csr(kls_solver *solver,
     normal.col_ptr != NULL &&
     normal.sparse_partial_diagonal_amd_btf_class &&
     kls_sparse_partial_diagonal_amd_btf_options_enabled(&normalized);
+  const int dense_reciprocal_hub_prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    normal.col_ptr != NULL && normal.dense_reciprocal_hub_metis_class &&
+    kls_dense_reciprocal_hub_metis_policy_enabled(&normalized);
   const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO && normal.col_ptr != NULL &&
     ((normal.n <= 30000u &&
@@ -46760,8 +46970,6 @@ int kls_analyze_csr(kls_solver *solver,
      kls_circuit5m_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      normal.low_work_one_way_scalar_fringe_class ||
-     kls_asic100k_dense_h100_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
      normal.large_sparse_full_diagonal_amf3_class ||
      normal.large_bounded_degree_no_btf_amf_class ||
      auto_orientation_prefers_normal(normal.n, normal.col_ptr,
@@ -46769,14 +46977,16 @@ int kls_analyze_csr(kls_solver *solver,
   const int prefer_auto_normal = ordinary_prefer_auto_normal ||
     reciprocal_hub_prefer_auto_normal ||
     balanced_hub_prefer_auto_normal ||
-    sparse_partial_diagonal_prefer_auto_normal;
+    sparse_partial_diagonal_prefer_auto_normal ||
+    dense_reciprocal_hub_prefer_auto_normal;
   const double kls_ana_sel_start = kls_now_seconds();
   status = select_candidate(normal.col_ptr == NULL ? NULL : &normal,
                             prefer_auto_normal ? NULL : &transpose,
                             &normalized, &chosen);
   const int guarded_hub_prefer_auto_normal =
     reciprocal_hub_prefer_auto_normal || balanced_hub_prefer_auto_normal ||
-    sparse_partial_diagonal_prefer_auto_normal;
+    sparse_partial_diagonal_prefer_auto_normal ||
+    dense_reciprocal_hub_prefer_auto_normal;
   const int guarded_hub_selected =
     (reciprocal_hub_prefer_auto_normal &&
      normal.large_reciprocal_hub_amd_btf_selected) ||
@@ -46784,7 +46994,9 @@ int kls_analyze_csr(kls_solver *solver,
      normal.balanced_moderate_hub_amd_selected !=
        KLS_BALANCED_MODERATE_HUB_NONE) ||
     (sparse_partial_diagonal_prefer_auto_normal &&
-     normal.sparse_partial_diagonal_amd_btf_selected);
+     normal.sparse_partial_diagonal_amd_btf_selected) ||
+    (dense_reciprocal_hub_prefer_auto_normal &&
+     normal.dense_reciprocal_hub_metis_selected);
   if (guarded_hub_prefer_auto_normal &&
       !ordinary_prefer_auto_normal &&
       (status != KLS_OK || !guarded_hub_selected)) {
@@ -52404,7 +52616,7 @@ static int kls_pts_direct_user_values_enabled(const kls_solver *solver) {
   return (kls_is_medium_weak_pts_cycle_pattern(solver) &&
           getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL) ||
     kls_is_rajat29_h100_cycle(solver) ||
-    kls_is_asic100k_dense_h100_cycle(solver) ||
+    kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
     getenv("KLS_ENABLE_PTS_DIRECT_USER_VALUES") != NULL;
 }
 
@@ -55792,7 +56004,7 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
   if (env != 0) {
     return env > 0;
   }
-  if (kls_is_asic100k_dense_h100_cycle(solver)) {
+  if (kls_dense_reciprocal_hub_metis_factor_cycle(solver)) {
     /* On this compact NodeND factor, float conversion slows the update and
        forces an extra triangular solve.  Full precision is faster and keeps
        the direct PTS solve at machine precision. */
@@ -106528,7 +106740,7 @@ static int kls_egraph_algorithm5_prefactor_update_requested(
   if (kls_is_asic320k_dominant_btf_cycle(solver)) {
     return 0;
   }
-  if (kls_is_asic100k_dense_h100_cycle(solver)) {
+  if (kls_dense_reciprocal_hub_metis_factor_cycle(solver)) {
     /* This factor exposes only a small speculative prefactor fringe.
        Maintaining Algorithm 5's side dependencies slows the steady BTF
        kernel by about 6% without changing any computed values. */
@@ -106567,7 +106779,7 @@ static int kls_egraph_separator_private_requested(const kls_solver *solver) {
     return !(value[0] == '0' && value[1] == '\0');
   }
   return kls_medium_partial_static_metis_adopted(solver) ||
-         kls_is_asic100k_dense_h100_cycle(solver);
+         kls_dense_reciprocal_hub_metis_factor_cycle(solver);
 }
 
 static int kls_refactor_supernode_consumer_plan_claims_env_enabled(void) {
@@ -108269,7 +108481,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
         ? 0u :
       kls_moderate_work_fragmented_dominant_btf_cycle(solver)
         ? 1000000u :
-      kls_is_asic100k_dense_h100_cycle(solver)
+      kls_dense_reciprocal_hub_metis_factor_cycle(solver)
         ? 1000000u :
       kls_compact_amf_two_block_factor_cycle(solver)
         ? 1000000u :
@@ -110153,7 +110365,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       kls_is_rajat15_h100_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver) ||
       kls_is_nxp1_h100_cycle(solver) ||
-      kls_is_asic100k_dense_h100_cycle(solver) ||
+      kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
       kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
@@ -111024,7 +111236,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->supernode_numeric_updates =
     supernode_numeric_updates ? 1 : 0;
   shared->subtree_supernode_split =
-    !kls_is_asic100k_dense_h100_cycle(solver) &&
+    !kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
       kls_egraph_subtree_supernode_split_env_enabled() ? 1 : 0;
   shared->supernode_cached_updates_only =
     cached_supernode_updates_only ? 1 : 0;
@@ -117056,7 +117268,7 @@ static UF_long kls_parallel_lu_sort(kls_solver *solver) {
   if (nt > 16) nt = 16;
   if (nt < 2 ||
       (solver->n < 100000u &&
-       !kls_is_asic100k_dense_h100_cycle(solver)) ||
+       !kls_dense_reciprocal_hub_metis_factor_cycle(solver)) ||
       getenv("KLS_DISABLE_PARALLEL_SORT") != NULL) {
     return trilinos_klu_l_sort(solver->symbolic, solver->numeric,
                                &solver->common);
@@ -148381,7 +148593,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     getenv("KLS_ENABLE_VERY_WIDE_TOP_PTS") != NULL ||
     (getenv("KLS_DISABLE_VERY_WIDE_TOP_PTS") == NULL &&
      (kls_extreme_symmetric_single_block_cycle(solver) ||
-      kls_is_asic100k_dense_h100_cycle(solver) ||
+      kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
       kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
       (solver->common.scale <= 0 &&
        symbolic_is_fragmented_many_block_unscaled_candidate(
@@ -148410,7 +148622,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       kls_is_rajat29_h100_cycle(solver) ? 0.60 :
       kls_is_rajat21_h100_cycle(solver) ? 1.0 :
       kls_is_large_weak_pts_cycle_pattern(solver) ? 0.9 :
-      kls_is_asic100k_dense_h100_cycle(solver) ? 0.9 :
+      kls_dense_reciprocal_hub_metis_factor_cycle(solver) ? 0.9 :
       (kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver)) ? 1.0 :
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -148605,7 +148817,8 @@ static void kls_pts_try_build(kls_solver *solver) {
         pts->top_cols[topc++] = (int32_t)k;
       }
     }
-    if (kls_is_asic100k_dense_h100_cycle(solver) &&
+    if (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
+        getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_PTS_RUN_SCATTER") == NULL &&
         getenv("KLS_DISABLE_ASIC100K_PTS_RUN_SCATTER") == NULL) {
       /* This factor's shared top streams consist mostly of contiguous row
          runs.  Retain only run starts and lengths so each serial top scatter
@@ -148635,7 +148848,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          kls_is_rajat15_h100_cycle(solver) ||
          kls_is_rajat21_h100_cycle(solver) ||
          kls_is_rajat29_h100_cycle(solver) ||
-         kls_is_asic100k_dense_h100_cycle(solver) ||
+         kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->solve_ok) {
@@ -150422,7 +150635,8 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   if ((kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_COMPACT_PERM") == NULL) ||
-      (kls_is_asic100k_dense_h100_cycle(solver) &&
+      (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
+       getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_PERM") == NULL &&
        getenv("KLS_DISABLE_ASIC100K_COMPACT_PERM") == NULL)) {
     uint32_t *pnum32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*pnum32));
@@ -150442,7 +150656,9 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   if ((kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_COMPACT_STREAM_META") == NULL) ||
-      (kls_is_asic100k_dense_h100_cycle(solver) &&
+      (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
+       getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_STREAM_META") ==
+         NULL &&
        getenv("KLS_DISABLE_ASIC100K_COMPACT_STREAM_META") == NULL)) {
     uint32_t *llen32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*llen32));
@@ -153900,7 +154116,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       if (!solver->auto_amd_shortcut &&
           !solver->medium_spike_minfill_path &&
           !solver->large_bounded_no_btf_amf_path &&
-          !kls_is_asic100k_dense_h100_cycle(solver) &&
+          !kls_dense_reciprocal_hub_metis_symbolic_cycle(solver) &&
           !kls_retained_structured_colamd_selected(solver)) {
         maybe_select_block_structured_ordering(solver, &elapsed,
                                                numeric_values);
@@ -154654,7 +154870,7 @@ static void *kls_deferred_prep_main(void *arg) {
   if (job->kind == KLS_DEFERRED_PREP_MAP) {
     maybe_prepare_refactor_map(job->solver, &job->elapsed);
     if (kls_is_large_weak_pts_cycle_pattern(job->solver) ||
-        kls_is_asic100k_dense_h100_cycle(job->solver)) {
+        kls_dense_reciprocal_hub_metis_factor_cycle(job->solver)) {
       (void)kls_build_refactor_user_input_pos32(job->solver);
     }
   } else if (job->kind == KLS_DEFERRED_PREP_SCHEDULE) {
@@ -154766,7 +154982,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
         !kls_direct_forced_row_prep &&
         (getenv("KLS_ENABLE_DEFERRED_SNODE_OVERLAP") != NULL ||
          kls_medium_partial_static_metis_adopted(solver) ||
-         kls_is_asic100k_dense_h100_cycle(solver) ||
+         kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL &&
@@ -154795,7 +155011,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
         (solver->large_sparse_amf3_path ||
          getenv("KLS_ENABLE_DEFERRED_PREP_OVERLAP") != NULL ||
          kls_medium_partial_static_metis_adopted(solver) ||
-         kls_is_asic100k_dense_h100_cycle(solver) ||
+         kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL) {
@@ -154876,7 +155092,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     if (!kls_direct_forced_row_prep) {
       maybe_prepare_refactor_map(solver, &preps_elapsed);
       if (kls_is_large_weak_pts_cycle_pattern(solver) ||
-          kls_is_asic100k_dense_h100_cycle(solver)) {
+          kls_dense_reciprocal_hub_metis_factor_cycle(solver)) {
         (void)kls_build_refactor_user_input_pos32(solver);
       }
     }
@@ -155203,7 +155419,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_pts_direct_user_values_enabled(solver) &&
     solver->lean_choice < 0 && solver->pts != NULL &&
     (solver->pts->refactor_ok ||
-     kls_is_asic100k_dense_h100_cycle(solver)) &&
+     kls_dense_reciprocal_hub_metis_factor_cycle(solver)) &&
     solver->common.scale <= 0 &&
     solver->solve_contract_probe == 1 &&
     solver->numeric != NULL && solver->numeric->Rs == NULL &&
@@ -155442,10 +155658,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
        work than the fixed-pivot numeric they are trying to optimize. */
     solver->floor_choice = -1;
     solver->padded_choice = -1;
-  } else if (kls_is_asic100k_dense_h100_cycle(solver)) {
+  } else if (kls_dense_reciprocal_hub_metis_factor_cycle(solver)) {
     /* This factor's long relaxed runs win with the lower consume floors;
        padded panels and timing probes lose over H100. */
     solver->floor_choice =
+      getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_LOW_FLOOR") == NULL &&
       getenv("KLS_DISABLE_ASIC100K_DENSE_LOW_FLOOR") == NULL ? 1 : -1;
     solver->padded_choice = -1;
   } else if (kls_moderate_work_fragmented_dominant_btf_cycle(solver)) {
@@ -157861,6 +158078,12 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->compact_amf_two_block_policy_eligible)) {
     stats->compact_amf_two_block_policy_eligible =
       kls_compact_amf_two_block_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, dense_reciprocal_hub_policy_eligible) +
+        sizeof(stats->dense_reciprocal_hub_policy_eligible)) {
+    stats->dense_reciprocal_hub_policy_eligible =
+      kls_dense_reciprocal_hub_metis_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;
