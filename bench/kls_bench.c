@@ -2148,7 +2148,11 @@ int main(int argc, char **argv) {
            ",\"compact_solve_singleton_run_eligible\":%d"
            ",\"compact_missing_diagonal_match_candidate\":%d"
            ",\"compact_missing_diagonal_match_selected\":%d"
-           ",\"compact_missing_diagonal_factor_eligible\":%d",
+           ",\"compact_missing_diagonal_factor_eligible\":%d"
+           ",\"symmetric_partial_diagonal_match_candidate\":%d"
+           ",\"symmetric_partial_diagonal_match_selected\":%d"
+           ",\"symmetric_partial_diagonal_factor_eligible\":%d"
+           ",\"symmetric_partial_diagonal_low_work_eligible\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2391,7 +2395,11 @@ int main(int argc, char **argv) {
            stats.compact_solve_singleton_run_eligible,
            stats.compact_missing_diagonal_match_candidate,
            stats.compact_missing_diagonal_match_selected,
-           stats.compact_missing_diagonal_factor_eligible);
+           stats.compact_missing_diagonal_factor_eligible,
+           stats.symmetric_partial_diagonal_match_candidate,
+           stats.symmetric_partial_diagonal_match_selected,
+           stats.symmetric_partial_diagonal_factor_eligible,
+           stats.symmetric_partial_diagonal_low_work_eligible);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64

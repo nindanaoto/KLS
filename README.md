@@ -136,6 +136,32 @@ stages.  `Hamrle2` is included in the extended SuiteSparse manifest as a
 cross-family one-block holdout.  The exact Gemat selector and Gemat-named
 internal representations are removed.
 
+A separate symmetric partial-diagonal policy replaces the former OPF_3754 and
+OPF_10000 size windows.  Its input proof covers 8,192--131,072 rows, 6--12
+entries per row overall, 2--64 entries in every column, exact
+multiplicity-aware structural symmetry, and structural diagonals in 40--60%
+of columns.  The heavier match proposal starts only above 262,144 input
+entries.  It is retained only when a value-aware match produces normal AMD,
+one unblocked full-rank component, balanced symbolic L/U, 8--24 estimated
+factor entries per row with at least 400,000 entries, and 32--512 estimated
+flops per row with at least four million operations.  The final numeric must
+independently meet the corresponding fill/work and pivot-repair bounds before
+direct-value, PTS, preparation-overlap, or settled-probe consumers run.
+
+Smaller members use an independently bounded AMD/BTF lifecycle: 100,000--
+500,000 estimated factor entries and one--eight million estimated operations.
+That immutable symbolic verdict is cached after adoption, so the generic proof
+is not repeated in refactor or solve dispatch.  Direct updates consume public
+values only after the first solve contract succeeds, and both PTS and the
+serial one-block fallback apply the inverse input map and paired match scales.
+Set `KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY=1` to disable the
+whole policy or `KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES=1` to
+retain matching while disabling fused direct input.  `kls_stats` and benchmark
+JSON expose `symmetric_partial_diagonal_match_candidate`,
+`symmetric_partial_diagonal_match_selected`,
+`symmetric_partial_diagonal_factor_eligible`, and
+`symmetric_partial_diagonal_low_work_eligible`.
+
 For an AUTO/8-thread normal-AMD symbolic whose full-rank BTF consists of many
 genuinely tiny components, KLS avoids global block-ordering work that costs
 more than the complete factor.  The structural contract covers

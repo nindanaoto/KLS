@@ -23589,6 +23589,243 @@ cleanup:
   return ok;
 }
 
+static int run_symmetric_partial_diagonal_band_case(int32_t n,
+                                                     int expected_route) {
+  const int32_t half_bandwidth = 4;
+  const int32_t nnz = (2 * half_bandwidth) * n + n / 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && changed != NULL &&
+    expected != NULL && b != NULL && x != NULL;
+
+  if (!ok) {
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    int32_t rows[2 * half_bandwidth + 1];
+    int count = 0;
+    if ((col & 1) == 0) {
+      rows[count++] = col;
+    }
+    for (int32_t offset = 1; offset <= half_bandwidth; ++offset) {
+      rows[count++] = (col + offset) % n;
+      rows[count++] = (col + n - offset) % n;
+    }
+    for (int i = 1; i < count; ++i) {
+      const int32_t row = rows[i];
+      int insert = i;
+      while (insert > 0 && rows[insert - 1] > row) {
+        rows[insert] = rows[insert - 1];
+        --insert;
+      }
+      rows[insert] = row;
+    }
+
+    ap[col] = p;
+    const int32_t partner = (col & 1) != 0
+      ? (((col & 3) == 1) ? col + 2 : col - 2) : -1;
+    for (int i = 0; i < count; ++i) {
+      const int32_t row = rows[i];
+      const int32_t lower = row < col ? row : col;
+      const int32_t upper = row < col ? col : row;
+      int32_t distance = upper - lower;
+      if (distance > n / 2) {
+        distance = n - distance;
+      }
+      double value;
+      if (row == col) {
+        value = 8.0;
+      } else if (row == partner) {
+        value = 4.0;
+      } else {
+        value = -0.0078125 * (double)(half_bandwidth + 1 - distance);
+      }
+      const int variation = (int)(((int64_t)lower * 17 +
+                                    (int64_t)upper * 13) % 9) - 4;
+      ai[p] = row;
+      ax[p] = value;
+      changed[p] = value * (1.0 + 1.0e-4 * (double)variation);
+      ++p;
+    }
+    expected[col] = 0.125 + 0.00390625 * (double)(col % 31);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected symmetric partial-diagonal band nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  if (expected_route == -1) {
+    /* Preserve every scalar bound but remove one reciprocal edge. */
+    ai[ap[0] + half_bandwidth] = half_bandwidth + 1;
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create symmetric partial-diagonal band") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze symmetric partial-diagonal band")) {
+    ok = 0;
+    goto cleanup;
+  }
+  if (expected_route >= 0 &&
+      !require_ok(kls_factor(solver, ax),
+                  "factor symmetric partial-diagonal band")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int generation = 0; expected_route >= 0 && generation < 16;
+       ++generation) {
+    for (int32_t entry = 0; entry < nnz; ++entry) {
+      const int variation = (entry % 9) - 4;
+      changed[entry] = ax[entry] *
+        (1.0 + 5.0e-5 * (double)(generation + 1) * (double)variation);
+    }
+    if (!require_ok(kls_refactor(solver, changed),
+                    "refactor symmetric partial-diagonal band")) {
+      ok = 0;
+      goto cleanup;
+    }
+    memset(b, 0, (size_t)n * sizeof(*b));
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        b[ai[entry]] += changed[entry] * expected[col];
+      }
+    }
+    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                    "solve symmetric partial-diagonal band")) {
+      ok = 0;
+      goto cleanup;
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      if (fabs(x[row] - expected[row]) > 1.0e-8) {
+        fprintf(stderr,
+                "symmetric partial-diagonal solve mismatch n=%d"
+                " generation=%d at %d: %.17g vs %.17g\n",
+                n, generation + 1, row, x[row], expected[row]);
+        ok = 0;
+        goto cleanup;
+      }
+    }
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats symmetric partial-diagonal band")) {
+    ok = 0;
+    goto cleanup;
+  }
+  if ((expected_route == 1 &&
+       (stats.symmetric_partial_diagonal_match_candidate != 1 ||
+        stats.symmetric_partial_diagonal_match_selected != 1 ||
+        stats.symmetric_partial_diagonal_factor_eligible != 1 ||
+        stats.symmetric_partial_diagonal_low_work_eligible != 0)) ||
+      (expected_route == 0 &&
+       (stats.symmetric_partial_diagonal_match_candidate != 0 ||
+        stats.symmetric_partial_diagonal_match_selected != 0 ||
+        stats.symmetric_partial_diagonal_factor_eligible != 0 ||
+        stats.symmetric_partial_diagonal_low_work_eligible != 1)) ||
+      (expected_route < 0 &&
+       (stats.symmetric_partial_diagonal_match_candidate != 0 ||
+        stats.symmetric_partial_diagonal_match_selected != 0 ||
+        stats.symmetric_partial_diagonal_factor_eligible != 0 ||
+        stats.symmetric_partial_diagonal_low_work_eligible != 0))) {
+    fprintf(stderr,
+            "unexpected symmetric partial-diagonal band policy n=%d:"
+            " candidate=%d selected=%d factor=%d low=%d"
+            " order=%d scale=%d btf=%d blocks=%" PRId64
+            " max=%" PRId64 " fill=%" PRId64 "/%" PRId64
+            " work=%.0f/%.0f offdiag=%" PRId64 "\n",
+            n, stats.symmetric_partial_diagonal_match_candidate,
+            stats.symmetric_partial_diagonal_match_selected,
+            stats.symmetric_partial_diagonal_factor_eligible,
+            stats.symmetric_partial_diagonal_low_work_eligible,
+            stats.selected_ordering, stats.selected_scale, stats.selected_btf,
+            stats.nblocks, stats.max_block, stats.nnz_l, stats.nnz_u,
+            stats.estimated_flops, stats.factor_flops,
+            stats.offdiag_pivots);
+    ok = 0;
+    goto cleanup;
+  }
+
+cleanup:
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  return ok;
+}
+
+static int test_symmetric_partial_diagonal_match_lifecycles(void) {
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  int ok = (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok ||
+      unsetenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY") != 0) {
+    perror("configure symmetric partial-diagonal match policy");
+    ok = 0;
+    goto cleanup;
+  }
+  /* Both orders are outside the superseded exact windows.  The same topology
+     selects the lightweight lifecycle below the resource floor and the
+     SPRAL/direct-value lifecycle above it. */
+  if (!run_symmetric_partial_diagonal_band_case(16000, 0) ||
+      !run_symmetric_partial_diagonal_band_case(40000, 1) ||
+      !run_symmetric_partial_diagonal_band_case(40000, -1)) {
+    ok = 0;
+  }
+  if (ok && setenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY",
+                   "1", 1) != 0) {
+    perror("disable symmetric partial-diagonal match policy");
+    ok = 0;
+  }
+  if (ok && !run_symmetric_partial_diagonal_band_case(40000, -2)) {
+    fprintf(stderr, "disabled symmetric partial-diagonal control failed\n");
+    ok = 0;
+  }
+
+cleanup:
+  if (!restore_env_value(
+        "KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY",
+                         had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -23632,6 +23869,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_high_work_tiny_scalar_fringe_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_symmetric_partial_diagonal_match_lifecycles()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

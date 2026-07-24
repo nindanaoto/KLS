@@ -1384,6 +1384,17 @@ typedef struct kls_stats {
   /* The accepted match also produced the fragmented, low-work numeric needed
      by the compact row/direct-value lifecycle. */
   int compact_missing_diagonal_factor_eligible;
+  /* The original AUTO input is a bounded-degree symmetric graph with a
+     material structural-diagonal defect suitable for value-aware matching. */
+  int symmetric_partial_diagonal_match_candidate;
+  /* A value-aware match for that proposal was adopted. */
+  int symmetric_partial_diagonal_match_selected;
+  /* The adopted match produced the bounded, balanced single-block numeric
+     required by the direct-value/PTS lifecycle. */
+  int symmetric_partial_diagonal_factor_eligible;
+  /* The same structural family produced a smaller AMD/BTF symbolic for which
+     the lightweight matched PTS lifecycle is preferable. */
+  int symmetric_partial_diagonal_low_work_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

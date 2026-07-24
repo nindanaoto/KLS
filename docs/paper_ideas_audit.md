@@ -18857,3 +18857,105 @@ ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
 10%-amplitude changed-value runs retain decisions `1/1/1`, `1/1/1`, and
 `1/1/0` for `gemat11`, `gemat12`, and `Hamrle2`; their maximum verified
 residuals over three generations are `2.01e-15`, `1.35e-14`, and `1.75e-12`.
+
+SYMMETRIC PARTIAL-DIAGONAL MATCH LIFECYCLES GENERALIZED (2026-07-24).  Two
+remaining PTS policies described adjacent IPSO operating points through exact
+dimension boxes.  The low-work selector required 15,400--15,500 rows and
+140,000--143,000 entries; the heavy selector required 43,800--44,000 rows and
+426,000--428,000 entries.  The latter fingerprint selected much more than a
+matching trial: it started analysis without BTF, forced exact SPRAL matching,
+preapplied match scaling, suppressed pipeline and METIS trials, chose direct
+user-value maps and a PTS pool, overlapped selected preparations, fixed the
+column engine, skipped adaptive floor/panel probes, and changed worker spin.
+Those recurring consumers inferred their capabilities from the original input
+dimensions even after matching had replaced its coordinates and symbolic.
+
+The replacement first proves a topology, independently of numeric-engine
+choice.  A normal candidate must have 8,192--131,072 rows, 6--12 stored entries
+per row overall, 2--64 entries in every column, and structural diagonals in
+40--60% of columns.  Its pattern must be exactly symmetric, including duplicate
+multiplicity.  Sorted CSC uses reciprocal-column binary searches; bounded-
+degree unsorted CSC uses an exact `O(64*nnz)` fallback.  This makes the decision
+invariant under simultaneous row/column relabeling and entry-order shuffling.
+The standard AUTO orientation, ordering, scaling, BTF, static-pivoting,
+eight-thread, and `1e-3` tolerance contract remains explicit.  The former
+large-policy environment name is retained only as a compatibility disable
+alias.
+
+Resource economics then split the family.  At 262,144 input entries or more,
+KLS uses a no-BTF NATURAL placeholder and proposes a value-aware SPRAL match.
+The match is retained only when its normal AMD symbolic is one unblocked full-
+rank component, has balanced L/U, contains 8--24 estimated factor entries per
+row and at least 400,000 entries, and predicts 32--512 operations per row and
+at least four million operations.  A symbolic miss is cached, so later
+value-only factors do not replay the same losing match.  The numeric is a
+second independent gate: it must remain balanced inside 8--24 entries and
+32--512 measured operations per row (with 400,000/three-million absolute
+floors), have at most `n/512 + 16` off-diagonal pivots, use no numeric-internal
+scaling, nudge, perturbation, or predicted factor, and retain either no match
+scales or a valid row/column pair.  Only that post-factor capability enables
+the old PTS, direct-map, overlap, settled-probe, and spin consumers.
+
+Below the heavy resource floor, the same cached topology can select a distinct
+low-work lifecycle without paying the heavy proposal.  Its ordinary normal
+AMD/BTF symbolic must be a full-rank one-block factor with balanced L/U,
+8--32 estimated entries per row, 100,000--500,000 absolute entries,
+32--512 operations per row, and one--eight million absolute operations.  The
+verdict is cached at symbolic adoption because it is immutable; factor,
+refactor, and solve dispatch therefore pay a single boolean read rather than
+replaying the generalized profile.  This preserves OPF_3754's established
+scale-0 matched PTS route while removing its exact input window.
+
+The direct-value stage is also capability-checked.  It starts only after a
+first changed-value solve has certified the matched factor.  During synthetic
+testing, a heavy one-block topology whose PTS forest correctly declined
+exposed a latent assumption in the old exact policy: the serial mapped
+fallback indexed raw public values with internal positions and omitted paired
+match scaling.  PTS happened to hide that defect on OPF_10000.  The serial
+one-block and general mapped scatters now use the inverse public-input map,
+apply the prepared row/column scale for each internal position, and refresh the
+owned internal-frame mirror.  Sixteen independently solved generations on the
+fallback topology fail immediately without this fix and pass with it.  The
+stage can be isolated with
+`KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES=1` while the master
+`KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY=1` disables the complete
+policy.
+
+Four public fields expose staging through `kls_stats` and benchmark JSON:
+`symmetric_partial_diagonal_match_candidate`,
+`symmetric_partial_diagonal_match_selected`,
+`symmetric_partial_diagonal_factor_eligible`, and
+`symmetric_partial_diagonal_low_work_eligible`.  OPF_10000 reports `1/1/1/0`
+and retains normal AMD, no BTF, scale `-1`, SPRAL matching, and mapped updates.
+OPF_3754 reports `0/0/0/1` and retains normal AMD/BTF, scale 0, no SPRAL
+matching, and the same mapped factor geometry as the parent.  Screening all
+110 locally available SuiteSparse inputs admits only these two real topologies,
+so the positive evidence is deliberately supplemented rather than treating
+corpus uniqueness as validation.
+
+The metamorphic set includes an OPF_10000 simultaneous relabeling, a
+1,024-row disjoint symmetric extension (44,911 rows and 429,970 entries, beyond
+both old bounds), and the relabeled extension.  All three retain decisions
+`1/1/1/0`, normal AMD/no-BTF/matched/mapped execution, and accurate changed-
+value solves.  The smoke test adds independent 16,000- and 40,000-row symmetric
+circulant bands with half their diagonals missing.  The smaller topology selects
+only the low-work route; the larger selects and factors the heavy route even
+though both orders are outside the old boxes.  Sixteen changed-value
+refactor/solve generations are checked entrywise on each.  Removing one
+reciprocal edge preserves all scalar size/density/diagonal bounds but rejects
+all stages, and the master-disable control does the same on the unchanged
+positive.
+
+Accuracy replay covered OPF_10000, OPF_3754, the extension, and the relabeling
+for 100 independently verified entrywise generations at amplitudes `0.001`,
+`0.01`, and `0.1`.  Decisions remained stable and the worst per-generation
+relative-L2 residual was `4.84e-12`.  A later 32-generation `0.01` replay after
+the serial-fallback correction put the five real/metamorphic maxima between
+`3.48e-13` and `1.06e-12`.  Ten alternating parent/current H100 pairs on
+OPF_10000 measured a modeled-cycle median of `0.11447s` current versus
+`0.12237s` parent; the recurring-refactor median was `0.5318ms` versus
+`0.6035ms`.  Fourteen alternating pairs on OPF_3754 measured `0.04860s` versus
+`0.04803s` (ratio `1.0120`), while its recurring-refactor median improved
+slightly (`0.2164ms` versus `0.2181ms`); the remaining difference is the
+one-time exact structural proof and timing noise in the first phases.  Release
+and ASan/UBSan/LSan CTest pass all four tests.

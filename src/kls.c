@@ -2403,6 +2403,11 @@ struct kls_solver {
   int nearly_missing_diagonal_early_match_selected;
   int compact_missing_diagonal_match_candidate;
   int compact_missing_diagonal_match_selected;
+  int symmetric_partial_diagonal_match_input_class;
+  int symmetric_partial_diagonal_match_candidate;
+  int symmetric_partial_diagonal_match_selected;
+  int symmetric_partial_diagonal_match_symbolic_rejected;
+  int symmetric_partial_diagonal_low_work_class;
   int high_work_tiny_scalar_fringe_amd_symbolic_cycle;
   int high_work_tiny_scalar_fringe_amd_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *
@@ -2488,6 +2493,7 @@ typedef struct kls_pattern_candidate {
   int dense_reciprocal_hub_metis_class;
   int dense_reciprocal_hub_metis_selected;
   int symmetric_scalar_fringe_class;
+  int symmetric_partial_diagonal_match_class;
   int low_work_hubbed_scalar_fringe_class;
 } kls_pattern_candidate;
 
@@ -3097,9 +3103,9 @@ static int solve_impl(kls_solver *solver,
                       double *x,
                       int64_t ldx);
 static void kls_pts_free(kls_solver *solver);
-static int kls_is_medium_weak_pts_cycle_pattern(
+static int kls_low_work_symmetric_partial_diagonal_pts_cycle(
   const kls_solver *solver);
-static int kls_is_large_weak_pts_cycle_pattern(
+static int kls_symmetric_partial_diagonal_match_factor_cycle(
   const kls_solver *solver);
 static void kls_pts_refactor_pool_worker_run(
   kls_egraph_refactor_worker *worker);
@@ -24920,7 +24926,7 @@ static int kls_parallel_refactor_mapped_value(
     /* The scaled fused path retains an internal-frame value array for its
        solve-contract checks.  Refresh it while the factor scatter already
        visits every entry; a second O(nnz) repack would erase the gain. */
-    if (kls_is_large_weak_pts_cycle_pattern(shared->solver) &&
+    if (kls_symmetric_partial_diagonal_match_factor_cycle(shared->solver) &&
         shared->solver->values != NULL) {
       shared->solver->values[input_pos] = value;
     }
@@ -25450,7 +25456,16 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
   const int32_t *map_input_pos32 = shared->direct_user_values
     ? shared->solver->refactor_input_user_pos32
     : shared->solver->refactor_input_pos32;
+  const int32_t *map_internal_pos32 =
+    shared->solver->refactor_input_pos32;
+  const double *prepared_scale = shared->solver->prepared_value_scale;
+  double *owned_values = shared->solver->values;
+  const int fast_direct_scaled_map32 = shared->direct_user_values &&
+    prepared_scale != NULL && map_row_idx32 != NULL &&
+    map_input_pos32 != NULL && map_internal_pos32 != NULL &&
+    owned_values != NULL;
   const int fast_unscaled_map32 = shared->scale <= 0 &&
+    !fast_direct_scaled_map32 &&
     map_row_idx32 != NULL && map_input_pos32 != NULL;
   const double *ax = shared->values;
   const trilinos_klu_l_symbolic *symbolic = shared->symbolic;
@@ -25473,7 +25488,23 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     const UF_long poff_end = offp[k1 + 1u];
     double s = 0.0;
     if (map_col_ptr != NULL && map_block_start != NULL) {
-      if (fast_unscaled_map32) {
+      if (fast_direct_scaled_map32) {
+        for (UF_long p = map_col_ptr[k1]; p < map_block_start[k1]; ++p) {
+          const UF_long internal = (UF_long)map_internal_pos32[p];
+          const double value =
+            ax[(UF_long)map_input_pos32[p]] * prepared_scale[internal];
+          owned_values[internal] = value;
+          offx[poff++] = value;
+        }
+        for (UF_long p = map_block_start[k1];
+             p < map_col_ptr[k1 + 1u]; ++p) {
+          const UF_long internal = (UF_long)map_internal_pos32[p];
+          const double value =
+            ax[(UF_long)map_input_pos32[p]] * prepared_scale[internal];
+          owned_values[internal] = value;
+          s = value;
+        }
+      } else if (fast_unscaled_map32) {
         for (UF_long p = map_col_ptr[k1]; p < map_block_start[k1]; ++p) {
           offx[poff++] = ax[(UF_long)map_input_pos32[p]];
         }
@@ -25554,7 +25585,24 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     const UF_long poff_end = offp[global_col + 1u];
 
     if (map_col_ptr != NULL && map_block_start != NULL) {
-      if (fast_unscaled_map32) {
+      if (fast_direct_scaled_map32) {
+        for (UF_long p = map_col_ptr[global_col];
+             p < map_block_start[global_col]; ++p) {
+          const UF_long internal = (UF_long)map_internal_pos32[p];
+          const double value =
+            ax[(UF_long)map_input_pos32[p]] * prepared_scale[internal];
+          owned_values[internal] = value;
+          offx[poff++] = value;
+        }
+        for (UF_long p = map_block_start[global_col];
+             p < map_col_ptr[global_col + 1u]; ++p) {
+          const UF_long internal = (UF_long)map_internal_pos32[p];
+          const double value =
+            ax[(UF_long)map_input_pos32[p]] * prepared_scale[internal];
+          owned_values[internal] = value;
+          x[(UF_long)map_row_idx32[p] - k1] = value;
+        }
+      } else if (fast_unscaled_map32) {
         for (UF_long p = map_col_ptr[global_col];
              p < map_block_start[global_col]; ++p) {
           offx[poff++] = ax[(UF_long)map_input_pos32[p]];
@@ -25743,7 +25791,7 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
   const int32_t *map_internal_pos32 =
     shared->solver->refactor_input_pos32;
   const int fused_direct_values = shared->direct_user_values &&
-    kls_is_large_weak_pts_cycle_pattern(shared->solver);
+    kls_symmetric_partial_diagonal_match_factor_cycle(shared->solver);
   const int fast_unscaled_map32 = shared->scale <= 0 &&
     !fused_direct_values &&
     map_row_idx32 != NULL && map_input_pos32 != NULL;
@@ -27088,7 +27136,7 @@ static void free_numeric(kls_solver *solver) {
   /* deferral flags are solver-level intent (the consult re-validates);
      mid-factor numeric replacements must not wipe them */
   if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-      !kls_is_medium_weak_pts_cycle_pattern(solver)) {
+      !kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) {
     /* the panels/seeds freed below must be re-prepped by the next
        refactorization's consult */
     solver->factor_preps_deferred = 1;
@@ -27232,7 +27280,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
     solver->metis_race_deferred_invalid = 1;
   }
   if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-      !kls_is_medium_weak_pts_cycle_pattern(solver)) {
+      !kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) {
     /* deferred-preps regime: a replacement wipes the engine prep state
        (panels, run ends, seeds), exactly like mid-factor replacements do
        before the sync exit block re-preps; re-arm the consult so the
@@ -27527,6 +27575,11 @@ static void clear_matrix(kls_solver *solver) {
   solver->nearly_missing_diagonal_early_match_selected = 0;
   solver->compact_missing_diagonal_match_candidate = 0;
   solver->compact_missing_diagonal_match_selected = 0;
+  solver->symmetric_partial_diagonal_match_input_class = 0;
+  solver->symmetric_partial_diagonal_match_candidate = 0;
+  solver->symmetric_partial_diagonal_match_selected = 0;
+  solver->symmetric_partial_diagonal_match_symbolic_rejected = 0;
+  solver->symmetric_partial_diagonal_low_work_class = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_cycle = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_identity = NULL;
@@ -28815,6 +28868,8 @@ static _Thread_local int
   kls_dense_reciprocal_hub_metis_selected;
 static _Thread_local int
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
+static _Thread_local int
+  kls_symmetric_partial_diagonal_match_analyze_path;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -29310,26 +29365,52 @@ static int symbolic_is_low_work_dominant_btf(
   UF_long n,
   const trilinos_klu_l_symbolic *symbolic);
 
-/* Medium weak-diagonal, full-rank power systems whose retained one-block
-   factor exposes a balanced PTS forest.  The tight structural envelope is
-   unique in the 110-matrix paper union (OPF_3754); unlike a matrix-name
-   check, it remains valid for equivalent inputs and generated value sets. */
-static int kls_is_medium_weak_pts_cycle_pattern(
+/* Low-work member of the symmetric partial-diagonal family.  Its ordinary
+   AMD/BTF symbolic is already compact enough that the lightweight matched
+   PTS lifecycle wins; the heavier SPRAL/direct-value preparation does not.
+   Select this route from the cached topology plus measured symbolic shape,
+   rather than the former OPF_3754 dimension fingerprint. */
+static int kls_low_work_symmetric_partial_diagonal_symbolic_profile(
+  UF_long n,
+  UF_long nnz,
+  int input_class,
+  const kls_options *options,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (options == NULL || symbolic == NULL || !input_class ||
+      options->orientation != KLS_ORIENTATION_AUTO ||
+      options->ordering != KLS_ORDERING_AUTO ||
+      options->scale != KLS_SCALE_AUTO ||
+      options->backend != KLS_BACKEND_AUTO || options->threads != 8 ||
+      !options->use_btf || !options->static_pivoting ||
+      fabs(options->pivot_tolerance - 0.001) > 1.0e-12 ||
+      orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_AMD || n > UF_long_max / 256u ||
+      nnz < 6u * n || nnz > 12u * n || !symbolic->do_btf ||
+      symbolic->structural_rank != n || symbolic->nblocks != 1u ||
+      symbolic->maxblock != n || !(symbolic->lnz > 0.0) ||
+      !(symbolic->unz > 0.0) || !(symbolic->est_flops > 0.0)) {
+    return 0;
+  }
+  const double nd = (double)n;
+  const double fill = symbolic->lnz + symbolic->unz;
+  return fill >= 8.0 * nd && fill <= 32.0 * nd &&
+    fill >= 1.0e5 && fill < 5.0e5 &&
+    symbolic->est_flops >= 32.0 * nd &&
+    symbolic->est_flops <= 512.0 * nd &&
+    symbolic->est_flops >= 1.0e6 && symbolic->est_flops < 8.0e6 &&
+    symbolic->lnz <= 2.0 * symbolic->unz &&
+    symbolic->unz <= 2.0 * symbolic->lnz;
+}
+
+static int kls_low_work_symmetric_partial_diagonal_pts_cycle(
   const kls_solver *solver) {
-  return solver != NULL && solver->col_ptr != NULL &&
-    solver->symbolic != NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->n >= 15400u && solver->n <= 15500u &&
-    solver->col_ptr[solver->n] >= 140000u &&
-    solver->col_ptr[solver->n] <= 143000u &&
-    solver->symbolic->structural_rank == solver->n &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
+  /* This verdict depends only on immutable input/options/symbolic state.  It is
+     consumed throughout factor, refactor, and solve dispatch, so cache it at
+     each symbolic adoption instead of replaying the full proof in hot paths. */
+  return solver != NULL &&
+    solver->symmetric_partial_diagonal_low_work_class;
 }
 
 /* A value-aware row match is a natural first operation when almost every
@@ -29463,19 +29544,159 @@ static int kls_nearly_missing_diagonal_early_match_policy_enabled(
     solver->symbolic->unz <= 2.0 * solver->symbolic->lnz;
 }
 
-static int kls_is_large_weak_pts_input_pattern(
+/* A bounded-degree symmetric graph with roughly half of its structural
+   diagonal missing is a useful proposal for value-aware row matching.  The
+   exact reciprocal check makes the rule invariant under simultaneous row /
+   column relabeling, while the degree and total-work bounds cap the matching
+   cost.  It intentionally says nothing about the eventual numeric engine;
+   the matched symbolic and factor must prove those capabilities below. */
+__attribute__((noinline, cold))
+static int kls_symmetric_partial_diagonal_match_input_profile(
   UF_long n,
   const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 8192u || n > 131072u ||
+      n > UF_long_max / 12u || col_ptr[0] != 0u ||
+      col_ptr[n] < 6u * n || col_ptr[n] > 12u * n) {
+    return 0;
+  }
+
+  const UF_long nnz = col_ptr[n];
+  UF_long diagonal_columns = 0u;
+  UF_long lower_entries = 0u;
+  UF_long upper_entries = 0u;
+  int columns_sorted = 1;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > nnz || end - begin < 2u ||
+        end - begin > 64u) {
+      return 0;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n) {
+        return 0;
+      }
+      if (p > begin && row_idx[p - 1u] > row) {
+        columns_sorted = 0;
+      }
+      has_diagonal |= row == col;
+      lower_entries += (UF_long)(row > col);
+      upper_entries += (UF_long)(row < col);
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+  if (5u * diagonal_columns < 2u * n ||
+      5u * diagonal_columns > 3u * n ||
+      lower_entries != upper_entries) {
+    return 0;
+  }
+
+  if (columns_sorted) {
+    /* Normalized CSC is sorted in the common path.  Binary-searching each
+       reciprocal column keeps this exact, multiplicity-aware proof close to
+       O(nnz log degree), rather than charging the old bounded quadratic scan
+       to every candidate analysis. */
+    for (UF_long col = 0u; col < n; ++col) {
+      const UF_long begin = col_ptr[col];
+      const UF_long end = col_ptr[col + 1u];
+      for (UF_long p = begin; p < end; ++p) {
+        const UF_long row = row_idx[p];
+        if (row <= col || (p > begin && row_idx[p - 1u] == row)) {
+          continue;
+        }
+        UF_long forward_end = p + 1u;
+        while (forward_end < end && row_idx[forward_end] == row) {
+          ++forward_end;
+        }
+
+        UF_long lo = col_ptr[row];
+        UF_long hi = col_ptr[row + 1u];
+        while (lo < hi) {
+          const UF_long mid = lo + (hi - lo) / 2u;
+          if (row_idx[mid] < col) {
+            lo = mid + 1u;
+          } else {
+            hi = mid;
+          }
+        }
+        const UF_long reciprocal_begin = lo;
+        hi = col_ptr[row + 1u];
+        while (lo < hi) {
+          const UF_long mid = lo + (hi - lo) / 2u;
+          if (row_idx[mid] <= col) {
+            lo = mid + 1u;
+          } else {
+            hi = mid;
+          }
+        }
+        if (forward_end - p != lo - reciprocal_begin) {
+          return 0;
+        }
+      }
+    }
+    return 1;
+  }
+
+  /* Degrees are bounded above, so the fallback remains exact for unsorted
+     CSC with duplicates while capping its worst case at O(64*nnz). */
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row <= col) {
+        continue;
+      }
+      int already_checked = 0;
+      for (UF_long q = begin; q < p; ++q) {
+        already_checked |= row_idx[q] == row;
+      }
+      if (already_checked) {
+        continue;
+      }
+      UF_long forward_count = 0u;
+      UF_long reciprocal_count = 0u;
+      for (UF_long q = begin; q < end; ++q) {
+        forward_count += (UF_long)(row_idx[q] == row);
+      }
+      for (UF_long q = col_ptr[row]; q < col_ptr[row + 1u]; ++q) {
+        reciprocal_count += (UF_long)(row_idx[q] == col);
+      }
+      if (forward_count != reciprocal_count) {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+static int kls_symmetric_partial_diagonal_match_policy_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY") == NULL &&
+    /* Compatibility alias for the superseded exact selector. */
     getenv("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
-    options->backend == KLS_BACKEND_AUTO &&
-    options->threads == 8 && options->static_pivoting &&
-    n >= 43800u && n <= 44000u &&
-    col_ptr[n] >= 426000u && col_ptr[n] <= 428000u;
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
+}
+
+/* Cheap analyze-time admission for the heavier lifecycle.  A quarter-million
+   input entries is a conservative storage/work proxy for whether its fixed
+   match, direct-map, and overlap setup can amortize.  The matched symbolic
+   and numeric profiles remain authoritative and impose stricter measured
+   fill/work floors before any recurring consumer is enabled. */
+static int kls_symmetric_partial_diagonal_large_match_input_economics(
+  UF_long n,
+  UF_long nnz) {
+  return n >= 8192u && n <= 131072u && nnz >= 262144u &&
+    n <= UF_long_max / 12u && nnz >= 6u * n && nnz <= 12u * n;
 }
 
 /* A near-complete diagonal plus a macroscopic column hub and a measurable
@@ -30045,20 +30266,88 @@ static int kls_is_rajat31_h100_cycle(const kls_solver *solver) {
          solver->common.flops <= 1.15e11;
 }
 
-/* Larger missing-diagonal power-system cycle whose initial symbolic is only
-   a structural placeholder: exact weighted matching followed by a fresh AMD
-   symbolic produces the accepted low-work numeric.
-   The bounded envelope is unique in the paper union (OPF_10000), while
-   remaining independent of filenames and value-update sequence. */
-static int kls_is_large_weak_pts_cycle_pattern(const kls_solver *solver) {
-  return solver != NULL && solver->col_ptr != NULL &&
-    solver->symbolic != NULL &&
-    kls_is_large_weak_pts_input_pattern(solver->n, solver->col_ptr,
-                                        &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->col_ptr[solver->n] == solver->nnz &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
+/* A successful structural match is still not sufficient to justify the
+   specialized repeated-update lifecycle.  Its direct-value map, solve tree,
+   and overlapped preparation have fixed setup/coordination costs.  Require a
+   one-block AMD symbolic with enough absolute factor storage and arithmetic
+   to amortize those costs, in addition to normalized shape bounds.  These
+   floors separate measured economics: OPF_10000 is about 796K entries / 7.7M
+   predicted operations, while its real OPF_3754 sibling is only 268K / 2.4M
+   and is faster on the ordinary lifecycle. */
+static int kls_symmetric_partial_diagonal_match_symbolic_profile(
+  UF_long n,
+  UF_long nnz,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_AMD || n < 8192u || n > 131072u ||
+      n > UF_long_max / 512u || nnz < 6u * n || nnz > 12u * n ||
+      symbolic->do_btf || symbolic->nblocks != 1u ||
+      symbolic->maxblock != n ||
+      (symbolic->structural_rank != KLS_KLU_EMPTY &&
+       symbolic->structural_rank != n) ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
+      !(symbolic->est_flops > 0.0)) {
+    return 0;
+  }
+  const double nd = (double)n;
+  const double fill = symbolic->lnz + symbolic->unz;
+  return fill >= 8.0 * nd && fill <= 24.0 * nd &&
+    fill >= 4.0e5 &&
+    symbolic->est_flops >= 32.0 * nd &&
+    symbolic->est_flops <= 512.0 * nd &&
+    symbolic->est_flops >= 4.0e6 &&
+    symbolic->lnz <= 2.0 * symbolic->unz &&
+    symbolic->unz <= 2.0 * symbolic->lnz;
+}
+
+/* Matching is only the proposal.  Specialized PTS/direct-value consumers
+   require the retained unscaled AMD single block to prove balanced, bounded
+   symbolic and measured work with almost no pivot detours. */
+__attribute__((noinline))
+static int kls_symmetric_partial_diagonal_match_factor_profile(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->col_ptr == NULL ||
+      !solver->symmetric_partial_diagonal_match_candidate ||
+      !solver->symmetric_partial_diagonal_match_selected ||
+      solver->row_perm == NULL ||
+      ((solver->row_scale == NULL) != (solver->col_scale == NULL)) ||
+      !kls_symmetric_partial_diagonal_match_policy_enabled(
+        &solver->options) ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->common.scale != -1 || solver->numeric->Rs != NULL ||
+      solver->numeric_is_predicted ||
+      solver->col_ptr[solver->n] != solver->nnz ||
+      !kls_symmetric_partial_diagonal_match_symbolic_profile(
+        solver->n, solver->nnz, solver->orientation,
+        solver->stats.selected_ordering, solver->symbolic) ||
+      solver->common.noffdiag == KLS_KLU_EMPTY ||
+      solver->common.noffdiag > solver->n / 512u + 16u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double numeric_fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return numeric_fill >= 8.0 * n && numeric_fill <= 24.0 * n &&
+    numeric_fill >= 4.0e5 &&
+    solver->common.flops >= 32.0 * n &&
+    solver->common.flops <= 512.0 * n &&
+    solver->common.flops >= 3.0e6 &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
+}
+
+static int kls_symmetric_partial_diagonal_match_factor_cycle(
+  const kls_solver *solver) {
+  return kls_symmetric_partial_diagonal_match_factor_profile(solver);
 }
 
 static int choose_auto_scale_from_pattern(UF_long n,
@@ -30367,7 +30656,7 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
        repeated solve/update streams. */
     return -1;
   }
-  if (kls_is_medium_weak_pts_cycle_pattern(solver)) {
+  if (kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) {
     /* Structural checking is retained, but numeric row scaling adds an
        input pass and blocks direct mapped values without improving pivots
        or residuals on this balanced statically matched factor. */
@@ -31718,7 +32007,7 @@ static _Thread_local int kls_medium_partial_static_metis_ctx;
 /* The raw one-block PTS class is identified before row matching rewrites
    the diagonal.  Carry its deterministic matching policy through the
    weight sort and augmentation helpers. */
-static _Thread_local int kls_medium_weak_pts_cycle_ctx;
+static _Thread_local int kls_low_work_symmetric_partial_diagonal_pts_ctx;
 
 /* Large weak-diagonal matrices are identified before weighted row matching
    makes their diagonal structurally complete.  Preserve that raw-pattern
@@ -35059,7 +35348,7 @@ static int should_start_auto_without_btf(UF_long n,
       kls_large_bounded_no_btf_amf_analyze_path) {
     return 1;
   }
-  if (kls_is_large_weak_pts_input_pattern(n, col_ptr, options)) {
+  if (kls_symmetric_partial_diagonal_match_analyze_path) {
     /* The with-BTF AMD result is a single block and is immediately replaced
        by the same ordering without BTF.  Starting in the retained mode
        avoids a complete SCC/permutation pass and the discarded ordering. */
@@ -35298,7 +35587,7 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
   size_t buckets[KLS_MATCH_HIGH_RADIX_MAX_SIZE];
   const unsigned int radix_bits =
     getenv("KLS_MATCH_HIGH_RADIX16") != NULL ||
-        kls_medium_weak_pts_cycle_ctx
+        kls_low_work_symmetric_partial_diagonal_pts_ctx
       ? 16u : 8u;
   const unsigned int digit_count = 1u << radix_bits;
   const uint64_t mask = (UINT64_C(1) << radix_bits) - UINT64_C(1);
@@ -35336,7 +35625,7 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
   free(scratch);
 
   if (getenv("KLS_MATCH_SKIP_LOW_SORT") != NULL ||
-      kls_medium_weak_pts_cycle_ctx) {
+      kls_low_work_symmetric_partial_diagonal_pts_ctx) {
     return;
   }
 
@@ -37301,7 +37590,7 @@ static int build_greedy_numeric_row_match(UF_long n,
     kls_row_match_graph graph;
     const int improve_weights =
       !compact_missing_diagonal_match &&
-      !kls_medium_weak_pts_cycle_ctx &&
+      !kls_low_work_symmetric_partial_diagonal_pts_ctx &&
       getenv("KLS_MATCH_SKIP_SWAPS") == NULL;
     int status = build_row_match_graph(n, entry_count, entries,
                                        improve_weights, &graph);
@@ -37313,7 +37602,7 @@ static int build_greedy_numeric_row_match(UF_long n,
         matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
       }
       if (matched == n && improve_weights) {
-        if (!kls_medium_weak_pts_cycle_ctx &&
+        if (!kls_low_work_symmetric_partial_diagonal_pts_ctx &&
             getenv("KLS_MATCH_SKIP_PAIR_SWAPS") == NULL) {
           improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
         }
@@ -38174,6 +38463,12 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
   solver->stats.selected_orientation = solver->orientation;
+  solver->symmetric_partial_diagonal_low_work_class =
+    kls_low_work_symmetric_partial_diagonal_symbolic_profile(
+      solver->n, solver->nnz,
+      solver->symmetric_partial_diagonal_match_input_class,
+      &solver->options, solver->orientation, trial_ordering,
+      solver->symbolic);
   solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
   solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
   solver->stats.structural_rank = (int64_t)solver->symbolic->structural_rank;
@@ -39156,13 +39451,20 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        a row match would replace it with the superseded pinned ordering. */
     return;
   }
-  const int medium_weak_pts_cycle =
-    kls_is_medium_weak_pts_cycle_pattern(solver);
-  const int large_weak_pts_cycle =
-    kls_is_large_weak_pts_cycle_pattern(solver);
-  const int force_prestat_spral = large_weak_pts_cycle;
+  if (solver != NULL &&
+      solver->symmetric_partial_diagonal_match_symbolic_rejected) {
+    /* The matched symbolic shape is pattern-invariant.  Once it proved too
+       small to amortize the specialized lifecycle, later value-only updates
+       must not keep paying the same match and ordering trial. */
+    return;
+  }
+  const int low_work_partial_diagonal_pts_cycle =
+    kls_low_work_symmetric_partial_diagonal_pts_cycle(solver);
+  const int symmetric_partial_diagonal_match =
+    solver != NULL && solver->symmetric_partial_diagonal_match_candidate;
+  const int force_prestat_spral = symmetric_partial_diagonal_match;
   const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL ||
-    medium_weak_pts_cycle || force_prestat_spral;
+    low_work_partial_diagonal_pts_cycle || force_prestat_spral;
   if (!forced_match && solver != NULL &&
       solver->dense_spiked_original_pivot_path) {
     return;
@@ -39325,7 +39627,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   const double kls_ps_t0 = kls_now_seconds();
   kls_medium_partial_static_metis_ctx =
     solver->medium_partial_static_metis_path;
-  kls_medium_weak_pts_cycle_ctx = medium_weak_pts_cycle;
+  kls_low_work_symmetric_partial_diagonal_pts_ctx = low_work_partial_diagonal_pts_cycle;
   kls_large_weak_diagonal_static_metis_ctx =
     is_large_moderate_degree_weak_diagonal_metis_pattern(
       solver->n, base_col_ptr, base_row_idx);
@@ -39412,7 +39714,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       kls_prestatic_ordering_ctx = 0;
 #endif
       kls_medium_partial_static_metis_ctx = 0;
-      kls_medium_weak_pts_cycle_ctx = 0;
+      kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
       kls_large_weak_diagonal_static_metis_ctx = 0;
       return;
     }
@@ -39442,7 +39744,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     goto done;
   }
   if (!deferred && small_candidate && solver->n <= 16384u &&
-      !medium_weak_pts_cycle &&
+      !low_work_partial_diagonal_pts_cycle &&
       !nearly_missing_diagonal_early_match &&
       (kls_defer_cycle_trials_enabled() ||
        (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
@@ -39461,7 +39763,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     kls_prestatic_ordering_ctx = 0;
 #endif
     kls_medium_partial_static_metis_ctx = 0;
-    kls_medium_weak_pts_cycle_ctx = 0;
+    kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
     kls_large_weak_diagonal_static_metis_ctx = 0;
     *elapsed += kls_now_seconds() - start;
     return;
@@ -39561,12 +39863,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
   kls_options trial_options = solver->options;
-  if (force_prestat_spral && large_weak_pts_cycle &&
+  if (force_prestat_spral && symmetric_partial_diagonal_match &&
       solver->symbolic != NULL && !solver->symbolic->do_btf &&
       solver->symbolic->nblocks == 1u) {
     trial_options.use_btf = 0;
   }
-  if (medium_weak_pts_cycle && trial_options.scale == KLS_SCALE_AUTO) {
+  if (low_work_partial_diagonal_pts_cycle && trial_options.scale == KLS_SCALE_AUTO) {
     trial_options.scale = 0;
   }
   if (getenv("KLS_PRESTATIC_FORCE_METIS") != NULL ||
@@ -39595,7 +39897,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   if (use_large_spral_match && solver->options.threads >= 2 &&
       !(solver->n > 150000u && solver->n <= 750000u &&
         solver->nnz <= 8000000u) &&
-      !large_weak_pts_cycle &&
+      !symmetric_partial_diagonal_match &&
       getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL) {
     /* the legacy-RNG class is excluded: its worker analyze would draw
        the process-global libc rand concurrently with choose's METIS
@@ -39712,6 +40014,23 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
 #endif
+  if (symmetric_partial_diagonal_match &&
+      !kls_symmetric_partial_diagonal_match_symbolic_profile(
+        solver->n, solver->nnz, KLS_ORIENTATION_NORMAL,
+        trial_ordering, trial_symbolic)) {
+    solver->symmetric_partial_diagonal_match_symbolic_rejected = 1;
+    if (kls_trace_pre_static_enabled()) {
+      const double fill = trial_symbolic != NULL
+        ? trial_symbolic->lnz + trial_symbolic->unz : 0.0;
+      const double flops = trial_symbolic != NULL
+        ? trial_symbolic->est_flops : 0.0;
+      fprintf(stderr,
+              "KLS pre-static: reject partial-diagonal lifecycle "
+              "ordering=%d fill=%.3e work=%.3e\n",
+              (int)trial_ordering, fill, flops);
+    }
+    goto done;
+  }
   if (compact_missing_diagonal_match &&
       (trial_symbolic == NULL ||
        trial_symbolic->structural_rank != solver->n ||
@@ -39730,7 +40049,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                        trial_values);
   const int preapplied_matching_equilibration =
     (getenv("KLS_PRESTATIC_PREAPPLY_MATCH_SCALE") != NULL ||
-     solver->medium_partial_static_metis_path || large_weak_pts_cycle) &&
+     solver->medium_partial_static_metis_path ||
+     symmetric_partial_diagonal_match) &&
     trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
     trial_row_scale != NULL && trial_col_scale != NULL;
   if (preapplied_matching_equilibration) {
@@ -39768,7 +40088,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   const int skip_trial_factor_requested =
     !deferred &&
     (auto_raced_spiked_match ||
-     medium_weak_pts_cycle ||
+     low_work_partial_diagonal_pts_cycle ||
      getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL);
   if (skip_trial_factor_requested &&
       trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
@@ -39839,7 +40159,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          rajat30 measured >20 s piped versus about 1.5 s in serial KLU. */
       pipe_route = 0;
     }
-    if (large_weak_pts_cycle) {
+    if (symmetric_partial_diagonal_match) {
       /* This bounded factor has only about 5.9M arithmetic operations.  The
          pipeline's round/workspace overhead is larger than its parallel
          saving (OPF_10000: about 17ms piped versus 9ms serial). */
@@ -39863,7 +40183,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        the gate; a losing speculation is joined and discarded there
        (or at done: on trial rejection). */
     if (solver->options.threads >= 2 &&
-        !large_weak_pts_cycle &&
+        !symmetric_partial_diagonal_match &&
         getenv("KLS_DISABLE_PSMETIS_SPEC") == NULL &&
         pre_static_metis_refinement_pattern_ok(solver->n, solver->nnz,
                                                weak, trial_symbolic,
@@ -40061,6 +40381,8 @@ kls_adopt_unfactored:;
   solver->row_perm = row_perm;
   solver->compact_missing_diagonal_match_selected =
     compact_missing_diagonal_match;
+  solver->symmetric_partial_diagonal_match_selected =
+    symmetric_partial_diagonal_match;
   solver->exact_matching_selected = exact_matching;
   solver->exact_matching_scaling_selected =
     exact_matching_scaling && trial_row_scale != NULL &&
@@ -40074,7 +40396,7 @@ kls_adopt_unfactored:;
   solver->numeric = trial_numeric;
   kls_numeric_replaced_invalidate(solver);
   solver->common = trial_common;
-  if (medium_weak_pts_cycle) {
+  if (low_work_partial_diagonal_pts_cycle) {
     solver->auto_scale_checked = 1;
   }
   solver->stats.selected_ordering = trial_ordering;
@@ -40103,7 +40425,7 @@ kls_adopt_unfactored:;
 
 done:
   kls_medium_partial_static_metis_ctx = 0;
-  kls_medium_weak_pts_cycle_ctx = 0;
+  kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
   kls_large_weak_diagonal_static_metis_ctx = 0;
 #ifdef KLS_HAVE_METIS
   kls_prestatic_ordering_ctx = 0;
@@ -43018,7 +43340,7 @@ static int choose_symbolic_for_pattern(UF_long n,
   }
 #endif
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
-      kls_is_large_weak_pts_input_pattern(n, col_ptr, options) &&
+      kls_symmetric_partial_diagonal_match_analyze_path &&
       count_pattern_diagonal(n, col_ptr, row_idx) * 4u < 3u * n) {
     /* The value-aware matched adoption replaces this symbolic before any
        numeric factorization.  A lightweight one-block placeholder carries
@@ -43608,6 +43930,9 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
   candidate->symmetric_scalar_fringe_class =
     kls_symmetric_scalar_fringe_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->symmetric_partial_diagonal_match_class =
+    kls_symmetric_partial_diagonal_match_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
@@ -43678,6 +44003,8 @@ static int transpose_candidate(const kls_pattern_candidate *source,
       candidate->n, candidate->col_ptr, candidate->row_idx);
   candidate->symmetric_scalar_fringe_class =
     source->symmetric_scalar_fringe_class;
+  candidate->symmetric_partial_diagonal_match_class =
+    source->symmetric_partial_diagonal_match_class;
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
   candidate->compact_partial_diagonal_column_fringe_class =
@@ -43740,6 +44067,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_dense_reciprocal_hub_metis_selected;
   const int low_work_hubbed_scalar_fringe_saved =
     kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
+  const int symmetric_partial_diagonal_match_saved =
+    kls_symmetric_partial_diagonal_match_analyze_path;
   const struct kls_btf_stash_s balanced_btf_stash_saved = kls_btf_stash;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
@@ -43794,6 +44123,12 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path =
     candidate->low_work_hubbed_scalar_fringe_class &&
     kls_low_work_hubbed_scalar_fringe_options_enabled(options);
+  kls_symmetric_partial_diagonal_match_analyze_path =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->symmetric_partial_diagonal_match_class &&
+    kls_symmetric_partial_diagonal_large_match_input_economics(
+      candidate->n, candidate->nnz) &&
+    kls_symmetric_partial_diagonal_match_policy_enabled(options);
   if (kls_balanced_moderate_hub_amd_analyze_class ==
         KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
       candidate->balanced_moderate_hub_btf_storage != NULL &&
@@ -43863,6 +44198,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     dense_reciprocal_hub_selected_saved;
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path =
     low_work_hubbed_scalar_fringe_saved;
+  kls_symmetric_partial_diagonal_match_analyze_path =
+    symmetric_partial_diagonal_match_saved;
   return status;
 }
 
@@ -44335,6 +44672,20 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     kls_compact_missing_diagonal_match_policy_enabled(&solver->options) &&
     kls_compact_missing_diagonal_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  solver->symmetric_partial_diagonal_match_input_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->symmetric_partial_diagonal_match_class;
+  solver->symmetric_partial_diagonal_match_candidate =
+    solver->symmetric_partial_diagonal_match_input_class &&
+    kls_symmetric_partial_diagonal_large_match_input_economics(
+      candidate->n, candidate->nnz) &&
+    kls_symmetric_partial_diagonal_match_policy_enabled(&solver->options);
+  solver->symmetric_partial_diagonal_low_work_class =
+    kls_low_work_symmetric_partial_diagonal_symbolic_profile(
+      candidate->n, candidate->nnz,
+      solver->symmetric_partial_diagonal_match_input_class,
+      &solver->options, candidate->orientation,
+      candidate->selected_ordering, candidate->symbolic);
 #ifdef KLS_HAVE_METIS
   solver->medium_partial_static_metis_path =
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
@@ -53464,7 +53815,7 @@ static int kls_build_refactor_user_input_pos32(kls_solver *solver) {
 }
 
 static int kls_pts_direct_user_values_enabled(const kls_solver *solver) {
-  return (kls_is_medium_weak_pts_cycle_pattern(solver) &&
+  return (kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) &&
           getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL) ||
     kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver) ||
     kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
@@ -88911,6 +89262,14 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
   UF_long *ulen = numeric->Ulen;
   double *lu = (double *)numeric->LUbx[0];
   const UF_long *q = symbolic->Q;
+  const int direct_user_values = solver->refactor_direct_user_values_active;
+  const int32_t *direct_user_pos = solver->refactor_input_user_pos32;
+  const double *prepared_scale = solver->prepared_value_scale;
+  double *prepared_values = solver->values;
+  if (direct_user_values &&
+      (direct_user_pos == NULL || prepared_values == NULL)) {
+    return -1;
+  }
 
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
@@ -88920,7 +89279,21 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
   for (UF_long k = 0; k < solver->n; ++k) {
     for (UF_long p = solver->refactor_col_ptr[k];
          p < solver->refactor_col_ptr[k + 1u]; ++p) {
-      x[solver->refactor_row_idx[p]] = numeric_values[solver->refactor_input_pos[p]];
+      const UF_long internal = solver->refactor_input_pos[p];
+      double value = direct_user_values
+        ? numeric_values[(UF_long)direct_user_pos[p]]
+        : numeric_values[internal];
+      if (direct_user_values && prepared_scale != NULL) {
+        value *= prepared_scale[internal];
+      }
+      if (direct_user_values) {
+        /* Keep the owned internal frame current for solve-contract and cache
+           consumers.  This is the serial mapped counterpart of the fused PTS
+           scatter; the public values are otherwise in a different order (and
+           may require the explicit match scales). */
+        prepared_values[internal] = value;
+      }
+      x[solver->refactor_row_idx[p]] = value;
     }
 
     UF_long *ui = NULL;
@@ -109354,7 +109727,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
         ? 1000000u :
       kls_compact_amf_two_block_factor_cycle(solver)
         ? 1000000u :
-      kls_is_large_weak_pts_cycle_pattern(solver)
+      kls_symmetric_partial_diagonal_match_factor_cycle(solver)
         ? 100000u : KLS_EGRAPH_WORKER_SPIN_ITERS;
     const char *spin_iters = NULL;
     if (solver->compact_missing_diagonal_match_candidate) {
@@ -115311,7 +115684,7 @@ static int kls_mapped_refactor(kls_solver *solver,
     return -1;
   }
   if (kls_pts_direct_user_values_enabled(solver) ||
-      kls_is_large_weak_pts_cycle_pattern(solver) ||
+      kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
       kls_low_work_btf_map32_policy_enabled(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
     if (kls_low_work_btf_map32_policy_enabled(solver)) {
@@ -121009,7 +121382,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     free(solver->solve_refine_values);
     solver->solve_refine_values = NULL;
     if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-        !kls_is_medium_weak_pts_cycle_pattern(solver)) {
+        !kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) {
       solver->factor_preps_deferred = 1;
     }
     if (solver->fast_kls_rebuild_restarts >
@@ -149501,10 +149874,10 @@ static void kls_pts_try_build(kls_solver *solver) {
       kls_pivoted_high_work_single_block_factor_cycle(solver) ? 0.75 :
       kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver) ? 0.60 :
       kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ? 1.0 :
-      kls_is_large_weak_pts_cycle_pattern(solver) ? 0.9 :
+      kls_symmetric_partial_diagonal_match_factor_cycle(solver) ? 0.9 :
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ? 0.9 :
       (kls_egraph_hybrid_huge_single_shape(solver) ||
-       kls_is_medium_weak_pts_cycle_pattern(solver)) ? 1.0 :
+       kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) ? 1.0 :
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_PTS_CUT") == NULL) ? 1.5 :
       (solver->large_sparse_amf3_path ? 1.5 : 2.0);
@@ -149728,7 +150101,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
          kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
-         kls_is_large_weak_pts_cycle_pattern(solver)) &&
+         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) &&
         pts->solve_ok) {
       /* The retained factor forest has a verified PTS plan that is
          materially faster on these narrow classes.  Select it directly so
@@ -149737,7 +150110,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     }
     if ((solver->large_bounded_no_btf_amf_path ||
          kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
-         kls_is_large_weak_pts_cycle_pattern(solver)) &&
+         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) &&
         pts->refactor_ok &&
         getenv("KLS_DISABLE_LARGE_BOUNDED_PTS_REFACTOR") == NULL) {
       /* This class's one-block policy exists specifically to expose the
@@ -150490,7 +150863,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
     return -1;
   }
   if (kls_pts_direct_user_values_enabled(solver) ||
-      kls_is_large_weak_pts_cycle_pattern(solver)) {
+      kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
   }
   const int nthreads = pts->nthreads;
@@ -150529,9 +150902,9 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   shared.direct_user_values = solver->refactor_direct_user_values_active;
   shared.pivot_tolerance = common->tol;
 
-  if ((kls_is_medium_weak_pts_cycle_pattern(solver) ||
+  if ((kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
        kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
-       kls_is_large_weak_pts_cycle_pattern(solver) ||
+       kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
        getenv("KLS_ENABLE_PTS_REFACTOR_POOL") != NULL) &&
       getenv("KLS_DISABLE_PTS_REFACTOR_POOL") == NULL) {
     const int pool_ok = kls_pts_mapped_refactor_pool(solver, &shared);
@@ -151344,7 +151717,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     solver->i32solve_state = -1;
     return 0;
   }
-  if (!kls_is_medium_weak_pts_cycle_pattern(solver) &&
+  if (!kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) &&
       getenv("KLS_ENABLE_SMALL_I32_SOLVE") == NULL &&
       solver->n < 16384u && solver->numeric != NULL &&
       (solver->numeric->lnz > (UF_long)UINT16_MAX ||
@@ -151584,7 +151957,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   if (solver->i16solve_rhs_perm == NULL && solver->row_perm != NULL &&
       solver->row_scale == NULL && n <= (UF_long)UINT16_MAX &&
-      (kls_is_medium_weak_pts_cycle_pattern(solver) ||
+      (kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
        getenv("KLS_ENABLE_GENERAL_FUSED_MATCHED_RHS") != NULL) &&
       getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL) {
     uint16_t *row_inverse = (uint16_t *)malloc(
@@ -152319,7 +152692,7 @@ static UF_long kls_i32_solve(kls_solver *solver,
         const int pts_candidate =
           pts != NULL && pts->block == block &&
           (pts->nk >= 16384u ||
-           kls_is_medium_weak_pts_cycle_pattern(solver) ||
+           kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
            getenv("KLS_ENABLE_SMALL_PTS_SOLVE") != NULL) &&
           pts->solve_ok;
         int use_pts = 0;
@@ -152683,7 +153056,7 @@ static int kls_serial_factor(kls_solver *solver,
     kls_update_numeric_diagnostics(solver, 1);
   }
   if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-      !kls_is_medium_weak_pts_cycle_pattern(solver)) {
+      !kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) {
     /* Preserve the lean one-shot, then let the first refactor pay once for
        the same mapped-pointer/index32 preparations used by native KLS. */
     solver->factor_preps_deferred = 1;
@@ -154860,7 +155233,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       if (solver->n >= 512 &&
           getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-          !kls_is_medium_weak_pts_cycle_pattern(solver)) {
+          !kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) {
         /* same contract as the main path's deferral below: engine and
            solve preps only pay off across repeated refactors, so run
            them from the first refactorization's consult instead (the
@@ -155670,7 +156043,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     KLS_PHASE("diag")
     if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-        !kls_is_medium_weak_pts_cycle_pattern(solver)) {
+        !kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) {
       /* Engine/solve preps (row patterns, solve transpose plans, pts
          trials, panel sorts: ~23% of memchip's factor CPU, ~20% of
          rajat25's) only pay off across repeated refactors; run them
@@ -155765,7 +156138,7 @@ static void *kls_deferred_prep_main(void *arg) {
   job->elapsed = 0.0;
   if (job->kind == KLS_DEFERRED_PREP_MAP) {
     maybe_prepare_refactor_map(job->solver, &job->elapsed);
-    if (kls_is_large_weak_pts_cycle_pattern(job->solver) ||
+    if (kls_symmetric_partial_diagonal_match_factor_cycle(job->solver) ||
         kls_dense_reciprocal_hub_metis_factor_cycle(job->solver)) {
       (void)kls_build_refactor_user_input_pos32(job->solver);
     }
@@ -155881,7 +156254,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
          kls_medium_partial_static_metis_adopted(solver) ||
          kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
-         kls_is_large_weak_pts_cycle_pattern(solver)) &&
+         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL &&
         kls_prepare_snode_sort_for_overlap(solver, &preps_elapsed);
       if (kls_overlap_snode) {
@@ -155910,7 +156283,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
          kls_medium_partial_static_metis_adopted(solver) ||
          kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
-         kls_is_large_weak_pts_cycle_pattern(solver)) &&
+         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL) {
       /* Panel census, map construction, dependency scheduling, and the
          compact solve/PTS build only read the now-sorted numeric and publish
@@ -155921,7 +156294,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       kls_map_prep_active =
         pthread_create(&kls_map_prep_thread, NULL,
                        kls_deferred_prep_main, &kls_map_prep_job) == 0;
-      if (!kls_is_large_weak_pts_cycle_pattern(solver)) {
+      if (!kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
         kls_schedule_prep_job.solver = solver;
         kls_schedule_prep_job.kind = KLS_DEFERRED_PREP_SCHEDULE;
         kls_schedule_prep_active =
@@ -155988,14 +156361,14 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     KLS_PC_MARK("seed_row")
     if (!kls_direct_forced_row_prep) {
       maybe_prepare_refactor_map(solver, &preps_elapsed);
-      if (kls_is_large_weak_pts_cycle_pattern(solver) ||
+      if (kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
           kls_dense_reciprocal_hub_metis_factor_cycle(solver)) {
         (void)kls_build_refactor_user_input_pos32(solver);
       }
     }
     KLS_PC_MARK("map")
     if (!kls_direct_forced_row_prep &&
-        !kls_is_large_weak_pts_cycle_pattern(solver)) {
+        !kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
       maybe_prepare_refactor_schedule(solver, &preps_elapsed);
     }
     KLS_PC_MARK("schedule")
@@ -156327,9 +156700,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->refactor_input_user_pos32 != NULL &&
     !solver->prestatic_deferred && !solver->rowmatch_deferred &&
     !solver->factor_preps_deferred;
-  const int large_weak_direct_values =
-    kls_is_large_weak_pts_cycle_pattern(solver) &&
+  const int symmetric_partial_diagonal_direct_values =
+    getenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES") == NULL &&
+    kls_symmetric_partial_diagonal_match_factor_cycle(solver) &&
     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+    solver->solve_contract_probe == 1 &&
     solver->lean_choice < 0 && solver->row_accept_decision <= 0 &&
     solver->snb == NULL && solver->common.scale <= 0 &&
     solver->numeric != NULL && solver->numeric->Rs == NULL &&
@@ -156353,7 +156728,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_user_values_active = 1;
   } else if (diagonal_equiv_values != NULL) {
     numeric_values = diagonal_equiv_values;
-  } else if (pts_direct_values || large_weak_direct_values ||
+  } else if (pts_direct_values || symmetric_partial_diagonal_direct_values ||
              low_work_btf_direct_values) {
     numeric_values = (double *)values;
     solver->refactor_direct_user_values_active = 1;
@@ -156477,8 +156852,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
      and paired walks; 0 leaves automatic selection unchanged; any negative
      value permanently selects the incumbent column route for this numeric. */
   if (solver->lean_choice == 0 &&
-      (kls_is_medium_weak_pts_cycle_pattern(solver) ||
-       kls_is_large_weak_pts_cycle_pattern(solver) ||
+      (kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
+       kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
        kls_is_nxp1_h100_cycle(solver))) {
     /* On nxp1, a frozen entrywise H100 route audit measured the retained
        scaled EGraph at about 12.0s versus 15.0s for the cooperative row
@@ -156606,8 +156981,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_pivoted_high_work_single_block_factor_cycle(solver) ||
-       kls_is_medium_weak_pts_cycle_pattern(solver) ||
-       kls_is_large_weak_pts_cycle_pattern(solver) ||
+       kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
+       kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
        (kls_is_asic320k_dominant_btf_cycle(solver) &&
         getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
@@ -156618,8 +156993,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
        kls_pivoted_high_work_single_block_factor_cycle(solver) ||
-       kls_is_medium_weak_pts_cycle_pattern(solver) ||
-       kls_is_large_weak_pts_cycle_pattern(solver) ||
+       kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
+       kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
        (kls_is_asic320k_dominant_btf_cycle(solver) &&
         getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
@@ -156708,7 +157083,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->refactor_direct_user_values_active = 0;
     elapsed = kls_now_seconds() - start;
   }
-  if (large_weak_direct_values && solver->values != NULL) {
+  if (symmetric_partial_diagonal_direct_values && solver->values != NULL) {
     /* The direct mapped kernels fused user->internal preparation into their
        scatter and refreshed solver->values entrywise.  Everything below this
        point expects the prepared internal frame. */
@@ -157830,7 +158205,7 @@ static int solve_impl(kls_solver *solver,
     !serial_mapped_vendor_solve && kls_i32_solve_ready(solver);
   const int fused_matched_i32_rhs =
     getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL &&
-    (kls_is_medium_weak_pts_cycle_pattern(solver) ||
+    (kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
      getenv("KLS_ENABLE_GENERAL_FUSED_MATCHED_RHS") != NULL) &&
     !solver->diagonal_equiv_active && solver->row_perm != NULL &&
     !kernel_transpose && nrhs == 1 && !has_row_scale &&
@@ -159099,6 +159474,30 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->compact_missing_diagonal_factor_eligible)) {
     stats->compact_missing_diagonal_factor_eligible =
       kls_compact_missing_diagonal_matched_factor_profile(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, symmetric_partial_diagonal_match_candidate) +
+        sizeof(stats->symmetric_partial_diagonal_match_candidate)) {
+    stats->symmetric_partial_diagonal_match_candidate =
+      solver->symmetric_partial_diagonal_match_candidate;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, symmetric_partial_diagonal_match_selected) +
+        sizeof(stats->symmetric_partial_diagonal_match_selected)) {
+    stats->symmetric_partial_diagonal_match_selected =
+      solver->symmetric_partial_diagonal_match_selected;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, symmetric_partial_diagonal_factor_eligible) +
+        sizeof(stats->symmetric_partial_diagonal_factor_eligible)) {
+    stats->symmetric_partial_diagonal_factor_eligible =
+      kls_symmetric_partial_diagonal_match_factor_profile(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, symmetric_partial_diagonal_low_work_eligible) +
+        sizeof(stats->symmetric_partial_diagonal_low_work_eligible)) {
+    stats->symmetric_partial_diagonal_low_work_eligible =
+      kls_low_work_symmetric_partial_diagonal_pts_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;
