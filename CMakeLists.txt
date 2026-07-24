@@ -670,6 +670,15 @@ if(KLS_BUILD_TESTS)
               "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_dev_manifest.txt"
               --holdout
               "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_holdout_manifest.txt")
+    add_test(
+      NAME kls_large_generalization_manifests
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_generalization_manifests.py"
+              --development
+              "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_large_dev_manifest.txt"
+              --holdout
+              "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_large_holdout_manifest.txt"
+              --expected-count 12)
   endif()
   add_executable(kls_smoke
     tests/kls_smoke.c)

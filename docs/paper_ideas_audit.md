@@ -18092,3 +18092,96 @@ one and EGraph, and the worst per-generation relative-L2 residual was
 Leak-enabled sanitized changed-value runs additionally cover the original,
 the out-of-box 1,024-node positive, and the 8,192-node rejection with their
 expected decisions and valid residuals.
+
+LOW-WORK MANY-FRINGE BTF/PTS LIFECYCLE GENERALIZED (2026-07-24).  The former
+`rajat21` selector was post-factor, but it still identified one benchmark by
+requiring 411,000--412,000 rows, 1.87M--1.89M input entries, 10,000--10,400
+BTF blocks, and a 396,000--399,000-row dominant core.  It then required at
+most 512 off-diagonal pivots, 2.75M--2.90M factor entries, and 6M--10M factor
+flops.  Seven PTS decisions consumed that verdict: the subtree cut, the
+top-flop refactor bypass, direct solve and refactor admission, pooled and
+non-pooled top pipelining, and the refactor pool.  Thus useful measured bounds
+did not remove the exact matrix identity from the recurring lifecycle.
+
+The replacement keeps the unchanged AUTO orientation, ordering, scale, and
+backend contract with eight threads, BTF, static pivoting, and the default
+requested `0.001` tolerance.  It admits a retained normal-AMD numeric with
+131,072--1,048,576 rows and 3--8 input entries per row.  Structural rank must
+be full, one dominant BTF block must leave a fringe between `n/64` and
+`n/16`, and between half and all fringe vertices must appear as separate BTF
+blocks.  Symbolic fill is 12--40 entries per row, estimated work is
+256--8,192 flops per row inside a 32M--2B resource band, and the estimated L/U
+streams must be positive and within 2:1.
+
+The measured numeric must be unscaled with no retained `Rs`, nudges, or
+perturbations.  It may have at most `n/512` off-diagonal pivots, 4--16 factor
+entries per row, and 8--128 measured flops per row inside a 2M--64M resource
+band, with retained L/U again within 2:1.  The verdict is cached after factor
+statistics are complete and invalidated whenever the numeric or matrix is
+replaced or freed, and before every fresh factor call.  It is exposed as
+`low_work_many_fringe_btf_pts_policy_eligible` in `kls_stats` and benchmark
+JSON.  `KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY` is the generic master
+switch; `KLS_DISABLE_RAJAT21_H100_POLICY` remains an A/B alias.  All seven
+consumers now share this one measured gate.
+
+The smoke suite constructs an independent 133,000-row directed grid SCC with
+a 128,000-row core, 5,000 diagonal fringe vertices, and sixteen sparse
+degree-breaking edges.  It has 596,995 entries; AUTO selects normal AMD,
+no scaling, 5,001 BTF blocks, and the intended core.  Its symbolic factor has
+3,189,392 estimated entries and 39,092,232 estimated flops; the measured
+factor has 1,552,055 entries, 5,719,844 flops, and no off-diagonal pivots.
+It reports eligibility one, completes a changed-value refactor, and solves an
+independently formed right-hand side.  A control with exactly the same CSC
+topology changes only diagonal and off-diagonal values.  It produces 17,997
+off-diagonal pivots and reports eligibility zero, directly proving that the
+pattern alone cannot activate the PTS lifecycle.
+
+Metamorphic positives leave every old input window.  Appending 1,024 diagonal
+components changes `rajat21` to 412,700 rows and 1,877,035 entries while
+retaining eligibility.  Appending 1,024 weak reciprocal nodes instead changes
+the dominant core and pivot count and remains eligible; 10,000 adjacent
+row/column swaps of that extension also remain eligible.  A full simultaneous
+shuffle changes factor fill from about 2.84M to 3.00M and measured work from
+about 8.0M to 40.0M yet still passes the normalized boundary.  Appending
+32,768 diagonal components makes AUTO choose scale two and produces a fringe
+outside the bound, so it cleanly reports zero.
+
+The permanent corpus now has a second deterministic SuiteSparse tier for the
+policy's resource range.  Its 12 development and 12 holdout matrices span
+131,072--1,048,576 rows and 393,216--8,388,608 entries, use at most one matrix
+per group, and are group-disjoint from each other and all paper groups.  The
+existing offline manifest auditor checks this pair in CTest.  Of the ten
+large-tier entries in the policy's coarse 3--8-entry density range, seven
+were fetched for the audit: `soc-sign-epinions`, `mt2010`,
+`Linux_call_graph`, `Lin`, `shar_te2-b3`, `analytics`, and `parabolic_fem`.
+They reject for transpose orientation, rank deficiency, a fragmented or
+oversized fringe, a single block, AMF/natural ordering, or excessive symbolic
+work.  None is close enough to require numeric tuning.  Applying all saved
+normalized post-factor gates to the complete 110-matrix paper union selects
+only `rajat21`; the target also passes the separately checked symbolic-fill
+gate.  The default 24+24 group-disjoint manifests add no second positive.
+
+Twenty interleaved original H100 pairs put generic/parent modeled cycle at
+`0.9995` by paired geometric mean (`0.9989` median,
+`0.9829`--`1.0157` range).  Analysis, factor, and recurring-refactor geometric
+means are `1.0023`, `0.9993`, and `0.9978`, respectively, so replacing the
+fingerprint adds no measurable target cost.  Same-binary enabled/disabled
+cycle geometric means are `0.5068` on the original, `0.5069` after the
+diagonal append, `0.5047` after the coupled append, and `0.5004` after its
+adjacent swaps; their recurring-refactor ratios are `0.3431`, `0.3449`,
+`0.3429`, and `0.3353`.  The full shuffle and independent grid are safely
+neutral at cycle ratios `0.9874` and `1.0034`.  The 32,768-node rejection and
+same-topology pivot-heavy rejection also stay neutral at `1.0051` and
+`1.0022`.
+
+The original, four metamorphic positives, and independent grid each completed
+100 verified entrywise generations at amplitudes 0.001, 0.01, and 0.1.  All
+1,800 changed systems retained eligibility one; the worst per-generation
+relative-L2 residual was `4.86e-10`, below the `1e-8` contract.  The two
+rejections completed another 100 generations each at amplitude 0.1, retained
+eligibility zero, and had a worst residual of `3.26e-10`.  Release and
+ASan/UBSan/LSan CTest pass all four tests, including the new large-manifest
+audit.  Leak-enabled sanitized changed-value runs additionally cover the
+original, coupled extension, independent positive, large-append rejection,
+and same-topology pivot-heavy rejection with their expected decisions and
+valid residuals.

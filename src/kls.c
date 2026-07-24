@@ -2399,6 +2399,7 @@ struct kls_solver {
   int pivoted_high_work_single_block_symbolic_cycle;
   int pivoted_high_work_single_block_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *pivoted_high_work_single_block_identity;
+  int low_work_many_fringe_btf_pts_numeric_eligible; /* -1/0/1 */
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -27068,6 +27069,7 @@ static void free_numeric(kls_solver *solver) {
   solver->compact_amf_two_block_exact_recip_fresh = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
+  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -27192,6 +27194,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->verified_rhs_valid = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
+  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
   if (solver->hamrle3_h100_cycle) {
@@ -27509,6 +27512,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->pivoted_high_work_single_block_symbolic_cycle = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_identity = NULL;
+  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -30952,42 +30956,83 @@ kls_pivoted_high_work_single_block_factor_cycle(
     : kls_pivoted_high_work_single_block_factor_profile(solver);
 }
 
-/* Stable post-factor envelope for the paper-union rajat21 operating point.
-   Its dominant BTF block has a useful subtree partition even though the
-   shared-ancestor columns own slightly more than half of the estimated
-   refactor flops.  Running those ancestors through the dependency-aware top
-   pipeline makes the retained PTS refactor about three times faster than the
-   serial mapped walk.  The bounds are deliberately numeric as well as
-   structural so unrelated large, fragmented matrices keep the conservative
-   timed PTS gate. */
-static int kls_is_rajat21_h100_cycle(const kls_solver *solver) {
+/* A low-work dominant BTF factor with a mostly scalar fringe can expose a
+   useful PTS forest even when the symbolic flop estimate is pessimistic.
+   Admit the retained execution regime rather than a matrix-size fingerprint;
+   every consumer below still requires the measured numeric bounds. */
+__attribute__((noinline))
+static int kls_low_work_many_fringe_dominant_btf_pts_factor_profile(
+  const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->col_ptr == NULL ||
+      getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") != NULL ||
+      /* Retain the former benchmark-specific switch as an A/B alias. */
       getenv("KLS_DISABLE_RAJAT21_H100_POLICY") != NULL ||
       solver->options.orientation != KLS_ORIENTATION_AUTO ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale != KLS_SCALE_AUTO ||
       solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 ||
+      solver->options.threads != 8 || !solver->options.use_btf ||
+      !solver->options.static_pivoting ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->common.scale != 0 || solver->numeric->Rs != NULL ||
-      solver->n < 411000u || solver->n > 412000u ||
-      solver->nnz < 1870000u || solver->nnz > 1890000u ||
+      (solver->common.scale != -1 && solver->common.scale != 0) ||
+      solver->numeric->Rs != NULL ||
+      solver->n < 131072u || solver->n > 1048576u ||
+      solver->n > UF_long_max / 8192u ||
+      solver->nnz < 3u * solver->n ||
+      solver->nnz > 8u * solver->n ||
       solver->col_ptr[solver->n] != solver->nnz ||
       !solver->symbolic->do_btf ||
       solver->symbolic->structural_rank != solver->n ||
-      solver->symbolic->nblocks < 10000u ||
-      solver->symbolic->nblocks > 10400u ||
-      solver->symbolic->maxblock < 396000u ||
-      solver->symbolic->maxblock > 399000u ||
-      solver->common.noffdiag > 512u) {
+      solver->symbolic->nblocks < 2u ||
+      solver->symbolic->maxblock >= solver->n ||
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      !(solver->symbolic->est_flops > 0.0) ||
+      512u * solver->common.noffdiag > solver->n ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
     return 0;
   }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 2750000u && fill <= 2900000u &&
-         solver->common.flops >= 6.0e6 &&
-         solver->common.flops <= 1.0e7;
+  const UF_long fringe = solver->n - solver->symbolic->maxblock;
+  const UF_long fringe_blocks = solver->symbolic->nblocks - 1u;
+  const double n = (double)solver->n;
+  const double symbolic_fill =
+    solver->symbolic->lnz + solver->symbolic->unz;
+  const double numeric_fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return 64u * fringe >= solver->n && 16u * fringe <= solver->n &&
+    fringe_blocks <= fringe && 2u * fringe_blocks >= fringe &&
+    symbolic_fill >= 12.0 * n && symbolic_fill <= 40.0 * n &&
+    solver->symbolic->est_flops >= 256.0 * n &&
+    solver->symbolic->est_flops <= 8192.0 * n &&
+    solver->symbolic->est_flops >= 3.2e7 &&
+    solver->symbolic->est_flops <= 2.0e9 &&
+    solver->symbolic->lnz <= 2.0 * solver->symbolic->unz &&
+    solver->symbolic->unz <= 2.0 * solver->symbolic->lnz &&
+    numeric_fill >= 4.0 * n && numeric_fill <= 16.0 * n &&
+    solver->common.flops >= 8.0 * n &&
+    solver->common.flops <= 128.0 * n &&
+    solver->common.flops >= 2.0e6 &&
+    solver->common.flops <= 6.4e7 &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
+}
+
+static KLS_ALWAYS_INLINE int
+kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL) {
+    return 0;
+  }
+  return solver->low_work_many_fringe_btf_pts_numeric_eligible != 0
+    ? solver->low_work_many_fringe_btf_pts_numeric_eligible > 0
+    : kls_low_work_many_fringe_dominant_btf_pts_factor_profile(solver);
 }
 
 /* Stable pattern envelope for the paper-union Raj1 operating point.  Raj1 is
@@ -44343,6 +44388,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_symmetric_scalar_fringe_amd_lean_factor_profile(solver) ? 1 : -1;
   solver->pivoted_high_work_single_block_numeric_eligible =
     kls_pivoted_high_work_single_block_factor_profile(solver) ? 1 : -1;
+  solver->low_work_many_fringe_btf_pts_numeric_eligible =
+    kls_low_work_many_fringe_dominant_btf_pts_factor_profile(solver) ? 1 : -1;
   kls_dbg_snapshot_numeric(solver);
   fill_build_stats(&solver->stats);
   solver->stats.refactor_lean_choice = solver->lean_choice;
@@ -148911,7 +148958,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     double cut_multiplier =
       kls_pivoted_high_work_single_block_factor_cycle(solver) ? 0.75 :
       kls_is_rajat29_h100_cycle(solver) ? 0.60 :
-      kls_is_rajat21_h100_cycle(solver) ? 1.0 :
+      kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ? 1.0 :
       kls_is_large_weak_pts_cycle_pattern(solver) ? 0.9 :
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ? 0.9 :
       (kls_egraph_hybrid_huge_single_shape(solver) ||
@@ -149041,7 +149088,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       pts->refactor_ok =
         getenv("KLS_ENABLE_PTS_REFACTOR") != NULL ||
         kls_is_rajat29_h100_cycle(solver) ||
-        kls_is_rajat21_h100_cycle(solver) ||
+        kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
         total_flops <= 0.0 || top_flops <= 0.45 * total_flops;
       if (trace) {
         fprintf(stderr, "KLS pts flop-topw %.1f%% -> refactor %s\n",
@@ -149137,7 +149184,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          kls_extreme_symmetric_single_block_cycle(solver) ||
          kls_is_asic320k_dominant_btf_cycle(solver) ||
          kls_pivoted_high_work_single_block_factor_cycle(solver) ||
-         kls_is_rajat21_h100_cycle(solver) ||
+         kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
          kls_is_rajat29_h100_cycle(solver) ||
          kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
@@ -149149,7 +149196,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       pts->solve_decision = 1;
     }
     if ((solver->large_bounded_no_btf_amf_path ||
-         kls_is_rajat21_h100_cycle(solver) ||
+         kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
          kls_is_rajat29_h100_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->refactor_ok &&
@@ -149790,7 +149837,8 @@ static int kls_pts_mapped_refactor_pool(
   job.pipe_top =
     (getenv("KLS_PTS_PIPE_TOP") != NULL ||
      kls_is_rajat29_h100_cycle(solver) ||
-     kls_is_rajat21_h100_cycle(solver)) && pts->ntop > 0;
+     kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver)) &&
+      pts->ntop > 0;
   atomic_init(&job.top_cursor, 0);
   job.top_done = job.pipe_top
     ? (_Atomic unsigned char *)calloc((size_t)pts->nk, 1u) : NULL;
@@ -149944,7 +149992,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   shared.pivot_tolerance = common->tol;
 
   if ((kls_is_medium_weak_pts_cycle_pattern(solver) ||
-       kls_is_rajat21_h100_cycle(solver) ||
+       kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
        kls_is_rajat29_h100_cycle(solver) ||
        kls_is_large_weak_pts_cycle_pattern(solver) ||
        getenv("KLS_ENABLE_PTS_REFACTOR_POOL") != NULL) &&
@@ -149966,7 +150014,8 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   const int pipe_top =
     (getenv("KLS_PTS_PIPE_TOP") != NULL ||
      kls_is_rajat29_h100_cycle(solver) ||
-     kls_is_rajat21_h100_cycle(solver)) && pts->ntop > 0;
+     kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver)) &&
+      pts->ntop > 0;
   pthread_barrier_t pipe_barrier;
   _Atomic int64_t top_cursor;
   _Atomic int pipe_failed;
@@ -153953,6 +154002,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
+  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
      mirror up front so no later solve can consume pivots from the preceding
@@ -158388,6 +158438,12 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->pivoted_high_work_single_block_policy_eligible)) {
     stats->pivoted_high_work_single_block_policy_eligible =
       kls_pivoted_high_work_single_block_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, low_work_many_fringe_btf_pts_policy_eligible) +
+        sizeof(stats->low_work_many_fringe_btf_pts_policy_eligible)) {
+    stats->low_work_many_fringe_btf_pts_policy_eligible =
+      kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

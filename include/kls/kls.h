@@ -1346,6 +1346,9 @@ typedef struct kls_stats {
   /* The retained normal-AMD single block passed normalized symbolic work and
      measured pivot, fill, balance, and numeric-work guards. */
   int pivoted_high_work_single_block_policy_eligible;
+  /* The retained unscaled dominant-BTF numeric has a mostly scalar fringe
+     and passed the normalized PTS fill, work, pivot, and balance guards. */
+  int low_work_many_fringe_btf_pts_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

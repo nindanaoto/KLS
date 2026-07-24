@@ -1769,6 +1769,21 @@ different pivot behavior. Benchmark JSON exposes
 `KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY=1` for an A/B fallback.
 The former `KLS_DISABLE_RAJAT15_H100_POLICY` switch remains an alias.
 
+A low-work many-fringe BTF/PTS policy replaces the former `rajat21` order,
+nonzero, block-count, and core-size box. Under the standard AUTO/8-thread
+BTF/static-pivoting contract, a retained normal-AMD factor may qualify from
+131,072--1,048,576 rows and 3--8 input entries per row. It must be full-rank,
+put between `n/64` and `n/16` vertices outside one dominant BTF core, expose
+between half and all of that fringe as separate blocks, keep its symbolic L/U
+estimates within 2:1, and meet normalized symbolic fill and work bounds.
+Recurring PTS choices additionally require an unscaled numeric with no `Rs`,
+nudges, or perturbations; at most `n/512` off-diagonal pivots; balanced L/U
+storage; 4--16 retained factor entries per row; and 8--128 measured flops per
+row inside a 2M--64M resource band. Benchmark JSON exposes
+`low_work_many_fringe_btf_pts_policy_eligible`; set
+`KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY=1` for an A/B fallback. The
+former `KLS_DISABLE_RAJAT21_H100_POLICY` switch remains an alias.
+
 The metamorphic holdout utility can produce deterministic simultaneous
 row/column relabelings without checking generated matrices into the tree. For
 example, the compact positive used by the policy audit is reproduced with:
@@ -2255,6 +2270,26 @@ Use `--index path/to/ssstats.csv` to regenerate from a pinned SuiteSparse
 metadata snapshot. Generated manifests record the index timestamp and SHA-256;
 `python3 scripts/build_generalization_manifests.py --check` verifies that the
 committed files still match the selected metadata and seed.
+
+The default split caps matrices at 300,000 rows and one million entries so it
+stays practical for routine development. A second deterministic 12+12 tier
+extends coverage to 131,072--1,048,576 rows and up to 8,388,608 entries. Its
+development and holdout groups are disjoint from each other and from every
+paper-suite group, and CTest audits that boundary without network access:
+
+```sh
+python3 scripts/fetch_suitesparse.py \
+  --manifest bench/suitesparse_generalization_large_dev_manifest.txt \
+  --out data/suitesparse-generalization-large-dev
+python3 scripts/fetch_suitesparse.py \
+  --manifest bench/suitesparse_generalization_large_holdout_manifest.txt \
+  --out data/suitesparse-generalization-large-holdout
+```
+
+Regenerate that tier from a pinned `ssstats.csv` with
+`scripts/build_generalization_manifests.py`, counts of 12, row bounds
+131,072--1,048,576, nonzero bounds 393,216--8,388,608, and explicit large
+development/holdout output paths.
 
 For SubtreeLU-specific tuning, `bench/suitesparse_subtreelu_manifest.txt`
 contains the exact 46 public SuiteSparse circuit labels from SubtreeLU Fig. 7.

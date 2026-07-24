@@ -21572,6 +21572,234 @@ cleanup:
   return ok;
 }
 
+static int test_low_work_many_fringe_btf_pts_policy(void) {
+  const int32_t grid_rows = 16000;
+  const int32_t grid_cols = 8;
+  const int32_t core = grid_rows * grid_cols;
+  const int32_t fringe = 5000;
+  const int32_t n = core + fringe;
+  const int32_t degree_break = 16;
+  const int32_t degree_step = core / degree_break;
+  const int32_t directed_grid_edges =
+    grid_rows * (grid_cols - 1) +
+    (grid_rows - 1) * grid_cols +
+    2 * (grid_rows - 1) * (grid_cols - 1);
+  const int32_t nnz =
+    core + directed_grid_edges + 1 + degree_break + fringe;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *ax_changed =
+    (double *)malloc((size_t)nnz * sizeof(*ax_changed));
+  double *ax_pivoted =
+    (double *)malloc((size_t)nnz * sizeof(*ax_pivoted));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_RAJAT21_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *negative_solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
+    ax_pivoted != NULL && expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_RAJAT21_H100_POLICY") != 0) {
+    perror("configure low-work many-fringe BTF PTS policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col < core) {
+      const int32_t grid_row = col / grid_cols;
+      const int32_t grid_col = col % grid_cols;
+      ai[p++] = col;
+      if (grid_col + 1 < grid_cols) {
+        ai[p++] = col + 1;
+      }
+      if (grid_row + 1 < grid_rows) {
+        if (grid_col > 0) {
+          ai[p++] = col + grid_cols - 1;
+        }
+        ai[p++] = col + grid_cols;
+        if (grid_col + 1 < grid_cols) {
+          ai[p++] = col + grid_cols + 1;
+        }
+      }
+      if (col == 0) {
+        for (int32_t index = 0; index < degree_break; ++index) {
+          ai[p++] = 2 + index * degree_step;
+        }
+      }
+      if (col == core - 1) {
+        ai[p++] = 0;
+      }
+    } else {
+      ai[p++] = col;
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+    for (int32_t entry = ap[col]; entry < p; ++entry) {
+      const int32_t row = ai[entry];
+      const int degree_break_edge =
+        col == 0 && row >= 2 && (row - 2) % degree_step == 0 &&
+        (row - 2) / degree_step < degree_break;
+      if (row == col) {
+        ax[entry] = col < core ? 10.0 : 1.0;
+        ax_pivoted[entry] = col < core ? 2.0 : 1.0;
+      } else {
+        ax[entry] = degree_break_edge || (col == core - 1 && row == 0)
+          ? 1.0e-3 : -0.1;
+        ax_pivoted[entry] = 10.0;
+      }
+      ax_changed[entry] =
+        ax[entry] * (1.0 + 1.0e-5 * (double)((entry % 7) - 3));
+    }
+    expected[col] = 1.0 + 0.01 * (double)(col % 17);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected low-work many-fringe nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create low-work many-fringe BTF PTS policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze low-work many-fringe BTF PTS policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor low-work many-fringe BTF PTS policy") ||
+      !require_ok(kls_refactor(solver, ax_changed),
+                  "refactor low-work many-fringe BTF PTS policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats low-work many-fringe BTF PTS policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  const double fill = (double)(stats.nnz_l + stats.nnz_u);
+  if (stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != -1 || !stats.selected_btf ||
+      stats.structural_rank != n || stats.nblocks != fringe + 1 ||
+      stats.max_block != core ||
+      fill < 4.0 * (double)n || fill > 16.0 * (double)n ||
+      stats.factor_flops < 8.0 * (double)n ||
+      stats.factor_flops > 128.0 * (double)n ||
+      stats.offdiag_pivots * 512 > n ||
+      stats.low_work_many_fringe_btf_pts_policy_eligible != 1) {
+    fprintf(stderr,
+            "unexpected low-work many-fringe BTF PTS policy:"
+            " orientation=%d ordering=%d scale=%d btf=%d blocks=%" PRId64
+            " max=%" PRId64 " rank=%" PRId64 " offdiag=%" PRId64
+            " fill=%.0f flops=%.0f eligible=%d\n",
+            (int)stats.selected_orientation,
+            (int)stats.selected_ordering, stats.selected_scale,
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.structural_rank, stats.offdiag_pivots, fill,
+            stats.factor_flops,
+            stats.low_work_many_fringe_btf_pts_policy_eligible);
+    ok = 0;
+    goto cleanup;
+  }
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += ax_changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve low-work many-fringe BTF PTS policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "low-work many-fringe solve mismatch at %d: %.17g vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* Identical topology with dominant off-diagonal values produces far too
+     many pivots for the direct PTS lifecycle and must fail the numeric gate. */
+  if (!require_ok(kls_create(&negative_solver),
+                  "create low-work many-fringe numeric negative") ||
+      !require_ok(kls_analyze_csc(negative_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze low-work many-fringe numeric negative") ||
+      !require_ok(kls_factor(negative_solver, ax_pivoted),
+                  "factor low-work many-fringe numeric negative")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(negative_solver, &stats),
+                  "stats low-work many-fringe numeric negative") ||
+      stats.low_work_many_fringe_btf_pts_policy_eligible != 0 ||
+      stats.offdiag_pivots * 512 <= n) {
+    fprintf(stderr,
+            "pivot-heavy control unexpectedly selected low-work"
+            " many-fringe BTF PTS policy (offdiag=%" PRId64 ")\n",
+            stats.offdiag_pivots);
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(negative_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_RAJAT21_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(ax_changed);
+  free(ax_pivoted);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -21597,6 +21825,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_pivoted_high_work_single_block_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_low_work_many_fringe_btf_pts_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {
