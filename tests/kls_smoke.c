@@ -25689,6 +25689,265 @@ cleanup:
 }
 
 enum {
+  GIANT_DOMINANT_HUB_FIXTURE_N = 131072,
+  GIANT_DOMINANT_HUB_EXTENSION_N = 135168
+};
+
+/* Independent degree-balanced dominant-hub family.  A reciprocal nine-point
+   circulant and three-quarter-order hub are perturbed by one directed edge.
+   The compact order tests proposal/fallback without invoking the production
+   million-row dense-tail route. */
+static int build_giant_dominant_hub_fixture(
+  int32_t n,
+  int symmetric_control,
+  int hub_control,
+  int32_t *ap,
+  int32_t *ai) {
+  if (n < 32 || ap == NULL || ai == NULL) {
+    return 0;
+  }
+  const int32_t hub = 0;
+  const int32_t hub_count = hub_control < 0
+    ? n / 2 : (hub_control > 0 ? (9 * n) / 10 : (3 * n) / 4);
+  const int32_t hub_begin = (n - hub_count) / 2;
+  const int32_t asym_col = 1;
+  const int32_t asym_row = (7 * n) / 8;
+  if (hub_begin <= 4 || hub_begin + hub_count + 4 >= n ||
+      asym_row == hub || asym_row == asym_col) {
+    return 0;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    for (int32_t offset = -4; offset <= 4; ++offset) {
+      int32_t row = col + offset;
+      if (row < 0) {
+        row += n;
+      } else if (row >= n) {
+        row -= n;
+      }
+      ai[p++] = row;
+    }
+    if (col == hub) {
+      for (int32_t k = 0; k < hub_count; ++k) {
+        ai[p++] = hub_begin + k;
+      }
+    } else if (col >= hub_begin && col < hub_begin + hub_count) {
+      ai[p++] = hub;
+    }
+    if (col == asym_col) {
+      ai[p++] = asym_row;
+    }
+    if (symmetric_control && col == asym_row) {
+      ai[p++] = asym_col;
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+  }
+  ap[n] = p;
+  return p;
+}
+
+static int check_giant_dominant_hub_stages(
+  kls_solver *solver,
+  const char *label,
+  int expected_candidate) {
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), label) ||
+      stats.giant_dominant_hub_metis_dense_tail_candidate !=
+        expected_candidate ||
+      stats.giant_dominant_hub_metis_dense_tail_symbolic_eligible != 0 ||
+      stats.giant_dominant_hub_metis_dense_tail_factor_eligible != 0) {
+    fprintf(stderr,
+            "unexpected giant dominant-hub stages for %s: %d/%d/%d\n",
+            label,
+            stats.giant_dominant_hub_metis_dense_tail_candidate,
+            stats.giant_dominant_hub_metis_dense_tail_symbolic_eligible,
+            stats.giant_dominant_hub_metis_dense_tail_factor_eligible);
+    return 0;
+  }
+  return 1;
+}
+
+static int test_giant_dominant_hub_metis_dense_tail_policy(void) {
+  const int32_t n = GIANT_DOMINANT_HUB_FIXTURE_N;
+  const int32_t extension_n = GIANT_DOMINANT_HUB_EXTENSION_N;
+  const size_t capacity = (size_t)11 * (size_t)n + 8u;
+  const size_t extension_capacity =
+    (size_t)11 * (size_t)extension_n + 8u;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(capacity * sizeof(*ai));
+  int32_t *unsorted_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*unsorted_ap));
+  int32_t *unsorted_ai = (int32_t *)malloc(capacity * sizeof(*unsorted_ai));
+  int32_t *symmetric_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*symmetric_ap));
+  int32_t *symmetric_ai =
+    (int32_t *)malloc(capacity * sizeof(*symmetric_ai));
+  int32_t *moderate_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*moderate_ap));
+  int32_t *moderate_ai = (int32_t *)malloc(capacity * sizeof(*moderate_ai));
+  int32_t *oversized_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*oversized_ap));
+  int32_t *oversized_ai =
+    (int32_t *)malloc(capacity * sizeof(*oversized_ai));
+  int32_t *extension_ap = (int32_t *)malloc(
+    ((size_t)extension_n + 1u) * sizeof(*extension_ap));
+  int32_t *extension_ai =
+    (int32_t *)malloc(extension_capacity * sizeof(*extension_ai));
+  const char *saved_policy_value = getenv(
+    "KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY");
+  const char *saved_legacy_value = getenv("KLS_DISABLE_FULLCHIP_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *extension_solver = NULL;
+  kls_solver *csr_solver = NULL;
+  kls_solver *unsorted_solver = NULL;
+  kls_solver *symmetric_solver = NULL;
+  kls_solver *moderate_solver = NULL;
+  kls_solver *oversized_solver = NULL;
+  kls_solver *disabled_solver = NULL;
+  kls_solver *legacy_disabled_solver = NULL;
+  int ok = ap != NULL && ai != NULL && unsorted_ap != NULL &&
+    unsorted_ai != NULL && symmetric_ap != NULL && symmetric_ai != NULL &&
+    moderate_ap != NULL && moderate_ai != NULL && oversized_ap != NULL &&
+    oversized_ai != NULL && extension_ap != NULL && extension_ai != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+  int32_t nnz = 0;
+  if (ok) {
+    nnz = build_giant_dominant_hub_fixture(n, 0, 0, ap, ai);
+    const int32_t symmetric_nnz = build_giant_dominant_hub_fixture(
+      n, 1, 0, symmetric_ap, symmetric_ai);
+    const int32_t moderate_nnz = build_giant_dominant_hub_fixture(
+      n, 0, -1, moderate_ap, moderate_ai);
+    const int32_t oversized_nnz = build_giant_dominant_hub_fixture(
+      n, 0, 1, oversized_ap, oversized_ai);
+    const int32_t extension_nnz = build_giant_dominant_hub_fixture(
+      extension_n, 0, 0, extension_ap, extension_ai);
+    ok = nnz > 0 && symmetric_nnz > 0 && moderate_nnz > 0 &&
+      oversized_nnz > 0 && extension_nnz > 0;
+  }
+  if (!ok) {
+    goto cleanup;
+  }
+  memcpy(unsorted_ap, ap, ((size_t)n + 1u) * sizeof(*ap));
+  memcpy(unsorted_ai, ai, (size_t)nnz * sizeof(*ai));
+  {
+    const int32_t first = unsorted_ap[2];
+    const int32_t swap = unsorted_ai[first];
+    unsorted_ai[first] = unsorted_ai[first + 1];
+    unsorted_ai[first + 1] = swap;
+  }
+  if (unsetenv("KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY") !=
+        0 ||
+      unsetenv("KLS_DISABLE_FULLCHIP_H100_POLICY") != 0) {
+    perror("configure giant dominant-hub METIS dense-tail policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+#define ANALYZE_DOMINANT_HUB(target, label, input_n, input_ap, input_ai, csr, expect) \
+  do { \
+    if (!require_ok(kls_create(&(target)), "create " label) || \
+        !require_ok((csr) \
+          ? kls_analyze_csr((target), KLS_INDEX_INT32, (input_n), \
+                            (input_ap), (input_ai), 0, &options) \
+          : kls_analyze_csc((target), KLS_INDEX_INT32, (input_n), \
+                            (input_ap), (input_ai), 0, &options), \
+          "analyze " label) || \
+        !check_giant_dominant_hub_stages( \
+          (target), "stats " label, (expect))) { \
+      ok = 0; \
+      goto cleanup; \
+    } \
+  } while (0)
+
+  ANALYZE_DOMINANT_HUB(solver, "giant dominant-hub proposal",
+                       n, ap, ai, 0, 1);
+  ANALYZE_DOMINANT_HUB(extension_solver,
+                       "extended giant dominant-hub proposal",
+                       extension_n, extension_ap, extension_ai, 0, 1);
+  ANALYZE_DOMINANT_HUB(csr_solver, "CSR giant dominant-hub proposal",
+                       n, ap, ai, 1, 1);
+  ANALYZE_DOMINANT_HUB(unsorted_solver,
+                       "unsorted giant dominant-hub proposal",
+                       n, unsorted_ap, unsorted_ai, 0, 1);
+  ANALYZE_DOMINANT_HUB(symmetric_solver,
+                       "symmetric giant dominant-hub control",
+                       n, symmetric_ap, symmetric_ai, 0, 0);
+  ANALYZE_DOMINANT_HUB(moderate_solver,
+                       "moderate giant dominant-hub control",
+                       n, moderate_ap, moderate_ai, 0, 0);
+  ANALYZE_DOMINANT_HUB(oversized_solver,
+                       "oversized giant dominant-hub control",
+                       n, oversized_ap, oversized_ai, 0, 0);
+
+  if (setenv("KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY",
+             "1", 1) != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+  ANALYZE_DOMINANT_HUB(disabled_solver,
+                       "disabled giant dominant-hub control",
+                       n, ap, ai, 0, 0);
+  if (unsetenv("KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY") !=
+        0 ||
+      setenv("KLS_DISABLE_FULLCHIP_H100_POLICY", "1", 1) != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+  ANALYZE_DOMINANT_HUB(legacy_disabled_solver,
+                       "legacy-disabled giant dominant-hub control",
+                       n, ap, ai, 0, 0);
+#undef ANALYZE_DOMINANT_HUB
+
+cleanup:
+  kls_destroy(legacy_disabled_solver);
+  kls_destroy(disabled_solver);
+  kls_destroy(oversized_solver);
+  kls_destroy(moderate_solver);
+  kls_destroy(symmetric_solver);
+  kls_destroy(unsorted_solver);
+  kls_destroy(csr_solver);
+  kls_destroy(extension_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_FULLCHIP_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(extension_ai);
+  free(extension_ap);
+  free(oversized_ai);
+  free(oversized_ap);
+  free(moderate_ai);
+  free(moderate_ap);
+  free(symmetric_ai);
+  free(symmetric_ap);
+  free(unsorted_ai);
+  free(unsorted_ap);
+  free(ai);
+  free(ap);
+  free(saved_legacy);
+  free(saved_policy);
+  return ok;
+}
+
+enum {
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_N = 1048576,
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_FRINGE = 512,
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_CORE =
@@ -26544,6 +26803,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_near_symmetric_mega_hub_amd_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_giant_dominant_hub_metis_dense_tail_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_giant_symmetric_scalar_fringe_metis_row_policy()) {

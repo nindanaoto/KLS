@@ -4301,6 +4301,85 @@ observed cold-factor/first-refactor variation. Thus the exact identity is gone
 without materially changing the established workload, while the moved-size
 positive demonstrates useful behavior outside the benchmark coordinate.
 
+## Giant dominant-hub METIS dense-tail lifecycle
+
+The former `FullChip` route no longer compares the input order and entry count
+with a SuiteSparse coordinate. Under the standard AUTO, eight-worker, BTF,
+static-pivoting contract, a topology proposal accepts 131,072--8,388,608 rows
+and eight--twelve stored entries per row. Every row and column must be nonempty,
+almost every column must contain its diagonal, and scalar rows and columns are
+bounded. The maximum in- and out-degree must each lie between `2n/3` and
+`7n/8`; a nonzero but bounded set of degree mismatches supplies a directed-
+asymmetry proof. The predicates are invariant under transpose, simultaneous
+relabeling, and stored entry order. A column-only pass rejects unrelated
+matrices before allocating row degrees or scanning all entries.
+
+Topology is only the first stage. The selected symbolic must contain at least
+1,048,576 rows, use normal METIS without BTF, and consist of one full-size
+block. Its balanced L/U estimate must total 32--96 entries per row. The
+separator analysis must cover every row with at least two workers, at most four
+components per worker, at least one pipeline component, at least 255/256 of
+the rows in private components, and bounded private and pipeline maxima. An
+unknown structural rank is accepted because no-BTF KLU does not compute one;
+when rank or work estimates are available they must satisfy the contract.
+
+The installed numeric supplies the final evidence. It must preserve that
+symbolic identity, normal METIS/no-BTF representation, scale `-1`, and the
+caller threshold; come from the pipelined KLU path with a 1,024--16,384-column
+dense tail; have full numerical rank, bounded off-diagonal pivots and nudges,
+no perturbation, balanced measured fill of 32--96 entries per row, and measured
+work of 4,096--131,072 operations per row. Only the accepted numeric suppresses
+the redundant automatic scale retry. Its verdict is cached across in-place
+EGraph refactors and invalidated whenever the numeric or symbolic is replaced.
+
+Rank completion is deliberately outside this automatic policy. `FullChip` is
+exactly singular, and `KLS_ENABLE_SINGULAR_COMPLETION=1` still must be supplied
+by the caller before KLS may constrain its zero-pivot degrees of freedom. The
+general capability only routes that explicitly requested operation through
+the pipelined dense-tail factor and reuses its checked zero-pivot discovery; it
+does not silently change any ordinary singular problem.
+
+Set
+`KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY=1` for a generic
+same-binary control. `KLS_DISABLE_FULLCHIP_H100_POLICY` remains a compatibility
+alias, as do the old route-specific environment names. Generic route controls
+are `KLS_DISABLE_GIANT_DOMINANT_HUB_ROUTED_FACTOR`,
+`KLS_DISABLE_GIANT_DOMINANT_HUB_ZERO_DISCOVERY`, and
+`KLS_DISABLE_GIANT_DOMINANT_HUB_COMPLETION_PIPE`; the dense-tail override is
+`KLS_GIANT_DOMINANT_HUB_DENSE_TAIL`. `kls_stats` and analyze/full benchmark JSON
+expose `giant_dominant_hub_metis_dense_tail_candidate`,
+`giant_dominant_hub_metis_dense_tail_symbolic_eligible`, and
+`giant_dominant_hub_metis_dense_tail_factor_eligible`.
+
+The independent smoke family uses 131,072- and 135,168-row reciprocal
+nine-point circulants, a three-quarter-order reciprocal hub, and one unmatched
+directed edge. Equivalent CSR, unsorted CSC, and nearby-size fixtures pass the
+input stage; exact symmetry, half-order and nine-tenths-order hubs, and both
+disable variables reject. These fixtures deliberately remain below the
+million-row symbolic floor and therefore test invariant proposal and ordinary
+fallback behavior rather than claiming an independent large numeric positive.
+
+Separate development and cross-family holdout manifests add `circuit5M`,
+`Freescale2`, `G3_circuit`, `rajat30`, `kkt_power`, `CurlCurl_3`, `StocF-1465`,
+`Transport`, and `wikipedia-20051105` as controls. In live checks,
+`G3_circuit`, `circuit5M`, and independently sourced `CurlCurl_3` all report
+`0/0/0`, despite collectively covering large one-block METIS, similar density,
+and dominant-hub shapes.
+
+Appending 512 coupled nodes to the motivating matrix produces a
+2,987,524-row, 26,623,519-entry holdout outside the old exact coordinate. It
+reports `1/1/1`, retains normal METIS/no-BTF, factors in 14.74 seconds, and
+solves with `1.97e-14` relative-L2 residual. The frozen exact parent did not
+finish that factor within 180 seconds. On the original matrix, two alternating
+pinned parent/current pairs retain identical 82,748,400/84,816,974 L/U counts
+and residuals below `1.15e-14`; the generalized input proof adds roughly
+0.1 second of analysis, while initial factors remain in the same 10--12-second
+band. Refactor samples on the shared host remain more variable than the policy
+change, so they are treated as dispersion rather than evidence for a new
+kernel speedup. The limitation is explicit: the only full-lifecycle positive
+outside the original coordinate is a coupled metamorphic extension; the
+cross-family matrices are rejection controls, not natural positives.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

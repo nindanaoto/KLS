@@ -1478,6 +1478,15 @@ typedef struct kls_stats {
   /* The installed max-row-scaled numeric also passed normalized pivot,
      fill, work, and representation guards. */
   int near_symmetric_mega_hub_amd_factor_eligible;
+  /* The original AUTO input is a giant almost-full-diagonal graph with a
+     dominant, degree-balanced in/out hub. */
+  int giant_dominant_hub_metis_dense_tail_candidate;
+  /* Its ordinary AUTO symbolic selected one unscaled METIS block and proved
+     normalized fill plus a nearly all-private separator. */
+  int giant_dominant_hub_metis_dense_tail_symbolic_eligible;
+  /* The installed full-rank pipelined numeric also proved the dense-tail,
+     pivot, fill, work, and residual-refinement representation. */
+  int giant_dominant_hub_metis_dense_tail_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

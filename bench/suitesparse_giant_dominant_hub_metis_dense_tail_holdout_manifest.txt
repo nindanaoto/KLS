@@ -1,0 +1,9 @@
+# Cross-family giant controls for the dominant-hub dense-tail policy.
+# These were held outside threshold selection and span exact symmetry,
+# bounded degree, missing diagonals, and directed web topology.
+
+kkt_power
+CurlCurl_3
+StocF-1465
+Transport
+wikipedia-20051105

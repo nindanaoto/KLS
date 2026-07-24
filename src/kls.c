@@ -2435,6 +2435,12 @@ struct kls_solver {
   const trilinos_klu_l_symbolic *
     near_symmetric_mega_hub_amd_symbolic_identity;
   int near_symmetric_mega_hub_amd_numeric_eligible; /* -1/0/1 */
+  /* Staged state for the giant dominant-hub METIS dense-tail capability. */
+  int giant_dominant_hub_metis_dense_tail_candidate;
+  int giant_dominant_hub_metis_dense_tail_symbolic_eligible;
+  const trilinos_klu_l_symbolic *
+    giant_dominant_hub_metis_dense_tail_symbolic_identity;
+  int giant_dominant_hub_metis_dense_tail_numeric_eligible; /* -1/0/1 */
   /* Cold solve-accuracy policy state.  Keep it at the tail so adding
      observability does not move the established factor/refactor hot fields. */
   int promoted_tolerance_l2_recovery_required;
@@ -2537,6 +2543,8 @@ typedef struct kls_pattern_candidate {
   int asymmetric_bounded_degree_direct_metis_symbolic_eligible;
   int near_symmetric_mega_hub_amd_candidate;
   int near_symmetric_mega_hub_amd_symbolic_eligible;
+  int giant_dominant_hub_metis_dense_tail_candidate;
+  int giant_dominant_hub_metis_dense_tail_symbolic_eligible;
   int bounded_degree_retained_preconditioner_candidate;
   int bounded_degree_retained_preconditioner_symbolic_eligible;
 } kls_pattern_candidate;
@@ -27165,6 +27173,9 @@ static void free_numeric(kls_solver *solver) {
   solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
+  solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
+  solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
+  solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
   solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->fp32_decision = 0;
@@ -27653,6 +27664,10 @@ static void clear_matrix(kls_solver *solver) {
   solver->near_symmetric_mega_hub_amd_symbolic_eligible = 0;
   solver->near_symmetric_mega_hub_amd_symbolic_identity = NULL;
   solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
+  solver->giant_dominant_hub_metis_dense_tail_candidate = 0;
+  solver->giant_dominant_hub_metis_dense_tail_symbolic_eligible = 0;
+  solver->giant_dominant_hub_metis_dense_tail_symbolic_identity = NULL;
+  solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -30531,34 +30546,273 @@ static int kls_asymmetric_bounded_degree_direct_metis_factor_cycle(
     : kls_asymmetric_bounded_degree_direct_metis_factor_profile(solver);
 }
 
-/* Freescale/FullChip is a numerically rank-deficient, giant single-block
-   circuit.  Its H100 path combines the selected pivoted METIS ordering with
-   the parallel KLU pipeline, a BLAS3 dense tail, and a checked zero-pivot
-   constraint.  The exact public envelope is unique in the union. */
-static int kls_fullchip_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
+/* Dense, almost-full-diagonal directed graphs with one dominant in/out hub
+   can settle into a giant unscaled METIS block whose trailing pivot panel is
+   profitable as a pipelined dense tail.  The matrix-named switch is retained
+   only as a same-binary compatibility alias. */
+static int kls_giant_dominant_hub_metis_dense_tail_options_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+#ifdef KLS_HAVE_METIS
+  return options != NULL &&
+    getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY") == NULL &&
     getenv("KLS_DISABLE_FULLCHIP_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n == 2987012u && col_ptr[n] == 26621983u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
+#else
+  (void)options;
+  return 0;
+#endif
 }
 
-static int kls_is_fullchip_h100_symbolic_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    kls_fullchip_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
+/* The proposal is invariant under transpose, simultaneous relabeling, and
+   stored entry order.  A column-only pass rejects unrelated giant matrices
+   before the row-degree allocation and O(nnz) scan. */
+__attribute__((noinline, cold))
+static int kls_giant_dominant_hub_metis_dense_tail_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 131072u || n > 8388608u ||
+      n > UF_long_max / 32u || col_ptr[0] != 0u ||
+      col_ptr[n] < 8u * n || col_ptr[n] > 12u * n ||
+      (size_t)n > SIZE_MAX / sizeof(uint32_t)) {
+    return 0;
+  }
+  const UF_long nnz = col_ptr[n];
+  UF_long scalar_columns = 0u;
+  UF_long max_column_degree = 0u;
+  int valid = 1;
+  for (UF_long col = 0u; col < n && valid; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > nnz) {
+      valid = 0;
+      break;
+    }
+    const UF_long degree = end - begin;
+    scalar_columns += (UF_long)(degree == 1u);
+    if (degree > max_column_degree) {
+      max_column_degree = degree;
+    }
+  }
+  if (!valid || scalar_columns > n / 65536u + 16u ||
+      3u * max_column_degree < 2u * n ||
+      8u * max_column_degree > 7u * n) {
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS giant dominant-hub input: n=%ld nnz=%ld"
+              " scalar-columns=%ld max-column-degree=%ld candidate=0\n",
+              (long)n, (long)nnz, (long)scalar_columns,
+              (long)max_column_degree);
+    }
+    return 0;
+  }
+
+  uint32_t *row_degree =
+    (uint32_t *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+  UF_long diagonal_columns = 0u;
+  for (UF_long col = 0u; col < n && valid; ++col) {
+    int has_diagonal = 0;
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] == UINT32_MAX) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      has_diagonal |= row == col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+  UF_long scalar_rows = 0u;
+  UF_long max_row_degree = 0u;
+  UF_long degree_mismatch_vertices = 0u;
+  UF_long degree_imbalance = 0u;
+  for (UF_long row = 0u; row < n && valid; ++row) {
+    if (row_degree[row] == 0u) {
+      valid = 0;
+      break;
+    }
+    const UF_long row_degree_value = (UF_long)row_degree[row];
+    const UF_long column_degree = col_ptr[row + 1u] - col_ptr[row];
+    scalar_rows += (UF_long)(row_degree_value == 1u);
+    if (row_degree_value > max_row_degree) {
+      max_row_degree = row_degree_value;
+    }
+    if (column_degree != row_degree_value) {
+      degree_mismatch_vertices++;
+      degree_imbalance += column_degree > row_degree_value
+        ? column_degree - row_degree_value
+        : row_degree_value - column_degree;
+    }
+  }
+  free(row_degree);
+  const UF_long mismatch_limit = n / 32768u + 32u;
+  const int candidate = valid &&
+    n - diagonal_columns <= n / 8192u + 16u &&
+    scalar_rows <= n / 65536u + 16u &&
+    3u * max_row_degree >= 2u * n &&
+    8u * max_row_degree <= 7u * n &&
+    degree_mismatch_vertices > 0u &&
+    degree_mismatch_vertices <= mismatch_limit &&
+    degree_imbalance > 0u && degree_imbalance <= mismatch_limit;
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr,
+            "KLS giant dominant-hub input: n=%ld nnz=%ld diag=%ld"
+            " scalar=%ld/%ld maxdeg=%ld/%ld degree-skew=%ld/%ld"
+            " candidate=%d\n",
+            (long)n, (long)nnz, (long)diagonal_columns,
+            (long)scalar_columns, (long)scalar_rows,
+            (long)max_column_degree, (long)max_row_degree,
+            (long)degree_mismatch_vertices, (long)degree_imbalance,
+            candidate);
+  }
+  return candidate;
+}
+
+static int kls_giant_dominant_hub_metis_dense_tail_symbolic_contract(
+  UF_long n,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic,
+  const kls_separator_analysis *separator) {
+  if (n < 1048576u || symbolic == NULL || separator == NULL ||
+      orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_METIS || symbolic->do_btf ||
+      symbolic->nblocks != 1u || symbolic->maxblock != n ||
+      (symbolic->structural_rank != KLS_KLU_EMPTY &&
+       symbolic->structural_rank != n) ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
+      symbolic->lnz + symbolic->unz < 32.0 * (double)n ||
+      symbolic->lnz + symbolic->unz > 96.0 * (double)n ||
+      symbolic->lnz > 2.0 * symbolic->unz ||
+      symbolic->unz > 2.0 * symbolic->lnz ||
+      separator->n != n || !separator->global_range_valid ||
+      separator->global_begin != 0u || separator->global_end != n ||
+      separator->thread_count < 2u ||
+      separator->component_count == 0u ||
+      separator->component_count > 4u * separator->thread_count ||
+      separator->private_component_count < separator->thread_count ||
+      separator->pipeline_component_count == 0u ||
+      separator->private_component_count +
+          separator->pipeline_component_count !=
+        separator->component_count ||
+      separator->private_rows > n || separator->pipeline_rows > n ||
+      separator->private_rows + separator->pipeline_rows != n ||
+      256u * separator->private_rows < 255u * n ||
+      256u * separator->pipeline_rows > n ||
+      separator->private_max_rows > n / 4u ||
+      separator->pipeline_max_rows > n / 1024u + 16u) {
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS giant dominant-hub symbolic reject: n=%ld orient=%d"
+              " order=%d btf=%ld blocks=%ld max=%ld rank=%ld"
+              " fill=%.0f/%.0f sep-n=%ld range=%d:%ld:%ld"
+              " threads=%ld components=%ld/%ld/%ld"
+              " rows=%ld/%ld maxrows=%ld/%ld\n",
+              (long)n, (int)orientation, (int)ordering,
+              symbolic != NULL ? (long)symbolic->do_btf : -1L,
+              symbolic != NULL ? (long)symbolic->nblocks : -1L,
+              symbolic != NULL ? (long)symbolic->maxblock : -1L,
+              symbolic != NULL ? (long)symbolic->structural_rank : -2L,
+              symbolic != NULL ? symbolic->lnz : -1.0,
+              symbolic != NULL ? symbolic->unz : -1.0,
+              separator != NULL ? (long)separator->n : -1L,
+              separator != NULL ? separator->global_range_valid : -1,
+              separator != NULL ? (long)separator->global_begin : -1L,
+              separator != NULL ? (long)separator->global_end : -1L,
+              separator != NULL ? (long)separator->thread_count : -1L,
+              separator != NULL ? (long)separator->component_count : -1L,
+              separator != NULL
+                ? (long)separator->private_component_count : -1L,
+              separator != NULL
+                ? (long)separator->pipeline_component_count : -1L,
+              separator != NULL ? (long)separator->private_rows : -1L,
+              separator != NULL ? (long)separator->pipeline_rows : -1L,
+              separator != NULL ? (long)separator->private_max_rows : -1L,
+              separator != NULL ? (long)separator->pipeline_max_rows : -1L);
+    }
+    return 0;
+  }
+  return !(symbolic->est_flops > 0.0) ||
+    (symbolic->est_flops >= 2048.0 * (double)n &&
+     symbolic->est_flops <= 131072.0 * (double)n);
+}
+
+static int kls_giant_dominant_hub_metis_dense_tail_candidate_cycle(
+  const kls_solver *solver) {
+  return solver != NULL &&
+    solver->giant_dominant_hub_metis_dense_tail_candidate &&
+    kls_giant_dominant_hub_metis_dense_tail_options_enabled(
+      &solver->options) && solver->orientation == KLS_ORIENTATION_NORMAL;
+}
+
+static int kls_giant_dominant_hub_metis_dense_tail_symbolic_eligible_cycle(
+  const kls_solver *solver) {
+  return kls_giant_dominant_hub_metis_dense_tail_candidate_cycle(solver) &&
+    solver->symbolic != NULL &&
+    solver->giant_dominant_hub_metis_dense_tail_symbolic_eligible &&
+    solver->symbolic ==
+      solver->giant_dominant_hub_metis_dense_tail_symbolic_identity &&
     solver->orientation == KLS_ORIENTATION_NORMAL &&
     solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-    solver->common.scale == -1 && !solver->symbolic->do_btf &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
+    !solver->symbolic->do_btf &&
+    kls_giant_dominant_hub_metis_dense_tail_symbolic_contract(
+      solver->n, solver->orientation, solver->stats.selected_ordering,
+      solver->symbolic, &solver->separator);
+}
+
+static int kls_giant_dominant_hub_metis_dense_tail_symbolic_cycle(
+  const kls_solver *solver) {
+  return
+    kls_giant_dominant_hub_metis_dense_tail_symbolic_eligible_cycle(solver) &&
+    solver->common.scale == -1;
+}
+
+__attribute__((noinline, cold))
+static int kls_giant_dominant_hub_metis_dense_tail_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_giant_dominant_hub_metis_dense_tail_symbolic_cycle(solver) ||
+      solver->numeric == NULL || solver->row_perm != NULL ||
+      solver->numeric->Rs != NULL || !solver->numeric_from_pipe ||
+      solver->dense_tail_cols < 1024u || solver->dense_tail_cols > 16384u ||
+      solver->dense_tail_block != 0u || !solver->numeric_needs_refinement ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR ||
+      solver->common.numerical_rank != solver->n ||
+      fabs(solver->common.tol - solver->options.pivot_tolerance) > 1.0e-12 ||
+      solver->common.noffdiag == KLS_KLU_EMPTY ||
+      solver->common.noffdiag > solver->n / 8192u + 16u ||
+      solver->pivot_nudge_count > solver->n / 65536u + 16u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->numeric->lnz == 0u || solver->numeric->unz == 0u ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  const double nd = (double)solver->n;
+  const double lnz = (double)solver->numeric->lnz;
+  const double unz = (double)solver->numeric->unz;
+  return lnz + unz >= 32.0 * nd && lnz + unz <= 96.0 * nd &&
+    solver->common.flops >= 4096.0 * nd &&
+    solver->common.flops <= 131072.0 * nd &&
+    lnz <= 2.0 * unz && unz <= 2.0 * lnz;
+}
+
+static int kls_giant_dominant_hub_metis_dense_tail_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_giant_dominant_hub_metis_dense_tail_symbolic_cycle(solver)) {
+    return 0;
+  }
+  return solver->giant_dominant_hub_metis_dense_tail_numeric_eligible != 0
+    ? solver->giant_dominant_hub_metis_dense_tail_numeric_eligible > 0
+    : kls_giant_dominant_hub_metis_dense_tail_factor_profile(solver);
 }
 
 /* Rank completion changes the mathematical problem by constraining degrees
@@ -42485,10 +42739,9 @@ static int should_try_auto_scale(const kls_solver *solver) {
   if (kls_near_symmetric_mega_hub_amd_factor_cycle(solver)) {
     return 0;
   }
-  if (kls_fullchip_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
-    /* Its predicted no-pivot pattern does not finish inside the H100 cap,
-       while the pivoted METIS direct factor is the selected routed path. */
+  if (kls_giant_dominant_hub_metis_dense_tail_factor_cycle(solver)) {
+    /* The measured pipelined dense-tail numeric is already the retained
+       factor; a max-row-scale retry duplicates a much larger traversal. */
     return 0;
   }
   if (kls_freescale_chain_h100_policy_enabled(
@@ -45071,6 +45324,10 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
     kls_near_symmetric_mega_hub_amd_options_enabled(options) &&
     kls_near_symmetric_mega_hub_amd_input_profile(
       candidate->n, candidate->col_ptr, candidate->row_idx);
+  candidate->giant_dominant_hub_metis_dense_tail_candidate =
+    kls_giant_dominant_hub_metis_dense_tail_options_enabled(options) &&
+    kls_giant_dominant_hub_metis_dense_tail_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
@@ -45149,6 +45406,8 @@ static int transpose_candidate(const kls_pattern_candidate *source,
     source->asymmetric_bounded_degree_direct_metis_class;
   candidate->near_symmetric_mega_hub_amd_candidate =
     source->near_symmetric_mega_hub_amd_candidate;
+  candidate->giant_dominant_hub_metis_dense_tail_candidate =
+    source->giant_dominant_hub_metis_dense_tail_candidate;
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
   candidate->compact_partial_diagonal_column_fringe_class =
@@ -45376,6 +45635,14 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
         &candidate->separator);
     }
   }
+  candidate->giant_dominant_hub_metis_dense_tail_symbolic_eligible =
+    status == KLS_OK &&
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->giant_dominant_hub_metis_dense_tail_candidate &&
+    kls_giant_dominant_hub_metis_dense_tail_options_enabled(options) &&
+    kls_giant_dominant_hub_metis_dense_tail_symbolic_contract(
+      candidate->n, candidate->orientation, candidate->selected_ordering,
+      candidate->symbolic, &candidate->separator);
   candidate->sparse_spiked_predicted_class =
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_sparse_spiked_predicted_options_enabled(options) &&
@@ -46072,6 +46339,15 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     candidate->near_symmetric_mega_hub_amd_symbolic_eligible
       ? candidate->symbolic : NULL;
   solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
+  solver->giant_dominant_hub_metis_dense_tail_candidate =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->giant_dominant_hub_metis_dense_tail_candidate;
+  solver->giant_dominant_hub_metis_dense_tail_symbolic_eligible =
+    candidate->giant_dominant_hub_metis_dense_tail_symbolic_eligible;
+  solver->giant_dominant_hub_metis_dense_tail_symbolic_identity =
+    candidate->giant_dominant_hub_metis_dense_tail_symbolic_eligible
+      ? candidate->symbolic : NULL;
+  solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_amd_lean_cycle =
     kls_symmetric_scalar_fringe_policy_enabled(&solver->options) &&
     candidate->symmetric_scalar_fringe_class &&
@@ -46572,6 +46848,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_asymmetric_bounded_degree_direct_metis_factor_profile(solver) ? 1 : -1;
   solver->near_symmetric_mega_hub_amd_numeric_eligible =
     kls_near_symmetric_mega_hub_amd_factor_profile(solver) ? 1 : -1;
+  if (solver->giant_dominant_hub_metis_dense_tail_numeric_eligible == 0) {
+    solver->giant_dominant_hub_metis_dense_tail_numeric_eligible =
+      kls_giant_dominant_hub_metis_dense_tail_factor_profile(solver) ? 1 : -1;
+  }
   solver->hybrid_huge_single_egraph_numeric_eligible =
     kls_hybrid_huge_single_egraph_factor_profile(solver) ? 1 : -1;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible =
@@ -155941,8 +156221,8 @@ static int kls_try_singular_rank_completion(kls_solver *solver,
     UF_long zero_count = 0u;
     if (discovery_round == 0u && seeded_zero_count > 0u &&
         solver->numeric != NULL) {
-      /* FullChip's first routed numeric already completed a safe
-         replacement traversal.  Reuse that discovery numeric for the
+      /* A routed dominant-hub numeric already completed a safe replacement
+         traversal.  Reuse that discovery numeric for the
          pivot-to-input mapping instead of paying a serial second traversal. */
       zero_count = seeded_zero_count;
       solver->common.status = TRILINOS_KLU_OK;
@@ -156072,18 +156352,22 @@ static int kls_try_singular_rank_completion(kls_solver *solver,
     solver->common.status = TRILINOS_KLU_OK;
     solver->common.numerical_rank = KLS_KLU_EMPTY;
     solver->common.singular_col = KLS_KLU_EMPTY;
-    const int fullchip_pipe =
-      kls_is_fullchip_h100_symbolic_cycle(solver);
-    int completion_pipe_threads = fullchip_pipe
+    const int giant_dominant_hub_pipe =
+      kls_giant_dominant_hub_metis_dense_tail_symbolic_cycle(solver);
+    int completion_pipe_threads = giant_dominant_hub_pipe
       ? kls_pipe_first_factor_threads(solver, solver->symbolic) : 0;
     UF_long completion_dense_tail = 0u;
-    if (fullchip_pipe &&
+    if (giant_dominant_hub_pipe &&
+        getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_COMPLETION_PIPE") == NULL &&
         getenv("KLS_DISABLE_FULLCHIP_COMPLETION_PIPE") == NULL) {
       if (completion_pipe_threads == 0) {
         completion_pipe_threads = solver->options.threads;
       }
       completion_dense_tail = 4096u;
-      const char *tail_env = getenv("KLS_FULLCHIP_DENSE_TAIL");
+      const char *tail_env = getenv("KLS_GIANT_DOMINANT_HUB_DENSE_TAIL");
+      if (tail_env == NULL || tail_env[0] == '\0') {
+        tail_env = getenv("KLS_FULLCHIP_DENSE_TAIL");
+      }
       if (tail_env != NULL && tail_env[0] != '\0') {
         const long parsed = atol(tail_env);
         if (parsed >= 0 && parsed <= 16384) {
@@ -156265,6 +156549,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
   solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
   solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
+  solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
   solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
@@ -157022,33 +157307,36 @@ int kls_factor(kls_solver *solver, const double *values) {
         kls_klu_pipe_threads =
           kls_pipe_first_factor_threads(solver, solver->symbolic);
       }
-      const int fullchip_routed_factor =
-        !had_numeric && kls_is_fullchip_h100_symbolic_cycle(solver) &&
+      const int giant_dominant_hub_routed_factor =
+        !had_numeric &&
+        kls_giant_dominant_hub_metis_dense_tail_symbolic_cycle(solver) &&
+        getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_ROUTED_FACTOR") == NULL &&
         getenv("KLS_DISABLE_FULLCHIP_ROUTED_FACTOR") == NULL;
-      if (fullchip_routed_factor) {
+      if (giant_dominant_hub_routed_factor) {
         if (kls_klu_pipe_threads == 0) {
           kls_klu_pipe_threads = solver->options.threads;
         }
         kls_klu_dense_tail = 4096;
       }
-      const int fullchip_completion_discovery =
-        fullchip_routed_factor &&
+      const int giant_dominant_hub_completion_discovery =
+        giant_dominant_hub_routed_factor &&
+        getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_ZERO_DISCOVERY") == NULL &&
         getenv("KLS_DISABLE_FULLCHIP_ZERO_DISCOVERY") == NULL &&
         kls_singular_completion_enabled(solver);
-      const UF_long fullchip_zero_capacity = 4096u;
-      const UF_long fullchip_saved_halt = solver->common.halt_if_singular;
-      if (fullchip_completion_discovery) {
+      const UF_long dominant_hub_zero_capacity = 4096u;
+      const UF_long dominant_hub_saved_halt = solver->common.halt_if_singular;
+      if (giant_dominant_hub_completion_discovery) {
         solver->zero_pivot_collect = (UF_long *)malloc(
-          (size_t)fullchip_zero_capacity *
+          (size_t)dominant_hub_zero_capacity *
           sizeof(*solver->zero_pivot_collect));
         if (solver->zero_pivot_collect != NULL) {
-          solver->zero_pivot_collect_cap = (long)fullchip_zero_capacity;
+          solver->zero_pivot_collect_cap = (long)dominant_hub_zero_capacity;
           atomic_store_explicit(&solver->zero_pivot_collect_count, 0,
                                 memory_order_release);
           solver->common.halt_if_singular = 0;
           solver->common.kls_zero_pivot_replacement = 1.0;
           solver->common.kls_zero_pivots = solver->zero_pivot_collect;
-          solver->common.kls_zero_pivot_capacity = fullchip_zero_capacity;
+          solver->common.kls_zero_pivot_capacity = dominant_hub_zero_capacity;
           solver->common.kls_zero_pivot_count = 0u;
         }
       }
@@ -157059,10 +157347,10 @@ int kls_factor(kls_solver *solver, const double *values) {
                                               numeric_values,
                                               solver->symbolic,
                                               &solver->common);
-      if (fullchip_completion_discovery &&
+      if (giant_dominant_hub_completion_discovery &&
           solver->zero_pivot_collect != NULL) {
         const UF_long discovered = solver->common.kls_zero_pivot_count;
-        solver->common.halt_if_singular = fullchip_saved_halt;
+        solver->common.halt_if_singular = dominant_hub_saved_halt;
         solver->common.kls_zero_pivot_replacement = 0.0;
         solver->common.kls_zero_pivots = NULL;
         solver->common.kls_zero_pivot_capacity = 0u;
@@ -157071,7 +157359,7 @@ int kls_factor(kls_solver *solver, const double *values) {
                               (long)discovered, memory_order_release);
         if (getenv("KLS_TRACE_SINGULAR_COMPLETION") != NULL) {
           fprintf(stderr,
-                  "KLS FullChip routed completion: replacements=%ld"
+                  "KLS giant dominant-hub routed completion: replacements=%ld"
                   " status=%ld\n",
                   (long)discovered, (long)solver->common.status);
         }
@@ -157109,8 +157397,8 @@ int kls_factor(kls_solver *solver, const double *values) {
       if ((solver->numeric == NULL ||
            solver->common.status == TRILINOS_KLU_SINGULAR) &&
           kls_try_singular_rank_completion(solver, numeric_values)) {
-        /* The helper owns and resets its retry routing.  The giant FullChip
-           envelope reinstates its parallel/dense-tail route internally. */
+        /* The helper owns and resets its retry routing.  An accepted giant
+           dominant-hub symbolic reinstates its parallel/dense-tail route. */
         solver->numeric_from_pipe = 0;
       }
       if (solver->numeric != NULL && dense_tail_req > 1 &&
@@ -157152,12 +157440,13 @@ int kls_factor(kls_solver *solver, const double *values) {
                 1e3 * (kls_now_seconds() - start));
       }
       if (solver->common.kls_dense_panels ||
-          (fullchip_completion_discovery && solver->numeric != NULL &&
+          (giant_dominant_hub_completion_discovery &&
+           solver->numeric != NULL &&
            solver->common.status >= TRILINOS_KLU_OK)) {
         /* dense within-panel pivoting is a reduced-stability regime;
            refinement recovers the contract at one extra solve/iter.  The
-           routed FullChip completion carries the same true-matrix check: its
-           dense-tail/pivot replacement imposes a constraint on an exactly
+           routed dominant-hub completion carries the same true-matrix check:
+           its dense-tail/pivot replacement imposes a constraint on an exactly
            singular system rather than claiming an ordinary nonsingular LU. */
         solver->numeric_needs_refinement = 1;
       }
@@ -161080,6 +161369,27 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->near_symmetric_mega_hub_amd_factor_eligible)) {
     stats->near_symmetric_mega_hub_amd_factor_eligible =
       kls_near_symmetric_mega_hub_amd_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               giant_dominant_hub_metis_dense_tail_candidate) +
+        sizeof(stats->giant_dominant_hub_metis_dense_tail_candidate)) {
+    stats->giant_dominant_hub_metis_dense_tail_candidate =
+      kls_giant_dominant_hub_metis_dense_tail_candidate_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               giant_dominant_hub_metis_dense_tail_symbolic_eligible) +
+        sizeof(stats->giant_dominant_hub_metis_dense_tail_symbolic_eligible)) {
+    stats->giant_dominant_hub_metis_dense_tail_symbolic_eligible =
+      kls_giant_dominant_hub_metis_dense_tail_symbolic_eligible_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               giant_dominant_hub_metis_dense_tail_factor_eligible) +
+        sizeof(stats->giant_dominant_hub_metis_dense_tail_factor_eligible)) {
+    stats->giant_dominant_hub_metis_dense_tail_factor_eligible =
+      kls_giant_dominant_hub_metis_dense_tail_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

@@ -20081,3 +20081,116 @@ cross-family matrices are rejection controls, not independent positives, so a
 future naturally occurring positive should widen or recalibrate the capability
 only from its measured symbolic/numeric stages rather than by adding another
 identity exception.
+
+GIANT DOMINANT-HUB METIS DENSE-TAIL LIFECYCLE GENERALIZED (2026-07-24). The
+remaining `FullChip` predicate compared one exact order and entry count under
+the eight-worker AUTO/BTF/static-pivoting configuration. Generic AUTO already
+selected normal METIS, no BTF, one full-size block, and scale `-1`; the identity
+instead gated the crucial pipelined KLU first factor, 4,096-column dense tail,
+zero-pivot discovery and completion retry, and suppression of a redundant
+automatic-scale factor. With explicitly enabled singular completion, disabling
+that exact route raised the original matrix's first factor from roughly
+10--12 seconds to 61.8 seconds. Without singular completion, both the old and
+new versions correctly return the singular-matrix error.
+
+The replacement begins with an options-scoped, transpose-invariant topology
+proposal. It accepts 131,072--8,388,608 rows and density eight--twelve, requires
+no empty row or column, at most `n/8192+16` missing diagonals, and at most
+`n/65536+16` scalar rows or columns. Maximum in- and out-degree must each lie
+between `2n/3` and `7n/8`. At least one, but no more than `n/32768+32`, vertices
+must have unequal in/out degree; their total absolute degree imbalance is
+positive and bounded by the same limit. These predicates use no SuiteSparse
+coordinate and are invariant under transpose, simultaneous relabeling, and
+sorted versus unsorted storage.
+
+The input check is staged for giant-case economics. It validates column
+pointers, density, nonempty/scalar columns, and the maximum column degree in
+O(n). An implausible hub rejects before allocation. Only a surviving proposal
+allocates one 32-bit row-degree vector and scans O(nnz) entries to validate row
+degrees, diagonal coverage, and directed imbalance. This adds roughly a tenth
+of a second to FullChip's seven-second analysis in the final alternating runs,
+while bounded-degree and moderate-hub controls avoid the extra pass.
+
+Input topology cannot authorize the route by itself. The installed symbolic
+must have at least 1,048,576 rows, normal METIS ordering, BTF disabled, and one
+block covering `[0,n)`. Its predicted L and U must be positive, balanced within
+2x, and total 32n--96n; known estimated work must be 2,048n--131,072n. The
+separator analysis must cover the whole matrix with at least two threads and
+no more than four components per thread, contain at least one pipeline
+component and one private component per thread, account for every row, keep at
+least 255/256 rows private, and bound the largest private and pipeline
+components by `n/4` and `n/1024+16`. A known structural rank must be full, but
+the no-BTF KLU sentinel is admitted because this symbolic deliberately does not
+run a structural-rank BTF pass.
+
+The numeric proof then requires the exact accepted symbolic pointer, normal
+METIS/no-BTF coordinates, scale `-1`, no row permutation or scale vector, the
+caller pivot threshold, and provenance from the pipelined KLU route. Its dense
+tail must be 1,024--16,384 columns in the sole block. Completion must leave a
+nonsingular, full-rank numeric with at most `n/8192+16` off-diagonal pivots,
+at most `n/65536+16` nudges, no perturbation, and refinement enabled for the
+true-matrix residual check. Measured L+U must be balanced within 2x and total
+32n--96n; measured work must be 4,096n--131,072n. This tri-state verdict is
+preserved across in-place EGraph refactors of the same numeric and reset by
+every factor or numeric/symbolic replacement. Auditing that lifecycle also
+closed stale-reset holes for the two previously generalized numeric verdicts.
+
+The singular-completion boundary remains explicit. Rank completion changes the
+mathematical problem by constraining zero-pivot degrees of freedom, so the
+generic policy never enables it. Only a caller supplying
+`KLS_ENABLE_SINGULAR_COMPLETION=1` may use the routed completion pipe and reuse
+its checked zero-pivot discovery. The generalized route therefore describes
+how an already authorized completion is executed, not which singular matrices
+should be altered.
+
+Three public stats fields and analyze/full benchmark JSON expose input,
+symbolic, and numeric acceptance. The generic same-binary control is
+`KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY`. The old
+`KLS_DISABLE_FULLCHIP_H100_POLICY` remains only as a compatibility alias.
+Generic routed-factor, zero-discovery, completion-pipe, and dense-tail controls
+also have compatibility fallbacks to their old environment names. The exact
+matrix predicate, order, entry count, and matrix-named internal functions are
+absent from solver, header, benchmark, and smoke sources.
+
+The independent smoke graph has a reciprocal nine-point circulant, a
+three-quarter-order reciprocal in/out hub, and one unmatched directed edge.
+Generated orders 131,072 and 135,168 pass input candidacy. Equivalent CSR
+(which transposes the directed graph) and unsorted CSC also pass. Adding the
+missing reciprocal edge rejects exact symmetry; half-order and nine-tenths-
+order hubs reject the lower and upper hub bounds. Both generic and legacy
+disable variables reject. These compact fixtures intentionally fall below the
+production symbolic floor, so they prove invariant proposal and fallback
+behavior without being counted as a second full-factor positive.
+
+The development manifest contains FullChip plus `circuit5M`, `Freescale2`,
+`G3_circuit`, and `rajat30` controls. The cross-family holdout contains
+`kkt_power`, `CurlCurl_3`, `StocF-1465`, `Transport`, and
+`wikipedia-20051105`, spanning exact symmetry, bounded degree, missing
+diagonals, and directed-web topology. Live analysis confirms `G3_circuit`,
+`circuit5M`, and independently sourced `CurlCurl_3` at `0/0/0`; notably,
+`G3_circuit` reaches a giant normal METIS/no-BTF one-block representation but
+rejects the input density/hub proof.
+
+The real positive holdout appends 512 coupled nodes with the public metamorphic
+generator. It has 2,987,524 rows and 26,623,519 effective entries, lies outside
+the old identity, and reports `1/1/1`. The generalized build selects normal
+METIS/no-BTF and scale `-1`, produces 89,108,315/90,898,505 L/U entries and
+1.5971e11 measured operations, factors in 14.7372 seconds, and solves with
+`1.9704e-14` relative L2. The frozen exact parent selected the same symbolic
+but missed its routed factor and did not finish within a measured 180-second
+bound; that benchmark process was stopped rather than reported as a completed
+timing.
+
+On the original target, two alternating pinned parent/current pairs keep the
+same normal METIS/no-BTF representation, 82,748,400/84,816,974 L/U counts,
+1.1792e11 operations, and residuals below `1.15e-14`. Parent analysis is
+6.98--7.02 seconds and current analysis 7.03--7.17 seconds. Parent initial
+factor is 10.32--10.43 seconds and current is 10.19--11.72 seconds, retaining
+the established performance band. Entrywise-refactor samples range from
+2.65--3.64 seconds across both binaries and are sensitive to run order and host
+state; no refactor kernel or representation changed, so this audit does not
+claim a recurring speedup from those samples. The remaining evidence limit is
+explicit: the only million-row factor-positive outside the original coordinate
+is the coupled metamorphic family. A natural cross-family positive is still
+needed before widening any threshold; future generalization must use measured
+symbolic/numeric evidence rather than another identity exception.

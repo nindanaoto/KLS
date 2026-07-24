@@ -1,0 +1,10 @@
+# Development family for the staged giant dominant-hub METIS dense-tail policy.
+# FullChip is the motivating positive.  The remaining rows separate hub size,
+# density, BTF fragmentation, and another naturally selected no-BTF/METIS
+# representation.
+
+FullChip
+circuit5M
+Freescale2
+G3_circuit
+rajat30
