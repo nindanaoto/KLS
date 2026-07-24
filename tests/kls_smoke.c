@@ -25114,6 +25114,316 @@ cleanup:
 }
 
 enum {
+  ASYMMETRIC_DIRECT_METIS_FIXTURE_N = 131072,
+  ASYMMETRIC_DIRECT_METIS_FIXTURE_FRINGE = 64,
+  ASYMMETRIC_DIRECT_METIS_EXTENSION_N = 135168,
+  ASYMMETRIC_DIRECT_METIS_EXTENSION_FRINGE = 66,
+  ASYMMETRIC_DIRECT_METIS_THIN_N = 133120,
+  ASYMMETRIC_DIRECT_METIS_THIN_FRINGE = 8
+};
+
+/* Independent directed circulant fixtures exercise the mechanism rather than
+   a SuiteSparse size.  The dominant core is strongly connected; one-way
+   diagonal fringe vertices remain singleton SCCs.  Nearby-size and thin-
+   fringe variants prove both tuning classes. */
+static int build_asymmetric_direct_metis_fixture(
+  int32_t n,
+  int32_t fringe,
+  int symmetric_control,
+  int degree_control,
+  int32_t *ap,
+  int32_t *ai) {
+  if (n <= fringe || fringe <= 0 || ap == NULL || ai == NULL ||
+      (symmetric_control && (fringe & 1) != 0)) {
+    return 0;
+  }
+  const int32_t core = n - fringe;
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col < core) {
+      ai[p++] = col;
+      if (symmetric_control) {
+        ai[p++] = col == 0 ? core - 1 : col - 1;
+        ai[p++] = col + 1 == core ? 0 : col + 1;
+        ai[p++] = col < 2 ? core + col - 2 : col - 2;
+        ai[p++] = col + 2 >= core ? col + 2 - core : col + 2;
+      } else {
+        ai[p++] = col + 1 >= core ? col + 1 - core : col + 1;
+        ai[p++] = col + 2 >= core ? col + 2 - core : col + 2;
+        ai[p++] = col + 3 >= core ? col + 3 - core : col + 3;
+        ai[p++] = col + 5 >= core ? col + 5 - core : col + 5;
+      }
+      if (degree_control && col == 0) {
+        for (int32_t extra = 64; extra < 92; ++extra) {
+          ai[p++] = extra;
+        }
+      }
+    } else {
+      ai[p++] = col;
+      if (symmetric_control) {
+        ai[p++] = core + ((col - core) ^ 1);
+      } else {
+        const int32_t local = col - core;
+        ai[p++] = local % core;
+        /* A one-way fringe chain removes scalar rows without joining the
+           singleton SCCs.  The last vertex points to a second core row. */
+        ai[p++] = local + 1 < fringe ? col + 1 : (local + 1) % core;
+      }
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+  }
+  ap[n] = p;
+  return p;
+}
+
+static int check_asymmetric_direct_metis_stages(
+  kls_solver *solver,
+  const char *label,
+  int expected_candidate,
+  int expected_class) {
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats), label) ||
+      stats.asymmetric_bounded_degree_direct_metis_candidate !=
+        expected_candidate ||
+      stats.asymmetric_bounded_degree_direct_metis_tuning_class !=
+        expected_class ||
+      stats.asymmetric_bounded_degree_direct_metis_symbolic_eligible != 0 ||
+      stats.asymmetric_bounded_degree_direct_metis_factor_eligible != 0) {
+    fprintf(stderr,
+            "unexpected asymmetric direct-METIS stages for %s: %d/%d/%d/%d\n",
+            label,
+            stats.asymmetric_bounded_degree_direct_metis_candidate,
+            stats.asymmetric_bounded_degree_direct_metis_tuning_class,
+            stats.asymmetric_bounded_degree_direct_metis_symbolic_eligible,
+            stats.asymmetric_bounded_degree_direct_metis_factor_eligible);
+    return 0;
+  }
+  return 1;
+}
+
+static int test_asymmetric_bounded_degree_direct_metis_policy(void) {
+  const int32_t n = ASYMMETRIC_DIRECT_METIS_FIXTURE_N;
+  const int32_t fringe = ASYMMETRIC_DIRECT_METIS_FIXTURE_FRINGE;
+  const int32_t extension_n = ASYMMETRIC_DIRECT_METIS_EXTENSION_N;
+  const int32_t extension_fringe =
+    ASYMMETRIC_DIRECT_METIS_EXTENSION_FRINGE;
+  const int32_t thin_n = ASYMMETRIC_DIRECT_METIS_THIN_N;
+  const int32_t thin_fringe = ASYMMETRIC_DIRECT_METIS_THIN_FRINGE;
+  const size_t base_capacity = (size_t)5 * (size_t)n + 28u;
+  const size_t extension_capacity = (size_t)5 * (size_t)extension_n;
+  const size_t thin_capacity = (size_t)5 * (size_t)thin_n;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(base_capacity * sizeof(*ai));
+  int32_t *symmetric_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*symmetric_ap));
+  int32_t *symmetric_ai =
+    (int32_t *)malloc(base_capacity * sizeof(*symmetric_ai));
+  int32_t *degree_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*degree_ap));
+  int32_t *degree_ai =
+    (int32_t *)malloc(base_capacity * sizeof(*degree_ai));
+  int32_t *extension_ap = (int32_t *)malloc(
+    ((size_t)extension_n + 1u) * sizeof(*extension_ap));
+  int32_t *extension_ai =
+    (int32_t *)malloc(extension_capacity * sizeof(*extension_ai));
+  int32_t *thin_ap =
+    (int32_t *)malloc(((size_t)thin_n + 1u) * sizeof(*thin_ap));
+  int32_t *thin_ai =
+    (int32_t *)malloc(thin_capacity * sizeof(*thin_ai));
+  const char *saved_policy_value = getenv(
+    "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *extension_solver = NULL;
+  kls_solver *thin_solver = NULL;
+  kls_solver *csr_solver = NULL;
+  kls_solver *symmetric_solver = NULL;
+  kls_solver *degree_solver = NULL;
+  kls_solver *disabled_solver = NULL;
+  kls_solver *legacy_disabled_solver = NULL;
+  int ok = ap != NULL && ai != NULL && symmetric_ap != NULL &&
+    symmetric_ai != NULL && degree_ap != NULL && degree_ai != NULL &&
+    extension_ap != NULL && extension_ai != NULL && thin_ap != NULL &&
+    thin_ai != NULL && (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+  int32_t base_nnz = 0;
+  int32_t symmetric_nnz = 0;
+  int32_t degree_nnz = 0;
+  int32_t extension_nnz = 0;
+  int32_t thin_nnz = 0;
+  if (ok) {
+    base_nnz = build_asymmetric_direct_metis_fixture(
+      n, fringe, 0, 0, ap, ai);
+    symmetric_nnz = build_asymmetric_direct_metis_fixture(
+      n, fringe, 1, 0, symmetric_ap, symmetric_ai);
+    degree_nnz = build_asymmetric_direct_metis_fixture(
+      n, fringe, 0, 1, degree_ap, degree_ai);
+    extension_nnz = build_asymmetric_direct_metis_fixture(
+      extension_n, extension_fringe, 0, 0, extension_ap, extension_ai);
+    thin_nnz = build_asymmetric_direct_metis_fixture(
+      thin_n, thin_fringe, 0, 0, thin_ap, thin_ai);
+    ok = base_nnz > 0 && symmetric_nnz > 0 && degree_nnz > 0 &&
+      extension_nnz > 0 && thin_nnz > 0;
+  }
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv(
+        "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY") != 0) {
+    perror("configure asymmetric bounded-degree direct-METIS policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver), "create asymmetric direct proposal") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze asymmetric direct proposal") ||
+      !check_asymmetric_direct_metis_stages(
+        solver, "stats asymmetric direct proposal", 1, 1)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* The same coarse-fringe decision survives a nearby coupled size
+     extension, proving that no matrix order or entry count is encoded. */
+  if (!require_ok(kls_create(&extension_solver),
+                  "create extended asymmetric direct proposal") ||
+      !require_ok(kls_analyze_csc(extension_solver, KLS_INDEX_INT32,
+                                  extension_n, extension_ap, extension_ai, 0,
+                                  &options),
+                  "analyze extended asymmetric direct proposal") ||
+      !check_asymmetric_direct_metis_stages(
+        extension_solver, "stats extended asymmetric direct proposal", 1,
+        1)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (!require_ok(kls_create(&thin_solver),
+                  "create thin-fringe asymmetric direct proposal") ||
+      !require_ok(kls_analyze_csc(thin_solver, KLS_INDEX_INT32, thin_n,
+                                  thin_ap, thin_ai, 0, &options),
+                  "analyze thin-fringe asymmetric direct proposal") ||
+      !check_asymmetric_direct_metis_stages(
+        thin_solver, "stats thin-fringe asymmetric direct proposal", 1, 2)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Interpreting the same compressed graph as CSR transposes its directed
+     edges.  In/out degrees and SCC fragmentation are invariant. */
+  if (!require_ok(kls_create(&csr_solver),
+                  "create CSR asymmetric direct proposal") ||
+      !require_ok(kls_analyze_csr(csr_solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze CSR asymmetric direct proposal") ||
+      !check_asymmetric_direct_metis_stages(
+        csr_solver, "stats CSR asymmetric direct proposal", 1, 1)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (!require_ok(kls_create(&symmetric_solver),
+                  "create symmetric direct-METIS rejection control") ||
+      !require_ok(kls_analyze_csc(symmetric_solver, KLS_INDEX_INT32, n,
+                                  symmetric_ap, symmetric_ai, 0, &options),
+                  "analyze symmetric direct-METIS rejection control") ||
+      !check_asymmetric_direct_metis_stages(
+        symmetric_solver, "stats symmetric direct-METIS rejection control",
+        0, 0)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (!require_ok(kls_create(&degree_solver),
+                  "create degree direct-METIS rejection control") ||
+      !require_ok(kls_analyze_csc(degree_solver, KLS_INDEX_INT32, n,
+                                  degree_ap, degree_ai, 0, &options),
+                  "analyze degree direct-METIS rejection control") ||
+      !check_asymmetric_direct_metis_stages(
+        degree_solver, "stats degree direct-METIS rejection control", 0,
+        0)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (setenv(
+        "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY", "1",
+        1) != 0 ||
+      !require_ok(kls_create(&disabled_solver),
+                  "create disabled asymmetric direct control") ||
+      !require_ok(kls_analyze_csc(disabled_solver, KLS_INDEX_INT32, n, ap, ai,
+                                  0, &options),
+                  "analyze disabled asymmetric direct control") ||
+      !check_asymmetric_direct_metis_stages(
+        disabled_solver, "stats disabled asymmetric direct control", 0, 0)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (unsetenv(
+        "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY") != 0 ||
+      setenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_create(&legacy_disabled_solver),
+                  "create legacy-disabled asymmetric direct control") ||
+      !require_ok(kls_analyze_csc(legacy_disabled_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze legacy-disabled asymmetric direct control") ||
+      !check_asymmetric_direct_metis_stages(
+        legacy_disabled_solver,
+        "stats legacy-disabled asymmetric direct control", 0, 0)) {
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(legacy_disabled_solver);
+  kls_destroy(disabled_solver);
+  kls_destroy(degree_solver);
+  kls_destroy(symmetric_solver);
+  kls_destroy(csr_solver);
+  kls_destroy(thin_solver);
+  kls_destroy(extension_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY",
+                         had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(thin_ai);
+  free(thin_ap);
+  free(extension_ai);
+  free(extension_ap);
+  free(degree_ai);
+  free(degree_ap);
+  free(symmetric_ai);
+  free(symmetric_ap);
+  free(ai);
+  free(ap);
+  free(saved_legacy);
+  free(saved_policy);
+  return ok;
+}
+
+enum {
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_N = 1048576,
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_FRINGE = 512,
   GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_CORE =
@@ -25963,6 +26273,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_full_diagonal_metis_row_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_asymmetric_bounded_degree_direct_metis_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_giant_symmetric_scalar_fringe_metis_row_policy()) {

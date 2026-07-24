@@ -4173,6 +4173,69 @@ layout-sensitive one-time factor. Release and leak-enabled
 ASan/UBSan/LSan CTest pass all four tests; an explicit sanitized target
 factor/update/solve also reports `1/1/1`, one retained reuse, and no findings.
 
+## Asymmetric bounded-degree direct-METIS lifecycle
+
+The direct NodeNDP selectors for Freescale1 and memchip no longer compare an
+input with either matrix's exact order or entry count. Under the standard
+AUTO/8-thread/BTF/static-pivoting contract, a proposal now comes from directed
+topology: 131,072--8,388,608 rows, four--six stored entries per row on average,
+no empty row or column, maximum in/out degree 32, an almost-full structural
+diagonal, a bounded scalar population, either unequal strict-triangle counts as
+a fast asymmetry proof or an exact bounded-degree reciprocity test, and a raw
+strongly connected component covering at least 127/128 of the graph. There may
+be at most `n/1024+1` raw SCCs.
+
+Raw SCC fragmentation chooses tuning rather than matrix identity. At most
+`n/8192+1` SCCs is thin-fringe class 2, which uses fourteen deterministic
+NodeNDP leaves and 3,072-column constrained-AMD windows. A coarser fringe is
+class 1, which uses eight leaves and the ordinary giant-window rule. The SCC
+pass is invariant under transpose and simultaneous relabeling.
+
+Topology only proposes direct METIS. The resulting symbolic must have at least
+1,048,576 rows, full structural rank, BTF enabled, a 127/128 dominant block,
+the same SCC-fragmentation class, a complete separator covering every row,
+at least 127/128 private rows, bounded private/pipeline components, and—when
+estimates exist—8--64 factor entries and 256--65,536 operations per row. A
+rejected proposal is freed and the complete AUTO tournament resumes. The
+installed numeric independently requires an unscaled, untransformed,
+unperturbed fixed-pivot factor with balanced L/U streams, 8--64 measured
+factor entries per row, and 256--16,384 operations per row.
+
+Only the numeric-accepted capability receives the recurring giant-chain row
+updates and setup suppressions. Thin-fringe numerics still use the deterministic
+pipeline for first-pattern discovery, but their changed-value row factor is
+published to the packed column solve through the existing factor-level
+preference. This replaces the former hard-coded no-publish solve shortcut;
+the coupled holdout showed that shortcut was not a generic SCC property.
+
+Set
+`KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY=1` for a generic
+same-binary control. `KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY` remains a
+compatibility alias. `kls_stats` and benchmark JSON expose
+`asymmetric_bounded_degree_direct_metis_candidate`,
+`asymmetric_bounded_degree_direct_metis_tuning_class`,
+`asymmetric_bounded_degree_direct_metis_symbolic_eligible`, and
+`asymmetric_bounded_degree_direct_metis_factor_eligible`.
+
+Independent smoke fixtures use directed circulant cores at 131,072, 133,120,
+and 135,168 rows. They cover both tuning classes, a nearby-size coupled
+extension, equivalent CSR/transposed topology, symmetric and degree controls,
+symbolic rejection with ordinary AUTO fallback, and both disable switches.
+Freescale2 rejects on fragmentation/degree and structurally symmetric
+`circuit5M_dc` rejects at the exact asymmetry stage.
+
+Real coupled holdouts also move both targets outside their former identities.
+Freescale1 plus 1,024 reciprocal diagonal nodes reports `1/1/1`, preserves the
+class-1 dominant core, and measures a 33.64-second modeled cycle versus 35.87
+seconds for the frozen exact parent. Memchip plus 512 nodes reports class 2 and
+`1/1/1`, measuring 39.43 versus 42.58 seconds. On the original matrices, a
+pinned parent/current pair is 31.08 versus 30.94 seconds for Freescale1. Two
+alternating memchip pairs give a geometric current/parent cycle ratio of
+`0.8246`: publishing raises steady row-update time by about 20% but cuts the
+steady solve to `0.2325x`, improving the complete workload. All verified
+target and holdout residuals are below `4.13e-16`. Release and leak-enabled
+ASan/UBSan/LSan CTest pass all four tests.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

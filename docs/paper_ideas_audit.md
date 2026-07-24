@@ -19868,3 +19868,114 @@ classification preserves the recurring performance contract while removing
 the benchmark identity. Release and leak-enabled ASan/UBSan/LSan CTest pass
 all four tests. An explicit sanitized target factor/update/solve reports
 `1/1/1`, one retained reuse, 14.9 GB peak RSS, and no sanitizer or leak finding.
+
+ASYMMETRIC BOUNDED-DEGREE DIRECT-METIS LIFECYCLE GENERALIZED (2026-07-24).
+Two remaining direct-ordering policies recognized Freescale1 and memchip by
+exact `(n,nnz)` pairs inside the broader Freescale H100 envelope. Those bits
+selected the retained METIS symbolic on the analyze critical path and also
+chose materially different NodeNDP/CAMD tuning: eight leaves with a giant
+window for Freescale1, fourteen leaves with 3,072-column windows for memchip.
+The memchip bit additionally forced the KLU pipeline, rejected predicted
+pattern construction, suppressed packed-factor publication, selected a hybrid
+dominant-BTF row solve, and bypassed recurring row-solve residual checks. The
+ordering distinction was real, but its identity source and unconditional
+downstream inheritance were not general.
+
+The replacement begins with an options-scoped, transpose-invariant topology
+proposal. It accepts 131,072--8,388,608 rows and density four--six, requires no
+empty row or column, maximum in/out degree 32, at most `n/65536+8` missing
+diagonals, at most `n/4096+16` scalar rows or columns, and exact structural
+asymmetry. Unequal lower/upper triangle counts prove asymmetry immediately;
+balanced sorted input uses reciprocal binary searches, while balanced unsorted
+input uses an allocation-free degree-bounded multiplicity scan. A byte-per-row
+pass proves the in-degree bound. Only then does an O(nnz) identity-frame BTF
+strong-component pass allocate its workspace. The raw graph must contain two
+through `n/1024+1` SCCs and a
+largest SCC covering at least 127/128 of the order. None of these predicates
+contains a SuiteSparse coordinate.
+
+The raw component count is the tuning mechanism. Counts no larger than
+`n/8192+1` form thin-fringe class 2 and request fourteen deterministic NodeNDP
+leaves plus 3,072-column constrained-AMD windows. Higher accepted counts form
+coarse-fringe class 1 and request eight leaves plus the generic giant-window
+rule. On the audited raw patterns, Freescale1 has 1,061 SCCs with a
+3,408,803-row core and therefore class 1; memchip has 53 SCCs with a
+2,706,851-row core and therefore class 2. Freescale2 has 608,915 SCCs and a
+2,333,718-row core, so it rejects. Canonical `circuit5M_dc` has a similar giant
+core but exact reciprocal structure, so it rejects before the SCC allocation.
+
+The direct ordering cannot commit from input topology alone. Its actual
+METIS/BTF symbolic must contain at least 1,048,576 rows, full structural rank,
+two through `n/1024+1` blocks, a 127/128 dominant block, and the same thin/coarse
+fragmentation decision. The captured separator must cover `[0,n)`, account for
+every component and row, use at least two workers, keep at least 127/128 rows
+private, retain at least one worker's worth of both private and pipeline
+components, bound the largest private component by `n/4`, and bound the largest
+pipeline component by `n/4096`. Known symbolic fill must be balanced within 2x
+and lie between 8n and 64n; known estimated work must lie between 256n and
+65,536n. Unknown KLU estimates remain admissible because memchip's valid
+symbolic reports `-1`; the numeric stage supplies the missing evidence. A
+failed symbolic is freed and reset and the full AUTO tournament reruns with
+direct selection disabled.
+
+The installed numeric must preserve the accepted symbolic identity, normal
+METIS/BTF coordinates, scale -1, the caller's threshold, and no row/scaling
+transform. It rejects off-diagonal pivot excess, nudge, perturbation, empty L
+or U, and missing work diagnostics. Measured L+U must be 8n--64n, L and U must
+balance within 2x, and work must be 256n--16,384n. This accepted/rejected
+numeric verdict gates the recurring row lifecycle; a later symbolic
+replacement cannot inherit it because the accepted symbolic pointer is part
+of the contract.
+
+The first thin-fringe implementation generalized the old memchip no-publish
+and trusted-hybrid-solve shortcuts. The 512-node holdout falsified that choice:
+it remained `1/1/1` and accurate, but its hybrid row solve took about 167 ms,
+while the packed column solve took about 40 ms. The final policy keeps the
+structurally guarded hybrid solve as an allocation-failure fallback but lets
+the established factor-level publish preference choose the packed solve. It
+also removes the identity-derived residual-check bypass. The deterministic
+KLU first-pattern path remains class-2 symbolic behavior because the symbolic
+itself proves the regime before that choice is consulted.
+
+Four public stats and analyze/full benchmark JSON fields report input
+candidacy, tuning class, symbolic eligibility, and numeric eligibility.
+`KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY=1` supplies the new
+same-binary control. `KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY` remains a
+compatibility alias so existing exact-parent scripts still disable both the
+old broad race and this replacement. The exact Freescale1/memchip functions,
+orders, and entry counts are absent from the solver source.
+
+The independent smoke family contains no SuiteSparse-derived graph. A
+directed five-point circulant core plus a one-way diagonal SCC fringe exercises
+coarse class 1 at 131,072 rows, a nearby coupled extension at 135,168 rows, and
+thin class 2 at 133,120 rows. Equivalent CSR input transposes every directed
+edge and retains class 1. A reciprocal symmetric circulant/fringe control and
+a same-family 33-degree control reject. Because the independent orders lie
+below the symbolic economics floor, each positive proves candidacy, measures
+and rejects its direct symbolic, and completes ordinary AUTO fallback; this
+directly covers the staged recovery path. Generic and compatibility disables
+also reject. Release smoke remains in the roughly 17--22 second range.
+
+Two real coupled holdouts use the public metamorphic generator. Appending
+1,024 reciprocal diagonal nodes to Freescale1 produces 3,429,779 rows and
+17,055,698 entries, outside the former exact pair. It reports class 1 and
+`1/1/1`, retains 1,061 BTF blocks with a 3,409,827-row core, and returns a
+worst checked relative-L2 residual of `4.0239e-16`. The frozen parent starts
+from AMD and measures a 35.8662-second modeled cycle; the direct guarded path
+measures 33.6429 seconds (`0.9380x`). Appending 512 nodes to memchip produces
+2,708,036 rows and 13,345,484 entries, reports class 2 and `1/1/1`, retains 63
+matched BTF blocks with a 2,707,363-row core, and returns `1.1824e-16`. Its
+final publish-enabled run measures 39.4272 seconds versus 42.5766 for the
+frozen parent (`0.9260x`).
+
+On Freescale1 itself, a final pinned parent/current pair retains the identical
+24,801,399-entry L and U factors and measures 31.0830 versus 30.9449 seconds
+(`1.0045x`), with the new 0.20-second SCC classification cost visible in
+analysis. Two alternating memchip pairs retain identical 29,216,967/29,216,949
+L/U counts. The geometric current/parent ratios are `1.0363` for analysis,
+about `1.196` for steady row update, `0.2325` for its published solve, and
+`0.8246` for the complete modeled cycle. A pinned `circuit5M_dc` rejection
+pair retains identical 24,618,098-entry L/U factors and measures 34.1774 versus
+34.1709 seconds. All target and holdout changed-value checks remain below
+`4.13e-16` relative L2. Release and leak-enabled ASan/UBSan/LSan CTest pass all
+four tests.

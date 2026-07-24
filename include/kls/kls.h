@@ -1457,6 +1457,18 @@ typedef struct kls_stats {
   /* Number of changed-value refactors served by the retained numeric after
      the entrywise update bound accepted the new values. */
   int64_t bounded_degree_retained_preconditioner_reuse_count;
+  /* The original AUTO input is a nearly full-diagonal asymmetric graph with
+     bounded in/out degree and one nearly spanning raw SCC. */
+  int asymmetric_bounded_degree_direct_metis_candidate;
+  /* SCC fragmentation selected the coarse-fringe/eight-leaf class (1) or
+     the thin-fringe/fourteen-leaf class (2). */
+  int asymmetric_bounded_degree_direct_metis_tuning_class;
+  /* Direct METIS/BTF analysis preserved that SCC class and proved the
+     normalized dominant-core and separator economics. */
+  int asymmetric_bounded_degree_direct_metis_symbolic_eligible;
+  /* The installed unscaled fixed-pivot numeric also passed normalized
+     fill/work, balance, and pivot-repair guards. */
+  int asymmetric_bounded_degree_direct_metis_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
