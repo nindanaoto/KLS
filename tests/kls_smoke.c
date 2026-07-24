@@ -13227,6 +13227,282 @@ static int test_dense_group_fragmented_target_map_probe(void) {
   return ok;
 }
 
+static int test_nearly_missing_diagonal_early_match_policy(void) {
+  const int32_t grid_rows = 64;
+  const int32_t grid_cols = 64;
+  const int32_t n = grid_rows * grid_cols;
+  const int32_t row_shift = n / 2 + 1;
+  const int32_t grid_edges =
+    grid_rows * (grid_cols - 1) + (grid_rows - 1) * grid_cols;
+  const int32_t nnz = n + 2 * grid_edges;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *ax_changed =
+    (double *)malloc((size_t)nnz * sizeof(*ax_changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *control_solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
+    expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv(
+        "KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY") != 0) {
+    perror("configure nearly-missing-diagonal early-match policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    const int32_t grid_row = col / grid_cols;
+    const int32_t grid_col = col % grid_cols;
+    int32_t rows[5];
+    double values[5];
+    int count = 0;
+    rows[count] = (col + row_shift) % n;
+    values[count++] = 8.0;
+    if (grid_row > 0) {
+      rows[count] = (col - grid_cols + row_shift) % n;
+      values[count++] = -1.0;
+    }
+    if (grid_col > 0) {
+      rows[count] = (col - 1 + row_shift) % n;
+      values[count++] = -1.0;
+    }
+    if (grid_col + 1 < grid_cols) {
+      rows[count] = (col + 1 + row_shift) % n;
+      values[count++] = -1.0;
+    }
+    if (grid_row + 1 < grid_rows) {
+      rows[count] = (col + grid_cols + row_shift) % n;
+      values[count++] = -1.0;
+    }
+    for (int i = 1; i < count; ++i) {
+      const int32_t row = rows[i];
+      const double value = values[i];
+      int insert = i;
+      while (insert > 0 && rows[insert - 1] > row) {
+        rows[insert] = rows[insert - 1];
+        values[insert] = values[insert - 1];
+        --insert;
+      }
+      rows[insert] = row;
+      values[insert] = value;
+    }
+    ap[col] = p;
+    for (int i = 0; i < count; ++i) {
+      ai[p] = rows[i];
+      ax[p] = values[i];
+      ++p;
+    }
+    expected[col] = 0.5 + 0.03125 * (double)(col % 19);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr,
+            "unexpected nearly-missing-diagonal grid nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t entry = 0; entry < nnz; ++entry) {
+    ax_changed[entry] = ax[entry] *
+      (1.0 + 1.0e-5 * (double)(entry % 11 - 5));
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create nearly-missing-diagonal early match") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze nearly-missing-diagonal early match") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor nearly-missing-diagonal early match") ||
+      !require_ok(kls_refactor(solver, ax_changed),
+                  "refactor nearly-missing-diagonal early match")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats nearly-missing-diagonal early match") ||
+      stats.nearly_missing_diagonal_early_match_selected != 1 ||
+      stats.last_factor_path != KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST ||
+      !stats.selected_static_pivoting ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != -1 || !stats.selected_btf ||
+      stats.structural_rank != n || stats.nblocks != 1 ||
+      stats.max_block != n) {
+    fprintf(stderr,
+            "unexpected nearly-missing-diagonal early-match policy:"
+            " selected=%d path=%s static=%d orientation=%d ordering=%d"
+            " scale=%d btf=%d blocks=%" PRId64 " max=%" PRId64
+            " rank=%" PRId64 "\n",
+            stats.nearly_missing_diagonal_early_match_selected,
+            kls_factor_path_name(stats.last_factor_path),
+            stats.selected_static_pivoting,
+            (int)stats.selected_orientation,
+            (int)stats.selected_ordering, stats.selected_scale,
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.structural_rank);
+    ok = 0;
+    goto cleanup;
+  }
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += ax_changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve nearly-missing-diagonal early match")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "nearly-missing-diagonal solve mismatch at %d: %.17g"
+              " vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+  kls_destroy(solver);
+  solver = NULL;
+
+  /* Explicit ordering remains authoritative even for an otherwise identical
+     input and retained numeric. */
+  kls_options explicit_options = options;
+  explicit_options.ordering = KLS_ORDERING_AMD;
+  if (!require_ok(kls_create(&control_solver),
+                  "create nearly-missing-diagonal explicit control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &explicit_options),
+                  "analyze nearly-missing-diagonal explicit control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor nearly-missing-diagonal explicit control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats nearly-missing-diagonal explicit control") ||
+      stats.nearly_missing_diagonal_early_match_selected != 0) {
+    fprintf(stderr,
+            "explicit nearly-missing-diagonal control selected policy\n");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+
+  if (setenv("KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY",
+             "1", 1) != 0 ||
+      !require_ok(kls_create(&control_solver),
+                  "create nearly-missing-diagonal disabled control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze nearly-missing-diagonal disabled control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor nearly-missing-diagonal disabled control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats nearly-missing-diagonal disabled control") ||
+      stats.nearly_missing_diagonal_early_match_selected != 0) {
+    fprintf(stderr,
+            "disabled nearly-missing-diagonal control selected policy\n");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+  if (unsetenv(
+        "KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY") != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Preserve the order, density, and completely missing diagonal, but make
+     every BTF component scalar.  The one-block symbolic work contract must
+     reject this cheap control. */
+  p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    for (int32_t offset = 0; offset <= 2 && col + offset < n; ++offset) {
+      ai[p] = (col + offset + row_shift) % n;
+      ax[p] = offset == 0 ? 4.0 : (offset == 1 ? -1.0 : -0.5);
+      ++p;
+    }
+  }
+  ap[n] = p;
+  if (p != 3 * n - 3 ||
+      !require_ok(kls_create(&control_solver),
+                  "create nearly-missing-diagonal block control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze nearly-missing-diagonal block control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor nearly-missing-diagonal block control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats nearly-missing-diagonal block control") ||
+      stats.nearly_missing_diagonal_early_match_selected != 0 ||
+      stats.nblocks != n || stats.max_block != 1) {
+    fprintf(stderr,
+            "cheap nearly-missing-diagonal control selected policy:"
+            " selected=%d blocks=%" PRId64 " max=%" PRId64 "\n",
+            stats.nearly_missing_diagonal_early_match_selected,
+            stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(control_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(ax_changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  return ok;
+}
+
 static int test_pre_static_pivoting(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -22171,6 +22447,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_many_fringe_btf_pts_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_nearly_missing_diagonal_early_match_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_high_work_tiny_scalar_fringe_policy()) {

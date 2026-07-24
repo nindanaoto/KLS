@@ -97,6 +97,18 @@ have to pass KLS's normal numeric checks and a value gate that requires the
 matching to remove substantial pivoting pressure or materially reduce factor
 work/fill.
 
+For a compact normal-AMD one-block symbolic with at least 31/32 of rows both
+weak and structurally missing on the diagonal, KLS can run that guarded match
+before the first numeric rather than deferring it to the first changed-value
+refactor.  The timing policy is bounded to 4,096--16,384 rows, 3--8 input
+entries per row, 16--64 estimated factor entries per row, balanced L/U, and
+128--4,096 estimated flops per row inside a 1M--64M resource band.  Matching
+coverage, candidate factorization, and the ordinary numeric acceptance gates
+still decide whether the transformed candidate is retained.  Benchmark JSON
+reports `nearly_missing_diagonal_early_match_selected`; set
+`KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY=1` to restore deferred
+evaluation.  The former Hamrle2-specific input check is removed.
+
 For very large pre-static candidates, KLS uses SPRAL's auction
 matching/scaling path instead of exact Hungarian matching, except on
 mostly-missing-diagonal patterns where the auction predictably falls short of

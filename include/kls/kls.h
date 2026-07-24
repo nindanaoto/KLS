@@ -1355,6 +1355,9 @@ typedef struct kls_stats {
   /* The retained low-work AMD/PTS numeric has a hubbed input and an almost
      entirely scalar BTF fringe. */
   int low_work_hubbed_scalar_fringe_pts_policy_eligible;
+  /* A nearly-missing-diagonal one-block symbolic selected value-aware
+     matching before the first numeric factor. */
+  int nearly_missing_diagonal_early_match_selected;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

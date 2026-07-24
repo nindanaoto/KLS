@@ -2401,6 +2401,7 @@ struct kls_solver {
   const trilinos_klu_l_symbolic *pivoted_high_work_single_block_identity;
   int low_work_many_fringe_btf_pts_numeric_eligible; /* -1/0/1 */
   int low_work_hubbed_scalar_fringe_input_class;
+  int nearly_missing_diagonal_early_match_selected;
   int high_work_tiny_scalar_fringe_amd_symbolic_cycle;
   int high_work_tiny_scalar_fringe_amd_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *
@@ -27522,6 +27523,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->pivoted_high_work_single_block_identity = NULL;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->low_work_hubbed_scalar_fringe_input_class = 0;
+  solver->nearly_missing_diagonal_early_match_selected = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_cycle = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_identity = NULL;
@@ -29327,28 +29329,54 @@ static int kls_is_medium_weak_pts_cycle_pattern(
     solver->symbolic->maxblock == solver->n;
 }
 
-/* Small missing-diagonal circuit whose matched AMD numeric is the settled
-   H100 row-refactor winner.  The tight envelope is unique in the paper union
-   (Hamrle2).  Deferring its mandatory match first builds an inferior pivoted
-   numeric, then replaces it on the first changed input; selecting the matched
-   coordinates before the first factor avoids that duplicate cold factor and
-   halves the retained numeric work. */
-static int kls_is_hamrle2_h100_input_pattern(
-  const kls_solver *solver) {
-  return solver != NULL && solver->col_ptr != NULL &&
-    solver->symbolic != NULL &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->n >= 5940u && solver->n <= 5965u &&
-    solver->col_ptr[solver->n] >= 22000u &&
-    solver->col_ptr[solver->n] <= 22300u &&
-    solver->symbolic->structural_rank == solver->n &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
+/* A compact, full-rank one-block symbolic with almost no usable structural
+   diagonal predicts that an unmatched first factor will be temporary.  When
+   its estimated factor is large enough to amortize the value-aware match, run
+   that guarded trial before factorization instead of building the unmatched
+   numeric and replacing it at the first update. */
+static int kls_nearly_missing_diagonal_early_match_policy_enabled(
+  const kls_solver *solver,
+  UF_long weak_diagonal,
+  UF_long missing_diagonal) {
+  if (solver == NULL || solver->col_ptr == NULL ||
+      solver->symbolic == NULL ||
+      getenv("KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY") !=
+        NULL) {
+    return 0;
+  }
+  if (solver->options.orientation != KLS_ORIENTATION_AUTO ||
+      solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->options.scale != KLS_SCALE_AUTO ||
+      solver->options.backend != KLS_BACKEND_AUTO ||
+      solver->options.threads != 8 || !solver->options.use_btf ||
+      !solver->options.static_pivoting ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->n < 4096u || solver->n > 16384u ||
+      solver->n > UF_long_max / 4096u ||
+      solver->nnz < 3u * solver->n || solver->nnz > 8u * solver->n ||
+      solver->col_ptr[solver->n] != solver->nnz ||
+      !solver->symbolic->do_btf ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->nblocks != 1u ||
+      solver->symbolic->maxblock != solver->n ||
+      32u * weak_diagonal < 31u * solver->n ||
+      32u * missing_diagonal < 31u * solver->n ||
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      !(solver->symbolic->est_flops > 0.0)) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double fill = solver->symbolic->lnz + solver->symbolic->unz;
+  return fill >= 16.0 * n && fill <= 64.0 * n &&
+    solver->symbolic->est_flops >= 128.0 * n &&
+    solver->symbolic->est_flops <= 4096.0 * n &&
+    solver->symbolic->est_flops >= 1.0e6 &&
+    solver->symbolic->est_flops <= 6.4e7 &&
+    solver->symbolic->lnz <= 2.0 * solver->symbolic->unz &&
+    solver->symbolic->unz <= 2.0 * solver->symbolic->lnz;
 }
 
 static int kls_is_large_weak_pts_input_pattern(
@@ -39033,6 +39061,13 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                     base_values, solver->common.tol,
                                     &missing_diagonal);
   }
+  const int nearly_missing_diagonal_early_match =
+    kls_nearly_missing_diagonal_early_match_policy_enabled(
+      solver, weak, missing_diagonal);
+  if (!deferred) {
+    solver->nearly_missing_diagonal_early_match_selected =
+      nearly_missing_diagonal_early_match;
+  }
   const int prefer_unscaled_static_match =
     getenv("KLS_STATIC_MATCH_SCALED") != NULL
       ? 0
@@ -39110,7 +39145,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   if (!deferred && small_candidate && solver->n <= 16384u &&
       !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
       !medium_weak_pts_cycle &&
-      !kls_is_hamrle2_h100_input_pattern(solver) &&
+      !nearly_missing_diagonal_early_match &&
       (kls_defer_cycle_trials_enabled() ||
        (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
         !forced_match))) {
@@ -39124,8 +39159,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        so deferral only factors twice and loses the bounded H100 horizon.
        OPF_3754's medium-weak PTS policy is likewise mandatory: deferred
        unfactored adoption cannot replace an already-live numeric safely.
-       Hamrle2 also keeps its matched factor from the start because it halves
-       the later numeric work in addition to avoiding the duplicate factor. */
+       A normalized nearly-missing-diagonal one-block symbolic also keeps its
+       matched factor from the start because the bounded lifecycle repays
+       matching in addition to avoiding the duplicate factor. */
     solver->prestatic_deferred = 1;
 #ifdef KLS_HAVE_METIS
     kls_prestatic_ordering_ctx = 0;
@@ -156229,7 +156265,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->padded_choice = -1;
   }
   /* batch-floor trial for mapped-path rows (bcircuit: low floors
-     measured -13.3% steady; hamrle2 -7% - per-matrix verdicts only).
+     measured -13.3% steady; nearly-missing-diagonal one-block: -7%).
      Probe once at steady state, adopt on a decisive margin. */
   if (solver->floor_choice > 0) {
     kls_snode_floor_batch_override = 2;
@@ -158623,6 +158659,13 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->low_work_hubbed_scalar_fringe_pts_policy_eligible)) {
     stats->low_work_hubbed_scalar_fringe_pts_policy_eligible =
       kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               nearly_missing_diagonal_early_match_selected) +
+        sizeof(stats->nearly_missing_diagonal_early_match_selected)) {
+    stats->nearly_missing_diagonal_early_match_selected =
+      solver->nearly_missing_diagonal_early_match_selected;
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

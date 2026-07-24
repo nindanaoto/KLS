@@ -2129,7 +2129,8 @@ int main(int argc, char **argv) {
            ",\"pivoted_high_work_single_block_policy_eligible\":%d"
            ",\"low_work_many_fringe_btf_pts_policy_eligible\":%d"
            ",\"high_work_tiny_scalar_fringe_policy_eligible\":%d"
-           ",\"low_work_hubbed_scalar_fringe_pts_policy_eligible\":%d",
+           ",\"low_work_hubbed_scalar_fringe_pts_policy_eligible\":%d"
+           ",\"nearly_missing_diagonal_early_match_selected\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2362,7 +2363,8 @@ int main(int argc, char **argv) {
            stats.pivoted_high_work_single_block_policy_eligible,
            stats.low_work_many_fringe_btf_pts_policy_eligible,
            stats.high_work_tiny_scalar_fringe_policy_eligible,
-           stats.low_work_hubbed_scalar_fringe_pts_policy_eligible);
+           stats.low_work_hubbed_scalar_fringe_pts_policy_eligible,
+           stats.nearly_missing_diagonal_early_match_selected);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64

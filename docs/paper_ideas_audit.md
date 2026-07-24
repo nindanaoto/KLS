@@ -18392,3 +18392,91 @@ Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled
 sanitized changed-value runs additionally cover the original, the connected
 out-of-window positive, and the large-fringe rejection; all retain their
 expected decisions and verified residuals.
+
+NEARLY-MISSING-DIAGONAL EARLY MATCH GENERALIZED (2026-07-24).  The remaining
+`Hamrle2` exception was a single pre-factor timing decision, but it still
+recognized one benchmark by requiring 5,940--5,965 rows and
+22,000--22,300 entries.  When that exact normal, full-rank, one-block input
+was seen, KLS ran its value-aware row match before the first numeric.  Every
+other small candidate deferred the same guarded trial until the first changed
+refactor.  The retained match is useful, but the input dimensions rather than
+the cost of the discarded unmatched factor decided when it ran.
+
+The replacement uses the diagonal census already computed by the pre-static
+matcher, so it adds no pattern scan.  Under the unchanged AUTO orientation,
+ordering, scale, and backend contract with eight threads, BTF, static
+pivoting, and the requested `0.001` tolerance, at least 31/32 of rows must
+have both a structurally missing and a numerically weak diagonal.  The current
+symbolic must be normal AMD, full-rank, and one BTF block.  Its order is
+bounded to 4,096--16,384 and input density to 3--8 entries per row; estimated
+fill is 16--64 entries per row and balanced L/U, while estimated work is
+128--4,096 flops per row inside a 1M--64M resource band.  These are the
+resources that make one discarded factor more expensive than scheduling the
+match early, not a widened benchmark box.
+
+Passing that timing profile does not force a transformed numeric.  The
+existing matcher must still cover at least 99.5% of rows, build a valid
+permuted pattern, factor the candidate, and pass the ordinary pivot,
+conditioning, fill, work, and setup-value acceptance gates.  A failed match
+therefore returns to the same unmatched factor as before.  Explicit options
+remain authoritative.  The decision is observable as
+`nearly_missing_diagonal_early_match_selected` in `kls_stats` and benchmark
+JSON, and
+`KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY=1` restores deferred
+evaluation.  No matrix-specific diagnostic alias was added.
+
+The smoke suite constructs an independent 4,096-row five-point grid, applies
+a simultaneous 2,049-row cyclic permutation only to its row coordinates, and
+thereby removes every structural diagonal while preserving a full-rank
+one-block system.  The 20,224-entry initial AMD symbolic has 158,142 estimated
+factor entries and about 6.65M estimated flops, far outside the former input
+box.  The early match is selected, the retained numeric has 134,400 entries
+and about 4.81M flops, a changed-value refactor succeeds, and an independently
+formed right-hand side solves within the residual contract.  An explicit-AMD
+control and the generic disable switch both report zero.  A second 4,096-row
+control retains a completely missing diagonal and 3-entry density but exposes
+4,096 scalar BTF blocks; it is too cheap to qualify and also reports zero.
+
+Metamorphic cases exercise the old size boundary and the new diagonal
+boundary independently.  Appending 128 weak reciprocal diagonal nodes moves
+the original to 6,080 rows and 22,546 entries, outside the old window, while
+retaining 5,944 missing diagonal rows and one block.  It selects early
+matching; a complete simultaneous shuffle remains positive despite changing
+the AMD estimates and retained numeric.  Appending 256 such nodes instead
+produces 6,208 rows with only 95.75% missing diagonals, below the 31/32 floor,
+and cleanly retains deferred evaluation.
+
+Corpus screening confirms that the rule is structural.  Twenty-eight paper
+matrices enter its broad order range.  Only `Hamrle2` and the two `gemat`
+inputs have at least 31/32 missing diagonals; the latter use an intentionally
+deferred NATURAL placeholder with no qualifying AMD estimates and remain on
+their existing generic match lifecycle.  Among 75 locally available matrices
+from the group-disjoint development and holdout archives, the only additional
+near-missing candidates either exceed the density ceiling or expose a
+fragmented BTF (`fd12`: 713 blocks around a 6,787-row core).  None inherits
+the early timing decision.
+
+Twenty interleaved standard-amplitude pairs put generalized/parent modeled
+cycle at `0.9889` by paired geometric mean (`0.9861` median), with factor and
+recurring-refactor ratios `1.0112` and `0.9828`; replacing the exact check is
+performance-neutral on its original target.  Ten same-binary enabled/deferred
+pairs produce modeled-cycle ratios of `0.4979` on the original, `0.3199` on
+the 128-node extension, `0.8196` after its full shuffle, and `0.9276` on the
+independent grid.  The 256-node rejection is neutral at `1.0252`.  Some early
+matches intentionally spend more on the first factor; the complete horizon
+wins because it removes the deferred match, discarded factor, and slower
+intermediate solve/refactor state.
+
+The original, connected extension, shuffled extension, and independent grid
+each completed 100 verified entrywise generations at amplitudes 0.001, 0.01,
+and 0.1.  Across all 1,200 positive systems the worst per-generation
+relative-L2 residual was `8.81e-9`, below the `1e-8` contract; at the
+documented 0.001 amplitude the worst was `6.41e-11`.  The nearby rejection
+completed another 100 generations at amplitude 0.1 with a `1.99e-10` maximum
+and retained selection zero.
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled
+sanitized changed-value runs additionally cover the original, the 128-node
+out-of-window positive, and the 256-node diagonal-threshold rejection.  They
+retain decisions `1/1/0`; their maximum verified residuals are respectively
+`5.68e-13`, `5.92e-12`, and `2.33e-10`.
