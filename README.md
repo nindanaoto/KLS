@@ -1784,6 +1784,23 @@ row inside a 2M--64M resource band. Benchmark JSON exposes
 `KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY=1` for an A/B fallback. The
 former `KLS_DISABLE_RAJAT21_H100_POLICY` switch remains an alias.
 
+A high-work tiny scalar-fringe AMD policy replaces the former `Raj1` order,
+nonzero, block-count, and core-size box. Under the standard AUTO/8-thread
+BTF/static-pivoting contract, a retained normal-AMD symbolic from
+131,072--1,048,576 rows and 3--12 input entries per row may qualify. It must
+be full-rank, leave between `n/4096` and `n/256` vertices outside one dominant
+core, represent at least three quarters of that fringe as separate BTF blocks,
+keep estimated L/U within 2:1, and meet normalized symbolic fill and work
+bounds. The compact-fill half may use probe-first predicted construction;
+denser members retain the ordinary nudge sequence. Recurring EGraph choices
+additionally require an unscaled numeric with no `Rs`, nudges, or
+perturbations; either a verified predicted no-pivot factor or at most `n/512`
+off-diagonal pivots; balanced L/U storage; and normalized measured fill and
+work. Benchmark JSON exposes
+`high_work_tiny_scalar_fringe_policy_eligible`; set
+`KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY=1` for an A/B fallback. The
+former `KLS_DISABLE_RAJ1_H100_POLICY` switch remains an alias.
+
 The metamorphic holdout utility can produce deterministic simultaneous
 row/column relabelings without checking generated matrices into the tree. For
 example, the compact positive used by the policy audit is reproduced with:

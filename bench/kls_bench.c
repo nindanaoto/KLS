@@ -2127,7 +2127,8 @@ int main(int argc, char **argv) {
            ",\"dense_reciprocal_hub_policy_eligible\":%d"
            ",\"symmetric_scalar_fringe_policy_eligible\":%d"
            ",\"pivoted_high_work_single_block_policy_eligible\":%d"
-           ",\"low_work_many_fringe_btf_pts_policy_eligible\":%d",
+           ",\"low_work_many_fringe_btf_pts_policy_eligible\":%d"
+           ",\"high_work_tiny_scalar_fringe_policy_eligible\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2358,7 +2359,8 @@ int main(int argc, char **argv) {
            stats.dense_reciprocal_hub_policy_eligible,
            stats.symmetric_scalar_fringe_policy_eligible,
            stats.pivoted_high_work_single_block_policy_eligible,
-           stats.low_work_many_fringe_btf_pts_policy_eligible);
+           stats.low_work_many_fringe_btf_pts_policy_eligible,
+           stats.high_work_tiny_scalar_fringe_policy_eligible);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64

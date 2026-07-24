@@ -21800,6 +21800,273 @@ cleanup:
   return ok;
 }
 
+static int test_high_work_tiny_scalar_fringe_policy(void) {
+  const int32_t grid_rows = 256;
+  const int32_t grid_cols = 512;
+  const int32_t core = grid_rows * grid_cols;
+  const int32_t fringe = 256;
+  const int32_t n = core + fringe;
+  const int32_t grid_edges =
+    grid_rows * (grid_cols - 1) +
+    (grid_rows - 1) * grid_cols +
+    2 * (grid_rows - 1) * (grid_cols - 1);
+  const int32_t nnz = core + 2 * grid_edges + fringe;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *ax_changed =
+    (double *)malloc((size_t)nnz * sizeof(*ax_changed));
+  double *ax_pivoted =
+    (double *)malloc((size_t)nnz * sizeof(*ax_pivoted));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY");
+  const char *saved_legacy_value = getenv("KLS_DISABLE_RAJ1_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *negative_solver = NULL;
+  kls_solver *explicit_solver = NULL;
+  kls_options options;
+  kls_options explicit_options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
+    ax_pivoted != NULL && expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv("KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_RAJ1_H100_POLICY") != 0) {
+    perror("configure high-work tiny scalar-fringe policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col < core) {
+      const int32_t grid_row = col / grid_cols;
+      const int32_t grid_col = col % grid_cols;
+      for (int32_t row_delta = -1; row_delta <= 1; ++row_delta) {
+        const int32_t neighbor_row = grid_row + row_delta;
+        if (neighbor_row < 0 || neighbor_row >= grid_rows) {
+          continue;
+        }
+        for (int32_t col_delta = -1; col_delta <= 1; ++col_delta) {
+          const int32_t neighbor_col = grid_col + col_delta;
+          if (neighbor_col < 0 || neighbor_col >= grid_cols) {
+            continue;
+          }
+          ai[p++] = neighbor_row * grid_cols + neighbor_col;
+        }
+      }
+    } else {
+      ai[p++] = col;
+    }
+    for (int32_t entry = ap[col]; entry < p; ++entry) {
+      const int32_t row = ai[entry];
+      if (row == col) {
+        ax[entry] = col < core ? 20.0 : 1.0;
+        if (col < core) {
+          const int32_t grid_col = col % grid_cols;
+          ax_pivoted[entry] = grid_col % 13 <= 1
+            ? 2.0e-6 : 10.0 + 1.0e-4 * (double)(col % 17);
+        } else {
+          ax_pivoted[entry] = 1.0;
+        }
+      } else {
+        ax[entry] = -0.1;
+        const int32_t row_grid_row = row / grid_cols;
+        const int32_t row_grid_col = row % grid_cols;
+        const int32_t col_grid_row = col / grid_cols;
+        const int32_t col_grid_col = col % grid_cols;
+        const int32_t first_col = row_grid_col < col_grid_col
+          ? row_grid_col : col_grid_col;
+        ax_pivoted[entry] =
+          row_grid_row == col_grid_row &&
+          abs(row_grid_col - col_grid_col) == 1 &&
+          first_col % 13 == 0 ? 10.0 : -0.1;
+      }
+      ax_changed[entry] =
+        ax[entry] * (1.0 + 1.0e-5 * (double)((entry % 7) - 3));
+    }
+    expected[col] = 1.0 + 0.01 * (double)(col % 23);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr,
+            "unexpected high-work tiny scalar-fringe nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create high-work tiny scalar-fringe policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze high-work tiny scalar-fringe policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor high-work tiny scalar-fringe policy") ||
+      !require_ok(kls_refactor(solver, ax_changed),
+                  "refactor high-work tiny scalar-fringe policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats high-work tiny scalar-fringe policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  const double fill = (double)(stats.nnz_l + stats.nnz_u);
+  if (stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != -1 || !stats.selected_btf ||
+      stats.structural_rank != n || stats.nblocks != fringe + 1 ||
+      stats.max_block != core ||
+      (stats.offdiag_pivots != -1 &&
+       stats.offdiag_pivots * 512 > n) ||
+      fill < 16.0 * (double)n || fill > 128.0 * (double)n ||
+      stats.factor_flops < 1024.0 * (double)n ||
+      stats.factor_flops > 16384.0 * (double)n ||
+      stats.high_work_tiny_scalar_fringe_policy_eligible != 1 ||
+      stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+    fprintf(stderr,
+            "unexpected high-work tiny scalar-fringe policy:"
+            " orientation=%d ordering=%d scale=%d btf=%d blocks=%" PRId64
+            " max=%" PRId64 " rank=%" PRId64 " offdiag=%" PRId64
+            " fill=%.0f flops=%.0f eligible=%d path=%d\n",
+            (int)stats.selected_orientation,
+            (int)stats.selected_ordering, stats.selected_scale,
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.structural_rank, stats.offdiag_pivots, fill,
+            stats.factor_flops,
+            stats.high_work_tiny_scalar_fringe_policy_eligible,
+            (int)stats.last_refactor_path);
+    ok = 0;
+    goto cleanup;
+  }
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += ax_changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve high-work tiny scalar-fringe policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "high-work tiny scalar-fringe solve mismatch at %d: %.17g"
+              " vs %.17g\n", row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+  kls_destroy(solver);
+  solver = NULL;
+
+  /* Identical topology with repeated weak-diagonal pivot pairs must fail
+     the measured pivot contract even though the symbolic proposal passes. */
+  if (!require_ok(kls_create(&negative_solver),
+                  "create high-work tiny scalar-fringe numeric negative") ||
+      !require_ok(kls_analyze_csc(negative_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze high-work tiny scalar-fringe numeric negative") ||
+      !require_ok(kls_factor(negative_solver, ax_pivoted),
+                  "factor high-work tiny scalar-fringe numeric negative")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(negative_solver, &stats),
+                  "stats high-work tiny scalar-fringe numeric negative") ||
+      stats.high_work_tiny_scalar_fringe_policy_eligible != 0 ||
+      stats.offdiag_pivots * 512 <= n) {
+    fprintf(stderr,
+            "pivot-heavy control unexpectedly selected high-work tiny"
+            " scalar-fringe policy (offdiag=%" PRId64 ")\n",
+            stats.offdiag_pivots);
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(negative_solver);
+  negative_solver = NULL;
+
+  /* Explicit choices remain authoritative even when they reach the same
+     retained normal-AMD factor. */
+  explicit_options = options;
+  explicit_options.orientation = KLS_ORIENTATION_NORMAL;
+  explicit_options.ordering = KLS_ORDERING_AMD;
+  explicit_options.scale = -1;
+  if (!require_ok(kls_create(&explicit_solver),
+                  "create high-work tiny scalar-fringe explicit control") ||
+      !require_ok(kls_analyze_csc(explicit_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &explicit_options),
+                  "analyze high-work tiny scalar-fringe explicit control") ||
+      !require_ok(kls_factor(explicit_solver, ax),
+                  "factor high-work tiny scalar-fringe explicit control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(explicit_solver, &stats),
+                  "stats high-work tiny scalar-fringe explicit control") ||
+      stats.high_work_tiny_scalar_fringe_policy_eligible != 0 ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != -1) {
+    fprintf(stderr,
+            "explicit high-work tiny scalar-fringe control changed or"
+            " became eligible\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(explicit_solver);
+  kls_destroy(negative_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_RAJ1_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(ax_changed);
+  free(ax_pivoted);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -21828,6 +22095,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_many_fringe_btf_pts_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_high_work_tiny_scalar_fringe_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

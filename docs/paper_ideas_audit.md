@@ -18185,3 +18185,98 @@ audit.  Leak-enabled sanitized changed-value runs additionally cover the
 original, coupled extension, independent positive, large-append rejection,
 and same-topology pivot-heavy rejection with their expected decisions and
 valid residuals.
+
+HIGH-WORK TINY SCALAR-FRINGE AMD LIFECYCLE GENERALIZED (2026-07-24).  The
+former `Raj1` symbolic selector required 263,500--264,000 rows,
+1.29M--1.31M input entries, 128--256 BTF blocks, and no more than 512 vertices
+outside the dominant core.  Its numeric half then required at most 256
+off-diagonal pivots, 7.2M--7.9M factor entries, and 650M--800M factor flops.
+Three pre-factor decisions used the exact symbolic identity to suppress a
+METIS race, prefer the unmodified predicted-factor residual probe, and bypass
+the ordinary small-prediction cutoff.  Eight recurring decisions skipped a
+Hungarian trial, scale and METIS consultations, FP32, Algorithm-5 prefactor
+updates, dispatch-width probes, the generic schedule cut, and floor/padding
+probes.  Numeric checks therefore did not remove the benchmark fingerprint
+from either phase of the lifecycle.
+
+The replacement has separate symbolic and measured contracts.  Under AUTO
+orientation, ordering, scale, and backend with eight threads, BTF, static
+pivoting, and the default requested `0.001` tolerance, the selected symbolic
+must be normal AMD and full-rank.  Its order is 131,072--1,048,576 with 3--12
+input entries per row.  One dominant BTF block leaves a fringe between
+`n/4096` and `n/256`, at least three quarters of fringe vertices are separate
+blocks, symbolic fill is 24--128 entries per row, and estimated work is
+1,024--16,384 flops per row inside a 256M--4B resource band.  Both estimated
+triangular streams must be positive and within 2:1.
+
+The compact-fill subset, at no more than 48 symbolic entries per row, may run
+the probe-first predicted construction used by the original operating point.
+The independent denser grid initially exposed why that extra guard matters:
+applying probe-first to every symbolic positive made a value-only rejection's
+cold factor about 40 times slower.  Keeping the normalized compact-fill
+crossover restores the ordinary nudge-first fallback on that topology while
+preserving the original and metamorphic first factors.
+
+Recurring choices require the accepted symbolic identity and an unscaled
+numeric with no `Rs`, nudges, or perturbations.  The factor may be a verified
+predicted no-pivot numeric or have at most `n/512` off-diagonal pivots.  It
+must retain 16--128 entries and 1,024--16,384 measured flops per row inside
+the same 256M--4B resource band, with L/U within 2:1.  A retained symbolic
+identity prevents a replacement ordering from inheriting the class, and the
+cached numeric verdict is invalidated on replacement or a fresh factor.
+The public field is `high_work_tiny_scalar_fringe_policy_eligible`; the master
+switch is `KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY`, and the old
+`KLS_DISABLE_RAJ1_H100_POLICY` remains an A/B alias.  Explicit orientation,
+ordering, or scale requests remain authoritative and report zero.
+
+The smoke suite constructs an independent symmetric 256-by-512 nine-point
+grid with a 131,072-row core and 256 scalar diagonal components.  Its 131,328
+rows and 1,175,300 entries are far outside the old window.  AUTO selects
+normal AMD, no scaling, 257 BTF blocks, and the intended core.  Symbolic and
+measured fill are 11,597,048 entries and work is about 1.869B flops; the
+stable-diagonal numeric reports eligibility one, completes a changed-value
+EGraph refactor, and solves an independently formed right-hand side.  A
+same-topology control installs repeated weak-diagonal/strong-edge pivot pairs.
+Its first factor takes 10,240 off-diagonal pivots, retains 13,006,381 entries,
+and reports eligibility zero.  A separate explicit normal/AMD/no-scale
+control reaches the requested factor but remains ineligible.
+
+Four metamorphic positives leave every old size window.  Appending 512
+diagonal components produces 264,255 rows, 681 blocks, and a 263,571-row core.
+Appending 512 weak reciprocal nodes instead produces 173 blocks around a
+264,079-row core.  That connected extension remains eligible after 10,000
+adjacent swaps and after a complete simultaneous shuffle; the shuffle moves
+measured fill to about 7.78M entries and work to 816.5M flops.  Appending
+2,048 diagonal components leaves 2,220 fringe vertices, crosses the `n/256`
+boundary, and reports zero.
+
+Corpus screening remains selective without a name check.  None of the 48
+default group-disjoint development/holdout matrices passes the symbolic
+contract.  None of the seven fetched coarse-density members of the new large
+12+12 tier passes.  In the 110-matrix paper union, only `Raj1` and
+`ASIC_100ks` even have the normalized tiny-fringe BTF geometry;
+`ASIC_100ks` selects METIS and lacks the required AMD symbolic work, leaving
+only `Raj1` eligible.
+
+Twenty interleaved original H100 pairs put generic/parent modeled cycle at
+`0.9945` by paired geometric mean (`0.9970` median,
+`0.9728`--`1.0221` range).  Analysis, factor, and recurring-refactor geometric
+means are `1.0010`, `1.0019`, and `1.0033`; solve improves to `0.9705`.
+Same-binary enabled/disabled cycle geometric means are `0.8018` on the
+original, `0.8131` after the diagonal append, `0.8154` after the coupled
+append, `0.7824` after adjacent swaps, `0.8046` after full shuffle, and
+`0.6239` on the independent grid.  The fringe-boundary and extreme
+value-only rejections stay neutral at `1.0038` and `0.9969`; the paired-pivot
+rejection is slightly faster at `0.9546` while retaining eligibility zero.
+
+The original, four metamorphic positives, and independent grid each completed
+100 verified entrywise generations at amplitudes 0.001, 0.01, and 0.1.  All
+1,800 changed systems retained eligibility one and EGraph; the worst
+per-generation relative-L2 residual was `8.84e-13`.  The boundary and
+paired-pivot controls completed another 100 generations each, while the
+extreme weak-diagonal control completed 20; all retained eligibility zero and
+the worst rejection residual was `1.07e-10`.  Release and ASan/UBSan/LSan
+CTest pass all four tests.  Leak-enabled sanitized changed-value runs also
+cover the original, coupled extension, independent grid, fringe-boundary
+rejection, and same-topology paired-pivot rejection with their expected
+decisions and valid residuals.

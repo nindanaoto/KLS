@@ -1349,6 +1349,9 @@ typedef struct kls_stats {
   /* The retained unscaled dominant-BTF numeric has a mostly scalar fringe
      and passed the normalized PTS fill, work, pivot, and balance guards. */
   int low_work_many_fringe_btf_pts_policy_eligible;
+  /* The retained normal-AMD numeric has a tiny, mostly scalar BTF fringe and
+     passed the normalized high-work EGraph lifecycle guards. */
+  int high_work_tiny_scalar_fringe_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
