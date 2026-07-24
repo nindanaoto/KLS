@@ -4113,6 +4113,66 @@ relative-L2 residuals `7.43e-10` and `9.38e-10`; none required a recovery
 rebuild. Leak-enabled ASan/UBSan/LSan factor/refactor/solve runs cover both
 matrices.
 
+## Bounded-degree retained-preconditioner lifecycle
+
+The former `Hamrle3` lifecycle no longer recognizes a narrow order and entry-
+count window or requires exactly eight workers. Under the ordinary parallel
+AUTO/BTF/static-pivoting contract, a proposal now comes from sparse topology:
+32,768--4,194,304 rows, two--six stored entries per row on average, no empty
+row or column, maximum row and column degree 16, at most `n/32` scalar rows or
+columns, and at most `n/128` columns with a structural diagonal. The proposal
+uses transpose AMD with scale 1 and a `1e-4` pivot threshold, but cannot force
+that representation by itself.
+
+The measured BTF symbolic must prove full structural rank, at most `n/128+1`
+blocks, a dominant block containing at least 31/32 of the matrix, 48--512
+estimated factor entries per row, and at least 8,192 estimated operations per
+row. A rejected proposal is discarded and ordinary two-sided AUTO analysis
+resumes. The installed numeric must independently preserve the representation
+and rank, avoid nudges and perturbations, keep L and U within 4x balance, retain
+48--1,536 measured factor entries per row, and perform at least 8,192 measured
+operations per row.
+
+Only a numeric that passes all three stages captures its factor-time values.
+A changed-value update may reuse that factor when every entry changes by no
+more than `1.01e-3*abs(old)+64*DBL_MIN`. Every resulting solve checks the true
+current-matrix relative-L2 residual and must reach `1e-9`; larger updates or a
+reference allocation failure permanently return that numeric epoch to an
+ordinary refactor. This makes retained-factor accuracy a measured contract,
+not an inference from matrix identity.
+
+Set
+`KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY=1` for a generic
+same-binary control. `KLS_DISABLE_HAMRLE3_H100_POLICY` remains a compatibility
+alias. `kls_stats` and benchmark JSON expose
+`bounded_degree_retained_preconditioner_candidate`,
+`bounded_degree_retained_preconditioner_symbolic_eligible`,
+`bounded_degree_retained_preconditioner_factor_eligible`, and
+`bounded_degree_retained_preconditioner_reuse_count`.
+
+The independent smoke fixture is a 32,768-row six-neighbor toroidal graph with
+no diagonal and generated values. It qualifies at candidate, symbolic, and
+factor stages under four workers, reuses the numeric for changed values, and
+checks an independently formed solution. A same-order six-neighbor narrow-band
+ring passes the input proposal, fails the symbolic economics, and completes
+ordinary AUTO fallback. A scan of all 110 local SuiteSparse matrices leaves
+only `Hamrle3` inside the coarse topology bounds; that is compatibility
+evidence, while the independent fixture and extensions establish the
+capability's generality.
+
+Appending 1,000 independent diagonal blocks produces a 1,448,360-row holdout
+outside the former order window. It reports `1/1/1`, retains a 1,447,360-row
+dominant block, and completes 20 checked updates with worst relative-L2
+residual `1.90e-10`. A 1% update rejects reuse, selects EGraph, and returns
+`1.36e-15` with reuse count zero. Three pinned alternating target pairs keep
+the same representation and residual while measuring geometric current/parent
+ratios of `1.0093` for analysis, `1.0008` for steady update, `0.9997` for its
+solve, and `1.0120` for the complete modeled cycle. The recurring path is
+therefore effectively unchanged; the remaining cycle variation comes from the
+layout-sensitive one-time factor. Release and leak-enabled
+ASan/UBSan/LSan CTest pass all four tests; an explicit sanitized target
+factor/update/solve also reports `1/1/1`, one retained reuse, and no findings.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

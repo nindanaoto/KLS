@@ -22185,6 +22185,278 @@ cleanup:
   return ok;
 }
 
+static int test_bounded_degree_retained_preconditioner(void) {
+  enum { n = 32768, degree = 6, nnz = n * degree };
+  const int32_t offsets[degree] = {-256, -16, -1, 1, 16, 256};
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_disable_value =
+    getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_HAMRLE3_H100_POLICY");
+  char *saved_disable = saved_disable_value != NULL
+    ? strdup(saved_disable_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_disable = saved_disable_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = 1;
+
+  if (ap == NULL || ai == NULL || ax == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL ||
+      (had_disable && saved_disable == NULL) ||
+      (had_legacy && saved_legacy == NULL)) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    int32_t rows[degree];
+    ap[col] = p;
+    for (int32_t k = 0; k < degree; ++k) {
+      int32_t row = col + offsets[k];
+      row %= n;
+      if (row < 0) {
+        row += n;
+      }
+      rows[k] = row;
+    }
+    for (int32_t i = 1; i < degree; ++i) {
+      const int32_t row = rows[i];
+      int32_t j = i;
+      while (j > 0 && rows[j - 1] > row) {
+        rows[j] = rows[j - 1];
+        --j;
+      }
+      rows[j] = row;
+    }
+    for (int32_t k = 0; k < degree; ++k) {
+      const int32_t row = rows[k];
+      ai[p] = row;
+      ax[p] = row == (col + 1) % n
+        ? 4.0 : 0.01 * (double)(1 + ((row + col) % 7));
+      changed[p] = ax[p] *
+        (1.0 + 1.0e-4 * (double)((p % 7) - 3));
+      ++p;
+    }
+    expected[col] = 0.5 + 0.03125 * (double)(col % 19);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "bounded-degree retained fixture nnz mismatch\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (unsetenv(
+        "KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_HAMRLE3_H100_POLICY") != 0) {
+    perror("configure bounded-degree retained preconditioner");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_default_options(&options);
+  options.threads = 4;
+  if (!require_ok(kls_create(&solver),
+                  "create bounded-degree retained preconditioner") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze bounded-degree retained preconditioner")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "symbolic bounded-degree retained preconditioner") ||
+      stats.bounded_degree_retained_preconditioner_candidate != 1 ||
+      stats.bounded_degree_retained_preconditioner_symbolic_eligible != 1) {
+    fprintf(stderr,
+            "unexpected bounded-degree retained symbolic: candidate=%d"
+            " symbolic=%d orientation=%d ordering=%d blocks=%" PRId64
+            " max=%" PRId64 " lnz=%" PRId64 " flops=%.9g\n",
+            stats.bounded_degree_retained_preconditioner_candidate,
+            stats.bounded_degree_retained_preconditioner_symbolic_eligible,
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.nblocks, stats.max_block, stats.nnz_l,
+            stats.estimated_flops);
+    ok = 0;
+    goto cleanup;
+  }
+  if (!require_ok(kls_factor(solver, ax),
+                  "factor bounded-degree retained preconditioner")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "factor stats bounded-degree retained preconditioner") ||
+      stats.bounded_degree_retained_preconditioner_factor_eligible != 1) {
+    fprintf(stderr,
+            "unexpected bounded-degree retained factor: eligible=%d"
+            " lnz=%" PRId64 " unz=%" PRId64 " flops=%.9g\n",
+            stats.bounded_degree_retained_preconditioner_factor_eligible,
+            stats.nnz_l, stats.nnz_u, stats.factor_flops);
+    ok = 0;
+    goto cleanup;
+  }
+  memset(b, 0, (size_t)n * sizeof(*b));
+  memset(x, 0, (size_t)n * sizeof(*x));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_refactor(solver, changed),
+                  "reuse bounded-degree retained preconditioner") ||
+      !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve bounded-degree retained preconditioner")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "reuse stats bounded-degree retained preconditioner") ||
+      stats.last_refactor_path !=
+        KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER ||
+      stats.bounded_degree_retained_preconditioner_reuse_count != 1) {
+    fprintf(stderr,
+            "unexpected bounded-degree retained reuse: path=%d count=%" PRId64
+            "\n", (int)stats.last_refactor_path,
+            stats.bounded_degree_retained_preconditioner_reuse_count);
+    ok = 0;
+    goto cleanup;
+  }
+  double error2 = 0.0;
+  double expected2 = 0.0;
+  for (int32_t row = 0; row < n; ++row) {
+    const double error = x[row] - expected[row];
+    error2 += error * error;
+    expected2 += expected[row] * expected[row];
+  }
+  if (!isfinite(error2) || !(expected2 > 0.0) ||
+      error2 > 25.0e-18 * expected2) {
+    fprintf(stderr, "bounded-degree retained solve relative error %.9g\n",
+            sqrt(error2 / expected2));
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (setenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY",
+             "1", 1) != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "disabled bounded-degree retained stats") ||
+      stats.bounded_degree_retained_preconditioner_factor_eligible != 0) {
+    fprintf(stderr, "bounded-degree retained disable was not honored\n");
+    ok = 0;
+  }
+  if (!ok) {
+    goto cleanup;
+  }
+
+  /* A low-treewidth graph can satisfy the coarse degree/diagonal proposal
+     without having the factor economics this lifecycle needs.  It must stop
+     at stage one and successfully resume the ordinary AUTO tournament. */
+  if (unsetenv(
+        "KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(solver);
+  solver = NULL;
+  const int32_t narrow_offsets[degree] = {-3, -2, -1, 1, 2, 3};
+  p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    int32_t rows[degree];
+    ap[col] = p;
+    for (int32_t k = 0; k < degree; ++k) {
+      int32_t row = (col + narrow_offsets[k]) % n;
+      if (row < 0) {
+        row += n;
+      }
+      rows[k] = row;
+    }
+    for (int32_t i = 1; i < degree; ++i) {
+      const int32_t row = rows[i];
+      int32_t j = i;
+      while (j > 0 && rows[j - 1] > row) {
+        rows[j] = rows[j - 1];
+        --j;
+      }
+      rows[j] = row;
+    }
+    for (int32_t k = 0; k < degree; ++k) {
+      ai[p] = rows[k];
+      ax[p] = rows[k] == (col + 1) % n ? 4.0 : 0.01;
+      ++p;
+    }
+  }
+  ap[n] = p;
+  if (!require_ok(kls_create(&solver),
+                  "create bounded-degree retained low-work control") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze bounded-degree retained low-work control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "bounded-degree retained low-work stats") ||
+      stats.bounded_degree_retained_preconditioner_candidate != 1 ||
+      stats.bounded_degree_retained_preconditioner_symbolic_eligible != 0 ||
+      stats.bounded_degree_retained_preconditioner_factor_eligible != 0) {
+    fprintf(stderr,
+            "unexpected bounded-degree retained low-work stages: %d/%d/%d"
+            " ordering=%d orientation=%d fill=%" PRId64 " flops=%.9g\n",
+            stats.bounded_degree_retained_preconditioner_candidate,
+            stats.bounded_degree_retained_preconditioner_symbolic_eligible,
+            stats.bounded_degree_retained_preconditioner_factor_eligible,
+            (int)stats.selected_ordering, (int)stats.selected_orientation,
+            stats.nnz_l, stats.estimated_flops);
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY",
+        had_disable, saved_disable != NULL ? saved_disable : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_HAMRLE3_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_disable);
+  free(saved_legacy);
+  return ok;
+}
+
 static int run_sparse_fragmented_grid_solve_case(
   int32_t n,
   const int32_t *ap,
@@ -25649,6 +25921,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_large_sparse_low_degree_retained_tolerance()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_bounded_degree_retained_preconditioner()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_partial_diagonal_direct_amd_analysis()) {

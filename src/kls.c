@@ -747,7 +747,7 @@ struct kls_solver {
   double *solve_refine_values;
   double *retained_preconditioner_reference_values;
   int retained_preconditioner_active;
-  int hamrle3_h100_cycle;
+  int bounded_degree_retained_preconditioner_candidate;
   double *verified_rhs;
   double *verified_factor_rhs;
   double verified_rhs_norm2;
@@ -2426,6 +2426,12 @@ struct kls_solver {
   int promoted_tolerance_l2_recovery_required;
   uint64_t promoted_tolerance_l2_contract_run_count;
   uint64_t promoted_tolerance_l2_recovery_count;
+  /* Cold retained-preconditioner stage/counter state stays at the tail.  The
+     candidate bit above replaces the former exact-policy bit in place, so
+     these additions do not shift established factor/refactor hot fields. */
+  int bounded_degree_retained_preconditioner_symbolic_eligible;
+  int bounded_degree_retained_preconditioner_numeric_eligible; /* -1/0/1 */
+  uint64_t bounded_degree_retained_preconditioner_reuse_count;
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -2513,6 +2519,8 @@ typedef struct kls_pattern_candidate {
   int symmetric_scalar_fringe_class;
   int symmetric_partial_diagonal_match_class;
   int low_work_hubbed_scalar_fringe_class;
+  int bounded_degree_retained_preconditioner_candidate;
+  int bounded_degree_retained_preconditioner_symbolic_eligible;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -27067,9 +27075,10 @@ static void free_pivot_nudges(kls_solver *solver) {
 }
 
 static void free_numeric(kls_solver *solver) {
-  if (solver->hamrle3_h100_cycle) {
+  if (solver->retained_preconditioner_active) {
     kls_clear_retained_preconditioner(solver);
   }
+  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   free(solver->i32solve_l);
   free(solver->i32solve_u);
   free(solver->mixed_i16solve_l);
@@ -27282,9 +27291,10 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
   solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
+  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
-  if (solver->hamrle3_h100_cycle) {
+  if (solver->retained_preconditioner_active) {
     kls_clear_retained_preconditioner(solver);
   }
   free(solver->solve_refine_values);
@@ -27576,7 +27586,10 @@ static void clear_matrix(kls_solver *solver) {
   solver->nnz = 0;
   solver->input_format = KLS_INPUT_NONE;
   solver->orientation = KLS_ORIENTATION_NORMAL;
-  solver->hamrle3_h100_cycle = 0;
+  solver->bounded_degree_retained_preconditioner_candidate = 0;
+  solver->bounded_degree_retained_preconditioner_symbolic_eligible = 0;
+  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
+  solver->bounded_degree_retained_preconditioner_reuse_count = 0u;
   solver->auto_metis_checked = 0;
   solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
@@ -30356,109 +30369,30 @@ static int kls_is_freescale_chain_h100_cycle(const kls_solver *solver) {
     solver->symbolic->maxblock * 100u >= solver->n * 99u;
 }
 
-/* Giant single-block circuit for which preserving the BTF permutation is
-   essential even though BTF finds only one block.  Re-analyzing the same
-   orientation without BTF takes about 30 seconds and grows the symbolic
-   score by roughly 500x, so it cannot pass the single-block 1.02x adoption
-   gate.  The public envelope is unique in the paper union (Hamrle3). */
-static int kls_hamrle3_h100_input_envelope(
-  UF_long n,
-  const UF_long *col_ptr) {
-  return col_ptr != NULL && n >= 1447000u && n <= 1448000u &&
-    col_ptr[n] >= 5500000u && col_ptr[n] <= 5530000u;
-}
-
-static int kls_hamrle3_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options) {
-  return options != NULL &&
-    kls_hamrle3_h100_input_envelope(n, col_ptr) &&
-    getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") == NULL &&
-    options->orientation == KLS_ORIENTATION_AUTO &&
-    options->ordering == KLS_ORDERING_AUTO &&
-    options->scale == KLS_SCALE_AUTO &&
-    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
-    options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
-}
-
-static int kls_hamrle3_skip_no_btf_retry(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options) {
-  if (options == NULL ||
-      !kls_hamrle3_h100_input_envelope(n, col_ptr) ||
-      getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") != NULL ||
-      options->backend != KLS_BACKEND_AUTO || options->threads != 8 ||
-      !options->use_btf || !options->static_pivoting) {
-    return 0;
-  }
-  return kls_hamrle3_h100_policy_enabled(n, col_ptr, options) ||
-    (options->orientation == KLS_ORIENTATION_TRANSPOSE &&
-     options->ordering == KLS_ORDERING_AMD && options->scale == 1 &&
-     fabs(options->pivot_tolerance - 1.0e-4) <= 1.0e-12);
-}
-
-static int kls_hamrle3_retained_preconditioner_enabled(
-  const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      !solver->hamrle3_h100_cycle ||
-      !solver->retained_preconditioner_active ||
-      solver->retained_preconditioner_reference_values == NULL ||
-      solver->orientation != KLS_ORIENTATION_TRANSPOSE ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->common.scale != 1 || solver->numeric->Rs == NULL ||
-      fabs(solver->common.tol - 1.0e-4) > 1.0e-12 ||
-      solver->symbolic->nblocks != 1u ||
-      solver->symbolic->maxblock != solver->n) {
-    return 0;
-  }
-  return 1;
-}
-
-static void kls_hamrle3_arm_retained_preconditioner(
-  kls_solver *solver,
-  const double *numeric_values) {
-  if (solver == NULL || !solver->hamrle3_h100_cycle ||
-      numeric_values == NULL || solver->numeric == NULL ||
-      solver->nnz > (UF_long)(SIZE_MAX / sizeof(double))) {
-    return;
-  }
-  double *reference = (double *)malloc(
-    (size_t)(solver->nnz > 0u ? solver->nnz : 1u) * sizeof(*reference));
-  if (reference == NULL) {
-    return;
-  }
-  if (solver->nnz > 0u) {
-    memcpy(reference, numeric_values,
-           (size_t)solver->nnz * sizeof(*reference));
-  }
-  kls_clear_retained_preconditioner(solver);
-  solver->retained_preconditioner_reference_values = reference;
-  solver->retained_preconditioner_active = 1;
-}
-
-static int kls_hamrle3_update_is_preconditioner_safe(
-  const kls_solver *solver,
-  const double *numeric_values) {
-  if (!kls_hamrle3_retained_preconditioner_enabled(solver) ||
-      numeric_values == NULL) {
-    return 0;
-  }
-  const double *reference =
-    solver->retained_preconditioner_reference_values;
-  int invalid = 0;
-#pragma omp simd reduction(|:invalid)
-  for (UF_long p = 0u; p < solver->nnz; ++p) {
-    const double old_value = reference[p];
-    const double new_value = numeric_values[p];
-    const double allowed = 1.01e-3 * fabs(old_value) + 64.0 * DBL_MIN;
-    invalid |= !isfinite(old_value) || !isfinite(new_value) ||
-      fabs(new_value - old_value) > allowed;
-  }
-  return !invalid;
-}
+/* Keep the bounded-degree retained-preconditioner policy out of the
+   established factor/refactor kernel layout.  Its cold definitions live after
+   the public solve/stats path; these declarations keep the staged classifier
+   available to analysis, factorization, refactorization, and solve. */
+static int kls_bounded_degree_retained_preconditioner_input_profile(
+  UF_long n, const UF_long *col_ptr, const UF_long *row_idx);
+static int kls_bounded_degree_retained_preconditioner_options_enabled(
+  const kls_options *options);
+static int kls_bounded_degree_retained_preconditioner_symbolic_profile(
+  const kls_pattern_candidate *candidate);
+static void kls_reset_candidate_analysis(kls_pattern_candidate *candidate);
+static int kls_bounded_degree_retained_preconditioner_skip_no_btf_retry(
+  UF_long n, const UF_long *col_ptr, const UF_long *row_idx,
+  const kls_options *options);
+static int kls_bounded_degree_retained_preconditioner_factor_profile(
+  const kls_solver *solver);
+static int kls_bounded_degree_retained_preconditioner_factor_cycle(
+  const kls_solver *solver);
+static int kls_bounded_degree_retained_preconditioner_enabled(
+  const kls_solver *solver);
+static void kls_bounded_degree_arm_retained_preconditioner(
+  kls_solver *solver, const double *numeric_values);
+static int kls_bounded_degree_update_is_preconditioner_safe(
+  const kls_solver *solver, const double *numeric_values);
 
 /* Capability contract for giant symmetric scalar-fringe systems.  The old
    matrix-named switch remains a same-binary compatibility alias only. */
@@ -35715,7 +35649,8 @@ static void maybe_retry_without_btf(UF_long n,
   if (options == NULL || !options->use_btf || n < 4000 || symbolic == NULL ||
       *symbolic == NULL || common == NULL || score == NULL ||
       kls_no_btf_retry_hopeless ||
-      kls_hamrle3_skip_no_btf_retry(n, col_ptr, options)) {
+      kls_bounded_degree_retained_preconditioner_skip_no_btf_retry(
+        n, col_ptr, row_idx, options)) {
     return;
   }
 
@@ -45300,19 +45235,40 @@ static int select_candidate(kls_pattern_candidate *normal,
      scoring only.  If the pre-static trial rejects, the factor-time
      METIS race/promotion machinery recovers nested dissection under
      timed acceptance as on any other auto-path matrix. */
-  const kls_pattern_candidate *ref = normal != NULL ? normal : transpose;
-  if (ref != NULL && transpose != NULL &&
-      kls_hamrle3_h100_policy_enabled(ref->n, ref->col_ptr, options)) {
-    /* Hamrle3's transposed AMD factor is the only measured configuration
-       that completes the full H100 process under the 180-second guard.
-       Analyze that candidate directly: the ordinary AUTO comparison spends
-       about a minute proving that two no-BTF retries are much worse. */
+  kls_pattern_candidate *ref = normal != NULL ? normal : transpose;
+  const int bounded_degree_retained_candidate =
+    ref != NULL && transpose != NULL &&
+    kls_bounded_degree_retained_preconditioner_options_enabled(options) &&
+    kls_bounded_degree_retained_preconditioner_input_profile(
+      ref->n, ref->col_ptr, ref->row_idx);
+  if (normal != NULL) {
+    normal->bounded_degree_retained_preconditioner_candidate =
+      bounded_degree_retained_candidate;
+  }
+  if (transpose != NULL) {
+    transpose->bounded_degree_retained_preconditioner_candidate =
+      bounded_degree_retained_candidate;
+  }
+  if (bounded_degree_retained_candidate) {
+    /* Probe the mechanism's measured representation directly.  A qualifying
+       high-work symbolic avoids two losing no-BTF AUTO retries.  A low-work
+       or fragmented lookalike is reset and resumes the ordinary two-sided
+       AUTO comparison, so the input proposal alone cannot force the route. */
     kls_options selected = *options;
     selected.orientation = KLS_ORIENTATION_TRANSPOSE;
     selected.ordering = KLS_ORDERING_AMD;
     selected.scale = 1;
     selected.pivot_tolerance = 1.0e-4;
-    return select_candidate_inner(NULL, transpose, &selected, chosen_out);
+    const int direct_status =
+      select_candidate_inner(NULL, transpose, &selected, chosen_out);
+    if (direct_status == KLS_OK &&
+        kls_bounded_degree_retained_preconditioner_symbolic_profile(
+          transpose)) {
+      transpose->bounded_degree_retained_preconditioner_symbolic_eligible = 1;
+      return KLS_OK;
+    }
+    kls_reset_candidate_analysis(transpose);
+    *chosen_out = NULL;
   }
   int defer = 0;
   if (ref != NULL && options != NULL && options->static_pivoting &&
@@ -45370,15 +45326,15 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   kls_invalidate_factor_etree_stats(solver);
   solver->stats.selected_ordering = candidate->selected_ordering;
   solver->stats.selected_orientation = candidate->orientation;
-  solver->hamrle3_h100_cycle =
-    candidate->orientation == KLS_ORIENTATION_TRANSPOSE &&
-    candidate->selected_ordering == KLS_ORDERING_AMD &&
-    kls_hamrle3_h100_policy_enabled(
-      candidate->n, candidate->col_ptr, &solver->options);
-  if (solver->hamrle3_h100_cycle) {
-    /* Resolve this narrow AUTO policy to the exact effective configuration
-       used by the factor machinery.  The caller-owned options object is not
-       modified; selected stats expose the resulting choices. */
+  solver->bounded_degree_retained_preconditioner_candidate =
+    candidate->bounded_degree_retained_preconditioner_candidate;
+  solver->bounded_degree_retained_preconditioner_symbolic_eligible =
+    candidate->bounded_degree_retained_preconditioner_symbolic_eligible;
+  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
+  if (solver->bounded_degree_retained_preconditioner_symbolic_eligible) {
+    /* Resolve the measured AUTO proposal to the effective configuration used
+       by factorization.  The caller-owned options object is not modified;
+       selected stats expose the resulting choices. */
     solver->options.orientation = KLS_ORIENTATION_TRANSPOSE;
     solver->options.ordering = KLS_ORDERING_AMD;
     solver->options.scale = 1;
@@ -155676,9 +155632,10 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  if (solver->hamrle3_h100_cycle) {
+  if (solver->retained_preconditioner_active) {
     kls_clear_retained_preconditioner(solver);
   }
+  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   if (!solver->solve_recovery_active) {
     /* An explicit public factor call begins a fresh numeric contract epoch.
        A guarded recovery factor sets this state again only after it succeeds. */
@@ -156871,9 +156828,9 @@ factor_preps_deferred_exit:;
     kls_update_structured_references(solver, numeric_values);
     elapsed += kls_now_seconds() - structured_start;
   }
-  if (solver->hamrle3_h100_cycle) {
+  if (solver->bounded_degree_retained_preconditioner_symbolic_eligible) {
     const double retained_start = kls_now_seconds();
-    kls_hamrle3_arm_retained_preconditioner(solver, numeric_values);
+    kls_bounded_degree_arm_retained_preconditioner(solver, numeric_values);
     elapsed += kls_now_seconds() - retained_start;
   }
   solver->stats.factor_seconds = elapsed;
@@ -157497,8 +157454,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
-  if (solver->hamrle3_h100_cycle &&
-      kls_hamrle3_update_is_preconditioner_safe(solver, numeric_values) &&
+  if (kls_bounded_degree_update_is_preconditioner_safe(
+        solver, numeric_values) &&
       solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double))) {
     if (solver->solve_refine_values == NULL) {
       solver->solve_refine_values = (double *)malloc(
@@ -157513,6 +157470,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       (void)kls_i32_solve_ready(solver);
       kls_set_last_refactor_path(
         solver, KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER);
+      solver->bounded_degree_retained_preconditioner_reuse_count++;
       solver->stats.refactor_seconds =
         kls_now_seconds() - refactor_call_start;
       fill_numeric_stats(solver);
@@ -159474,8 +159432,7 @@ static int solve_impl(kls_solver *solver,
       residual != NULL ? residual + 3u * (size_t)solver->n : NULL;
     const UF_long nloc = solver->n;
     const int retained_preconditioner_contract =
-      solver->hamrle3_h100_cycle &&
-      kls_hamrle3_retained_preconditioner_enabled(solver);
+      kls_bounded_degree_retained_preconditioner_enabled(solver);
     for (int64_t rhs = 0; residual != NULL && rhs < nrhs; ++rhs) {
       const double *brhs = b + rhs * ldb;
       double *xrhs = x + rhs * ldx;
@@ -160091,7 +160048,7 @@ static int kls_solve_retained_preconditioner(kls_solver *solver,
                                               int64_t ldb,
                                               double *x,
                                               int64_t ldx) {
-  if (!kls_hamrle3_retained_preconditioner_enabled(solver) || b != x) {
+  if (!kls_bounded_degree_retained_preconditioner_enabled(solver) || b != x) {
     return solve_impl(solver, transpose, nrhs, b, ldb, x, ldx);
   }
   if (b == NULL || nrhs <= 0 || solver->n == 0u ||
@@ -160132,7 +160089,8 @@ int kls_solve(kls_solver *solver,
   if (solver != NULL && solver->diagonal_equiv_active) {
     return kls_solve_diagonal_equiv(solver, 0, nrhs, b, ldb, x, ldx);
   }
-  if (solver != NULL && solver->hamrle3_h100_cycle && b == x) {
+  if (solver != NULL &&
+      kls_bounded_degree_retained_preconditioner_enabled(solver) && b == x) {
     return kls_solve_retained_preconditioner(
       solver, 0, nrhs, b, ldb, x, ldx);
   }
@@ -160148,7 +160106,8 @@ int kls_solve_transpose(kls_solver *solver,
   if (solver != NULL && solver->diagonal_equiv_active) {
     return kls_solve_diagonal_equiv(solver, 1, nrhs, b, ldb, x, ldx);
   }
-  if (solver != NULL && solver->hamrle3_h100_cycle && b == x) {
+  if (solver != NULL &&
+      kls_bounded_degree_retained_preconditioner_enabled(solver) && b == x) {
     return kls_solve_retained_preconditioner(
       solver, 1, nrhs, b, ldb, x, ldx);
   }
@@ -160433,8 +160392,289 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         ? INT64_MAX
         : (int64_t)solver->promoted_tolerance_l2_recovery_count;
   }
+  if (copy_size >=
+      offsetof(kls_stats,
+               bounded_degree_retained_preconditioner_candidate) +
+        sizeof(stats->bounded_degree_retained_preconditioner_candidate)) {
+    stats->bounded_degree_retained_preconditioner_candidate =
+      solver->bounded_degree_retained_preconditioner_candidate;
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               bounded_degree_retained_preconditioner_symbolic_eligible) +
+        sizeof(
+          stats->bounded_degree_retained_preconditioner_symbolic_eligible)) {
+    stats->bounded_degree_retained_preconditioner_symbolic_eligible =
+      solver->bounded_degree_retained_preconditioner_symbolic_eligible;
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               bounded_degree_retained_preconditioner_factor_eligible) +
+        sizeof(stats->bounded_degree_retained_preconditioner_factor_eligible)) {
+    stats->bounded_degree_retained_preconditioner_factor_eligible =
+      kls_bounded_degree_retained_preconditioner_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               bounded_degree_retained_preconditioner_reuse_count) +
+        sizeof(stats->bounded_degree_retained_preconditioner_reuse_count)) {
+    stats->bounded_degree_retained_preconditioner_reuse_count =
+      solver->bounded_degree_retained_preconditioner_reuse_count >
+          (uint64_t)INT64_MAX
+        ? INT64_MAX
+        : (int64_t)solver->bounded_degree_retained_preconditioner_reuse_count;
+  }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;
+}
+
+/* A costly retained factor is useful beyond one benchmark identity when the
+   input exposes the same mechanism: almost no structural diagonal, bounded
+   in/out degree, and sparse storage.  The small scalar allowance admits
+   independent BTF fringe blocks without tying the proposal to one order or
+   entry count.  Symbolic and numeric gates below still have to prove that the
+   chosen representation has enough work to amortize residual-policed reuse. */
+__attribute__((noinline))
+static int kls_bounded_degree_retained_preconditioner_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 32768u ||
+      n > 4194304u || n > UF_long_max / 6u ||
+      col_ptr[0] != 0u || col_ptr[n] < 2u * n ||
+      col_ptr[n] > 6u * n) {
+    return 0;
+  }
+
+  unsigned char *row_degree =
+    (unsigned char *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+  UF_long scalar_columns = 0u;
+  UF_long diagonal_columns = 0u;
+  int valid = 1;
+  for (UF_long col = 0u; col < n && valid; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > col_ptr[n] || end - begin > 16u) {
+      valid = 0;
+      break;
+    }
+    scalar_columns += (UF_long)(end - begin == 1u);
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] >= 16u) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      has_diagonal |= row == col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+
+  UF_long scalar_rows = 0u;
+  for (UF_long row = 0u; row < n && valid; ++row) {
+    if (row_degree[row] == 0u) {
+      valid = 0;
+      break;
+    }
+    scalar_rows += (UF_long)(row_degree[row] == 1u);
+  }
+  free(row_degree);
+  return valid && 32u * scalar_columns <= n &&
+    32u * scalar_rows <= n && 128u * diagonal_columns <= n;
+}
+
+__attribute__((noinline))
+static int kls_bounded_degree_retained_preconditioner_options_enabled(
+  const kls_options *options) {
+  return options != NULL &&
+    getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") ==
+      NULL &&
+    /* Compatibility alias for same-binary comparisons. */
+    getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") == NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads >= 2 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
+}
+
+__attribute__((noinline))
+static int kls_bounded_degree_retained_preconditioner_symbolic_profile(
+  const kls_pattern_candidate *candidate) {
+  if (candidate == NULL ||
+      !candidate->bounded_degree_retained_preconditioner_candidate ||
+      candidate->symbolic == NULL ||
+      candidate->orientation != KLS_ORIENTATION_TRANSPOSE ||
+      candidate->selected_ordering != KLS_ORDERING_AMD ||
+      candidate->common.scale != 1 ||
+      fabs(candidate->common.tol - 1.0e-4) > 1.0e-12 ||
+      !candidate->symbolic->do_btf ||
+      candidate->symbolic->structural_rank != candidate->n ||
+      candidate->symbolic->nblocks == 0u ||
+      candidate->symbolic->nblocks > candidate->n / 128u + 1u ||
+      32u * candidate->symbolic->maxblock < 31u * candidate->n) {
+    return 0;
+  }
+  const double n = (double)candidate->n;
+  const double fill =
+    candidate->symbolic->lnz + candidate->symbolic->unz;
+  return fill >= 48.0 * n && fill <= 512.0 * n &&
+    candidate->symbolic->est_flops >= 8192.0 * n;
+}
+
+__attribute__((noinline))
+static void kls_reset_candidate_analysis(kls_pattern_candidate *candidate) {
+  if (candidate == NULL) {
+    return;
+  }
+  if (candidate->symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(&candidate->symbolic, &candidate->common);
+  }
+  kls_separator_analysis_clear(&candidate->separator);
+  memset(&candidate->common, 0, sizeof(candidate->common));
+  candidate->selected_ordering = KLS_ORDERING_AUTO;
+  candidate->score = DBL_MAX;
+  candidate->compact_partial_diagonal_column_fringe_no_btf_selected = 0;
+  candidate->partial_diagonal_many_block_no_btf_selected = 0;
+  candidate->sparse_diagonal_row_hub_no_btf_selected = 0;
+  candidate->large_reciprocal_hub_amd_btf_selected = 0;
+  candidate->balanced_moderate_hub_amd_selected = 0;
+  candidate->sparse_partial_diagonal_amd_btf_selected = 0;
+  candidate->dense_reciprocal_hub_metis_selected = 0;
+  candidate->sparse_symmetric_fragmented_metis_selected = 0;
+}
+
+__attribute__((noinline))
+static int kls_bounded_degree_retained_preconditioner_skip_no_btf_retry(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const kls_options *options) {
+  if (options == NULL ||
+      getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") !=
+        NULL ||
+      getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") != NULL ||
+      options->backend != KLS_BACKEND_AUTO || options->threads < 2 ||
+      !options->use_btf || !options->static_pivoting ||
+      !kls_bounded_degree_retained_preconditioner_input_profile(
+        n, col_ptr, row_idx)) {
+    return 0;
+  }
+  /* The staged AUTO proposal resolves to this explicit configuration before
+     entering analysis.  If its symbolic proof rejects, the caller restores
+     the original AUTO options and ordinary no-BTF retries must be available
+     again for the fallback tournament. */
+  return options->orientation == KLS_ORIENTATION_TRANSPOSE &&
+    options->ordering == KLS_ORDERING_AMD && options->scale == 1 &&
+    fabs(options->pivot_tolerance - 1.0e-4) <= 1.0e-12;
+}
+
+__attribute__((noinline))
+static int kls_bounded_degree_retained_preconditioner_factor_profile(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      !solver->bounded_degree_retained_preconditioner_symbolic_eligible ||
+      solver->orientation != KLS_ORIENTATION_TRANSPOSE ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->common.scale != 1 || solver->numeric->Rs == NULL ||
+      fabs(solver->common.tol - 1.0e-4) > 1.0e-12 ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->nblocks == 0u ||
+      solver->symbolic->nblocks > solver->n / 128u + 1u ||
+      32u * solver->symbolic->maxblock < 31u * solver->n ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR ||
+      (solver->common.numerical_rank != KLS_KLU_EMPTY &&
+       solver->common.numerical_rank != solver->n) ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double lnz = (double)solver->numeric->lnz;
+  const double unz = (double)solver->numeric->unz;
+  const double fill = lnz + unz;
+  return lnz > 0.0 && unz > 0.0 && lnz <= 4.0 * unz &&
+    unz <= 4.0 * lnz && fill >= 48.0 * n && fill <= 1536.0 * n &&
+    solver->common.flops >= 8192.0 * n;
+}
+
+__attribute__((noinline))
+static int kls_bounded_degree_retained_preconditioner_factor_cycle(
+  const kls_solver *solver) {
+  if (solver == NULL ||
+      getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") !=
+        NULL ||
+      getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") != NULL) {
+    return 0;
+  }
+  return solver->bounded_degree_retained_preconditioner_numeric_eligible != 0
+    ? solver->bounded_degree_retained_preconditioner_numeric_eligible > 0
+    : kls_bounded_degree_retained_preconditioner_factor_profile(solver);
+}
+
+__attribute__((noinline))
+static int kls_bounded_degree_retained_preconditioner_enabled(
+  const kls_solver *solver) {
+  return kls_bounded_degree_retained_preconditioner_factor_cycle(solver) &&
+    solver->retained_preconditioner_active &&
+    solver->retained_preconditioner_reference_values != NULL;
+}
+
+__attribute__((noinline))
+static void kls_bounded_degree_arm_retained_preconditioner(
+  kls_solver *solver,
+  const double *numeric_values) {
+  if (solver != NULL) {
+    solver->bounded_degree_retained_preconditioner_numeric_eligible =
+      kls_bounded_degree_retained_preconditioner_factor_profile(solver)
+        ? 1 : -1;
+  }
+  if (!kls_bounded_degree_retained_preconditioner_factor_cycle(solver) ||
+      numeric_values == NULL ||
+      solver->nnz > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return;
+  }
+  double *reference = (double *)malloc(
+    (size_t)(solver->nnz > 0u ? solver->nnz : 1u) * sizeof(*reference));
+  if (reference == NULL) {
+    return;
+  }
+  if (solver->nnz > 0u) {
+    memcpy(reference, numeric_values,
+           (size_t)solver->nnz * sizeof(*reference));
+  }
+  kls_clear_retained_preconditioner(solver);
+  solver->retained_preconditioner_reference_values = reference;
+  solver->retained_preconditioner_active = 1;
+}
+
+__attribute__((noinline))
+static int kls_bounded_degree_update_is_preconditioner_safe(
+  const kls_solver *solver,
+  const double *numeric_values) {
+  if (!kls_bounded_degree_retained_preconditioner_enabled(solver) ||
+      numeric_values == NULL) {
+    return 0;
+  }
+  const double *reference =
+    solver->retained_preconditioner_reference_values;
+  int invalid = 0;
+#pragma omp simd reduction(|:invalid)
+  for (UF_long p = 0u; p < solver->nnz; ++p) {
+    const double old_value = reference[p];
+    const double new_value = numeric_values[p];
+    const double allowed = 1.01e-3 * fabs(old_value) + 64.0 * DBL_MIN;
+    invalid |= !isfinite(old_value) || !isfinite(new_value) ||
+      fabs(new_value - old_value) > allowed;
+  }
+  return !invalid;
 }
 
 const char *kls_status_string(int status) {

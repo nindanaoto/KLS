@@ -19764,3 +19764,107 @@ entries each and no recovery episode.  Release and leak-enabled
 ASan/UBSan/LSan CTest pass all four tests.  Explicit leak-enabled sanitized
 factor/refactor/solve runs also cover the target (`2.25e-11`) and extension
 (`1.08e-10`) with eligibility and contract activity and no findings.
+
+BOUNDED-DEGREE RETAINED-PRECONDITIONER LIFECYCLE GENERALIZED (2026-07-24).
+The remaining `Hamrle3` policy recognized 1,447,000--1,448,000 rows and
+5,500,000--5,530,000 entries under exactly eight-worker AUTO analysis. That
+identity directly selected transpose AMD, scale 1, and a `1e-4` threshold,
+suppressed no-BTF retries, captured the initial numeric as a preconditioner,
+and reused it for entrywise-small value updates. The solve-side residual check
+made reuse accurate, but neither selection nor lifecycle eligibility had to
+prove that another matrix exposed the same topology, symbolic economics, or
+factor representation.
+
+The replacement is a three-stage capability. Under a parallel AUTO backend
+with at least two workers, BTF, static pivoting, and the default `1e-3`
+threshold, the input proposal accepts 32,768--4,194,304 rows and two--six
+stored entries per row on average. It requires no empty row or column, maximum
+row and column degree 16, no more than `n/32` scalar rows or scalar columns,
+and no more than `n/128` columns containing a diagonal entry. A byte-per-row
+degree scan supplies the exact in-degree proof. These are ratios and resource
+bounds; the old order and entry-count coordinates are absent.
+
+The proposal directly measures transpose AMD with scale 1 and threshold
+`1e-4`. Its BTF symbolic must have full structural rank, between one and
+`n/128+1` blocks, a largest block covering at least 31/32 of the order,
+48--512 estimated L+U entries per row, and at least 8,192 estimated operations
+per row. If any condition fails, the trial symbolic and its common/separator
+state are freed and reset, and the ordinary two-sided AUTO selector runs. The
+input stage therefore proposes one representation but cannot commit it.
+
+After factorization, the installed numeric must retain that transpose/AMD,
+scaled, BTF, full-rank representation with no singular status, nudge, or
+perturbation. L and U must be nonempty and balanced within 4x, measured L+U
+fill must be 48--1,536 entries per row, and measured work must be at least
+8,192 operations per row. This verdict is cached as rejected or accepted and
+is invalidated whenever the numeric is freed or replaced. Only an accepted
+numeric captures the factor-time matrix values.
+
+The update rule retains its value-level safety boundary: every current CSC
+entry must differ by at most `1.01e-3*abs(reference)+64*DBL_MIN`. An accepted
+update stores the current values for residual evaluation, records the public
+retained-preconditioner path, and increments a reuse counter without modifying
+the numeric. Every solve then computes the true current-matrix residual and
+must reach `1e-9` relative L2 within the existing correction budget; failure
+returns a solve error rather than a plausible answer. A larger update or
+reference-allocation failure clears the retained state for the numeric epoch
+and runs an ordinary refactor.
+
+`KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY=1` is the generic
+same-binary control. `KLS_DISABLE_HAMRLE3_H100_POLICY` remains only as a
+compatibility alias. Four appended stats and analyze/full benchmark JSON fields
+report input candidacy, symbolic eligibility, numeric eligibility, and the
+number of retained updates. The exact policy functions, dimension window,
+entry window, and matrix-named lifecycle state are gone from solver, header,
+benchmark, and test sources.
+
+The independent positive is a 32,768-row, six-regular toroidal/Cayley graph
+using offsets `{-256,-16,-1,1,16,256}`, no structural diagonal, and generated
+dominant-permutation values. With four workers it reports `1/1/1`, accepts a
+generated `1e-4` relative update, records one retained reuse, and recovers an
+independently formed solution below `5e-9` relative L2. A live generic disable
+turns the installed factor verdict off. A same-order six-neighbor narrow-band
+ring reports `1/0/0` and completes the ordinary AUTO fallback, independently
+covering symbolic rejection. The fixtures share neither SuiteSparse coordinates
+nor target graph data.
+
+A structural scan of all 110 local SuiteSparse inputs applies only the coarse
+resource/topology proof: order at least 32,768, density two--six, maximum row
+and column degree 16, no empty row, and diagonal coverage at most 1/128. Only
+`Hamrle3` survives. This is compatibility evidence, not the generality claim;
+the independent factor-positive family and metamorphic holdout show that the
+staged predicates are executable outside that corpus identity.
+
+Appending 1,000 independent diagonal blocks produces 1,448,360 rows,
+5,515,242 entries, and 1,001 BTF blocks, outside the former upper order bound.
+It reports `1/1/1`, retains the 1,447,360-row core as the dominant block,
+factors in 40.63 seconds in the final pinned run, and completes 20 independently
+verified retained updates with a worst `1.90062767e-10` relative-L2 residual.
+The exact parent misses its identity window, selects normal AMF, and did not
+complete a full run after more than nine minutes and roughly 25 GB resident
+memory. A simultaneous 65,536-adjacent-swap relabeling reaches `1/1` at the
+symbolic stage, but both the old exact policy and the generalized proposal have
+layout-hostile factorization on that ordering; its full run was stopped after
+two minutes and roughly 18 GB rather than counted as positive performance
+evidence.
+
+On the original matrix, 20 verified 0.1%-amplitude updates have worst relative
+L2 `1.91304821e-10`; a four-worker run also reports `1/1/1`, retained reuse,
+and `9.2654e-11`. A deliberately unsafe 1%-amplitude update records zero reuse,
+falls through to EGraph in 11.28 seconds, and returns `1.3587e-15`, directly
+covering the safety transition.
+
+Final timing used three alternating exact-parent/current pairs pinned to cores
+0--7, one initial factor, and three independently verified retained updates.
+Both binaries select the same transpose AMD, scale 1, one-block representation
+and produce the same approximately `1.12e-10` worst update residual. Geometric
+current/parent ratios are `1.0093` for analysis, `1.0448` for the variable cold
+factor, `1.0008` for steady retained update, `0.9997` for its checked solve,
+and `1.0120` for the complete modeled 100-cycle workload. The new cold stage
+and counter fields live at the solver-struct tail, preserving the pre-change
+layout of established factor/refactor fields; the recurring path is effectively
+unchanged. Thus the generic
+classification preserves the recurring performance contract while removing
+the benchmark identity. Release and leak-enabled ASan/UBSan/LSan CTest pass
+all four tests. An explicit sanitized target factor/update/solve reports
+`1/1/1`, one retained reuse, 14.9 GB peak RSS, and no sanitizer or leak finding.

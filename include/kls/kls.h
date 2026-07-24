@@ -1445,6 +1445,18 @@ typedef struct kls_stats {
   /* Number of residual-stagnation episodes that rebuilt the numeric at a
      more conservative, request-relative pivot threshold. */
   int64_t promoted_tolerance_l2_recovery_count;
+  /* A sparse, nearly diagonal-free, bounded in/out-degree input proposed the
+     high-work retained-preconditioner lifecycle. */
+  int bounded_degree_retained_preconditioner_candidate;
+  /* The directly measured transpose/AMD symbolic has a dominant SCC and
+     enough fill/work to make retained-factor updates economically relevant. */
+  int bounded_degree_retained_preconditioner_symbolic_eligible;
+  /* The installed numeric preserved the symbolic regime and passed the
+     measured factor-work and representation checks. */
+  int bounded_degree_retained_preconditioner_factor_eligible;
+  /* Number of changed-value refactors served by the retained numeric after
+     the entrywise update bound accepted the new values. */
+  int64_t bounded_degree_retained_preconditioner_reuse_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
