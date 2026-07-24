@@ -17697,3 +17697,77 @@ does not perturb unrelated hot refactor code.  Three alternating pairs on the
 low-work `power197k` control put new/parent at 1.002 by median H100; five final
 pairs on the high-work `twotone` control put it at 0.995.  Both retained their
 pre-existing ordering, scaling, matching, and numeric paths.
+
+MODERATE-WORK FRAGMENTED LIFECYCLE POLICY GENERALIZED (2026-07-24).  The
+remaining AT&T `onetone2` lifecycle selector required exactly 36,057 rows,
+222,596 input entries, 3,843 BTF blocks, and a 32,211-row largest block.  It
+then reused that identity across 16 decision points to choose first-factor
+pipe width, worker spin, value preparation, EGraph scatter/tail variants,
+settled thread
+width, cluster width, PTS defaults, compact solve offsets, deferred
+preparation overlap, diagonal-plan suppression, and probe settlement.  Even
+though the post-factor check included fill and flop windows, those exact four
+integers and AUTO-only options made the complete bundle a benchmark
+fingerprint.
+
+The replacement separates the only pre-numeric decision from the measured
+numeric decisions.  The pre-static trial can use all eight factor workers
+only under the established AUTO/8-thread options and when its actual symbolic
+has full rank, 3--8 input entries per row, BTF blocks covering 1/12--1/5 of
+the order, an 80%--95% dominant core, 12--64 estimated factor entries per row,
+and 1,000--16,384 estimated flops per row in a 100M--1B total band.  Every
+later consumer requires the selected normal AMD/BTF, unscaled numeric to have
+no retained numeric `Rs` array, no nudges or perturbations, at most `n/128`
+off-diagonal pivots, 12--40 actual factor entries per row, and 1,000--8,192
+actual flops per row in the same total-work band.  Explicit
+normal/AMD/unscaled requests are allowed when they reach the same retained
+state.  EGraph admission remains a
+separate decision: satisfying this profile supplies defaults only to a
+consumer that is otherwise eligible.
+
+The boundary is observable as `moderate_fragmented_policy_eligible` in
+`kls_stats` and benchmark JSON.  The generic master diagnostic is
+`KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY`; generic component controls
+cover pipe factor, parallel value preparation, AVX-512 scatter, 128/144-entry
+and masked supernode tails, mixed-i16 solve, and the diagonal-equivalence plan.
+The old `KLS_*ONETONE2*` names remain aliases so existing A/B scripts keep
+working without preserving an identity-based decision.
+
+A scan of 145 successful saved numeric profiles from the 105 completed paper
+rows, 16 development rows, and 24 held-out rows found three real matrices in
+the complete post-factor boundary: `onetone2`, `HTC_336_4438`, and
+`HTC_336_9129`.  The two 226,340-row IPSO factors are more than six times the
+size of the motivating row and were admitted by the preceding generic direct
+AMD policy, not by the old AT&T identity.  Their measured retained states have
+29,588 blocks, a 196,753-row core, 4.11M/4.79M factor entries, 365M/546M
+factor flops, and 68/64 off-diagonal pivots.  Thus the replacement composes
+with an independently generalized analysis path rather than merely widening
+one exact dimension box.
+
+The independent 100,000-row 45-by-1,889 grid fixture also enters the numeric
+profile under explicit AMD/unscaled options: 14,996 blocks, an 85,005-row
+core, 3,053,566 factor entries, and 115,548,281 factor flops.  It remains on
+the ordinary refactor engine because EGraph admission is independent.  A
+same-order, same-density, same-fringe/core narrow-band control keeps the SCC
+shape but has too little fill/work and reports the profile disabled.  The
+smoke suite factors both controls and checks the public eligibility field, so
+future edits cannot collapse the rule back onto the three corpus identities.
+
+Six alternating long-horizon pairs on default `onetone2` put generic/parent
+at `0.9985` by median (`0.42116s` versus `0.42181s`), with initial factor
+`0.07042s` versus `0.07164s` and steady refactor within 0.5%.  Fixing scale to
+`-1` is outside the former AUTO-only selector but reaches the same retained
+numeric; six pairs improved it from `0.50406s` to `0.43276s` (`0.859x`).
+Five default pairs improved `HTC_336_4438` from `2.15425s` to `2.02376s`
+(`0.939x`) and `HTC_336_9129` from `1.91584s` to `1.78891s` (`0.934x`).
+The rejected `onetone1`, `ckt11752_tr_0`, and `twotone` controls were
+neutral-to-faster across four alternating pairs and retained eligibility zero.
+
+The first implementation incorrectly annotated the frequently consulted
+numeric predicate as compiler-cold.  GCC consequently outlined almost the
+entire EGraph refactor into a cold section and a short paired run regressed.
+Keeping the classifier out of line but not cold restores the established hot
+layout; symbol inspection and the longer pairs above verify the correction.
+Finally, 1,000 independently verified entrywise generations at amplitude 0.1
+completed for all three eligible real matrices.  Worst relative-L2 residuals
+were `8.66e-13` for `onetone2`, `2.18e-10` for 4438, and `4.47e-10` for 9129.

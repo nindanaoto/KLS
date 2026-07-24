@@ -1330,6 +1330,9 @@ typedef struct kls_stats {
   /* Zero means no compact triangular-solve mirror is prepared. */
   int compact_solve_index_bytes;
   int compact_solve_fused_rhs;
+  /* The retained numeric satisfies the normalized moderate-work,
+     fragmented dominant-BTF policy boundary. */
+  int moderate_fragmented_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

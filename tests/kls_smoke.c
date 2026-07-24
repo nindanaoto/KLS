@@ -20566,14 +20566,16 @@ static int run_sparse_fragmented_grid_solve_case(
   const double *expected,
   double *b,
   double *x,
-  int expected_index_bytes) {
+  int threads,
+  int expected_index_bytes,
+  int expected_moderate_profile) {
   kls_solver *solver = NULL;
   kls_options options;
   kls_stats stats;
   int ok = require_ok(kls_create(&solver), "create fragmented grid solve");
 
   kls_default_options(&options);
-  options.threads = 4;
+  options.threads = threads;
   options.ordering = KLS_ORDERING_AMD;
   options.scale = -1;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
@@ -20623,15 +20625,21 @@ static int run_sparse_fragmented_grid_solve_case(
         stats.factor_flops < 1000.0 * (double)n ||
         stats.factor_flops > 4096.0 * (double)n ||
         stats.compact_solve_index_bytes != expected_index_bytes ||
-        stats.compact_solve_fused_rhs != 0) {
+        stats.compact_solve_fused_rhs != 0 ||
+        stats.moderate_fragmented_policy_eligible !=
+          expected_moderate_profile) {
       fprintf(stderr,
               "unexpected fragmented grid policy: order=%d scale=%d btf=%d"
               " blocks=%" PRId64 " max=%" PRId64 " fill=%.0f flops=%.0f"
-              " compact=%d fused=%d expected_compact=%d\n",
+              " compact=%d fused=%d policy=%d spin=%" PRId64
+              " expected_compact=%d expected_policy=%d\n",
               (int)stats.selected_ordering, stats.selected_scale,
               stats.selected_btf, stats.nblocks, stats.max_block, fill,
               stats.factor_flops, stats.compact_solve_index_bytes,
-              stats.compact_solve_fused_rhs, expected_index_bytes);
+              stats.compact_solve_fused_rhs,
+              stats.moderate_fragmented_policy_eligible,
+              stats.egraph_worker_spin_iters,
+              expected_index_bytes, expected_moderate_profile);
       ok = 0;
       break;
     }
@@ -20943,7 +20951,11 @@ static int test_sparse_fragmented_dominant_btf_solve_policy(void) {
     ok = 0;
   }
   if (ok && !run_sparse_fragmented_grid_solve_case(
-              n, ap, ai, ax, ax_changed, expected, b, x, 0)) {
+              n, ap, ai, ax, ax_changed, expected, b, x, 4, 0, 0)) {
+    ok = 0;
+  }
+  if (ok && !run_sparse_fragmented_grid_solve_case(
+              n, ap, ai, ax, ax_changed, expected, b, x, 8, 0, 1)) {
     ok = 0;
   }
   if (ok && setenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE", "1", 1) != 0) {
@@ -20951,8 +20963,78 @@ static int test_sparse_fragmented_dominant_btf_solve_policy(void) {
     ok = 0;
   }
   if (ok && !run_sparse_fragmented_grid_solve_case(
-              n, ap, ai, ax, ax_changed, expected, b, x, 4)) {
+              n, ap, ai, ax, ax_changed, expected, b, x, 4, 4, 0)) {
     ok = 0;
+  }
+
+  if (ok) {
+    /* Preserve the same order, fragmented SCC/core proportions, and sparse
+       input-density band, but replace the 2-D core with a narrow band.  Its
+       cheap factor must not inherit the moderate-work lifecycle defaults. */
+    p = 0;
+    for (int32_t col = 0; col < n; ++col) {
+      ap[col] = p;
+      if (col < core) {
+        if (col > 0) {
+          ai[p] = col - 1;
+          ax[p++] = -0.25;
+        }
+        ai[p] = col;
+        ax[p++] = 4.0;
+        if (col + 1 < core) {
+          ai[p] = col + 1;
+          ax[p++] = -0.25;
+        }
+        if (col + 2 < core) {
+          ai[p] = col + 2;
+          ax[p++] = -0.125;
+        }
+      } else {
+        ai[p] = col;
+        ax[p++] = 1.0;
+      }
+    }
+    ap[n] = p;
+    kls_solver *low_work_solver = NULL;
+    kls_options options;
+    kls_stats stats;
+    kls_default_options(&options);
+    options.threads = 8;
+    options.ordering = KLS_ORDERING_AMD;
+    options.scale = -1;
+    if (p > nnz ||
+        !require_ok(kls_create(&low_work_solver),
+                    "create low-work fragmented policy control") ||
+        !require_ok(kls_analyze_csc(low_work_solver, KLS_INDEX_INT32, n,
+                                    ap, ai, 0, &options),
+                    "analyze low-work fragmented policy control") ||
+        !require_ok(kls_factor(low_work_solver, ax),
+                    "factor low-work fragmented policy control")) {
+      ok = 0;
+    }
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    if (ok && !require_ok(kls_get_stats(low_work_solver, &stats),
+                          "stats low-work fragmented policy control")) {
+      ok = 0;
+    }
+    const double fill = (double)(stats.nnz_l + stats.nnz_u);
+    if (ok &&
+        (stats.nblocks < n / 12 || stats.nblocks > n / 5 ||
+         (double)stats.max_block < 0.80 * (double)n ||
+         (double)stats.max_block > 0.95 * (double)n ||
+         (fill >= 12.0 * (double)n &&
+          stats.factor_flops >= 1000.0 * (double)n) ||
+         stats.moderate_fragmented_policy_eligible != 0)) {
+      fprintf(stderr,
+              "unexpected low-work fragmented policy control:"
+              " blocks=%" PRId64 " max=%" PRId64
+              " fill=%.0f flops=%.0f policy=%d\n",
+              stats.nblocks, stats.max_block, fill, stats.factor_flops,
+              stats.moderate_fragmented_policy_eligible);
+      ok = 0;
+    }
+    kls_destroy(low_work_solver);
   }
 
 cleanup:

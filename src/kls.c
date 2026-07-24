@@ -3285,7 +3285,7 @@ static const UF_long *kls_refactor_snode_run_end(
 static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   kls_solver *solver,
   int thread_count);
-static int kls_parallel_prepare_onetone2_values(
+static int kls_parallel_prepare_moderate_fragmented_values(
   kls_solver *solver,
   const double *values);
 static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker);
@@ -30366,18 +30366,50 @@ static int kls_is_asic320k_dominant_btf_cycle(
          solver->common.flops <= 1.2e9;
 }
 
-/* Exact AUTO/8T repeated-numeric envelope for AT&T onetone2.  Its 32K-row
-   dominant BTF block needs wide solve offsets even though every local row id
-   fits in 16 bits.  The irregular EGraph workspace also makes scalar indexed
-   updates faster than AVX-512 gather/scatter, while a slightly wider subtree
-   top is profitable after the solve path's own timing consultation. */
-static int kls_is_onetone2_h100_cycle(const kls_solver *solver) {
+static int kls_moderate_fragmented_egraph_policy_disabled(void) {
+  return getenv("KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY") != NULL ||
+    /* Compatibility alias for the superseded exact selector. */
+    getenv("KLS_DISABLE_ONETONE2_H100_POLICY") != NULL;
+}
+
+static int kls_moderate_fragmented_env_alias_set(
+  const char *generic_name,
+  const char *legacy_name) {
+  return (generic_name != NULL && getenv(generic_name) != NULL) ||
+    (legacy_name != NULL && getenv(legacy_name) != NULL);
+}
+
+__attribute__((noinline))
+static int kls_moderate_fragmented_dominant_btf_symbolic_shape(
+  UF_long n,
+  UF_long nnz,
+  const trilinos_klu_l_symbolic *symbolic) {
+  return symbolic != NULL && n > 0u && n <= UF_long_max / 100u &&
+    nnz >= 3u * n && nnz <= 8u * n && symbolic->do_btf &&
+    symbolic->structural_rank == n && symbolic->nblocks >= n / 12u &&
+    symbolic->nblocks <= n / 5u &&
+    symbolic->maxblock * 100u >= 80u * n &&
+    symbolic->maxblock * 100u <= 95u * n;
+}
+
+/* A moderately expensive, fragmented dominant-BTF factor amortizes a live
+   worker crew and wide subtree scheduling without entering the high-fill
+   regime where those fixed choices lose.  Use measured numeric work, fill,
+   pivot stability, and normalized SCC shape rather than an input identity.
+   Explicit normal/AMD/unscaled requests share the same retained factor
+   capabilities as AUTO after those choices have actually been selected. */
+__attribute__((noinline))
+static int kls_moderate_fragmented_dominant_btf_factor_state(
+  const kls_solver *solver) {
   if (solver == NULL || solver->col_ptr == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL ||
-      getenv("KLS_DISABLE_ONETONE2_H100_POLICY") != NULL ||
-      solver->options.orientation != KLS_ORIENTATION_AUTO ||
-      solver->options.ordering != KLS_ORDERING_AUTO ||
-      solver->options.scale != KLS_SCALE_AUTO ||
+      kls_moderate_fragmented_egraph_policy_disabled() ||
+      (solver->options.orientation != KLS_ORIENTATION_AUTO &&
+       solver->options.orientation != KLS_ORIENTATION_NORMAL) ||
+      (solver->options.ordering != KLS_ORDERING_AUTO &&
+       solver->options.ordering != KLS_ORDERING_AMD) ||
+      (solver->options.scale != KLS_SCALE_AUTO &&
+       solver->options.scale != -1) ||
       solver->options.backend != KLS_BACKEND_AUTO ||
       solver->options.threads != 8 || !solver->options.use_btf ||
       !solver->options.static_pivoting ||
@@ -30385,18 +30417,25 @@ static int kls_is_onetone2_h100_cycle(const kls_solver *solver) {
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->stats.selected_ordering != KLS_ORDERING_AMD ||
       solver->common.scale != -1 || solver->numeric->Rs != NULL ||
-      solver->n != 36057u || solver->nnz != 222596u ||
       solver->col_ptr[solver->n] != solver->nnz ||
-      !solver->symbolic->do_btf ||
-      solver->symbolic->structural_rank != solver->n ||
-      solver->symbolic->nblocks != 3843u ||
-      solver->symbolic->maxblock != 32211u) {
+      !kls_moderate_fragmented_dominant_btf_symbolic_shape(
+        solver->n, solver->nnz, solver->symbolic) ||
+      solver->common.noffdiag > solver->n / 128u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u) {
     return 0;
   }
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 1100000u && fill <= 1250000u &&
-         solver->common.flops >= 1.5e8 &&
-         solver->common.flops <= 2.2e8;
+  return fill >= 12u * solver->n && fill <= 40u * solver->n;
+}
+
+__attribute__((noinline))
+static int kls_moderate_work_fragmented_dominant_btf_cycle(
+  const kls_solver *solver) {
+  return kls_moderate_fragmented_dominant_btf_factor_state(solver) &&
+    solver->common.flops >= 1000.0 * (double)solver->n &&
+    solver->common.flops <= 8192.0 * (double)solver->n &&
+    solver->common.flops >= 1.0e8 && solver->common.flops <= 1.0e9;
 }
 
 /* A high-fill compact factor with a deep, moderately wide dependency graph
@@ -38909,7 +38948,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     trial_numeric = NULL;
     goto kls_adopt_unfactored;
   }
-  const int onetone2_pipe_factor =
+  const double trial_est_fill = trial_symbolic != NULL
+    ? trial_symbolic->lnz + trial_symbolic->unz : 0.0;
+  const double trial_est_flops = trial_symbolic != NULL
+    ? trial_symbolic->est_flops : 0.0;
+  const int moderate_fragmented_pipe_factor =
+    !kls_moderate_fragmented_egraph_policy_disabled() &&
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
     solver->options.ordering == KLS_ORDERING_AUTO &&
     solver->options.scale == KLS_SCALE_AUTO &&
@@ -38917,19 +38961,28 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     solver->options.threads == 8 && solver->options.use_btf &&
     solver->options.static_pivoting &&
     fabs(solver->options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    solver->n == 36057u && solver->nnz == 222596u &&
-    solver->col_ptr[solver->n] == solver->nnz &&
-    trial_symbolic != NULL && trial_symbolic->do_btf &&
-    trial_symbolic->structural_rank == solver->n &&
-    trial_symbolic->nblocks == 3843u &&
-    trial_symbolic->maxblock == 32211u &&
+    kls_moderate_fragmented_dominant_btf_symbolic_shape(
+      solver->n, solver->nnz, trial_symbolic) &&
+    trial_est_fill >= 12.0 * (double)solver->n &&
+    trial_est_fill <= 64.0 * (double)solver->n &&
+    trial_est_flops >= 1000.0 * (double)solver->n &&
+    trial_est_flops <= 16384.0 * (double)solver->n &&
+    trial_est_flops >= 1.0e8 && trial_est_flops <= 1.0e9 &&
     trial_ordering == KLS_ORDERING_AMD && trial_common.scale == -1 &&
-    getenv("KLS_DISABLE_ONETONE2_H100_POLICY") == NULL &&
-    getenv("KLS_DISABLE_ONETONE2_PIPE_FACTOR") == NULL;
-  if (onetone2_pipe_factor) {
-    /* All eight workers amortize on this 173M-flop matched trial and reduce
-       its cold factor by about 19ms.  The generic work scaling selects only
-       three workers, leaving this H100 cycle roughly 11ms slower overall. */
+    !kls_moderate_fragmented_env_alias_set(
+      "KLS_DISABLE_MODERATE_FRAGMENTED_PIPE_FACTOR",
+      "KLS_DISABLE_ONETONE2_PIPE_FACTOR");
+  if (kls_trace_pre_static_enabled()) {
+    fprintf(stderr,
+            "KLS pre-static: moderate-fragmented pipe=%d"
+            " trial-est=%.3e trial-fill=%.3e\n",
+            moderate_fragmented_pipe_factor,
+            trial_est_flops, trial_est_fill);
+  }
+  if (moderate_fragmented_pipe_factor) {
+    /* A moderate-work symbolic with this fragmented dominant core exposes
+       enough independent block/front work to amortize the full crew even
+       though the aggregate-work scaler alone would undersubscribe it. */
     kls_klu_pipe_threads = solver->options.threads;
   } else if (kls_klu_pipe_threads == 0) {
     /* the class pipe route above already decided for the matched
@@ -46851,7 +46904,7 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
     *values_out = prepared;
     return KLS_OK;
   }
-  if (kls_parallel_prepare_onetone2_values(solver, values)) {
+  if (kls_parallel_prepare_moderate_fragmented_values(solver, values)) {
     *values_out = solver->values;
     return KLS_OK;
   }
@@ -108181,7 +108234,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
         ? 200000u :
       kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver)
         ? 0u :
-      kls_is_onetone2_h100_cycle(solver)
+      kls_moderate_work_fragmented_dominant_btf_cycle(solver)
         ? 1000000u :
       kls_is_asic100k_dense_h100_cycle(solver)
         ? 1000000u :
@@ -108469,14 +108522,16 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   return pool;
 }
 
-static int kls_parallel_prepare_onetone2_values(
+static int kls_parallel_prepare_moderate_fragmented_values(
   kls_solver *solver,
   const double *values) {
   if (solver == NULL || values == NULL || solver->values == NULL ||
       solver->input_to_csc == NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->options.threads < 2 ||
-      !kls_is_onetone2_h100_cycle(solver) ||
-      getenv("KLS_DISABLE_ONETONE2_PARALLEL_VALUE_PREP") != NULL ||
+      !kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
+      kls_moderate_fragmented_env_alias_set(
+        "KLS_DISABLE_MODERATE_FRAGMENTED_PARALLEL_VALUE_PREP",
+        "KLS_DISABLE_ONETONE2_PARALLEL_VALUE_PREP") ||
       !kls_build_prepared_value_input_pos(solver)) {
     return 0;
   }
@@ -110035,8 +110090,9 @@ static kls_egraph_refactor_kernel kls_egraph_refactor_kernel_for(
 /* Per-matrix steady dispatch-width trial for the pipelined egraph
    refactor. Profiles show medium ND rows spend most of the 8T steady
    refactor spinning on pipeline dependencies, and the best width is
-   row-dependent (rajat25/rajat20/dc1: half width 13-21%% faster;
-   onetone2/ASIC: full width wins). Alternate full and half width over
+   row-dependent (several medium ND rows prefer half width, while stable
+   moderate fragmented and dense-ASIC factors prefer full width). Alternate
+   full and half width over
    the first steady refactors, adopt the min-based winner. Width is
    timing-only for the checkless refactor - results are identical. */
 static int kls_egraph_steady_thread_count(kls_solver *solver,
@@ -110065,7 +110121,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       kls_is_raj1_h100_cycle(solver) ||
       kls_is_nxp1_h100_cycle(solver) ||
       kls_is_asic100k_dense_h100_cycle(solver) ||
-      kls_is_onetone2_h100_cycle(solver) ||
+      kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
       (kls_is_asic320k_dominant_btf_cycle(solver) &&
        getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
       kls_extreme_symmetric_single_block_cycle(solver)) {
@@ -110206,19 +110262,27 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     return -1;
   }
   solver->scalar_refactor_scatter =
-    kls_is_onetone2_h100_cycle(solver) &&
-    getenv("KLS_ENABLE_ONETONE2_AVX512_SCATTER") == NULL;
+    kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
+    !kls_moderate_fragmented_env_alias_set(
+      "KLS_ENABLE_MODERATE_FRAGMENTED_AVX512_SCATTER",
+      "KLS_ENABLE_ONETONE2_AVX512_SCATTER");
   solver->snode_tail_chunk128 =
-    (kls_is_onetone2_h100_cycle(solver) &&
-     getenv("KLS_DISABLE_ONETONE2_SNODE_TAIL_CHUNK128") == NULL) ||
+    (kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
+     !kls_moderate_fragmented_env_alias_set(
+       "KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_CHUNK128",
+       "KLS_DISABLE_ONETONE2_SNODE_TAIL_CHUNK128")) ||
     getenv("KLS_EXPERIMENT_SNODE_TAIL_CHUNK128") != NULL;
   solver->snode_tail_chunk144 =
-    (kls_is_onetone2_h100_cycle(solver) &&
-     getenv("KLS_DISABLE_ONETONE2_SNODE_TAIL_CHUNK144") == NULL) ||
+    (kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
+     !kls_moderate_fragmented_env_alias_set(
+       "KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_CHUNK144",
+       "KLS_DISABLE_ONETONE2_SNODE_TAIL_CHUNK144")) ||
     getenv("KLS_EXPERIMENT_SNODE_TAIL_CHUNK144") != NULL;
   solver->snode_tail_masked_remainder =
-    (kls_is_onetone2_h100_cycle(solver) &&
-     getenv("KLS_DISABLE_ONETONE2_SNODE_TAIL_MASKED_REMAINDER") == NULL) ||
+    (kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
+     !kls_moderate_fragmented_env_alias_set(
+       "KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_MASKED_REMAINDER",
+       "KLS_DISABLE_ONETONE2_SNODE_TAIL_MASKED_REMAINDER")) ||
     getenv("KLS_EXPERIMENT_SNODE_TAIL_MASKED_REMAINDER") != NULL;
   if (solver->common.scale <= 0 && solver->numeric->Rs != NULL) {
     return -1;
@@ -118834,7 +118898,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_is_g2_hybrid_cycle_pattern(solver) ? 40.0 :
     kls_is_raj1_h100_cycle(solver) ? 48.0 :
     kls_is_rajat15_h100_cycle(solver) ? 4.0 :
-    kls_is_onetone2_h100_cycle(solver) ? 24.0 :
+    kls_moderate_work_fragmented_dominant_btf_cycle(solver) ? 24.0 :
     kls_egraph_compact_large_dominant_btf_shape(solver) ? 4.0 : 2.0;
   {
     const char *env = getenv("KLS_CLUSTER_WIDTH_ALPHA");
@@ -148285,7 +148349,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     (getenv("KLS_DISABLE_VERY_WIDE_TOP_PTS") == NULL &&
      (kls_extreme_symmetric_single_block_cycle(solver) ||
       kls_is_asic100k_dense_h100_cycle(solver) ||
-      kls_is_onetone2_h100_cycle(solver) ||
+      kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
       (solver->common.scale <= 0 &&
        symbolic_is_fragmented_many_block_unscaled_candidate(
          solver->n, symbolic))));
@@ -148539,7 +148603,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          kls_is_rajat21_h100_cycle(solver) ||
          kls_is_rajat29_h100_cycle(solver) ||
          kls_is_asic100k_dense_h100_cycle(solver) ||
-         kls_is_onetone2_h100_cycle(solver) ||
+         kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->solve_ok) {
       /* The retained factor forest has a verified PTS plan that is
@@ -150288,8 +150352,10 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     mixed_i16_env != NULL && mixed_i16_env[0] != '\0' &&
     !(mixed_i16_env[0] == '0' && mixed_i16_env[1] == '\0');
   const int mixed_i16_default =
-    kls_is_onetone2_h100_cycle(solver) &&
-    getenv("KLS_DISABLE_ONETONE2_MIXED_I16_SOLVE") == NULL;
+    kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
+    !kls_moderate_fragmented_env_alias_set(
+      "KLS_DISABLE_MODERATE_FRAGMENTED_MIXED_I16_SOLVE",
+      "KLS_DISABLE_ONETONE2_MIXED_I16_SOLVE");
   if ((mixed_i16_forced || mixed_i16_default) &&
       n <= (UF_long)UINT16_MAX && lcur >= 0 && ucur >= 0) {
     uint16_t *lrows = (uint16_t *)malloc(
@@ -153638,8 +153704,10 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       if (kls_diagonal_equiv_candidate &&
           solver->diagonal_equiv_plan_state == 0 &&
-          !(kls_is_onetone2_h100_cycle(solver) &&
-            getenv("KLS_ENABLE_ONETONE2_DIAGONAL_PLAN") == NULL)) {
+          !(kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
+            !kls_moderate_fragmented_env_alias_set(
+              "KLS_ENABLE_MODERATE_FRAGMENTED_DIAGONAL_PLAN",
+              "KLS_ENABLE_ONETONE2_DIAGONAL_PLAN"))) {
         const double plan_start = kls_now_seconds();
         kls_prepare_diagonal_equiv_plan(solver, numeric_values);
         elapsed += kls_now_seconds() - plan_start;
@@ -154666,7 +154734,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
         (getenv("KLS_ENABLE_DEFERRED_SNODE_OVERLAP") != NULL ||
          kls_medium_partial_static_metis_adopted(solver) ||
          kls_is_asic100k_dense_h100_cycle(solver) ||
-         kls_is_onetone2_h100_cycle(solver) ||
+         kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL &&
         kls_prepare_snode_sort_for_overlap(solver, &preps_elapsed);
@@ -154695,7 +154763,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
          getenv("KLS_ENABLE_DEFERRED_PREP_OVERLAP") != NULL ||
          kls_medium_partial_static_metis_adopted(solver) ||
          kls_is_asic100k_dense_h100_cycle(solver) ||
-         kls_is_onetone2_h100_cycle(solver) ||
+         kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL) {
       /* Panel census, map construction, dependency scheduling, and the
@@ -155347,10 +155415,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->floor_choice =
       getenv("KLS_DISABLE_ASIC100K_DENSE_LOW_FLOOR") == NULL ? 1 : -1;
     solver->padded_choice = -1;
-  } else if (kls_is_onetone2_h100_cycle(solver)) {
-    /* Full-width EGraph with the incumbent consume floors wins this exact
-       repeated-numeric shape.  Avoid charging the H100 horizon for the
-       known-losing lower-floor and padded-panel consultations. */
+  } else if (kls_moderate_work_fragmented_dominant_btf_cycle(solver)) {
+    /* This bounded-work factor class has already selected full-width EGraph
+       and its incumbent consume floors.  Avoid charging the horizon for
+       lower-floor and padded-panel consultations outside their work regime. */
     solver->floor_choice = -1;
     solver->padded_choice = -1;
   } else if (kls_low_work_btf_map32_policy_enabled(solver)) {
@@ -155439,9 +155507,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
   }
   if (solver->padded_pending > 0 && solver->padded_choice == 0) {
-    /* alternate padded/unpadded so both arms sample the same thermal
-       and warmup window (onetone2 false-adopted against a colder
-       steady min before this) */
+    /* Alternate padded/unpadded so both arms sample the same thermal and
+       warmup window; an earlier cold-min comparison could false-adopt. */
     solver->padded_active = (solver->padded_pending & 1) != 0;
   } else {
     solver->padded_active = solver->padded_choice > 0;
@@ -157749,6 +157816,11 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
     stats->compact_solve_fused_rhs = solver->i32solve_state > 0 &&
       (solver->i32solve_rhs_perm32 != NULL ||
        solver->i16solve_rhs_perm != NULL);
+  }
+  if (copy_size >= offsetof(kls_stats, moderate_fragmented_policy_eligible) +
+                   sizeof(stats->moderate_fragmented_policy_eligible)) {
+    stats->moderate_fragmented_policy_eligible =
+      kls_moderate_work_fragmented_dominant_btf_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

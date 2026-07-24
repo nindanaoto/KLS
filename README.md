@@ -1684,6 +1684,25 @@ fill and work fall in the same moderate band. Set
 `KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE=1`, or
 `KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS=1` for independent A/B diagnosis.
 
+A separate retained-numeric profile supplies lifecycle defaults for stable,
+moderate-work members of that fragmented dominant-BTF class. It requires
+3--8 input entries per row, a BTF block count between 1/12 and 1/5 of the
+order, an 80--95% dominant core, at most `n/128` off-diagonal pivots, no nudges
+or perturbations, 12--40 retained factor entries per row, and 1,000--8,192
+factor flops per row within a 100M--1B total-work band. The selected factor
+must be normal AMD, full-rank, unscaled, and have no retained numeric `Rs`
+array; explicit normal/AMD/unscaled requests are eligible after selecting the
+same numeric state. Consumers that already admit EGraph can then reuse the
+full worker crew, scalar scatter,
+wide subtree/PTS setup, compact solve offsets where representable, and
+overlapped preparations without an input-size fingerprint. The pre-static
+factor-worker counterpart uses the trial symbolic's normalized SCC shape,
+fill, and estimated work because no accepted numeric exists yet. Benchmark
+JSON exposes `moderate_fragmented_policy_eligible`. Set
+`KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY=1` to disable the bundle; the
+former `KLS_DISABLE_ONETONE2_H100_POLICY` switch and its component switches
+remain compatibility aliases.
+
 For the corresponding AUTO analysis problem, a 40--60% structural diagonal
 and three-to-five input entries per row only propose a direct AMD/BTF
 candidate. KLS retains that candidate when the computed symbolic has full
