@@ -24359,6 +24359,305 @@ cleanup:
   return ok;
 }
 
+enum {
+  DENSE_FRAGMENTED_FIXTURE_N = 4096,
+  DENSE_FRAGMENTED_FIXTURE_WIDTH = 256,
+  DENSE_FRAGMENTED_FIXTURE_POSITIVE_BLOCK = 256,
+  DENSE_FRAGMENTED_FIXTURE_CONTROL_BLOCK = 1024,
+  DENSE_FRAGMENTED_FIXTURE_NNZ =
+    DENSE_FRAGMENTED_FIXTURE_N * DENSE_FRAGMENTED_FIXTURE_WIDTH
+};
+
+static int build_dense_fragmented_scaled_row_fixture(
+  int32_t *ap,
+  int32_t *ai,
+  double *ax,
+  int merged_control) {
+  const int32_t block_size = merged_control
+    ? DENSE_FRAGMENTED_FIXTURE_CONTROL_BLOCK
+    : DENSE_FRAGMENTED_FIXTURE_POSITIVE_BLOCK;
+  int32_t p = 0;
+  for (int32_t col = 0; col < DENSE_FRAGMENTED_FIXTURE_N; ++col) {
+    const int32_t block = col / block_size;
+    const int32_t block_start = block * block_size;
+    const int32_t local_col = col - block_start;
+    ap[col] = p;
+    for (int32_t offset = 0;
+         offset < DENSE_FRAGMENTED_FIXTURE_WIDTH; ++offset) {
+      const int32_t row = merged_control
+        ? block_start +
+            (local_col + offset) % DENSE_FRAGMENTED_FIXTURE_CONTROL_BLOCK
+        : block_start + offset;
+      ai[p++] = row;
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+    if (ax != NULL) {
+      for (int32_t entry = ap[col]; entry < p; ++entry) {
+        const int32_t row = ai[entry];
+        const double row_scale = (row & 1) != 0 ? 1.0e4 : 1.0e-4;
+        const double sign = ((row + col) & 1) != 0 ? -1.0 : 1.0;
+        ax[entry] = row_scale * (row == col ? 4.0 : sign * 1.0e-4);
+      }
+    }
+  }
+  ap[DENSE_FRAGMENTED_FIXTURE_N] = p;
+  return p == DENSE_FRAGMENTED_FIXTURE_NNZ;
+}
+
+static int test_dense_fragmented_scaled_row_policy(void) {
+  const int32_t n = DENSE_FRAGMENTED_FIXTURE_N;
+  const int32_t nnz = DENSE_FRAGMENTED_FIXTURE_NNZ;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  int32_t *control_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*control_ap));
+  int32_t *control_ai =
+    (int32_t *)malloc((size_t)nnz * sizeof(*control_ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *csr_solver = NULL;
+  kls_solver *control_solver = NULL;
+  kls_solver *disabled_solver = NULL;
+  kls_solver *legacy_disabled_solver = NULL;
+  int ok = ap != NULL && ai != NULL && control_ap != NULL &&
+    control_ai != NULL && ax != NULL && changed != NULL && expected != NULL &&
+    b != NULL && x != NULL && (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok ||
+      !build_dense_fragmented_scaled_row_fixture(ap, ai, ax, 0) ||
+      !build_dense_fragmented_scaled_row_fixture(
+        control_ap, control_ai, NULL, 1)) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t entry = 0; entry < nnz; ++entry) {
+    changed[entry] = ax[entry] *
+      (1.0 + 1.0e-5 * (double)(entry % 19 - 9));
+  }
+  for (int32_t col = 0; col < n; ++col) {
+    expected[col] = 0.25 + 0.00390625 * (double)(col % 29);
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+  if (unsetenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY") != 0) {
+    perror("configure dense fragmented scaled row policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create dense fragmented scaled row policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze dense fragmented scaled row policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor dense fragmented scaled row policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats dense fragmented scaled row policy") ||
+      stats.dense_fragmented_scaled_row_factor_eligible != 1) {
+    fprintf(stderr,
+            "unexpected dense fragmented scaled row factor: orientation=%d"
+            " ordering=%d scale=%d btf=%d blocks=%" PRId64
+            " max=%" PRId64 " offdiag=%" PRId64 " fill=%" PRId64
+            "/%" PRId64 " work=%.0f eligible=%d\n",
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.selected_scale, stats.selected_btf, stats.nblocks,
+            stats.max_block, stats.offdiag_pivots, stats.nnz_l, stats.nnz_u,
+            stats.factor_flops,
+            stats.dense_fragmented_scaled_row_factor_eligible);
+    ok = 0;
+    goto cleanup;
+  }
+  if (!require_ok(kls_refactor(solver, changed),
+                  "refactor dense fragmented scaled row policy") ||
+      !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve dense fragmented scaled row policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "refactor stats dense fragmented scaled row policy") ||
+      stats.last_refactor_path != KLS_REFACTOR_PATH_ROW) {
+    fprintf(stderr, "dense fragmented scaled factor did not use row path\n");
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (fabs(x[row] - expected[row]) >
+        1.0e-8 * (1.0 + fabs(expected[row]))) {
+      fprintf(stderr,
+              "dense fragmented scaled solve mismatch at %d: %.17g"
+              " vs %.17g\n", row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* The dense blocks are structurally symmetric.  Reading the same arrays
+     as CSR transposes the row-scaled values, exercising the public format
+     conversion without changing the measured factor class. */
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t row = 0; row < n; ++row) {
+    for (int32_t entry = ap[row]; entry < ap[row + 1]; ++entry) {
+      b[row] += changed[entry] * expected[ai[entry]];
+    }
+  }
+  if (!require_ok(kls_create(&csr_solver),
+                  "create CSR dense fragmented scaled row policy") ||
+      !require_ok(kls_analyze_csr(csr_solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze CSR dense fragmented scaled row policy") ||
+      !require_ok(kls_factor(csr_solver, ax),
+                  "factor CSR dense fragmented scaled row policy") ||
+      !require_ok(kls_refactor(csr_solver, changed),
+                  "refactor CSR dense fragmented scaled row policy") ||
+      !require_ok(kls_solve(csr_solver, 1, b, 0, x, 0),
+                  "solve CSR dense fragmented scaled row policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(csr_solver, &stats),
+                  "stats CSR dense fragmented scaled row policy") ||
+      stats.dense_fragmented_scaled_row_factor_eligible != 1 ||
+      stats.last_refactor_path != KLS_REFACTOR_PATH_ROW) {
+    fprintf(stderr, "CSR dense fragmented scaled factor was not retained\n");
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (fabs(x[row] - expected[row]) >
+        1.0e-8 * (1.0 + fabs(expected[row]))) {
+      fprintf(stderr,
+              "CSR dense fragmented scaled solve mismatch at %d: %.17g"
+              " vs %.17g\n", row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  if (!build_dense_fragmented_scaled_row_fixture(
+        control_ap, control_ai, changed, 1) ||
+      !require_ok(kls_create(&control_solver),
+                  "create merged dense fragmented control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  control_ap, control_ai, 0, &options),
+                  "analyze merged dense fragmented control") ||
+      !require_ok(kls_factor(control_solver, changed),
+                  "factor merged dense fragmented control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats merged dense fragmented control") ||
+      stats.dense_fragmented_scaled_row_factor_eligible != 0) {
+    fprintf(stderr, "merged dense fragmented control became eligible\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (setenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_create(&disabled_solver),
+                  "create disabled dense fragmented control") ||
+      !require_ok(kls_analyze_csc(disabled_solver, KLS_INDEX_INT32, n, ap, ai,
+                                  0, &options),
+                  "analyze disabled dense fragmented control") ||
+      !require_ok(kls_factor(disabled_solver, ax),
+                  "factor disabled dense fragmented control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(disabled_solver, &stats),
+                  "stats disabled dense fragmented control") ||
+      stats.dense_fragmented_scaled_row_factor_eligible != 0) {
+    fprintf(stderr, "disabled dense fragmented control became eligible\n");
+    ok = 0;
+  }
+
+  if (unsetenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY") != 0 ||
+      setenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_create(&legacy_disabled_solver),
+                  "create legacy-disabled dense fragmented control") ||
+      !require_ok(kls_analyze_csc(legacy_disabled_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze legacy-disabled dense fragmented control") ||
+      !require_ok(kls_factor(legacy_disabled_solver, ax),
+                  "factor legacy-disabled dense fragmented control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(legacy_disabled_solver, &stats),
+                  "stats legacy-disabled dense fragmented control") ||
+      stats.dense_fragmented_scaled_row_factor_eligible != 0) {
+    fprintf(stderr,
+            "legacy-disabled dense fragmented control became eligible\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(legacy_disabled_solver);
+  kls_destroy(disabled_solver);
+  kls_destroy(control_solver);
+  kls_destroy(csr_solver);
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY",
+                         had_policy,
+                         saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY",
+                         had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(control_ap);
+  free(control_ai);
+  free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -24411,6 +24710,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_spiked_predicted_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_dense_fragmented_scaled_row_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

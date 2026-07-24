@@ -3877,6 +3877,37 @@ independent fixture measured `0.7016` and `0.6100`. Release and
 ASan/UBSan/LSan CTest pass all four tests, including leak-enabled positive and
 measured-rejection runs.
 
+## Dense fragmented scaled-row lifecycle
+
+The former `TSOPF_RS_b2383` row-update route no longer recognizes exactly
+38,120 rows and 16,171,169 entries. It now makes no input-name, dimension,
+orientation, or ordering decision. After the ordinary AUTO factor completes,
+KLS admits direct cooperative-row updates only for a real scaled, full-rank BTF
+numeric whose component count, largest component, pivot count, balanced fill,
+work, and dense-input ratio all fall inside normalized bounds. A failed factor
+gate retains the generic update engine.
+
+`KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY=1` provides a generic
+same-binary control; `KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY` remains a
+compatibility alias. `dense_fragmented_scaled_row_factor_eligible` exposes the
+measured decision through `kls_stats` and benchmark JSON.
+
+The smoke test supplies an independent 4,096-row family with 16 dense
+256-row components. It selects normal AMD rather than the target's transposed
+METIS factor, works through both CSC and CSR, refactors changed values through
+the row engine, and recovers an independently constructed solution. A
+same-order, same-entry-count control merges the pattern into four 1,024-row
+components and rejects. A 512-component TSOPF extension at 38,632 rows also
+selects outside the old exact identity.
+
+Across both real value sets, the extension, and the independent family, 1,200
+independently checked entrywise generations through 10% amplitude had worst
+relative-L2 residual `2.04e-11`. Six alternating target pairs put the modeled-
+cycle ratio at `1.0021` versus the former exact policy. Four extension pairs
+measured `0.4892`, and six independent-family pairs measured `0.1756`.
+Release and ASan/UBSan/LSan CTest pass all four tests; leak-enabled target,
+extension, and independent runs are clean.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

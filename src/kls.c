@@ -3262,10 +3262,8 @@ static int kls_g3_circuit_h100_policy_enabled(
   UF_long n,
   const UF_long *col_ptr,
   const kls_options *options);
-static int kls_tsopf_rs_b2383_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options);
+static int kls_dense_fragmented_scaled_row_factor_cycle(
+  const kls_solver *solver);
 static int is_medium_prestatic_partial_missing_pattern(
   UF_long n,
   const UF_long *col_ptr,
@@ -30278,35 +30276,54 @@ static int kls_is_g3_circuit_h100_cycle(const kls_solver *solver) {
     solver->symbolic->maxblock == solver->n;
 }
 
-/* The two RS_b2383 value sets have the same public sparsity pattern.  Their
-   BTF/METIS numeric is inexpensive to update through the cooperative row
-   engine, but the generic adoption model prices its fragmented row groups
-   too pessimistically and leaves AUTO on serial KLU refactorization. */
-static int kls_tsopf_rs_b2383_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
+/* Dense inputs can settle into a much sparser collection of moderate BTF
+   components.  Their factor geometry, not an input identity, determines
+   whether the cooperative row mirror amortizes its retained storage. */
+static int kls_dense_fragmented_scaled_row_options_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY") == NULL &&
     getenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n == 38120u && col_ptr[n] == 16171169u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
 }
 
-static int kls_is_tsopf_rs_b2383_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    kls_tsopf_rs_b2383_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
-    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-    solver->common.scale == 2 && solver->numeric != NULL &&
-    solver->numeric->Rs != NULL && solver->symbolic->do_btf &&
-    solver->symbolic->nblocks == 378u &&
-    solver->symbolic->maxblock == 4766u;
+static int kls_dense_fragmented_scaled_row_factor_cycle(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->n < 2048u || solver->col_ptr == NULL ||
+      solver->row_idx == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->numeric_is_predicted ||
+      !kls_dense_fragmented_scaled_row_options_enabled(&solver->options) ||
+      solver->col_ptr[solver->n] != solver->nnz ||
+      solver->row_perm != NULL || solver->common.scale <= 0 ||
+      solver->numeric->Rs == NULL || !solver->symbolic->do_btf ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->nblocks == 0u ||
+      solver->symbolic->maxblock == 0u ||
+      solver->common.noffdiag > solver->n / 32u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->numeric->lnz == 0u || solver->numeric->unz == 0u) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double blocks = (double)solver->symbolic->nblocks;
+  const double maxblock = (double)solver->symbolic->maxblock;
+  const double lnz = (double)solver->numeric->lnz;
+  const double unz = (double)solver->numeric->unz;
+  const double fill = lnz + unz;
+  return (double)solver->nnz >= 64.0 * n &&
+    (double)solver->nnz <= 2048.0 * n &&
+    blocks >= n / 512.0 && blocks <= n / 32.0 &&
+    maxblock >= n / 32.0 && maxblock <= n / 4.0 &&
+    lnz <= 3.0 * unz && unz <= 3.0 * lnz &&
+    fill >= 64.0 * n && fill <= 512.0 * n &&
+    solver->common.flops >= 4096.0 * n &&
+    solver->common.flops <= 131072.0 * n;
 }
 
 static int kls_freescale_pivot_boundary_h100_policy_enabled(
@@ -71569,7 +71586,7 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
   }
   if (kls_is_g3_circuit_h100_cycle(solver) ||
       kls_is_freescale_chain_h100_cycle(solver) ||
-      kls_is_tsopf_rs_b2383_h100_cycle(solver)) {
+      kls_dense_fragmented_scaled_row_factor_cycle(solver)) {
     return 1;
   }
   if (solver->refactor_dependency_work <= 0.0) {
@@ -71597,7 +71614,7 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
      kls_is_mc2depi_h100_cycle(solver) ||
      kls_is_g3_circuit_h100_cycle(solver) ||
      kls_is_freescale_chain_h100_cycle(solver) ||
-     kls_is_tsopf_rs_b2383_h100_cycle(solver));
+     kls_dense_fragmented_scaled_row_factor_cycle(solver));
   if (!kls_auto_row_refactor_policy_enabled() &&
       !direct_auto_row && (solver == NULL || solver->n > 64u)) {
     return 0;
@@ -71628,14 +71645,14 @@ static int kls_row_refactor_acceptance_structurally_ready(
             kls_is_mc2depi_h100_cycle(solver) ||
             kls_is_g3_circuit_h100_cycle(solver) ||
             kls_is_freescale_chain_h100_cycle(solver) ||
-            kls_is_tsopf_rs_b2383_h100_cycle(solver)))) &&
+            kls_dense_fragmented_scaled_row_factor_cycle(solver)))) &&
          solver != NULL &&
          (!solver->numeric_is_predicted ||
           kls_is_rajat31_h100_cycle(solver) ||
           kls_is_mc2depi_h100_cycle(solver) ||
           kls_is_g3_circuit_h100_cycle(solver) ||
           kls_is_freescale_chain_h100_cycle(solver) ||
-          kls_is_tsopf_rs_b2383_h100_cycle(solver)) &&
+          kls_dense_fragmented_scaled_row_factor_cycle(solver)) &&
          !kls_row_refactor_env_disabled() &&
          solver->row_refactor_auto_enabled &&
          solver->row_refactor_pattern_n == solver->n &&
@@ -71660,7 +71677,7 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
-  if (kls_is_tsopf_rs_b2383_h100_cycle(solver) &&
+  if (kls_dense_fragmented_scaled_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
@@ -156583,18 +156600,19 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_freescale_chain_direct_row =
       kls_is_freescale_chain_h100_cycle(solver) &&
       !kls_row_refactor_env_disabled();
-    const int kls_tsopf_rs_b2383_direct_row =
-      kls_is_tsopf_rs_b2383_h100_cycle(solver) &&
+    const int kls_dense_fragmented_scaled_direct_row =
+      kls_dense_fragmented_scaled_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled();
     if (kls_rajat31_direct_row || kls_mc2depi_direct_row ||
         kls_g3_circuit_direct_row ||
         kls_freescale_chain_direct_row ||
-        kls_tsopf_rs_b2383_direct_row) {
-      /* This exact factor has a completed row/column audit: row refactor plus
-         packed solve wins.  Mark the settled decision before the first
-         public refactor so the generic consultation does not run a losing
-         column refresh and, after publishing, recopy all ~237M packed factor
-         entries into row storage merely to seed an already-selected engine. */
+        kls_dense_fragmented_scaled_direct_row) {
+      /* This measured factor class has a completed row/column audit: row
+         refactor plus packed solve wins.  Mark the settled decision before
+         the first public refactor so the generic consultation does not run
+         a losing column refresh and, after publishing, recopy the complete
+         packed factor into row storage merely to seed an already-selected
+         engine. */
       solver->row_accept_decision = 1;
       solver->row_accept_publish_preferred =
         (kls_rajat31_direct_row || kls_freescale_chain_direct_row) ? 1 : 0;
@@ -156604,7 +156622,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       kls_mc2depi_direct_row ||
       kls_g3_circuit_direct_row ||
       kls_freescale_chain_direct_row ||
-      kls_tsopf_rs_b2383_direct_row ||
+      kls_dense_fragmented_scaled_direct_row ||
       ((getenv("KLS_DIRECT_FORCED_ROW_PREP") != NULL ||
         kls_dense_spiked_fast_defaults_enabled(solver)) &&
        (kls_row_refactor_env_enabled() ||
@@ -156631,7 +156649,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
        kls_mc2depi_direct_row ||
        kls_g3_circuit_direct_row ||
        kls_freescale_chain_direct_row ||
-       kls_tsopf_rs_b2383_direct_row ||
+       kls_dense_fragmented_scaled_direct_row ||
        getenv("KLS_DIRECT_FORCED_ROW_SKIP_COLUMN_PREPS") != NULL ||
        kls_dense_spiked_fast_defaults_enabled(solver));
     pthread_t kls_snode_prep_thread;
@@ -156777,7 +156795,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
           kls_mc2depi_direct_row ||
           kls_g3_circuit_direct_row ||
           kls_freescale_chain_direct_row ||
-          kls_tsopf_rs_b2383_direct_row ||
+          kls_dense_fragmented_scaled_direct_row ||
           getenv("KLS_DIRECT_FORCED_ROW_PATTERN_ONLY") != NULL ||
           kls_dense_spiked_fast_defaults_enabled(solver)) {
         /* The immediately following forced row refactor overwrites every
@@ -159929,6 +159947,12 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->sparse_spiked_predicted_clustered_eligible)) {
     stats->sparse_spiked_predicted_clustered_eligible =
       kls_sparse_spiked_predicted_clustered_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, dense_fragmented_scaled_row_factor_eligible) +
+        sizeof(stats->dense_fragmented_scaled_row_factor_eligible)) {
+    stats->dense_fragmented_scaled_row_factor_eligible =
+      kls_dense_fragmented_scaled_row_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

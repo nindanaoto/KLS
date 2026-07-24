@@ -1410,6 +1410,9 @@ typedef struct kls_stats {
   /* That factor also has the nearly all-private moderate-work separator for
      which the retained cluster schedule and relaxed-consume floors apply. */
   int sparse_spiked_predicted_clustered_eligible;
+  /* The retained scaled BTF factor has normalized dense-input,
+     fragmentation, fill, work, and pivot bounds for direct row updates. */
+  int dense_fragmented_scaled_row_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

@@ -19148,3 +19148,88 @@ Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
 factor/refactor/solve runs cover `nxp1`, its extension, the independent
 positive, and the relabeled `1/0/0` rejection with no findings.  The legacy
 disable alias was separately checked and suppresses all three stages.
+
+DENSE FRAGMENTED SCALED-ROW LIFECYCLE GENERALIZED (2026-07-24).  The remaining
+`TSOPF_RS_b2383` post-factor selector required exactly 38,120 rows and
+16,171,169 entries under the standard eight-thread AUTO contract.  It then
+required a transposed METIS, scale-2 BTF factor with exactly 378 blocks and a
+4,766-row largest block.  That benchmark fingerprint bypassed the row-engine
+cost model and timed consultation, marked row acceptance before the first
+changed matrix, skipped column-engine preparation, built only the row pattern,
+and forced the cooperative row refactor.  The optimization depended on a real
+numeric, but its decisive structural fields were still exact benchmark
+coordinates.
+
+The replacement has no input-name, exact dimension, exact entry-count,
+orientation, ordering, block-count, or block-size gate.  It retains the
+standard AUTO orientation/ordering/scaling/backend, eight-thread, BTF,
+static-pivoting, and `1e-3` tolerance contract, then waits for the ordinary
+factor.  The numeric must be a real non-predicted KLU factor with no matching
+row permutation, positive KLU scaling and numeric `Rs`, full structural rank,
+BTF enabled, no pivot nudge or perturbation, and at most `n/32` off-diagonal
+pivots.  The absolute `n >= 2,048` floor bounds row-mirror setup economics.
+
+All remaining gates are normalized.  The input has 64--2,048 stored entries
+per row overall.  BTF has between `n/512` and `n/32` components, with its
+largest component between `n/32` and `n/4`.  L and U must each be nonempty and
+within 3x of one another; their combined fill lies between 64 and 512 entries
+per row.  Measured factor work lies between 4,096 and 131,072 operations per
+row.  Only that settled factor enables the direct row-update lifecycle.  The
+ordinary factor and update route remain untouched when any bound rejects.
+
+The generic same-binary control is
+`KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY=1`; the old
+`KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY` name remains a compatibility alias.
+The public `dense_fragmented_scaled_row_factor_eligible` field reports the
+factor verdict through `kls_stats`, full benchmark JSON, and analyze-only JSON.
+
+The independent smoke positive has 4,096 rows and 1,048,576 entries.  Sixteen
+independent dense 256-row strongly connected blocks produce normal AMD, scale
+2, 16 BTF blocks, a 256-row largest block, no off-diagonal pivots, 526,336 L
+and U entries each, and 178,432,000 measured operations.  This differs from
+the target in order by nearly 10x, in input density, orientation, ordering,
+block count, block size, pivot behavior, and value scaling, yet reports the
+same measured factor class.  Changed-value CSC and CSR paths both use the row
+engine and recover independently constructed solutions.
+
+The structural control preserves the independent fixture's order, 1,048,576
+entries, scaling distribution, and 256 entries per compressed vector, but
+redistributes them into four cyclic 1,024-row components.  It fails the
+normalized BTF geometry and reports zero.  The unchanged positive under the
+generic disable and under the legacy alias also reports zero and returns to
+KLU refactorization.
+
+The local SuiteSparse corpus contains 110 matrices.  Only the two
+`TSOPF_RS_b2383` value sets enter the broad `n >= 2,048`, 64--2,048-entry input
+density screen, and they share one sparsity pattern.  Corpus uniqueness is
+therefore not used as generalization evidence.  Appending 512 independent
+diagonal components creates a 38,632-row, 16,171,681-entry metamorph outside
+the old exact identity.  It retains transposed METIS and scale 2, now with 890
+BTF blocks, and passes the normalized factor gate.  The independent fixture
+provides the unrelated positive family.
+
+Both real value sets, the 512-row extension, and the independent fixture each
+completed 100 independently checked entrywise generations at amplitudes
+`0.001`, `0.01`, and `0.1`, for 1,200 positive generations.  The real targets
+and extension had worst per-generation relative-L2 residual
+`2.0388e-11`; the independent family remained below `1.1951e-15`.
+
+Six alternating former-exact/current target pairs, pinned to quiet cores with
+three solve repetitions and 20 refactors per process, put geometric
+current/parent ratios at `1.00514` for analysis, `1.00243` for initial factor,
+`0.99547` for first refactor, `0.99963` for steady refactor, `1.00796` for
+solve, and `1.00213` for the complete modeled cycle.  The normalized predicate
+therefore preserves the established target route and cycle within 0.3%.
+
+Four alternating pairs on the out-of-box extension measured `0.99890` for
+initial factor, `1.08056` for first refactor, `0.30863` for steady refactor,
+`2.56618` for solve, and `0.48920` for the modeled cycle.  Six pairs on the
+independent family measured `0.99556`, `0.93997`, `0.08379`, `5.97332`, and
+`0.17560` for the same phases.  The row solve is deliberately more expensive,
+but the independently measured update reduction dominates the complete H100
+horizon in both newly admitted families.
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+factor/refactor/solve runs cover the original target, the out-of-box extension,
+and the independent positive with no findings.  Same-binary generic and legacy
+disable probes both report factor eligibility zero and use KLU refactorization.
