@@ -18003,3 +18003,92 @@ CTest pass all three tests.  Leak-enabled sanitizer runs additionally
 exercised changed-value refactors on the original, the out-of-box 128-block
 positive, and the 256-block rejection; all three retained their expected
 policy decisions and verified residuals.
+
+PIVOTED HIGH-WORK SINGLE-BLOCK LIFECYCLE GENERALIZED (2026-07-24).  The
+remaining `rajat15` route began with an AUTO/8-thread normal-AMD input selector
+whose 37,200--37,320-row and 443,000--444,200-entry windows identified the
+benchmark before any values were inspected.  One pre-numeric decision used
+that identity to suppress the METIS race, and thirteen post-factor decisions
+used it to decline rejected Hungarian, scaling, ordering, FP32, scheduling,
+PTS, reciprocal-diagonal, and adaptive-probe alternatives.  The later factor
+checks bounded pivots, fill, and work, but the exact input window remained the
+authority for every consumer.
+
+The replacement first records only the accepted symbolic capability.  Under
+the unchanged AUTO orientation, ordering, scale, and backend contract with
+eight threads, BTF, static pivoting, and the default requested `0.001`
+tolerance, the selected candidate must be normal AMD with one block.  Its
+order may be 8,192--131,072, input density 6--16 entries per row, symbolic
+fill 32--96 entries per row, and estimated work 2,048--8,192 flops per row
+inside a 64M--512M total-work band.  Both estimated triangular streams must be
+positive and within 2:1, and structural rank must be full or the one-block KLU
+unknown sentinel.  These are normalized execution and resource limits rather
+than a narrow matrix dimension fingerprint.
+
+Recurring decisions require the accepted symbolic identity and an actual
+no-scale/no-recheck numeric with no `Rs`, nudges, or perturbations.  The factor
+must have between `n/64` and `n/8` off-diagonal pivots, 32--128 retained
+entries per row, and 2,048--16,384 measured flops per row inside a 64M--768M
+total-work band, again with L/U within 2:1.  The measured verdict is cached and
+invalidated whenever the numeric or symbolic identity is replaced or freed.
+It is exposed as `pivoted_high_work_single_block_policy_eligible` in
+`kls_stats` and benchmark JSON.  The generic master switch is
+`KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY`; the old
+`KLS_DISABLE_RAJAT15_H100_POLICY` switch remains only an A/B alias.
+
+The pre-numeric METIS-race shortcut was removed instead of generalized.
+Ordinary AUTO competition changed original and out-of-box positive timings
+only by noise, while a symbolic-only shortcut cannot distinguish factors with
+the same topology and different pivot behavior.  Every specialized recurring
+choice is therefore gated by the measured numeric.  Explicit orientation,
+ordering, or scale requests remain authoritative and report eligibility zero
+even if they happen to reach a similar factor.
+
+The smoke suite constructs an independent 32,000-row symmetric 160-by-200
+nine-point grid, adds 2,000 weak hub connections, and creates stable adjacent
+pivot pairs every thirteen columns.  Its 289,844-entry normal-AMD one-block
+factor passes the normalized bounds, reports eligibility one, uses EGraph for
+a changed-value refactor, and solves the independently formed system within
+the residual contract.  A same-topology control changes only the diagonal
+values, removes material pivoting, and reports eligibility zero.  This pair
+directly checks that topology alone cannot activate the lifecycle.
+
+Metamorphic holdouts exercise identity and nearby rejection.  Appending 1,024
+weak reciprocal diagonal nodes to `rajat15` changes its order to 38,285 and
+its entry count to 446,645, outside both old windows; it remains eligible with
+2,794 off-diagonal pivots, about 1.624M factor entries, and 129.1M factor
+flops.  A complete simultaneous shuffle of that extension also remains
+eligible despite changing pivots, fill, and work.  Appending 8,192 nodes moves
+the matrix to 45,453 rows; ordinary AUTO selects scale two and 28 blocks, so
+the numeric gate cleanly rejects it.  The metamorphic utility now provides
+`--append-coupled-nodes COUNT` for these connected size perturbations.
+
+The wider corpus scan remains selective.  In 110 saved paper-union results,
+only `rajat15` passed the complete symbolic and numeric boundary.  The coarse
+order/density/normal-AMD/one-block filter also found `OPF_10000` and
+`OPF_3754`, but both failed normalized fill or work.  Across fresh
+deterministic 24-matrix development and 24-matrix holdout partitions, only
+the holdouts `viscoplastic2` and `Dubcova1` passed the symbolic proposal.
+`viscoplastic2` then had too few pivots and 886.7M factor flops;
+`Dubcova1` had no off-diagonal pivots.  Both report numeric eligibility zero,
+as do all remaining scanned matrices.
+
+Twenty interleaved original H100 pairs put generic/parent at `1.0135` by
+paired geometric mean (`1.0166` median, `0.9910`--`1.0259` range).  Analysis
+and recurring refactor medians were `1.0034` and `1.0075`; total modeled-cycle
+performance is therefore retained within about 1.4% geometric mean without
+the exact selector.  Same-binary enabled/disabled pairs demonstrate that the
+generalized consumers remain material: geometric-mean cycle ratios were
+`0.4396` on the independent grid, `0.3865` on the 1,024-node extension, and
+`0.4149` after its full shuffle.  The same-topology no-pivot control,
+`viscoplastic2`, and `Dubcova1` stayed neutral at median ratios `1.0057`,
+`0.9967`, and `1.0004`.
+
+The original, 1,024-node extension, full shuffle, and independent grid each
+completed 100 verified entrywise generations at amplitudes 0.001, 0.01, and
+0.1.  Across all 1,200 changed systems, every positive retained eligibility
+one and EGraph, and the worst per-generation relative-L2 residual was
+`3.72e-13`.  Release CTest and ASan/UBSan/LSan CTest pass all three tests.
+Leak-enabled sanitized changed-value runs additionally cover the original,
+the out-of-box 1,024-node positive, and the 8,192-node rejection with their
+expected decisions and valid residuals.

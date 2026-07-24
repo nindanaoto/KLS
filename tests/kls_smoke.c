@@ -21288,6 +21288,290 @@ cleanup:
   return ok;
 }
 
+static int compare_fixture_int32(const void *lhs, const void *rhs) {
+  const int32_t a = *(const int32_t *)lhs;
+  const int32_t b = *(const int32_t *)rhs;
+  return (a > b) - (a < b);
+}
+
+static int test_pivoted_high_work_single_block_policy(void) {
+  const int32_t grid_rows = 160;
+  const int32_t grid_cols = 200;
+  const int32_t n = grid_rows * grid_cols;
+  const int32_t hub = n - 1;
+  const int32_t hub_stride = 16;
+  const int32_t hub_anchors = (hub + hub_stride - 1) / hub_stride;
+  const int32_t grid_edges =
+    grid_rows * (grid_cols - 1) + (grid_rows - 1) * grid_cols +
+    2 * (grid_rows - 1) * (grid_cols - 1);
+  const int32_t nnz = n + 2 * grid_edges + 2 * hub_anchors;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *ax_changed =
+    (double *)malloc((size_t)nnz * sizeof(*ax_changed));
+  double *ax_no_pivots =
+    (double *)malloc((size_t)nnz * sizeof(*ax_no_pivots));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_RAJAT15_H100_POLICY");
+  const char *saved_race_value = getenv("KLS_DISABLE_METIS_RACE");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  char *saved_race = saved_race_value != NULL
+    ? strdup(saved_race_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  const int had_race = saved_race_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *negative_solver = NULL;
+  kls_solver *explicit_solver = NULL;
+  kls_options options;
+  kls_options explicit_options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
+    ax_no_pivots != NULL && expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL) &&
+    (!had_race || saved_race != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv("KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_RAJAT15_H100_POLICY") != 0 ||
+      setenv("KLS_DISABLE_METIS_RACE", "1", 1) != 0) {
+    perror("configure pivoted high-work single-block policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    const int32_t grid_row = col / grid_cols;
+    const int32_t grid_col = col % grid_cols;
+    for (int32_t row_delta = -1; row_delta <= 1; ++row_delta) {
+      const int32_t neighbor_row = grid_row + row_delta;
+      if (neighbor_row < 0 || neighbor_row >= grid_rows) {
+        continue;
+      }
+      for (int32_t col_delta = -1; col_delta <= 1; ++col_delta) {
+        const int32_t neighbor_col = grid_col + col_delta;
+        if (neighbor_col < 0 || neighbor_col >= grid_cols) {
+          continue;
+        }
+        ai[p++] = neighbor_row * grid_cols + neighbor_col;
+      }
+    }
+    if (col != hub && col % hub_stride == 0) {
+      ai[p++] = hub;
+    }
+    if (col == hub) {
+      for (int32_t anchor = 0; anchor < hub; anchor += hub_stride) {
+        ai[p++] = anchor;
+      }
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+    for (int32_t entry = ap[col]; entry < p; ++entry) {
+      const int32_t row = ai[entry];
+      if (row == col) {
+        ax[entry] = grid_col % 13 <= 1
+          ? 2.0e-6 : 10.0 + 1.0e-4 * (double)(col % 17);
+      } else if ((row == hub && col % hub_stride == 0) ||
+                 (col == hub && row % hub_stride == 0)) {
+        ax[entry] = 1.0e-3;
+      } else {
+        const int32_t row_grid_row = row / grid_cols;
+        const int32_t row_grid_col = row % grid_cols;
+        const int32_t first_col = row_grid_col < grid_col
+          ? row_grid_col : grid_col;
+        ax[entry] = row_grid_row == grid_row &&
+          abs(row_grid_col - grid_col) == 1 && first_col % 13 == 0
+          ? 10.0 : -0.1;
+      }
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr,
+            "unexpected pivoted high-work single-block nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  memcpy(ax_no_pivots, ax, (size_t)nnz * sizeof(*ax_no_pivots));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      if (ai[entry] == col) {
+        ax_no_pivots[entry] = 20.0;
+      }
+      ax_changed[entry] =
+        ax[entry] * (1.0 + 1.0e-5 * (double)((entry % 7) - 3));
+    }
+    expected[col] = 1.0 + 0.01 * (double)(col % 19);
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create pivoted high-work single-block policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze pivoted high-work single-block policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor pivoted high-work single-block policy") ||
+      !require_ok(kls_refactor(solver, ax_changed),
+                  "refactor pivoted high-work single-block policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats pivoted high-work single-block policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  const double fill = (double)(stats.nnz_l + stats.nnz_u);
+  if (stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != -1 || stats.nblocks != 1 ||
+      stats.max_block != n ||
+      64 * stats.offdiag_pivots < n ||
+      8 * stats.offdiag_pivots > n ||
+      fill < 32.0 * (double)n || fill > 128.0 * (double)n ||
+      stats.factor_flops < 2048.0 * (double)n ||
+      stats.factor_flops > 16384.0 * (double)n ||
+      stats.pivoted_high_work_single_block_policy_eligible != 1 ||
+      stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+    fprintf(stderr,
+            "unexpected pivoted high-work single-block policy:"
+            " orientation=%d ordering=%d scale=%d btf=%d blocks=%" PRId64
+            " max=%" PRId64 " offdiag=%" PRId64 " fill=%.0f flops=%.0f"
+            " eligible=%d path=%d\n",
+            (int)stats.selected_orientation,
+            (int)stats.selected_ordering, stats.selected_scale,
+            stats.selected_btf, stats.nblocks, stats.max_block,
+            stats.offdiag_pivots, fill, stats.factor_flops,
+            stats.pivoted_high_work_single_block_policy_eligible,
+            (int)stats.last_refactor_path);
+    ok = 0;
+    goto cleanup;
+  }
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += ax_changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve pivoted high-work single-block policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "pivoted high-work single-block solve mismatch at %d: %.17g"
+              " vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* The same topology and symbolic estimates with strong diagonals must be
+     rejected by the measured pivot gate. */
+  if (!require_ok(kls_create(&negative_solver),
+                  "create pivoted high-work numeric negative") ||
+      !require_ok(kls_analyze_csc(negative_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze pivoted high-work numeric negative") ||
+      !require_ok(kls_factor(negative_solver, ax_no_pivots),
+                  "factor pivoted high-work numeric negative")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(negative_solver, &stats),
+                  "stats pivoted high-work numeric negative") ||
+      stats.pivoted_high_work_single_block_policy_eligible != 0) {
+    fprintf(stderr,
+            "no-pivot control unexpectedly selected pivoted high-work"
+            " single-block policy\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Explicit choices remain authoritative even when they reach an otherwise
+     identical retained factor. */
+  explicit_options = options;
+  explicit_options.orientation = KLS_ORIENTATION_NORMAL;
+  explicit_options.ordering = KLS_ORDERING_AMD;
+  explicit_options.scale = -1;
+  if (!require_ok(kls_create(&explicit_solver),
+                  "create pivoted high-work explicit control") ||
+      !require_ok(kls_analyze_csc(explicit_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &explicit_options),
+                  "analyze pivoted high-work explicit control") ||
+      !require_ok(kls_factor(explicit_solver, ax),
+                  "factor pivoted high-work explicit control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(explicit_solver, &stats),
+                  "stats pivoted high-work explicit control") ||
+      stats.pivoted_high_work_single_block_policy_eligible != 0 ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != -1) {
+    fprintf(stderr,
+            "explicit pivoted high-work control changed or became eligible\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(explicit_solver);
+  kls_destroy(negative_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_RAJAT15_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_METIS_RACE", had_race,
+                         saved_race != NULL ? saved_race : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(ax_changed);
+  free(ax_no_pivots);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  free(saved_legacy);
+  free(saved_race);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -21310,6 +21594,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_symmetric_scalar_fringe_amd_lean_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_pivoted_high_work_single_block_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

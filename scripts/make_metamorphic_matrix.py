@@ -127,6 +127,46 @@ def append_diagonal_blocks(
     return order + block_count, transformed
 
 
+def append_coupled_nodes(
+    entries: list[tuple[int, int, tuple[str, ...]]],
+    order: int,
+    node_count: int,
+    value_kind: str,
+    symmetry: str,
+) -> tuple[int, list[tuple[int, int, tuple[str, ...]]]]:
+    if node_count < 0:
+        raise ValueError("coupled node count must be nonnegative")
+    if node_count > 0 and order == 0:
+        raise ValueError("cannot couple nodes to an empty matrix")
+    if symmetry == "skew-symmetric" and node_count > 0:
+        raise ValueError("coupled-node extension does not support skew symmetry")
+    if value_kind == "pattern":
+        diagonal_value: tuple[str, ...] = ()
+        coupling_value: tuple[str, ...] = ()
+    elif value_kind == "integer":
+        diagonal_value = ("1",)
+        coupling_value = ("1",)
+    elif value_kind == "real":
+        diagonal_value = ("1",)
+        coupling_value = ("1e-3",)
+    elif value_kind == "complex":
+        diagonal_value = ("1", "0")
+        coupling_value = ("1e-3", "0")
+    else:
+        raise ValueError(f"unsupported MatrixMarket value kind: {value_kind}")
+
+    transformed = list(entries)
+    for offset in range(node_count):
+        node = order + offset
+        anchor = offset % order
+        transformed.append((node, node, diagonal_value))
+        transformed.append((node, anchor, coupling_value))
+        if symmetry == "general":
+            transformed.append((anchor, node, coupling_value))
+    transformed.sort(key=lambda entry: (entry[1], entry[0]))
+    return order + node_count, transformed
+
+
 def write_coordinate_matrix(
     path: pathlib.Path,
     comments: list[str],
@@ -167,6 +207,12 @@ def main() -> int:
         metavar="COUNT",
         help="append COUNT independent 1x1 unit-diagonal blocks",
     )
+    mode.add_argument(
+        "--append-coupled-nodes",
+        type=int,
+        metavar="COUNT",
+        help="append COUNT weakly and reciprocally coupled diagonal nodes",
+    )
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     if args.input.resolve() == args.output.resolve():
@@ -175,7 +221,16 @@ def main() -> int:
         comments, value_kind, symmetry, order, entries = read_coordinate_matrix(
             args.input
         )
-        if args.append_diagonal_blocks is not None:
+        if args.append_coupled_nodes is not None:
+            order, transformed = append_coupled_nodes(
+                entries,
+                order,
+                args.append_coupled_nodes,
+                value_kind,
+                symmetry,
+            )
+            transformation = f"append_coupled_nodes={args.append_coupled_nodes}"
+        elif args.append_diagonal_blocks is not None:
             order, transformed = append_diagonal_blocks(
                 entries, order, args.append_diagonal_blocks, value_kind
             )

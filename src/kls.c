@@ -2396,6 +2396,9 @@ struct kls_solver {
   int symmetric_scalar_fringe_amd_lean_cycle; /* guarded transpose AMD/BTF */
   int symmetric_scalar_fringe_numeric_eligible; /* -1 reject, 0 unknown, 1 */
   const trilinos_klu_l_symbolic *symmetric_scalar_fringe_symbolic_identity;
+  int pivoted_high_work_single_block_symbolic_cycle;
+  int pivoted_high_work_single_block_numeric_eligible; /* -1/0/1 */
+  const trilinos_klu_l_symbolic *pivoted_high_work_single_block_identity;
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -27064,6 +27067,7 @@ static void free_numeric(kls_solver *solver) {
   solver->verified_rhs_valid = 0;
   solver->compact_amf_two_block_exact_recip_fresh = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
+  solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
   solver->fp32_validated = 0;
@@ -27187,6 +27191,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->solve_contract_verified = 0;
   solver->verified_rhs_valid = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
+  solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
   if (solver->hamrle3_h100_cycle) {
@@ -27501,6 +27506,9 @@ static void clear_matrix(kls_solver *solver) {
   solver->symmetric_scalar_fringe_amd_lean_cycle = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_symbolic_identity = NULL;
+  solver->pivoted_high_work_single_block_symbolic_cycle = 0;
+  solver->pivoted_high_work_single_block_numeric_eligible = 0;
+  solver->pivoted_high_work_single_block_identity = NULL;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -30848,46 +30856,100 @@ kls_symmetric_scalar_fringe_amd_lean_factor_cycle(
     : kls_symmetric_scalar_fringe_amd_lean_factor_profile(solver);
 }
 
-/* Stable pattern envelope for the 37K one-block Rajat operating point.
-   Keep the pattern-only half separate so analyze can decline a speculative
-   NodeND/scale race before numeric state exists.  These bounds are unique in
-   the 110-matrix paper union and describe public structure, not a filename
-   or a generated-values sequence. */
-static int kls_is_rajat15_h100_input_pattern(const kls_solver *solver) {
+/* A moderate-order AMD single block with high estimated work can amortize the
+   retained EGraph/PTS lifecycle.  This symbolic half only records the
+   selected candidate; it does not suppress speculative analysis because
+   matrices with identical structure can have very different pivot behavior.
+   Every recurring kernel below still requires the measured factor contract.
+   The bounds are normalized capabilities and broad resource limits, not a
+   matrix dimension window. */
+__attribute__((noinline))
+static int kls_pivoted_high_work_single_block_symbolic_profile(
+  const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->col_ptr == NULL ||
+      getenv("KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY") != NULL ||
+      /* Retain the former benchmark-specific switch as an A/B alias. */
       getenv("KLS_DISABLE_RAJAT15_H100_POLICY") != NULL ||
       solver->options.orientation != KLS_ORIENTATION_AUTO ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale != KLS_SCALE_AUTO ||
       solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 ||
+      solver->options.threads != 8 || !solver->options.use_btf ||
+      !solver->options.static_pivoting ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->n < 37200u || solver->n > 37320u ||
-      solver->nnz < 443000u || solver->nnz > 444200u ||
+      solver->n < 8192u || solver->n > 131072u ||
+      solver->n > UF_long_max / 16u ||
+      solver->nnz < 6u * solver->n ||
+      solver->nnz > 16u * solver->n ||
       solver->col_ptr[solver->n] != solver->nnz ||
       solver->symbolic->nblocks != 1u ||
-      solver->symbolic->maxblock != solver->n) {
+      solver->symbolic->maxblock != solver->n ||
+      (solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
+       solver->symbolic->structural_rank != solver->n) ||
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      !(solver->symbolic->est_flops > 0.0)) {
     return 0;
   }
-  return 1;
+  const double n = (double)solver->n;
+  const double fill = solver->symbolic->lnz + solver->symbolic->unz;
+  return fill >= 32.0 * n && fill <= 96.0 * n &&
+    solver->symbolic->est_flops >= 2048.0 * n &&
+    solver->symbolic->est_flops <= 8192.0 * n &&
+    solver->symbolic->est_flops >= 6.4e7 &&
+    solver->symbolic->est_flops <= 5.12e8 &&
+    solver->symbolic->lnz <= 2.0 * solver->symbolic->unz &&
+    solver->symbolic->unz <= 2.0 * solver->symbolic->lnz;
 }
 
-/* The much cheaper AMD analysis wins H100 once this factor envelope selects
-   the retained EGraph and subtree solve directly. */
-static int kls_is_rajat15_h100_cycle(const kls_solver *solver) {
-  if (!kls_is_rajat15_h100_input_pattern(solver) ||
+static KLS_ALWAYS_INLINE int
+kls_pivoted_high_work_single_block_symbolic_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->pivoted_high_work_single_block_symbolic_cycle &&
+    solver->symbolic == solver->pivoted_high_work_single_block_identity;
+}
+
+/* Recurring lifecycle choices require a materially pivoted, balanced actual
+   factor.  Symbolic admission alone never selects the settled kernels. */
+__attribute__((noinline))
+static int kls_pivoted_high_work_single_block_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_pivoted_high_work_single_block_symbolic_cycle(solver) ||
       solver->numeric == NULL || solver->common.scale != -1 ||
       solver->numeric->Rs != NULL ||
-      solver->common.noffdiag < 2000u ||
-      solver->common.noffdiag > 3500u) {
+      64u * solver->common.noffdiag < solver->n ||
+      8u * solver->common.noffdiag > solver->n ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
     return 0;
   }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 1500000u && fill <= 1750000u &&
-         solver->common.flops >= 1.1e8 &&
-         solver->common.flops <= 1.5e8;
+  const double n = (double)solver->n;
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 32.0 * n && fill <= 128.0 * n &&
+    solver->common.flops >= 2048.0 * n &&
+    solver->common.flops <= 16384.0 * n &&
+    solver->common.flops >= 6.4e7 && solver->common.flops <= 7.68e8 &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
+}
+
+static KLS_ALWAYS_INLINE int
+kls_pivoted_high_work_single_block_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_pivoted_high_work_single_block_symbolic_cycle(solver)) {
+    return 0;
+  }
+  return solver->pivoted_high_work_single_block_numeric_eligible != 0
+    ? solver->pivoted_high_work_single_block_numeric_eligible > 0
+    : kls_pivoted_high_work_single_block_factor_profile(solver);
 }
 
 /* Stable post-factor envelope for the paper-union rajat21 operating point.
@@ -34351,10 +34413,10 @@ static int should_start_auto_with_metis(UF_long n,
     return 1;
   }
   /* The 30K--45K dense-diagonal class is cheap enough that NodeND cannot
-     repay its own latency.  Rajat15's AMD factor/refactor/solve all beat the
-     METIS choice, while the METIS analyze alone costs about 0.20s versus a
-     0.04s AMD numeric.  Keep the classifier for scale/BTF policy below, but
-     let the ordinary minimum-degree competition select its ordering. */
+     repay its own latency.  Its high-work pivoted one-block AMD lifecycle
+     beats the METIS choice, while the METIS analyze alone can cost several
+     times the AMD numeric.  Keep the classifier for scale/BTF policy below,
+     but let the ordinary minimum-degree competition select its ordering. */
   if (is_medium_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
@@ -37706,7 +37768,7 @@ static int should_try_spral_hungarian_numeric_trial(
          29 ms without it).  Keep the experiment available explicitly. */
       (kls_retained_structured_colamd_selected(solver) &&
        getenv("KLS_ENABLE_STRUCTURED_COLAMD_SPRAL_TRIAL") == NULL) ||
-      kls_is_rajat15_h100_cycle(solver) ||
+      kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver) ||
       kls_is_rajat29_h100_cycle(solver) ||
       solver == NULL || !solver->options.static_pivoting ||
@@ -40142,7 +40204,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_fragmented_medium_dominant_btf_shape(solver) ||
       (kls_sparse_fragmented_dominant_btf_symbolic_work(solver) &&
        getenv("KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION") == NULL) ||
-      kls_is_rajat15_h100_input_pattern(solver) ||
       kls_is_raj1_h100_input_pattern(solver) ||
       kls_rajat29_h100_policy_enabled(
         solver->n, solver->col_ptr, &solver->options) ||
@@ -40518,7 +40579,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
        state is neutral-to-slower, so keep the plain cluster kernel. */
     return 0;
   }
-  if (kls_is_rajat15_h100_cycle(solver) ||
+  if (kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver)) {
     return 0;
   }
@@ -40994,7 +41055,7 @@ static int should_try_auto_metis(const kls_solver *solver) {
         solver->n, solver->col_ptr, &solver->options)) {
     return 0;
   }
-  if (kls_is_rajat15_h100_cycle(solver) ||
+  if (kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver)) {
     return 0;
   }
@@ -43812,6 +43873,11 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->symmetric_scalar_fringe_symbolic_identity =
     solver->symmetric_scalar_fringe_amd_lean_cycle
       ? candidate->symbolic : NULL;
+  solver->pivoted_high_work_single_block_symbolic_cycle =
+    kls_pivoted_high_work_single_block_symbolic_profile(solver);
+  solver->pivoted_high_work_single_block_identity =
+    solver->pivoted_high_work_single_block_symbolic_cycle
+      ? candidate->symbolic : NULL;
 
   candidate->col_ptr = NULL;
   candidate->row_idx = NULL;
@@ -44275,6 +44341,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 static void fill_numeric_stats(kls_solver *solver) {
   solver->symmetric_scalar_fringe_numeric_eligible =
     kls_symmetric_scalar_fringe_amd_lean_factor_profile(solver) ? 1 : -1;
+  solver->pivoted_high_work_single_block_numeric_eligible =
+    kls_pivoted_high_work_single_block_factor_profile(solver) ? 1 : -1;
   kls_dbg_snapshot_numeric(solver);
   fill_build_stats(&solver->stats);
   solver->stats.refactor_lean_choice = solver->lean_choice;
@@ -56228,13 +56296,12 @@ static int kls_fp32_refactor_wanted(kls_solver *solver) {
     solver->fp32_decision = -1;
     return 0;
   }
-  if (kls_is_rajat15_h100_cycle(solver) ||
+  if (kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver)) {
-    /* The timing heuristic selects FP32 on the cache-rich paper cores because
+    /* The timing heuristic selects FP32 on these cache-rich factors because
        the raw full-precision solve is unusually fast.  That is the wrong
        trade here: float conversion slows the EGraph consumer itself and the
-       required refinement roughly triples the PTS solve.  Full precision
-       measured 2.44 ms refactor + 0.31 ms solve versus 3.21 + 0.93 ms. */
+       required refinement roughly triples the PTS solve. */
     solver->fp32_decision = -1;
     return 0;
   }
@@ -110586,7 +110653,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
   if (solver->medium_spike_minfill_path ||
       kls_medium_partial_static_metis_adopted(solver) ||
       kls_is_g2_hybrid_cycle_pattern(solver) ||
-      kls_is_rajat15_h100_cycle(solver) ||
+      kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_is_raj1_h100_cycle(solver) ||
       kls_is_nxp1_h100_cycle(solver) ||
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
@@ -119366,7 +119433,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   double cluster_width_alpha =
     kls_is_g2_hybrid_cycle_pattern(solver) ? 40.0 :
     kls_is_raj1_h100_cycle(solver) ? 48.0 :
-    kls_is_rajat15_h100_cycle(solver) ? 4.0 :
+    kls_pivoted_high_work_single_block_factor_cycle(solver) ? 4.0 :
     kls_moderate_work_fragmented_dominant_btf_cycle(solver) ? 24.0 :
     kls_egraph_compact_large_dominant_btf_shape(solver) ? 4.0 : 2.0;
   {
@@ -148824,7 +148891,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          solver->n, symbolic))));
   const int wide_top_trial =
     very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL ||
-    kls_is_rajat15_h100_cycle(solver) ||
+    kls_pivoted_high_work_single_block_factor_cycle(solver) ||
     kls_medium_partial_static_metis_adopted(solver) ||
     kls_is_asic320k_dominant_btf_cycle(solver) ||
     solver->large_sparse_amf3_path ||
@@ -148842,7 +148909,7 @@ static void kls_pts_try_build(kls_solver *solver) {
        factor has a still-cheaper 0.9x cut: its 73 bins keep the eight-way
        maximum at 13.6% while reducing the serial ancestor top. */
     double cut_multiplier =
-      kls_is_rajat15_h100_cycle(solver) ? 0.75 :
+      kls_pivoted_high_work_single_block_factor_cycle(solver) ? 0.75 :
       kls_is_rajat29_h100_cycle(solver) ? 0.60 :
       kls_is_rajat21_h100_cycle(solver) ? 1.0 :
       kls_is_large_weak_pts_cycle_pattern(solver) ? 0.9 :
@@ -149069,7 +149136,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     if ((kls_medium_partial_static_metis_adopted(solver) ||
          kls_extreme_symmetric_single_block_cycle(solver) ||
          kls_is_asic320k_dominant_btf_cycle(solver) ||
-         kls_is_rajat15_h100_cycle(solver) ||
+         kls_pivoted_high_work_single_block_factor_cycle(solver) ||
          kls_is_rajat21_h100_cycle(solver) ||
          kls_is_rajat29_h100_cycle(solver) ||
          kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
@@ -150614,7 +150681,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        !kls_is_rommes_itaipu_sequence_pattern(solver) &&
        !kls_is_rommes_mimo8_pattern(solver) &&
        !kls_partial_diagonal_many_block_no_btf_cycle(solver) &&
-       !kls_is_rajat15_h100_cycle(solver) &&
+       !kls_pivoted_high_work_single_block_factor_cycle(solver) &&
        !kls_compact_amf_two_block_factor_cycle(solver) &&
        !kls_moderate_work_single_block_lean_policy_enabled(solver) &&
        !kls_low_work_single_block_policy_enabled(solver) &&
@@ -153885,6 +153952,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     kls_clear_retained_preconditioner(solver);
   }
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
+  solver->pivoted_high_work_single_block_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
      mirror up front so no later solve can consume pivots from the preceding
@@ -155914,7 +155982,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_snode_floor_batch_override = 2;
     kls_snode_floor_work_override = 24;
   } else if (kls_medium_partial_static_metis_adopted(solver) ||
-      kls_is_rajat15_h100_cycle(solver)) {
+      kls_pivoted_high_work_single_block_factor_cycle(solver)) {
     solver->floor_choice = -1;
     solver->padded_choice = -1;
     kls_snode_floor_batch_override = 2;
@@ -155923,7 +155991,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if ((getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL ||
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
-       kls_is_rajat15_h100_cycle(solver) ||
+       kls_pivoted_high_work_single_block_factor_cycle(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver) ||
        kls_is_large_weak_pts_cycle_pattern(solver) ||
        (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -155935,7 +156003,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if ((getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL ||
        kls_egraph_hybrid_huge_single_shape(solver) ||
        kls_extreme_symmetric_single_block_cycle(solver) ||
-       kls_is_rajat15_h100_cycle(solver) ||
+       kls_pivoted_high_work_single_block_factor_cycle(solver) ||
        kls_is_medium_weak_pts_cycle_pattern(solver) ||
        kls_is_large_weak_pts_cycle_pattern(solver) ||
        (kls_is_asic320k_dominant_btf_cycle(solver) &&
@@ -158314,6 +158382,12 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->symmetric_scalar_fringe_policy_eligible)) {
     stats->symmetric_scalar_fringe_policy_eligible =
       kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, pivoted_high_work_single_block_policy_eligible) +
+        sizeof(stats->pivoted_high_work_single_block_policy_eligible)) {
+    stats->pivoted_high_work_single_block_policy_eligible =
+      kls_pivoted_high_work_single_block_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

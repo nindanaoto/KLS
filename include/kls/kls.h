@@ -1343,6 +1343,9 @@ typedef struct kls_stats {
   /* The retained transpose-AMD numeric has an exact symmetric degree-one
      fringe and passed the normalized BTF, fill, work, and pivot guards. */
   int symmetric_scalar_fringe_policy_eligible;
+  /* The retained normal-AMD single block passed normalized symbolic work and
+     measured pivot, fill, balance, and numeric-work guards. */
+  int pivoted_high_work_single_block_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

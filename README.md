@@ -1754,6 +1754,21 @@ array and the same measured factor bounds. Benchmark JSON exposes
 The former `KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY` switch remains an
 alias.
 
+A pivoted high-work single-block policy replaces the former `rajat15` order
+and nonzero window. Under the standard AUTO/8-thread BTF/static-pivoting
+contract, only a retained normal-AMD single block can qualify. The symbolic
+state must have 6--16 input entries per row, balanced L/U estimates, 32--96
+estimated factor entries per row, and 2,048--8,192 estimated flops per row
+inside broad order and total-work resource bounds. Recurring kernels are
+enabled only after the no-scale/no-recheck numeric has no `Rs`, nudges, or
+perturbations; between `n/64` and `n/8` off-diagonal pivots; balanced L/U
+storage; and normalized measured fill and work. Symbolic admission does not
+suppress AUTO's ordinary ordering race because identical patterns can produce
+different pivot behavior. Benchmark JSON exposes
+`pivoted_high_work_single_block_policy_eligible`; set
+`KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY=1` for an A/B fallback.
+The former `KLS_DISABLE_RAJAT15_H100_POLICY` switch remains an alias.
+
 The metamorphic holdout utility can produce deterministic simultaneous
 row/column relabelings without checking generated matrices into the tree. For
 example, the compact positive used by the policy audit is reproduced with:
@@ -1767,10 +1782,11 @@ python3 scripts/make_metamorphic_matrix.py \
 
 Use `--shuffle --seed N` instead of `--adjacent-swaps` for a complete
 deterministic random relabeling. `--append-diagonal-blocks COUNT` adds
-independent unit diagonal components as a separate transformation mode. These
+independent unit diagonal components, while `--append-coupled-nodes COUNT`
+adds weak reciprocal diagonal nodes, as separate transformation modes. These
 transformations are useful for detecting classifiers or separator policies
-that accidentally depend on the original vertex numbers or an exact matrix
-order.
+that accidentally depend on the original vertex numbers, an exact matrix
+order, or an exact component count.
 
 For the corresponding AUTO analysis problem, a 40--60% structural diagonal
 and three-to-five input entries per row only propose a direct AMD/BTF
