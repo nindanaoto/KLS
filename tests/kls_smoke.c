@@ -24661,6 +24661,268 @@ cleanup:
 }
 
 enum {
+  GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_N = 1048576,
+  GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_FRINGE = 512,
+  GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_CORE =
+    GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_N -
+      GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_FRINGE,
+  GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_NNZ =
+    5 * GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_CORE +
+      2 * GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_FRINGE
+};
+
+/* Independent topology family: a symmetric quintic circulant core, one
+   bounded hub, and missing-diagonal scalar leaves.  It deliberately lacks
+   the target's high symbolic fill, so analysis can prove only the proposal
+   stage.  This avoids constructing a giant numeric in the smoke test while
+   still exercising the exact reciprocal-structure classifier. */
+static int build_giant_symmetric_scalar_fringe_fixture(
+  int32_t *ap,
+  int32_t *ai,
+  int32_t *hub_reciprocal_pos_out) {
+  const int32_t n = GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_N;
+  const int32_t core = GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_CORE;
+  const int32_t hub = core / 2;
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col < core) {
+      ai[p++] = (col + core - 2) % core;
+      ai[p++] = (col + core - 1) % core;
+      ai[p++] = col;
+      ai[p++] = (col + 1) % core;
+      ai[p++] = (col + 2) % core;
+      if (col == hub) {
+        for (int32_t leaf = core; leaf < n; ++leaf) {
+          ai[p++] = leaf;
+        }
+      }
+    } else {
+      ai[p++] = hub;
+    }
+    qsort(ai + ap[col], (size_t)(p - ap[col]), sizeof(*ai),
+          compare_fixture_int32);
+  }
+  ap[n] = p;
+  if (p != GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_NNZ) {
+    return 0;
+  }
+  int32_t reciprocal_pos = -1;
+  for (int32_t q = ap[hub]; q < ap[hub + 1]; ++q) {
+    if (ai[q] == core) {
+      reciprocal_pos = q;
+      break;
+    }
+  }
+  if (reciprocal_pos < 0) {
+    return 0;
+  }
+  *hub_reciprocal_pos_out = reciprocal_pos;
+  return 1;
+}
+
+static int test_giant_symmetric_scalar_fringe_metis_row_policy(void) {
+  const int32_t n = GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_N;
+  const int32_t core = GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_CORE;
+  const int32_t hub = core / 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(
+    (size_t)GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_NNZ * sizeof(*ai));
+  const char *saved_policy_value = getenv(
+    "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY");
+  const char *saved_legacy_value = getenv("KLS_DISABLE_RAJAT31_H100_POLICY");
+  const char *saved_race_value = getenv("KLS_DISABLE_METIS_RACE");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  char *saved_race = saved_race_value != NULL
+    ? strdup(saved_race_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  const int had_race = saved_race_value != NULL;
+  int32_t reciprocal_pos = -1;
+  kls_solver *solver = NULL;
+  int ok = ap != NULL && ai != NULL && (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL) &&
+    (!had_race || saved_race != NULL) &&
+    build_giant_symmetric_scalar_fringe_fixture(ap, ai, &reciprocal_pos);
+  if (!ok ||
+      unsetenv(
+        "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_RAJAT31_H100_POLICY") != 0 ||
+      setenv("KLS_DISABLE_METIS_RACE", "1", 1) != 0 ||
+      !require_ok(kls_create(&solver),
+                  "create giant symmetric scalar-fringe proposal")) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  kls_stats stats;
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze giant symmetric scalar-fringe proposal")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats giant symmetric scalar-fringe proposal") ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.giant_symmetric_scalar_fringe_metis_row_candidate != 1 ||
+      stats.giant_symmetric_scalar_fringe_metis_row_symbolic_eligible != 0 ||
+      stats.giant_symmetric_scalar_fringe_metis_row_factor_eligible != 0) {
+    fprintf(stderr,
+            "unexpected giant symmetric scalar-fringe stages=%d/%d/%d "
+            "orientation=%d ordering=%d fill=%" PRId64 "/%" PRId64 "\n",
+            stats.giant_symmetric_scalar_fringe_metis_row_candidate,
+            stats.giant_symmetric_scalar_fringe_metis_row_symbolic_eligible,
+            stats.giant_symmetric_scalar_fringe_metis_row_factor_eligible,
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.nnz_l, stats.nnz_u);
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Exact symmetry makes these arrays a CSR representation too; admission
+     must not depend on the public storage convention. */
+  if (!require_ok(kls_analyze_csr(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze CSR giant symmetric scalar-fringe proposal")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats CSR giant symmetric scalar-fringe proposal") ||
+      stats.giant_symmetric_scalar_fringe_metis_row_candidate != 1 ||
+      stats.giant_symmetric_scalar_fringe_metis_row_symbolic_eligible != 0 ||
+      stats.giant_symmetric_scalar_fringe_metis_row_factor_eligible != 0) {
+    fprintf(stderr, "CSR giant symmetric scalar-fringe proposal rejected\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Input CSC need not be sorted.  Reverse one harmless pair to exercise the
+     exact transpose-comparison fallback and its degree-bounded scratch. */
+  const int32_t unsorted_col = 100;
+  const int32_t unsorted_pos = ap[unsorted_col];
+  const int32_t unsorted_first = ai[unsorted_pos];
+  ai[unsorted_pos] = ai[unsorted_pos + 1];
+  ai[unsorted_pos + 1] = unsorted_first;
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze unsorted giant symmetric scalar-fringe proposal")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats unsorted giant symmetric scalar-fringe proposal") ||
+      stats.giant_symmetric_scalar_fringe_metis_row_candidate != 1) {
+    fprintf(stderr, "unsorted giant symmetric scalar-fringe proposal rejected\n");
+    ok = 0;
+    goto cleanup;
+  }
+  ai[unsorted_pos + 1] = ai[unsorted_pos];
+  ai[unsorted_pos] = unsorted_first;
+
+  /* Preserve size, density, diagonal coverage, scalar counts, hub degree,
+     triangular counts, and sorted CSC while breaking one reciprocal edge. */
+  ai[reciprocal_pos] = hub + 10;
+  qsort(ai + ap[hub], (size_t)(ap[hub + 1] - ap[hub]), sizeof(*ai),
+        compare_fixture_int32);
+  if (!require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze asymmetric scalar-fringe control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats asymmetric scalar-fringe control") ||
+      stats.giant_symmetric_scalar_fringe_metis_row_candidate != 0 ||
+      stats.giant_symmetric_scalar_fringe_metis_row_symbolic_eligible != 0 ||
+      stats.giant_symmetric_scalar_fringe_metis_row_factor_eligible != 0) {
+    fprintf(stderr, "asymmetric scalar-fringe control became eligible\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Restore reciprocity and prove both same-binary disable names suppress the
+     otherwise unchanged proposal. */
+  for (int32_t q = ap[hub]; q < ap[hub + 1]; ++q) {
+    if (ai[q] == hub + 10) {
+      ai[q] = core;
+      break;
+    }
+  }
+  qsort(ai + ap[hub], (size_t)(ap[hub + 1] - ap[hub]), sizeof(*ai),
+        compare_fixture_int32);
+  if (setenv(
+        "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY", "1",
+        1) != 0 ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze disabled giant scalar-fringe control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats disabled giant scalar-fringe control") ||
+      stats.giant_symmetric_scalar_fringe_metis_row_candidate != 0) {
+    fprintf(stderr, "disabled giant scalar-fringe control became eligible\n");
+    ok = 0;
+    goto cleanup;
+  }
+  if (unsetenv(
+        "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY") != 0 ||
+      setenv("KLS_DISABLE_RAJAT31_H100_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze legacy-disabled giant scalar-fringe control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats legacy-disabled giant scalar-fringe control") ||
+      stats.giant_symmetric_scalar_fringe_metis_row_candidate != 0) {
+    fprintf(stderr,
+            "legacy-disabled giant scalar-fringe control became eligible\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY",
+        had_policy, saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_RAJAT31_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "") ||
+      !restore_env_value("KLS_DISABLE_METIS_RACE", had_race,
+                         saved_race != NULL ? saved_race : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(saved_policy);
+  free(saved_legacy);
+  free(saved_race);
+  return ok;
+}
+
+enum {
   DENSE_FRAGMENTED_FIXTURE_N = 4096,
   DENSE_FRAGMENTED_FIXTURE_WIDTH = 256,
   DENSE_FRAGMENTED_FIXTURE_POSITIVE_BLOCK = 256,
@@ -25014,6 +25276,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_full_diagonal_metis_row_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_giant_symmetric_scalar_fringe_metis_row_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_dense_fragmented_scaled_row_policy()) {

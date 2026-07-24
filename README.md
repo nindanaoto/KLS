@@ -3966,6 +3966,68 @@ residual improves from as high as `4.86e-13` to `4.21e-16`. Release and
 ASan/UBSan/LSan CTest pass all four tests, and leak-enabled target, extension,
 and relabeling runs are clean.
 
+## Giant symmetric scalar-fringe METIS row lifecycle
+
+The former `rajat31` AUTO/eight-thread exception no longer recognizes a narrow
+4.68--4.70 million-row and 20.2--20.4 million-entry box. Its proposal is now
+an exact topology proof: 1,048,576--8,388,608 rows, three--six entries per
+row, exact multiplicity-aware structural symmetry, an almost-full diagonal,
+a missing-diagonal scalar fringe between `n/8192` and `n/1024`, at most
+`n/128` scalar columns overall, and one to sixteen bounded hubs. Sorted CSC
+uses allocation-free reciprocal searches; unsorted input uses an exact
+transpose comparison. CSC and CSR therefore receive the same verdict.
+
+Topology may start an overlapped seven-leaf NodeNDP proposal and select scale
+`-1`, pipelined first-factor routing, and narrow-panel suppression. It does not
+authorize recurring row machinery. The retained METIS/BTF symbolic must
+independently prove full structural rank, one giant block with a mostly scalar
+normalized fringe, 32--80 estimated factor entries per row with an absolute
+128--512 million-entry setup floor, balanced L/U, and a complete separator
+with at least 99% private rows. Unknown predicted-symbolic flop estimates are
+allowed because the numeric stage measures work directly.
+
+The actual fixed-pivot numeric must then remain unscaled at the requested
+`1e-3` tolerance, have no row permutation, scale vector, off-diagonal pivot,
+nudge, or perturbation, retain balanced 40--64-entry-per-row fill, and perform
+16,384--32,768 operations per row. Only this cached factor verdict enables
+predicted-row preparation, direct cooperative row updates, large dense-group
+priority, and packed-solve publication. Numeric replacement invalidates and
+recomputes the verdict.
+
+Set
+`KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY=1` for a generic
+same-binary control. `KLS_DISABLE_RAJAT31_H100_POLICY` remains a compatibility
+alias. Candidate, symbolic, and numeric decisions are exposed in `kls_stats`
+and benchmark JSON as
+`giant_symmetric_scalar_fringe_metis_row_candidate`,
+`giant_symmetric_scalar_fringe_metis_row_symbolic_eligible`, and
+`giant_symmetric_scalar_fringe_metis_row_factor_eligible`.
+
+The independent smoke family has a 1,048,576-row symmetric quintic core, one
+517-entry hub, and 512 missing-diagonal scalar leaves. It reports `1/0/0` in
+CSC, CSR, and deliberately unsorted CSC. Breaking one reciprocal edge while
+preserving dimensions, density, degree counts, diagonal coverage, triangular
+counts, and sorted storage rejects the proposal; the generic and legacy
+controls reject it as well. Screening every local SuiteSparse input capable of
+meeting the coarse resource bounds leaves only `rajat31` as a proposal.
+
+Appending 10,240 independent diagonal blocks produces a 4,700,242-row holdout
+outside the old dimension box. It reports `1/1/1`, grows the measured BTF
+fringe from 2,502 to 12,742 rows, retains predicted-first/row execution, and
+returns a worst `6.91e-12` relative-L2 residual across ten independently
+checked 10%-amplitude updates. A 65,536-adjacent-swap relabeling also reports
+`1/1/1`; its measured row update plus packed solve is faster than the parent's
+factor-rejected EGraph update plus solve despite the relabeling's much slower
+cold layout.
+
+Three alternating target pairs preserve identical `1.81e-14` residuals and
+have geometric current/parent ratios of `1.0244` for analysis, `0.9968` for
+initial factor, `0.9921` for first refactor, `0.9152` for steady refactor,
+`1.0005` for packed solve, and `0.9387` for the complete modeled cycle. Two
+extension pairs reduce the modeled-cycle ratio to `0.5803`. Release and
+ASan/UBSan/LSan CTest pass all four tests; leak-enabled target and extension
+factor/refactor/solve runs are clean.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

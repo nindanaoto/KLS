@@ -1422,6 +1422,16 @@ typedef struct kls_stats {
   /* The retained fixed-pivot factor also preserves the normalized fill/work
      regime required by the recurring cooperative row lifecycle. */
   int sparse_full_diagonal_metis_row_factor_eligible;
+  /* The original AUTO input is a giant, exactly structurally symmetric
+     sparse graph with an almost-full diagonal, a scalar missing-diagonal
+     fringe, and a bounded hub population. */
+  int giant_symmetric_scalar_fringe_metis_row_candidate;
+  /* Its raced METIS/BTF symbolic proved a giant core, mostly scalar fringe,
+     bounded fill/work, and a complete mostly-private separator. */
+  int giant_symmetric_scalar_fringe_metis_row_symbolic_eligible;
+  /* The retained unscaled fixed-pivot factor also passed normalized numeric
+     fill/work, balance, and pivot-repair guards for recurring row updates. */
+  int giant_symmetric_scalar_fringe_metis_row_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

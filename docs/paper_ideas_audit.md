@@ -19476,3 +19476,113 @@ factor/refactor/solve runs cover the target, out-of-box extension, and adjacent
 relabeling with stages `1/1/1` and no findings.  The source contains neither
 the former exact dimensions nor a `G3_circuit` policy function; only the
 documented legacy environment spelling remains.
+
+GIANT SYMMETRIC SCALAR-FRINGE METIS ROW POLICY GENERALIZED (2026-07-24).
+The remaining `rajat31` route began from only the standard AUTO/eight-thread
+contract plus 4,680,000--4,700,000 rows and 20,200,000--20,400,000 entries.
+That identity started the early METIS race at scale `-1`, selected a hard-coded
+seven-leaf forest, enabled the pipelined no-panel race factor, prevented the
+high-work symbolic-only downgrade, suppressed later scale trials, forced the
+race join, admitted predicted row metadata, bypassed row-cost arbitration,
+prioritized large dense groups, forced direct row preparation, and published
+row updates back to the packed triangular solve.  Its post-factor check still
+used exact BTF-block, maximum-block, absolute fill, and absolute flop windows.
+
+The exact function, race bit, and thread-local matrix context are gone.  The
+replacement first proves an actual graph family: 1,048,576--8,388,608 rows,
+three--six stored entries per row, nonempty columns, exact multiplicity-aware
+structural symmetry, an almost-full diagonal, `n/8192`--`n/1024`
+missing-diagonal columns of which at least 1023/1024 are scalar, no more than
+`n/128` scalar columns overall, one--sixteen columns above degree eight, and a
+largest degree between `n/8192` and `n/1024` with an absolute 4,096 cap.  The
+real target has 4,690,002 rows, 20,316,253 entries, 1,251 missing-diagonal
+scalar columns, one degree-1,252 hub, all remaining degrees at most five, and
+exactly equal lower/upper structure.  Sorted normalized CSC proves reciprocity
+with allocation-free binary searches.  The shared exact helper now uses a
+degree-sized scratch allocation for unsorted CSC instead of a fixed 512-entry
+stack buffer, then compares against an exact sorted transpose.
+
+Topology is only an early proposal.  The actual normal METIS/BTF symbolic must
+be full rank, expose a fringe between `n/8192` and `n/128`, have at least seven
+eighths as many fringe blocks as fringe rows, retain balanced 32--80-entry-per-
+row fill inside an absolute 128--512 million-entry setup band, and (when the
+estimate is known) 8,192--65,536 operations per row inside 32--256 billion
+operations.  Its separator must cover every row and component, assign at least
+99% of rows privately, keep the largest private component under `n/3`, and
+the largest pipeline component under `n/1024`.  Predicted numerics may replace
+the symbolic flop estimate with the unknown sentinel; the numeric stage below
+then supplies the authoritative measured work.
+
+The factor proof requires normal METIS, BTF, scale `-1`, the requested `1e-3`
+tolerance, no row permutation or numeric scale vector, zero off-diagonal
+pivots, no nudge or perturbation, L/U balance within 2x, 40--64 measured factor
+entries per row, and 16,384--32,768 measured operations per row.  The verdict
+is cached after each numeric and invalidated by every replacement.  Only this
+stage grants recurring row preparation/update, dense-help priority, and packed
+solve publication.  Proposal-only actions remain correctness-neutral race and
+ordering choices.  The generic master control is
+`KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY`; the old
+`KLS_DISABLE_RAJAT31_H100_POLICY` and dense-help spelling are compatibility
+aliases.  Three public stats/JSON fields expose candidate, symbolic, and factor
+stages.
+
+The independent smoke fixture is not derived from SuiteSparse: a 1,048,064-row
+symmetric quintic circulant core, one 517-entry hub, and 512 missing-diagonal
+scalar leaves, for 1,048,576 rows and 5,241,344 entries.  It reports `1/0/0`
+through CSC, equivalent CSR, and a deliberately unsorted CSC column.  Its low
+fill correctly stops at the absolute symbolic economics gate.  Replacing one
+hub reciprocal with another same-side row preserves order, entry count,
+diagonal coverage, scalar/hub degrees, and lower/upper counts but reports
+`0/0/0`, isolating exact symmetry.  Generic and legacy disables also report
+zero.  Release smoke remains about 10.5 seconds; ASan/UBSan/LSan smoke is about
+33.2 seconds.
+
+A header/resource audit reduces all 110 local SuiteSparse inputs to six that
+could possibly meet the size and expanded-density bands.  `Hamrle3`,
+`G3_circuit`, `memchip`, `Freescale1`, and `circuit5M_dc` report candidate zero;
+only `rajat31` reports one.  This result follows missing-diagonal scalar
+symmetry rather than a project/name list.
+
+Appending 10,240 independent diagonal blocks yields 4,700,242 rows and
+20,326,493 entries, outside the old upper dimension by 242 rows.  It reports
+`1/1/1`, grows BTF blocks from 2,503 to 12,743 while retaining the 4,687,500-row
+core, has 118,329,405 entries in each factor stream and 102.855 billion
+operations, and keeps predicted-first/row execution with `8.49e-15` residual
+on the performance input.  Ten independently verified 10%-amplitude updates
+retain all stages and row execution; worst/final relative-L2 residuals are
+`6.9079e-12`/`4.9169e-12` (the target is `6.9126e-12`/`4.9203e-12`).
+
+A 65,536-adjacent-swap simultaneous relabeling also reports `1/1/1`.  Its
+layout is deliberately hostile: cold predicted factor is about 39.6 seconds
+and the first row update 11.6 seconds.  The parent exact post-factor window
+rejects its 96.98-billion-operation numeric and falls to EGraph; nevertheless,
+the generalized row update plus packed solve is 11.90 seconds versus the
+parent EGraph update plus solve at 12.88 seconds, with residuals
+`9.88e-15` and `4.93e-15`.  Thus even this layout-sensitive holdout is not
+admitted at a measured combined-update regression.
+
+Three alternating target parent/current pairs, pinned to cores 0--7 with one
+initial factor, two changed-value refactors, and the same entrywise 0.001
+generation, preserve predicted-first/row execution and identical
+`1.81185728e-14` final residuals.  Geometric current/parent ratios are
+`1.02444` for analysis, `0.99685` for initial factor, `0.99209` for first
+refactor, `0.91519` for steady refactor, `0.99725`/`1.00712` for first/steady
+changed-numeric solves, `1.00046` for repeated packed solve, and `0.93871` for
+the complete modeled cycle (`0.93763` by aggregate means).  The exact topology
+proof costs about 59 ms of mean analysis while preserving or improving the
+100-cycle horizon.
+
+Two alternating extension pairs compare the parent's out-of-box EGraph route
+with the generalized row route.  Geometric ratios are `1.02806` for analysis,
+`0.94934` for initial factor, `3.28836` for one-time first row setup,
+`0.45756` for steady refactor, and `0.58031` for the complete modeled cycle.
+The parent timings and solve caches are variable, but both pairs favor the
+current complete cycle (176.0 versus 370.4 seconds and 182.9 versus 258.1).
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+factor/refactor/solve runs cover both the target and out-of-box extension with
+`1/1/1`, predicted-first/row execution, residuals below `8.54e-15`, and no
+findings.  Source searches find no exact policy function, exact dimension
+window, exact BTF block window, or exact fill/work window from the former
+selector; only documented compatibility environment spellings and historical
+performance comments retain the matrix name.
