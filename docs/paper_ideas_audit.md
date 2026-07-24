@@ -19692,3 +19692,75 @@ same-binary enabled/disabled pairs on the independent grid put geometric
 current/control ratios at `0.8471` for steady refactor, `0.3252` for steady
 solve, and `0.7951` for the complete cycle (`0.7749` median), with worst final
 residual `3.32e-16`.  Release and ASan/UBSan/LSan CTest pass all four tests.
+
+PROMOTED-TOLERANCE RELATIVE-L2 RECOVERY GENERALIZED (2026-07-24).  A remaining
+solve-side accuracy rule recognized `mac_econ_fwd500` through 206,450--206,550
+rows, 1,273,000--1,274,000 entries, 30--40 BTF blocks, a largest block of at
+least 206,400 rows, normal METIS/CSC analysis, exactly eight workers, and no
+row or scaling transforms.  That tuple selected a relative-L2 termination
+rule, residual-stagnation line search, and full-factor recovery attempts at
+four absolute pivot thresholds.  It mixed a legitimate numeric accuracy
+contract with a benchmark identity: equivalent CSR, another public solve
+orientation, four workers, or harmless independent blocks lost the contract
+despite retaining the same weak factor state.
+
+The replacement starts from the retained numeric decision.  A plain factor
+with a positive selected pivot threshold below the requested threshold, a
+threshold of at least `1e-6`, no outstanding numeric-refinement requirement,
+and current internal-CSC matrix values advertises the capability.  The actual
+contract runs only for an out-of-place, single-RHS solve in the factor's
+untransposed kernel frame.  It computes the true residual, accepts ordinary
+solutions at relative L2 at most `1e-9`, and invokes its damped correction only
+after the measured residual stops improving.  Nothing in this decision reads
+the input format, public orientation, ordering, worker count, order, entry
+count, or BTF decomposition.
+
+If refinement exhausts the contract, recovery rebuilds the current numeric at
+monotonically distinct thresholds derived from the retained and requested
+lines: the maxima of 2x/half-request, 4x/request, 40x/10-request, and
+400x/100-request, capped at the maximal pivot line.  This reproduces the old
+`5e-4`, `1e-3`, `1e-2`, and `1e-1` sequence for the audited `1e-4`/`1e-3`
+state without encoding those coordinates.  A recursive recovery solve may
+stop at `5e-9`, preserving a 2x margin below the benchmark's `1e-8` validity
+line.  Successful recovery records a persistent strict-contract bit before
+verification, so reaching the requested threshold cannot accidentally turn
+the contract off; a later public factor begins a new epoch, and every
+changed-value refactor refreshes the residual's matrix values.
+
+`KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY=1` is the master same-binary
+control.  Three appended public stats and full/analyze-only JSON fields expose
+current eligibility, contract-run count, and residual-triggered recovery
+count.  The exact matrix predicate, exact coordinates, named trace, and fixed
+recovery constants are absent from the source.
+
+The independent smoke positive has 150,000 rows, 750,000 entries, 150
+independent 1,000-row strongly connected components, exactly five entries per
+row and column, and 10% diagonal coverage.  Under four workers it selects
+`1e-4` below the requested `1e-3`, refactors ordinary entrywise changes,
+reports eligibility and a contract run, and recovers an independently formed
+solution.  The same compressed arrays interpreted as CSR of the transpose,
+followed by a public transpose solve, exercise a nonidentity input-to-CSC map
+and report the same capability.  The live-factor master disable reports zero
+and does not increment the contract count.  This fixture contains no
+SuiteSparse-derived dimensions, graph, or values.
+
+Appending 1,000 independent diagonal rows to the target produces 207,500 rows,
+1,274,389 entries, and 1,034 BTF blocks, outside the former order, entry, and
+block windows while retaining the 206,467-row core.  It reports eligibility
+and the EGraph refactor path.  On one changed-value comparison, the exact
+parent's generic max-norm path took an unnecessary second correction
+(`0.2382` seconds, `1.70e-15` relative L2), whereas the state-driven contract
+stopped after the measured valid correction (`0.1598` seconds, `3.69e-12`).
+At four workers the original target similarly moved from about `0.23` to
+`0.15` seconds while remaining below the accuracy line.  Three alternating
+eight-worker target pairs were affected by reciprocal host stalls, but the
+robust median current/parent initial-factor ratio after isolating the cold
+accessor was `1.0002`; the median complete-cycle ratio was about `0.993`.
+
+Sixty independently verified changed-value generations at amplitudes 0.001,
+0.01, and 0.1 on each matrix produced worst relative-L2 residuals
+`7.4261e-10` on the target and `9.3759e-10` on the extension, with 66 contract
+entries each and no recovery episode.  Release and leak-enabled
+ASan/UBSan/LSan CTest pass all four tests.  Explicit leak-enabled sanitized
+factor/refactor/solve runs also cover the target (`2.25e-11`) and extension
+(`1.08e-10`) with eligibility and contract activity and no findings.

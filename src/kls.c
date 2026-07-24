@@ -2421,6 +2421,11 @@ struct kls_solver {
   int high_work_tiny_scalar_fringe_amd_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *
     high_work_tiny_scalar_fringe_amd_symbolic_identity;
+  /* Cold solve-accuracy policy state.  Keep it at the tail so adding
+     observability does not move the established factor/refactor hot fields. */
+  int promoted_tolerance_l2_recovery_required;
+  uint64_t promoted_tolerance_l2_contract_run_count;
+  uint64_t promoted_tolerance_l2_recovery_count;
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -27266,6 +27271,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
      refinement runs against a stale matrix */
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
+  solver->promoted_tolerance_l2_recovery_required = 0;
   solver->verified_rhs_valid = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
@@ -27546,6 +27552,9 @@ static void clear_matrix(kls_solver *solver) {
   solver->solve_refine_workspace = NULL;
   solver->solve_refine_values = NULL;
   solver->solve_recovery_active = 0;
+  solver->promoted_tolerance_l2_recovery_required = 0;
+  solver->promoted_tolerance_l2_contract_run_count = 0u;
+  solver->promoted_tolerance_l2_recovery_count = 0u;
   solver->retained_preconditioner_reference_values = NULL;
   solver->retained_preconditioner_active = 0;
   solver->solve_refine_csc_ptr16 = NULL;
@@ -155670,6 +155679,11 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver->hamrle3_h100_cycle) {
     kls_clear_retained_preconditioner(solver);
   }
+  if (!solver->solve_recovery_active) {
+    /* An explicit public factor call begins a fresh numeric contract epoch.
+       A guarded recovery factor sets this state again only after it succeeds. */
+    solver->promoted_tolerance_l2_recovery_required = 0;
+  }
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
@@ -157175,10 +157189,11 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
 static int kls_prepare_unchanged_solve_contract(kls_solver *solver,
                                                  const double *values) {
   if (solver == NULL || values == NULL || solver->solve_refine_values != NULL ||
-      (kls_uses_structural_initial_pivot_tolerance(solver) &&
-       !kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) ||
-      !(solver->common.tol > 0.0) ||
-      !(solver->common.tol < solver->options.pivot_tolerance) ||
+      (!solver->promoted_tolerance_l2_recovery_required &&
+       ((kls_uses_structural_initial_pivot_tolerance(solver) &&
+         !kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) ||
+        !(solver->common.tol > 0.0) ||
+        !(solver->common.tol < solver->options.pivot_tolerance))) ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL) {
     return 1;
@@ -158174,6 +158189,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     if ((solver->solve_contract_probe == 2 ||
          (solver->numeric_is_predicted &&
           solver->row_solve_self_check) ||
+         solver->promoted_tolerance_l2_recovery_required ||
          (solver->stats.selected_pivot_tolerance > 0.0 &&
           solver->stats.selected_pivot_tolerance <
             solver->options.pivot_tolerance &&
@@ -158795,6 +158811,43 @@ static void kls_remember_verified_rhs(kls_solver *solver,
   solver->verified_rhs_valid = 1;
 }
 
+/* A retained tolerance below the caller's requested one is already explicit
+   numeric policy state, whether selected initially from a structural regime
+   or retained after a measured fill/pivot trial.  Keep the solve-accuracy
+   classification attached to that state instead of rediscovering one matrix
+   from dimensions, entry count, ordering, BTF geometry, and worker count.
+   Keep these cold policy accessors out of line and beside solve_impl so they
+   cannot perturb the established factor/refactor kernel layout. */
+__attribute__((noinline))
+static int kls_promoted_tolerance_plain_factor(
+  const kls_solver *solver) {
+  return solver != NULL && solver->numeric != NULL &&
+    solver->stats.selected_pivot_tolerance > 0.0 &&
+    solver->stats.selected_pivot_tolerance <
+      solver->options.pivot_tolerance &&
+    (!kls_uses_structural_initial_pivot_tolerance(solver) ||
+     kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) &&
+    solver->row_perm == NULL && solver->row_scale == NULL &&
+    solver->col_scale == NULL;
+}
+
+__attribute__((noinline))
+static int kls_promoted_tolerance_l2_recovery_factor_cycle(
+  const kls_solver *solver) {
+  if (solver == NULL ||
+      getenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") != NULL) {
+    return 0;
+  }
+  return (kls_promoted_tolerance_plain_factor(solver) ||
+          solver->promoted_tolerance_l2_recovery_required) &&
+    solver->common.tol >= 1.0e-6 &&
+    !solver->numeric_needs_refinement &&
+    solver->row_perm == NULL && solver->row_scale == NULL &&
+    solver->col_scale == NULL && solver->col_ptr != NULL &&
+    solver->row_idx != NULL &&
+    (solver->solve_refine_values != NULL || solver->values != NULL);
+}
+
 static int solve_impl(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
@@ -159298,18 +159351,11 @@ static int solve_impl(kls_solver *solver,
             solver->values != NULL, b == x,
             solver->solve_contract_probe, contract_probe_wanted);
   }
+  /* Plain frames only, mirroring the per-refactor value capture:
+     matched/scaled classes have no capture here, so admitting them would
+     refine against stale analyze-time values. */
   const int tight_tol_selected =
-    solver->stats.selected_pivot_tolerance > 0.0 &&
-    solver->stats.selected_pivot_tolerance <
-      solver->options.pivot_tolerance &&
-    (!kls_uses_structural_initial_pivot_tolerance(solver) ||
-     kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) &&
-    /* plain frames only, mirroring the per-refactor value capture:
-       matched/scaled classes (pre2) have no capture here, so this
-       gate would refine them against the stale analyze-time values —
-       the documented P1 hazard; they police via first-solve probes */
-    solver->row_perm == NULL && solver->row_scale == NULL &&
-    solver->col_scale == NULL;
+    kls_promoted_tolerance_plain_factor(solver);
   const int compact_amf_two_block_raw_l2_contract =
     !kernel_transpose && nrhs == 1 && b != x &&
     kls_compact_amf_two_block_factor_cycle(solver) &&
@@ -159357,6 +159403,7 @@ static int solve_impl(kls_solver *solver,
           row/tolerance self-check flags, so retain the contract explicitly
           across that guarded recursive solve. */
        solver->solve_recovery_active ||
+       solver->promoted_tolerance_l2_recovery_required ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL ||
        contract_probe_wanted || contract_armed) &&
       (solver->row_scale == NULL && solver->col_scale == NULL
@@ -159435,29 +159482,30 @@ static int solve_impl(kls_solver *solver,
       const int self_check_only = (solver->row_solve_self_check ||
                                    tight_tol_selected ||
                                    solver->solve_recovery_active ||
+                                   solver->promoted_tolerance_l2_recovery_required ||
                                    contract_probe_wanted || contract_armed) &&
         (solver->solve_recovery_active ||
+         solver->promoted_tolerance_l2_recovery_required ||
          !solver->numeric_needs_refinement) &&
         (solver->solve_recovery_active ||
+         solver->promoted_tolerance_l2_recovery_required ||
          !(solver->common.tol < 1.0e-6)) &&
         getenv("KLS_ENABLE_SOLVE_REFINEMENT") == NULL;
-      const int mac_econ_accuracy_contract = self_check_only &&
+      const int promoted_tolerance_l2_contract = self_check_only &&
         !kernel_transpose && nrhs == 1 && b != x &&
-        solver->input_format == KLS_INPUT_CSC &&
+        (tight_tol_selected || solver->solve_recovery_active ||
+         solver->promoted_tolerance_l2_recovery_required) &&
+        getenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") == NULL &&
         solver->row_perm == NULL && solver->row_scale == NULL &&
-        solver->col_scale == NULL && solver->symbolic != NULL &&
-        solver->options.threads == 8 &&
-        solver->orientation == KLS_ORIENTATION_NORMAL &&
-        solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-        solver->n >= 206450u && solver->n <= 206550u &&
-        solver->nnz >= 1273000u && solver->nnz <= 1274000u &&
-        solver->symbolic->nblocks >= 30u &&
-        solver->symbolic->nblocks <= 40u &&
-        solver->symbolic->maxblock >= 206400u;
+        solver->col_scale == NULL && solver->symbolic != NULL;
+      if (promoted_tolerance_l2_contract) {
+        solver->promoted_tolerance_l2_contract_run_count++;
+      }
       double bmax = 0.0;
       double bnorm2 = 0.0;
       if (verified_rhs_contract ||
-          retained_preconditioner_contract || mac_econ_accuracy_contract) {
+          retained_preconditioner_contract ||
+          promoted_tolerance_l2_contract) {
         const int cached_rhs_norm = verified_rhs_contract &&
           solver->verified_rhs != NULL &&
           (nloc == 0u ||
@@ -159471,7 +159519,8 @@ static int solve_impl(kls_solver *solver,
             bnorm2 += brhs[i] * brhs[i];
           }
         }
-        if (mac_econ_accuracy_contract || verified_rhs_cache_candidate) {
+        if (promoted_tolerance_l2_contract ||
+            verified_rhs_cache_candidate) {
           for (UF_long i = 0; i < nloc; ++i) {
             const double av = fabs(brhs[i]);
             bmax = bmax < av ? av : bmax;
@@ -159484,12 +159533,14 @@ static int solve_impl(kls_solver *solver,
         }
       }
       if (getenv("KLS_TRACE_REFINE") != NULL &&
-          solver->n >= 206450u && solver->n <= 206550u) {
+          (tight_tol_selected || solver->solve_recovery_active ||
+           solver->promoted_tolerance_l2_recovery_required)) {
         fprintf(stderr,
-                "KLS mac recovery gate: contract=%d self=%d kt=%d nrhs=%ld"
+                "KLS promoted-tolerance L2 gate: contract=%d self=%d"
+                " kt=%d nrhs=%ld"
                 " bx=%d fmt=%d rp=%d rs=%d cs=%d sym=%d t=%d ori=%d"
                 " ord=%d n=%ld nnz=%ld blocks=%ld max=%ld\n",
-                mac_econ_accuracy_contract, self_check_only,
+                promoted_tolerance_l2_contract, self_check_only,
                 kernel_transpose, (long)nrhs, b == x,
                 (int)solver->input_format, solver->row_perm != NULL,
                 solver->row_scale != NULL, solver->col_scale != NULL,
@@ -159502,27 +159553,27 @@ static int solve_impl(kls_solver *solver,
                 solver->symbolic != NULL
                   ? (long)solver->symbolic->maxblock : -1L);
       }
-      /* The self-check enforces a strict margin below the benchmark's
-         1e-8 relative-L2 contract rather than maximal accuracy.  A
-         mac_econ-class solve at its typical e-6 draw takes ONE correction
-         to e-11..e-13 and exits
-         at the next residual pass, instead of iterating to the 1e-12
-         line (measured 0.26s vs 0.066s base solve).  Reduced-precision
-         factors under needs_refinement keep the tight target. */
+      /* The promoted-tolerance self-check enforces a strict margin below the
+         public 1e-8 relative-L2 contract rather than maximal accuracy.  A
+         weak raw draw commonly takes one correction into the e-11..e-9 band
+         and exits at the next measured residual, instead of iterating toward
+         the unrelated 1e-12 max-norm line.  Reduced-precision factors under
+         needs_refinement keep the tight target. */
       double target = repeated_rhs_raw_l2_contract ? 0.0 :
         (bmax > 0.0 ? bmax : 1.0) * (self_check_only
            /* the tolerance-promoted class targets one notch tighter:
               its 1e-9 max-norm exits still drew 1.15e-8 on the
-              l2-relative validity metric (sqrt-n normalization gap on
-              mac_econ's 206k vector) — one extra halving iteration on
-              the bad draws only */
+              l2-relative validity metric on long vectors.  The generic L2
+              path below is authoritative; this tighter max line remains the
+              fallback when that path is explicitly disabled. */
            ? (tight_tol_selected ? 1.0e-10 : 1.0e-9)
          : solver->user_col_perm != NULL ? 1.0e-10 : 1.0e-12);
       double last_rmax = HUGE_VAL;
       double last_rnorm2 = HUGE_VAL;
       double initial_rmax = -1.0;
       int have_previous_residual = 0;
-      int mac_econ_accuracy_verified = !mac_econ_accuracy_contract;
+      int promoted_tolerance_l2_verified =
+        !promoted_tolerance_l2_contract;
       int retained_preconditioner_verified =
         !retained_preconditioner_contract;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
@@ -159632,7 +159683,7 @@ static int solve_impl(kls_solver *solver,
             rmax = rmax < av ? av : rmax;
             if (verified_rhs_contract ||
                 retained_preconditioner_contract ||
-                mac_econ_accuracy_contract) {
+                promoted_tolerance_l2_contract) {
               rnorm2 += residual[i] * residual[i];
             }
           }
@@ -159663,13 +159714,14 @@ static int solve_impl(kls_solver *solver,
            stop at 5e-9: this retains a 2x margin below the audited 1e-8
            validity line while avoiding another expensive full factor when
            stationary refinement has already produced a valid answer. */
-        const double mac_econ_l2_limit_squared =
+        const double promoted_tolerance_l2_limit_squared =
           solver->solve_recovery_active ? 25.0e-18 : 1.0e-18;
-        const int mac_econ_l2_ok = mac_econ_accuracy_contract &&
+        const int promoted_tolerance_l2_ok =
+          promoted_tolerance_l2_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
-          rnorm2 <= mac_econ_l2_limit_squared * l2_scale;
+          rnorm2 <= promoted_tolerance_l2_limit_squared * l2_scale;
         retained_preconditioner_verified |= retained_preconditioner_l2_ok;
-        mac_econ_accuracy_verified |= mac_econ_l2_ok;
+        promoted_tolerance_l2_verified |= promoted_tolerance_l2_ok;
         if (raw_l2_ok || verified_rhs_cache_ok) {
           kls_remember_verified_rhs(solver, brhs, bnorm2);
         }
@@ -159680,16 +159732,17 @@ static int solve_impl(kls_solver *solver,
                   iter, rmax, target,
                   (verified_rhs_contract ||
                    retained_preconditioner_contract ||
-                   mac_econ_accuracy_contract)
+                   promoted_tolerance_l2_contract)
                     ? sqrt(rnorm2 / l2_scale) : -1.0,
                   raw_l2_ok || verified_rhs_cache_ok ||
                     retained_preconditioner_l2_ok ||
-                    mac_econ_l2_ok);
+                    promoted_tolerance_l2_ok);
         }
         if (initial_rmax < 0.0) {
           initial_rmax = rmax;
         }
-        if (mac_econ_accuracy_contract && !mac_econ_l2_ok &&
+        if (promoted_tolerance_l2_contract &&
+            !promoted_tolerance_l2_ok &&
             have_previous_residual && isfinite(rnorm2) &&
             !(rnorm2 < 0.998 * last_rnorm2)) {
           /* A weak-pivot correction can overshoot even though a shorter
@@ -159720,11 +159773,12 @@ static int solve_impl(kls_solver *solver,
             continue;
           }
         }
-        if ((!mac_econ_accuracy_contract && rmax <= target) ||
-            raw_l2_ok || retained_preconditioner_l2_ok || mac_econ_l2_ok ||
-            (!mac_econ_accuracy_contract &&
+        if ((!promoted_tolerance_l2_contract && rmax <= target) ||
+            raw_l2_ok || retained_preconditioner_l2_ok ||
+            promoted_tolerance_l2_ok ||
+            (!promoted_tolerance_l2_contract &&
              !(rmax < (self_check_only ? 0.999 : 0.5) * last_rmax))) {
-          if (!mac_econ_accuracy_contract &&
+          if (!promoted_tolerance_l2_contract &&
               initial_rmax >= 0.0 && rmax > initial_rmax) {
             /* Refinement diverged: the factorization amplifies in this
                direction.  Keep the preceding correction when its measured
@@ -159760,7 +159814,7 @@ static int solve_impl(kls_solver *solver,
         }
         last_rmax = rmax;
         last_rnorm2 = rnorm2;
-        if (mac_econ_accuracy_contract) {
+        if (promoted_tolerance_l2_contract) {
           memcpy(previous_residual, residual,
                  (size_t)nloc * sizeof(*previous_residual));
           have_previous_residual = 1;
@@ -159775,7 +159829,7 @@ static int solve_impl(kls_solver *solver,
         for (UF_long i = 0; i < nloc; ++i) {
           xrhs[i] += correction[i];
         }
-        if (!mac_econ_accuracy_contract &&
+        if (!promoted_tolerance_l2_contract &&
             (solver->solve_refine_single_shot ||
              solver->common.tol < 1.0e-6 ||
              (contract_armed && solver->solve_contract_verified &&
@@ -159790,8 +159844,9 @@ static int solve_impl(kls_solver *solver,
           break;
         }
       }
-      if (mac_econ_accuracy_contract && !mac_econ_accuracy_verified) {
-        /* Some 5e-5 mac_econ pivot draws are too ill-conditioned for
+      if (promoted_tolerance_l2_contract &&
+          !promoted_tolerance_l2_verified) {
+        /* A tolerance-promoted factor can still be too ill-conditioned for
            stationary refinement, even with a damped correction.  Recover
            only after the measured residual proves that case: rebuild the
            current numeric through increasingly conservative pivot lines
@@ -159812,28 +159867,54 @@ static int solve_impl(kls_solver *solver,
             }
             const double saved_pivot_tolerance =
               solver->options.pivot_tolerance;
+            const double promoted_pivot_tolerance = solver->common.tol;
             const double recovery_tolerances[] = {
-              5.0e-4, 1.0e-3, 1.0e-2, 1.0e-1
+              fmin(1.0,
+                   fmax(2.0 * promoted_pivot_tolerance,
+                        0.5 * saved_pivot_tolerance)),
+              fmin(1.0,
+                   fmax(4.0 * promoted_pivot_tolerance,
+                        saved_pivot_tolerance)),
+              fmin(1.0,
+                   fmax(40.0 * promoted_pivot_tolerance,
+                        10.0 * saved_pivot_tolerance)),
+              fmin(1.0,
+                   fmax(400.0 * promoted_pivot_tolerance,
+                        100.0 * saved_pivot_tolerance))
             };
             int recovery_status = KLS_ERR_SOLVE_FAILED;
+            double previous_recovery_tolerance = -1.0;
             solver->solve_recovery_active = 1;
+            solver->promoted_tolerance_l2_recovery_count++;
             for (size_t attempt = 0u;
                  attempt < sizeof(recovery_tolerances) /
                              sizeof(recovery_tolerances[0]);
                  ++attempt) {
+              if (!(recovery_tolerances[attempt] >
+                    previous_recovery_tolerance)) {
+                continue;
+              }
+              previous_recovery_tolerance = recovery_tolerances[attempt];
               solver->options.pivot_tolerance =
                 recovery_tolerances[attempt];
               if (getenv("KLS_TRACE_REFINE") != NULL) {
                 fprintf(stderr,
-                        "KLS mac recovery refactor: pivot_tolerance=%.3g\n",
+                        "KLS promoted-tolerance recovery refactor:"
+                        " pivot_tolerance=%.3g\n",
                         recovery_tolerances[attempt]);
               }
               const int factor_status =
                 kls_factor(solver, recovery_values);
-              recovery_status = factor_status == KLS_OK
-                ? solve_impl(solver, transpose, 1, brhs, nloc,
-                             xrhs, nloc)
-                : factor_status;
+              if (factor_status == KLS_OK) {
+                /* Persist the strict contract even if recovery reaches or
+                   exceeds the originally requested threshold, where the
+                   selected<requested predicate no longer describes it. */
+                solver->promoted_tolerance_l2_recovery_required = 1;
+                recovery_status =
+                  solve_impl(solver, transpose, 1, brhs, nloc, xrhs, nloc);
+              } else {
+                recovery_status = factor_status;
+              }
               if (recovery_status == KLS_OK) {
                 break;
               }
@@ -160329,6 +160410,28 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->hybrid_huge_single_egraph_factor_eligible)) {
     stats->hybrid_huge_single_egraph_factor_eligible =
       kls_hybrid_huge_single_egraph_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, promoted_tolerance_l2_recovery_eligible) +
+        sizeof(stats->promoted_tolerance_l2_recovery_eligible)) {
+    stats->promoted_tolerance_l2_recovery_eligible =
+      kls_promoted_tolerance_l2_recovery_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, promoted_tolerance_l2_contract_run_count) +
+        sizeof(stats->promoted_tolerance_l2_contract_run_count)) {
+    stats->promoted_tolerance_l2_contract_run_count =
+      solver->promoted_tolerance_l2_contract_run_count > (uint64_t)INT64_MAX
+        ? INT64_MAX
+        : (int64_t)solver->promoted_tolerance_l2_contract_run_count;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, promoted_tolerance_l2_recovery_count) +
+        sizeof(stats->promoted_tolerance_l2_recovery_count)) {
+    stats->promoted_tolerance_l2_recovery_count =
+      solver->promoted_tolerance_l2_recovery_count > (uint64_t)INT64_MAX
+        ? INT64_MAX
+        : (int64_t)solver->promoted_tolerance_l2_recovery_count;
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

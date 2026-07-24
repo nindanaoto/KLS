@@ -21884,22 +21884,40 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
   double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_enable_value =
     getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR");
+  const char *saved_contract_disable_value =
+    getenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY");
   char *saved_enable = saved_enable_value != NULL
     ? strdup(saved_enable_value) : NULL;
+  char *saved_contract_disable = saved_contract_disable_value != NULL
+    ? strdup(saved_contract_disable_value) : NULL;
   const int had_enable = saved_enable_value != NULL;
+  const int had_contract_disable = saved_contract_disable_value != NULL;
   kls_solver *solver = NULL;
+  kls_solver *contract_solver = NULL;
+  kls_solver *contract_csr_solver = NULL;
   kls_options options;
   kls_stats stats;
   int ok = 1;
 
-  if (ap == NULL || ai == NULL || ax == NULL ||
-      (had_enable && saved_enable == NULL)) {
+  if (ap == NULL || ai == NULL || ax == NULL || changed == NULL ||
+      expected == NULL || b == NULL || x == NULL ||
+      (had_enable && saved_enable == NULL) ||
+      (had_contract_disable && saved_contract_disable == NULL)) {
     free(ap);
     free(ai);
     free(ax);
+    free(changed);
+    free(expected);
+    free(b);
+    free(x);
     free(saved_enable);
+    free(saved_contract_disable);
     return 0;
   }
 
@@ -21934,8 +21952,11 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
       ai[p] = block_begin + rows[k];
       ax[p] = rows[k] == dominant_row
         ? 4.0 : 0.01 * (double)(1 + ((col + rows[k]) % 7));
+      changed[p] = ax[p] *
+        (1.0 + 1.0e-5 * (double)((p % 11) - 5));
       ++p;
     }
+    expected[col] = 0.75 + 0.015625 * (double)(col % 17);
   }
   ap[n] = p;
   if (p != nnz) {
@@ -21956,13 +21977,161 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
   if (ok && stats.build_has_metis == 0) {
     goto cleanup;
   }
+  kls_default_options(&options);
+  options.threads = 4;
+
+  /* Ordinary entrywise updates in this independent low-degree family select
+     1e-4 below the requested 1e-3 threshold.  That retained numeric state is
+     the generic accuracy capability: it must enter the relative-L2 contract
+     without depending on the public benchmark's dimensions, BTF geometry,
+     ordering tuple, or eight-worker count. */
+  if (ok && (unsetenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != 0 ||
+             unsetenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") != 0)) {
+    perror("configure promoted-tolerance L2 contract");
+    ok = 0;
+  }
+  if (ok &&
+      (!require_ok(kls_create(&contract_solver),
+                   "create promoted-tolerance L2 contract") ||
+       !require_ok(kls_analyze_csc(contract_solver, KLS_INDEX_INT32, n,
+                                   ap, ai, 0, &options),
+                   "analyze promoted-tolerance L2 contract") ||
+       !require_ok(kls_factor(contract_solver, ax),
+                   "factor promoted-tolerance L2 contract") ||
+       !require_ok(kls_refactor(contract_solver, changed),
+                   "refactor promoted-tolerance L2 contract"))) {
+    ok = 0;
+  }
+  if (ok) {
+    memset(b, 0, (size_t)n * sizeof(*b));
+    memset(x, 0, (size_t)n * sizeof(*x));
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        b[ai[entry]] += changed[entry] * expected[col];
+      }
+    }
+    if (!require_ok(kls_solve(contract_solver, 1, b, 0, x, 0),
+                    "solve promoted-tolerance L2 contract")) {
+      ok = 0;
+    }
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok &&
+      (!require_ok(kls_get_stats(contract_solver, &stats),
+                   "stats promoted-tolerance L2 contract") ||
+       fabs(stats.selected_pivot_tolerance - 1.0e-4) > 1.0e-12 ||
+       stats.promoted_tolerance_l2_recovery_eligible != 1 ||
+       stats.promoted_tolerance_l2_contract_run_count < 1 ||
+       stats.promoted_tolerance_l2_recovery_count != 0)) {
+    fprintf(stderr,
+            "unexpected promoted-tolerance L2 contract: tol=%.17g"
+            " eligible=%d runs=%" PRId64 " recoveries=%" PRId64 "\n",
+            stats.selected_pivot_tolerance,
+            stats.promoted_tolerance_l2_recovery_eligible,
+            stats.promoted_tolerance_l2_contract_run_count,
+            stats.promoted_tolerance_l2_recovery_count);
+    ok = 0;
+  }
+  for (int32_t row = 0; ok && row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "promoted-tolerance L2 solve mismatch at %d: %.17g vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+    }
+  }
+
+  /* The compressed arrays are also CSR(A^T).  AUTO adopts the transpose
+     orientation, so a public transpose solve exercises the same internal
+     untransposed L2/recovery path through a nonidentity input-to-CSC map. */
+  if (ok &&
+      (!require_ok(kls_create(&contract_csr_solver),
+                   "create CSR promoted-tolerance L2 contract") ||
+       !require_ok(kls_analyze_csr(contract_csr_solver, KLS_INDEX_INT32, n,
+                                   ap, ai, 0, &options),
+                   "analyze CSR promoted-tolerance L2 contract") ||
+       !require_ok(kls_factor(contract_csr_solver, ax),
+                   "factor CSR promoted-tolerance L2 contract") ||
+       !require_ok(kls_refactor(contract_csr_solver, changed),
+                   "refactor CSR promoted-tolerance L2 contract"))) {
+    ok = 0;
+  }
+  if (ok) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+    if (!require_ok(kls_solve_transpose(
+                      contract_csr_solver, 1, b, 0, x, 0),
+                    "CSR promoted-tolerance L2 transpose solve")) {
+      ok = 0;
+    }
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok &&
+      (!require_ok(kls_get_stats(contract_csr_solver, &stats),
+                   "stats CSR promoted-tolerance L2 contract") ||
+       fabs(stats.selected_pivot_tolerance - 1.0e-4) > 1.0e-12 ||
+       stats.promoted_tolerance_l2_recovery_eligible != 1 ||
+       stats.promoted_tolerance_l2_contract_run_count < 1)) {
+    fprintf(stderr,
+            "unexpected CSR promoted-tolerance L2 contract:"
+            " orientation=%d tol=%.17g eligible=%d runs=%" PRId64 "\n",
+            (int)stats.selected_orientation,
+            stats.selected_pivot_tolerance,
+            stats.promoted_tolerance_l2_recovery_eligible,
+            stats.promoted_tolerance_l2_contract_run_count);
+    ok = 0;
+  }
+  for (int32_t row = 0; ok && row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "CSR promoted-tolerance solve mismatch at %d: %.17g"
+              " vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+    }
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(contract_solver, &stats),
+                        "pre-disable promoted-tolerance L2 stats")) {
+    ok = 0;
+  }
+  const int64_t contract_runs =
+    stats.promoted_tolerance_l2_contract_run_count;
+  if (ok && setenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY", "1", 1) != 0) {
+    perror("disable promoted-tolerance L2 contract");
+    ok = 0;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok &&
+      (!require_ok(kls_get_stats(contract_solver, &stats),
+                   "disabled promoted-tolerance L2 stats") ||
+       stats.promoted_tolerance_l2_recovery_eligible != 0)) {
+    fprintf(stderr, "promoted-tolerance L2 disable was not honored\n");
+    ok = 0;
+  }
+  if (ok) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+    if (!require_ok(kls_solve(contract_solver, 1, b, 0, x, 0),
+                    "disabled promoted-tolerance L2 solve")) {
+      ok = 0;
+    }
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok &&
+      (!require_ok(kls_get_stats(contract_solver, &stats),
+                   "disabled promoted-tolerance L2 run stats") ||
+       stats.promoted_tolerance_l2_contract_run_count != contract_runs)) {
+    fprintf(stderr, "disabled promoted-tolerance L2 solve entered contract\n");
+    ok = 0;
+  }
   if (ok && setenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR", "1", 1) != 0) {
     perror("setenv low-degree retained tolerance");
     ok = 0;
   }
-
-  kls_default_options(&options);
-  options.threads = 4;
   if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
                                         0, &options),
                         "analyze low-degree retained tolerance")) {
@@ -21990,16 +22159,29 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
   }
 
 cleanup:
+  kls_destroy(contract_csr_solver);
+  kls_destroy(contract_solver);
   if (!restore_env_value("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR",
                          had_enable,
                          saved_enable != NULL ? saved_enable : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY",
+                         had_contract_disable,
+                         saved_contract_disable != NULL
+                           ? saved_contract_disable : "")) {
     ok = 0;
   }
   kls_destroy(solver);
   free(ap);
   free(ai);
   free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
   free(saved_enable);
+  free(saved_contract_disable);
   return ok;
 }
 
@@ -22986,7 +23168,6 @@ static int test_pivoted_high_work_single_block_policy(void) {
             "explicit pivoted high-work control changed or became eligible\n");
     ok = 0;
   }
-
 cleanup:
   kls_destroy(explicit_solver);
   kls_destroy(negative_solver);

@@ -1436,6 +1436,15 @@ typedef struct kls_stats {
      balanced fill/work and nearly all-private geometry used by the hybrid
      clustered-prefix/dependency-pipeline EGraph schedule. */
   int hybrid_huge_single_egraph_factor_eligible;
+  /* A plain-frame factor selected a weaker-than-requested pivot threshold and
+     retains the current matrix values needed to enforce a relative-L2 solve
+     contract.  This is a numeric-state capability, not an input-shape tag. */
+  int promoted_tolerance_l2_recovery_eligible;
+  /* Number of public solves that entered that relative-L2 contract. */
+  int64_t promoted_tolerance_l2_contract_run_count;
+  /* Number of residual-stagnation episodes that rebuilt the numeric at a
+     more conservative, request-relative pivot threshold. */
+  int64_t promoted_tolerance_l2_recovery_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

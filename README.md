@@ -4075,6 +4075,44 @@ ratio at `0.7951` geometrically (`0.7749` median) and the steady solve ratio at
 `0.3252`. Release and ASan/UBSan/LSan tests pass, and leak-enabled target,
 extension, and shuffled-relabeling runs are clean.
 
+## Promoted-tolerance relative-L2 recovery
+
+A solve-accuracy rule formerly recognized one matrix through exact dimension,
+entry-count, BTF-block, ordering, orientation, worker-count, and input-format
+coordinates. The rule is now attached to the numeric fact it needs: a plain
+factor retained a positive pivot threshold below the caller's requested
+threshold, and the solver retained current matrix values with which to measure
+the true residual. For an out-of-place, single-RHS solve in the factor's
+untransposed kernel frame, KLS accepts only a finite relative-L2 residual at or
+below `1e-9`. It damps a correction only after measured stagnation and, if
+stationary refinement cannot meet the contract, rebuilds at monotonically
+stronger thresholds derived from the selected and requested thresholds. A
+recovery solve retains a `5e-9` limit, still a 2x margin below the public
+`1e-8` validity line.
+
+The contract is independent of CSC versus equivalent CSR input, public solve
+orientation, ordering, BTF geometry, and worker count. Recovery state persists
+for the installed numeric even when its stronger threshold no longer compares
+below the original request, and every changed-value refactor refreshes the
+matrix values used by the residual. Set
+`KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY=1` for a same-binary control.
+`promoted_tolerance_l2_recovery_eligible`,
+`promoted_tolerance_l2_contract_run_count`, and
+`promoted_tolerance_l2_recovery_count` expose the capability and its activity
+through `kls_stats` and benchmark JSON.
+
+The smoke regression uses an independently generated 150,000-row family with
+150 strongly connected components, five entries per row and column, and only
+10% diagonal coverage. It selects `1e-4` from a requested `1e-3`, verifies
+changed-value CSC and equivalent-CSR/public-transpose solves with four workers,
+and checks the live-factor disable. Appending 1,000 independent diagonal rows
+to the SuiteSparse target moves it outside every former dimension, entry, and
+BTF-block box while retaining eligibility. Sixty independently checked
+entrywise generations per matrix across 0.1%, 1%, and 10% amplitudes had worst
+relative-L2 residuals `7.43e-10` and `9.38e-10`; none required a recovery
+rebuild. Leak-enabled ASan/UBSan/LSan factor/refactor/solve runs cover both
+matrices.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

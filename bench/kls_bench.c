@@ -932,6 +932,9 @@ int main(int argc, char **argv) {
              ",\"giant_symmetric_scalar_fringe_metis_row_symbolic_eligible\":%d"
              ",\"giant_symmetric_scalar_fringe_metis_row_factor_eligible\":%d"
              ",\"hybrid_huge_single_egraph_factor_eligible\":%d"
+             ",\"promoted_tolerance_l2_recovery_eligible\":%d"
+             ",\"promoted_tolerance_l2_contract_run_count\":%" PRId64
+             ",\"promoted_tolerance_l2_recovery_count\":%" PRId64
              ",\"analyze_only\":true}\n",
              path, a.n, a.nnz, options.threads,
              kls_backend_name(options.backend),
@@ -993,7 +996,10 @@ int main(int argc, char **argv) {
              stats.giant_symmetric_scalar_fringe_metis_row_candidate,
              stats.giant_symmetric_scalar_fringe_metis_row_symbolic_eligible,
              stats.giant_symmetric_scalar_fringe_metis_row_factor_eligible,
-             stats.hybrid_huge_single_egraph_factor_eligible);
+             stats.hybrid_huge_single_egraph_factor_eligible,
+             stats.promoted_tolerance_l2_recovery_eligible,
+             stats.promoted_tolerance_l2_contract_run_count,
+             stats.promoted_tolerance_l2_recovery_count);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -2191,7 +2197,10 @@ int main(int argc, char **argv) {
            ",\"giant_symmetric_scalar_fringe_metis_row_candidate\":%d"
            ",\"giant_symmetric_scalar_fringe_metis_row_symbolic_eligible\":%d"
            ",\"giant_symmetric_scalar_fringe_metis_row_factor_eligible\":%d"
-           ",\"hybrid_huge_single_egraph_factor_eligible\":%d",
+           ",\"hybrid_huge_single_egraph_factor_eligible\":%d"
+           ",\"promoted_tolerance_l2_recovery_eligible\":%d"
+           ",\"promoted_tolerance_l2_contract_run_count\":%" PRId64
+           ",\"promoted_tolerance_l2_recovery_count\":%" PRId64,
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2451,7 +2460,10 @@ int main(int argc, char **argv) {
            stats.giant_symmetric_scalar_fringe_metis_row_candidate,
            stats.giant_symmetric_scalar_fringe_metis_row_symbolic_eligible,
            stats.giant_symmetric_scalar_fringe_metis_row_factor_eligible,
-           stats.hybrid_huge_single_egraph_factor_eligible);
+           stats.hybrid_huge_single_egraph_factor_eligible,
+           stats.promoted_tolerance_l2_recovery_eligible,
+           stats.promoted_tolerance_l2_contract_run_count,
+           stats.promoted_tolerance_l2_recovery_count);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64
