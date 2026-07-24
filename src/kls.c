@@ -3288,10 +3288,6 @@ kls_symmetric_scalar_fringe_amd_lean_factor_cycle(
   const kls_solver *solver);
 static int kls_sparse_partial_diagonal_amd_btf_cycle(
   const kls_solver *solver);
-static int kls_freescale_chain_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options);
 static int kls_near_symmetric_mega_hub_amd_options_enabled(
   const kls_options *options);
 static int kls_dense_fragmented_scaled_row_factor_cycle(
@@ -30237,28 +30233,6 @@ static int kls_sparse_spiked_predicted_clustered_cycle(
     solver->common.flops <= 32768.0 * (double)solver->n;
 }
 
-/* Three giant Freescale chains share a nearly spanning BTF core and a
-   retained METIS numeric.  The ordinary giant AUTO path launches a second
-   NodeND race before analysis has settled on that same ordering; arbitrary
-   entrywise H100 updates later wait 9--13 seconds for the redundant worker.
-   Keep the gate on the exact public contract and a union-unique size/density
-   envelope; explicit ordering and scaling requests retain generic behavior. */
-static int kls_freescale_chain_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
-    getenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY") == NULL &&
-    options->orientation == KLS_ORIENTATION_AUTO &&
-    options->ordering == KLS_ORDERING_AUTO &&
-    options->scale == KLS_SCALE_AUTO &&
-    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
-    options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 2500000u && n <= 3700000u &&
-    col_ptr[n] >= 12000000u && col_ptr[n] <= 18000000u;
-}
-
 /* Direct NodeNDP is a capability of sparse asymmetric graphs with bounded
    in/out degree and one nearly spanning strongly connected component.  Keep
    the standard AUTO/8T contract explicit.  The former family switch remains
@@ -31090,32 +31064,6 @@ static int kls_dense_fragmented_scaled_row_factor_cycle(
     solver->common.flops <= 131072.0 * n;
 }
 
-static int kls_freescale_pivot_boundary_h100_candidate_cycle(
-  const kls_solver *solver) {
-  return solver != NULL &&
-    kls_freescale_chain_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    !kls_asymmetric_bounded_degree_direct_metis_candidate_cycle(solver);
-}
-
-static int kls_is_freescale_chain_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    !kls_asymmetric_bounded_degree_direct_metis_candidate_cycle(solver) &&
-    kls_freescale_chain_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-    solver->common.scale == -1 && solver->numeric != NULL &&
-    solver->symbolic->do_btf && solver->symbolic->nblocks <= 1200u &&
-    solver->symbolic->maxblock * 100u >= solver->n * 99u;
-}
-
-static int kls_direct_or_freescale_chain_factor_cycle(
-  const kls_solver *solver) {
-  return kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) ||
-    kls_is_freescale_chain_h100_cycle(solver);
-}
-
 /* Keep the bounded-degree retained-preconditioner policy out of the
    established factor/refactor kernel layout.  Its cold definitions live after
    the public solve/stats path; these declarations keep the staged classifier
@@ -31595,13 +31543,6 @@ static int choose_auto_scale_from_pattern(UF_long n,
     return options == NULL ? 2 : initial_scale(options);
   }
 
-  if (kls_freescale_chain_h100_policy_enabled(n, col_ptr, options)) {
-    /* The retained deterministic NodeND factors are residual-clean and
-       smallest unscaled; generic rescale trials rebuild multi-gigaflop
-       numerics without changing this verdict. */
-    return -1;
-  }
-
   if (is_large_low_degree_diagonal_pattern(n, col_ptr, row_idx)) {
     return -1;
   }
@@ -31860,6 +31801,11 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
                                          const double *numeric_values) {
   if (solver == NULL) {
     return 2;
+  }
+  if (kls_asymmetric_bounded_degree_direct_metis_symbolic_cycle(solver)) {
+    /* The accepted generic direct-METIS symbolic, not a family-sized input
+       box, proves that this factor lifecycle requires no row scaling. */
+    return -1;
   }
   if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
     /* The accepted symbolic identifies a moderately expensive dominant BTF
@@ -34363,10 +34309,6 @@ static int kls_dense_reciprocal_hub_metis_factor_cycle(
       2.0 * (double)solver->numeric->lnz;
 }
 
-/* The remaining Freescale race uses the fourteen-leaf context.  Direct
-   bounded-degree candidates carry their independently classified context so
-   the two mechanisms cannot leak tuning into one another. */
-static _Thread_local int kls_freescale_chain_h100_metis_ctx;
 /* Scoped to the generic bounded-degree/full-diagonal AUTO proposal.  One is
    the fine sparse resource class; two is its wider giant-graph class. */
 static _Thread_local int kls_sparse_full_diagonal_metis_row_ctx;
@@ -35453,17 +35395,18 @@ static UF_long kls_metis_order_inner(UF_long n,
       ? (idx_t)atol(npes_env) : 7;
   } else
 #endif
-  if (kls_asymmetric_bounded_degree_direct_metis_analyze_class ||
-      kls_freescale_chain_h100_metis_ctx) {
+  if (kls_asymmetric_bounded_degree_direct_metis_analyze_class) {
     /* A coarser SCC fringe favors eight leaves for row-refactor throughput.
-       Thin-fringe and pivot-boundary systems retain fourteen: that forest's
-       P/Q layout cuts their packed solve substantially. */
-    const char *npes_env =
-      getenv("KLS_FREESCALE_CHAIN_METIS_NDP_NPES");
+       Thin-fringe systems retain fourteen: that forest's P/Q layout cuts
+       their packed solve substantially. */
+    const char *npes_env = getenv(
+      "KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES");
+    if (npes_env == NULL || npes_env[0] == '\0') {
+      npes_env = getenv("KLS_FREESCALE_CHAIN_METIS_NDP_NPES");
+    }
     metis_ndp_npes = npes_env != NULL && npes_env[0] != '\0'
       ? (idx_t)atol(npes_env)
-      : (kls_freescale_chain_h100_metis_ctx ||
-         kls_asymmetric_bounded_degree_direct_metis_analyze_class ==
+      : (kls_asymmetric_bounded_degree_direct_metis_analyze_class ==
            KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_THIN_FRINGE
            ? 14 : 8);
   } else
@@ -35647,7 +35590,6 @@ static UF_long kls_metis_order_inner(UF_long n,
   const int force_det_ndp =
     getenv("KLS_FORCE_DET_NDP") != NULL ||
     kls_medium_partial_static_metis_ctx ||
-    kls_freescale_chain_h100_metis_ctx ||
     kls_asymmetric_bounded_degree_direct_metis_analyze_class;
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 &&
@@ -41825,7 +41767,6 @@ struct kls_metis_race_s {
      earlier auto-scale promotion can consume them without joining */
   int scale_wanted;
   int giant_symmetric_scalar_fringe_metis_row;
-  int freescale_chain_h100;
   int symbolic_only;         /* dense-tail class: the joiner wants the
                                 analyze only - skip the scale trials
                                 and the serial trial factor (ss1: an
@@ -41891,12 +41832,8 @@ static void *kls_metis_race_main(void *arg) {
 #ifdef KLS_HAVE_MTMETIS
     const int saved_giant_symmetric_scalar_fringe_metis_ctx =
       kls_giant_symmetric_scalar_fringe_metis_ctx;
-    const int saved_freescale_chain_h100_metis_ctx =
-      kls_freescale_chain_h100_metis_ctx;
     kls_giant_symmetric_scalar_fringe_metis_ctx =
       race->giant_symmetric_scalar_fringe_metis_row;
-    kls_freescale_chain_h100_metis_ctx =
-      race->freescale_chain_h100 ? 2 : 0;
 #endif
 #ifdef KLS_HAVE_MTMETIS
     /* the symbolic-only (dense-tail class) joiner is on the one-shot
@@ -41914,8 +41851,6 @@ static void *kls_metis_race_main(void *arg) {
     kls_det_ndp_requested = 0;
     kls_giant_symmetric_scalar_fringe_metis_ctx =
       saved_giant_symmetric_scalar_fringe_metis_ctx;
-    kls_freescale_chain_h100_metis_ctx =
-      saved_freescale_chain_h100_metis_ctx;
 #endif
   }
   atomic_store_explicit(&race->analyze_done, 1, memory_order_release);
@@ -42403,8 +42338,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->input_format == KLS_INPUT_CSC &&
       solver->orientation == KLS_ORIENTATION_NORMAL &&
       solver->input_to_csc == NULL &&
-      !kls_freescale_chain_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) &&
       !kls_giant_symmetric_scalar_fringe_metis_row_candidate_cycle(solver) &&
       !kls_sparse_spiked_predicted_candidate_cycle(solver)) {
     /* The diagonal-equivalent engine retains the incumbent numeric and
@@ -42512,22 +42445,16 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   race->options.use_btf = solver->symbolic->do_btf ? 1 : 0;
   race->giant_symmetric_scalar_fringe_metis_row =
     kls_giant_symmetric_scalar_fringe_metis_row_candidate_cycle(solver);
-  race->freescale_chain_h100 =
-    kls_freescale_chain_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    !kls_asymmetric_bounded_degree_direct_metis_candidate_cycle(solver);
-  if (race->giant_symmetric_scalar_fringe_metis_row ||
-      race->freescale_chain_h100) {
+  if (race->giant_symmetric_scalar_fringe_metis_row) {
     race->options.scale = -1;
   }
   race->scale_symbolic = solver->symbolic;
   race->metis_wanted = metis_wanted;
   race->scale_wanted = scale_wanted;
-  race->symbolic_only = race->freescale_chain_h100 ||
-    (metis_wanted && solver->n >= 50000 &&
+  race->symbolic_only = metis_wanted && solver->n >= 50000 &&
      est_flops >= 2.0e5 * (double)solver->n &&
      solver->col_ptr != NULL &&
-     solver->col_ptr[solver->n] < 8 * solver->n);
+     solver->col_ptr[solver->n] < 8 * solver->n;
   atomic_init(&race->scale_done, 0);
   atomic_init(&race->stage2, 0);
   race->analyze_status =
@@ -42600,7 +42527,6 @@ static void kls_start_metis_race_early(kls_solver *solver,
   if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
       solver->input_format == KLS_INPUT_CSC &&
       orientation == KLS_ORIENTATION_NORMAL &&
-      !kls_freescale_chain_h100_policy_enabled(n, col_ptr, options) &&
       !(giant_symmetric_scalar_fringe_class &&
         kls_giant_symmetric_scalar_fringe_metis_row_options_enabled(
           options)) &&
@@ -42661,12 +42587,7 @@ static void kls_start_metis_race_early(kls_solver *solver,
     orientation == KLS_ORIENTATION_NORMAL &&
     giant_symmetric_scalar_fringe_class &&
     kls_giant_symmetric_scalar_fringe_metis_row_options_enabled(options);
-  race->freescale_chain_h100 =
-    kls_freescale_chain_h100_policy_enabled(n, col_ptr, options) &&
-    asymmetric_bounded_degree_class ==
-      KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE;
-  if (race->giant_symmetric_scalar_fringe_metis_row ||
-      race->freescale_chain_h100) {
+  if (race->giant_symmetric_scalar_fringe_metis_row) {
     /* The settled arbitrary-update numeric is the unscaled METIS factor.
        Put the race on that exact factor state before NodeND starts; changing
        only solver->common after the worker launches leaves its private KLU
@@ -42675,7 +42596,7 @@ static void kls_start_metis_race_early(kls_solver *solver,
   }
   race->scale_symbolic = NULL;
   race->metis_wanted = 1;
-  race->symbolic_only = race->freescale_chain_h100;
+  race->symbolic_only = 0;
   /* Ordering only: the race's scale trials use different acceptance
      criteria than the sync selection and can override a better scale
      verdict (ASIC_320k: -1 -> 0, refactor +12%). */
@@ -42742,10 +42663,6 @@ static int should_try_auto_scale(const kls_solver *solver) {
   if (kls_giant_dominant_hub_metis_dense_tail_factor_cycle(solver)) {
     /* The measured pipelined dense-tail numeric is already the retained
        factor; a max-row-scale retry duplicates a much larger traversal. */
-    return 0;
-  }
-  if (kls_freescale_chain_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
     return 0;
   }
   if (kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver)) {
@@ -43361,23 +43278,6 @@ static int maybe_promote_auto_metis(kls_solver *solver,
     kls_separator_analysis_move(&metis_separator, &race->separator);
     metis_numeric = race->numeric;
     race->numeric = NULL;
-    if (metis_numeric == NULL && race->freescale_chain_h100 &&
-        numeric_values != NULL) {
-      /* The ordering ran beside the AMD bootstrap, but its numeric must use
-         the first changed values: these two circuits cross a pivot boundary
-         between A0 and the generic entrywise horizon.  Factoring A0 on the
-         worker would merely create a fixed-pivot numeric that the first
-         update cannot refactor accurately. */
-      const double factor_start = kls_now_seconds();
-      metis_common.scale = -1;
-      metis_common.status = TRILINOS_KLU_OK;
-      metis_common.numerical_rank = KLS_KLU_EMPTY;
-      metis_common.singular_col = KLS_KLU_EMPTY;
-      metis_numeric = trilinos_klu_l_factor(
-        solver->col_ptr, solver->row_idx, (double *)numeric_values,
-        metis_symbolic, &metis_common);
-      *elapsed += kls_now_seconds() - factor_start;
-    }
     kls_metis_race_free(race);
   } else {
     kls_metis_race_free(race);
@@ -67571,7 +67471,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
   }
   if (!lean_only && solver->options.threads > 1 &&
       (solver->symbolic->nblocks == 1u ||
-       kls_direct_or_freescale_chain_factor_cycle(solver)) &&
+       kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver)) &&
       getenv("KLS_ENABLE_PARALLEL_ROW_PATTERN") != NULL &&
       getenv("KLS_ENABLE_DIRECT_NUMERIC_ROW_PATTERN") != NULL &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 1, 0)) {
@@ -71509,7 +71409,7 @@ static int kls_predicted_row_refactor_enabled(const kls_solver *solver) {
          solver->stats.last_factor_path != KLS_FACTOR_PATH_NONE &&
          !explicitly_disabled &&
          (explicitly_enabled ||
-          kls_direct_or_freescale_chain_factor_cycle(solver) ||
+          kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) ||
           solver->prestatic_reused_raced_metis_symbolic ||
           (!kls_row_refactor_env_disabled() &&
            (kls_giant_symmetric_scalar_fringe_metis_row_factor_cycle(solver) ||
@@ -72787,7 +72687,7 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
     return 0;
   }
   if (kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
-      kls_direct_or_freescale_chain_factor_cycle(solver) ||
+      kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) ||
       kls_dense_fragmented_scaled_row_factor_cycle(solver)) {
     return 1;
   }
@@ -72814,7 +72714,7 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
     solver != NULL &&
     (kls_giant_symmetric_scalar_fringe_metis_row_factor_cycle(solver) ||
      kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
-     kls_direct_or_freescale_chain_factor_cycle(solver) ||
+     kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) ||
      kls_dense_fragmented_scaled_row_factor_cycle(solver));
   if (!kls_auto_row_refactor_policy_enabled() &&
       !direct_auto_row && (solver == NULL || solver->n > 64u)) {
@@ -72845,13 +72745,13 @@ static int kls_row_refactor_acceptance_structurally_ready(
            (solver->n <= 64u ||
             kls_giant_symmetric_scalar_fringe_metis_row_factor_cycle(solver) ||
             kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
-            kls_direct_or_freescale_chain_factor_cycle(solver) ||
+            kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) ||
             kls_dense_fragmented_scaled_row_factor_cycle(solver)))) &&
          solver != NULL &&
          (!solver->numeric_is_predicted ||
           kls_giant_symmetric_scalar_fringe_metis_row_factor_cycle(solver) ||
           kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
-          kls_direct_or_freescale_chain_factor_cycle(solver) ||
+          kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) ||
           kls_dense_fragmented_scaled_row_factor_cycle(solver)) &&
          !kls_row_refactor_env_disabled() &&
          solver->row_refactor_auto_enabled &&
@@ -72869,7 +72769,7 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
-  if (kls_direct_or_freescale_chain_factor_cycle(solver) &&
+  if (kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
@@ -156589,7 +156489,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     !solver->large_bounded_no_btf_amf_path &&
     kls_sparse_full_diagonal_metis_row_symbolic_class(solver) != 2 &&
     !kls_near_symmetric_mega_hub_amd_symbolic_cycle(solver) &&
-    !kls_freescale_pivot_boundary_h100_candidate_cycle(solver) &&
     (solver->diagonal_equiv_plan_state == 1 ||
      kls_diagonal_equiv_plan_eligible(solver));
   kls_reset_lean_scale_input_cache(solver);
@@ -157518,8 +157417,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->metis_promotion_validated = 0;
   const int kls_oneshot_lean = kls_defer_cycle_trials_enabled();
 #ifdef KLS_HAVE_METIS
-  if (kls_diagonal_equiv_candidate ||
-      kls_freescale_pivot_boundary_h100_candidate_cycle(solver)) {
+  if (kls_diagonal_equiv_candidate) {
     /* A validated boundary-map update retains this numeric indefinitely.
        Defer the alternate ordering trial until (and unless) an input fails
        that validation; the ordinary refactor fallback below then settles
@@ -157799,15 +157697,15 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_sparse_full_diagonal_metis_direct_row =
       kls_sparse_full_diagonal_metis_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled();
-    const int kls_freescale_chain_direct_row =
-      kls_direct_or_freescale_chain_factor_cycle(solver) &&
+    const int kls_asymmetric_direct_metis_row =
+      kls_asymmetric_bounded_degree_direct_metis_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled();
     const int kls_dense_fragmented_scaled_direct_row =
       kls_dense_fragmented_scaled_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled();
     if (kls_giant_scalar_fringe_direct_row ||
         kls_sparse_full_diagonal_metis_direct_row ||
-        kls_freescale_chain_direct_row ||
+        kls_asymmetric_direct_metis_row ||
         kls_dense_fragmented_scaled_direct_row) {
       /* This measured factor class has a completed row/column audit: row
          refactor plus packed solve wins.  Mark the settled decision before
@@ -157818,12 +157716,12 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       solver->row_accept_decision = 1;
       solver->row_accept_publish_preferred =
         (kls_giant_scalar_fringe_direct_row ||
-         kls_freescale_chain_direct_row) ? 1 : 0;
+         kls_asymmetric_direct_metis_row) ? 1 : 0;
     }
     const int kls_direct_forced_row_prep =
       kls_giant_scalar_fringe_direct_row ||
       kls_sparse_full_diagonal_metis_direct_row ||
-      kls_freescale_chain_direct_row ||
+      kls_asymmetric_direct_metis_row ||
       kls_dense_fragmented_scaled_direct_row ||
       ((getenv("KLS_DIRECT_FORCED_ROW_PREP") != NULL ||
         kls_dense_spiked_fast_defaults_enabled(solver)) &&
@@ -157849,7 +157747,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       kls_direct_forced_row_prep &&
       (kls_giant_scalar_fringe_direct_row ||
        kls_sparse_full_diagonal_metis_direct_row ||
-       kls_freescale_chain_direct_row ||
+       kls_asymmetric_direct_metis_row ||
        kls_dense_fragmented_scaled_direct_row ||
        getenv("KLS_DIRECT_FORCED_ROW_SKIP_COLUMN_PREPS") != NULL ||
        kls_dense_spiked_fast_defaults_enabled(solver));
@@ -157886,7 +157784,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       if (!kls_snode_prep_active) {
         kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
       }
-    } else if (kls_freescale_chain_direct_row &&
+    } else if (kls_asymmetric_direct_metis_row &&
                !solver->numeric_is_predicted) {
       /* Sort the freshly promoted packed columns before deriving either the
          compact solve stream or the row mirror.  Building the row mirror
@@ -157923,7 +157821,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     }
     if (!kls_direct_forced_row_prep) {
       (void)kls_i32_solve_ready(solver);
-    } else if (kls_freescale_chain_direct_row &&
+    } else if (kls_asymmetric_direct_metis_row &&
                !solver->numeric_is_predicted) {
       /* The first-update promotion installs a pivoted KLU numeric.  Its
          packed 64-bit triangular walk is about twice as slow as the compact
@@ -157994,7 +157892,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       const double row_start = kls_now_seconds();
       if (kls_giant_scalar_fringe_direct_row ||
           kls_sparse_full_diagonal_metis_direct_row ||
-          kls_freescale_chain_direct_row ||
+          kls_asymmetric_direct_metis_row ||
           kls_dense_fragmented_scaled_direct_row ||
           getenv("KLS_DIRECT_FORCED_ROW_PATTERN_ONLY") != NULL ||
           kls_dense_spiked_fast_defaults_enabled(solver)) {

@@ -20194,3 +20194,78 @@ explicit: the only million-row factor-positive outside the original coordinate
 is the coupled metamorphic family. A natural cross-family positive is still
 needed before widening any threshold; future generalization must use measured
 symbolic/numeric evidence rather than another identity exception.
+
+FRAGMENTED-CHAIN ONE-UPDATE SELECTOR RETIRED (2026-07-24). After the
+Freescale1 and memchip routes were replaced by the asymmetric bounded-degree
+direct-METIS capability, one family-sized selector remained. Under the
+standard eight-thread AUTO/BTF/static-pivoting contract it accepted every
+matrix with 2,500,000--3,700,000 rows and 12,000,000--18,000,000 entries. A
+surviving input inherited unscaled deterministic fourteen-leaf NodeNDP,
+suppression of the scale and diagonal-equivalent trials, a special race
+context and changed-value race factor, automatic row-refactor preparation,
+and deferred-race behavior. Freescale2 was the only paper-union input still
+using that branch; its order and entry count were not written literally, but
+the envelope remained a benchmark-family proxy.
+
+The first attempted replacement was a staged topology/symbolic/numeric
+capability for a giant fragmented dominant BTF whose updated factor crossed a
+pivot boundary. It rejected nearby paper controls and accepted both
+Freescale2 and a coupled extension outside the old row ceiling. That was
+sufficient evidence that the shape generalized, but not that the associated
+optimization did. Before retaining the classifier, the benchmark horizon was
+extended from three updates to 100 entrywise 0.1% generations and every
+generation received an independent residual check.
+
+That horizon falsified the proposal. The old enabled route measured 2.6431
+seconds of analysis, 7.8772 seconds for the initial factor, 1.2031 seconds for
+the first refactor, 0.5730 seconds for a steady refactor, 0.3789 seconds for
+the first changed solve, and 0.2954 seconds for a steady changed solve. Its
+modeled 100-state SPICE cycle was 97.4544 seconds, and its worst checked
+relative-L2 residual was `3.04656e-9`. The same binary with the family selector
+disabled measured 2.6625, 6.5196, 4.4109, 0.081902, 0.08366, and 0.04503
+seconds for those stages. Its complete modeled cycle was 26.1603 seconds and
+its worst residual was `1.63769e-13`.
+
+The tempting first-refactor comparison therefore pointed in the wrong
+direction: 1.20 seconds looked much better than 4.41 seconds, but the retained
+specialized representation then paid about seven times as much per steady
+refactor and 6.6 times as much per solve. The old unscaled factor contained
+39,402,413 L and 25,595,605 U entries, performed 2.528 billion measured
+operations, and used 5,437 off-diagonal pivots. Ordinary scale-2 AUTO produced
+14,782,212/14,655,388 entries, 376.9 million operations, and 1,696 off-diagonal
+pivots. Across the workload the fallback costs `0.2684x`, or about 3.73 times
+less, while improving the worst residual by more than four orders of
+magnitude. Generalizing the staged selector would have encoded a benchmark
+artifact more cleanly; the correct generalization is to remove it.
+
+The final implementation deletes the size/density predicate, its
+pivot-boundary and factor-cycle helpers, its METIS thread-local context and
+race field, the special race factor, and every downstream combined
+direct-or-family lifecycle gate. Freescale2 is no longer excluded from the
+ordinary scale, race, diagonal-equivalent, mapped-refactor, or setup policies.
+No replacement stats or classifier remain. The old disable variable survives
+only as a compatibility alias for the independently guarded asymmetric
+bounded-degree policy.
+
+Removing the broad pattern-scale shortcut also exposed one legitimate shared
+dependency: Freescale1 and memchip require scale `-1`, but that fact is now
+authorized by their accepted generic direct-METIS symbolic rather than by a
+family-sized input box. The scale selection moved to the values-stage symbolic
+gate, and every row/preparation call site now names only the accepted generic
+factor capability. `KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES` is
+the new generic tuning override; the old Freescale-named spelling is only its
+fallback.
+
+Final frozen-parent/current checks preserve Freescale1's class-1 verdict,
+scale `-1`, 24,801,399/24,801,399 L/U entries, row-refactor path, and
+`4.1207e-16` residual. An alternating confirmation pair measured parent versus
+current steady refactors of 0.2400 versus 0.2021 seconds and changed solves of
+0.05899 versus 0.05930 seconds. Memchip likewise preserves class 2, scale
+`-1`, 29,216,967/29,216,949 entries, the row path, and `7.3650e-17`; its paired
+steady samples were 0.2859 versus 0.2662 seconds. The final Freescale2 build
+selects normal METIS/scale 2 with the generic factor geometry and mapped path.
+Without `KLS_ENABLE_SINGULAR_COMPLETION=1`, it still reports the singular-
+matrix setup error, so retiring the performance selector does not alter the
+mathematical completion contract. Release CTest passes all four tests; the
+leak-enabled ASan/UBSan/LSan build also passes all four, including the
+59.89-second generated-policy smoke suite.

@@ -4211,7 +4211,10 @@ the coupled holdout showed that shortcut was not a generic SCC property.
 Set
 `KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY=1` for a generic
 same-binary control. `KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY` remains a
-compatibility alias. `kls_stats` and benchmark JSON expose
+compatibility alias. The generic NodeNDP leaf-count override is
+`KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES`;
+`KLS_FREESCALE_CHAIN_METIS_NDP_NPES` remains its legacy fallback. `kls_stats`
+and benchmark JSON expose
 `asymmetric_bounded_degree_direct_metis_candidate`,
 `asymmetric_bounded_degree_direct_metis_tuning_class`,
 `asymmetric_bounded_degree_direct_metis_symbolic_eligible`, and
@@ -4379,6 +4382,53 @@ change, so they are treated as dispersion rather than evidence for a new
 kernel speedup. The limitation is explicit: the only full-lifecycle positive
 outside the original coordinate is a coupled metamorphic extension; the
 cross-family matrices are rejection controls, not natural positives.
+
+## Fragmented-chain one-update selector retired
+
+The residual Freescale H100 selector has been removed rather than widened. It
+accepted any AUTO/8-thread input with 2.5--3.7 million rows and 12--18 million
+stored entries, then forced unscaled fourteen-leaf METIS and a specialized
+first-update lifecycle. Once Freescale1 and memchip had moved to the guarded
+asymmetric bounded-degree capability, Freescale2 was the only SuiteSparse
+matrix still inheriting this broad size/density box.
+
+An attempted topology replacement identified the intended fragmented
+dominant-BTF/pivot-boundary shape and also accepted a coupled moved-size
+extension. The full horizon audit nevertheless falsified the optimization.
+On 100 entrywise 0.1% updates, with every generation independently checked,
+the old enabled path and the ordinary same-binary fallback measured:
+
+| Metric | old specialized path | ordinary generic path |
+| --- | ---: | ---: |
+| analysis | 2.643 s | 2.662 s |
+| initial factor | 7.877 s | 6.520 s |
+| first refactor | 1.203 s | 4.411 s |
+| steady refactor | 0.5730 s | 0.08190 s |
+| first changed solve | 0.3789 s | 0.08366 s |
+| steady changed solve | 0.2954 s | 0.04503 s |
+| modeled 100-state SPICE cycle | 97.454 s | 26.160 s |
+| worst relative-L2 update residual | `3.0466e-9` | `1.6377e-13` |
+
+The specialized path won only the first refactor. Its 39,402,413/25,595,605
+L/U entries, 2.528 billion measured operations, and 5,437 off-diagonal pivots
+made the recurring pool update and solve much slower than the generic scale-2
+factor's 14,782,212/14,655,388 entries, 376.9 million operations, and 1,696
+off-diagonal pivots. The generic route costs only `0.268x` as much over the
+actual horizon and is about four orders of magnitude more accurate. Promoting
+the staged classifier would therefore have generalized a one-update benchmark
+artifact; retiring the selector generalizes behavior instead.
+
+Freescale2 now follows ordinary AUTO selection: normal METIS, scale 2, mapped
+steady updates, and no family-specific race, row-refactor, scale, or deferred
+setup inheritance. Its singular semantics are unchanged: without
+`KLS_ENABLE_SINGULAR_COMPLETION=1` setup still returns the singular-matrix
+error. Freescale1 and memchip retain scale `-1` only after their generic
+direct-METIS symbolic capability is accepted. Frozen-parent/current checks
+preserve their respective class 1/class 2 verdicts, exact L/U geometries
+(24,801,399/24,801,399 and 29,216,967/29,216,949), row-refactor paths, and
+residuals (`4.12e-16` and `7.37e-17`). No SuiteSparse coordinate replaces the
+deleted box. Release and leak-enabled ASan/UBSan/LSan CTest pass all four
+tests.
 
 ## License
 
