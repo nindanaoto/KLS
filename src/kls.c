@@ -2391,6 +2391,7 @@ struct kls_solver {
   /* Cold policy state stays at the tail so it does not shift the established
      alignment of hot refactor and solve fields above. */
   int balanced_moderate_hub_amd_cycle; /* guarded AMD/BTF or AMD/no-BTF */
+  int sparse_partial_diagonal_amd_btf_cycle; /* symbolic-guarded direct AMD */
 };
 
 /* The dense-spiked matched route has a substantially larger retained row
@@ -2467,6 +2468,8 @@ typedef struct kls_pattern_candidate {
   int balanced_moderate_hub_amd_selected;
   UF_long *balanced_moderate_hub_btf_storage;
   UF_long balanced_moderate_hub_btf_nblocks;
+  int sparse_partial_diagonal_amd_btf_class;
+  int sparse_partial_diagonal_amd_btf_selected;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -3197,10 +3200,8 @@ static int kls_is_bips98_lean_pattern(const kls_solver *solver);
 static int kls_is_medium_symmetric_rajat_pattern(
   UF_long n,
   const UF_long *col_ptr);
-static int kls_htc336_9129_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options);
+static int kls_sparse_partial_diagonal_amd_btf_cycle(
+  const kls_solver *solver);
 static int kls_freescale_chain_h100_policy_enabled(
   UF_long n,
   const UF_long *col_ptr,
@@ -27423,6 +27424,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->sparse_diagonal_row_hub_no_btf_cycle = 0;
   solver->large_reciprocal_hub_amd_btf_cycle = 0;
   solver->balanced_moderate_hub_amd_cycle = 0;
+  solver->sparse_partial_diagonal_amd_btf_cycle = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -28623,6 +28625,10 @@ static _Thread_local int
   kls_balanced_moderate_hub_amd_analyze_class;
 static _Thread_local int
   kls_balanced_moderate_hub_amd_selected;
+static _Thread_local int
+  kls_sparse_partial_diagonal_amd_btf_analyze_path;
+static _Thread_local int
+  kls_sparse_partial_diagonal_amd_btf_selected;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -29735,11 +29741,6 @@ static int choose_auto_scale_from_pattern(UF_long n,
     return options == NULL ? 2 : initial_scale(options);
   }
 
-  if (kls_htc336_9129_h100_policy_enabled(n, col_ptr, options)) {
-    /* HTC_336_9129's normal AMD/BTF factors are both smaller and faster
-       without row scaling; the generic numeric heuristic selects 2. */
-    return -1;
-  }
   if (kls_circuit5m_h100_policy_enabled(n, col_ptr, options)) {
     return 2;
   }
@@ -30002,6 +30003,11 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
                                          const double *numeric_values) {
   if (solver == NULL) {
     return 2;
+  }
+  if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
+    /* The accepted symbolic identifies a moderately expensive dominant BTF
+       core whose direct factor is smaller without a numeric row-scale pass. */
+    return -1;
   }
   if (kls_partial_diagonal_many_block_no_btf_cycle(solver)) {
     /* The guarded one-block factor remains residual-clean without numeric
@@ -30299,22 +30305,6 @@ static int kls_is_rommes_mimo8_pattern(const kls_solver *solver) {
     solver->symbolic->nblocks <= 5220u &&
     solver->symbolic->maxblock >= 7800u &&
     solver->symbolic->maxblock <= 7850u;
-}
-
-static int kls_htc336_9129_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
-    getenv("KLS_DISABLE_HTC336_9129_H100_POLICY") == NULL &&
-    options->orientation == KLS_ORIENTATION_AUTO &&
-    options->ordering == KLS_ORDERING_AUTO &&
-    options->scale == KLS_SCALE_AUTO &&
-    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
-    options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 226300u && n <= 226400u &&
-    col_ptr[n] >= 760000u && col_ptr[n] <= 770000u;
 }
 
 static int kls_is_sandia_mult_dcop_pattern(const kls_solver *solver) {
@@ -37320,10 +37310,9 @@ static int should_try_spral_hungarian_numeric_trial(
   if (kls_is_sandia_mult_dcop_pattern(solver)) {
     return 0;
   }
-  if (solver != NULL && kls_htc336_9129_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
-    /* The retained unscaled AMD/BTF numeric is both smaller and faster than
-       the SPRAL-matched trial once the complete H100 horizon is charged. */
+  if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
+    /* The symbolic-guarded direct numeric is both smaller and faster than
+       rebuilding the same topology around a weighted row match. */
     return 0;
   }
   if (solver->dense_spiked_original_pivot_path) {
@@ -38248,11 +38237,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
     return;
   }
-  if (!forced_match && solver != NULL &&
-      kls_htc336_9129_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
+  if (!forced_match && kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
     if (trace_gates) {
-      fprintf(stderr, "KLS pre-static defer: HTC336_9129 direct AMD gate\n");
+      fprintf(stderr,
+              "KLS pre-static defer: sparse partial-diagonal direct AMD\n");
     }
     return;
   }
@@ -39611,41 +39599,109 @@ static int kls_fragmented_medium_dominant_btf_shape(
          est_flops >= 1.0e8 && est_flops <= 2.0e9;
 }
 
+/* A partial structural diagonal is a cheap proposal signal for sparse
+   matching-class systems.  It is deliberately insufficient to select the
+   policy: the actual AMD/BTF symbolic below must also demonstrate the
+   normalized dominant-core work regime. */
+__attribute__((noinline, cold))
+static int kls_sparse_partial_diagonal_amd_btf_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 100000u ||
+      n > UF_long_max / 5u || col_ptr[n] < 3u * n ||
+      col_ptr[n] > 5u * n) {
+    return 0;
+  }
+  const UF_long diagonal = count_pattern_diagonal(n, col_ptr, row_idx);
+  return (double)diagonal >= 0.40 * (double)n &&
+         (double)diagonal <= 0.60 * (double)n;
+}
+
+__attribute__((noinline, cold))
+static int kls_sparse_partial_diagonal_amd_btf_options_enabled(
+  const kls_options *options) {
+  return options != NULL &&
+    getenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD") == NULL &&
+    /* Compatibility alias for the superseded matrix-window policy. */
+    getenv("KLS_DISABLE_HTC336_9129_H100_POLICY") == NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
+    options->use_btf && options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
+}
+
 /* Sparse AMD analyses with a dominant core and a 10--20% scalar/block
    fringe form a distinct fragmented-BTF class.  Keep this normalized
    structural predicate shared by analyze-time speculation and post-factor
    solve selection; the latter adds measured numeric-work requirements. */
 __attribute__((noinline, cold))
-static int kls_sparse_fragmented_dominant_btf_structure(
-  const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->n < 100000u || solver->nnz < 3u * solver->n ||
-      solver->nnz > 5u * solver->n || !solver->symbolic->do_btf ||
-      solver->symbolic->nblocks < solver->n / 10u ||
-      solver->symbolic->nblocks > solver->n / 5u ||
-      (double)solver->symbolic->maxblock < 0.80 * (double)solver->n ||
-      (double)solver->symbolic->maxblock > 0.95 * (double)solver->n ||
-      (solver->symbolic->structural_rank >= 0 &&
-       (UF_long)solver->symbolic->structural_rank != solver->n)) {
+static int kls_sparse_fragmented_dominant_btf_symbolic_structure(
+  UF_long n,
+  UF_long nnz,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_AMD || n < 100000u ||
+      n > UF_long_max / 5u || nnz < 3u * n || nnz > 5u * n ||
+      !symbolic->do_btf || symbolic->nblocks < n / 10u ||
+      symbolic->nblocks > n / 5u ||
+      (double)symbolic->maxblock < 0.80 * (double)n ||
+      (double)symbolic->maxblock > 0.95 * (double)n ||
+      (symbolic->structural_rank >= 0 &&
+       (UF_long)symbolic->structural_rank != n)) {
     return 0;
   }
   return 1;
 }
 
 __attribute__((noinline, cold))
-static int kls_sparse_fragmented_dominant_btf_symbolic_work(
-  const kls_solver *solver) {
-  if (!kls_sparse_fragmented_dominant_btf_structure(solver)) {
+static int kls_sparse_fragmented_dominant_btf_symbolic_work_profile(
+  UF_long n,
+  UF_long nnz,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (!kls_sparse_fragmented_dominant_btf_symbolic_structure(
+        n, nnz, orientation, ordering, symbolic)) {
     return 0;
   }
-  const double est_fill = solver->symbolic->lnz + solver->symbolic->unz;
-  const double est_flops = solver->symbolic->est_flops;
-  return est_fill >= 32.0 * (double)solver->n &&
-    est_fill <= 64.0 * (double)solver->n &&
-    est_flops >= 1000.0 * (double)solver->n &&
-    est_flops <= 8192.0 * (double)solver->n;
+  const double est_fill = symbolic->lnz + symbolic->unz;
+  const double est_flops = symbolic->est_flops;
+  return est_fill >= 32.0 * (double)n &&
+    est_fill <= 64.0 * (double)n &&
+    est_flops >= 1000.0 * (double)n &&
+    est_flops <= 8192.0 * (double)n;
+}
+
+__attribute__((noinline, cold))
+static int kls_sparse_fragmented_dominant_btf_structure(
+  const kls_solver *solver) {
+  return solver != NULL &&
+    kls_sparse_fragmented_dominant_btf_symbolic_structure(
+      solver->n, solver->nnz, solver->orientation,
+      solver->stats.selected_ordering, solver->symbolic);
+}
+
+__attribute__((noinline, cold))
+static int kls_sparse_fragmented_dominant_btf_symbolic_work(
+  const kls_solver *solver) {
+  return solver != NULL &&
+    kls_sparse_fragmented_dominant_btf_symbolic_work_profile(
+      solver->n, solver->nnz, solver->orientation,
+      solver->stats.selected_ordering, solver->symbolic);
+}
+
+__attribute__((noinline, cold))
+static int kls_sparse_partial_diagonal_amd_btf_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->sparse_partial_diagonal_amd_btf_cycle &&
+    getenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD") == NULL &&
+    getenv("KLS_DISABLE_HTC336_9129_H100_POLICY") == NULL &&
+    kls_sparse_fragmented_dominant_btf_symbolic_work(solver);
 }
 
 /* Analyze-time start: the METIS analyze stage needs only the pattern,
@@ -39996,8 +40052,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
       solver->numeric == NULL || solver->n < 20000) {
     return 0;
   }
-  if (kls_htc336_9129_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
+  if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
     return 0;
   }
   if (kls_circuit5m_h100_policy_enabled(
@@ -40502,8 +40557,7 @@ static int should_try_auto_metis(const kls_solver *solver) {
     /* AUTO already selected the measured NodeND horizon winner. */
     return 0;
   }
-  if (solver != NULL && kls_htc336_9129_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
+  if (kls_sparse_partial_diagonal_amd_btf_cycle(solver)) {
     return 0;
   }
   if (solver != NULL && kls_circuit5m_h100_policy_enabled(
@@ -41637,15 +41691,29 @@ static int choose_symbolic_for_pattern(UF_long n,
       n, col_ptr, row_idx, &amf_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
   }
-  if (kls_htc336_9129_h100_policy_enabled(n, col_ptr, options)) {
-    /* The entrywise H100 winner retains the original normal AMD/BTF
-       structure.  AUTO's generic no-BTF retry and later SPRAL match both
-       produce slower numerics, so settle the measured symbolic directly. */
+  if (kls_sparse_partial_diagonal_amd_btf_analyze_path && options != NULL &&
+      options->ordering == KLS_ORDERING_AUTO) {
+    /* A partial diagonal proposes the direct route, but does not decide it.
+       Retain the actual AMD/BTF candidate only when its SCC decomposition,
+       rank, estimated fill, and work all land in the normalized fragmented
+       regime; otherwise resume ordinary AUTO selection. */
     kls_options amd_options = *options;
     amd_options.ordering = KLS_ORDERING_AMD;
-    return choose_symbolic_for_pattern(
+    const int status = choose_symbolic_for_pattern(
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
+    if (status == KLS_OK && *symbolic_out != NULL &&
+        kls_sparse_fragmented_dominant_btf_symbolic_work_profile(
+          n, col_ptr[n], KLS_ORIENTATION_NORMAL, KLS_ORDERING_AMD,
+          *symbolic_out)) {
+      kls_sparse_partial_diagonal_amd_btf_selected = 1;
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
   }
   if (kls_compact_partial_diagonal_column_fringe_analyze_path &&
       kls_compact_partial_diagonal_column_fringe_options_enabled(
@@ -42481,6 +42549,10 @@ static int copy_compressed_candidate(kls_pattern_candidate *candidate,
           &candidate->balanced_moderate_hub_btf_storage,
           &candidate->balanced_moderate_hub_btf_nblocks)
       : KLS_BALANCED_MODERATE_HUB_NONE;
+  candidate->sparse_partial_diagonal_amd_btf_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_sparse_partial_diagonal_amd_btf_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   return KLS_OK;
 }
 
@@ -42541,6 +42613,10 @@ static int transpose_candidate(const kls_pattern_candidate *source,
           &candidate->balanced_moderate_hub_btf_storage,
           &candidate->balanced_moderate_hub_btf_nblocks)
       : KLS_BALANCED_MODERATE_HUB_NONE;
+  candidate->sparse_partial_diagonal_amd_btf_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_sparse_partial_diagonal_amd_btf_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
   candidate->small_symmetric_no_btf_class =
     source->small_symmetric_no_btf_class;
   candidate->compact_partial_diagonal_column_fringe_class =
@@ -42593,6 +42669,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_balanced_moderate_hub_amd_analyze_class;
   const int balanced_hub_selected_saved =
     kls_balanced_moderate_hub_amd_selected;
+  const int sparse_partial_diagonal_saved =
+    kls_sparse_partial_diagonal_amd_btf_analyze_path;
+  const int sparse_partial_diagonal_selected_saved =
+    kls_sparse_partial_diagonal_amd_btf_selected;
   const struct kls_btf_stash_s balanced_btf_stash_saved = kls_btf_stash;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
@@ -42630,6 +42710,11 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
       : KLS_BALANCED_MODERATE_HUB_NONE;
   kls_balanced_moderate_hub_amd_selected =
     KLS_BALANCED_MODERATE_HUB_NONE;
+  kls_sparse_partial_diagonal_amd_btf_analyze_path =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->sparse_partial_diagonal_amd_btf_class &&
+    kls_sparse_partial_diagonal_amd_btf_options_enabled(options);
+  kls_sparse_partial_diagonal_amd_btf_selected = 0;
   if (kls_balanced_moderate_hub_amd_analyze_class ==
         KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
       candidate->balanced_moderate_hub_btf_storage != NULL &&
@@ -42665,6 +42750,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_large_reciprocal_hub_amd_btf_selected;
   candidate->balanced_moderate_hub_amd_selected =
     kls_balanced_moderate_hub_amd_selected;
+  candidate->sparse_partial_diagonal_amd_btf_selected =
+    kls_sparse_partial_diagonal_amd_btf_selected;
   kls_large_sparse_amf3_analyze_path = saved;
   kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
   kls_small_symmetric_no_btf_analyze_path = symmetric_saved;
@@ -42685,6 +42772,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
   kls_balanced_moderate_hub_amd_analyze_class = balanced_hub_saved;
   kls_balanced_moderate_hub_amd_selected =
     balanced_hub_selected_saved;
+  kls_sparse_partial_diagonal_amd_btf_analyze_path =
+    sparse_partial_diagonal_saved;
+  kls_sparse_partial_diagonal_amd_btf_selected =
+    sparse_partial_diagonal_selected_saved;
   return status;
 }
 
@@ -43217,6 +43308,13 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
       !candidate->symbolic->do_btf))
       ? candidate->balanced_moderate_hub_amd_selected
       : KLS_BALANCED_MODERATE_HUB_NONE;
+  solver->sparse_partial_diagonal_amd_btf_cycle =
+    candidate->sparse_partial_diagonal_amd_btf_selected &&
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_AMD &&
+    kls_sparse_fragmented_dominant_btf_symbolic_work_profile(
+      candidate->n, candidate->nnz, candidate->orientation,
+      candidate->selected_ordering, candidate->symbolic);
 
   candidate->col_ptr = NULL;
   candidate->row_idx = NULL;
@@ -46351,12 +46449,14 @@ int kls_analyze_csc(kls_solver *solver,
       KLS_BALANCED_MODERATE_HUB_NONE &&
     kls_balanced_moderate_hub_amd_class_enabled(
       &normalized, normal.balanced_moderate_hub_amd_class);
+  const int sparse_partial_diagonal_prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    normal.sparse_partial_diagonal_amd_btf_class &&
+    kls_sparse_partial_diagonal_amd_btf_options_enabled(&normalized);
   const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO &&
     ((row_hub_prefer_auto_normal && normal.n <= 30000u) ||
      kls_tsopf_fs_b9_c1_h100_input_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
-     kls_htc336_9129_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      kls_circuit5m_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
@@ -46372,7 +46472,8 @@ int kls_analyze_csc(kls_solver *solver,
     partial_many_block_prefer_auto_normal ||
     row_hub_prefer_auto_normal ||
     reciprocal_hub_prefer_auto_normal ||
-    balanced_hub_prefer_auto_normal;
+    balanced_hub_prefer_auto_normal ||
+    sparse_partial_diagonal_prefer_auto_normal;
   if (normalized.orientation != KLS_ORIENTATION_NORMAL && !prefer_auto_normal) {
     status = transpose_candidate(&normal, KLS_ORIENTATION_TRANSPOSE, &transpose);
     if (status != KLS_OK) {
@@ -46388,6 +46489,7 @@ int kls_analyze_csc(kls_solver *solver,
       !row_hub_prefer_auto_normal &&
       !reciprocal_hub_prefer_auto_normal &&
       !balanced_hub_prefer_auto_normal &&
+      !sparse_partial_diagonal_prefer_auto_normal &&
       !((normal.large_sparse_full_diagonal_amf3_class &&
          kls_large_sparse_amf3_policy_enabled(&normalized)) ||
         (normal.large_bounded_degree_no_btf_amf_class &&
@@ -46424,12 +46526,15 @@ int kls_analyze_csc(kls_solver *solver,
      normal.large_reciprocal_hub_amd_btf_selected) ||
     (balanced_hub_prefer_auto_normal &&
      normal.balanced_moderate_hub_amd_selected !=
-       KLS_BALANCED_MODERATE_HUB_NONE);
+       KLS_BALANCED_MODERATE_HUB_NONE) ||
+    (sparse_partial_diagonal_prefer_auto_normal &&
+     normal.sparse_partial_diagonal_amd_btf_selected);
   if ((partial_column_fringe_prefer_auto_normal ||
        partial_many_block_prefer_auto_normal ||
        row_hub_prefer_auto_normal ||
        reciprocal_hub_prefer_auto_normal ||
-       balanced_hub_prefer_auto_normal) &&
+       balanced_hub_prefer_auto_normal ||
+       sparse_partial_diagonal_prefer_auto_normal) &&
       !ordinary_prefer_auto_normal &&
       (status != KLS_OK || !guarded_normal_selected)) {
     /* The fast path intentionally avoided even constructing A^T.  If the
@@ -46552,14 +46657,17 @@ int kls_analyze_csr(kls_solver *solver,
       KLS_BALANCED_MODERATE_HUB_NONE &&
     kls_balanced_moderate_hub_amd_class_enabled(
       &normalized, normal.balanced_moderate_hub_amd_class);
+  const int sparse_partial_diagonal_prefer_auto_normal =
+    normalized.orientation == KLS_ORIENTATION_AUTO &&
+    normal.col_ptr != NULL &&
+    normal.sparse_partial_diagonal_amd_btf_class &&
+    kls_sparse_partial_diagonal_amd_btf_options_enabled(&normalized);
   const int ordinary_prefer_auto_normal =
     normalized.orientation == KLS_ORIENTATION_AUTO && normal.col_ptr != NULL &&
     ((normal.n <= 30000u &&
       normal.sparse_diagonal_row_hub_no_btf_class &&
       kls_sparse_diagonal_row_hub_no_btf_policy_enabled(&normalized)) ||
      kls_tsopf_fs_b9_c1_h100_input_policy_enabled(
-       normal.n, normal.col_ptr, &normalized) ||
-     kls_htc336_9129_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
      kls_circuit5m_h100_policy_enabled(
        normal.n, normal.col_ptr, &normalized) ||
@@ -46572,19 +46680,23 @@ int kls_analyze_csr(kls_solver *solver,
                                      normal.row_idx));
   const int prefer_auto_normal = ordinary_prefer_auto_normal ||
     reciprocal_hub_prefer_auto_normal ||
-    balanced_hub_prefer_auto_normal;
+    balanced_hub_prefer_auto_normal ||
+    sparse_partial_diagonal_prefer_auto_normal;
   const double kls_ana_sel_start = kls_now_seconds();
   status = select_candidate(normal.col_ptr == NULL ? NULL : &normal,
                             prefer_auto_normal ? NULL : &transpose,
                             &normalized, &chosen);
   const int guarded_hub_prefer_auto_normal =
-    reciprocal_hub_prefer_auto_normal || balanced_hub_prefer_auto_normal;
+    reciprocal_hub_prefer_auto_normal || balanced_hub_prefer_auto_normal ||
+    sparse_partial_diagonal_prefer_auto_normal;
   const int guarded_hub_selected =
     (reciprocal_hub_prefer_auto_normal &&
      normal.large_reciprocal_hub_amd_btf_selected) ||
     (balanced_hub_prefer_auto_normal &&
      normal.balanced_moderate_hub_amd_selected !=
-       KLS_BALANCED_MODERATE_HUB_NONE);
+       KLS_BALANCED_MODERATE_HUB_NONE) ||
+    (sparse_partial_diagonal_prefer_auto_normal &&
+     normal.sparse_partial_diagonal_amd_btf_selected);
   if (guarded_hub_prefer_auto_normal &&
       !ordinary_prefer_auto_normal &&
       (status != KLS_OK || !guarded_hub_selected)) {

@@ -16587,7 +16587,6 @@ static int test_kls_first_separator_queue_plan(void) {
       ok = 0;
     }
   }
-
 cleanup:
   if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
                          saved_first)) {
@@ -20651,6 +20650,224 @@ static int run_sparse_fragmented_grid_solve_case(
   return ok;
 }
 
+static int test_sparse_partial_diagonal_direct_amd_analysis(void) {
+  const int32_t grid_rows = 45;
+  const int32_t grid_cols = 1889;
+  const int32_t core = grid_rows * grid_cols;
+  const int32_t n = 100000;
+  const int32_t grid_edges =
+    grid_rows * (grid_cols - 1) + (grid_rows - 1) * grid_cols;
+  const int32_t nnz = n + 2 * grid_edges;
+  const int32_t permuted_rows = (core / 2) & ~1;
+  const int32_t row_shift = permuted_rows / 2;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_HTC336_9129_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  int ok = ap != NULL && ai != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    const int32_t column_start = p;
+    if (col < core) {
+      const int32_t row = col / grid_cols;
+      const int32_t grid_col = col % grid_cols;
+      if (row > 0) {
+        ai[p++] = col - grid_cols;
+      }
+      if (grid_col > 0) {
+        ai[p++] = col - 1;
+      }
+      ai[p++] = col;
+      if (grid_col + 1 < grid_cols) {
+        ai[p++] = col + 1;
+      }
+      if (row + 1 < grid_rows) {
+        ai[p++] = col + grid_cols;
+      }
+    } else {
+      ai[p++] = col;
+    }
+    for (int32_t q = column_start; q < p; ++q) {
+      if (ai[q] < permuted_rows) {
+        ai[q] = (ai[q] + row_shift) % permuted_rows;
+      }
+    }
+    for (int32_t q = column_start + 1; q < p; ++q) {
+      const int32_t row = ai[q];
+      int32_t insert = q;
+      while (insert > column_start && ai[insert - 1] > row) {
+        ai[insert] = ai[insert - 1];
+        --insert;
+      }
+      ai[insert] = row;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected partial-diagonal grid nnz: %d/%d\n", p,
+            nnz);
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (unsetenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD") != 0 ||
+      unsetenv("KLS_DISABLE_HTC336_9129_H100_POLICY") != 0) {
+    perror("unsetenv sparse partial-diagonal direct AMD");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  ok = require_ok(kls_create(&solver),
+                  "create sparse partial-diagonal analysis") &&
+    require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                               &options),
+               "analyze sparse partial-diagonal direct AMD");
+  if (ok) {
+    kls_stats stats;
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    ok = require_ok(kls_get_stats(solver, &stats),
+                    "stats sparse partial-diagonal direct AMD");
+    const double est_fill = (double)stats.nnz_l + (double)stats.nnz_u;
+    if (ok &&
+        (stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+         stats.selected_ordering != KLS_ORDERING_AMD ||
+         stats.selected_btf != 1 || stats.structural_rank != n ||
+         stats.nblocks < n / 10 || stats.nblocks > n / 5 ||
+         (double)stats.max_block < 0.80 * (double)n ||
+         (double)stats.max_block > 0.95 * (double)n ||
+         est_fill < 32.0 * (double)n ||
+         est_fill > 64.0 * (double)n ||
+         stats.estimated_flops < 1000.0 * (double)n ||
+         stats.estimated_flops > 8192.0 * (double)n)) {
+      fprintf(stderr,
+              "unexpected partial-diagonal direct AMD analysis:"
+              " orient=%d order=%d btf=%d rank=%" PRId64
+              " blocks=%" PRId64 " max=%" PRId64
+              " fill=%.0f flops=%.0f\n",
+              (int)stats.selected_orientation,
+              (int)stats.selected_ordering,
+              stats.selected_btf,
+              stats.structural_rank, stats.nblocks, stats.max_block,
+              est_fill, stats.estimated_flops);
+      ok = 0;
+    }
+  }
+
+  if (ok) {
+    /* Keep the same size, density, diagonal coverage, dominant BTF core, and
+       row permutation, but replace the 2-D core with a narrow band.  Its AMD
+       symbolic is far below the retained-work floor, so the proposal must
+       fall back without carrying the direct-route selection bit. */
+    kls_destroy(solver);
+    solver = NULL;
+    p = 0;
+    for (int32_t col = 0; col < n; ++col) {
+      ap[col] = p;
+      const int32_t column_start = p;
+      if (col < core) {
+        if (col > 0) {
+          ai[p++] = col - 1;
+        }
+        ai[p++] = col;
+        if (col + 1 < core) {
+          ai[p++] = col + 1;
+        }
+        if (col + 2 < core) {
+          ai[p++] = col + 2;
+        }
+      } else {
+        ai[p++] = col;
+      }
+      for (int32_t q = column_start; q < p; ++q) {
+        if (ai[q] < permuted_rows) {
+          ai[q] = (ai[q] + row_shift) % permuted_rows;
+        }
+      }
+      for (int32_t q = column_start + 1; q < p; ++q) {
+        const int32_t row = ai[q];
+        int32_t insert = q;
+        while (insert > column_start && ai[insert - 1] > row) {
+          ai[insert] = ai[insert - 1];
+          --insert;
+        }
+        ai[insert] = row;
+      }
+    }
+    ap[n] = p;
+    if (p < 3 * n || p > 5 * n ||
+        !require_ok(kls_create(&solver),
+                    "create rejected partial-diagonal analysis") ||
+        !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                    &options),
+                    "analyze rejected partial-diagonal direct AMD")) {
+      ok = 0;
+    }
+    if (ok) {
+      kls_stats stats;
+      memset(&stats, 0, sizeof(stats));
+      stats.struct_size = sizeof(stats);
+      ok = require_ok(kls_get_stats(solver, &stats),
+                      "stats rejected partial-diagonal direct AMD");
+      const double est_fill = (double)stats.nnz_l + (double)stats.nnz_u;
+      const int retained_profile =
+        stats.selected_orientation == KLS_ORIENTATION_NORMAL &&
+        stats.selected_ordering == KLS_ORDERING_AMD &&
+        stats.selected_btf == 1 && stats.structural_rank == n &&
+        stats.nblocks >= n / 10 && stats.nblocks <= n / 5 &&
+        (double)stats.max_block >= 0.80 * (double)n &&
+        (double)stats.max_block <= 0.95 * (double)n &&
+        est_fill >= 32.0 * (double)n &&
+        est_fill <= 64.0 * (double)n &&
+        stats.estimated_flops >= 1000.0 * (double)n &&
+        stats.estimated_flops <= 8192.0 * (double)n;
+      if (ok && retained_profile) {
+        fprintf(stderr,
+                "low-work partial-diagonal proposal was retained:"
+                " order=%d btf=%d blocks=%" PRId64
+                " fill=%" PRId64 "/%" PRId64 " flops=%.0f\n",
+                (int)stats.selected_ordering, stats.selected_btf,
+                stats.nblocks, stats.nnz_l, stats.nnz_u,
+                stats.estimated_flops);
+        ok = 0;
+      }
+    }
+  }
+
+cleanup:
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD",
+                         had_policy,
+                         saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_HTC336_9129_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 static int test_sparse_fragmented_dominant_btf_solve_policy(void) {
   const int32_t grid_rows = 45;
   const int32_t grid_cols = 1889;
@@ -20770,6 +20987,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_large_sparse_low_degree_retained_tolerance()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_sparse_partial_diagonal_direct_amd_analysis()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

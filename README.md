@@ -1684,6 +1684,18 @@ fill and work fall in the same moderate band. Set
 `KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE=1`, or
 `KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS=1` for independent A/B diagnosis.
 
+For the corresponding AUTO analysis problem, a 40--60% structural diagonal
+and three-to-five input entries per row only propose a direct AMD/BTF
+candidate. KLS retains that candidate when the computed symbolic has full
+structural rank, a 10--20% block fringe, an 80--95% dominant core, estimated
+fill of 32--64 entries per row, and estimated work of 1,000--8,192 flops per
+row. The accepted state stays unscaled and does not pay later row-matching,
+scale, or METIS replacement trials. A rejected proposal resumes ordinary AUTO
+ordering and orientation selection. Set
+`KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD=1` to disable the policy;
+`KLS_DISABLE_HTC336_9129_H100_POLICY` remains as a compatibility alias for the
+superseded matrix-window switch.
+
 When row refactor has retained exact compact dense groups, normal and transpose
 row solves consume complete groups as row-major triangular panels for one RHS
 and four-RHS chunks, falling back to scalar row loops when a group does not

@@ -17642,3 +17642,58 @@ policy functions remain out of the hot refactor loop, and the established
 EGraph column kernel retains explicit alignment so classifier growth does not
 change its instruction alignment.  Release and ASan/LSan CTest both pass all
 three tests.
+
+SPARSE PARTIAL-DIAGONAL DIRECT AMD POLICY GENERALIZED (2026-07-23).  The
+remaining `HTC_336_9129` AUTO policy was a single exact input window:
+226,300--226,400 rows and 760K--770K retained entries under the eight-thread
+H100 options.  That one predicate forced normal AMD/BTF, unscaled numeric
+factorization, and suppression of pre-static matching plus later SPRAL,
+scale, and METIS trials.  Appending only 61 scalar diagonal components moved
+the matrix to 226,401 rows and exposed the overfit: AUTO adopted a matched
+numeric and measured about 2.11s, while explicit normal AMD/BTF without
+scaling or matching measured about 1.31s with a `4.02e-12` residual.
+
+The replacement has two independently meaningful stages.  A sparse input
+with 3--5 entries per row and 40%--60% structural diagonal coverage may
+propose normal AMD/BTF.  The proposal is retained only when the computed
+symbolic has full structural rank, 10%--20% BTF blocks, an 80%--95% dominant
+core, 32--64 estimated factor entries per row, and 1,000--8,192 estimated
+flops per row.  A rejected proposal resumes the ordinary ordering and
+orientation chooser.  Only an accepted symbolic carries a solver-lifetime
+bit into the unscaled factor and the matching/scale/METIS suppression gates.
+The generic diagnostic disable is
+`KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD`, with the old HTC disable
+retained as an alias.
+
+The normalized rule admits both IPSO operating points and metamorphic
+extensions rather than one size box.  `HTC_336_4438` has 226,340 rows and
+783,496 retained entries, so it was excluded by the exact selector despite an
+AMD/BTF symbolic with 29,588 blocks, a 196,753-row core, `46.55n` estimated
+fill, and `4244n` estimated work.  Five alternating pre-generalization/new
+H100 pairs reduced its median from 3.050s to 2.137s (`0.701x`), its initial
+factor from about 0.968s to 0.338s, and its steady refactor from 13.96ms to
+11.03ms.  The +61, 9129+1,000, and 4438+1,000 variants all select the same
+direct state despite lying outside the former dimension/nonzero box; their
+current H100 samples were 1.815s, 1.862s, and 2.134s, respectively.
+
+An independent 100,000-row smoke case applies a large row permutation to half
+of the earlier grid core.  It has the required partial diagonal without
+changing the matrix's structural rank or relying on a benchmark identity, and
+its measured 2-D AMD/BTF symbolic is accepted.  A second row-permuted fixture
+keeps the same order, density, diagonal coverage, dominant core, and scalar
+fringe but replaces the 2-D grid with a narrow band; its low-work symbolic is
+rejected.  A scan of all 110 local paper matrices plus the 48 independently
+partitioned SuiteSparse development/holdout matrices found no unrelated input
+that reaches even the partial-diagonal proposal (the closest held-out sparse
+candidate, `shar_te2-b3`, has one diagonal entry).
+
+Both newly direct IPSO numerics completed 1,000 verified entrywise generations
+at amplitudes 0.001, 0.01, and 0.1.  Worst relative-L2 residuals for 9129 were
+`5.56e-12`, `7.38e-12`, and `6.55e-10`; for 4438 they were `1.46e-12`,
+`1.68e-12`, and `2.58e-10`.  The proposal and symbolic checks execute only
+during analysis, and the persisted field remains in the solver's cold policy
+tail.  The classifier helpers are also cold and out of line so their growth
+does not perturb unrelated hot refactor code.  Three alternating pairs on the
+low-work `power197k` control put new/parent at 1.002 by median H100; five final
+pairs on the high-work `twotone` control put it at 0.995.  Both retained their
+pre-existing ordering, scaling, matching, and numeric paths.
