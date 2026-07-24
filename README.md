@@ -109,6 +109,33 @@ reports `nearly_missing_diagonal_early_match_selected`; set
 `KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY=1` to restore deferred
 evaluation.  The former Hamrle2-specific input check is removed.
 
+AUTO inputs that can carry the complete compact matching lifecycle now use a
+second staged policy instead of a `gemat11`/`gemat12` dimension and nonzero
+fingerprint.  The input proposal requires 4,001--65,535 rows and at most
+65,535 entries, 2--16 entries per row overall, no empty row or column, row and
+column degrees at most 64, and at most 1/32 of columns represented on the
+structural diagonal.  A lightweight NATURAL placeholder is replaced only
+after a value-aware match covers at least 99.5% of rows and the matched
+symbolic proves full rank with a block spanning at least 3/4 of the matrix.
+Inputs below four entries per row retain the full weighted matcher, where
+alternative-edge quality matters; denser inputs use the lower-overhead compact
+matcher.  The accepted one-block holdout keeps the mapped update engine; the
+specialized compact row/direct-value lifecycle additionally requires at least
+64 BTF blocks, balanced L/U streams, at most 16 factor entries and 128 measured
+flops per row, at most `n/64 + 16` off-diagonal pivots, and no scaling,
+nudging, perturbation, or predicted numeric.  This separates matching
+economics from recurring-engine eligibility.
+
+`kls_stats` and benchmark JSON expose
+`compact_missing_diagonal_match_candidate`,
+`compact_missing_diagonal_match_selected`, and
+`compact_missing_diagonal_factor_eligible`.  Set
+`KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH=1` to disable the complete policy;
+the former `KLS_*GEMAT*` switches remain diagnostic aliases for individual
+stages.  `Hamrle2` is included in the extended SuiteSparse manifest as a
+cross-family one-block holdout.  The exact Gemat selector and Gemat-named
+internal representations are removed.
+
 For an AUTO/8-thread normal-AMD symbolic whose full-rank BTF consists of many
 genuinely tiny components, KLS avoids global block-ordering work that costs
 more than the complete factor.  The structural contract covers

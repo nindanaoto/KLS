@@ -18767,3 +18767,93 @@ per-generation relative residual `1.93e-16`.  Release and
 ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized runs also
 exercise `mimo8x8_system` and independent `circuit_3` positives with 5,148 and
 4,520 cached singleton blocks; their residuals are `9.58e-17` and `5.98e-15`.
+
+COMPACT MISSING-DIAGONAL MATCH LIFECYCLE GENERALIZED (2026-07-24).  The
+remaining `gemat11`/`gemat12` selector required 4,900--4,950 rows and
+32,900--33,300 entries.  That fingerprint reached far beyond the initial
+matching choice: it selected a compact greedy matcher and fast weak-diagonal
+census, skipped matching equilibration, installed a `1e-5` pivot tolerance,
+prewarmed the row worker pool, enabled compact row/value/solve representations,
+selected the lean row refactor directly, changed worker spin behavior, and
+suppressed the vendor BTF solve.  The retained behavior was valuable, but its
+consumers inferred all of those independent capabilities from two dimensions
+and one nonzero interval.
+
+The replacement is staged.  The input proposal accepts normal AUTO inputs
+with 4,001--65,535 rows, 2--16 entries per row overall, no more than 65,535
+stored entries, nonempty rows and columns, maximum row and column degree 64,
+and structural diagonals in at most 1/32 of the columns.  Those bounds express
+the 16-bit input-position/direct-map representation and the bounded-degree
+matching cost.  A match must still cover 99.5% of rows.  The matched symbolic
+must then be normal AMD+BTF, full rank, unscaled, balanced in estimated L/U,
+bounded to 64 estimated entries and 512 estimated flops per row, and contain a
+component spanning at least three quarters of the matrix.  A failed match,
+rank test, or dominant-component test discards the NATURAL placeholder and
+rebuilds ordinary AUTO analysis.
+
+Matcher choice is itself resource-based.  Inputs with at least four entries
+per row use the lower-overhead compact weight-sorted matcher plus cardinality
+augmentation.  Sparser alternative-edge graphs keep the full weighted matcher;
+this preserves the substantially better `Hamrle2` factor.  Every accepted
+proposal is tested unscaled.  Only a fragmented matched symbolic with at least
+64 BTF blocks receives the tighter `1e-5` pivot tolerance.  The final recurring
+row/direct-value/solve capability additionally requires a real, unpredicted
+numeric with no scaling array, nudge, or perturbation; at most `n/64 + 16`
+off-diagonal pivots; balanced L/U; 2--16 retained factor entries per row; and
+at most 128 measured factor flops per row.  A selected one-block match therefore
+keeps the mapped update engine instead of inheriting the fragmented row route.
+
+The exact selector is removed, and every internal Gemat-named representation,
+worker, direct map, and solve helper is renamed for the compact matched
+capability.  The old `KLS_*GEMAT*` environment names remain compatibility
+aliases, while generic stage controls are available under
+`KLS_*COMPACT_MATCH*` and
+`KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH=1` disables the whole policy.
+`compact_missing_diagonal_match_candidate`,
+`compact_missing_diagonal_match_selected`, and
+`compact_missing_diagonal_factor_eligible` expose the three decisions through
+`kls_stats` and benchmark JSON.
+
+A structural screen of 110 local SuiteSparse matrices admits exactly three
+input proposals: `gemat11` (4,929 rows, 33,185 header entries, 13 structural
+diagonals), `gemat12` (4,929, 33,111, 9), and cross-family `Hamrle2` (5,952,
+22,162, 8).  `Hamrle2` is now part of the extended manifest.  It selects the
+match and produces a full 5,952-row block, but correctly reports recurring
+factor eligibility zero and uses mapped updates.  The two former targets
+produce 352/378 blocks with largest blocks 4,578/4,552 and retain the complete
+fragmented compact lifecycle.
+
+The smoke suite supplies two independent structural checks.  Its positive is
+an 8,192-row, 34,816-entry matrix with a shifted five-band 6,144-row strongly
+connected core and 2,048 scalar-fringe columns.  The row shift removes every
+structural diagonal without changing the intended strong transversal.  The
+matched symbolic has 2,049 blocks and a 6,144-row core, passes the measured
+factor gate, selects the lean row refactor, and solves an independently formed
+changed-value right-hand side.  A master-disable run reports all three stages
+zero.  The existing same-order missing-diagonal control reaches the input
+proposal but decomposes into 4,096 scalar blocks; its matched symbolic has no
+dominant component, so adoption and factor eligibility remain zero.  Explicit
+ordering and legacy-disable controls also remain zero.
+
+Twenty-five pinned parent/current pairs preserve the established targets.
+Modeled-cycle current/parent ratios are `1.00084` for `gemat11` and `1.00831`
+for `gemat12`; recurring refactor ratios are `1.00773` and `1.00931`, solve
+ratios `1.00097` and `0.99925`, and no route or factor-geometry decision
+changes.  The cross-family `Hamrle2` holdout has a `0.84852` modeled-cycle
+ratio: the generic proposal cuts analysis and first-factor ratios to `0.07214`
+and `0.60154`, while deliberately retaining its mapped recurring route.
+Twenty-five same-binary enabled/disabled pairs put modeled-cycle ratios at
+`0.57330`, `0.44329`, and `0.77213` for `gemat11`, `gemat12`, and `Hamrle2`.
+A separate 48-pair screen over 16 unrelated circuit and power matrices finds
+zero orientation, ordering, scaling, BTF, block-geometry, factor-path, fill,
+or off-diagonal-pivot changes.
+
+All three corpus positives completed 100 independently verified generations
+for entrywise, rank-preserving, and localized-entrywise changes through 10%
+amplitude.  The worst entrywise per-generation relative-L2 residual is
+`7.59e-11` on `Hamrle2`; the two former targets remain below `4.35e-13`, and
+the other change modes remain below `7.18e-13`.  Release and
+ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+10%-amplitude changed-value runs retain decisions `1/1/1`, `1/1/1`, and
+`1/1/0` for `gemat11`, `gemat12`, and `Hamrle2`; their maximum verified
+residuals over three generations are `2.01e-15`, `1.35e-14`, and `1.75e-12`.

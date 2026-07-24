@@ -13582,6 +13582,9 @@ static int test_nearly_missing_diagonal_early_match_policy(void) {
   if (!require_ok(kls_get_stats(solver, &stats),
                   "stats nearly-missing-diagonal early match") ||
       stats.nearly_missing_diagonal_early_match_selected != 1 ||
+      stats.compact_missing_diagonal_match_candidate != 1 ||
+      stats.compact_missing_diagonal_match_selected != 1 ||
+      stats.compact_missing_diagonal_factor_eligible != 0 ||
       stats.last_factor_path != KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST ||
       !stats.selected_static_pivoting ||
       stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
@@ -13592,13 +13595,18 @@ static int test_nearly_missing_diagonal_early_match_policy(void) {
     fprintf(stderr,
             "unexpected nearly-missing-diagonal early-match policy:"
             " selected=%d path=%s static=%d orientation=%d ordering=%d"
-            " scale=%d btf=%d blocks=%" PRId64 " max=%" PRId64
+            " compact=%d/%d/%d scale=%d btf=%d blocks=%" PRId64
+            " max=%" PRId64
             " rank=%" PRId64 "\n",
             stats.nearly_missing_diagonal_early_match_selected,
             kls_factor_path_name(stats.last_factor_path),
             stats.selected_static_pivoting,
             (int)stats.selected_orientation,
-            (int)stats.selected_ordering, stats.selected_scale,
+            (int)stats.selected_ordering,
+            stats.compact_missing_diagonal_match_candidate,
+            stats.compact_missing_diagonal_match_selected,
+            stats.compact_missing_diagonal_factor_eligible,
+            stats.selected_scale,
             stats.selected_btf, stats.nblocks, stats.max_block,
             stats.structural_rank);
     ok = 0;
@@ -13646,7 +13654,10 @@ static int test_nearly_missing_diagonal_early_match_policy(void) {
   stats.struct_size = sizeof(stats);
   if (!require_ok(kls_get_stats(control_solver, &stats),
                   "stats nearly-missing-diagonal explicit control") ||
-      stats.nearly_missing_diagonal_early_match_selected != 0) {
+      stats.nearly_missing_diagonal_early_match_selected != 0 ||
+      stats.compact_missing_diagonal_match_candidate != 0 ||
+      stats.compact_missing_diagonal_match_selected != 0 ||
+      stats.compact_missing_diagonal_factor_eligible != 0) {
     fprintf(stderr,
             "explicit nearly-missing-diagonal control selected policy\n");
     ok = 0;
@@ -13671,7 +13682,10 @@ static int test_nearly_missing_diagonal_early_match_policy(void) {
   stats.struct_size = sizeof(stats);
   if (!require_ok(kls_get_stats(control_solver, &stats),
                   "stats nearly-missing-diagonal disabled control") ||
-      stats.nearly_missing_diagonal_early_match_selected != 0) {
+      stats.nearly_missing_diagonal_early_match_selected != 0 ||
+      stats.compact_missing_diagonal_match_candidate != 0 ||
+      stats.compact_missing_diagonal_match_selected != 0 ||
+      stats.compact_missing_diagonal_factor_eligible != 0) {
     fprintf(stderr,
             "disabled nearly-missing-diagonal control selected policy\n");
     ok = 0;
@@ -13714,11 +13728,18 @@ static int test_nearly_missing_diagonal_early_match_policy(void) {
   if (!require_ok(kls_get_stats(control_solver, &stats),
                   "stats nearly-missing-diagonal block control") ||
       stats.nearly_missing_diagonal_early_match_selected != 0 ||
+      stats.compact_missing_diagonal_match_candidate != 1 ||
+      stats.compact_missing_diagonal_match_selected != 0 ||
+      stats.compact_missing_diagonal_factor_eligible != 0 ||
       stats.nblocks != n || stats.max_block != 1) {
     fprintf(stderr,
             "cheap nearly-missing-diagonal control selected policy:"
-            " selected=%d blocks=%" PRId64 " max=%" PRId64 "\n",
+            " selected=%d compact=%d/%d/%d blocks=%" PRId64
+            " max=%" PRId64 "\n",
             stats.nearly_missing_diagonal_early_match_selected,
+            stats.compact_missing_diagonal_match_candidate,
+            stats.compact_missing_diagonal_match_selected,
+            stats.compact_missing_diagonal_factor_eligible,
             stats.nblocks, stats.max_block);
     ok = 0;
   }
@@ -13739,6 +13760,204 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
+  return ok;
+}
+
+static int test_compact_missing_diagonal_fragmented_factor_policy(void) {
+  const int32_t n = 8192;
+  const int32_t core = 6144;
+  const int32_t row_shift = n / 2 + 1;
+  const int32_t nnz = 5 * core + 2 * (n - core);
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_disable_value =
+    getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH");
+  char *saved_disable = saved_disable_value != NULL
+    ? strdup(saved_disable_value) : NULL;
+  const int had_disable = saved_disable_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *control = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && changed != NULL &&
+    expected != NULL && b != NULL && x != NULL &&
+    (!had_disable || saved_disable != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") != 0) {
+    perror("configure compact missing-diagonal match policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    int32_t rows[5];
+    double values[5];
+    const int count = col < core ? 5 : 2;
+    if (col < core) {
+      rows[0] = col;
+      rows[1] = (col + 1) % core;
+      rows[2] = (col + core - 1) % core;
+      rows[3] = (col + 2) % core;
+      rows[4] = (col + core - 2) % core;
+      values[0] = 8.0;
+      values[1] = -0.5;
+      values[2] = -0.375;
+      values[3] = -0.25;
+      values[4] = -0.125;
+    } else {
+      rows[0] = col;
+      rows[1] = (col - core) % core;
+      values[0] = 4.0;
+      values[1] = -0.25;
+    }
+    for (int i = 0; i < count; ++i) {
+      rows[i] = (rows[i] + row_shift) % n;
+    }
+    for (int i = 1; i < count; ++i) {
+      const int32_t row = rows[i];
+      const double value = values[i];
+      int insert = i;
+      while (insert > 0 && rows[insert - 1] > row) {
+        rows[insert] = rows[insert - 1];
+        values[insert] = values[insert - 1];
+        --insert;
+      }
+      rows[insert] = row;
+      values[insert] = value;
+    }
+    ap[col] = p;
+    for (int i = 0; i < count; ++i) {
+      ai[p] = rows[i];
+      ax[p] = values[i];
+      changed[p] = values[i] *
+        (1.0 + 1.0e-4 * (double)(p % 13 - 6));
+      ++p;
+    }
+    expected[col] = 0.25 + 0.015625 * (double)(col % 37);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr, "unexpected compact missing-diagonal nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create compact missing-diagonal factor") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze compact missing-diagonal factor") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor compact missing-diagonal factor") ||
+      !require_ok(kls_refactor(solver, changed),
+                  "refactor compact missing-diagonal factor")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats compact missing-diagonal factor") ||
+      stats.compact_missing_diagonal_match_candidate != 1 ||
+      stats.compact_missing_diagonal_match_selected != 1 ||
+      stats.compact_missing_diagonal_factor_eligible != 1 ||
+      stats.nearly_missing_diagonal_early_match_selected != 1 ||
+      stats.refactor_lean_choice != 1 ||
+      stats.last_factor_path != KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST ||
+      stats.last_refactor_path != KLS_REFACTOR_PATH_ROW ||
+      stats.nblocks < 64 || stats.max_block * 4 < 3 * n) {
+    fprintf(stderr,
+            "unexpected compact missing-diagonal factor policy:"
+            " match=%d/%d factor=%d early=%d lean=%d paths=%s/%s"
+            " blocks=%" PRId64 " max=%" PRId64
+            " scale=%d offdiag=%" PRId64 " L/U=%" PRId64 "/%" PRId64
+            " est/flops=%.0f/%.0f\n",
+            stats.compact_missing_diagonal_match_candidate,
+            stats.compact_missing_diagonal_match_selected,
+            stats.compact_missing_diagonal_factor_eligible,
+            stats.nearly_missing_diagonal_early_match_selected,
+            stats.refactor_lean_choice,
+            kls_factor_path_name(stats.last_factor_path),
+            kls_refactor_path_name(stats.last_refactor_path),
+            stats.nblocks, stats.max_block, stats.selected_scale,
+            stats.offdiag_pivots, stats.nnz_l, stats.nnz_u,
+            stats.estimated_flops, stats.factor_flops);
+    ok = 0;
+    goto cleanup;
+  }
+
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve compact missing-diagonal factor")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "compact missing-diagonal solve mismatch at %d: %.17g"
+              " vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  if (setenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH", "1", 1) != 0 ||
+      !require_ok(kls_create(&control),
+                  "create compact missing-diagonal disabled control") ||
+      !require_ok(kls_analyze_csc(control, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze compact missing-diagonal disabled control") ||
+      !require_ok(kls_factor(control, ax),
+                  "factor compact missing-diagonal disabled control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control, &stats),
+                  "stats compact missing-diagonal disabled control") ||
+      stats.compact_missing_diagonal_match_candidate != 0 ||
+      stats.compact_missing_diagonal_match_selected != 0 ||
+      stats.compact_missing_diagonal_factor_eligible != 0) {
+    fprintf(stderr, "compact missing-diagonal disable control selected\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(control);
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH",
+                         had_disable,
+                         saved_disable != NULL ? saved_disable : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_disable);
   return ok;
 }
 
@@ -23401,6 +23620,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_nearly_missing_diagonal_early_match_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_compact_missing_diagonal_fragmented_factor_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_tiny_block_btf_policy()) {

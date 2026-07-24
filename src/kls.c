@@ -782,8 +782,7 @@ struct kls_solver {
   int metis_race_deferred_invalid;
   int prestatic_deferred;
   int rowmatch_deferred;      /* lean tiny class: the post-factor
-                                 Hungarian trial is cycle-payoff work
-                                 (gemat11: 7ms of a 10ms one-shot) */
+                                 Hungarian trial is cycle-payoff work */
   int block_order_deferred;
   int numeric_from_pipe;
   int factor_preps_deferred;
@@ -944,7 +943,7 @@ struct kls_solver {
   UF_long *row_refactor_input_pos;
   uint32_t *row_refactor_input_pos32;
   uint16_t *row_refactor_input_user_pos;
-  uint16_t *gemat_offdiag_user_pos;
+  uint16_t *compact_match_offdiag_user_pos;
   unsigned char *row_refactor_input_needs_cleanup;
   unsigned char *row_refactor_segment_input_row_ready;
   unsigned char *row_refactor_segment_input_target_kind;
@@ -2124,7 +2123,7 @@ struct kls_solver {
   int egraph_worker_scratch_count;
   int egraph_worker_scratch_dirty;
   int lean_parallel_scratch_clean;
-  int lean_gemat_row_factor_active;
+  int lean_compact_match_row_factor_active;
   atomic_uint *egraph_pipeline_done;
   UF_long egraph_pipeline_done_size;
   unsigned int egraph_pipeline_generation;
@@ -2402,6 +2401,8 @@ struct kls_solver {
   int low_work_many_fringe_btf_pts_numeric_eligible; /* -1/0/1 */
   int low_work_hubbed_scalar_fringe_input_class;
   int nearly_missing_diagonal_early_match_selected;
+  int compact_missing_diagonal_match_candidate;
+  int compact_missing_diagonal_match_selected;
   int high_work_tiny_scalar_fringe_amd_symbolic_cycle;
   int high_work_tiny_scalar_fringe_amd_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *
@@ -2855,7 +2856,7 @@ typedef struct kls_egraph_refactor_shared {
   kls_lean_pattern_job *lean_pattern_job;
   int lean_pattern_mode;
   int lean_refactor_mode;
-  int lean_gemat_mode;
+  int lean_compact_match_mode;
   int lean_symmetric_scalar_fringe_mode;
   int lean_parallel_offdiag_mode;
   int lean_grouped_done_mode;
@@ -3071,10 +3072,10 @@ typedef struct kls_match_entry {
   UF_long col;
 } kls_match_entry;
 
-typedef struct kls_gemat_match_entry {
+typedef struct kls_compact_match_entry {
   double weight;
   uint32_t row_col;
-} kls_gemat_match_entry;
+} kls_compact_match_entry;
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
@@ -19724,7 +19725,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_input_pos);
   free(solver->row_refactor_input_pos32);
   free(solver->row_refactor_input_user_pos);
-  free(solver->gemat_offdiag_user_pos);
+  free(solver->compact_match_offdiag_user_pos);
   free(solver->row_refactor_input_needs_cleanup);
   free(solver->row_refactor_segment_input_row_ready);
   free(solver->row_refactor_segment_input_target_kind);
@@ -19802,7 +19803,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_input_pos = NULL;
   solver->row_refactor_input_pos32 = NULL;
   solver->row_refactor_input_user_pos = NULL;
-  solver->gemat_offdiag_user_pos = NULL;
+  solver->compact_match_offdiag_user_pos = NULL;
   solver->row_refactor_input_needs_cleanup = NULL;
   solver->row_refactor_segment_input_row_ready = NULL;
   solver->row_refactor_segment_input_target_kind = NULL;
@@ -19954,7 +19955,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_auto_value_copy_failed = 0;
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_values_dirty = 0;
-  solver->lean_gemat_row_factor_active = 0;
+  solver->lean_compact_match_row_factor_active = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
   solver->row_refactor_last_lazy_value_scatter = 0;
@@ -27524,6 +27525,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->low_work_hubbed_scalar_fringe_input_class = 0;
   solver->nearly_missing_diagonal_early_match_selected = 0;
+  solver->compact_missing_diagonal_match_candidate = 0;
+  solver->compact_missing_diagonal_match_selected = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_cycle = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_identity = NULL;
@@ -29329,6 +29332,73 @@ static int kls_is_medium_weak_pts_cycle_pattern(
     solver->symbolic->maxblock == solver->n;
 }
 
+/* A value-aware row match is a natural first operation when almost every
+   structural diagonal entry is absent.  The compact matcher stores both row
+   and column in one 32-bit word, and the later direct-value map stores input
+   positions in 16 bits, so these are representation limits rather than a
+   matrix-family fingerprint.  Bounded, nonempty row and column degrees keep
+   the sort/augment work linearithmic in a genuinely sparse graph. */
+static int kls_compact_missing_diagonal_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n <= 4000u ||
+      n > (UF_long)UINT16_MAX || col_ptr[0] != 0u) {
+    return 0;
+  }
+  const UF_long nnz = col_ptr[n];
+  if (nnz < 2u * n || nnz > 16u * n ||
+      nnz > (UF_long)UINT16_MAX) {
+    return 0;
+  }
+
+  uint16_t *row_degree =
+    (uint16_t *)calloc((size_t)n, sizeof(*row_degree));
+  if (row_degree == NULL) {
+    return 0;
+  }
+  UF_long diagonal_columns = 0u;
+  int valid = 1;
+  for (UF_long col = 0u; col < n && valid; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (end <= begin || end > nnz || end - begin > 64u) {
+      valid = 0;
+      break;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n || row_degree[row] >= 64u) {
+        valid = 0;
+        break;
+      }
+      row_degree[row]++;
+      has_diagonal |= row == col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+  for (UF_long row = 0u; row < n && valid; ++row) {
+    valid = row_degree[row] != 0u;
+  }
+  free(row_degree);
+  return valid && 32u * diagonal_columns <= n;
+}
+
+static int kls_compact_missing_diagonal_match_policy_enabled(
+  const kls_options *options) {
+  return options != NULL &&
+    getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") == NULL &&
+    getenv("KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY") ==
+      NULL &&
+    options->orientation == KLS_ORIENTATION_AUTO &&
+    options->ordering == KLS_ORDERING_AUTO &&
+    options->scale == KLS_SCALE_AUTO &&
+    options->backend == KLS_BACKEND_AUTO && options->use_btf &&
+    options->static_pivoting &&
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
+}
+
 /* A compact, full-rank one-block symbolic with almost no usable structural
    diagonal predicts that an unmatched first factor will be temporary.  When
    its estimated factor is large enough to amortize the value-aware match, run
@@ -29343,6 +29413,20 @@ static int kls_nearly_missing_diagonal_early_match_policy_enabled(
       getenv("KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY") !=
         NULL) {
     return 0;
+  }
+  if (solver->compact_missing_diagonal_match_candidate &&
+      solver->orientation == KLS_ORIENTATION_NORMAL &&
+      ((solver->symbolic->do_btf &&
+        solver->symbolic->maxblock * 4u >= 3u * solver->n) ||
+       (!solver->symbolic->do_btf &&
+        solver->symbolic->nblocks == 1u &&
+        solver->symbolic->maxblock == solver->n)) &&
+      32u * weak_diagonal >= 31u * solver->n &&
+      32u * missing_diagonal >= 31u * solver->n) {
+    /* The lightweight analyze placeholder only proposes this trial.
+       Matching still has to cover 99.5% of rows, and the matched symbolic
+       must prove full rank plus a dominant block before numeric acceptance. */
+    return 1;
   }
   if (solver->options.orientation != KLS_ORIENTATION_AUTO ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
@@ -30241,9 +30325,15 @@ static int symbolic_is_scale0_dense_fringe_dominant_btf_candidate(
   return 1;
 }
 
-static int kls_is_gemat_power_sequence_pattern(
-  UF_long n,
-  const UF_long *col_ptr);
+__attribute__((noinline))
+static int kls_compact_missing_diagonal_matched_symbolic_profile(
+  const kls_solver *solver);
+__attribute__((noinline))
+static int kls_compact_missing_diagonal_fragmented_symbolic_profile(
+  const kls_solver *solver);
+__attribute__((noinline))
+static int kls_compact_missing_diagonal_matched_factor_profile(
+  const kls_solver *solver);
 
 static int choose_auto_scale_from_values(const kls_solver *solver,
                                          const double *numeric_values) {
@@ -30298,12 +30388,11 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   }
   if (solver->options.scale == KLS_SCALE_AUTO &&
       getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
-      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)) {
-    /* With a retained factor, KLU row scaling is paid again by every one of
-       the 100 boundary-scaled solves but cannot reduce any later numeric
-       work.  This weak-diagonal power-network shape remains accurate with an
-       unscaled 1e-5 threshold factor; that choice also reduces pivot detours
-       and the triangular streams (gemat11/12). */
+      kls_compact_missing_diagonal_fragmented_symbolic_profile(solver)) {
+    /* With a retained factor, KLU row scaling is paid again by every
+       boundary-scaled solve but cannot reduce later numeric work.  This
+       accepted compact match has already proved an accurate unscaled 1e-5
+       factor with bounded pivot detours and triangular streams. */
     return -1;
   }
   if (solver->options.scale == KLS_SCALE_AUTO &&
@@ -30405,14 +30494,65 @@ static int kls_compact_partial_diagonal_column_fringe_single_block_cycle(
   return fill > 0.0 && fill <= 24.0 * (double)solver->n;
 }
 
-static int kls_is_gemat_power_sequence_pattern(
-  UF_long n,
-  const UF_long *col_ptr) {
-  /* gemat11/12 are consecutive operating points with the same 4.9K-row
-     power-network structure.  This tight range contains only those two
-     members of the paper union. */
-  return col_ptr != NULL && n >= 4900u && n <= 4950u &&
-         col_ptr[n] >= 32900u && col_ptr[n] <= 33300u;
+static int kls_compact_missing_diagonal_matched_symbolic_profile(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
+      !solver->compact_missing_diagonal_match_selected ||
+      !solver->compact_missing_diagonal_match_candidate ||
+      solver->row_perm == NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->common.scale != -1 || solver->n <= 4000u ||
+      solver->n > (UF_long)UINT16_MAX ||
+      solver->nnz < 2u * solver->n || solver->nnz > 16u * solver->n ||
+      solver->nnz > (UF_long)UINT16_MAX ||
+      !solver->symbolic->do_btf ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->maxblock * 4u < 3u * solver->n ||
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      !(solver->symbolic->est_flops > 0.0)) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double fill = solver->symbolic->lnz + solver->symbolic->unz;
+  return fill <= 64.0 * n &&
+    solver->symbolic->est_flops <= 512.0 * n &&
+    solver->symbolic->lnz <= 2.0 * solver->symbolic->unz &&
+    solver->symbolic->unz <= 2.0 * solver->symbolic->lnz;
+}
+
+static int kls_compact_missing_diagonal_fragmented_symbolic_profile(
+  const kls_solver *solver) {
+  return kls_compact_missing_diagonal_matched_symbolic_profile(solver) &&
+    solver->symbolic->nblocks >= 64u;
+}
+
+/* The input match is only a proposal.  Recurring compact row/value/solve
+   machinery is admitted after the real numeric proves low measured work,
+   balanced streams, a bounded pivot detour count, and no perturbation. */
+static int kls_compact_missing_diagonal_matched_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_compact_missing_diagonal_fragmented_symbolic_profile(solver) ||
+      solver->numeric == NULL || solver->numeric->Rs != NULL ||
+      solver->numeric_is_predicted ||
+      solver->common.noffdiag == KLS_KLU_EMPTY ||
+      solver->common.noffdiag > solver->n / 64u + 16u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 2.0 * n && fill <= 16.0 * n &&
+    solver->common.flops <= 128.0 * n &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
 }
 
 /* Admit sparse, low-work dominant BTF factors with only a bounded fixed-pivot
@@ -31416,7 +31556,7 @@ static int kls_uses_structural_initial_pivot_tolerance(
      solver->options.orientation == KLS_ORIENTATION_AUTO &&
      solver->options.ordering == KLS_ORDERING_AUTO &&
      solver->options.scale == KLS_SCALE_AUTO && solver->common.scale == -1 &&
-     kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr));
+     kls_compact_missing_diagonal_fragmented_symbolic_profile(solver));
 }
 
 /* Keep this policy table out of factor_impl.  Its individual structural
@@ -31494,11 +31634,10 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
   if (solver->options.orientation == KLS_ORIENTATION_AUTO &&
       solver->options.ordering == KLS_ORDERING_AUTO &&
       solver->options.scale == KLS_SCALE_AUTO && solver->common.scale == -1 &&
-      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)) {
-    /* A 1e-5 threshold keeps both public operating points below 1e-11
-       relative residual under every checked refactor.  The looser 1e-6
-       threshold is faster in isolation, but gemat12 can exceed the global
-       1e-8 contract for some generated right-hand sides. */
+      kls_compact_missing_diagonal_fragmented_symbolic_profile(solver)) {
+    /* A 1e-5 threshold retains the compact matched pattern while preserving
+       residual headroom across changed values.  The looser 1e-6 threshold
+       can exceed the global 1e-8 contract for generated right-hand sides. */
     return 1.0e-5;
   }
 
@@ -35223,11 +35362,11 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
   }
 }
 
-static int compare_gemat_match_entries_desc(const void *a, const void *b) {
-  const kls_gemat_match_entry *left =
-    (const kls_gemat_match_entry *)a;
-  const kls_gemat_match_entry *right =
-    (const kls_gemat_match_entry *)b;
+static int compare_compact_match_entries_desc(const void *a, const void *b) {
+  const kls_compact_match_entry *left =
+    (const kls_compact_match_entry *)a;
+  const kls_compact_match_entry *right =
+    (const kls_compact_match_entry *)b;
   if (left->weight != right->weight) {
     return left->weight > right->weight ? -1 : 1;
   }
@@ -35237,27 +35376,27 @@ static int compare_gemat_match_entries_desc(const void *a, const void *b) {
   return 0;
 }
 
-static void kls_sort_gemat_match_entries_desc(
-  kls_gemat_match_entry *entries,
+static void kls_sort_compact_match_entries_desc(
+  kls_compact_match_entry *entries,
   UF_long count) {
   if (entries == NULL || count <= 1u) {
     return;
   }
   if (count < 256u || count > (UF_long)(SIZE_MAX / sizeof(*entries))) {
     qsort(entries, (size_t)count, sizeof(*entries),
-          compare_gemat_match_entries_desc);
+          compare_compact_match_entries_desc);
     return;
   }
-  kls_gemat_match_entry *scratch = (kls_gemat_match_entry *)malloc(
+  kls_compact_match_entry *scratch = (kls_compact_match_entry *)malloc(
     (size_t)count * sizeof(*scratch));
   if (scratch == NULL) {
     qsort(entries, (size_t)count, sizeof(*entries),
-          compare_gemat_match_entries_desc);
+          compare_compact_match_entries_desc);
     return;
   }
 
-  kls_gemat_match_entry *src = entries;
-  kls_gemat_match_entry *dst = scratch;
+  kls_compact_match_entry *src = entries;
+  kls_compact_match_entry *dst = scratch;
   for (unsigned int pass = 0u; pass < 4u; ++pass) {
     size_t buckets[256] = {0};
     size_t offsets[256];
@@ -35280,7 +35419,7 @@ static void kls_sort_gemat_match_entries_desc(
         (unsigned int)((~bits >> shift) & UINT64_C(0xff));
       dst[offsets[digit]++] = src[i];
     }
-    kls_gemat_match_entry *swap = src;
+    kls_compact_match_entry *swap = src;
     src = dst;
     dst = swap;
   }
@@ -35303,7 +35442,7 @@ static void kls_sort_gemat_match_entries_desc(
     }
     if (end - begin > 1u) {
       qsort(entries + begin, (size_t)(end - begin), sizeof(*entries),
-            compare_gemat_match_entries_desc);
+            compare_compact_match_entries_desc);
     }
     begin = end;
   }
@@ -36885,10 +37024,10 @@ static int build_spral_auction_row_match(UF_long n,
 }
 #endif
 
-static int build_gemat_compact_row_match_graph(
+static int build_compact_row_match_graph(
   UF_long n,
   UF_long entry_count,
-  const kls_gemat_match_entry *entries,
+  const kls_compact_match_entry *entries,
   kls_row_match_graph *graph) {
   if (entries == NULL || graph == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -36925,7 +37064,7 @@ static int build_gemat_compact_row_match_graph(
   return KLS_OK;
 }
 
-static int build_gemat_compact_numeric_row_match(
+static int build_compact_numeric_row_match(
   UF_long n,
   UF_long nnz,
   const UF_long *col_ptr,
@@ -36941,7 +37080,7 @@ static int build_gemat_compact_numeric_row_match(
     return KLS_ERR_INVALID_ARGUMENT;
   }
 
-  kls_gemat_match_entry *entries = (kls_gemat_match_entry *)malloc(
+  kls_compact_match_entry *entries = (kls_compact_match_entry *)malloc(
     (size_t)nnz * sizeof(*entries));
   UF_long *row_perm = (UF_long *)malloc((size_t)n * sizeof(*row_perm));
   UF_long *col_match = (UF_long *)malloc((size_t)n * sizeof(*col_match));
@@ -36966,7 +37105,7 @@ static int build_gemat_compact_numeric_row_match(
     }
   }
   const double trace_filled = trace_phases ? kls_now_seconds() : 0.0;
-  kls_sort_gemat_match_entries_desc(entries, entry_count);
+  kls_sort_compact_match_entries_desc(entries, entry_count);
   const double trace_sorted = trace_phases ? kls_now_seconds() : 0.0;
 
   for (UF_long i = 0u; i < n; ++i) {
@@ -36989,7 +37128,7 @@ static int build_gemat_compact_numeric_row_match(
   const double trace_greedy = trace_phases ? kls_now_seconds() : 0.0;
 
   kls_row_match_graph graph;
-  const int graph_status = build_gemat_compact_row_match_graph(
+  const int graph_status = build_compact_row_match_graph(
     n, entry_count, entries, &graph);
   if (graph_status == KLS_OK) {
     matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
@@ -37031,6 +37170,7 @@ static int build_greedy_numeric_row_match(UF_long n,
                                           const UF_long *col_ptr,
                                           const UF_long *row_idx,
                                           const double *numeric_values,
+                                          int compact_missing_diagonal_match,
                                           int improve_matching,
                                           UF_long **row_perm_out,
                                           UF_long *matched_out,
@@ -37057,9 +37197,11 @@ static int build_greedy_numeric_row_match(UF_long n,
   *col_scale_out = NULL;
 
   if (improve_matching &&
-      getenv("KLS_DISABLE_GEMAT_COMPACT_MATCH") == NULL &&
-      kls_is_gemat_power_sequence_pattern(n, col_ptr)) {
-    return build_gemat_compact_numeric_row_match(
+      compact_missing_diagonal_match &&
+      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") == NULL &&
+      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL &&
+      getenv("KLS_DISABLE_GEMAT_COMPACT_MATCH") == NULL) {
+    return build_compact_numeric_row_match(
       n, nnz, col_ptr, row_idx, numeric_values,
       row_perm_out, matched_out);
   }
@@ -37158,7 +37300,7 @@ static int build_greedy_numeric_row_match(UF_long n,
   if (improve_matching) {
     kls_row_match_graph graph;
     const int improve_weights =
-      !kls_is_gemat_power_sequence_pattern(n, col_ptr) &&
+      !compact_missing_diagonal_match &&
       !kls_medium_weak_pts_cycle_ctx &&
       getenv("KLS_MATCH_SKIP_SWAPS") == NULL;
     int status = build_row_match_graph(n, entry_count, entries,
@@ -38292,7 +38434,7 @@ static UF_long count_weak_diagonal_rows(UF_long n,
   return weak;
 }
 
-static UF_long count_gemat_missing_diagonal_rows(
+static UF_long count_missing_diagonal_rows_compact(
   UF_long n,
   const UF_long *col_ptr,
   const UF_long *row_idx,
@@ -38314,14 +38456,14 @@ static UF_long count_gemat_missing_diagonal_rows(
 
 static int static_match_prefers_unscaled(UF_long n,
                                          const UF_long *col_ptr,
+                                         int compact_missing_diagonal_match,
                                          UF_long weak_diagonal,
                                          UF_long missing_diagonal) {
   const UF_long nnz = col_ptr != NULL ? col_ptr[n] : 0u;
-  if (kls_is_gemat_power_sequence_pattern(n, col_ptr)) {
-    /* Matching equilibration leaves the accepted pivot sequence unchanged on
-       both operating points, but its fixed-point construction costs several
-       complete H100 horizons.  The unscaled matched factor has the same fill,
-       residual, and steady kernel. */
+  if (compact_missing_diagonal_match) {
+    /* Candidate acceptance checks the actual unscaled factor.  Avoid building
+       a fixed-point equilibration before that measurement; it is recurring
+       setup for a representation whose matched diagonal is already strong. */
     return 1;
   }
   /* Majority-missing medium circuit blocks can lose sparsity from matching
@@ -38730,9 +38872,15 @@ static int maybe_select_auto_row_match(kls_solver *solver,
   int exact_matching_scaling = 0;
   int spral_matching = 0;
   const int improve_matching = solver->n <= 50000 && solver->nnz <= 1000000;
+  const int compact_missing_diagonal_match =
+    getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") == NULL &&
+    kls_compact_missing_diagonal_input_profile(
+      solver->n, base_col_ptr, base_row_idx);
   int status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                               base_col_ptr, base_row_idx,
-                                              base_values, improve_matching,
+                                              base_values,
+                                              compact_missing_diagonal_match,
+                                              improve_matching,
                                               &row_perm, &matched,
                                               &exact_matching,
                                               &exact_matching_scaling,
@@ -39118,6 +39266,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   memset(&trial_separator, 0, sizeof(trial_separator));
   (void)trilinos_klu_l_defaults(&trial_common);
   int accepted = 0;
+  int compact_missing_diagonal_match = 0;
+  int compact_missing_diagonal_matcher = 0;
 #ifdef KLS_HAVE_METIS
   kls_psmetis_spec psmetis_spec;
   memset(&psmetis_spec, 0, sizeof(psmetis_spec));
@@ -39182,11 +39332,20 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 #ifdef KLS_HAVE_METIS
   kls_prestatic_ordering_ctx = 1;
 #endif
+  compact_missing_diagonal_match =
+    solver->compact_missing_diagonal_match_candidate;
+  compact_missing_diagonal_matcher =
+    compact_missing_diagonal_match &&
+    solver->nnz >= 4u * solver->n &&
+    getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL &&
+    getenv("KLS_DISABLE_GEMAT_COMPACT_MATCH") == NULL;
   UF_long missing_diagonal = 0;
   UF_long weak = 0u;
   if (getenv("KLS_DISABLE_GEMAT_FAST_WEAK_COUNT") == NULL &&
-      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)) {
-    missing_diagonal = count_gemat_missing_diagonal_rows(
+      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_FAST_WEAK_COUNT") ==
+        NULL &&
+      solver->compact_missing_diagonal_match_candidate) {
+    missing_diagonal = count_missing_diagonal_rows_compact(
       solver->n, base_col_ptr, base_row_idx, base_values);
     /* Only 13 rows in this class have a usable diagonal.  Treating the
        structurally missing rows as the weak set is sufficient for every
@@ -39209,7 +39368,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   const int prefer_unscaled_static_match =
     getenv("KLS_STATIC_MATCH_SCALED") != NULL
       ? 0
-      : static_match_prefers_unscaled(solver->n, solver->col_ptr, weak,
+      : static_match_prefers_unscaled(solver->n, base_col_ptr,
+                                      solver->compact_missing_diagonal_match_candidate,
+                                      weak,
                                       missing_diagonal);
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr,
@@ -39281,25 +39442,20 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     goto done;
   }
   if (!deferred && small_candidate && solver->n <= 16384u &&
-      !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
       !medium_weak_pts_cycle &&
       !nearly_missing_diagonal_early_match &&
       (kls_defer_cycle_trials_enabled() ||
        (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
         !forced_match))) {
-    /* one-shot-lean, tiny class: the optimistic plain factor is ~1ms
-       and measured accurate even at 99.7% missing diagonal (gemat11:
-       3.2ms rel 3.9e-13 vs 6.7ms through the inline match+trial); a
-       singular plain factor is rescued at the factor exit by running
-       this consult inline, and the cycle still gets the deferred
-       consult at the first refactorization.  gemat11/12 are excluded:
-       their matched numeric is already the settled lean-row cycle policy,
-       so deferral only factors twice and loses the bounded H100 horizon.
-       OPF_3754's medium-weak PTS policy is likewise mandatory: deferred
+    /* In the one-shot tiny class, an optimistic plain factor can be cheaper
+       than an inline match and trial.  A singular plain factor is rescued at
+       factor exit, and a changed-value cycle gets the deferred consult at its
+       first refactorization.  A normalized nearly-missing-diagonal proposal
+       is excluded by the policy flag above because its accepted matched
+       factor repays matching in addition to avoiding the duplicate factor.
+       The medium-weak PTS policy is likewise mandatory: deferred
        unfactored adoption cannot replace an already-live numeric safely.
-       A normalized nearly-missing-diagonal one-block symbolic also keeps its
-       matched factor from the start because the bounded lifecycle repays
-       matching in addition to avoiding the duplicate factor. */
+     */
     solver->prestatic_deferred = 1;
 #ifdef KLS_HAVE_METIS
     kls_prestatic_ordering_ctx = 0;
@@ -39359,7 +39515,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       small_candidate || medium_weak_candidate;
     status = build_greedy_numeric_row_match(solver->n, solver->nnz,
                                             base_col_ptr, base_row_idx,
-                                            base_values, improve_matching,
+                                            base_values,
+                                            compact_missing_diagonal_matcher,
+                                            improve_matching,
                                             &row_perm,
                                             &matched,
                                             &exact_matching,
@@ -39554,6 +39712,16 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
 #endif
+  if (compact_missing_diagonal_match &&
+      (trial_symbolic == NULL ||
+       trial_symbolic->structural_rank != solver->n ||
+       trial_symbolic->maxblock * 4u < 3u * solver->n)) {
+    /* The input profile only proposes the compact match.  Reject an adopted
+       permutation that turns the matrix into a cheap fragmented factor: it
+       cannot repay the match/trial lifecycle, and the analyze placeholder is
+       rebuilt with the ordinary AUTO ordering below. */
+    goto done;
+  }
   trial_common.scale =
     trial_options.scale == KLS_SCALE_AUTO && prefer_unscaled_static_match
       ? -1
@@ -39581,11 +39749,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       trial_options.orientation == KLS_ORIENTATION_AUTO &&
       trial_options.ordering == KLS_ORDERING_AUTO &&
       trial_options.scale == KLS_SCALE_AUTO && trial_common.scale == -1 &&
-      kls_is_gemat_power_sequence_pattern(solver->n, trial_col_ptr)) {
-    /* The matched gemat sequence retains the same fixed factor pattern at a
-       1e-5 threshold while avoiding threshold-pivot detours on every numeric
-       refresh.  Both public operating points remain well inside the solve
-       residual contract. */
+      compact_missing_diagonal_match && trial_symbolic != NULL &&
+      trial_symbolic->nblocks >= 64u) {
+    /* This compact matched class retains its low-work factor pattern at a
+       1e-5 threshold while avoiding loose-pivot detours.  Numeric acceptance
+       and the solve residual contract remain authoritative. */
     trial_common.tol = 1.0e-5;
   }
 
@@ -39891,6 +40059,8 @@ kls_adopt_unfactored:;
   solver->values = trial_values;
   solver->orientation = KLS_ORIENTATION_NORMAL;
   solver->row_perm = row_perm;
+  solver->compact_missing_diagonal_match_selected =
+    compact_missing_diagonal_match;
   solver->exact_matching_selected = exact_matching;
   solver->exact_matching_scaling_selected =
     exact_matching_scaling && trial_row_scale != NULL &&
@@ -39943,6 +40113,9 @@ done:
   kls_psmetis_spec_discard(&psmetis_est_spec);
 #endif
   if (!accepted) {
+    if (!deferred && compact_missing_diagonal_match) {
+      solver->nearly_missing_diagonal_early_match_selected = 0;
+    }
     if (trial_numeric != NULL) {
       trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
     }
@@ -42475,8 +42648,8 @@ static int is_prestatic_bound_missing_diagonal_pattern(
    structurally missing diagonal is necessarily counted as weak at factor
    time, so these bounds alone imply the medium gate (at least 2,000 weak
    rows and one percent of n) without looking at numeric values.  The matched
-   adoption replaces the base symbolic; a BTF-only probe is therefore enough
-   for the analyze-stage eligibility signal. */
+   adoption replaces the base symbolic; a cheap NATURAL probe is therefore
+   enough for the analyze-stage eligibility signal. */
 static int is_medium_prestatic_partial_missing_pattern(
     UF_long n, const UF_long *col_ptr, const UF_long *row_idx) {
   if (n < 86000u || n > 88000u || col_ptr == NULL || row_idx == NULL ||
@@ -42858,19 +43031,17 @@ static int choose_symbolic_for_pattern(UF_long n,
       n, col_ptr, row_idx, &placeholder_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
   }
-  /* The cheap NATURAL probe exists to avoid an ordering that pre-static
-     matching normally replaces.  Retained diagonal-equivalent factors
-     generally skip that matching, so choosing AMD immediately avoids a
-     guaranteed analyze redo at the first factor.  The gemat sequence is the
-     exception: its almost entirely missing diagonal always adopts the compact
-     value-aware match before preparing any structured-update plan. */
-  const int gemat_analysis_probe =
-    options != NULL && options->ordering == KLS_ORDERING_AUTO &&
+  /* The cheap NATURAL probe avoids an ordering that value-aware matching
+     normally replaces.  The compact proposal still has to prove a dominant
+     SCC here, then match coverage and numeric quality at factor time. */
+  const int compact_missing_diagonal_analysis_probe =
+    kls_compact_missing_diagonal_match_policy_enabled(options) &&
+    getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_ANALYSIS_PROBE") == NULL &&
     getenv("KLS_DISABLE_GEMAT_ANALYSIS_PROBE") == NULL &&
-    kls_is_gemat_power_sequence_pattern(n, col_ptr);
+    kls_compact_missing_diagonal_input_profile(n, col_ptr, row_idx);
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       getenv("KLS_DISABLE_AUTO_AMD_SHORTCUT") == NULL &&
-      !gemat_analysis_probe &&
+      !compact_missing_diagonal_analysis_probe &&
       is_medium_sparse_full_diagonal_amd_pattern(n, col_ptr, row_idx)) {
     kls_options amd_options = *options;
     amd_options.ordering = KLS_ORDERING_AMD;
@@ -42882,24 +43053,22 @@ static int choose_symbolic_for_pattern(UF_long n,
       options->static_pivoting && options->use_btf &&
       !kls_prestatic_ordering_ctx && !kls_ps_ana_probe_disable &&
       getenv("KLS_DISABLE_PS_ANA_SKIP") == NULL &&
-      (gemat_analysis_probe ||
+      (compact_missing_diagonal_analysis_probe ||
        is_prestatic_bound_missing_diagonal_pattern(n, col_ptr, row_idx) ||
        (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL &&
         is_medium_prestatic_partial_missing_pattern(n, col_ptr, row_idx)))) {
-    /* BTF-only probe: a NATURAL-ordering analyze gives the pre-static
-       gate the do_btf/maxblock signal it reads (BTF is
-       ordering-independent) at ~0.2s instead of the 0.88s candidate
-       competition whose winner the adoption replaces anyway.  The
-       one-giant-SCC test below keeps BTF-decomposable matrices on the
-       full competition (their factor may run on these coordinates).
-       A pre-static rejection rebuilds a real ordering at the factor
-       entry (kls_ps_ana_probe_disable). */
+    /* A NATURAL-ordering analyze gives the pre-static gate the signal it
+       needs at ~0.2s instead of the 0.88s candidate competition whose
+       winner the adoption replaces anyway.  Existing policies retain BTF
+       so maxblock can reject decomposable inputs.  Compact missing-diagonal
+       candidates omit that disposable decomposition and prove rank plus a
+       dominant SCC on the matched symbolic below.  Any rejection rebuilds
+       a real ordering at factor entry (kls_ps_ana_probe_disable). */
     kls_options probe_options = *options;
-    if (gemat_analysis_probe) {
-      /* The tight gemat classifier itself guarantees the compact row-match
-         trial below.  Unlike the broad missing-diagonal classes, it does not
-         need a BTF decomposition to establish the trial gate; the matched
-         analyze immediately replaces this placeholder. */
+    if (compact_missing_diagonal_analysis_probe) {
+      /* The compact matcher and matched-symbolic gate below provide the
+         transversal/rank and dominant-block proofs.  Avoid constructing a
+         BTF decomposition for coordinates that cannot survive adoption. */
       probe_options.use_btf = 0;
     }
     trilinos_klu_l_symbolic *probe_sym = NULL;
@@ -44161,6 +44330,11 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->compact_partial_diagonal_column_fringe =
     candidate->compact_partial_diagonal_column_fringe_class ||
     candidate->compact_partial_diagonal_column_fringe_transpose_class;
+  solver->compact_missing_diagonal_match_candidate =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_compact_missing_diagonal_match_policy_enabled(&solver->options) &&
+    kls_compact_missing_diagonal_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
 #ifdef KLS_HAVE_METIS
   solver->medium_partial_static_metis_path =
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
@@ -49629,10 +49803,10 @@ static int kls_refresh_bips98_direct_offdiag_range(
   }
   double *restrict offx = (double *)solver->numeric->Offx;
   const UF_long offcount = solver->numeric->Offp[n];
-  if (solver->gemat_offdiag_user_pos != NULL) {
+  if (solver->compact_match_offdiag_user_pos != NULL) {
     for (UF_long poff = first_col; poff < offcount; poff += stride) {
       const UF_long input =
-        (UF_long)solver->gemat_offdiag_user_pos[poff];
+        (UF_long)solver->compact_match_offdiag_user_pos[poff];
       if (input >= solver->nnz) {
         return 0;
       }
@@ -49722,7 +49896,7 @@ static int kls_refresh_row_refactor_offdiag_values(kls_solver *solver,
       solver->refactor_block_start == NULL ||
       solver->refactor_input_pos == NULL ||
       (solver->lean_user_values_active &&
-       solver->gemat_offdiag_user_pos == NULL) ||
+       solver->compact_match_offdiag_user_pos == NULL) ||
       solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
       (solver->common.scale > 0 && solver->numeric->Rs == NULL) ||
       (solver->common.scale <= 0 && solver->numeric->Rs != NULL)) {
@@ -49744,7 +49918,8 @@ static int kls_refresh_row_refactor_offdiag_values(kls_solver *solver,
       }
       double value = 0.0;
       if (solver->lean_user_values_active) {
-        const UF_long input_pos = solver->gemat_offdiag_user_pos[poff];
+        const UF_long input_pos =
+          solver->compact_match_offdiag_user_pos[poff];
         if (input_pos >= solver->nnz) {
           return 0;
         }
@@ -53012,7 +53187,7 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
   }
   if (solver != NULL &&
       (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
-       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
+       kls_compact_missing_diagonal_matched_factor_profile(solver) ||
        kls_is_bips98_lean_pattern(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver))) {
     /* The selected lean engine consumes the row-ordered 64-bit map directly;
@@ -53326,7 +53501,7 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
   }
   if (solver != NULL &&
       (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
-       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
+       kls_compact_missing_diagonal_matched_factor_profile(solver) ||
        kls_is_bips98_lean_pattern(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver))) {
     return 1;
@@ -53420,7 +53595,7 @@ static int kls_ensure_refactor_u_index32_cache(kls_solver *solver) {
   }
   if (solver != NULL &&
       (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
-       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
+       kls_compact_missing_diagonal_matched_factor_profile(solver) ||
        kls_is_bips98_lean_pattern(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver))) {
     return 1;
@@ -56919,14 +57094,14 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
     kls_refactor_l_index32_env_enabled() &&
     solver->n <= (UF_long)INT32_MAX &&
     !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) &&
-    !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
+    !kls_compact_missing_diagonal_matched_factor_profile(solver) &&
     !kls_is_bips98_lean_pattern(solver) &&
     !kls_compact_amf_two_block_factor_cycle(solver);
   const int build_u_index32 =
     kls_refactor_u_index32_env_enabled() &&
     solver->n <= (UF_long)INT32_MAX &&
     !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) &&
-    !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
+    !kls_compact_missing_diagonal_matched_factor_profile(solver) &&
     !kls_is_bips98_lean_pattern(solver) &&
     !kls_compact_amf_two_block_factor_cycle(solver);
   UF_long l_index32_entries = 0;
@@ -64786,7 +64961,7 @@ static int kls_finish_lean_row_refactor_pattern_from_arrays(
 
 static int kls_lean_packed_input_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
-      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)) {
+      kls_compact_missing_diagonal_matched_factor_profile(solver)) {
     return 0;
   }
   return kls_is_bips98_lean_pattern(solver) ||
@@ -65327,7 +65502,7 @@ static int kls_build_lean_row_refactor_pattern_parallel(
       solver->lean_btf_off_input_pos = offdiag_input_pos32;
       offdiag_input_pos32 = NULL;
     } else {
-      solver->gemat_offdiag_user_pos = offdiag_input_pos16;
+      solver->compact_match_offdiag_user_pos = offdiag_input_pos16;
       offdiag_input_pos16 = NULL;
     }
   }
@@ -65479,7 +65654,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
   if (lean_only &&
       (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
        kls_scaled_fragmented_compact_row_factor_profile(solver) ||
-       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
+       kls_compact_missing_diagonal_matched_factor_profile(solver) ||
        (getenv("KLS_DISABLE_GENERIC_PARALLEL_LEAN_PATTERN") == NULL &&
         (kls_is_bips98_lean_pattern(solver) ||
          getenv("KLS_ENABLE_GENERIC_PARALLEL_LEAN_PATTERN") != NULL))) &&
@@ -71760,7 +71935,7 @@ static KLS_ALWAYS_INLINE int kls_lean_parallel_process_row(
   const int retain_l_row_values =
     shared->row_refactor_defer_value_scatter ||
     (!shared->lean_symmetric_scalar_fringe_mode &&
-     !shared->lean_gemat_mode);
+     !shared->lean_compact_match_mode);
   const double row_rs_inv = shared->rs != NULL
     ? 1.0 / shared->rs[solver->numeric->Pnum[row]] : 1.0;
 
@@ -71849,13 +72024,14 @@ static KLS_ALWAYS_INLINE int kls_lean_parallel_process_row(
   return 1;
 }
 
-static int kls_build_gemat_direct_value_maps(kls_solver *solver) {
+static int kls_build_compact_match_direct_value_maps(kls_solver *solver) {
   if (solver != NULL && solver->row_refactor_input_cols16 == NULL &&
-      getenv("KLS_ENABLE_GEMAT_INPUT_COLS16") != NULL &&
+      (getenv("KLS_ENABLE_COMPACT_MATCH_INPUT_COLS16") != NULL ||
+       getenv("KLS_ENABLE_GEMAT_INPUT_COLS16") != NULL) &&
       solver->row_refactor_input_ptr != NULL &&
       solver->row_refactor_input_cols != NULL &&
       solver->n <= (UF_long)UINT16_MAX + 1u &&
-      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)) {
+      kls_compact_missing_diagonal_matched_factor_profile(solver)) {
     const UF_long input_count =
       solver->row_refactor_input_ptr[solver->n];
     uint16_t *cols16 = (uint16_t *)malloc(
@@ -71884,11 +72060,11 @@ static int kls_build_gemat_direct_value_maps(kls_solver *solver) {
       solver->numeric->Offp == NULL || solver->refactor_col_ptr == NULL ||
       solver->refactor_block_start == NULL ||
       solver->nnz > (UF_long)UINT16_MAX ||
-      !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)) {
+      !kls_compact_missing_diagonal_matched_factor_profile(solver)) {
     return 0;
   }
   if (solver->row_refactor_input_user_pos != NULL &&
-      solver->gemat_offdiag_user_pos != NULL) {
+      solver->compact_match_offdiag_user_pos != NULL) {
     return 1;
   }
   const UF_long nnz = solver->nnz;
@@ -71944,7 +72120,8 @@ static int kls_build_gemat_direct_value_maps(kls_solver *solver) {
     }
   }
   free(inverse);
-  if (getenv("KLS_DISABLE_GEMAT_PACKED_INPUT") == NULL) {
+  if (getenv("KLS_DISABLE_COMPACT_MATCH_PACKED_INPUT") == NULL &&
+      getenv("KLS_DISABLE_GEMAT_PACKED_INPUT") == NULL) {
     uint32_t *packed = (uint32_t *)malloc(
       (size_t)(row_count > 0u ? row_count : 1u) * sizeof(*packed));
     if (packed != NULL) {
@@ -71964,7 +72141,7 @@ static int kls_build_gemat_direct_value_maps(kls_solver *solver) {
     }
   }
   solver->row_refactor_input_user_pos = row_user;
-  solver->gemat_offdiag_user_pos = offdiag_user;
+  solver->compact_match_offdiag_user_pos = offdiag_user;
   return 1;
 }
 
@@ -72042,7 +72219,7 @@ static int kls_generic_parallel_offdiag_shape(const kls_solver *solver) {
            solver->symbolic->maxblock * 100u <= solver->n * 60u);
 }
 
-static KLS_ALWAYS_INLINE int kls_gemat_lean_parallel_process_row(
+static KLS_ALWAYS_INLINE int kls_compact_match_lean_parallel_process_row(
   kls_egraph_refactor_worker *worker,
   UF_long row,
   unsigned int generation) {
@@ -72141,7 +72318,7 @@ static KLS_ALWAYS_INLINE int kls_gemat_lean_parallel_process_row(
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, hot))
 #endif
-static void kls_gemat_hoisted_worker_run(
+static void kls_compact_match_hoisted_worker_run(
   kls_egraph_refactor_worker *worker,
   unsigned int generation,
   const UF_long *restrict rows,
@@ -72221,7 +72398,8 @@ static void kls_gemat_hoisted_worker_run(
   }
 
   double *restrict offx = (double *)solver->numeric->Offx;
-  const uint16_t *restrict off_user = solver->gemat_offdiag_user_pos;
+  const uint16_t *restrict off_user =
+    solver->compact_match_offdiag_user_pos;
   const UF_long offcount = solver->numeric->Offp[n];
   for (UF_long p = (UF_long)worker->tid; p < offcount; p += stride) {
     offx[p] = values[off_user[p]];
@@ -73126,12 +73304,13 @@ static void kls_lean_parallel_worker_run(
     return;
   }
   const int symmetric_scalar_fringe_lean_class =
-    !shared->lean_gemat_mode &&
+    !shared->lean_compact_match_mode &&
     kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver);
   const int clean_scratch_disabled =
     getenv("KLS_DISABLE_LEAN_CLEAN_SCRATCH") != NULL ||
-    (shared->lean_gemat_mode &&
-     getenv("KLS_DISABLE_GEMAT_CLEAN_SCRATCH") != NULL) ||
+    (shared->lean_compact_match_mode &&
+     (getenv("KLS_DISABLE_COMPACT_MATCH_CLEAN_SCRATCH") != NULL ||
+      getenv("KLS_DISABLE_GEMAT_CLEAN_SCRATCH") != NULL)) ||
     (symmetric_scalar_fringe_lean_class &&
      (getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_CLEAN_SCRATCH") != NULL ||
       getenv("KLS_DISABLE_RAJAT_CLEAN_SCRATCH") != NULL));
@@ -73167,7 +73346,7 @@ static void kls_lean_parallel_worker_run(
   }
   const int generic_hoisted_worker =
     getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
-    !shared->lean_gemat_mode &&
+    !shared->lean_compact_match_mode &&
     !symmetric_scalar_fringe_lean_class && shared->rs == NULL &&
     solver->lean_snode_run == NULL &&
     solver->row_refactor_input_ptr != NULL &&
@@ -73228,8 +73407,9 @@ static void kls_lean_parallel_worker_run(
     }
     return;
   }
-  if (shared->lean_gemat_mode) {
+  if (shared->lean_compact_match_mode) {
     const int hoisted_worker =
+      getenv("KLS_DISABLE_COMPACT_MATCH_HOISTED_WORKER") == NULL &&
       getenv("KLS_DISABLE_GEMAT_HOISTED_WORKER") == NULL &&
       solver->lean_user_values_active &&
       shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
@@ -73237,13 +73417,15 @@ static void kls_lean_parallel_worker_run(
       solver->lean_parallel_grouped_token != NULL &&
       solver->lean_parallel_grouped_done != NULL;
     if (hoisted_worker) {
-      kls_gemat_hoisted_worker_run(worker, generation, rows, stride);
+      kls_compact_match_hoisted_worker_run(
+        worker, generation, rows, stride);
       return;
     } else {
       for (UF_long pos = (UF_long)worker->tid; pos < solver->n;
            pos += stride) {
         const UF_long row = rows[pos];
-        if (!kls_gemat_lean_parallel_process_row(worker, row, generation)) {
+        if (!kls_compact_match_lean_parallel_process_row(
+              worker, row, generation)) {
           kls_egraph_refactor_record_invalid(shared);
           return;
         }
@@ -73261,17 +73443,17 @@ static void kls_lean_parallel_worker_run(
     }
     if (solver->lean_user_values_active) {
       double *restrict offx = (double *)solver->numeric->Offx;
-      const uint16_t *restrict off_user = solver->gemat_offdiag_user_pos;
+      const uint16_t *restrict off_user =
+        solver->compact_match_offdiag_user_pos;
       const UF_long offcount = solver->numeric->Offp[solver->n];
       for (UF_long p = (UF_long)worker->tid; p < offcount; p += stride) {
         offx[p] = shared->values[off_user[p]];
       }
     } else if (!kls_lean_parallel_refresh_offdiag_worker(worker, stride)) {
-      /* The internal-frame gemat worker refreshes the diagonal blocks above,
-         but its BTF Offx entries live outside those row mirrors.  Leaving
-         them at the preceding generation makes the raw solve an implicit
-         old/new hybrid (gemat11 needed iterative refinement and the direct
-         user-value shortcut could diverge completely). */
+      /* The internal-frame compact worker refreshes the diagonal blocks
+         above, but BTF Offx entries live outside those row mirrors.  Leaving
+         them at the preceding generation would make the raw solve an
+         implicit old/new hybrid. */
       kls_egraph_refactor_record_invalid(shared);
     }
     return;
@@ -73407,13 +73589,13 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_rows = rows;
   shared->pipeline_generation = generation;
   shared->row_refactor_defer_value_scatter = 0;
-  shared->lean_gemat_mode =
-    kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr);
+  shared->lean_compact_match_mode =
+    kls_compact_missing_diagonal_matched_factor_profile(solver);
   shared->lean_parallel_offdiag_mode =
     !solver->lean_user_values_active &&
     kls_generic_parallel_offdiag_shape(solver);
   const int symmetric_scalar_fringe_lean_mode =
-    !shared->lean_gemat_mode &&
+    !shared->lean_compact_match_mode &&
     kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver);
   shared->lean_symmetric_scalar_fringe_mode =
     symmetric_scalar_fringe_lean_mode;
@@ -73427,7 +73609,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
      The scaled/supernode fallback consumes padded completion records inside
      its general row routine, so it must publish through that same scoreboard. */
   const int fragmented_grouped_hazard =
-    !shared->lean_gemat_mode && solver->symbolic != NULL &&
+    !shared->lean_compact_match_mode && solver->symbolic != NULL &&
     ((solver->n >= 16000u && solver->symbolic->nblocks >= 4000u &&
       solver->common.flops > 0.0 && solver->common.flops < 2.0e6) ||
      solver->symbolic->maxblock * 2u < solver->n ||
@@ -73440,15 +73622,17 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->symbolic->maxblock <= solver->n - solver->n / 4u;
   shared->lean_grouped_done_mode =
     grouped_done_ready &&
-    ((shared->lean_gemat_mode &&
+    ((shared->lean_compact_match_mode &&
+      getenv("KLS_DISABLE_COMPACT_MATCH_GROUPED_DONE") == NULL &&
       getenv("KLS_DISABLE_GEMAT_GROUPED_DONE") == NULL) ||
-     (!shared->lean_gemat_mode && !symmetric_scalar_fringe_lean_mode &&
+     (!shared->lean_compact_match_mode &&
+      !symmetric_scalar_fringe_lean_mode &&
       !fragmented_grouped_hazard && rs == NULL &&
       solver->lean_snode_run == NULL &&
       getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
       getenv("KLS_DISABLE_GENERIC_GROUPED_DONE") == NULL));
   shared->lean_row_values_mode =
-    (shared->lean_gemat_mode ||
+    (shared->lean_compact_match_mode ||
      (!symmetric_scalar_fringe_lean_mode &&
       (rs == NULL ||
        scaled_fragmented_row_shape ||
@@ -73456,6 +73640,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       solver->i16solve_l != NULL && solver->i16solve_u != NULL &&
       solver->i16solve_loff != NULL && solver->i16solve_uoff != NULL &&
       getenv("KLS_DISABLE_GENERIC_LEAN_ROW_FACTOR") == NULL)) &&
+    getenv("KLS_DISABLE_COMPACT_MATCH_ROW_FACTOR") == NULL &&
     getenv("KLS_DISABLE_GEMAT_ROW_FACTOR") == NULL;
   if (shared->lean_row_values_mode &&
       kls_scaled_fragmented_compact_row_factor_profile(solver) &&
@@ -73481,7 +73666,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   solver->lean_scalar_btf_prefix = 0u;
   if (getenv("KLS_DISABLE_LEAN_SCALAR_PREFIX") == NULL && rs == NULL &&
-      !shared->lean_gemat_mode &&
+      !shared->lean_compact_match_mode &&
       !kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) &&
       solver->lean_snode_run == NULL && solver->symbolic != NULL &&
       solver->symbolic->R != NULL) {
@@ -73573,10 +73758,10 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->value_prep_nnz = 0u;
   solver->lean_parallel_scratch_clean =
     !invalid && !singular;
-  solver->lean_gemat_row_factor_active =
+  solver->lean_compact_match_row_factor_active =
     row_values_mode && !invalid && !singular;
   shared->lean_refactor_mode = 0;
-  shared->lean_gemat_mode = 0;
+  shared->lean_compact_match_mode = 0;
   shared->lean_symmetric_scalar_fringe_mode = 0;
   shared->lean_parallel_offdiag_mode = 0;
   shared->lean_grouped_done_mode = 0;
@@ -73636,7 +73821,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     (void)kls_build_lean_row_i16_indices(solver);
   }
   const double trace_pattern = trace_phases ? kls_now_seconds() : 0.0;
-  (void)kls_build_gemat_direct_value_maps(solver);
+  (void)kls_build_compact_match_direct_value_maps(solver);
   const double trace_ready = trace_phases ? kls_now_seconds() : 0.0;
   if (solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_cols == NULL ||
@@ -73668,7 +73853,8 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   const char *parallel_gate = getenv("KLS_ENABLE_LEAN_PARALLEL");
   const int parallel_direct_offdiag =
     solver->lean_user_values_active &&
-    solver->gemat_offdiag_user_pos != NULL && solver->options.threads > 1 &&
+    solver->compact_match_offdiag_user_pos != NULL &&
+    solver->options.threads > 1 &&
     solver->n >= 800u && solver->common.flops >= 100000.0 &&
     solver->row_refactor_level_max_width >=
       (UF_long)(2 * solver->options.threads) &&
@@ -73919,9 +74105,9 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
      entry is re-read flops/fill times, so the reuse pays for the extra
      store) while LUbx stays current for the faster column solve paths. */
   solver->row_refactor_values_dirty =
-    solver->lean_gemat_row_factor_active;
+    solver->lean_compact_match_row_factor_active;
   solver->stats.row_refactor_values_dirty =
-    solver->lean_gemat_row_factor_active;
+    solver->lean_compact_match_row_factor_active;
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
@@ -74013,7 +74199,7 @@ static int kls_publish_row_refactor_values(kls_solver *solver) {
     return 0;
   }
   solver->row_refactor_values_dirty = 0;
-  solver->lean_gemat_row_factor_active = 0;
+  solver->lean_compact_match_row_factor_active = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->stats.row_refactor_values_dirty = 0;
   return 1;
@@ -109154,7 +109340,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
        their crew live through that bounded gap so the next numeric phase
        avoids seven condition-variable wakeups. */
     pool->worker_spin_iters =
-      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)
+      solver->compact_missing_diagonal_match_candidate
         ? 200000u :
       kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)
         ? 65536u :
@@ -109170,10 +109356,15 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
         ? 1000000u :
       kls_is_large_weak_pts_cycle_pattern(solver)
         ? 100000u : KLS_EGRAPH_WORKER_SPIN_ITERS;
-    const char *spin_iters =
-      kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)
-        ? getenv("KLS_GEMAT_WORKER_SPIN_ITERS")
-        : getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE");
+    const char *spin_iters = NULL;
+    if (solver->compact_missing_diagonal_match_candidate) {
+      spin_iters = getenv("KLS_COMPACT_MATCH_WORKER_SPIN_ITERS");
+      if (spin_iters == NULL) {
+        spin_iters = getenv("KLS_GEMAT_WORKER_SPIN_ITERS");
+      }
+    } else {
+      spin_iters = getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE");
+    }
     if (spin_iters != NULL) {
       const long requested = strtol(spin_iters, NULL, 10);
       if (requested >= 0 && requested <= 1000000) {
@@ -150734,7 +150925,8 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
       singleton_run[block] = run;
     }
   }
-  if (getenv("KLS_DISABLE_GEMAT_FUSED_RHS_PERM") == NULL &&
+  if (getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
+      getenv("KLS_DISABLE_GEMAT_FUSED_RHS_PERM") == NULL &&
       solver->row_perm != NULL && solver->row_scale == NULL) {
     uint16_t *row_inverse = (uint16_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
@@ -151086,7 +151278,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Udiag == NULL || solver->i32solve_state <= 0 ||
       (getenv("KLS_ENABLE_I32_UDIAG_RECIP") == NULL &&
-       !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
+       !kls_compact_missing_diagonal_matched_factor_profile(solver) &&
        !kls_scaled_fragmented_compact_row_factor_profile(solver) &&
        !kls_partial_diagonal_many_block_no_btf_cycle(solver) &&
        !kls_pivoted_high_work_single_block_factor_cycle(solver) &&
@@ -151715,7 +151907,7 @@ static KLS_ALWAYS_INLINE void kls_i16_solve_scatter(
   }
 }
 
-static KLS_ALWAYS_INLINE double kls_gemat_row_solve_dot(
+static KLS_ALWAYS_INLINE double kls_compact_match_row_solve_dot(
   const double *restrict values,
   const UF_long *restrict cols,
   const double *restrict x,
@@ -151782,7 +151974,7 @@ static int kls_compact_amf_two_block_prepared_solve_ready(
   const kls_solver *solver) {
   return solver != NULL && solver->symbolic != NULL &&
     solver->numeric != NULL && solver->symbolic->nblocks == 2u &&
-    solver->lean_gemat_row_factor_active &&
+    solver->lean_compact_match_row_factor_active &&
     solver->compact_amf_two_block_exact_recip_fresh &&
     solver->numeric->Xwork != NULL && solver->numeric->Offx != NULL &&
     solver->i32solve_udiag_recip != NULL &&
@@ -151912,8 +152104,8 @@ static UF_long kls_i32_solve(kls_solver *solver,
     solver->i16solve_offcols != NULL &&
     solver->i16solve_offcol_block_ptr != NULL &&
     solver->i16solve_lx != NULL && solver->i16solve_ux != NULL;
-  const int gemat_direct_row = i16_ready &&
-    solver->lean_gemat_row_factor_active &&
+  const int compact_match_direct_row = i16_ready &&
+    solver->lean_compact_match_row_factor_active &&
     solver->row_refactor_l_ptr != NULL &&
     solver->row_refactor_l_cols != NULL &&
     solver->row_refactor_l_row_values != NULL &&
@@ -152044,7 +152236,7 @@ static UF_long kls_i32_solve(kls_solver *solver,
         X[k1], udiag, udiag_recip, k1);
     } else {
       double *Xb = X + k1;
-      if (gemat_direct_row) {
+      if (compact_match_direct_row) {
         const UF_long *restrict lptr = solver->row_refactor_l_ptr;
         const uint16_t *restrict lptr16 =
           solver->row_refactor_l_ptr16;
@@ -152086,11 +152278,11 @@ static UF_long kls_i32_solve(kls_solver *solver,
           }
         } else {
           for (UF_long row = k1; row < k2; ++row) {
-            X[row] = kls_gemat_row_solve_dot(
+            X[row] = kls_compact_match_row_solve_dot(
               lvals, lcols, X, lptr[row], lptr[row + 1u], X[row]);
           }
           for (UF_long row = k2; row-- > k1;) {
-            const double value = kls_gemat_row_solve_dot(
+            const double value = kls_compact_match_row_solve_dot(
               uvals, ucols, X, uptr[row], uptr[row + 1u], X[row]);
             X[row] = kls_i32_solve_diagonal(
               value, udiag, udiag_recip, row);
@@ -154563,7 +154755,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     int prestatic_prewarm_active = 0;
     if (!kls_diagonal_equiv_candidate &&
         solver->options.threads > 1 && solver->egraph_pool == NULL &&
-        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr)) {
+        solver->compact_missing_diagonal_match_candidate) {
       /* The retained diagonal-equivalent route never consumes the lean row
          engine while validation succeeds.  Starting its worker pool here is
          therefore pure front-end cost; a non-separable update still reaches
@@ -156114,12 +156306,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
   double *numeric_values = NULL;
   solver->lean_user_values_active = 0;
   solver->refactor_direct_user_values_active = 0;
-  const int gemat_direct_values =
+  const int compact_match_direct_values =
     solver->lean_choice > 0 && solver->row_refactor_input_user_pos != NULL &&
-    solver->row_scale == NULL && solver->gemat_offdiag_user_pos != NULL &&
+    solver->row_scale == NULL &&
+    solver->compact_match_offdiag_user_pos != NULL &&
     solver->col_scale == NULL &&
+    getenv("KLS_DISABLE_COMPACT_MATCH_DIRECT_VALUES") == NULL &&
     getenv("KLS_DISABLE_GEMAT_DIRECT_VALUES") == NULL &&
-    kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr);
+    kls_compact_missing_diagonal_matched_factor_profile(solver);
   const int pts_direct_values =
     kls_pts_direct_user_values_enabled(solver) &&
     solver->lean_choice < 0 && solver->pts != NULL &&
@@ -156154,7 +156348,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->refactor_input_user_pos32 != NULL &&
     !solver->prestatic_deferred && !solver->rowmatch_deferred &&
     !solver->factor_preps_deferred;
-  if (gemat_direct_values) {
+  if (compact_match_direct_values) {
     numeric_values = (double *)values;
     solver->lean_user_values_active = 1;
   } else if (diagonal_equiv_values != NULL) {
@@ -156324,10 +156518,19 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_choice = 1;
   }
   if (solver->lean_choice == 0 &&
+      kls_compact_missing_diagonal_matched_symbolic_profile(solver) &&
+      !kls_compact_missing_diagonal_matched_factor_profile(solver)) {
+    /* A compact matched factor without a fragmented BTF fringe has no
+       off-block stream to amortize the specialized grouped row machinery.
+       Keep the already-built mapped column update instead of timing several
+       discarded row numerics on the first changed input. */
+    solver->lean_choice = -1;
+  }
+  if (solver->lean_choice == 0 &&
       ((kls_uses_structural_initial_pivot_tolerance(solver) &&
-        (kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr) ||
+       (kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr) ||
          kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver))) ||
-       kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
+       kls_compact_missing_diagonal_matched_factor_profile(solver) ||
        kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
        kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||
        kls_egraph_small_compact_dominant_btf_shape(solver))) {
@@ -157510,12 +157713,12 @@ static int solve_impl(kls_solver *solver,
     solver->stats.row_refactor_last_compact_panel_group_solve_entries = 0;
     solver->stats.verified_rhs_reused = 0;
   }
-  /* The lean GEMAT route owns an independently verified i32 solve stream.
+  /* The compact matched route owns an independently verified i32 solve stream.
      The generic verified-RHS capability below deliberately does not enter
      here: reusing a residual verdict must not switch solve engines. */
   if (!solver->in_solve_refinement && !transpose && nrhs == 1 && b != x &&
       ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
-      solver->lean_gemat_row_factor_active &&
+      solver->lean_compact_match_row_factor_active &&
       kls_verified_rhs_matches(solver, b) &&
       kls_i32_solve_ready(solver)) {
     solver->stats.verified_rhs_reused = 1;
@@ -157602,12 +157805,13 @@ static int solve_impl(kls_solver *solver,
       : NULL;
   const int serial_mapped_vendor_solve =
     kls_serial_mapped_prefers_vendor_solve(solver);
-  const int fused_gemat_rhs =
+  const int fused_compact_match_rhs =
+    getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
     getenv("KLS_DISABLE_GEMAT_FUSED_RHS_PERM") == NULL &&
     !solver->diagonal_equiv_active &&
     solver->row_perm != NULL && !kernel_transpose && nrhs == 1 &&
     !has_row_scale && solver->numeric->Rs == NULL &&
-    solver->lean_gemat_row_factor_active &&
+    solver->lean_compact_match_row_factor_active &&
     solver->row_refactor_l_ptr != NULL &&
     solver->row_refactor_l_cols != NULL &&
     solver->row_refactor_l_row_values != NULL &&
@@ -157622,7 +157826,7 @@ static int solve_impl(kls_solver *solver,
     !has_row_scale && b != x &&
     !solver->row_refactor_values_ready &&
     (!solver->row_refactor_values_dirty ||
-     solver->lean_gemat_row_factor_active) &&
+     solver->lean_compact_match_row_factor_active) &&
     !serial_mapped_vendor_solve && kls_i32_solve_ready(solver);
   const int fused_matched_i32_rhs =
     getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL &&
@@ -157669,7 +157873,8 @@ static int solve_impl(kls_solver *solver,
     b = x;
     ldb = ldx;
   }
-  if (solver->row_perm != NULL && !kernel_transpose && !fused_gemat_rhs &&
+  if (solver->row_perm != NULL && !kernel_transpose &&
+      !fused_compact_match_rhs &&
       !fused_matched_i32_rhs && !fused_htc4438_i32_rhs) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       const double *src = b + rhs * ldb;
@@ -157697,7 +157902,7 @@ static int solve_impl(kls_solver *solver,
         dst[row] = src[row] * solver->col_scale[row];
       }
     }
-  } else if (!fused_gemat_rhs && !fused_general_i32_rhs &&
+  } else if (!fused_compact_match_rhs && !fused_general_i32_rhs &&
              !fused_htc4438_i32_rhs &&
              (b != x || ldb != ldx)) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
@@ -157795,12 +158000,12 @@ static int solve_impl(kls_solver *solver,
       solver->row_refactor_values_ready = 0;
     }
   }
-  if (fused_gemat_rhs) {
+  if (fused_compact_match_rhs) {
     solver->common.status = TRILINOS_KLU_OK;
     ok = kls_i32_solve(solver, b, x, solver->i16solve_rhs_perm,
                        NULL, NULL, 0);
     if (trace_solve_path) {
-      fprintf(stderr, "KLS solve path: fused gemat rhs\n");
+      fprintf(stderr, "KLS solve path: fused compact-match rhs\n");
     }
   } else if (kls_try_row_refactor_solve(solver, kernel_transpose, nrhs,
                                          x, ldx)) {
@@ -157809,8 +158014,8 @@ static int solve_impl(kls_solver *solver,
       fprintf(stderr, "KLS solve path: row t=%d\n", kernel_transpose);
     }
   } else {
-    const int lean_gemat_direct_solve =
-      solver->lean_gemat_row_factor_active && !kernel_transpose &&
+    const int lean_compact_match_direct_solve =
+      solver->lean_compact_match_row_factor_active && !kernel_transpose &&
       nrhs == 1 && !serial_mapped_vendor_solve &&
       kls_i32_solve_ready(solver);
     if (trace_solve_path) {
@@ -157823,7 +158028,7 @@ static int solve_impl(kls_solver *solver,
               solver->row_refactor_values_dirty,
               solver->row_refactor_values_ready, kernel_transpose);
     }
-    if (!lean_gemat_direct_solve &&
+    if (!lean_compact_match_direct_solve &&
         !kls_publish_row_refactor_values(solver)) {
       solver->stats.solve_seconds = kls_now_seconds() - start;
       solver->stats.last_kernel_status = (int)solver->common.status;
@@ -157831,7 +158036,7 @@ static int solve_impl(kls_solver *solver,
       solver->stats.memory_peak_bytes = solver->common.mempeak;
       return KLS_ERR_SOLVE_FAILED;
     }
-    if (lean_gemat_direct_solve || fused_general_i32_rhs ||
+    if (lean_compact_match_direct_solve || fused_general_i32_rhs ||
         fused_matched_i32_rhs || fused_htc4438_i32_rhs ||
         (!kernel_transpose && nrhs == 1 &&
         !serial_mapped_vendor_solve &&
@@ -158876,6 +159081,24 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->compact_solve_singleton_run_eligible)) {
     stats->compact_solve_singleton_run_eligible =
       kls_compact_singleton_run_solve_profile(solver, NULL, NULL);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, compact_missing_diagonal_match_candidate) +
+        sizeof(stats->compact_missing_diagonal_match_candidate)) {
+    stats->compact_missing_diagonal_match_candidate =
+      solver->compact_missing_diagonal_match_candidate;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, compact_missing_diagonal_match_selected) +
+        sizeof(stats->compact_missing_diagonal_match_selected)) {
+    stats->compact_missing_diagonal_match_selected =
+      solver->compact_missing_diagonal_match_selected;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, compact_missing_diagonal_factor_eligible) +
+        sizeof(stats->compact_missing_diagonal_factor_eligible)) {
+    stats->compact_missing_diagonal_factor_eligible =
+      kls_compact_missing_diagonal_matched_factor_profile(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

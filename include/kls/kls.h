@@ -1375,6 +1375,15 @@ typedef struct kls_stats {
   /* The selected BTF geometry can amortize the compact singleton-run
      representation if a compact solve mirror is later built. */
   int compact_solve_singleton_run_eligible;
+  /* The original AUTO input fits the compact bounded-degree,
+     nearly-missing-diagonal matching representation. */
+  int compact_missing_diagonal_match_candidate;
+  /* The compact match covered the input and its accepted factor replaced the
+     analyze-time proposal. */
+  int compact_missing_diagonal_match_selected;
+  /* The accepted match also produced the fragmented, low-work numeric needed
+     by the compact row/direct-value lifecycle. */
+  int compact_missing_diagonal_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
