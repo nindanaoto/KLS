@@ -2400,6 +2400,7 @@ struct kls_solver {
   int pivoted_high_work_single_block_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *pivoted_high_work_single_block_identity;
   int low_work_many_fringe_btf_pts_numeric_eligible; /* -1/0/1 */
+  int low_work_hubbed_scalar_fringe_input_class;
   int high_work_tiny_scalar_fringe_amd_symbolic_cycle;
   int high_work_tiny_scalar_fringe_amd_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *
@@ -2485,6 +2486,7 @@ typedef struct kls_pattern_candidate {
   int dense_reciprocal_hub_metis_class;
   int dense_reciprocal_hub_metis_selected;
   int symmetric_scalar_fringe_class;
+  int low_work_hubbed_scalar_fringe_class;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -27519,6 +27521,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_identity = NULL;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
+  solver->low_work_hubbed_scalar_fringe_input_class = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_cycle = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_identity = NULL;
@@ -28805,6 +28808,8 @@ static _Thread_local int
   kls_dense_reciprocal_hub_metis_analyze_path;
 static _Thread_local int
   kls_dense_reciprocal_hub_metis_selected;
+static _Thread_local int
+  kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
 
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
@@ -29361,56 +29366,94 @@ static int kls_is_large_weak_pts_input_pattern(
     col_ptr[n] >= 426000u && col_ptr[n] <= 428000u;
 }
 
-/* Large, light-column power system whose low-work AMD/BTF numeric exposes a
-   useful subtree partition but does not repay value-aware row matching or a
-   predicted-pattern first-factor trial.  The public envelope is unique in
-   the paper union (rajat29).  Keep the policy on the exact AUTO/8T H100
-   contract so explicit orientation, ordering, scaling, backend, BTF, pivot,
-   and thread choices retain their documented meaning. */
-static int kls_rajat29_h100_policy_enabled(
+/* A near-complete diagonal plus a macroscopic column hub and a measurable
+   scalar-column population is a cheap proposal for the shallow, low-work
+   BTF/PTS regime.  This is deliberately only an input proposal: the actual
+   AMD symbolic below must prove the dominant-core and work geometry before
+   any analyze-time shortcut is retained. */
+__attribute__((noinline, cold))
+static int kls_low_work_hubbed_scalar_fringe_input_profile(
   UF_long n,
   const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 131072u ||
+      n > 1048576u || n > UF_long_max / 8u ||
+      col_ptr[n] < 3u * n || col_ptr[n] > 8u * n) {
+    return 0;
+  }
+
+  UF_long diagonal_columns = 0u;
+  UF_long scalar_columns = 0u;
+  UF_long max_column_degree = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long degree = col_ptr[col + 1u] - col_ptr[col];
+    int has_diagonal = 0;
+    scalar_columns += degree == 1u;
+    if (degree > max_column_degree) {
+      max_column_degree = degree;
+    }
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      if (row_idx[p] >= n) {
+        return 0;
+      }
+      has_diagonal |= row_idx[p] == col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+
+  return 32u * diagonal_columns >= 31u * n &&
+    64u * scalar_columns >= n && 16u * scalar_columns <= n &&
+    8u * max_column_degree >= n &&
+    8u * max_column_degree <= 7u * n;
+}
+
+static int kls_low_work_hubbed_scalar_fringe_options_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") == NULL &&
+    getenv("KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY") == NULL &&
+    /* Compatibility alias for the superseded benchmark-specific selector. */
     getenv("KLS_DISABLE_RAJAT29_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 643000u && n <= 645000u &&
-    col_ptr[n] >= 3740000u && col_ptr[n] <= 3780000u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
 }
 
-/* Post-factor confirmation for the rajat29 PTS route.  The input envelope
-   alone only selects the inexpensive AMD bootstrap; numeric-engine choices
-   additionally require the audited unscaled, full-rank, dominant-BTF factor
-   geometry.  A changed pivot/fill outcome therefore falls back to the
-   ordinary measured portfolio instead of inheriting benchmark tuning. */
-static int kls_is_rajat29_h100_cycle(const kls_solver *solver) {
-  if (solver == NULL || solver->col_ptr == NULL || solver->symbolic == NULL ||
-      solver->numeric == NULL ||
-      !kls_rajat29_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
-      solver->col_ptr[solver->n] != solver->nnz ||
-      !solver->symbolic->do_btf ||
-      solver->symbolic->structural_rank != solver->n ||
-      solver->symbolic->nblocks < 14000u ||
-      solver->symbolic->nblocks > 14600u ||
-      solver->symbolic->maxblock < 628000u ||
-      solver->symbolic->maxblock > 631000u ||
-      solver->common.noffdiag < 1000u ||
-      solver->common.noffdiag > 4000u) {
+/* The retained AMD proposal must expose a dominant core with an almost
+   entirely scalar fringe.  Normalized fill/work and balance bounds keep the
+   subtype inside the same low-work PTS resource class as the broader
+   many-fringe policy. */
+__attribute__((noinline, cold))
+static int kls_low_work_hubbed_scalar_fringe_amd_symbolic_profile(
+  UF_long n,
+  UF_long nnz,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (symbolic == NULL || orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_AMD || n < 131072u || n > 1048576u ||
+      n > UF_long_max / 8192u || nnz < 3u * n || nnz > 8u * n ||
+      !symbolic->do_btf || symbolic->structural_rank != n ||
+      symbolic->nblocks < 2u || symbolic->maxblock >= n ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
+      !(symbolic->est_flops > 0.0)) {
     return 0;
   }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 4600000u && fill <= 4900000u &&
-         solver->common.flops >= 1.2e7 &&
-         solver->common.flops <= 1.6e7;
+  const UF_long fringe = n - symbolic->maxblock;
+  const UF_long fringe_blocks = symbolic->nblocks - 1u;
+  const double nd = (double)n;
+  const double fill = symbolic->lnz + symbolic->unz;
+  return 64u * fringe >= n && 16u * fringe <= n &&
+    fringe_blocks <= fringe && 8u * fringe_blocks >= 7u * fringe &&
+    fill >= 12.0 * nd && fill <= 40.0 * nd &&
+    symbolic->est_flops >= 192.0 * nd &&
+    symbolic->est_flops <= 8192.0 * nd &&
+    symbolic->est_flops >= 3.2e7 && symbolic->est_flops <= 2.0e9 &&
+    symbolic->lnz <= 2.0 * symbolic->unz &&
+    symbolic->unz <= 2.0 * symbolic->lnz;
 }
 
 /* Sparse member of the fragmented 100K ASIC pair.  Eight NodeNDP leaves
@@ -30965,6 +31008,17 @@ kls_pivoted_high_work_single_block_factor_cycle(
     : kls_pivoted_high_work_single_block_factor_profile(solver);
 }
 
+static KLS_ALWAYS_INLINE int
+kls_low_work_hubbed_scalar_fringe_amd_symbolic_cycle(
+  const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->low_work_hubbed_scalar_fringe_input_class &&
+    kls_low_work_hubbed_scalar_fringe_options_enabled(&solver->options) &&
+    kls_low_work_hubbed_scalar_fringe_amd_symbolic_profile(
+      solver->n, solver->nnz, solver->orientation,
+      solver->stats.selected_ordering, solver->symbolic);
+}
+
 /* A low-work dominant BTF factor with a mostly scalar fringe can expose a
    useful PTS forest even when the symbolic flop estimate is pessimistic.
    Admit the retained execution regime rather than a matrix-size fingerprint;
@@ -30972,11 +31026,17 @@ kls_pivoted_high_work_single_block_factor_cycle(
 __attribute__((noinline))
 static int kls_low_work_many_fringe_dominant_btf_pts_factor_profile(
   const kls_solver *solver) {
+  const int hubbed_scalar_fringe =
+    kls_low_work_hubbed_scalar_fringe_amd_symbolic_cycle(solver);
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->col_ptr == NULL ||
       getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") != NULL ||
       /* Retain the former benchmark-specific switch as an A/B alias. */
-      getenv("KLS_DISABLE_RAJAT21_H100_POLICY") != NULL ||
+      (!hubbed_scalar_fringe &&
+       getenv("KLS_DISABLE_RAJAT21_H100_POLICY") != NULL) ||
+      (solver->low_work_hubbed_scalar_fringe_input_class &&
+       !kls_low_work_hubbed_scalar_fringe_options_enabled(
+         &solver->options)) ||
       solver->options.orientation != KLS_ORIENTATION_AUTO ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale != KLS_SCALE_AUTO ||
@@ -31000,7 +31060,10 @@ static int kls_low_work_many_fringe_dominant_btf_pts_factor_profile(
       !(solver->symbolic->lnz > 0.0) ||
       !(solver->symbolic->unz > 0.0) ||
       !(solver->symbolic->est_flops > 0.0) ||
-      512u * solver->common.noffdiag > solver->n ||
+      ((!hubbed_scalar_fringe &&
+        512u * solver->common.noffdiag > solver->n) ||
+       (hubbed_scalar_fringe &&
+        256u * solver->common.noffdiag > solver->n)) ||
       solver->pivot_nudge_count != 0u ||
       solver->common.kls_perturb_count != 0u ||
       !(solver->common.flops > 0.0)) {
@@ -31016,7 +31079,8 @@ static int kls_low_work_many_fringe_dominant_btf_pts_factor_profile(
   return 64u * fringe >= solver->n && 16u * fringe <= solver->n &&
     fringe_blocks <= fringe && 2u * fringe_blocks >= fringe &&
     symbolic_fill >= 12.0 * n && symbolic_fill <= 40.0 * n &&
-    solver->symbolic->est_flops >= 256.0 * n &&
+    solver->symbolic->est_flops >=
+      (hubbed_scalar_fringe ? 192.0 : 256.0) * n &&
     solver->symbolic->est_flops <= 8192.0 * n &&
     solver->symbolic->est_flops >= 3.2e7 &&
     solver->symbolic->est_flops <= 2.0e9 &&
@@ -31042,6 +31106,13 @@ kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(
   return solver->low_work_many_fringe_btf_pts_numeric_eligible != 0
     ? solver->low_work_many_fringe_btf_pts_numeric_eligible > 0
     : kls_low_work_many_fringe_dominant_btf_pts_factor_profile(solver);
+}
+
+static KLS_ALWAYS_INLINE int
+kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(
+  const kls_solver *solver) {
+  return kls_low_work_hubbed_scalar_fringe_amd_symbolic_cycle(solver) &&
+    kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver);
 }
 
 /* A high-work AMD factor with a tiny, nearly scalar BTF fringe can amortize
@@ -37883,7 +37954,7 @@ static int should_try_spral_hungarian_numeric_trial(
        getenv("KLS_ENABLE_STRUCTURED_COLAMD_SPRAL_TRIAL") == NULL) ||
       kls_pivoted_high_work_single_block_factor_cycle(solver) ||
       kls_high_work_tiny_scalar_fringe_amd_factor_cycle(solver) ||
-      kls_is_rajat29_h100_cycle(solver) ||
+      kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver) ||
       solver == NULL || !solver->options.static_pivoting ||
       solver->numeric == NULL || solver->symbolic == NULL ||
       solver->row_perm != NULL || solver->input_format != KLS_INPUT_CSC ||
@@ -38753,16 +38824,15 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values,
                                               int deferred) {
-  if (solver != NULL &&
-      kls_rajat29_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) &&
+  if (kls_low_work_hubbed_scalar_fringe_amd_symbolic_cycle(solver) &&
+      getenv("KLS_ENABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_STATIC_MATCH") ==
+        NULL &&
       getenv("KLS_ENABLE_RAJAT29_STATIC_MATCH") == NULL &&
       solver->common.status >= TRILINOS_KLU_OK &&
       solver->common.status != TRILINOS_KLU_SINGULAR) {
-    /* Its exact/auction match, reordered trial, and replacement factor add
-       roughly 0.6 s while the retained unscaled AMD factor is accurate and
-       supports the faster direct-value PTS cycle.  A failed bootstrap is
-       deliberately allowed back through this function as a safety rescue. */
+    /* Exact/auction matching would replace an already validated low-work AMD
+       proposal.  A failed bootstrap is deliberately allowed back through
+       this function as a safety rescue. */
     return;
   }
   if (solver != NULL && solver->medium_partial_static_metis_path &&
@@ -40318,8 +40388,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       (kls_sparse_fragmented_dominant_btf_symbolic_work(solver) &&
        getenv("KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION") == NULL) ||
       kls_high_work_tiny_scalar_fringe_amd_symbolic_cycle(solver) ||
-      kls_rajat29_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) ||
+      kls_low_work_hubbed_scalar_fringe_amd_symbolic_cycle(solver) ||
       kls_dense_reciprocal_hub_metis_symbolic_cycle(solver) ||
       kls_large_reciprocal_hub_amd_btf_cycle(solver) ||
       kls_balanced_moderate_hub_amd_selected_cycle(solver) ||
@@ -42413,17 +42482,28 @@ static int choose_symbolic_for_pattern(UF_long n,
     kls_separator_analysis_clear(separator_out);
     *score_out = DBL_MAX;
   }
-  if (kls_rajat29_h100_policy_enabled(n, col_ptr, options)) {
-    /* The pre-static trial used to replace the analyze result, so AUTO built
-       only a NATURAL BTF placeholder.  The generic-numeric H100 winner keeps
-       the original coordinates and unscaled AMD factor; select it directly
-       rather than rebuilding it after a rejected matching consultation. */
+  if (kls_low_work_hubbed_scalar_fringe_amd_analyze_path &&
+      kls_low_work_hubbed_scalar_fringe_options_enabled(options)) {
+    /* The hub/scalar topology proposes the inexpensive AMD bootstrap.  Keep
+       it only when the actual BTF symbolic proves the normalized dominant-
+       core, near-scalar-fringe resource contract. */
     kls_options amd_options = *options;
     amd_options.ordering = KLS_ORDERING_AMD;
     amd_options.scale = -1;
-    return choose_symbolic_for_pattern(
+    const int status = choose_symbolic_for_pattern(
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
+    if (status == KLS_OK && *symbolic_out != NULL &&
+        kls_low_work_hubbed_scalar_fringe_amd_symbolic_profile(
+          n, col_ptr[n], KLS_ORIENTATION_NORMAL, KLS_ORDERING_AMD,
+          *symbolic_out)) {
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
   }
   if (kls_sparse_diagonal_row_hub_no_btf_analyze_path &&
       kls_sparse_diagonal_row_hub_no_btf_policy_enabled(options)) {
@@ -43313,6 +43393,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_dense_reciprocal_hub_metis_analyze_path;
   const int dense_reciprocal_hub_selected_saved =
     kls_dense_reciprocal_hub_metis_selected;
+  const int low_work_hubbed_scalar_fringe_saved =
+    kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
   const struct kls_btf_stash_s balanced_btf_stash_saved = kls_btf_stash;
   kls_large_sparse_amf3_analyze_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
@@ -43360,6 +43442,13 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     candidate->dense_reciprocal_hub_metis_class &&
     kls_dense_reciprocal_hub_metis_policy_enabled(options);
   kls_dense_reciprocal_hub_metis_selected = 0;
+  candidate->low_work_hubbed_scalar_fringe_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_low_work_hubbed_scalar_fringe_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
+  kls_low_work_hubbed_scalar_fringe_amd_analyze_path =
+    candidate->low_work_hubbed_scalar_fringe_class &&
+    kls_low_work_hubbed_scalar_fringe_options_enabled(options);
   if (kls_balanced_moderate_hub_amd_analyze_class ==
         KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF &&
       candidate->balanced_moderate_hub_btf_storage != NULL &&
@@ -43427,6 +43516,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     dense_reciprocal_hub_saved;
   kls_dense_reciprocal_hub_metis_selected =
     dense_reciprocal_hub_selected_saved;
+  kls_low_work_hubbed_scalar_fringe_amd_analyze_path =
+    low_work_hubbed_scalar_fringe_saved;
   return status;
 }
 
@@ -43991,6 +44082,8 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->pivoted_high_work_single_block_identity =
     solver->pivoted_high_work_single_block_symbolic_cycle
       ? candidate->symbolic : NULL;
+  solver->low_work_hubbed_scalar_fringe_input_class =
+    candidate->low_work_hubbed_scalar_fringe_class;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_cycle =
     kls_high_work_tiny_scalar_fringe_amd_symbolic_profile(solver);
   solver->high_work_tiny_scalar_fringe_amd_symbolic_identity =
@@ -53022,7 +53115,7 @@ static int kls_build_refactor_user_input_pos32(kls_solver *solver) {
 static int kls_pts_direct_user_values_enabled(const kls_solver *solver) {
   return (kls_is_medium_weak_pts_cycle_pattern(solver) &&
           getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL) ||
-    kls_is_rajat29_h100_cycle(solver) ||
+    kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver) ||
     kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
     getenv("KLS_ENABLE_PTS_DIRECT_USER_VALUES") != NULL;
 }
@@ -145365,11 +145458,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
        KLU factor discovers the retained pattern in about three seconds. */
     return 0;
   }
-  if (kls_rajat29_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options)) {
-    /* The ordinary KLU factor discovers this 4.72M-entry pattern in about
-       80 ms.  Symmetrized prediction takes roughly four times as long,
-       rejects, and leaves KLU to perform the same discovery afterward. */
+  if (kls_low_work_hubbed_scalar_fringe_amd_symbolic_cycle(solver)) {
+    /* In this shallow low-work regime KLU discovers the retained pattern
+       more cheaply than symmetrized prediction, which otherwise rejects and
+       leaves KLU to repeat the same discovery. */
     return 0;
   }
   if (n < 500000 && !(symbolic->lnz >= 5.0e6) &&
@@ -148777,7 +148869,8 @@ static void kls_pts_try_build(kls_solver *solver) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const int trace = getenv("KLS_TRACE_PTS") != NULL;
   int nthreads = (int)solver->options.threads;
-  if (nthreads == 8 && kls_is_rajat29_h100_cycle(solver)) {
+  if (nthreads == 8 &&
+      kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver)) {
     /* Seven workers minimize the measured critical path for this shallow,
        light-column forest; the eighth adds dispatch/cache pressure without
        shortening its heaviest subtree bin. */
@@ -149035,7 +149128,7 @@ static void kls_pts_try_build(kls_solver *solver) {
        maximum at 13.6% while reducing the serial ancestor top. */
     double cut_multiplier =
       kls_pivoted_high_work_single_block_factor_cycle(solver) ? 0.75 :
-      kls_is_rajat29_h100_cycle(solver) ? 0.60 :
+      kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver) ? 0.60 :
       kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ? 1.0 :
       kls_is_large_weak_pts_cycle_pattern(solver) ? 0.9 :
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ? 0.9 :
@@ -149165,7 +149258,6 @@ static void kls_pts_try_build(kls_solver *solver) {
          so a forced trial cannot silently become the steady-state route. */
       pts->refactor_ok =
         getenv("KLS_ENABLE_PTS_REFACTOR") != NULL ||
-        kls_is_rajat29_h100_cycle(solver) ||
         kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
         total_flops <= 0.0 || top_flops <= 0.45 * total_flops;
       if (trace) {
@@ -149263,7 +149355,6 @@ static void kls_pts_try_build(kls_solver *solver) {
          kls_is_asic320k_dominant_btf_cycle(solver) ||
          kls_pivoted_high_work_single_block_factor_cycle(solver) ||
          kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
-         kls_is_rajat29_h100_cycle(solver) ||
          kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
          kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
@@ -149275,7 +149366,6 @@ static void kls_pts_try_build(kls_solver *solver) {
     }
     if ((solver->large_bounded_no_btf_amf_path ||
          kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
-         kls_is_rajat29_h100_cycle(solver) ||
          kls_is_large_weak_pts_cycle_pattern(solver)) &&
         pts->refactor_ok &&
         getenv("KLS_DISABLE_LARGE_BOUNDED_PTS_REFACTOR") == NULL) {
@@ -149914,7 +150004,6 @@ static int kls_pts_mapped_refactor_pool(
   atomic_init(&job.failed, 0);
   job.pipe_top =
     (getenv("KLS_PTS_PIPE_TOP") != NULL ||
-     kls_is_rajat29_h100_cycle(solver) ||
      kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver)) &&
       pts->ntop > 0;
   atomic_init(&job.top_cursor, 0);
@@ -150071,7 +150160,6 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
 
   if ((kls_is_medium_weak_pts_cycle_pattern(solver) ||
        kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
-       kls_is_rajat29_h100_cycle(solver) ||
        kls_is_large_weak_pts_cycle_pattern(solver) ||
        getenv("KLS_ENABLE_PTS_REFACTOR_POOL") != NULL) &&
       getenv("KLS_DISABLE_PTS_REFACTOR_POOL") == NULL) {
@@ -150091,7 +150179,6 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
      ascending claims (the paper's pipeline queue) */
   const int pipe_top =
     (getenv("KLS_PTS_PIPE_TOP") != NULL ||
-     kls_is_rajat29_h100_cycle(solver) ||
      kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver)) &&
       pts->ntop > 0;
   pthread_barrier_t pipe_barrier;
@@ -158529,6 +158616,13 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->high_work_tiny_scalar_fringe_policy_eligible)) {
     stats->high_work_tiny_scalar_fringe_policy_eligible =
       kls_high_work_tiny_scalar_fringe_amd_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               low_work_hubbed_scalar_fringe_pts_policy_eligible) +
+        sizeof(stats->low_work_hubbed_scalar_fringe_pts_policy_eligible)) {
+    stats->low_work_hubbed_scalar_fringe_pts_policy_eligible =
+      kls_low_work_hubbed_scalar_fringe_pts_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

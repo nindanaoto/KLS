@@ -1784,6 +1784,25 @@ row inside a 2M--64M resource band. Benchmark JSON exposes
 `KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY=1` for an A/B fallback. The
 former `KLS_DISABLE_RAJAT21_H100_POLICY` switch remains an alias.
 
+A hubbed scalar-fringe subtype replaces the former `rajat29` order and
+nonzero window.  A cheap input proposal requires the same broad order and
+density range as the low-work many-fringe family, at least 31/32 of columns
+to contain their diagonal, between `n/64` and `n/16` scalar columns, and one
+column whose degree is between `n/8` and `7n/8`.  AUTO retains the proposed
+normal-AMD symbolic only when it is full-rank, leaves an `n/64`--`n/16`
+fringe around one dominant BTF core, represents at least seven eighths of
+that fringe as separate blocks, and passes normalized fill, work, and L/U
+balance bounds.  The measured numeric then inherits the low-work PTS guards;
+this more specific topology admits a 192-flop-per-row symbolic floor and at
+most `n/256` off-diagonal pivots.  Explicit orientation,
+ordering, scale, backend, BTF, pivot, or thread choices remain authoritative.
+Benchmark JSON exposes
+`low_work_hubbed_scalar_fringe_pts_policy_eligible`.  Set
+`KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY=1` to disable only this
+subtype, or use the many-fringe master switch above to disable the whole
+family.  The former `KLS_DISABLE_RAJAT29_H100_POLICY` switch remains a
+subtype-only alias.
+
 A high-work tiny scalar-fringe AMD policy replaces the former `Raj1` order,
 nonzero, block-count, and core-size box. Under the standard AUTO/8-thread
 BTF/static-pivoting contract, a retained normal-AMD symbolic from

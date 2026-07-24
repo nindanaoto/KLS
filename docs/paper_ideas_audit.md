@@ -18280,3 +18280,115 @@ CTest pass all four tests.  Leak-enabled sanitized changed-value runs also
 cover the original, coupled extension, independent grid, fringe-boundary
 rejection, and same-topology paired-pivot rejection with their expected
 decisions and valid residuals.
+
+LOW-WORK HUBBED SCALAR-FRINGE PTS LIFECYCLE GENERALIZED (2026-07-24).  The
+remaining `rajat29` route started from a 643,000--645,000-row and
+3.74M--3.78M-entry input box.  Its post-factor check then required
+14,000--14,600 BTF blocks, a 628,000--631,000-row core, 1,000--4,000
+off-diagonal pivots, 4.6M--4.9M retained factor entries, and 12M--16M measured
+flops.  That identity selected a direct AMD bootstrap and suppressed the
+ordinary METIS, matching, scale, and prediction alternatives; it also chose
+the seven-worker PTS forest, a 0.60 subtree cut, direct user-position values,
+and the pooled pipelined refactor lifecycle.  Normalized measurements were
+present, but the exact input box remained the authority for the complete
+route.
+
+The replacement is a subtype of the already generalized low-work
+many-fringe family.  Under the standard AUTO orientation, ordering, scale,
+and backend contract with eight threads, BTF, static pivoting, and the
+requested `0.001` tolerance, an input only proposes the direct AMD bootstrap
+when it has 131,072--1,048,576 rows, 3--8 entries per row, diagonals in at
+least 31/32 of columns, between `n/64` and `n/16` scalar columns, and a
+maximum column degree between `n/8` and `7n/8`.  The proposal is rejected
+unless the actual normal-AMD symbolic is full-rank, leaves an `n/64`--`n/16`
+fringe around one dominant BTF core, represents at least seven eighths of
+that fringe as separate blocks, has 12--40 estimated factor entries per row,
+and has balanced L/U work between 192 and 8,192 flops per row inside a
+32M--2B resource band.  A rejection resumes ordinary AUTO selection.
+
+Recurring choices require both that retained symbolic contract and the
+measured low-work many-fringe numeric contract: no scaling array, nudges, or
+perturbations; balanced L/U storage; 4--16 actual factor entries and 8--128
+measured flops per row inside the existing absolute resource bounds.  Only
+the structurally narrower hubbed subtype admits the 192-flop symbolic floor
+and at most `n/256` off-diagonal pivots; the base family retains its previous
+256-flop and `n/512` boundaries.  The input class is carried with the adopted
+candidate, while the current symbolic is revalidated rather than compared by
+pointer identity.  Consequently an equivalent AMD replacement can retain
+the capability, but a different ordering or resource shape cannot inherit
+stale eligibility.
+
+The route is exposed as
+`low_work_hubbed_scalar_fringe_pts_policy_eligible` in `kls_stats` and
+benchmark JSON.  `KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY` is
+the subtype switch, `KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY` remains
+the family master, and `KLS_DISABLE_RAJAT29_H100_POLICY` is a subtype-only
+compatibility alias.  The unrelated `KLS_DISABLE_RAJAT21_H100_POLICY` alias
+continues to control only the base operating point.  Explicit orientation,
+ordering, scale, backend, BTF, static-pivot, tolerance, or thread choices are
+authoritative and report eligibility zero.
+
+The smoke suite now supplies an independent 133,000-row input, far outside
+the old window.  Its 128,000-row directed-grid core has a 16,625-edge column
+hub and 5,000 scalar diagonal components, for 613,604 entries total.  AUTO
+selects normal AMD, no scaling, 5,001 BTF blocks, and the intended core; the
+symbolic work is about 33.1M flops and the measured factor has about 1.28M
+entries and 3.53M flops.  It reports both the family and subtype fields as
+one, completes a changed-value mapped refactor, and solves an independently
+formed right-hand side.  A same-topology value control installs repeated
+weak-diagonal/strong-edge pairs, crosses the `n/256` pivot boundary, and
+reports both fields as zero.  A separate explicit normal/AMD/no-scale control
+also remains ineligible.
+
+Metamorphic holdouts exercise identity, order, connectivity, and rejection.
+Appending 4,096 diagonal components moves the original to 648,090 rows and
+18,403 blocks while retaining the 629,328-row core and eligibility; 10,000
+adjacent swaps and a complete simultaneous shuffle remain positive while
+changing pivots, fill, and work.  Adding 512 weak reciprocal nodes plus 512
+diagonal components instead produces 645,018 rows, just outside the former
+upper bound, 14,825 blocks, and a 629,831-row core; it and its complete
+shuffle remain eligible.  Appending 32,768 diagonal components makes a
+47,075-block, 676,762-row fringe outside the normalized boundary and reports
+zero.  The subtype switch and its legacy alias both select the same fallback,
+while the unrelated `rajat21` alias leaves this route enabled.
+
+Corpus screening is selective for structural reasons.  In the 110-matrix
+paper union, seventeen matrices enter the broad order/density range and only
+`rajat29` passes the input topology.  `rajat30` is too dense at 9.59 entries
+per row; `rajat21` has only 0.0115 scalar columns per row, below `n/64`; the
+remaining candidates fail the diagonal, scalar-fringe, or hub requirement.
+The deterministic 24+24 group-disjoint default manifests and seven fetched
+coarse-density matrices from the large SuiteSparse tier add no positive.
+Applying the symbolic gate to all available results likewise leaves only the
+intended execution class; structurally nearby matrices fall through before a
+specialized numeric consumer can run.
+
+Ten interleaved standard-amplitude H100 pairs put generalized/parent modeled
+cycle at `0.9882` by paired geometric mean (`0.9883` median,
+`0.9500`--`1.0218` range).  Factor and recurring-refactor ratios are `1.0040`
+and `0.9914`, so the broader classifier preserves the existing target route.
+Five same-binary enabled/disabled pairs put the original cycle at `0.5869`;
+three-pair ratios are `0.5877` after the diagonal append, `0.5889` after
+adjacent swaps, `0.8337` for the connected extension, and `0.7849` after its
+full shuffle.  The boundary rejection is neutral at `1.0121`.  The connected
+case deliberately accepts a 1.56x slower recurring refactor because its much
+faster first factor still reduces the complete modeled horizon; the policy
+is therefore justified by the declared factor/refactor/solve objective, not
+one isolated kernel.
+
+The original and five metamorphic positives each completed 100 verified
+entrywise generations at the documented amplitude 0.001.  Across all 600
+changed systems the worst per-generation relative-L2 residual was
+`5.04e-12`; the 32,768-node rejection completed another 100 at `4.11e-12`.
+The original also stayed below `1.92e-13` at amplitude 0.01.  At the much
+larger, nonstandard amplitude 0.1, the inherited pivoted PTS numeric has rare
+generations up to `1.20e-7` (the disabled fallback reaches `2.31e-10`).  The
+generalization therefore makes no broad-update accuracy claim: its certified
+workload remains the documented small entrywise perturbation sequence, and
+future work should add a change-magnitude-triggered residual contract before
+extending this lifecycle to large value excursions.
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled
+sanitized changed-value runs additionally cover the original, the connected
+out-of-window positive, and the large-fringe rejection; all retain their
+expected decisions and verified residuals.

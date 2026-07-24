@@ -21578,14 +21578,14 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
   const int32_t core = grid_rows * grid_cols;
   const int32_t fringe = 5000;
   const int32_t n = core + fringe;
-  const int32_t degree_break = 16;
-  const int32_t degree_step = core / degree_break;
+  const int32_t hub_edges = n / 8;
+  const int32_t hub_first_row = core - hub_edges;
   const int32_t directed_grid_edges =
     grid_rows * (grid_cols - 1) +
     (grid_rows - 1) * grid_cols +
     2 * (grid_rows - 1) * (grid_cols - 1);
   const int32_t nnz =
-    core + directed_grid_edges + 1 + degree_break + fringe;
+    core + directed_grid_edges + 1 + hub_edges + fringe;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
   int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
   double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
@@ -21600,26 +21600,42 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
     getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY");
   const char *saved_legacy_value =
     getenv("KLS_DISABLE_RAJAT21_H100_POLICY");
+  const char *saved_hubbed_policy_value =
+    getenv("KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY");
+  const char *saved_hubbed_legacy_value =
+    getenv("KLS_DISABLE_RAJAT29_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
   char *saved_legacy = saved_legacy_value != NULL
     ? strdup(saved_legacy_value) : NULL;
+  char *saved_hubbed_policy = saved_hubbed_policy_value != NULL
+    ? strdup(saved_hubbed_policy_value) : NULL;
+  char *saved_hubbed_legacy = saved_hubbed_legacy_value != NULL
+    ? strdup(saved_hubbed_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
   const int had_legacy = saved_legacy_value != NULL;
+  const int had_hubbed_policy = saved_hubbed_policy_value != NULL;
+  const int had_hubbed_legacy = saved_hubbed_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *negative_solver = NULL;
+  kls_solver *explicit_solver = NULL;
   kls_options options;
+  kls_options explicit_options;
   kls_stats stats;
   int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
     ax_pivoted != NULL && expected != NULL && b != NULL && x != NULL &&
     (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    (!had_legacy || saved_legacy != NULL) &&
+    (!had_hubbed_policy || saved_hubbed_policy != NULL) &&
+    (!had_hubbed_legacy || saved_hubbed_legacy != NULL);
 
   if (!ok) {
     goto cleanup;
   }
   if (unsetenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_RAJAT21_H100_POLICY") != 0) {
+      unsetenv("KLS_DISABLE_RAJAT21_H100_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_RAJAT29_H100_POLICY") != 0) {
     perror("configure low-work many-fringe BTF PTS policy");
     ok = 0;
     goto cleanup;
@@ -21645,8 +21661,8 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
         }
       }
       if (col == 0) {
-        for (int32_t index = 0; index < degree_break; ++index) {
-          ai[p++] = 2 + index * degree_step;
+        for (int32_t row = hub_first_row; row < core; ++row) {
+          ai[p++] = row;
         }
       }
       if (col == core - 1) {
@@ -21659,16 +21675,18 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
           compare_fixture_int32);
     for (int32_t entry = ap[col]; entry < p; ++entry) {
       const int32_t row = ai[entry];
-      const int degree_break_edge =
-        col == 0 && row >= 2 && (row - 2) % degree_step == 0 &&
-        (row - 2) / degree_step < degree_break;
+      const int hub_edge =
+        col == 0 && row >= hub_first_row && row < core;
       if (row == col) {
         ax[entry] = col < core ? 10.0 : 1.0;
-        ax_pivoted[entry] = col < core ? 2.0 : 1.0;
+        ax_pivoted[entry] = col < core && col % grid_cols <= 1
+          ? 2.0e-6 : ax[entry];
       } else {
-        ax[entry] = degree_break_edge || (col == core - 1 && row == 0)
+        ax[entry] = hub_edge || (col == core - 1 && row == 0)
           ? 1.0e-3 : -0.1;
-        ax_pivoted[entry] = 10.0;
+        const int paired_edge = col < core && col % grid_cols == 0 &&
+          row == col + 1;
+        ax_pivoted[entry] = paired_edge ? 10.0 : ax[entry];
       }
       ax_changed[entry] =
         ax[entry] * (1.0 + 1.0e-5 * (double)((entry % 7) - 3));
@@ -21710,22 +21728,27 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
       stats.selected_scale != -1 || !stats.selected_btf ||
       stats.structural_rank != n || stats.nblocks != fringe + 1 ||
       stats.max_block != core ||
+      stats.estimated_flops < 192.0 * (double)n ||
+      stats.estimated_flops > 8192.0 * (double)n ||
       fill < 4.0 * (double)n || fill > 16.0 * (double)n ||
       stats.factor_flops < 8.0 * (double)n ||
       stats.factor_flops > 128.0 * (double)n ||
-      stats.offdiag_pivots * 512 > n ||
-      stats.low_work_many_fringe_btf_pts_policy_eligible != 1) {
+      stats.offdiag_pivots * 256 > n ||
+      stats.low_work_many_fringe_btf_pts_policy_eligible != 1 ||
+      stats.low_work_hubbed_scalar_fringe_pts_policy_eligible != 1) {
     fprintf(stderr,
             "unexpected low-work many-fringe BTF PTS policy:"
             " orientation=%d ordering=%d scale=%d btf=%d blocks=%" PRId64
             " max=%" PRId64 " rank=%" PRId64 " offdiag=%" PRId64
-            " fill=%.0f flops=%.0f eligible=%d\n",
+            " fill=%.0f est=%.0f flops=%.0f eligible=%d hubbed=%d\n",
             (int)stats.selected_orientation,
             (int)stats.selected_ordering, stats.selected_scale,
             stats.selected_btf, stats.nblocks, stats.max_block,
             stats.structural_rank, stats.offdiag_pivots, fill,
+            stats.estimated_flops,
             stats.factor_flops,
-            stats.low_work_many_fringe_btf_pts_policy_eligible);
+            stats.low_work_many_fringe_btf_pts_policy_eligible,
+            stats.low_work_hubbed_scalar_fringe_pts_policy_eligible);
     ok = 0;
     goto cleanup;
   }
@@ -21749,9 +21772,12 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
       goto cleanup;
     }
   }
+  kls_destroy(solver);
+  solver = NULL;
 
-  /* Identical topology with dominant off-diagonal values produces far too
-     many pivots for the direct PTS lifecycle and must fail the numeric gate. */
+  /* Identical topology with repeated weak-diagonal/strong-edge pairs
+     produces far too many pivots for the direct PTS lifecycle and must fail
+     the numeric gate. */
   if (!require_ok(kls_create(&negative_solver),
                   "create low-work many-fringe numeric negative") ||
       !require_ok(kls_analyze_csc(negative_solver, KLS_INDEX_INT32, n,
@@ -21767,15 +21793,51 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
   if (!require_ok(kls_get_stats(negative_solver, &stats),
                   "stats low-work many-fringe numeric negative") ||
       stats.low_work_many_fringe_btf_pts_policy_eligible != 0 ||
-      stats.offdiag_pivots * 512 <= n) {
+      stats.low_work_hubbed_scalar_fringe_pts_policy_eligible != 0 ||
+      stats.offdiag_pivots * 256 <= n) {
     fprintf(stderr,
             "pivot-heavy control unexpectedly selected low-work"
             " many-fringe BTF PTS policy (offdiag=%" PRId64 ")\n",
             stats.offdiag_pivots);
     ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(negative_solver);
+  negative_solver = NULL;
+
+  /* Explicit choices remain authoritative even when they produce the same
+     retained normal-AMD factor. */
+  explicit_options = options;
+  explicit_options.orientation = KLS_ORIENTATION_NORMAL;
+  explicit_options.ordering = KLS_ORDERING_AMD;
+  explicit_options.scale = -1;
+  if (!require_ok(kls_create(&explicit_solver),
+                  "create low-work hubbed scalar-fringe explicit control") ||
+      !require_ok(kls_analyze_csc(explicit_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &explicit_options),
+                  "analyze low-work hubbed scalar-fringe explicit control") ||
+      !require_ok(kls_factor(explicit_solver, ax),
+                  "factor low-work hubbed scalar-fringe explicit control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(explicit_solver, &stats),
+                  "stats low-work hubbed scalar-fringe explicit control") ||
+      stats.low_work_many_fringe_btf_pts_policy_eligible != 0 ||
+      stats.low_work_hubbed_scalar_fringe_pts_policy_eligible != 0 ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != -1) {
+    fprintf(stderr,
+            "explicit low-work hubbed scalar-fringe control changed or"
+            " became eligible\n");
+    ok = 0;
   }
 
 cleanup:
+  kls_destroy(explicit_solver);
   kls_destroy(negative_solver);
   kls_destroy(solver);
   if (!restore_env_value(
@@ -21785,6 +21847,18 @@ cleanup:
   }
   if (!restore_env_value("KLS_DISABLE_RAJAT21_H100_POLICY", had_legacy,
                          saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value(
+        "KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY",
+        had_hubbed_policy,
+        saved_hubbed_policy != NULL ? saved_hubbed_policy : "")) {
+    ok = 0;
+  }
+  if (!restore_env_value("KLS_DISABLE_RAJAT29_H100_POLICY",
+                         had_hubbed_legacy,
+                         saved_hubbed_legacy != NULL
+                           ? saved_hubbed_legacy : "")) {
     ok = 0;
   }
   free(ap);
@@ -21797,6 +21871,8 @@ cleanup:
   free(x);
   free(saved_policy);
   free(saved_legacy);
+  free(saved_hubbed_policy);
+  free(saved_hubbed_legacy);
   return ok;
 }
 

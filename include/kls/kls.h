@@ -1352,6 +1352,9 @@ typedef struct kls_stats {
   /* The retained normal-AMD numeric has a tiny, mostly scalar BTF fringe and
      passed the normalized high-work EGraph lifecycle guards. */
   int high_work_tiny_scalar_fringe_policy_eligible;
+  /* The retained low-work AMD/PTS numeric has a hubbed input and an almost
+     entirely scalar BTF fringe. */
+  int low_work_hubbed_scalar_fringe_pts_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
