@@ -3802,6 +3802,44 @@ entrywise generations. Fresh CKTSO, KLU, and SubtreeLU controls each timed out
 at 180 seconds. A 1% update correctly declined retention, used EGraph in
 `9.54s`, and returned a `1.36e-15` relative residual.
 
+## Sparse symmetric fragmented METIS policy
+
+The former `ASIC_100ks` H100 route no longer recognizes a 99,000--99,500-row,
+570,000--590,000-entry benchmark box. Under the same standard eight-thread
+AUTO contract, it now proposes the tuned NodeNDP ordering only for a bounded
+sparse topology: a full structural diagonal, exact multiplicity-aware
+symmetry, four--eight entries per row overall, a small scalar fringe, and a
+moderate graph hub. Sorted and unsorted CSC are both proved exactly, and the
+same normalized policy works through the CSC and CSR APIs.
+
+The input is only a proposal. The real METIS symbolic must independently prove
+full rank, a nearly spanning BTF core, a represented scalar fringe, balanced
+bounded fill, and a complete separator decomposition with enough private work
+for the worker team. Only an unscaled numeric with no off-diagonal pivots,
+nudges, or perturbations and measured balanced fill/work suppresses the later
+scale trial. A rejection at either measured stage resumes ordinary AUTO.
+
+`KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY=1` provides a generic
+same-binary control; the old `KLS_DISABLE_ASIC100KS_H100_POLICY` and
+`KLS_ASIC100KS_METIS_NDP_NPES` names remain compatibility aliases. The generic
+leaf-count override is
+`KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES`.
+`sparse_symmetric_fragmented_metis_symbolic_eligible` and
+`sparse_symmetric_fragmented_metis_policy_eligible` expose the accepted
+symbolic and numeric stages through `kls_stats` and benchmark JSON.
+
+The independent smoke fixture has 65,696 rows, outside the old window, and
+selects the policy through both public sparse formats; a one-edge reciprocity
+break and the disable switch reject it. An appended-scalar `ASIC_100ks`
+metamorph at 99,702 rows and simultaneous relabelings also select, while a
+larger 101,238-row fringe crosses the normalized boundary and falls back.
+Across the target and three metamorphs, 1,200 independently checked entrywise
+generations through 10% amplitude had worst relative-L2 error `5.91e-15`.
+Twenty alternating parent/current target pairs put the modeled-cycle ratio at
+`0.9926` geometrically (`0.9932` by the means); twelve extension pairs measured
+`0.8525`. Release and ASan/UBSan/LSan CTest pass all four tests, including
+leak-enabled target, positive-extension, and boundary-rejection runs.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

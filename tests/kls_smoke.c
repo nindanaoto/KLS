@@ -23826,6 +23826,287 @@ cleanup:
   return ok;
 }
 
+static int test_sparse_symmetric_fragmented_metis_policy(void) {
+  const int32_t grid_rows = 256;
+  const int32_t grid_cols = 256;
+  const int32_t core = grid_rows * grid_cols;
+  const int32_t fringe = 160;
+  const int32_t n = core + fringe;
+  const int32_t hub = 0;
+  const int32_t connection_start = 4 * grid_cols;
+  const int32_t connection_count = 160;
+  const int32_t grid_edges =
+    grid_rows * (grid_cols - 1) + (grid_rows - 1) * grid_cols;
+  const int32_t nnz = core + 2 * grid_edges + 2 * connection_count + fringe;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  int32_t *ai_asymmetric =
+    (int32_t *)malloc((size_t)nnz * sizeof(*ai_asymmetric));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)calloc((size_t)n, sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY");
+  const char *saved_legacy_value =
+    getenv("KLS_DISABLE_ASIC100KS_H100_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  char *saved_legacy = saved_legacy_value != NULL
+    ? strdup(saved_legacy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  const int had_legacy = saved_legacy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *csr_solver = NULL;
+  kls_solver *negative_solver = NULL;
+  kls_solver *disabled_solver = NULL;
+  int ok = ap != NULL && ai != NULL && ai_asymmetric != NULL && ax != NULL &&
+    changed != NULL && expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col >= core) {
+      ai[p] = col;
+      ax[p++] = 1.0;
+    } else {
+      const int32_t row = col / grid_cols;
+      const int32_t grid_col = col % grid_cols;
+      const int connected_to_hub =
+        col >= connection_start &&
+        col < connection_start + connection_count;
+      if (connected_to_hub) {
+        ai[p] = hub;
+        ax[p++] = -0.005;
+      }
+      if (row > 0) {
+        ai[p] = col - grid_cols;
+        ax[p++] = -0.25;
+      }
+      if (grid_col > 0) {
+        ai[p] = col - 1;
+        ax[p++] = -0.25;
+      }
+      ai[p] = col;
+      ax[p++] = col == hub ? 4.0 : 2.0;
+      if (grid_col + 1 < grid_cols) {
+        ai[p] = col + 1;
+        ax[p++] = -0.25;
+      }
+      if (row + 1 < grid_rows) {
+        ai[p] = col + grid_cols;
+        ax[p++] = -0.25;
+      }
+      if (col == hub) {
+        for (int32_t offset = 0; offset < connection_count; ++offset) {
+          ai[p] = connection_start + offset;
+          ax[p++] = -0.005;
+        }
+      }
+    }
+    expected[col] = 0.25 + 0.001953125 * (double)(col % 37);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr,
+            "unexpected sparse symmetric fragmented fixture nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  memcpy(ai_asymmetric, ai, (size_t)nnz * sizeof(*ai_asymmetric));
+  int asymmetric_edge_found = 0;
+  for (int32_t entry = ap[hub]; entry < ap[hub + 1]; ++entry) {
+    if (ai_asymmetric[entry] == connection_start + connection_count - 1) {
+      ai_asymmetric[entry]++;
+      asymmetric_edge_found = 1;
+      break;
+    }
+  }
+  if (!asymmetric_edge_found) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t entry = 0; entry < nnz; ++entry) {
+    const int variation = entry % 13 - 6;
+    changed[entry] = ax[entry] * (1.0 + 2.5e-5 * (double)variation);
+  }
+
+  if (unsetenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_ASIC100KS_H100_POLICY") != 0) {
+    perror("configure sparse symmetric fragmented METIS policy");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create sparse symmetric fragmented METIS policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze sparse symmetric fragmented METIS policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor sparse symmetric fragmented METIS policy") ||
+      !require_ok(kls_refactor(solver, changed),
+                  "refactor sparse symmetric fragmented METIS policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats sparse symmetric fragmented METIS policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  if (stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_METIS ||
+      stats.selected_scale != -1 || !stats.selected_btf ||
+      stats.structural_rank != n || stats.nblocks != fringe + 1 ||
+      stats.max_block != core || stats.offdiag_pivots != 0 ||
+      stats.sparse_symmetric_fragmented_metis_symbolic_eligible != 1 ||
+      stats.sparse_symmetric_fragmented_metis_policy_eligible != 1) {
+    fprintf(stderr,
+            "unexpected sparse symmetric fragmented METIS policy:"
+            " orientation=%d ordering=%d scale=%d btf=%d rank=%" PRId64
+            " blocks=%" PRId64 " max=%" PRId64
+            " fill=%" PRId64 "/%" PRId64 " work=%.0f offdiag=%" PRId64
+            " symbolic=%d factor=%d\n",
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.selected_scale, stats.selected_btf, stats.structural_rank,
+            stats.nblocks, stats.max_block, stats.nnz_l, stats.nnz_u,
+            stats.factor_flops, stats.offdiag_pivots,
+            stats.sparse_symmetric_fragmented_metis_symbolic_eligible,
+            stats.sparse_symmetric_fragmented_metis_policy_eligible);
+    ok = 0;
+    goto cleanup;
+  }
+
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve sparse symmetric fragmented METIS policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (fabs(x[row] - expected[row]) > 1.0e-8) {
+      fprintf(stderr,
+              "sparse symmetric fragmented solve mismatch at %d: %.17g"
+              " vs %.17g\n", row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* The fixture is structurally and numerically symmetric, so the same
+     compressed arrays are also its CSR representation.  The normalized
+     policy must not depend on which public sparse interface supplied it. */
+  if (!require_ok(kls_create(&csr_solver),
+                  "create CSR sparse symmetric fragmented METIS policy") ||
+      !require_ok(kls_analyze_csr(csr_solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze CSR sparse symmetric fragmented METIS policy") ||
+      !require_ok(kls_factor(csr_solver, ax),
+                  "factor CSR sparse symmetric fragmented METIS policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(csr_solver, &stats),
+                  "stats CSR sparse symmetric fragmented METIS policy") ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_METIS ||
+      stats.sparse_symmetric_fragmented_metis_symbolic_eligible != 1 ||
+      stats.sparse_symmetric_fragmented_metis_policy_eligible != 1) {
+    fprintf(stderr,
+            "unexpected CSR sparse symmetric fragmented METIS policy:"
+            " orientation=%d ordering=%d symbolic=%d factor=%d\n",
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.sparse_symmetric_fragmented_metis_symbolic_eligible,
+            stats.sparse_symmetric_fragmented_metis_policy_eligible);
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* All coarse scalar/fringe/hub bounds remain unchanged, but one missing
+     reciprocal edge must make the exact structural proof reject. */
+  if (!require_ok(kls_create(&negative_solver),
+                  "create asymmetric fragmented METIS control") ||
+      !require_ok(kls_analyze_csc(negative_solver, KLS_INDEX_INT32, n, ap,
+                                  ai_asymmetric, 0, &options),
+                  "analyze asymmetric fragmented METIS control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(negative_solver, &stats),
+                  "stats asymmetric fragmented METIS control") ||
+      stats.sparse_symmetric_fragmented_metis_symbolic_eligible != 0 ||
+      stats.sparse_symmetric_fragmented_metis_policy_eligible != 0) {
+    fprintf(stderr, "asymmetric fragmented METIS control became eligible\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  if (setenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY", "1", 1)
+        != 0 ||
+      !require_ok(kls_create(&disabled_solver),
+                  "create disabled fragmented METIS control") ||
+      !require_ok(kls_analyze_csc(disabled_solver, KLS_INDEX_INT32, n, ap, ai,
+                                  0, &options),
+                  "analyze disabled fragmented METIS control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(disabled_solver, &stats),
+                  "stats disabled fragmented METIS control") ||
+      stats.sparse_symmetric_fragmented_metis_symbolic_eligible != 0 ||
+      stats.sparse_symmetric_fragmented_metis_policy_eligible != 0) {
+    fprintf(stderr, "disabled fragmented METIS control became eligible\n");
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(disabled_solver);
+  kls_destroy(negative_solver);
+  kls_destroy(csr_solver);
+  kls_destroy(solver);
+  if (!restore_env_value(
+        "KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY", had_policy,
+        saved_policy != NULL ? saved_policy : "") ||
+      !restore_env_value("KLS_DISABLE_ASIC100KS_H100_POLICY", had_legacy,
+                         saved_legacy != NULL ? saved_legacy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ai_asymmetric);
+  free(ax);
+  free(changed);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  free(saved_legacy);
+  return ok;
+}
+
 int main(void) {
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
@@ -23872,6 +24153,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_symmetric_partial_diagonal_match_lifecycles()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_sparse_symmetric_fragmented_metis_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_sparse_fragmented_dominant_btf_solve_policy()) {

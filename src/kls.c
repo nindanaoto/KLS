@@ -2392,6 +2392,8 @@ struct kls_solver {
   int balanced_moderate_hub_amd_cycle; /* guarded AMD/BTF or AMD/no-BTF */
   int sparse_partial_diagonal_amd_btf_cycle; /* symbolic-guarded direct AMD */
   int dense_reciprocal_hub_metis_cycle; /* guarded retained NodeNDP order */
+  int sparse_symmetric_fragmented_metis_cycle; /* guarded sparse NodeNDP */
+  int sparse_symmetric_fragmented_metis_numeric_eligible; /* -1/0/1 */
   int symmetric_scalar_fringe_amd_lean_cycle; /* guarded transpose AMD/BTF */
   int symmetric_scalar_fringe_numeric_eligible; /* -1 reject, 0 unknown, 1 */
   const trilinos_klu_l_symbolic *symmetric_scalar_fringe_symbolic_identity;
@@ -2492,6 +2494,7 @@ typedef struct kls_pattern_candidate {
   int sparse_partial_diagonal_amd_btf_selected;
   int dense_reciprocal_hub_metis_class;
   int dense_reciprocal_hub_metis_selected;
+  int sparse_symmetric_fragmented_metis_selected;
   int symmetric_scalar_fringe_class;
   int symmetric_partial_diagonal_match_class;
   int low_work_hubbed_scalar_fringe_class;
@@ -27126,6 +27129,7 @@ static void free_numeric(kls_solver *solver) {
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
+  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
@@ -27252,6 +27256,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
+  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
@@ -27564,6 +27569,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->balanced_moderate_hub_amd_cycle = 0;
   solver->sparse_partial_diagonal_amd_btf_cycle = 0;
   solver->dense_reciprocal_hub_metis_cycle = 0;
+  solver->sparse_symmetric_fragmented_metis_cycle = 0;
+  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_amd_lean_cycle = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_symbolic_identity = NULL;
@@ -28867,6 +28874,10 @@ static _Thread_local int
 static _Thread_local int
   kls_dense_reciprocal_hub_metis_selected;
 static _Thread_local int
+  kls_sparse_symmetric_fragmented_metis_analyze_path;
+static _Thread_local int
+  kls_sparse_symmetric_fragmented_metis_selected;
+static _Thread_local int
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
 static _Thread_local int
   kls_symmetric_partial_diagonal_match_analyze_path;
@@ -29789,27 +29800,197 @@ static int kls_low_work_hubbed_scalar_fringe_amd_symbolic_profile(
     symbolic->unz <= 2.0 * symbolic->lnz;
 }
 
-/* Sparse member of the fragmented 100K ASIC pair.  Eight NodeNDP leaves
-   align the separator forest with the numeric worker count and halve the
-   ordering wall time relative to the generic fourteen-leaf H100 setting.
-   Three separator refinements plus a 2304-column CAMD window retain the fast
-   EGraph/PTS numeric.  Keep the policy on the exact AUTO/8T contract so
-   explicit ordering, scaling, backend, BTF, and pivot choices retain their
-   documented meaning. */
-static int kls_asic100ks_h100_policy_enabled(
+static int kls_sparse_symmetric_compare_uf_long(const void *lhs,
+                                                 const void *rhs) {
+  const UF_long a = *(const UF_long *)lhs;
+  const UF_long b = *(const UF_long *)rhs;
+  return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+/* Exact multiplicity-aware structural-symmetry proof for the bounded-degree
+   sparse proposal below.  Sorted CSC uses reciprocal binary searches without
+   allocation.  Unsorted input builds and sorts one transpose, then compares
+   each original column through a fixed-size scratch buffer. */
+__attribute__((noinline, cold))
+static int kls_sparse_symmetric_fragmented_exact_symmetry(
   UF_long n,
   const UF_long *col_ptr,
+  const UF_long *row_idx,
+  int columns_sorted) {
+  enum { MAX_COLUMN_DEGREE = 512 };
+  const UF_long nnz = col_ptr[n];
+  if (columns_sorted) {
+    for (UF_long col = 0u; col < n; ++col) {
+      const UF_long begin = col_ptr[col];
+      const UF_long end = col_ptr[col + 1u];
+      for (UF_long p = begin; p < end; ++p) {
+        const UF_long row = row_idx[p];
+        if (row <= col || (p > begin && row_idx[p - 1u] == row)) {
+          continue;
+        }
+        UF_long forward_end = p + 1u;
+        while (forward_end < end && row_idx[forward_end] == row) {
+          ++forward_end;
+        }
+        UF_long lo = col_ptr[row];
+        UF_long hi = col_ptr[row + 1u];
+        while (lo < hi) {
+          const UF_long mid = lo + (hi - lo) / 2u;
+          if (row_idx[mid] < col) {
+            lo = mid + 1u;
+          } else {
+            hi = mid;
+          }
+        }
+        const UF_long reciprocal_begin = lo;
+        hi = col_ptr[row + 1u];
+        while (lo < hi) {
+          const UF_long mid = lo + (hi - lo) / 2u;
+          if (row_idx[mid] <= col) {
+            lo = mid + 1u;
+          } else {
+            hi = mid;
+          }
+        }
+        if (forward_end - p != lo - reciprocal_begin) {
+          return 0;
+        }
+      }
+    }
+    return 1;
+  }
+
+  if ((size_t)n + 1u > SIZE_MAX / sizeof(UF_long) ||
+      (size_t)nnz > SIZE_MAX / sizeof(UF_long)) {
+    return 0;
+  }
+  UF_long *transpose_ptr =
+    (UF_long *)calloc((size_t)n + 1u, sizeof(*transpose_ptr));
+  UF_long *transpose_idx =
+    (UF_long *)malloc((size_t)nnz * sizeof(*transpose_idx));
+  UF_long *next = (UF_long *)malloc((size_t)n * sizeof(*next));
+  if (transpose_ptr == NULL || transpose_idx == NULL || next == NULL) {
+    free(transpose_ptr);
+    free(transpose_idx);
+    free(next);
+    return 0;
+  }
+  for (UF_long p = 0u; p < nnz; ++p) {
+    transpose_ptr[row_idx[p] + 1u]++;
+  }
+  for (UF_long row = 0u; row < n; ++row) {
+    transpose_ptr[row + 1u] += transpose_ptr[row];
+    next[row] = transpose_ptr[row];
+  }
+  for (UF_long col = 0u; col < n; ++col) {
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      transpose_idx[next[row_idx[p]]++] = col;
+    }
+  }
+  free(next);
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long degree = transpose_ptr[col + 1u] - transpose_ptr[col];
+    if (degree > 1u) {
+      qsort(transpose_idx + transpose_ptr[col], (size_t)degree,
+            sizeof(*transpose_idx), kls_sparse_symmetric_compare_uf_long);
+    }
+  }
+
+  UF_long sorted_column[MAX_COLUMN_DEGREE];
+  int symmetric = 1;
+  for (UF_long col = 0u; col < n && symmetric; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long degree = col_ptr[col + 1u] - begin;
+    const UF_long transpose_degree =
+      transpose_ptr[col + 1u] - transpose_ptr[col];
+    if (degree != transpose_degree) {
+      symmetric = 0;
+      break;
+    }
+    memcpy(sorted_column, row_idx + begin,
+           (size_t)degree * sizeof(*sorted_column));
+    if (degree > 1u) {
+      qsort(sorted_column, (size_t)degree, sizeof(*sorted_column),
+            kls_sparse_symmetric_compare_uf_long);
+    }
+    symmetric = memcmp(sorted_column, transpose_idx + transpose_ptr[col],
+                       (size_t)degree * sizeof(*sorted_column)) == 0;
+  }
+  free(transpose_ptr);
+  free(transpose_idx);
+  return symmetric;
+}
+
+/* A full-diagonal, structurally symmetric sparse graph with a small scalar
+   SCC fringe and moderate hubs is a proposal for a tuned NodeNDP ordering.
+   The ratios describe topology and resource scale rather than a benchmark
+   dimension.  The actual METIS symbolic must still prove full rank, the BTF
+   core/fringe geometry, bounded fill, and a usable separator decomposition. */
+__attribute__((noinline, cold))
+static int kls_sparse_symmetric_fragmented_metis_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 32768u || n > 262144u ||
+      n > UF_long_max / 8u || col_ptr[0] != 0u ||
+      col_ptr[n] < 4u * n || col_ptr[n] > 8u * n) {
+    return 0;
+  }
+  const UF_long nnz = col_ptr[n];
+  UF_long diagonal_columns = 0u;
+  UF_long scalar_columns = 0u;
+  UF_long max_column_degree = 0u;
+  UF_long lower_entries = 0u;
+  UF_long upper_entries = 0u;
+  int columns_sorted = 1;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > nnz || end - begin > 512u) {
+      return 0;
+    }
+    const UF_long degree = end - begin;
+    scalar_columns += degree == 1u;
+    if (degree > max_column_degree) {
+      max_column_degree = degree;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n) {
+        return 0;
+      }
+      if (p > begin && row_idx[p - 1u] > row) {
+        columns_sorted = 0;
+      }
+      has_diagonal |= row == col;
+      lower_entries += row > col;
+      upper_entries += row < col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+  if (diagonal_columns != n || 1024u * scalar_columns < n ||
+      64u * scalar_columns > n || 512u * max_column_degree < n ||
+      64u * max_column_degree > n || lower_entries != upper_entries) {
+    return 0;
+  }
+  return kls_sparse_symmetric_fragmented_exact_symmetry(
+    n, col_ptr, row_idx, columns_sorted);
+}
+
+/* Preserve the standard AUTO/8T contract.  The old matrix-named switch is a
+   compatibility alias for existing A/B scripts, not part of classification. */
+static int kls_sparse_symmetric_fragmented_metis_policy_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY") == NULL &&
     getenv("KLS_DISABLE_ASIC100KS_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 99000u && n <= 99500u &&
-    col_ptr[n] >= 570000u && col_ptr[n] <= 590000u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
 }
 
 /* Capability contract for the guarded dense reciprocal-hub route.  Explicit
@@ -32943,7 +33124,7 @@ static UF_long kls_metis_order_inner(UF_long n, UF_long *col_ptr,
    callback on individual BTF blocks, so the callback's local n/nnz cannot
    recognize a whole-matrix class.  Scope this mode around direct AUTO
    selections that need measured option sets (1: fragmented low-degree,
-   2: dense reciprocal mega-hub, 3: sparse ASIC_100ks H100). */
+   2: dense reciprocal mega-hub, 3: sparse symmetric scalar fringe). */
 static _Thread_local int kls_fragmented_metis_tuning_ctx;
 
 static UF_long kls_metis_order(UF_long n,
@@ -32967,29 +33148,94 @@ static int kls_is_sparse_100k_nd_refine_pattern(
     col_ptr[n] >= 5u * n && col_ptr[n] <= 7u * n;
 }
 
-/* Remaining sparse member of the legacy 100K pair.  The denser reciprocal
-   mega-hub member is classified by its guarded structural/symbolic state
-   below instead of sharing this size envelope. */
-static int kls_is_sparse_asic100ks_fragmented_metis_cycle(
+/* The retained proposal must expose a nearly spanning BTF core whose small
+   fringe is substantially represented by separate components.  Symbolic fill
+   and separator bounds keep the tuned eight-leaf ordering inside its intended
+   resource and parallel-work regime. */
+__attribute__((noinline, cold))
+static int kls_sparse_symmetric_fragmented_metis_symbolic_profile(
+  UF_long n,
+  UF_long nnz,
+  kls_orientation orientation,
+  kls_ordering ordering,
+  const trilinos_klu_l_symbolic *symbolic,
+  const kls_separator_analysis *separator) {
+  if (symbolic == NULL || separator == NULL || n < 32768u || n > 262144u ||
+      n > UF_long_max / 64u || nnz < 4u * n || nnz > 8u * n ||
+      orientation != KLS_ORIENTATION_NORMAL ||
+      ordering != KLS_ORDERING_METIS || !symbolic->do_btf ||
+      symbolic->structural_rank != n || symbolic->maxblock > n ||
+      symbolic->nblocks < n / 512u || symbolic->nblocks > n / 64u ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0)) {
+    return 0;
+  }
+  const UF_long fringe = n - symbolic->maxblock;
+  const double fill = symbolic->lnz + symbolic->unz;
+  if (fringe < n / 512u || fringe > n / 64u ||
+      symbolic->nblocks > fringe + 1u ||
+      2u * symbolic->nblocks < fringe || fill < 16.0 * (double)n ||
+      fill > 64.0 * (double)n || symbolic->lnz > 2.0 * symbolic->unz ||
+      symbolic->unz > 2.0 * symbolic->lnz || separator->n != n ||
+      !separator->global_range_valid || separator->global_begin != 0u ||
+      separator->global_end != n || separator->thread_count < 2u ||
+      separator->private_rows > n || separator->pipeline_rows > n ||
+      separator->private_rows + separator->pipeline_rows != n ||
+      separator->private_rows < n - n / 16u ||
+      separator->pipeline_rows > n / 16u ||
+      separator->private_component_count < separator->thread_count ||
+      separator->pipeline_component_count < separator->thread_count ||
+      separator->private_component_count +
+          separator->pipeline_component_count != separator->component_count ||
+      separator->private_max_rows > n / 3u ||
+      separator->pipeline_max_rows > n / 64u) {
+    return 0;
+  }
+  return 1;
+}
+
+static int kls_sparse_symmetric_fragmented_metis_symbolic_cycle(
   const kls_solver *solver) {
   return solver != NULL && solver->col_ptr != NULL &&
-    solver->symbolic != NULL &&
-    kls_asic100ks_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->options.orientation == KLS_ORIENTATION_AUTO &&
-    solver->options.ordering == KLS_ORDERING_AUTO &&
-    solver->options.scale == KLS_SCALE_AUTO &&
-    solver->options.backend == KLS_BACKEND_AUTO &&
-    solver->options.threads == 8 &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+    solver->sparse_symmetric_fragmented_metis_cycle &&
+    kls_sparse_symmetric_fragmented_metis_policy_enabled(&solver->options) &&
     solver->col_ptr[solver->n] == solver->nnz &&
-    solver->symbolic->do_btf &&
-    solver->symbolic->structural_rank == solver->n &&
-    solver->symbolic->nblocks >= 200u &&
-    solver->symbolic->nblocks <= 450u &&
-    solver->symbolic->maxblock >= 98500u &&
-    solver->symbolic->maxblock <= 99000u;
+    kls_sparse_symmetric_fragmented_metis_symbolic_profile(
+      solver->n, solver->nnz, solver->orientation,
+      solver->stats.selected_ordering, solver->symbolic, &solver->separator);
+}
+
+/* Scale suppression additionally requires the actual unscaled, no-pivot
+   numeric to remain in the balanced fill/work band.  Cache this measured
+   verdict after each factor; a replacement invalidates it. */
+__attribute__((noinline, cold))
+static int kls_sparse_symmetric_fragmented_metis_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_sparse_symmetric_fragmented_metis_symbolic_cycle(solver) ||
+      solver->numeric == NULL || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL || solver->common.noffdiag != 0u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  const double fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return fill >= 16.0 * (double)solver->n &&
+    fill <= 64.0 * (double)solver->n &&
+    solver->common.flops >= 512.0 * (double)solver->n &&
+    solver->common.flops <= 8192.0 * (double)solver->n &&
+    (double)solver->numeric->lnz <= 2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <= 2.0 * (double)solver->numeric->lnz;
+}
+
+static int kls_sparse_symmetric_fragmented_metis_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_sparse_symmetric_fragmented_metis_symbolic_cycle(solver)) {
+    return 0;
+  }
+  return solver->sparse_symmetric_fragmented_metis_numeric_eligible != 0
+    ? solver->sparse_symmetric_fragmented_metis_numeric_eligible > 0
+    : kls_sparse_symmetric_fragmented_metis_factor_profile(solver);
 }
 
 static int kls_dense_reciprocal_hub_metis_symbolic_profile(
@@ -33128,12 +33374,10 @@ static UF_long kls_metis_camd_group_size(UF_long n,
        The scoped context prevents explicit METIS from inheriting AUTO. */
     return 1536u;
   }
-  if (kls_fragmented_metis_tuning_ctx == 3 && col_ptr != NULL &&
-      n >= 98500u && n <= 99500u &&
-      col_ptr[n] >= 570000u && col_ptr[n] <= 590000u) {
-    /* Sparse ASIC_100ks: preserve the eight-leaf NodeNDP forest while CAMD
-       trims within moderately wide rank windows.  Narrow windows add fill;
-       raw NodeNDP loses the fast PTS solve despite a cheaper analysis. */
+  if (kls_fragmented_metis_tuning_ctx == 3 && n >= 32768u) {
+    /* Preserve the accepted eight-leaf NodeNDP forest while CAMD trims within
+       moderately wide rank windows.  The scoped context is set only by the
+       structurally proposed and post-symbolically guarded AUTO route. */
     return 2304u;
   }
   if (kls_is_sparse_100k_nd_refine_pattern(n, col_ptr)) {
@@ -34148,7 +34392,11 @@ static UF_long kls_metis_order_inner(UF_long n,
       : (kls_freescale_chain_h100_metis_ctx > 1 ? 14 : 8);
   } else
   if (kls_fragmented_metis_tuning_ctx == 3) {
-    const char *npes_env = getenv("KLS_ASIC100KS_METIS_NDP_NPES");
+    const char *npes_env =
+      getenv("KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES");
+    if (npes_env == NULL || npes_env[0] == '\0') {
+      npes_env = getenv("KLS_ASIC100KS_METIS_NDP_NPES");
+    }
     metis_ndp_npes =
       npes_env != NULL && npes_env[0] != '\0' ? (idx_t)atol(npes_env) : 8;
   } else if (kls_medium_partial_static_metis_ctx) {
@@ -41152,7 +41400,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
     scale_wanted = 0;
   }
   if (scale_wanted &&
-      kls_is_sparse_asic100ks_fragmented_metis_cycle(solver)) {
+      kls_sparse_symmetric_fragmented_metis_symbolic_cycle(solver)) {
     scale_wanted = 0;
   }
   if (scale_wanted &&
@@ -41457,7 +41705,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
     return 0;
   }
   if (solver->common.scale <= 0 &&
-      kls_is_sparse_asic100ks_fragmented_metis_cycle(solver)) {
+      kls_sparse_symmetric_fragmented_metis_factor_cycle(solver)) {
     return 0;
   }
   if (solver->common.scale <= 0 &&
@@ -42300,25 +42548,6 @@ static int kls_choose_symbolic_inner(UF_long n,
   }
 
 #ifdef KLS_HAVE_METIS
-  if (kls_asic100ks_h100_policy_enabled(n, col_ptr, options)) {
-    /* This eight-leaf NodeNDP forest is the measured complete-H100 winner.
-       Select it before the generic block-structure probe and METIS-start
-       path so analysis contains only work retained by the first numeric. */
-    const int old_tuning_ctx = kls_fragmented_metis_tuning_ctx;
-    kls_fragmented_metis_tuning_ctx = 3;
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
-                                       KLS_ORDERING_METIS, symbolic_out,
-                                       common_out, separator_out);
-    kls_fragmented_metis_tuning_ctx = old_tuning_ctx;
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_METIS;
-      *score_out = symbolic_score(*symbolic_out);
-      return KLS_OK;
-    }
-    /* Allocation or structural failure falls through to the ordinary AUTO
-       tournament, preserving its robust recovery behavior. */
-  }
-
   if (!kls_analyze_defer_nd &&
       (kls_freescale1_direct_h100_policy_enabled(n, col_ptr, options) ||
        kls_memchip_direct_h100_policy_enabled(n, col_ptr, options))) {
@@ -43006,6 +43235,54 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        kls_ordering *selected_ordering_out,
                                        double *score_out,
                                        kls_separator_analysis *separator_out) {
+  if (kls_sparse_symmetric_fragmented_metis_analyze_path && options != NULL &&
+      options->ordering == KLS_ORDERING_AUTO &&
+      kls_sparse_symmetric_fragmented_metis_policy_enabled(options)) {
+    /* Topology only proposes the eight-leaf NodeNDP route.  Retain the real
+       candidate only after rank, BTF core/fringe, fill, and separator geometry
+       all pass normalized bounds; otherwise resume ordinary AUTO selection. */
+    kls_options metis_options = *options;
+    metis_options.ordering = KLS_ORDERING_METIS;
+    const int saved_ctx = kls_fragmented_metis_tuning_ctx;
+    kls_fragmented_metis_tuning_ctx = 3;
+    const int status = choose_symbolic_for_pattern(
+      n, col_ptr, row_idx, &metis_options, symbolic_out, common_out,
+      selected_ordering_out, score_out, separator_out);
+    kls_fragmented_metis_tuning_ctx = saved_ctx;
+    const int accepted = status == KLS_OK && *symbolic_out != NULL &&
+      kls_sparse_symmetric_fragmented_metis_symbolic_profile(
+        n, col_ptr[n], KLS_ORIENTATION_NORMAL, KLS_ORDERING_METIS,
+        *symbolic_out, separator_out);
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS sparse symmetric fragmented METIS proposal: status=%d "
+              "accepted=%d blocks=%ld max=%ld rank=%ld fill=%.0f "
+              "components=%ld private_rows=%ld pipeline_rows=%ld\n",
+              status, accepted,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->nblocks : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->maxblock : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (long)(*symbolic_out)->structural_rank : -1L,
+              status == KLS_OK && *symbolic_out != NULL
+                ? (*symbolic_out)->lnz + (*symbolic_out)->unz : -1.0,
+              separator_out != NULL
+                ? (long)separator_out->component_count : -1L,
+              separator_out != NULL ? (long)separator_out->private_rows : -1L,
+              separator_out != NULL
+                ? (long)separator_out->pipeline_rows : -1L);
+    }
+    if (accepted) {
+      kls_sparse_symmetric_fragmented_metis_selected = 1;
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
+  }
   if (kls_dense_reciprocal_hub_metis_analyze_path && options != NULL &&
       options->ordering == KLS_ORDERING_AUTO &&
       kls_dense_reciprocal_hub_metis_policy_enabled(options)) {
@@ -44065,6 +44342,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_dense_reciprocal_hub_metis_analyze_path;
   const int dense_reciprocal_hub_selected_saved =
     kls_dense_reciprocal_hub_metis_selected;
+  const int sparse_symmetric_fragmented_saved =
+    kls_sparse_symmetric_fragmented_metis_analyze_path;
+  const int sparse_symmetric_fragmented_selected_saved =
+    kls_sparse_symmetric_fragmented_metis_selected;
   const int low_work_hubbed_scalar_fringe_saved =
     kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
   const int symmetric_partial_diagonal_match_saved =
@@ -44116,6 +44397,12 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     candidate->dense_reciprocal_hub_metis_class &&
     kls_dense_reciprocal_hub_metis_policy_enabled(options);
   kls_dense_reciprocal_hub_metis_selected = 0;
+  kls_sparse_symmetric_fragmented_metis_analyze_path =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_sparse_symmetric_fragmented_metis_policy_enabled(options) &&
+    kls_sparse_symmetric_fragmented_metis_input_profile(
+      candidate->n, candidate->col_ptr, candidate->row_idx);
+  kls_sparse_symmetric_fragmented_metis_selected = 0;
   candidate->low_work_hubbed_scalar_fringe_class =
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_low_work_hubbed_scalar_fringe_input_profile(
@@ -44168,6 +44455,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_sparse_partial_diagonal_amd_btf_selected;
   candidate->dense_reciprocal_hub_metis_selected =
     kls_dense_reciprocal_hub_metis_selected;
+  candidate->sparse_symmetric_fragmented_metis_selected =
+    kls_sparse_symmetric_fragmented_metis_selected;
   kls_large_sparse_amf3_analyze_path = saved;
   kls_large_bounded_no_btf_amf_analyze_path = bounded_saved;
   kls_small_symmetric_no_btf_analyze_path = symmetric_saved;
@@ -44196,6 +44485,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     dense_reciprocal_hub_saved;
   kls_dense_reciprocal_hub_metis_selected =
     dense_reciprocal_hub_selected_saved;
+  kls_sparse_symmetric_fragmented_metis_analyze_path =
+    sparse_symmetric_fragmented_saved;
+  kls_sparse_symmetric_fragmented_metis_selected =
+    sparse_symmetric_fragmented_selected_saved;
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path =
     low_work_hubbed_scalar_fringe_saved;
   kls_symmetric_partial_diagonal_match_analyze_path =
@@ -44769,6 +45062,13 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
       candidate->n, candidate->nnz, candidate->orientation,
       candidate->selected_ordering, candidate->symbolic,
       &solver->separator);
+  solver->sparse_symmetric_fragmented_metis_cycle =
+    candidate->sparse_symmetric_fragmented_metis_selected &&
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_METIS &&
+    kls_sparse_symmetric_fragmented_metis_symbolic_profile(
+      candidate->n, candidate->nnz, candidate->orientation,
+      candidate->selected_ordering, candidate->symbolic, &solver->separator);
   solver->symmetric_scalar_fringe_amd_lean_cycle =
     kls_symmetric_scalar_fringe_policy_enabled(&solver->options) &&
     candidate->symmetric_scalar_fringe_class &&
@@ -45257,6 +45557,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_pivoted_high_work_single_block_factor_profile(solver) ? 1 : -1;
   solver->low_work_many_fringe_btf_pts_numeric_eligible =
     kls_low_work_many_fringe_dominant_btf_pts_factor_profile(solver) ? 1 : -1;
+  solver->sparse_symmetric_fragmented_metis_numeric_eligible =
+    kls_sparse_symmetric_fragmented_metis_factor_profile(solver) ? 1 : -1;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible =
     kls_high_work_tiny_scalar_fringe_amd_factor_profile(solver) ? 1 : -1;
   kls_dbg_snapshot_numeric(solver);
@@ -154929,6 +155231,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
+  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
@@ -159498,6 +159801,20 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->symmetric_partial_diagonal_low_work_eligible)) {
     stats->symmetric_partial_diagonal_low_work_eligible =
       kls_low_work_symmetric_partial_diagonal_pts_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               sparse_symmetric_fragmented_metis_symbolic_eligible) +
+        sizeof(stats->sparse_symmetric_fragmented_metis_symbolic_eligible)) {
+    stats->sparse_symmetric_fragmented_metis_symbolic_eligible =
+      kls_sparse_symmetric_fragmented_metis_symbolic_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               sparse_symmetric_fragmented_metis_policy_eligible) +
+        sizeof(stats->sparse_symmetric_fragmented_metis_policy_eligible)) {
+    stats->sparse_symmetric_fragmented_metis_policy_eligible =
+      kls_sparse_symmetric_fragmented_metis_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

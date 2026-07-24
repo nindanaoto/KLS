@@ -18959,3 +18959,97 @@ OPF_10000 measured a modeled-cycle median of `0.11447s` current versus
 slightly (`0.2164ms` versus `0.2181ms`); the remaining difference is the
 one-time exact structural proof and timing noise in the first phases.  Release
 and ASan/UBSan/LSan CTest pass all four tests.
+
+SPARSE SYMMETRIC FRAGMENTED METIS POLICY GENERALIZED (2026-07-24).  The
+remaining sparse `ASIC_100ks` H100 selector required 99,000--99,500 rows and
+570,000--590,000 stored entries.  That two-coordinate fingerprint directly
+selected the context-three METIS route and then implicitly authorized an
+eight-leaf NodeNDP forest, three separator refinements, one separator, a
+2,304-column CAMD window, suppression of the analyze-time scaling race, and
+suppression of the later numeric scale trial.  The useful behavior was the
+complete ordering/factor lifecycle, not membership in that benchmark box.
+
+The replacement begins with an exact topology proposal.  Under the standard
+normal-candidate, eight-thread AUTO orientation/ordering/scaling/backend, BTF,
+static-pivoting, and `1e-3` tolerance contract, the matrix must have
+32,768--262,144 rows, four--eight stored entries per row overall, no empty
+column, maximum column degree 512, and a full structural diagonal.  Diagonal
+scalar columns must cover between `n/1024` and `n/64` vertices, while the
+largest column degree must lie between `n/512` and `n/64`.  Lower and upper
+entry counts must agree and the graph must be exactly structurally symmetric,
+including duplicate multiplicity.  Sorted CSC uses reciprocal binary
+searches; unsorted CSC builds and sorts a bounded-degree transpose before an
+exact column comparison.  The proof is performed only for a candidate that is
+actually analyzed under the policy contract, so explicit options and a
+disabled policy do not inherit its cost.
+
+That topology does not decide the ordering.  KLS constructs the real tuned
+METIS candidate and retains it only if it is full-rank BTF with a nearly
+spanning core: both the block count and scalar fringe lie between `n/512` and
+`n/64`, the block count represents at least half of the fringe, and estimated
+L/U fill is balanced inside 16--64 entries per row.  The captured separator
+must span the complete order, expose at least two workers, account for every
+row and component, place at least 15/16 of rows in private components, bound
+pipeline work to 1/16, and keep the largest private and pipeline components at
+most `n/3` and `n/64`.  A failed METIS analysis or measured symbolic gate is
+freed immediately and ordinary AUTO selection resumes.
+
+Scaling is staged separately.  The accepted symbolic may suppress the
+redundant analyze-time scale race, but the later AUTO scale trial is suppressed
+only when the actual factor is unscaled, has no numeric `Rs`, off-diagonal
+pivot, pivot nudge, or perturbation, retains balanced L/U inside 16--64 entries
+per row, and measures 512--8,192 operations per row.  This numeric verdict is
+cached for the life of that factor and invalidated whenever the numeric is
+replaced.  The generic controls are
+`KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY=1` and
+`KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES`; the old ASIC-named disable
+and leaf-count variables remain compatibility aliases only.  Public
+`sparse_symmetric_fragmented_metis_symbolic_eligible` and
+`sparse_symmetric_fragmented_metis_policy_eligible` fields report the two
+accepted measured stages through `kls_stats`, full benchmark JSON, and
+analyze-only JSON.
+
+The independent smoke positive is a 65,696-row symmetric matrix, well outside
+the old order window: a 256-by-256 five-point-grid core, 160 diagonal scalar
+components, and 160 reciprocal moderate-hub connections.  It selects normal
+METIS with 161 BTF blocks and a 65,536-row core, factors unscaled with no
+off-diagonal pivots, refactors changed values, and recovers an independently
+constructed solution.  The equivalent CSR input selects the same symbolic and
+numeric stages.  Replacing one reciprocal hub edge leaves the coarse
+size/density/diagonal/hub bounds intact but fails the exact symmetry proof; the
+master-disable run also reports both stages zero.
+
+The local SuiteSparse screen inspected all 110 available supported matrices.
+Twenty-seven pass the coarse 32K--262K order and four--eight-entry density
+screen, but only `Sandia/ASIC_100ks` passes the complete input and measured
+symbolic stages.  Corpus uniqueness is therefore treated as compatibility
+evidence, not as generalization proof.  Metamorphic validation appends 512
+independent scalar components to produce a 99,702-row matrix beyond the old
+order bound; it selects with 761 blocks and the unchanged 98,843-row core.
+A simultaneous row/column relabeling of the target and of that extension also
+selects.  Appending 2,048 scalars produces 101,238 rows and 2,297 blocks,
+crosses the normalized fringe boundary, and correctly falls back with both
+stages zero.
+
+The target, 512-row extension, relabeling, and relabeled extension each
+completed 100 independently checked entrywise generations at amplitudes
+`0.001`, `0.01`, and `0.1`.  All 1,200 generations retained both decisions;
+the worst per-generation relative-L2 residual was `5.9052e-15`.
+
+Twenty alternating prior-exact/current H100 pairs on `ASIC_100ks`, with ten
+factor/refactor repetitions per process, put current/parent geometric ratios
+at `0.96193` for analysis, `0.99874` for initial factor, `0.98196` for first
+refactor, `0.99263` for steady refactor, `1.01475` for changed-numeric solve,
+and `1.03011` for the repeated solve.  The complete modeled-cycle ratio is
+`0.99259` geometrically and `0.99322` by the means, so the generalized proof
+preserves the established target performance despite the small solve-side
+noise.  Twelve alternating pairs on the out-of-box 512-row extension measure
+ratios of `0.90577` for analysis, `0.82088` for initial factor, `0.05257` for
+the first refactor, `0.99401` for steady refactor, and `0.85248` for the full
+cycle; the staged policy avoids the old selector's unnecessary scale
+consultation there.
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+entrywise factor/refactor/solve runs also cover the original target, the
+99,702-row positive extension, and the 101,238-row boundary rejection with
+stage decisions `1/1`, `1/1`, and `0/0` and no sanitizer findings.

@@ -1395,6 +1395,12 @@ typedef struct kls_stats {
   /* The same structural family produced a smaller AMD/BTF symbolic for which
      the lightweight matched PTS lifecycle is preferable. */
   int symmetric_partial_diagonal_low_work_eligible;
+  /* The retained NodeNDP symbolic passed the sparse symmetric scalar-fringe
+     input proposal and normalized BTF/fill/separator acceptance. */
+  int sparse_symmetric_fragmented_metis_symbolic_eligible;
+  /* That retained symbolic also produced an unscaled, no-pivot numeric inside
+     the measured balanced fill/work regime. */
+  int sparse_symmetric_fragmented_metis_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);
