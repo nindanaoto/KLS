@@ -1703,6 +1703,38 @@ JSON exposes `moderate_fragmented_policy_eligible`. Set
 former `KLS_DISABLE_ONETONE2_H100_POLICY` switch and its component switches
 remain compatibility aliases.
 
+A compact AMF two-block policy is selected from computed symbolic and numeric
+state rather than an input fingerprint. The symbolic proposal requires
+512--4096 rows, 8--16 input entries per row, full structural rank, exactly two
+BTF blocks with a core covering at least 99% of the order, 40--64 estimated
+factor entries per row, and 1,000--2,048 estimated flops per row. Each
+estimated triangular stream must fit in 16 bits; the 4096-row ceiling is the
+packed dependency descriptor's 12-bit row field. The recurring lifecycle is
+enabled only after the actual unscaled normal-AMF numeric has no nudges or
+perturbations, at most `n/64` off-diagonal pivots, 20--32 factor entries per
+row, and 200--512 factor flops per row, with both triangular streams still
+16-bit representable. Packed workers additionally validate every derived
+pointer, index, schedule, and solve representation before dispatch. AUTO uses
+the ordinary orientation/ordering selector, while explicit
+normal/AMF/scale-0 requests are eligible after reaching the same state. Every
+changed numeric retains the strict relative-L2 residual guard. Benchmark JSON
+exposes `compact_amf_two_block_policy_eligible`. Set
+`KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_POLICY=1` to disable the whole policy or
+`KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_SPECIALIZED_WORKER=1` to retain the policy
+without its specialized worker; the former `KLS_*TSOPF_B9*` controls remain
+diagnostic aliases.
+
+The metamorphic holdout utility can produce deterministic simultaneous
+row/column relabelings without checking generated matrices into the tree. For
+example, the compact positive used by the policy audit is reproduced with:
+
+```sh
+python3 scripts/make_metamorphic_matrix.py \
+  data/suitesparse/TSOPF/TSOPF_FS_b9_c1.mtx \
+  /tmp/TSOPF_FS_b9_c1_local_holdout.mtx \
+  --adjacent-swaps 100 --seed 211
+```
+
 For the corresponding AUTO analysis problem, a 40--60% structural diagonal
 and three-to-five input entries per row only propose a direct AMD/BTF
 candidate. KLS retains that candidate when the computed symbolic has full

@@ -17771,3 +17771,76 @@ layout; symbol inspection and the longer pairs above verify the correction.
 Finally, 1,000 independently verified entrywise generations at amplitude 0.1
 completed for all three eligible real matrices.  Worst relative-L2 residuals
 were `8.66e-13` for `onetone2`, `2.18e-10` for 4438, and `4.47e-10` for 9129.
+
+COMPACT AMF TWO-BLOCK LIFECYCLE POLICY GENERALIZED (2026-07-24).  The
+remaining `TSOPF_FS_b9_c1` bundle began with an exact 2,454-row/25,032-entry
+AUTO/8-thread input selector.  It forced normal AMF without running the
+ordinary selector, forced scale zero, selected a `3e-8` pivot tolerance from
+an exact two-block/2,453-row-core state, and reused the identity at more than
+twenty recurring decisions.  Those decisions included row-pattern
+construction, five-stream affinity scheduling, packed dependency work,
+16-bit indices and solves, worker spin, prewarm, lean-engine settlement,
+parallel residuals, repeated-RHS preparation, and a specialized solve.  The
+specialized kernels performed representation checks, but the outer admission
+still depended on one benchmark shape.
+
+The replacement removes the input shortcut entirely: AUTO reaches normal AMF
+through the ordinary orientation and ordering machinery.  A post-symbolic
+proposal then requires 512--4,096 rows, 8--16 input entries per row, full
+structural rank, exactly two BTF blocks, a core covering at least 99% of the
+order, 40--64 estimated factor entries per row, and 1,000--2,048 estimated
+flops per row.  Both estimated triangular streams must fit `uint16_t`; the
+4,096-row ceiling comes from the packed dependency descriptor's twelve-bit
+row field.  Explicit normal/AMF/scale-zero requests can reach the same state.
+Only an actual unscaled numeric with no `Rs`, nudges, or perturbations, at most
+`n/64` off-diagonal pivots, 20--32 factor entries per row, 200--512 factor
+flops per row, and individually 16-bit-representable triangular streams earns
+the recurring lifecycle.  Individual packed workers continue to validate
+every pointer, index, schedule, token, and solve representation before use.
+
+All internal b9-specific worker, residual, prepared-solve, state-field, and
+descriptor names now describe the compact AMF two-block capability.  The
+generic master diagnostic is `KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_POLICY`, the
+specialized worker has
+`KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_SPECIALIZED_WORKER`, and benchmark JSON
+exposes `compact_amf_two_block_policy_eligible`.  Existing
+`KLS_*TSOPF_B9*` switches remain compatibility aliases.  A deterministic
+`scripts/make_metamorphic_matrix.py` utility creates simultaneous row/column
+permutation holdouts without storing derived SuiteSparse matrices in the
+repository.
+
+The boundary separates closely related and metamorphic cases.  The larger
+`TSOPF_FS_b9_c6` and its `case9` alias retain natural ordering, scale `-1`,
+and eligibility zero.  Forcing AMF/scale zero on the larger member produces
+about 5.90M factor entries even at `3e-8`, so representation limits reject the
+family member that would make a size-widened rule disastrous.  Fresh runs of
+all twelve matrices from the deterministic development/holdout manifests that
+fit the 4,096-row/100K-entry audit ceiling also reported zero; these include
+the similarly sized/dense `utm3060` and the two-block `lung1`.  Saved profiles
+for the complete 110-row local paper union likewise leave only the motivating
+numeric inside the full boundary.
+
+The metamorphic utility provides both sides of the measured admission.  One
+adjacent relabeling (`--adjacent-swaps 1 --seed 112`) passes the symbolic
+proposal but grows to 505,093 factor entries and 15.47M factor flops, so the
+recurring policy rejects it.  One hundred deterministic local relabelings
+(`--adjacent-swaps 100 --seed 211`) instead retain 74,514 factor entries,
+1,130,519 factor flops, and 20 off-diagonal pivots, and report eligibility one.
+Thus neither identical dimensions and nonzero count nor even symbolic
+admission is sufficient; measured numeric state is authoritative.
+
+Twelve alternating parent/new entrywise-H100 pairs on the original matrix put
+the new median modeled cycle at `0.017759s` versus `0.017793s` (`0.9981x`).
+Initial factor was `0.902ms` versus `0.916ms`, average refactor `0.10738ms`
+versus `0.10804ms`, and solve `0.01868ms` versus `0.01874ms`.  The old exact
+selector did not apply to the explicit normal/AMF/scale-zero metamorphic
+holdout.  Across eight alternating generic/disabled pairs, its median modeled
+cycle fell from `0.26503s` to `0.02283s`; retained fill fell from 747,528 to
+74,514 entries and factor work from 28.49M to 1.13M flops.
+
+Both eligible inputs completed 1,000 independently checked entrywise
+generations at amplitudes 0.001, 0.01, and 0.1.  Across all 6,000 changed
+systems the worst per-generation relative-L2 residual was `5.997e-9`, below
+the `1e-8` contract.  Release CTest and ASan/LSan CTest pass all three tests;
+sanitized 100-generation runs also exercised the original positive, the
+metamorphic positive, and the measured-numeric rejection path.

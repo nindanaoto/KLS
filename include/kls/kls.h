@@ -1333,6 +1333,10 @@ typedef struct kls_stats {
   /* The retained numeric satisfies the normalized moderate-work,
      fragmented dominant-BTF policy boundary. */
   int moderate_fragmented_policy_eligible;
+  /* The retained AMF numeric fits the normalized compact two-block policy
+     and all recurring accuracy checks; individual packed kernels still
+     validate their derived representations before dispatch. */
+  int compact_amf_two_block_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

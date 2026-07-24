@@ -2122,7 +2122,8 @@ int main(int argc, char **argv) {
            ",\"egraph_worker_spin_iters\":%" PRId64
            ",\"compact_solve_index_bytes\":%d"
            ",\"compact_solve_fused_rhs\":%d"
-           ",\"moderate_fragmented_policy_eligible\":%d",
+           ",\"moderate_fragmented_policy_eligible\":%d"
+           ",\"compact_amf_two_block_policy_eligible\":%d",
            stats.factor_etree_block_start,
            stats.factor_etree_block_size,
            stats.factor_etree_levels,
@@ -2348,7 +2349,8 @@ int main(int argc, char **argv) {
            stats.egraph_worker_spin_iters,
            stats.compact_solve_index_bytes,
            stats.compact_solve_fused_rhs,
-           stats.moderate_fragmented_policy_eligible);
+           stats.moderate_fragmented_policy_eligible,
+           stats.compact_amf_two_block_policy_eligible);
     printf(",\"refactor_supernode_consumer_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_panel_count\":%" PRId64
            ",\"refactor_supernode_consumer_reused_run_count\":%" PRId64
