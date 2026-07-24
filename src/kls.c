@@ -2396,6 +2396,8 @@ struct kls_solver {
   int sparse_symmetric_fragmented_metis_numeric_eligible; /* -1/0/1 */
   int sparse_spiked_predicted_candidate; /* cached public input topology */
   int sparse_spiked_predicted_numeric_eligible; /* -1/0/1 */
+  int sparse_full_diagonal_metis_row_candidate; /* cached topology proposal */
+  int sparse_full_diagonal_metis_row_numeric_eligible; /* -1/0/1 */
   int symmetric_scalar_fringe_amd_lean_cycle; /* guarded transpose AMD/BTF */
   int symmetric_scalar_fringe_numeric_eligible; /* -1 reject, 0 unknown, 1 */
   const trilinos_klu_l_symbolic *symmetric_scalar_fringe_symbolic_identity;
@@ -2498,6 +2500,7 @@ typedef struct kls_pattern_candidate {
   int dense_reciprocal_hub_metis_selected;
   int sparse_symmetric_fragmented_metis_selected;
   int sparse_spiked_predicted_class;
+  int sparse_full_diagonal_metis_row_class;
   int symmetric_scalar_fringe_class;
   int symmetric_partial_diagonal_match_class;
   int low_work_hubbed_scalar_fringe_class;
@@ -27132,6 +27135,7 @@ static void free_numeric(kls_solver *solver) {
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->sparse_spiked_predicted_numeric_eligible = 0;
+  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->fp32_decision = 0;
   solver->fp32_last_used = 0;
@@ -27260,6 +27264,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->sparse_spiked_predicted_numeric_eligible = 0;
+  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
@@ -27576,6 +27581,8 @@ static void clear_matrix(kls_solver *solver) {
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->sparse_spiked_predicted_candidate = 0;
   solver->sparse_spiked_predicted_numeric_eligible = 0;
+  solver->sparse_full_diagonal_metis_row_candidate = 0;
+  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_amd_lean_cycle = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_symbolic_identity = NULL;
@@ -28883,6 +28890,8 @@ static _Thread_local int
 static _Thread_local int
   kls_sparse_symmetric_fragmented_metis_selected;
 static _Thread_local int kls_sparse_spiked_predicted_input_detected;
+static _Thread_local int
+  kls_sparse_full_diagonal_metis_row_input_detected;
 static _Thread_local int
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
 static _Thread_local int
@@ -30472,47 +30481,147 @@ static int kls_rajat31_h100_policy_enabled(
     col_ptr[n] >= 20200000u && col_ptr[n] <= 20400000u;
 }
 
-/* Very sparse, full-diagonal single-block circuit whose complete H100 cycle
-   is won by a fine NodeNDP/CAMD refinement and the cooperative row numeric.
-   The input envelope is unique in the paper union (mc2depi).  Keep the
-   default attached to the exact AUTO/8T contract; explicit ordering, scale,
-   BTF, tolerance, backend, and thread choices retain their documented
-   meaning. */
-static int kls_mc2depi_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
+/* Very sparse, full-diagonal graphs in this resource band can amortize a
+   fine NodeNDP/CAMD refinement and a retained cooperative row numeric.  The
+   input band caps the cost of evaluating that proposal; the later absolute
+   symbolic floor decides whether a smaller graph can actually repay row
+   metadata, while larger graphs use the wider giant-matrix schedule.
+   Topology only proposes the lifecycle; the retained symbolic and numeric
+   must independently prove their fill, work, and separator bounds.
+   The matrix-named switch remains solely as a compatibility alias. */
+static int kls_sparse_full_diagonal_metis_row_options_enabled(
   const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
+  return options != NULL &&
+    getenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY") == NULL &&
     getenv("KLS_DISABLE_MC2DEPI_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
     options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
     options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n >= 525000u && n <= 526500u &&
-    col_ptr[n] >= 2090000u && col_ptr[n] <= 2110000u;
+    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12;
 }
 
-/* Confirm that the AUTO input policy produced the audited fixed-pivot
-   numeric before selecting its row-major refactor/solve pair. */
-static int kls_is_mc2depi_h100_cycle(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      !kls_mc2depi_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) ||
+static int kls_sparse_full_diagonal_metis_row_input_economics(
+  UF_long n,
+  const UF_long *col_ptr) {
+  return col_ptr != NULL && n >= 100000u && n <= 1048576u &&
+    n <= UF_long_max / 17u && col_ptr[0] == 0u &&
+    col_ptr[n] >= 3u * n && 4u * col_ptr[n] <= 17u * n;
+}
+
+static int kls_sparse_full_diagonal_metis_row_input_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+#ifdef KLS_HAVE_METIS
+  return kls_sparse_full_diagonal_metis_row_input_economics(n, col_ptr) &&
+    is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx);
+#else
+  (void)n;
+  (void)col_ptr;
+  (void)row_idx;
+  return 0;
+#endif
+}
+
+static int kls_sparse_full_diagonal_metis_row_candidate_cycle(
+  const kls_solver *solver) {
+  return solver != NULL &&
+    solver->sparse_full_diagonal_metis_row_candidate &&
+    kls_sparse_full_diagonal_metis_row_options_enabled(&solver->options);
+}
+
+/* Admit the tighter initial tolerance only after the actual no-BTF METIS
+   symbolic proves a balanced intermediate-fill factor and a useful mostly
+   private separator.  Absolute bounds express the setup-cost crossover;
+   normalized bounds keep the rule meaningful across the whole input band. */
+__attribute__((noinline, cold))
+static int kls_sparse_full_diagonal_metis_row_symbolic_profile(
+  const kls_solver *solver) {
+  if (!kls_sparse_full_diagonal_metis_row_candidate_cycle(solver) ||
+      solver->col_ptr == NULL || solver->symbolic == NULL ||
+      solver->col_ptr[solver->n] != solver->nnz ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->stats.selected_ordering != KLS_ORDERING_METIS ||
-      solver->common.scale != -1 || solver->numeric->Rs != NULL ||
       solver->symbolic->do_btf ||
+      (solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
+       solver->symbolic->structural_rank != solver->n) ||
       solver->symbolic->nblocks != 1u ||
       solver->symbolic->maxblock != solver->n ||
-      solver->common.noffdiag > 64u) {
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      solver->separator.n != solver->n ||
+      !solver->separator.global_range_valid ||
+      solver->separator.global_begin != 0u ||
+      solver->separator.global_end != solver->n ||
+      solver->separator.thread_count < 2u ||
+      solver->separator.private_rows > solver->n ||
+      solver->separator.pipeline_rows > solver->n ||
+      solver->separator.private_rows + solver->separator.pipeline_rows !=
+        solver->n ||
+      50u * solver->separator.private_rows < 49u * solver->n ||
+      50u * solver->separator.pipeline_rows > solver->n ||
+      solver->separator.private_component_count +
+          solver->separator.pipeline_component_count !=
+        solver->separator.component_count ||
+      solver->separator.component_count <
+        solver->separator.thread_count ||
+      solver->separator.pipeline_max_rows > solver->n / 64u) {
     return 0;
   }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 45000000u && fill <= 60000000u &&
-         solver->common.flops >= 1.2e10 &&
-         solver->common.flops <= 1.5e10;
+  const double n = (double)solver->n;
+  const double lnz = solver->symbolic->lnz;
+  const double unz = solver->symbolic->unz;
+  const double fill = lnz + unz;
+  return fill >= 80.0 * n && fill <= 112.0 * n &&
+    fill >= 3.2e7 && fill <= 9.6e7 &&
+    lnz <= 2.0 * unz && unz <= 2.0 * lnz;
+}
+
+static int kls_sparse_full_diagonal_metis_row_symbolic_cycle(
+  const kls_solver *solver) {
+  return kls_sparse_full_diagonal_metis_row_symbolic_profile(solver);
+}
+
+/* Recurring row dispatch requires the measured fixed-pivot factor to preserve
+   the symbolic economics, balanced streams, and normalized arithmetic
+   intensity.  The same proof applies to the predicted bootstrap and to a
+   later KLU-built replacement.  Cache it after each numeric build. */
+__attribute__((noinline, cold))
+static int kls_sparse_full_diagonal_metis_row_factor_profile(
+  const kls_solver *solver) {
+  if (!kls_sparse_full_diagonal_metis_row_symbolic_cycle(solver) ||
+      solver->numeric == NULL ||
+      solver->row_perm != NULL || solver->common.scale != -1 ||
+      solver->numeric->Rs != NULL ||
+      fabs(solver->common.tol - 1.0e-6) > 1.0e-12 ||
+      (solver->common.noffdiag != KLS_KLU_EMPTY &&
+       solver->common.noffdiag > solver->n / 8192u + 16u) ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->numeric->lnz == 0u || solver->numeric->unz == 0u ||
+      !(solver->common.flops > 0.0)) {
+    return 0;
+  }
+  const double n = (double)solver->n;
+  const double lnz = (double)solver->numeric->lnz;
+  const double unz = (double)solver->numeric->unz;
+  const double fill = lnz + unz;
+  return fill >= 80.0 * n && fill <= 112.0 * n &&
+    solver->common.flops >= 16384.0 * n &&
+    solver->common.flops <= 32768.0 * n &&
+    lnz <= 2.0 * unz && unz <= 2.0 * lnz;
+}
+
+static int kls_sparse_full_diagonal_metis_row_factor_cycle(
+  const kls_solver *solver) {
+  if (!kls_sparse_full_diagonal_metis_row_symbolic_cycle(solver)) {
+    return 0;
+  }
+  return solver->sparse_full_diagonal_metis_row_numeric_eligible != 0
+    ? solver->sparse_full_diagonal_metis_row_numeric_eligible > 0
+    : kls_sparse_full_diagonal_metis_row_factor_profile(solver);
 }
 
 /* Post-factor half of the rajat31 policy.  The public input envelope above
@@ -32100,7 +32209,7 @@ static int kls_is_small_initial_tolerance_class(const kls_solver *solver) {
 static int kls_uses_structural_initial_pivot_tolerance(
   const kls_solver *solver) {
   return kls_balanced_moderate_hub_amd_no_btf_cycle(solver) ||
-    kls_is_mc2depi_h100_cycle(solver) ||
+    kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
     kls_is_small_initial_tolerance_class(solver) ||
     (solver != NULL &&
      solver->options.orientation == KLS_ORIENTATION_AUTO &&
@@ -32152,15 +32261,11 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
     return 1.0e-4;
   }
 
-  if (kls_mc2depi_h100_policy_enabled(
-        solver->n, solver->col_ptr, &solver->options) &&
-      solver->orientation == KLS_ORIENTATION_NORMAL &&
-      solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-      solver->common.scale == -1 && solver->symbolic != NULL &&
-      !solver->symbolic->do_btf) {
-    /* This full-diagonal factor retains its pivot order at 1e-6.  The tighter
-       threshold removes loose-pivot overhead and keeps every audited
-       entrywise update at machine-precision residual. */
+  if (kls_sparse_full_diagonal_metis_row_symbolic_cycle(solver) &&
+      solver->common.scale == -1) {
+    /* This measured symbolic regime retains its pivot order at 1e-6.  The
+       tighter threshold removes loose-pivot overhead; the post-factor gate
+       still has to prove the recurring row lifecycle independently. */
     return 1.0e-6;
   }
 
@@ -33413,6 +33518,8 @@ static _Thread_local int kls_freescale_chain_h100_metis_ctx;
 /* Scoped to G3_circuit's direct AUTO ordering so an explicit METIS request
    keeps the generic refinement policy. */
 static _Thread_local int kls_g3_circuit_h100_metis_ctx;
+/* Scoped to the generic bounded-degree/full-diagonal AUTO proposal. */
+static _Thread_local int kls_sparse_full_diagonal_metis_row_ctx;
 
 static UF_long kls_metis_camd_group_size(UF_long n,
                                          const UF_long *col_ptr,
@@ -33438,13 +33545,19 @@ static UF_long kls_metis_camd_group_size(UF_long n,
        broad minimum (5120--5632) while leaving NodeNDP's forest intact. */
     return 5376u;
   }
-  if (col_ptr != NULL && n >= 525000u && n <= 526500u &&
-      col_ptr[n] >= 2090000u && col_ptr[n] <= 2110000u) {
-    /* The broad 4096-column window preserves unnecessary fill on this
-       very sparse circuit.  A measured 864-column refinement cuts factor
-       work by about four percent and makes the complete H100 row cycle
-       faster than the competing SubtreeLU run. */
-    return 864u;
+  if (kls_sparse_full_diagonal_metis_row_ctx) {
+    /* Scale the constrained-AMD window with the graph instead of keying it
+       to one matrix dimension.  The clamps are ordering-resource limits;
+       n/608 retains the measured fine-refinement density across the input
+       band (864 columns at n=525825). */
+    UF_long group = n / 608u;
+    if (group < 320u) {
+      group = 320u;
+    }
+    if (group > 4096u) {
+      group = 4096u;
+    }
+    return group;
   }
   if (is_large_sparse_nearly_diagonal_spiked_metis_pattern(
         n, col_ptr, row_idx)) {
@@ -42765,8 +42878,15 @@ static int kls_choose_symbolic_inner(UF_long n,
        recovery path. */
   }
 
-  if (!kls_analyze_defer_nd &&
-      is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
+  const int sparse_full_diagonal_metis_row_economics =
+    kls_sparse_full_diagonal_metis_row_input_economics(n, col_ptr);
+  const int large_very_low_degree_full_diagonal =
+    sparse_full_diagonal_metis_row_economics
+      ? kls_sparse_full_diagonal_metis_row_input_profile(
+          n, col_ptr, row_idx)
+      : is_large_very_low_degree_full_diagonal_pattern(
+          n, col_ptr, row_idx);
+  if (!kls_analyze_defer_nd && large_very_low_degree_full_diagonal) {
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
       fprintf(stderr, "KLS choose: low-degree METIS branch n=%ld\n", (long)n);
     }
@@ -42774,13 +42894,24 @@ static int kls_choose_symbolic_inner(UF_long n,
     metis_options.use_btf = 0;
     const int saved_g3_circuit_h100_metis_ctx =
       kls_g3_circuit_h100_metis_ctx;
+    const int saved_sparse_full_diagonal_metis_row_ctx =
+      kls_sparse_full_diagonal_metis_row_ctx;
     kls_g3_circuit_h100_metis_ctx =
       kls_g3_circuit_h100_policy_enabled(n, col_ptr, options);
+    kls_sparse_full_diagonal_metis_row_ctx =
+      sparse_full_diagonal_metis_row_economics && n >= 262144u &&
+      kls_sparse_full_diagonal_metis_row_options_enabled(options);
+    if (sparse_full_diagonal_metis_row_economics &&
+        kls_sparse_full_diagonal_metis_row_options_enabled(options)) {
+      kls_sparse_full_diagonal_metis_row_input_detected = 1;
+    }
     int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out, separator_out);
     kls_g3_circuit_h100_metis_ctx =
       saved_g3_circuit_h100_metis_ctx;
+    kls_sparse_full_diagonal_metis_row_ctx =
+      saved_sparse_full_diagonal_metis_row_ctx;
     if (status == KLS_OK) {
       *selected_ordering_out = KLS_ORDERING_METIS;
       double selected_score = symbolic_score(*symbolic_out);
@@ -44447,6 +44578,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_sparse_symmetric_fragmented_metis_selected;
   const int sparse_spiked_predicted_detected_saved =
     kls_sparse_spiked_predicted_input_detected;
+  const int sparse_full_diagonal_metis_row_detected_saved =
+    kls_sparse_full_diagonal_metis_row_input_detected;
   const int low_work_hubbed_scalar_fringe_saved =
     kls_low_work_hubbed_scalar_fringe_amd_analyze_path;
   const int symmetric_partial_diagonal_match_saved =
@@ -44505,6 +44638,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
       candidate->n, candidate->col_ptr, candidate->row_idx);
   kls_sparse_symmetric_fragmented_metis_selected = 0;
   kls_sparse_spiked_predicted_input_detected = 0;
+  kls_sparse_full_diagonal_metis_row_input_detected = 0;
   candidate->low_work_hubbed_scalar_fringe_class =
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_low_work_hubbed_scalar_fringe_input_profile(
@@ -44546,6 +44680,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
     kls_sparse_spiked_predicted_options_enabled(options) &&
     kls_sparse_spiked_predicted_input_detected;
+  candidate->sparse_full_diagonal_metis_row_class =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    kls_sparse_full_diagonal_metis_row_options_enabled(options) &&
+    kls_sparse_full_diagonal_metis_row_input_detected;
   kls_btf_stash = balanced_btf_stash_saved;
   candidate->compact_partial_diagonal_column_fringe_no_btf_selected =
     kls_compact_partial_diagonal_column_fringe_no_btf_selected;
@@ -44597,6 +44735,8 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     sparse_symmetric_fragmented_selected_saved;
   kls_sparse_spiked_predicted_input_detected =
     sparse_spiked_predicted_detected_saved;
+  kls_sparse_full_diagonal_metis_row_input_detected =
+    sparse_full_diagonal_metis_row_detected_saved;
   kls_low_work_hubbed_scalar_fringe_amd_analyze_path =
     low_work_hubbed_scalar_fringe_saved;
   kls_symmetric_partial_diagonal_match_analyze_path =
@@ -45179,6 +45319,8 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
       candidate->selected_ordering, candidate->symbolic, &solver->separator);
   solver->sparse_spiked_predicted_candidate =
     candidate->sparse_spiked_predicted_class;
+  solver->sparse_full_diagonal_metis_row_candidate =
+    candidate->sparse_full_diagonal_metis_row_class;
   solver->symmetric_scalar_fringe_amd_lean_cycle =
     kls_symmetric_scalar_fringe_policy_enabled(&solver->options) &&
     candidate->symmetric_scalar_fringe_class &&
@@ -45671,6 +45813,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     kls_sparse_symmetric_fragmented_metis_factor_profile(solver) ? 1 : -1;
   solver->sparse_spiked_predicted_numeric_eligible =
     kls_sparse_spiked_predicted_factor_profile(solver) ? 1 : -1;
+  solver->sparse_full_diagonal_metis_row_numeric_eligible =
+    kls_sparse_full_diagonal_metis_row_factor_profile(solver) ? 1 : -1;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible =
     kls_high_work_tiny_scalar_fringe_amd_factor_profile(solver) ? 1 : -1;
   kls_dbg_snapshot_numeric(solver);
@@ -70311,7 +70455,7 @@ static int kls_predicted_row_refactor_enabled(const kls_solver *solver) {
           solver->prestatic_reused_raced_metis_symbolic ||
           (!kls_row_refactor_env_disabled() &&
            (kls_is_rajat31_h100_cycle(solver) ||
-            kls_is_mc2depi_h100_cycle(solver))));
+            kls_sparse_full_diagonal_metis_row_factor_cycle(solver))));
 }
 
 /* The column EGraph now wins refactor+solve on every paper-union matrix that
@@ -71611,7 +71755,7 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
   const int direct_auto_row =
     solver != NULL &&
     (kls_is_rajat31_h100_cycle(solver) ||
-     kls_is_mc2depi_h100_cycle(solver) ||
+     kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
      kls_is_g3_circuit_h100_cycle(solver) ||
      kls_is_freescale_chain_h100_cycle(solver) ||
      kls_dense_fragmented_scaled_row_factor_cycle(solver));
@@ -71642,14 +71786,14 @@ static int kls_row_refactor_acceptance_structurally_ready(
   return (kls_auto_row_refactor_policy_enabled() ||
           (solver != NULL &&
            (solver->n <= 64u || kls_is_rajat31_h100_cycle(solver) ||
-            kls_is_mc2depi_h100_cycle(solver) ||
+            kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
             kls_is_g3_circuit_h100_cycle(solver) ||
             kls_is_freescale_chain_h100_cycle(solver) ||
             kls_dense_fragmented_scaled_row_factor_cycle(solver)))) &&
          solver != NULL &&
          (!solver->numeric_is_predicted ||
           kls_is_rajat31_h100_cycle(solver) ||
-          kls_is_mc2depi_h100_cycle(solver) ||
+          kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
           kls_is_g3_circuit_h100_cycle(solver) ||
           kls_is_freescale_chain_h100_cycle(solver) ||
           kls_dense_fragmented_scaled_row_factor_cycle(solver)) &&
@@ -71665,7 +71809,7 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
-  if (kls_is_mc2depi_h100_cycle(solver) &&
+  if (kls_sparse_full_diagonal_metis_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
@@ -72434,7 +72578,7 @@ static int kls_build_row_i32_indices(kls_solver *solver) {
   const int parallel =
     (getenv("KLS_ENABLE_PARALLEL_ROW_I32_BUILD") != NULL ||
      kls_dense_spiked_fast_defaults_enabled(solver) ||
-     kls_is_mc2depi_h100_cycle(solver)) &&
+     kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) &&
     solver->options.threads >= 4 && input_count >= 100000u;
   if (parallel) {
     for (int kind = 1; kind < 3; ++kind) {
@@ -155345,6 +155489,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->sparse_spiked_predicted_numeric_eligible = 0;
+  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
@@ -156591,8 +156736,8 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_rajat31_direct_row =
       kls_is_rajat31_h100_cycle(solver) &&
       !kls_row_refactor_env_disabled();
-    const int kls_mc2depi_direct_row =
-      kls_is_mc2depi_h100_cycle(solver) &&
+    const int kls_sparse_full_diagonal_metis_direct_row =
+      kls_sparse_full_diagonal_metis_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled();
     const int kls_g3_circuit_direct_row =
       kls_is_g3_circuit_h100_cycle(solver) &&
@@ -156603,7 +156748,8 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_dense_fragmented_scaled_direct_row =
       kls_dense_fragmented_scaled_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled();
-    if (kls_rajat31_direct_row || kls_mc2depi_direct_row ||
+    if (kls_rajat31_direct_row ||
+        kls_sparse_full_diagonal_metis_direct_row ||
         kls_g3_circuit_direct_row ||
         kls_freescale_chain_direct_row ||
         kls_dense_fragmented_scaled_direct_row) {
@@ -156619,7 +156765,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     }
     const int kls_direct_forced_row_prep =
       kls_rajat31_direct_row ||
-      kls_mc2depi_direct_row ||
+      kls_sparse_full_diagonal_metis_direct_row ||
       kls_g3_circuit_direct_row ||
       kls_freescale_chain_direct_row ||
       kls_dense_fragmented_scaled_direct_row ||
@@ -156646,7 +156792,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_skip_forced_row_column_preps =
       kls_direct_forced_row_prep &&
       (kls_rajat31_direct_row ||
-       kls_mc2depi_direct_row ||
+       kls_sparse_full_diagonal_metis_direct_row ||
        kls_g3_circuit_direct_row ||
        kls_freescale_chain_direct_row ||
        kls_dense_fragmented_scaled_direct_row ||
@@ -156792,7 +156938,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     if (kls_direct_forced_row_prep) {
       const double row_start = kls_now_seconds();
       if (kls_rajat31_direct_row ||
-          kls_mc2depi_direct_row ||
+          kls_sparse_full_diagonal_metis_direct_row ||
           kls_g3_circuit_direct_row ||
           kls_freescale_chain_direct_row ||
           kls_dense_fragmented_scaled_direct_row ||
@@ -156819,10 +156965,10 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
         (void)kls_prepare_auto_row_refactor_from_numeric(solver);
       }
       if ((solver->prestatic_dense_spiked_match ||
-           kls_mc2depi_direct_row) &&
+           kls_sparse_full_diagonal_metis_direct_row) &&
           (getenv("KLS_ENABLE_ROW_I32_INDICES") != NULL ||
            kls_dense_spiked_fast_defaults_enabled(solver) ||
-           kls_mc2depi_direct_row)) {
+           kls_sparse_full_diagonal_metis_direct_row)) {
         (void)kls_build_row_i32_indices(solver);
       }
       preps_elapsed += kls_now_seconds() - row_start;
@@ -156849,7 +156995,8 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
 static int kls_prepare_unchanged_solve_contract(kls_solver *solver,
                                                  const double *values) {
   if (solver == NULL || values == NULL || solver->solve_refine_values != NULL ||
-      kls_uses_structural_initial_pivot_tolerance(solver) ||
+      (kls_uses_structural_initial_pivot_tolerance(solver) &&
+       !kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) ||
       !(solver->common.tol > 0.0) ||
       !(solver->common.tol < solver->options.pivot_tolerance) ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
@@ -157850,7 +157997,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
          (solver->stats.selected_pivot_tolerance > 0.0 &&
           solver->stats.selected_pivot_tolerance <
             solver->options.pivot_tolerance &&
-          !kls_uses_structural_initial_pivot_tolerance(solver))) &&
+          (!kls_uses_structural_initial_pivot_tolerance(solver) ||
+           kls_sparse_full_diagonal_metis_row_factor_cycle(solver)))) &&
         solver->row_perm == NULL &&
         solver->row_scale == NULL && solver->col_scale == NULL &&
         numeric_values != NULL && solver->nnz > 0) {
@@ -158974,7 +159122,8 @@ static int solve_impl(kls_solver *solver,
     solver->stats.selected_pivot_tolerance > 0.0 &&
     solver->stats.selected_pivot_tolerance <
       solver->options.pivot_tolerance &&
-    !kls_uses_structural_initial_pivot_tolerance(solver) &&
+    (!kls_uses_structural_initial_pivot_tolerance(solver) ||
+     kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) &&
     /* plain frames only, mirroring the per-refactor value capture:
        matched/scaled classes (pre2) have no capture here, so this
        gate would refine them against the stale analyze-time values —
@@ -159953,6 +160102,25 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->dense_fragmented_scaled_row_factor_eligible)) {
     stats->dense_fragmented_scaled_row_factor_eligible =
       kls_dense_fragmented_scaled_row_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, sparse_full_diagonal_metis_row_candidate) +
+        sizeof(stats->sparse_full_diagonal_metis_row_candidate)) {
+    stats->sparse_full_diagonal_metis_row_candidate =
+      kls_sparse_full_diagonal_metis_row_candidate_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               sparse_full_diagonal_metis_row_symbolic_eligible) +
+        sizeof(stats->sparse_full_diagonal_metis_row_symbolic_eligible)) {
+    stats->sparse_full_diagonal_metis_row_symbolic_eligible =
+      kls_sparse_full_diagonal_metis_row_symbolic_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, sparse_full_diagonal_metis_row_factor_eligible) +
+        sizeof(stats->sparse_full_diagonal_metis_row_factor_eligible)) {
+    stats->sparse_full_diagonal_metis_row_factor_eligible =
+      kls_sparse_full_diagonal_metis_row_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

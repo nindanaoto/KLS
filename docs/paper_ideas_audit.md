@@ -19233,3 +19233,130 @@ Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
 factor/refactor/solve runs cover the original target, the out-of-box extension,
 and the independent positive with no findings.  Same-binary generic and legacy
 disable probes both report factor eligibility zero and use KLU refactorization.
+
+SPARSE FULL-DIAGONAL METIS ROW LIFECYCLE GENERALIZED (2026-07-24).  The
+remaining `mc2depi` H100 policy began with an exact 525,000--526,500-row and
+2,090,000--2,110,000-entry box.  Those two coordinates selected a fine
+constrained-AMD refinement with group size 864, a `1e-6` initial pivot
+tolerance, scale-trial suppression, predicted-row preparation, parallel
+32-bit row metadata, and direct cooperative-row refactors.  The later numeric
+check still repeated the same identity before applying broad absolute
+45--60-million-fill and 12--15-billion-operation bounds, so the benchmark
+name effectively authorized the complete factor/update lifecycle.
+
+The replacement has three independently visible stages.  The input proposal
+applies only under the standard normal-candidate, eight-thread AUTO
+orientation/ordering/scaling/backend contract with BTF, static pivoting, and
+requested tolerance `1e-3`.  It admits 100,000--1,048,576 rows and between
+three and 4.25 stored entries per row.  Every row and column must be nonempty,
+the structural diagonal must be complete, and maximum row and column degree
+must be at most eight.  KLS obtains this verdict from the existing
+low-degree/full-diagonal AUTO scan and caches it on the adopted candidate, so
+the generalized policy does not add another O(nnz) topology pass.
+
+Only candidates of at least 262,144 rows receive the fine METIS constrained-
+AMD refinement.  Its group size is proportional to order (`n/608`) and
+clamped to 320--4,096 columns rather than matching one dimension.  The former
+target therefore retains the measured 864-column optimum, while neighboring
+orders vary continuously.  Direct comparisons with 876 and 1,027 columns
+made the complete target cycle 3.2% and 5.4% slower, respectively, so the
+measured density was retained rather than replacing it with a round but
+slower constant.
+
+The symbolic stage independently requires the retained normal METIS ordering,
+no BTF, one full-size block, and structural rank either not yet reported or
+full.  Estimated L and U must both be nonzero, agree within 2x, total 80--112
+entries per row, and total 32--96 million entries.  The captured separator
+must cover the whole order with at least two workers and all components
+accounted for.  At least 98% of rows must be private, at most 2% may be in the
+pipeline, private components must supply at least the worker count, and the
+largest pipeline component is bounded by `n/64`.  Only this measured stage
+selects the `1e-6` initial tolerance.
+
+The factor stage requires that symbolic verdict plus a retained plain-frame
+numeric at scale `-1` and tolerance `1e-6`, with no row permutation or numeric
+scale vector.  It allows only the no-off-diagonal-pivot sentinel or at most
+`n/8192 + 16` detours, no pivot nudge or perturbation, L/U within 2x, total
+fill of 80--112 entries per row, and measured work of 16,384--32,768
+operations per row.  The rule applies equally to the predicted bootstrap and
+a later KLU replacement, is cached for that numeric, and is invalidated on
+every replacement.  Only this final stage suppresses the later scale trial
+and authorizes predicted-row preparation, the parallel row-index build, and
+direct cooperative-row refactors.
+
+The generic same-binary control is
+`KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY=1`; the old
+`KLS_DISABLE_MC2DEPI_H100_POLICY` spelling remains a compatibility alias.
+Public `sparse_full_diagonal_metis_row_candidate`,
+`sparse_full_diagonal_metis_row_symbolic_eligible`, and
+`sparse_full_diagonal_metis_row_factor_eligible` fields expose the stages in
+`kls_stats`, full benchmark JSON, and analyze-only JSON.
+
+The independent smoke fixture has 100,000 rows and 400,000 entries.  A
+symmetric cubic circulant plus its full diagonal proposes the normal METIS
+route through both CSC and CSR, but intentionally reports `1/0/0`: its
+symbolic factor lies below the absolute setup-cost floor, avoiding a giant
+smoke-test numeric while exercising the generalized input proof.  Replacing
+one diagonal entry preserves order and entry count but reports `0/0/0`.
+The unchanged positive under the generic disable and under the legacy alias
+also rejects at the proposal stage.
+
+The local SuiteSparse screen inspected all 110 available supported matrices.
+Five pass the coarse order/density envelope: `mc2depi`, `ss1`, `ASIC_680ks`,
+`HTC_336_9129`, and `HTC_336_4438`.  Only `mc2depi` and the unrelated `ss1`
+pass the complete input topology.  The latter reports `1/0/0` because its
+53,638,844-entry symbolic estimate is about 261 entries per row, far outside
+the normalized factor regime.  `G2_circuit` and `G3_circuit` also retain their
+ordinary METIS policies and report `0/0/0`, demonstrating rejection on either
+side of the generalized resource band.
+
+Appending 1,024 diagonal scalar components produces a 526,849-row,
+2,101,249-entry matrix outside the former order window; it reports `1/1/1`,
+uses KLU-first followed by cooperative-row refactors, and returns
+`1.56e-15` relative residual under the sanitizer run.  A 4,096-row neighboring
+extension reaches 529,921 rows and also reports `1/1/1`.  A simultaneous
+row/column relabeling preserves the input topology and symbolic economics but
+reports `1/1/0`: debugger inspection found one real pivot nudge, so the final
+measured gate correctly declines the row lifecycle and falls back to EGraph.
+
+`mc2depi` and both positive extensions each completed 100 independently
+checked entrywise generations at amplitudes `0.001`, `0.01`, and `0.1`, for
+900 generations.  All retained stages `1/1/1` and cooperative-row updates.
+The target maxima were `5.76e-15`, `3.24e-13`, and `2.03e-12`; the 1,024-row
+extension maxima were `7.25e-13`, `2.15e-14`, and `4.69e-13`; and the
+4,096-row extension maxima were `2.44e-14`, `2.59e-13`, and `1.99e-12`.
+The overall worst relative-L2 residual was `2.0322e-12`.
+
+That accuracy replay found a real inherited contract defect.  Because the
+new symbolic policy intentionally selects `1e-6`, the older structural-
+tolerance exemption skipped current-value capture and solve-side verification;
+one 10% target generation reached `1.5507e-3` relative residual.  The factor-
+accepted full-diagonal class now keeps the structural marker that avoids
+redundant factor trials but explicitly participates in current-value capture,
+the tight-tolerance self-check, and iterative refinement.  The post-fix
+900-generation result above verifies the correction rather than merely
+loosening an acceptance threshold.
+
+Six alternating prior-exact/current target pairs pinned to eight quiet cores,
+with three factor repetitions and 20 refactors per process, put geometric
+current/parent ratios at `0.99658` for analysis, `1.14086` for initial factor,
+`0.99776` for first refactor, `0.99509` for steady refactor, `1.03946` for
+changed-numeric solve, `1.07832` for repeated solve, and `1.01143` for the
+complete modeled cycle (`1.01151` by means).  Both builds retain predicted-
+first/cooperative-row execution and the same final `5.06e-15` residual.  The
+roughly 1.1% cycle cost is the solve-side verification that closes the broad
+accuracy hole.
+
+Four alternating pairs on the 1,024-row extension put the complete-cycle
+current/parent ratio at `1.23560` geometrically and `1.20127` by means.  This
+is not a like-for-like performance regression: the parent falls back to
+predicted/EGraph and ends at `3.2882e-4` relative residual, while the new
+KLU-first/cooperative-row path ends at `3.13e-15` and remains below
+`7.26e-13` across its 300 randomized generations.  The extra 20--24% buys a
+valid answer on a newly admitted matrix rather than optimizing an inaccurate
+baseline.
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+factor/refactor/solve runs cover the original target, the positive extension,
+and the relabeled `1/1/0` measured rejection with no findings.  Generic and
+legacy same-binary disables both suppress all three stages.
