@@ -3261,10 +3261,6 @@ static int kls_circuit5m_h100_policy_enabled(
   UF_long n,
   const UF_long *col_ptr,
   const kls_options *options);
-static int kls_g3_circuit_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options);
 static int kls_dense_fragmented_scaled_row_factor_cycle(
   const kls_solver *solver);
 static int is_medium_prestatic_partial_missing_pattern(
@@ -30255,36 +30251,6 @@ static int kls_is_circuit5m_h100_cycle(const kls_solver *solver) {
     solver->symbolic->maxblock * 1000u >= solver->n * 999u;
 }
 
-/* G3_circuit's accepted predicted METIS factor is cheaper to build than a
-   pivot-discovery KLU numeric, while its row-factor update is substantially
-   faster than the column EGraph over H100. */
-static int kls_g3_circuit_h100_policy_enabled(
-  UF_long n,
-  const UF_long *col_ptr,
-  const kls_options *options) {
-  return col_ptr != NULL && options != NULL &&
-    getenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY") == NULL &&
-    options->orientation == KLS_ORIENTATION_AUTO &&
-    options->ordering == KLS_ORDERING_AUTO &&
-    options->scale == KLS_SCALE_AUTO &&
-    options->backend == KLS_BACKEND_AUTO && options->threads == 8 &&
-    options->use_btf && options->static_pivoting &&
-    fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    n == 1585478u && col_ptr[n] == 7660826u;
-}
-
-static int kls_is_g3_circuit_h100_cycle(const kls_solver *solver) {
-  return solver != NULL && solver->symbolic != NULL &&
-    kls_g3_circuit_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
-    solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-    solver->common.scale == -1 && solver->numeric != NULL &&
-    solver->numeric->Rs == NULL && !solver->symbolic->do_btf &&
-    solver->symbolic->nblocks == 1u &&
-    solver->symbolic->maxblock == solver->n;
-}
-
 /* Dense inputs can settle into a much sparser collection of moderate BTF
    components.  Their factor geometry, not an input identity, determines
    whether the cooperative row mirror amortizes its retained storage. */
@@ -30481,11 +30447,11 @@ static int kls_rajat31_h100_policy_enabled(
     col_ptr[n] >= 20200000u && col_ptr[n] <= 20400000u;
 }
 
-/* Very sparse, full-diagonal graphs in this resource band can amortize a
-   fine NodeNDP/CAMD refinement and a retained cooperative row numeric.  The
-   input band caps the cost of evaluating that proposal; the later absolute
-   symbolic floor decides whether a smaller graph can actually repay row
-   metadata, while larger graphs use the wider giant-matrix schedule.
+/* Very sparse, full-diagonal graphs in these resource bands can amortize a
+   tuned NodeNDP/CAMD refinement and a retained cooperative row numeric.  The
+   input band caps the cost of evaluating that proposal; later absolute
+   symbolic floors decide whether a graph can actually repay row metadata,
+   while measured fill separates the fine and wider giant-matrix schedules.
    Topology only proposes the lifecycle; the retained symbolic and numeric
    must independently prove their fill, work, and separator bounds.
    The matrix-named switch remains solely as a compatibility alias. */
@@ -30494,6 +30460,7 @@ static int kls_sparse_full_diagonal_metis_row_options_enabled(
   return options != NULL &&
     getenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY") == NULL &&
     getenv("KLS_DISABLE_MC2DEPI_H100_POLICY") == NULL &&
+    getenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -30505,9 +30472,9 @@ static int kls_sparse_full_diagonal_metis_row_options_enabled(
 static int kls_sparse_full_diagonal_metis_row_input_economics(
   UF_long n,
   const UF_long *col_ptr) {
-  return col_ptr != NULL && n >= 100000u && n <= 1048576u &&
-    n <= UF_long_max / 17u && col_ptr[0] == 0u &&
-    col_ptr[n] >= 3u * n && 4u * col_ptr[n] <= 17u * n;
+  return col_ptr != NULL && n >= 100000u && n <= 4194304u &&
+    n <= UF_long_max / 5u && col_ptr[0] == 0u &&
+    col_ptr[n] >= 3u * n && col_ptr[n] <= 5u * n;
 }
 
 static int kls_sparse_full_diagonal_metis_row_input_profile(
@@ -30532,12 +30499,13 @@ static int kls_sparse_full_diagonal_metis_row_candidate_cycle(
     kls_sparse_full_diagonal_metis_row_options_enabled(&solver->options);
 }
 
-/* Admit the tighter initial tolerance only after the actual no-BTF METIS
-   symbolic proves a balanced intermediate-fill factor and a useful mostly
-   private separator.  Absolute bounds express the setup-cost crossover;
-   normalized bounds keep the rule meaningful across the whole input band. */
+/* Classify the actual no-BTF METIS symbolic only after it proves balanced
+   intermediate fill and a useful mostly private separator.  Absolute bounds
+   express two setup-cost crossovers; normalized bounds keep both meaningful
+   across the complete input band.  Class one uses the fine sparse schedule;
+   class two retains the requested tolerance and wider giant schedule. */
 __attribute__((noinline, cold))
-static int kls_sparse_full_diagonal_metis_row_symbolic_profile(
+static int kls_sparse_full_diagonal_metis_row_symbolic_class(
   const kls_solver *solver) {
   if (!kls_sparse_full_diagonal_metis_row_candidate_cycle(solver) ||
       solver->col_ptr == NULL || solver->symbolic == NULL ||
@@ -30574,14 +30542,23 @@ static int kls_sparse_full_diagonal_metis_row_symbolic_profile(
   const double lnz = solver->symbolic->lnz;
   const double unz = solver->symbolic->unz;
   const double fill = lnz + unz;
-  return fill >= 80.0 * n && fill <= 112.0 * n &&
-    fill >= 3.2e7 && fill <= 9.6e7 &&
-    lnz <= 2.0 * unz && unz <= 2.0 * lnz;
+  if (lnz > 2.0 * unz || unz > 2.0 * lnz) {
+    return 0;
+  }
+  if (fill >= 80.0 * n && fill <= 112.0 * n &&
+      fill >= 3.2e7 && fill <= 9.6e7) {
+    return 1;
+  }
+  if (solver->n >= 1048576u && fill >= 96.0 * n &&
+      fill <= 160.0 * n && fill >= 1.28e8 && fill <= 5.12e8) {
+    return 2;
+  }
+  return 0;
 }
 
 static int kls_sparse_full_diagonal_metis_row_symbolic_cycle(
   const kls_solver *solver) {
-  return kls_sparse_full_diagonal_metis_row_symbolic_profile(solver);
+  return kls_sparse_full_diagonal_metis_row_symbolic_class(solver) != 0;
 }
 
 /* Recurring row dispatch requires the measured fixed-pivot factor to preserve
@@ -30591,11 +30568,16 @@ static int kls_sparse_full_diagonal_metis_row_symbolic_cycle(
 __attribute__((noinline, cold))
 static int kls_sparse_full_diagonal_metis_row_factor_profile(
   const kls_solver *solver) {
-  if (!kls_sparse_full_diagonal_metis_row_symbolic_cycle(solver) ||
+  const int symbolic_class =
+    kls_sparse_full_diagonal_metis_row_symbolic_class(solver);
+  if (symbolic_class == 0 ||
       solver->numeric == NULL ||
       solver->row_perm != NULL || solver->common.scale != -1 ||
       solver->numeric->Rs != NULL ||
-      fabs(solver->common.tol - 1.0e-6) > 1.0e-12 ||
+      (symbolic_class == 1
+         ? fabs(solver->common.tol - 1.0e-6) > 1.0e-12
+         : fabs(solver->common.tol -
+                solver->options.pivot_tolerance) > 1.0e-12) ||
       (solver->common.noffdiag != KLS_KLU_EMPTY &&
        solver->common.noffdiag > solver->n / 8192u + 16u) ||
       solver->pivot_nudge_count != 0u ||
@@ -30608,10 +30590,17 @@ static int kls_sparse_full_diagonal_metis_row_factor_profile(
   const double lnz = (double)solver->numeric->lnz;
   const double unz = (double)solver->numeric->unz;
   const double fill = lnz + unz;
-  return fill >= 80.0 * n && fill <= 112.0 * n &&
-    solver->common.flops >= 16384.0 * n &&
-    solver->common.flops <= 32768.0 * n &&
-    lnz <= 2.0 * unz && unz <= 2.0 * lnz;
+  if (lnz > 2.0 * unz || unz > 2.0 * lnz) {
+    return 0;
+  }
+  if (symbolic_class == 1) {
+    return fill >= 80.0 * n && fill <= 112.0 * n &&
+      solver->common.flops >= 16384.0 * n &&
+      solver->common.flops <= 32768.0 * n;
+  }
+  return fill >= 96.0 * n && fill <= 160.0 * n &&
+    solver->common.flops >= 32768.0 * n &&
+    solver->common.flops <= 131072.0 * n;
 }
 
 static int kls_sparse_full_diagonal_metis_row_factor_cycle(
@@ -32209,7 +32198,8 @@ static int kls_is_small_initial_tolerance_class(const kls_solver *solver) {
 static int kls_uses_structural_initial_pivot_tolerance(
   const kls_solver *solver) {
   return kls_balanced_moderate_hub_amd_no_btf_cycle(solver) ||
-    kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
+    (kls_sparse_full_diagonal_metis_row_symbolic_class(solver) == 1 &&
+     kls_sparse_full_diagonal_metis_row_factor_cycle(solver)) ||
     kls_is_small_initial_tolerance_class(solver) ||
     (solver != NULL &&
      solver->options.orientation == KLS_ORIENTATION_AUTO &&
@@ -32261,7 +32251,7 @@ static double choose_initial_auto_pivot_tolerance(const kls_solver *solver) {
     return 1.0e-4;
   }
 
-  if (kls_sparse_full_diagonal_metis_row_symbolic_cycle(solver) &&
+  if (kls_sparse_full_diagonal_metis_row_symbolic_class(solver) == 1 &&
       solver->common.scale == -1) {
     /* This measured symbolic regime retains its pivot order at 1e-6.  The
        tighter threshold removes loose-pivot overhead; the post-factor gate
@@ -33515,10 +33505,8 @@ static int kls_dense_reciprocal_hub_metis_factor_cycle(
    values distinguish Freescale1 (1), pivot-boundary chains (2), and
    Memchip (3). */
 static _Thread_local int kls_freescale_chain_h100_metis_ctx;
-/* Scoped to G3_circuit's direct AUTO ordering so an explicit METIS request
-   keeps the generic refinement policy. */
-static _Thread_local int kls_g3_circuit_h100_metis_ctx;
-/* Scoped to the generic bounded-degree/full-diagonal AUTO proposal. */
+/* Scoped to the generic bounded-degree/full-diagonal AUTO proposal.  One is
+   the fine sparse resource class; two is its wider giant-graph class. */
 static _Thread_local int kls_sparse_full_diagonal_metis_row_ctx;
 
 static UF_long kls_metis_camd_group_size(UF_long n,
@@ -33539,13 +33527,22 @@ static UF_long kls_metis_camd_group_size(UF_long n,
        more fill in the row factor; narrower windows add ordering overhead. */
     return 3072u;
   }
-  if (kls_g3_circuit_h100_metis_ctx) {
-    /* The generic 8192-column refinement retains a slower row schedule.
-       A 5376-column window is the repeatable full-H100 optimum around the
-       broad minimum (5120--5632) while leaving NodeNDP's forest intact. */
-    return 5376u;
+  if (kls_sparse_full_diagonal_metis_row_ctx == 2) {
+    /* The higher-fill resource class needs wider windows to preserve the
+       useful NodeNDP forest.  Keep roughly 37 windows per worker under the
+       eight-thread policy, round to a cache-friendly 128-column unit, and
+       cap ordering resources. */
+    UF_long group = n / 296u;
+    group = ((group + 64u) / 128u) * 128u;
+    if (group < 4096u) {
+      group = 4096u;
+    }
+    if (group > 8192u) {
+      group = 8192u;
+    }
+    return group;
   }
-  if (kls_sparse_full_diagonal_metis_row_ctx) {
+  if (kls_sparse_full_diagonal_metis_row_ctx == 1) {
     /* Scale the constrained-AMD window with the graph instead of keying it
        to one matrix dimension.  The clamps are ordering-resource limits;
        n/608 retains the measured fine-refinement density across the input
@@ -42892,15 +42889,14 @@ static int kls_choose_symbolic_inner(UF_long n,
     }
     kls_options metis_options = *options;
     metis_options.use_btf = 0;
-    const int saved_g3_circuit_h100_metis_ctx =
-      kls_g3_circuit_h100_metis_ctx;
     const int saved_sparse_full_diagonal_metis_row_ctx =
       kls_sparse_full_diagonal_metis_row_ctx;
-    kls_g3_circuit_h100_metis_ctx =
-      kls_g3_circuit_h100_policy_enabled(n, col_ptr, options);
-    kls_sparse_full_diagonal_metis_row_ctx =
-      sparse_full_diagonal_metis_row_economics && n >= 262144u &&
-      kls_sparse_full_diagonal_metis_row_options_enabled(options);
+    kls_sparse_full_diagonal_metis_row_ctx = 0;
+    if (sparse_full_diagonal_metis_row_economics && n >= 262144u &&
+        kls_sparse_full_diagonal_metis_row_options_enabled(options)) {
+      kls_sparse_full_diagonal_metis_row_ctx =
+        n >= 1048576u && 4u * col_ptr[n] > 17u * n ? 2 : 1;
+    }
     if (sparse_full_diagonal_metis_row_economics &&
         kls_sparse_full_diagonal_metis_row_options_enabled(options)) {
       kls_sparse_full_diagonal_metis_row_input_detected = 1;
@@ -42908,8 +42904,6 @@ static int kls_choose_symbolic_inner(UF_long n,
     int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out, separator_out);
-    kls_g3_circuit_h100_metis_ctx =
-      saved_g3_circuit_h100_metis_ctx;
     kls_sparse_full_diagonal_metis_row_ctx =
       saved_sparse_full_diagonal_metis_row_ctx;
     if (status == KLS_OK) {
@@ -70450,7 +70444,6 @@ static int kls_predicted_row_refactor_enabled(const kls_solver *solver) {
          solver->stats.last_factor_path != KLS_FACTOR_PATH_NONE &&
          !explicitly_disabled &&
          (explicitly_enabled ||
-          kls_is_g3_circuit_h100_cycle(solver) ||
           kls_is_freescale_chain_h100_cycle(solver) ||
           solver->prestatic_reused_raced_metis_symbolic ||
           (!kls_row_refactor_env_disabled() &&
@@ -71728,7 +71721,7 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
   if (solver == NULL || !solver->row_refactor_auto_enabled) {
     return 0;
   }
-  if (kls_is_g3_circuit_h100_cycle(solver) ||
+  if (kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
       kls_is_freescale_chain_h100_cycle(solver) ||
       kls_dense_fragmented_scaled_row_factor_cycle(solver)) {
     return 1;
@@ -71756,7 +71749,6 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
     solver != NULL &&
     (kls_is_rajat31_h100_cycle(solver) ||
      kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
-     kls_is_g3_circuit_h100_cycle(solver) ||
      kls_is_freescale_chain_h100_cycle(solver) ||
      kls_dense_fragmented_scaled_row_factor_cycle(solver));
   if (!kls_auto_row_refactor_policy_enabled() &&
@@ -71787,14 +71779,12 @@ static int kls_row_refactor_acceptance_structurally_ready(
           (solver != NULL &&
            (solver->n <= 64u || kls_is_rajat31_h100_cycle(solver) ||
             kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
-            kls_is_g3_circuit_h100_cycle(solver) ||
             kls_is_freescale_chain_h100_cycle(solver) ||
             kls_dense_fragmented_scaled_row_factor_cycle(solver)))) &&
          solver != NULL &&
          (!solver->numeric_is_predicted ||
           kls_is_rajat31_h100_cycle(solver) ||
           kls_sparse_full_diagonal_metis_row_factor_cycle(solver) ||
-          kls_is_g3_circuit_h100_cycle(solver) ||
           kls_is_freescale_chain_h100_cycle(solver) ||
           kls_dense_fragmented_scaled_row_factor_cycle(solver)) &&
          !kls_row_refactor_env_disabled() &&
@@ -71810,10 +71800,6 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
     return 1;
   }
   if (kls_sparse_full_diagonal_metis_row_factor_cycle(solver) &&
-      !kls_row_refactor_env_disabled()) {
-    return 1;
-  }
-  if (kls_is_g3_circuit_h100_cycle(solver) &&
       !kls_row_refactor_env_disabled()) {
     return 1;
   }
@@ -155526,8 +155512,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   const int kls_diagonal_equiv_candidate =
     !solver->large_sparse_amf3_path &&
     !solver->large_bounded_no_btf_amf_path &&
-    !kls_g3_circuit_h100_policy_enabled(
-      solver->n, solver->col_ptr, &solver->options) &&
+    kls_sparse_full_diagonal_metis_row_symbolic_class(solver) != 2 &&
     !kls_circuit5m_h100_policy_enabled(
       solver->n, solver->col_ptr, &solver->options) &&
     !kls_freescale_pivot_boundary_h100_policy_enabled(
@@ -156739,9 +156724,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_sparse_full_diagonal_metis_direct_row =
       kls_sparse_full_diagonal_metis_row_factor_cycle(solver) &&
       !kls_row_refactor_env_disabled();
-    const int kls_g3_circuit_direct_row =
-      kls_is_g3_circuit_h100_cycle(solver) &&
-      !kls_row_refactor_env_disabled();
     const int kls_freescale_chain_direct_row =
       kls_is_freescale_chain_h100_cycle(solver) &&
       !kls_row_refactor_env_disabled();
@@ -156750,7 +156732,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       !kls_row_refactor_env_disabled();
     if (kls_rajat31_direct_row ||
         kls_sparse_full_diagonal_metis_direct_row ||
-        kls_g3_circuit_direct_row ||
         kls_freescale_chain_direct_row ||
         kls_dense_fragmented_scaled_direct_row) {
       /* This measured factor class has a completed row/column audit: row
@@ -156766,7 +156747,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_direct_forced_row_prep =
       kls_rajat31_direct_row ||
       kls_sparse_full_diagonal_metis_direct_row ||
-      kls_g3_circuit_direct_row ||
       kls_freescale_chain_direct_row ||
       kls_dense_fragmented_scaled_direct_row ||
       ((getenv("KLS_DIRECT_FORCED_ROW_PREP") != NULL ||
@@ -156793,7 +156773,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       kls_direct_forced_row_prep &&
       (kls_rajat31_direct_row ||
        kls_sparse_full_diagonal_metis_direct_row ||
-       kls_g3_circuit_direct_row ||
        kls_freescale_chain_direct_row ||
        kls_dense_fragmented_scaled_direct_row ||
        getenv("KLS_DIRECT_FORCED_ROW_SKIP_COLUMN_PREPS") != NULL ||
@@ -156939,7 +156918,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       const double row_start = kls_now_seconds();
       if (kls_rajat31_direct_row ||
           kls_sparse_full_diagonal_metis_direct_row ||
-          kls_g3_circuit_direct_row ||
           kls_freescale_chain_direct_row ||
           kls_dense_fragmented_scaled_direct_row ||
           getenv("KLS_DIRECT_FORCED_ROW_PATTERN_ONLY") != NULL ||

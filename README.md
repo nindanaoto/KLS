@@ -3910,48 +3910,61 @@ extension, and independent runs are clean.
 
 ## Sparse full-diagonal METIS row lifecycle
 
-The former `mc2depi` route no longer recognizes a 525,000--526,500-row,
-2.09--2.11-million-entry benchmark box. Under the standard eight-thread AUTO
-contract, it now begins with a reusable topology proposal: 100,000--1,048,576
-rows, three--4.25 stored entries per row, a full structural diagonal, no empty
-row, and maximum row and column degree eight. The existing AUTO topology scan
-supplies this verdict, so the proposal adds no second full sparse-matrix pass.
+The former `mc2depi` row route and `G3_circuit` route no longer recognize,
+respectively, a narrow benchmark box and one exact `(n, nnz)` pair. Under the
+standard eight-thread AUTO contract, both now begin with one reusable topology
+proposal: 100,000--4,194,304 rows, three--five stored entries per row, a full
+structural diagonal, no empty row, and maximum row and column degree eight.
+The existing AUTO topology scan supplies the verdict, so the larger class adds
+no second full sparse-matrix pass.
 
-Later stages measure the retained factor rather than trusting the input. The
-no-BTF METIS symbolic must be full rank, balanced, inside both normalized and
-absolute fill bounds, and backed by a complete, almost entirely private
-separator. Its fixed-pivot numeric must then remain unscaled and balanced,
-avoid pivot repair, and satisfy normalized fill and work bounds before KLS
-enables the recurring cooperative-row lifecycle. A failure at either stage
-uses ordinary AUTO behavior.
+Ordering resources and later capabilities are staged. Fine sparse candidates
+retain an `n/608` constrained-AMD window. Candidates above 1,048,576 rows and
+4.25 entries per row use about 37 windows per worker, rounded and bounded by
+generic resource limits. The retained no-BTF METIS symbolic must then prove
+full rank, balanced normalized and absolute fill, and a complete, almost
+entirely private separator. The fine symbolic selects the measured `1e-6`
+pivot tolerance; the high-resource symbolic retains the requested `1e-3`.
+
+The actual fixed-pivot numeric must independently remain unscaled and
+balanced, avoid pivot repair, and satisfy its class's normalized fill and work
+bounds before KLS enables predicted-row preparation and recurring cooperative-
+row updates. The final proof applies to a predicted bootstrap or a later KLU
+replacement. A rejection at any stage resumes ordinary AUTO behavior.
 
 `KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY=1` provides a generic
-same-binary control; `KLS_DISABLE_MC2DEPI_H100_POLICY` remains a compatibility
-alias. The candidate, symbolic, and factor decisions are exposed through
-`kls_stats` and benchmark JSON as
+same-binary control; `KLS_DISABLE_MC2DEPI_H100_POLICY` and
+`KLS_DISABLE_G3_CIRCUIT_H100_POLICY` remain compatibility aliases. The
+candidate, symbolic, and factor decisions are exposed through `kls_stats` and
+benchmark JSON as
 `sparse_full_diagonal_metis_row_candidate`,
 `sparse_full_diagonal_metis_row_symbolic_eligible`, and
 `sparse_full_diagonal_metis_row_factor_eligible`.
 
-The independent smoke fixture is a 100,000-row symmetric cubic circulant with
-a full diagonal. CSC and CSR both propose it, while the smaller symbolic
-economics deliberately reject the expensive row lifecycle; removing one
-diagonal entry or setting either disable switch rejects the proposal itself.
-Two `mc2depi` extensions at 526,849 and 529,921 rows, both beyond the old
-window, retain all three measured stages. A simultaneous relabeling retains
-the input and symbolic stages but is rejected by the numeric stage after a
-real pivot nudge. Screening 110 local SuiteSparse inputs finds one unrelated
-coarse proposal, `ss1`, whose measured fill rejects the symbolic stage.
+The smoke test now has independent 100,000-row cubic and quintic circulants.
+Both propose the topology while deliberately failing the absolute symbolic
+economics; CSC and CSR cover the cubic family, and the quintic family exercises
+the newly admitted five-entry density. Removing one diagonal or setting the
+generic or either legacy disable rejects the proposal. Screening all 110 local
+SuiteSparse inputs finds only four complete topology proposals: `mc2depi` and
+`G3_circuit` reach all measured stages, while `G2_circuit` is below the
+absolute setup floor and `ss1` exceeds normalized fill.
 
-Nine hundred independently checked positive entrywise generations through
-10% amplitude had worst relative-L2 residual `2.04e-12`. This replay exposed
-and fixed a stale-value accuracy hole in the inherited tight-tolerance solve
-contract; the pre-fix worst case was `1.55e-3`. Six alternating target pairs
-put the complete modeled-cycle ratio at `1.0114` versus the former exact
-policy. The out-of-window extension is 20--24% slower than the parent route,
-but the parent's final relative residual was `3.29e-4`, versus `3.13e-15` for
-the measured row route. Release and ASan/UBSan/LSan CTest pass all four tests,
-and leak-enabled target, extension, and measured-rejection runs are clean.
+The earlier `mc2depi` extensions remain positive, including a measured
+`1/1/0` relabeling with a real pivot nudge. A new 4,096-row `G3_circuit`
+extension outside the exact identity and an adjacent relabeling both report
+`1/1/1`. Across the three high-resource matrices, 180 independently checked
+entrywise generations through 10% amplitude had worst relative-L2 residual
+`5.94e-13`; combined with the fine class, 1,080 positive generations remain
+below `2.04e-12`.
+
+Four alternating `G3_circuit` target pairs preserve predicted-first/row
+execution and put the complete modeled-cycle ratio at `0.9816` versus the
+former exact selector. Three extension pairs change the parent's EGraph
+fallback to measured row updates and reduce the cycle to `0.5293`; final
+residual improves from as high as `4.86e-13` to `4.21e-16`. Release and
+ASan/UBSan/LSan CTest pass all four tests, and leak-enabled target, extension,
+and relabeling runs are clean.
 
 ## License
 

@@ -1413,8 +1413,8 @@ typedef struct kls_stats {
   /* The retained scaled BTF factor has normalized dense-input,
      fragmentation, fill, work, and pivot bounds for direct row updates. */
   int dense_fragmented_scaled_row_factor_eligible;
-  /* The original AUTO input is a bounded-degree, full-diagonal graph in the
-     resource band where fine METIS refinement can amortize row metadata. */
+  /* The original AUTO input is a bounded-degree, full-diagonal graph in a
+     resource band where tuned METIS refinement can amortize row metadata. */
   int sparse_full_diagonal_metis_row_candidate;
   /* Its retained one-block METIS symbolic has balanced intermediate fill and
      a mostly private separator inside the measured setup-cost bounds. */

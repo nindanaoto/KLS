@@ -19247,68 +19247,77 @@ name effectively authorized the complete factor/update lifecycle.
 The replacement has three independently visible stages.  The input proposal
 applies only under the standard normal-candidate, eight-thread AUTO
 orientation/ordering/scaling/backend contract with BTF, static pivoting, and
-requested tolerance `1e-3`.  It admits 100,000--1,048,576 rows and between
-three and 4.25 stored entries per row.  Every row and column must be nonempty,
+requested tolerance `1e-3`.  It admits 100,000--4,194,304 rows and between
+three and five stored entries per row.  Every row and column must be nonempty,
 the structural diagonal must be complete, and maximum row and column degree
 must be at most eight.  KLS obtains this verdict from the existing
 low-degree/full-diagonal AUTO scan and caches it on the adopted candidate, so
 the generalized policy does not add another O(nnz) topology pass.
 
-Only candidates of at least 262,144 rows receive the fine METIS constrained-
-AMD refinement.  Its group size is proportional to order (`n/608`) and
+Candidates of at least 262,144 rows receive a measured METIS constrained-AMD
+resource schedule.  The fine class is proportional to order (`n/608`) and
 clamped to 320--4,096 columns rather than matching one dimension.  The former
-target therefore retains the measured 864-column optimum, while neighboring
-orders vary continuously.  Direct comparisons with 876 and 1,027 columns
-made the complete target cycle 3.2% and 5.4% slower, respectively, so the
-measured density was retained rather than replacing it with a round but
-slower constant.
+`mc2depi` target therefore retains the measured 864-column optimum, while
+neighboring orders vary continuously.  Direct comparisons with 876 and 1,027
+columns made the complete target cycle 3.2% and 5.4% slower, respectively.
+Above 1,048,576 rows and 4.25 entries per row, the high-resource class keeps
+about 37 windows per worker (`n/296` under the eight-thread contract), rounds
+to 128 columns, and clamps to 4,096--8,192.  This reproduces the established
+5,376-column forest at the former `G3_circuit` target without naming its order.
 
 The symbolic stage independently requires the retained normal METIS ordering,
 no BTF, one full-size block, and structural rank either not yet reported or
-full.  Estimated L and U must both be nonzero, agree within 2x, total 80--112
-entries per row, and total 32--96 million entries.  The captured separator
+full.  Estimated L and U must both be nonzero and agree within 2x.  The fine
+class totals 80--112 entries per row and 32--96 million entries; the high-
+resource class totals 96--160 entries per row and 128--512 million entries.
+The captured separator
 must cover the whole order with at least two workers and all components
 accounted for.  At least 98% of rows must be private, at most 2% may be in the
 pipeline, private components must supply at least the worker count, and the
-largest pipeline component is bounded by `n/64`.  Only this measured stage
-selects the `1e-6` initial tolerance.
+largest pipeline component is bounded by `n/64`.  Only the fine measured class
+selects the `1e-6` initial tolerance; the high-resource class retains the
+requested `1e-3` threshold.
 
 The factor stage requires that symbolic verdict plus a retained plain-frame
-numeric at scale `-1` and tolerance `1e-6`, with no row permutation or numeric
-scale vector.  It allows only the no-off-diagonal-pivot sentinel or at most
+numeric at scale `-1` and its class's selected tolerance, with no row
+permutation or numeric scale vector.  It allows only the no-off-diagonal-pivot
+sentinel or at most
 `n/8192 + 16` detours, no pivot nudge or perturbation, L/U within 2x, total
-fill of 80--112 entries per row, and measured work of 16,384--32,768
-operations per row.  The rule applies equally to the predicted bootstrap and
-a later KLU replacement, is cached for that numeric, and is invalidated on
-every replacement.  Only this final stage suppresses the later scale trial
-and authorizes predicted-row preparation, the parallel row-index build, and
-direct cooperative-row refactors.
+fill of 80--112 entries per row and measured work of 16,384--32,768 operations
+per row for the fine class.  The high-resource class requires 96--160 fill and
+32,768--131,072 operations per row.  The rule applies equally to the predicted
+bootstrap and a later KLU replacement, is cached for that numeric, and is
+invalidated on every replacement.  Only this final stage suppresses the later
+scale trial where applicable and authorizes predicted-row preparation, the
+parallel row-index build, and direct cooperative-row refactors.
 
 The generic same-binary control is
 `KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY=1`; the old
-`KLS_DISABLE_MC2DEPI_H100_POLICY` spelling remains a compatibility alias.
+`KLS_DISABLE_MC2DEPI_H100_POLICY` and
+`KLS_DISABLE_G3_CIRCUIT_H100_POLICY` spellings remain compatibility aliases.
 Public `sparse_full_diagonal_metis_row_candidate`,
 `sparse_full_diagonal_metis_row_symbolic_eligible`, and
 `sparse_full_diagonal_metis_row_factor_eligible` fields expose the stages in
 `kls_stats`, full benchmark JSON, and analyze-only JSON.
 
-The independent smoke fixture has 100,000 rows and 400,000 entries.  A
-symmetric cubic circulant plus its full diagonal proposes the normal METIS
-route through both CSC and CSR, but intentionally reports `1/0/0`: its
-symbolic factor lies below the absolute setup-cost floor, avoiding a giant
-smoke-test numeric while exercising the generalized input proof.  Replacing
-one diagonal entry preserves order and entry count but reports `0/0/0`.
-The unchanged positive under the generic disable and under the legacy alias
-also rejects at the proposal stage.
+The independent smoke fixtures have 100,000 rows and 400,000 or 500,000
+entries.  Symmetric cubic and quintic circulants plus their full diagonals
+propose the normal METIS route, but intentionally report `1/0/0`: their
+symbolic factors lie below the absolute setup-cost floors, avoiding giant
+smoke-test numerics while exercising both input-density classes.  CSC and CSR
+cover the cubic family.  The quintic family lies beyond the former 4.25-entry
+proposal.  Replacing one diagonal entry preserves order and entry count but
+reports `0/0/0`.  The unchanged positives under the generic disable and both
+legacy aliases also reject at the proposal stage.
 
 The local SuiteSparse screen inspected all 110 available supported matrices.
-Five pass the coarse order/density envelope: `mc2depi`, `ss1`, `ASIC_680ks`,
-`HTC_336_9129`, and `HTC_336_4438`.  Only `mc2depi` and the unrelated `ss1`
-pass the complete input topology.  The latter reports `1/0/0` because its
-53,638,844-entry symbolic estimate is about 261 entries per row, far outside
-the normalized factor regime.  `G2_circuit` and `G3_circuit` also retain their
-ordinary METIS policies and report `0/0/0`, demonstrating rejection on either
-side of the generalized resource band.
+Exactly four pass the complete generalized topology: `mc2depi`, `G2_circuit`,
+`G3_circuit`, and the unrelated `ss1`.  `mc2depi` and `G3_circuit` reach all
+three stages.  `G2_circuit` reports `1/0/0` because its 12,912,578-entry
+symbolic estimate is below the absolute setup floor.  `ss1` also reports
+`1/0/0`: its 53,638,844-entry estimate is about 261 entries per row, outside
+the normalized factor regime.  Corpus membership is thus neither necessary
+nor sufficient for the recurring row lifecycle.
 
 Appending 1,024 diagonal scalar components produces a 526,849-row,
 2,101,249-entry matrix outside the former order window; it reports `1/1/1`,
@@ -19360,3 +19369,110 @@ Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
 factor/refactor/solve runs cover the original target, the positive extension,
 and the relabeled `1/1/0` measured rejection with no findings.  Generic and
 legacy same-binary disables both suppress all three stages.
+
+GIANT FULL-DIAGONAL METIS ROW TIER GENERALIZED (2026-07-24).  After the fine
+full-diagonal lifecycle was generalized, `G3_circuit` still had a separate
+exact selector requiring exactly 1,585,478 rows and 7,660,826 entries.  That
+pair selected a 5,376-column constrained-AMD window, excluded diagonal-
+equivalent preparation, admitted predicted-row metadata, bypassed the row
+cost comparison, and forced direct row preparation and recurring updates.
+Its post-factor check required only normal METIS, scale `-1`, no BTF, and one
+full-size block; it did not independently bound fill, work, pivot repair, or
+separator economics.
+
+The exact selector and its thread-local context are gone.  The existing
+generic full-diagonal proposal now spans 100,000--4,194,304 rows and three--
+five stored entries per row, while retaining the complete diagonal, nonempty-
+row, and maximum-degree-eight proof.  The expansion reuses the same existing
+AUTO topology census.  There is still one candidate bit and one set of public
+symbolic/factor stages; the giant matrix is a measured resource tier of the
+same structural lifecycle, not a newly named exception.
+
+Ordering resources are normalized before the symbolic exists.  A candidate
+above 1,048,576 rows and 4.25 entries per row uses approximately 37
+constrained-AMD windows per worker: group size `n/296`, rounded to 128 columns
+and clamped to 4,096--8,192.  `G3_circuit` therefore produces 5,376 without
+testing its dimension.  An experimental `n/288` rule rounded to 5,504 changed
+the retained forest enough to move steady row refactor from about 0.89 to
+1.60 seconds; the worker-normalized 37-window rule restores the exact prior
+symbolic counts and measured performance.
+
+The high-resource symbolic must pass every common one-block METIS/separator
+proof used by the fine class: structural rank unknown or full, L/U balanced
+within 2x, complete global separator coverage, at least two workers, all rows
+and components accounted for, at least 98% private rows, at most 2% pipeline
+rows, and pipeline maximum at most `n/64`.  Its own economics require 96--160
+estimated entries per row, 128--512 million total entries, and order at least
+1,048,576.  Unlike the fine class, it retains the requested `1e-3` tolerance.
+
+The numeric must remain a plain scale-`-1` factor at that tolerance, with no
+row permutation or numeric scale vector, at most `n/8192 + 16` off-diagonal
+pivots (or the predicted sentinel), no nudge or perturbation, L/U within 2x,
+96--160 fill entries per row, and 32,768--131,072 measured operations per row.
+The measured high-resource symbolic, rather than an input identity, excludes
+the competing diagonal-equivalent setup before factorization.  Only the
+cached factor verdict grants predicted-row preparation, cost bypass, parallel
+row metadata, and direct row updates.  A later replacement is reclassified
+rather than inheriting the original decision.
+
+The same-binary master control remains
+`KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY=1` and the former
+`KLS_DISABLE_G3_CIRCUIT_H100_POLICY` name is now only a compatibility alias.
+An explicit METIS request, the master disable, and the legacy disable each
+report stages `0/0/0`; they retain the ordinary 8,192-window symbolic rather
+than silently inheriting AUTO tuning.
+
+The independent smoke test adds a 100,000-row, 500,000-entry symmetric
+quintic circulant with a full diagonal.  It lies beyond the previous
+4.25-entry proposal and reports `1/0/0`, proving the widened input class while
+the absolute symbolic floor prevents giant-row setup.  The existing cubic
+CSC/CSR positive, missing-diagonal control, master disable, and `mc2depi`
+legacy control remain, and a new `G3_circuit` legacy control rejects the
+unchanged quintic proposal.
+
+Screening all 110 local SuiteSparse matrices finds four complete topology
+proposals.  `G2_circuit` is the natural smaller member of the newly admitted
+density family: it reports `1/0/0` because its 12,912,578 estimated entries
+are below the setup floor.  The unrelated `ss1` also reports `1/0/0` because
+53,638,844 entries are about 261 per row.  `mc2depi` and `G3_circuit` alone
+reach `1/1/1`.  The decision therefore follows measured economics across the
+family rather than granting all similar SuiteSparse names the optimization.
+
+Appending 4,096 independent diagonal blocks produces a 1,589,574-row,
+7,664,922-entry matrix outside the former exact pair.  It reports `1/1/1`,
+uses predicted-first/cooperative-row execution, and returns a `4.21e-16`
+final relative residual in the performance protocol.  A 65,536-adjacent-swap
+relabeling also reports `1/1/1`; a complete random relabeling independently
+retains all three stages.  These transformations change dimension or ordering
+without changing the qualifying topology contract.
+
+`G3_circuit`, the 4,096-row extension, and the adjacent relabeling each
+completed 20 independently checked entrywise generations at amplitudes
+`0.001`, `0.01`, and `0.1`, for 180 generations.  Their respective maxima
+were `5.98e-16`/`6.77e-15`/`9.39e-14`,
+`5.02e-16`/`6.28e-15`/`5.94e-13`, and
+`6.66e-16`/`9.40e-15`/`1.02e-13`.  All generations retained `1/1/1` and row
+updates; the overall worst relative-L2 residual was `5.93996e-13`.
+
+Four alternating exact-parent/current target pairs, pinned to eight cores
+with two solve repetitions and ten changed-value refactors, preserve
+predicted-first/row execution and identical `4.43e-16` final residuals.
+Geometric current/parent ratios were `1.01626` for analysis, `0.84095` for
+first refactor, `0.97516` for steady refactor, `0.99760` for changed-numeric
+solve, `0.97368` for repeated solve, and `0.98159` for the complete modeled
+cycle (`0.98185` by aggregate means).  Initial-factor samples were noisy but
+do not overturn the full-horizon result.
+
+Three alternating extension pairs compare the exact parent's out-of-box
+predicted/EGraph fallback with the generalized predicted/row route.  Ratios
+were `0.99481` for analysis, `0.58567` for initial factor, `2.35595` for the
+one-time first row setup, `0.41547` for steady refactor, `1.46620` for
+changed-numeric solve, `0.58120` for repeated solve, and `0.52931` for the
+complete cycle (`0.52901` by means).  The parent final residual ranged up to
+`4.86e-13`; current returned `4.21e-16` in every pair.
+
+Release and ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized
+factor/refactor/solve runs cover the target, out-of-box extension, and adjacent
+relabeling with stages `1/1/1` and no findings.  The source contains neither
+the former exact dimensions nor a `G3_circuit` policy function; only the
+documented legacy environment spelling remains.

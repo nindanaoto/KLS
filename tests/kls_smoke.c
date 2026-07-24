@@ -24362,25 +24362,36 @@ cleanup:
 enum {
   SPARSE_FULL_DIAGONAL_FIXTURE_N = 100000,
   SPARSE_FULL_DIAGONAL_FIXTURE_NNZ =
-    4 * SPARSE_FULL_DIAGONAL_FIXTURE_N
+    4 * SPARSE_FULL_DIAGONAL_FIXTURE_N,
+  SPARSE_FULL_DIAGONAL_WIDE_FIXTURE_NNZ =
+    5 * SPARSE_FULL_DIAGONAL_FIXTURE_N
 };
 
-/* A symmetric cubic circulant plus its full diagonal is independent of the
-   SuiteSparse target while satisfying the public bounded-degree proposal.
-   At this smaller resource scale it must stop at the symbolic economics
-   gate, which also keeps the smoke test from constructing a giant factor. */
+/* Symmetric cubic/quintic circulants plus their full diagonals are independent
+   of the SuiteSparse targets and exercise both input-density resource tiers.
+   At this smaller scale they must stop at the symbolic economics gate, which
+   also keeps the smoke test from constructing a giant factor. */
 static int build_sparse_full_diagonal_metis_row_fixture(
   int32_t *ap,
   int32_t *ai,
-  int missing_diagonal_control) {
+  int missing_diagonal_control,
+  int wide_density) {
   int32_t p = 0;
   for (int32_t col = 0; col < SPARSE_FULL_DIAGONAL_FIXTURE_N; ++col) {
     ap[col] = p;
     ai[p++] = col;
-    ai[p++] = col == 0 ? SPARSE_FULL_DIAGONAL_FIXTURE_N - 1 : col - 1;
-    ai[p++] = col + 1 == SPARSE_FULL_DIAGONAL_FIXTURE_N ? 0 : col + 1;
-    ai[p++] = (col + SPARSE_FULL_DIAGONAL_FIXTURE_N / 2) %
-      SPARSE_FULL_DIAGONAL_FIXTURE_N;
+    if (wide_density) {
+      ai[p++] = (col + SPARSE_FULL_DIAGONAL_FIXTURE_N - 2) %
+        SPARSE_FULL_DIAGONAL_FIXTURE_N;
+      ai[p++] = col == 0 ? SPARSE_FULL_DIAGONAL_FIXTURE_N - 1 : col - 1;
+      ai[p++] = col + 1 == SPARSE_FULL_DIAGONAL_FIXTURE_N ? 0 : col + 1;
+      ai[p++] = (col + 2) % SPARSE_FULL_DIAGONAL_FIXTURE_N;
+    } else {
+      ai[p++] = col == 0 ? SPARSE_FULL_DIAGONAL_FIXTURE_N - 1 : col - 1;
+      ai[p++] = col + 1 == SPARSE_FULL_DIAGONAL_FIXTURE_N ? 0 : col + 1;
+      ai[p++] = (col + SPARSE_FULL_DIAGONAL_FIXTURE_N / 2) %
+        SPARSE_FULL_DIAGONAL_FIXTURE_N;
+    }
     if (missing_diagonal_control && col == 0) {
       ai[ap[col]] = 2;
     }
@@ -24388,7 +24399,8 @@ static int build_sparse_full_diagonal_metis_row_fixture(
           compare_fixture_int32);
   }
   ap[SPARSE_FULL_DIAGONAL_FIXTURE_N] = p;
-  return p == SPARSE_FULL_DIAGONAL_FIXTURE_NNZ;
+  return p == (wide_density ? SPARSE_FULL_DIAGONAL_WIDE_FIXTURE_NNZ
+                            : SPARSE_FULL_DIAGONAL_FIXTURE_NNZ);
 }
 
 static int test_sparse_full_diagonal_metis_row_policy(void) {
@@ -24400,34 +24412,50 @@ static int test_sparse_full_diagonal_metis_row_policy(void) {
     (int32_t *)malloc(((size_t)n + 1u) * sizeof(*control_ap));
   int32_t *control_ai =
     (int32_t *)malloc((size_t)nnz * sizeof(*control_ai));
+  int32_t *wide_ap =
+    (int32_t *)malloc(((size_t)n + 1u) * sizeof(*wide_ap));
+  int32_t *wide_ai = (int32_t *)malloc(
+    (size_t)SPARSE_FULL_DIAGONAL_WIDE_FIXTURE_NNZ * sizeof(*wide_ai));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY");
   const char *saved_legacy_value =
     getenv("KLS_DISABLE_MC2DEPI_H100_POLICY");
+  const char *saved_g3_legacy_value =
+    getenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
   char *saved_legacy = saved_legacy_value != NULL
     ? strdup(saved_legacy_value) : NULL;
+  char *saved_g3_legacy = saved_g3_legacy_value != NULL
+    ? strdup(saved_g3_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
   const int had_legacy = saved_legacy_value != NULL;
+  const int had_g3_legacy = saved_g3_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *csr_solver = NULL;
+  kls_solver *wide_solver = NULL;
   kls_solver *control_solver = NULL;
   kls_solver *disabled_solver = NULL;
   kls_solver *legacy_disabled_solver = NULL;
+  kls_solver *g3_legacy_disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && control_ap != NULL &&
-    control_ai != NULL && (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    control_ai != NULL && wide_ap != NULL && wide_ai != NULL &&
+    (!had_policy || saved_policy != NULL) &&
+    (!had_legacy || saved_legacy != NULL) &&
+    (!had_g3_legacy || saved_g3_legacy != NULL);
 
   if (!ok ||
-      !build_sparse_full_diagonal_metis_row_fixture(ap, ai, 0) ||
+      !build_sparse_full_diagonal_metis_row_fixture(ap, ai, 0, 0) ||
       !build_sparse_full_diagonal_metis_row_fixture(
-        control_ap, control_ai, 1)) {
+        control_ap, control_ai, 1, 0) ||
+      !build_sparse_full_diagonal_metis_row_fixture(
+        wide_ap, wide_ai, 0, 1)) {
     ok = 0;
     goto cleanup;
   }
   if (unsetenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_MC2DEPI_H100_POLICY") != 0) {
+      unsetenv("KLS_DISABLE_MC2DEPI_H100_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY") != 0) {
     perror("configure sparse full-diagonal METIS row policy");
     ok = 0;
     goto cleanup;
@@ -24486,6 +24514,37 @@ static int test_sparse_full_diagonal_metis_row_policy(void) {
       stats.sparse_full_diagonal_metis_row_symbolic_eligible != 0 ||
       stats.sparse_full_diagonal_metis_row_factor_eligible != 0) {
     fprintf(stderr, "CSR sparse full-diagonal proposal was not retained\n");
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Five entries per row is outside the former sparse proposal.  It must
+     now reach the same topology stage, while its small absolute factor
+     economics still reject the giant-row lifecycle. */
+  if (!require_ok(kls_create(&wide_solver),
+                  "create wider sparse full-diagonal METIS proposal") ||
+      !require_ok(kls_analyze_csc(
+        wide_solver, KLS_INDEX_INT32, n, wide_ap, wide_ai, 0, &options),
+        "analyze wider sparse full-diagonal METIS proposal")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(wide_solver, &stats),
+                  "stats wider sparse full-diagonal METIS proposal") ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_METIS || stats.selected_btf ||
+      stats.sparse_full_diagonal_metis_row_candidate != 1 ||
+      stats.sparse_full_diagonal_metis_row_symbolic_eligible != 0 ||
+      stats.sparse_full_diagonal_metis_row_factor_eligible != 0) {
+    fprintf(stderr,
+            "unexpected wider sparse full-diagonal proposal: stages=%d/%d/%d"
+            " fill=%" PRId64 "/%" PRId64 "\n",
+            stats.sparse_full_diagonal_metis_row_candidate,
+            stats.sparse_full_diagonal_metis_row_symbolic_eligible,
+            stats.sparse_full_diagonal_metis_row_factor_eligible,
+            stats.nnz_l, stats.nnz_u);
     ok = 0;
     goto cleanup;
   }
@@ -24552,25 +24611,52 @@ static int test_sparse_full_diagonal_metis_row_policy(void) {
     ok = 0;
   }
 
+  if (unsetenv("KLS_DISABLE_MC2DEPI_H100_POLICY") != 0 ||
+      setenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY", "1", 1) != 0 ||
+      !require_ok(kls_create(&g3_legacy_disabled_solver),
+                  "create G3-legacy-disabled full-diagonal control") ||
+      !require_ok(kls_analyze_csc(
+        g3_legacy_disabled_solver, KLS_INDEX_INT32, n, wide_ap, wide_ai, 0,
+        &options), "analyze G3-legacy-disabled full-diagonal control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(g3_legacy_disabled_solver, &stats),
+                  "stats G3-legacy-disabled full-diagonal control") ||
+      stats.sparse_full_diagonal_metis_row_candidate != 0) {
+    fprintf(stderr,
+            "G3-legacy-disabled sparse full-diagonal control became eligible\n");
+    ok = 0;
+  }
+
 cleanup:
+  kls_destroy(g3_legacy_disabled_solver);
   kls_destroy(legacy_disabled_solver);
   kls_destroy(disabled_solver);
   kls_destroy(control_solver);
+  kls_destroy(wide_solver);
   kls_destroy(csr_solver);
   kls_destroy(solver);
   if (!restore_env_value(
         "KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY", had_policy,
         saved_policy != NULL ? saved_policy : "") ||
       !restore_env_value("KLS_DISABLE_MC2DEPI_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+                         saved_legacy != NULL ? saved_legacy : "") ||
+      !restore_env_value("KLS_DISABLE_G3_CIRCUIT_H100_POLICY", had_g3_legacy,
+                         saved_g3_legacy != NULL ? saved_g3_legacy : "")) {
     ok = 0;
   }
   free(ap);
   free(ai);
   free(control_ap);
   free(control_ai);
+  free(wide_ap);
+  free(wide_ai);
   free(saved_policy);
   free(saved_legacy);
+  free(saved_g3_legacy);
   return ok;
 }
 
