@@ -125,6 +125,25 @@ JSON reports `low_work_tiny_block_btf_symbolic_eligible` and
 `KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY=1` to restore all generic trials.
 The former Sandia operating-point input box is removed.
 
+For an AUTO/8-thread normal-AMD, max-row-scaled factor with one moderate BTF
+core and a fragmented fringe, KLS selects its compact paired-row lifecycle
+only when the complete representation and measured work fit.  The contract
+covers 8,192--65,535 rows, 3--8 input entries per row, `n/8`--`n/3` BTF
+blocks, a largest block spanning one half to three quarters of the matrix,
+8--20 estimated factor entries and 32--256 estimated flops per row, and
+16-bit L/U index streams.  The retained factor must have 5--10 entries and
+16--64 flops per row, no transforms, nudges, perturbations, or predicted
+numeric, and at most one off-diagonal pivot per 32 rows.  Passing factors can
+avoid redundant tolerance, value-publication, reciprocal, and residual work;
+nearby scaled factors that exceed the representation or pivot bounds retain
+the generic lifecycle.  Benchmark JSON and `kls_stats` report
+`scaled_fragmented_compact_row_policy_eligible`; set
+`KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY=1` to restore the generic
+trials, or
+`KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_DEFER_VALUE_SCATTER=1` to retain
+the policy while disabling only deferred publication.  The former rajat27-
+specific input box is removed.
+
 For very large pre-static candidates, KLS uses SPRAL's auction
 matching/scaling path instead of exact Hungarian matching, except on
 mostly-missing-diagonal patterns where the auction predictably falls short of

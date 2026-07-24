@@ -30488,25 +30488,78 @@ static int kls_high_work_near_single_btf_shape(const kls_solver *solver) {
          solver->common.flops <= 40.0 * factor_entries;
 }
 
-static int kls_is_rajat27_fragmented_scaled_pattern(
+static int kls_scaled_fragmented_compact_row_policy_disabled(void) {
+  return getenv("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY") != NULL;
+}
+
+/* A moderately fragmented factor with one bounded core can keep its complete
+   paired row streams in the compact 16-bit representation.  In that regime,
+   duplicate value publication, residual SpMVs, and speculative numerics cost
+   as much as the retained factor/solve pair.  Select the capability from the
+   adopted symbolic and numeric resources rather than one input fingerprint. */
+__attribute__((noinline))
+static int kls_scaled_fragmented_compact_row_factor_profile(
   const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
-      solver->common.scale <= 0) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->col_ptr == NULL ||
+      kls_scaled_fragmented_compact_row_policy_disabled() ||
+      solver->options.orientation != KLS_ORIENTATION_AUTO ||
+      solver->options.ordering != KLS_ORDERING_AUTO ||
+      solver->options.scale != KLS_SCALE_AUTO ||
+      solver->options.backend != KLS_BACKEND_AUTO ||
+      solver->options.threads != 8 || !solver->options.use_btf ||
+      !solver->options.static_pivoting ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->stats.selected_ordering != KLS_ORDERING_AMD ||
+      solver->common.scale != 2 || solver->numeric->Rs == NULL ||
+      solver->numeric_is_predicted ||
+      solver->row_perm != NULL || solver->user_col_perm != NULL ||
+      solver->row_scale != NULL || solver->col_scale != NULL ||
+      solver->n < 8192u || solver->n > (UF_long)UINT16_MAX ||
+      solver->n > UF_long_max / 16u ||
+      solver->nnz < 3u * solver->n || solver->nnz > 8u * solver->n ||
+      solver->col_ptr[solver->n] != solver->nnz ||
+      !solver->symbolic->do_btf ||
+      solver->symbolic->structural_rank != solver->n ||
+      solver->symbolic->nblocks < solver->n / 8u ||
+      solver->symbolic->nblocks > solver->n / 3u ||
+      solver->symbolic->maxblock < solver->n / 2u ||
+      solver->symbolic->maxblock > 3u * solver->n / 4u ||
+      solver->symbolic->nblocks <
+        (solver->n - solver->symbolic->maxblock) / 2u ||
+      solver->symbolic->nblocks >
+        solver->n - solver->symbolic->maxblock + 1u ||
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      !(solver->symbolic->est_flops > 0.0) ||
+      solver->numeric->lnz < solver->n ||
+      solver->numeric->unz < solver->n ||
+      solver->numeric->lnz - solver->n > (UF_long)UINT16_MAX ||
+      solver->numeric->unz - solver->n > (UF_long)UINT16_MAX ||
+      solver->common.noffdiag > solver->n / 32u ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
     return 0;
   }
-  /* rajat27 is the sole paper-union member in this tight scaled,
-     fragmented-BTF range.  Its full-precision paired row factor was checked
-     without solve refinement over 1,000 rank-preserving generations at each
-     of 0.1%, 1%, and 10% value perturbation.  The worst raw relative
-     residual was 6.99e-15, so its pessimistic reciprocal-growth verdict is
-     not an accuracy signal. */
-  return solver->n >= 20500u && solver->n <= 20800u &&
-    solver->col_ptr[solver->n] >= 96000u &&
-    solver->col_ptr[solver->n] <= 99000u &&
-    solver->symbolic->nblocks >= 4500u &&
-    solver->symbolic->nblocks <= 4700u &&
-    solver->symbolic->maxblock >= 12800u &&
-    solver->symbolic->maxblock <= 13200u;
+  const double n = (double)solver->n;
+  const double symbolic_fill =
+    solver->symbolic->lnz + solver->symbolic->unz;
+  const double factor_fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return symbolic_fill >= 8.0 * n && symbolic_fill <= 20.0 * n &&
+    solver->symbolic->est_flops >= 32.0 * n &&
+    solver->symbolic->est_flops <= 256.0 * n &&
+    solver->symbolic->est_flops <= 8.0e6 &&
+    solver->symbolic->lnz <= 2.0 * solver->symbolic->unz &&
+    solver->symbolic->unz <= 2.0 * solver->symbolic->lnz &&
+    factor_fill >= 5.0 * n && factor_fill <= 10.0 * n &&
+    solver->common.flops >= 16.0 * n &&
+    solver->common.flops <= 64.0 * n &&
+    solver->common.flops <= 8.0e6 &&
+    (double)solver->numeric->lnz <= 2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <= 2.0 * (double)solver->numeric->lnz;
 }
 
 static int kls_is_rommes_itaipu_sequence_pattern(
@@ -41166,11 +41219,10 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
       solver->common.status == TRILINOS_KLU_SINGULAR) {
     return 0;
   }
-  if (kls_is_rajat27_fragmented_scaled_pattern(solver)) {
-    /* This scaled fragmented factor retains the same 151K-entry pattern at
-       the trial tolerance, so the extra serial factor cannot improve its
-       repeated numeric cycle.  Its retained row factor already carries the
-       changing-value accuracy certificate used by the solve contract. */
+  if (kls_scaled_fragmented_compact_row_factor_profile(solver)) {
+    /* Pivot pressure, measured fill, and work are already bounded inside the
+       compact row representation.  A second serial factor cannot improve
+       that recurring numeric enough to repay its complete construction. */
     return 0;
   }
   if (kls_low_work_tiny_block_btf_factor_profile(solver)) {
@@ -65409,7 +65461,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
 
   if (lean_only &&
       (kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver) ||
-       kls_is_rajat27_fragmented_scaled_pattern(solver) ||
+       kls_scaled_fragmented_compact_row_factor_profile(solver) ||
        kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) ||
        kls_is_rommes_mimo8_pattern(solver) ||
        (getenv("KLS_DISABLE_GENERIC_PARALLEL_LEAN_PATTERN") == NULL &&
@@ -73390,7 +73442,10 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       getenv("KLS_DISABLE_GENERIC_LEAN_ROW_FACTOR") == NULL)) &&
     getenv("KLS_DISABLE_GEMAT_ROW_FACTOR") == NULL;
   if (shared->lean_row_values_mode &&
-      kls_is_rajat27_fragmented_scaled_pattern(solver) &&
+      kls_scaled_fragmented_compact_row_factor_profile(solver) &&
+      getenv("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_DEFER_VALUE_SCATTER")
+        == NULL &&
+      /* Retain the former matrix-specific switch as a diagnostic alias. */
       getenv("KLS_DISABLE_RAJAT27_DEFER_VALUE_SCATTER") == NULL) {
     /* The retained solve consumes the flat row mirrors directly.  Avoid the
        duplicate random stores through LU pointer mirrors on every numeric
@@ -151005,7 +151060,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
       solver->numeric->Udiag == NULL || solver->i32solve_state <= 0 ||
       (getenv("KLS_ENABLE_I32_UDIAG_RECIP") == NULL &&
        !kls_is_gemat_power_sequence_pattern(solver->n, solver->col_ptr) &&
-       !kls_is_rajat27_fragmented_scaled_pattern(solver) &&
+       !kls_scaled_fragmented_compact_row_factor_profile(solver) &&
        !kls_is_rommes_itaipu_sequence_pattern(solver) &&
        !kls_is_rommes_mimo8_pattern(solver) &&
        !kls_partial_diagonal_many_block_no_btf_cycle(solver) &&
@@ -152464,10 +152519,11 @@ static void kls_solve_contract_classify(kls_solver *solver,
       getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") != NULL) {
     return;
   }
-  if (kls_is_rajat27_fragmented_scaled_pattern(solver)) {
+  if (kls_scaled_fragmented_compact_row_factor_profile(solver)) {
     /* A residual SpMV costs almost as much as this shape's paired row solve.
-       The narrow class above has a changing-value raw-accuracy certificate;
-       structurally risky factor modes were rejected by the entry guard. */
+       The factor profile and entry guard exclude transformed, perturbed, or
+       broadly pivoted numerics; changed-value audits cover the retained
+       full-precision row representation. */
     solver->solve_contract_probe = 1;
     solver->solve_contract_verified = 1;
     return;
@@ -156870,7 +156926,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !contract_certified_trusted_row_solve &&
       !dense_spiked_original_trusted_row_solve &&
       !memchip_trusted_row_solve &&
-      !kls_is_rajat27_fragmented_scaled_pattern(solver)) {
+      !kls_scaled_fragmented_compact_row_factor_profile(solver)) {
     /* Solves will be served from the row engine's published replica
        values.  That machinery's acceptance is timed, not
        value-validated, and rare draws publish a reduced-accuracy
@@ -158758,6 +158814,13 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->low_work_tiny_block_btf_symbolic_eligible)) {
     stats->low_work_tiny_block_btf_symbolic_eligible =
       kls_low_work_tiny_block_btf_symbolic_profile(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               scaled_fragmented_compact_row_policy_eligible) +
+        sizeof(stats->scaled_fragmented_compact_row_policy_eligible)) {
+    stats->scaled_fragmented_compact_row_policy_eligible =
+      kls_scaled_fragmented_compact_row_factor_profile(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

@@ -18575,3 +18575,105 @@ changed-value runs additionally cover the admitted first operating point,
 the third operating point's symbolic-only/matched branch, and both connected
 out-of-window holdouts.  They retain decisions `1/1`, `1/0`, `1/1`, and
 `1/1`; the worst verified residual in those runs was `1.45e-15`.
+
+SCALED FRAGMENTED COMPACT-ROW LIFECYCLE GENERALIZED (2026-07-24).  The
+remaining `rajat27` predicate recognized a 20,500--20,800-row,
+96,000--99,000-entry input box, then required 4,500--4,700 BTF blocks and a
+largest block between 12,800 and 13,200 rows.  A positive selected six
+post-factor behaviors: it suppressed the tight-pivot numeric, built the lean
+row pattern in parallel, deferred duplicate value scatter from the paired
+row streams, maintained diagonal reciprocals, bypassed a pessimistic residual
+probe, and omitted the otherwise mandatory row-solve self-check.  Apart from
+requiring some KLU scaling, that complete lifecycle followed the benchmark
+fingerprint rather than the representation and numeric facts each consumer
+actually needs.
+
+The replacement is a retained-factor capability under the standard AUTO
+orientation, ordering, scale, and backend contract with eight threads, BTF,
+static pivoting, and the requested `0.001` tolerance.  The selected numeric
+must be normal AMD with KLU max-row scaling, full-rank BTF, and no row or
+user-column permutation, external scaling, prediction, nudging, or
+perturbation.  Inputs may have 8,192--65,535 rows and 3--8 entries per row.
+Their BTF must have between `n/8` and `n/3` blocks, a largest block spanning
+one half to three quarters of the matrix, and enough blocks to cover at least
+half but no more than all of the remaining fringe.
+
+Resource checks enforce the actual compact lifecycle.  Balanced symbolic
+L/U storage totals 8--20 entries per row and estimated work is 32--256 flops
+per row below an 8M ceiling.  Both numeric L and U off-diagonal streams must
+individually fit `UINT16_MAX`; balanced retained storage totals 5--10 entries
+per row and measured work is 16--64 flops per row below the same ceiling.
+Off-diagonal pivots cannot exceed `n/32`.  A factor that changes scale,
+representation, pivot pressure, or transformation state therefore loses all
+six shortcuts together instead of inheriting an accuracy decision from its
+input dimensions.
+
+The result is exposed as
+`scaled_fragmented_compact_row_policy_eligible` in `kls_stats` and benchmark
+JSON.  `KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY=1` restores the
+generic lifecycle; the narrower
+`KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_DEFER_VALUE_SCATTER` controls the
+duplicate-publication optimization.  The former
+`KLS_DISABLE_RAJAT27_DEFER_VALUE_SCATTER` name remains only as a compatibility
+alias for that narrow switch.  Explicit option requests report eligibility
+zero.
+
+The smoke suite supplies an independent 16,384-row construction with 77,824
+entries.  A directed six-band 12,288-row core is followed by 4,096 scalar
+components, while an eight-decade row-magnitude split requires max scaling.
+AUTO selects normal AMD and full-rank BTF with 4,097 blocks.  Its symbolic
+has 278,430 estimated factor entries and about 2.58M flops; the retained
+numeric has 155,618 entries, 675,635 measured flops, zero off-diagonal
+pivots, and eligibility one.  It completes an initial changed-value solve
+and 24 additional independent generations reaching plus or minus 10%.
+
+Controls separate value, option, switch, and topology effects.  On the same
+synthetic pattern, replacing every core diagonal by a weak value and every
+successor by the dominant value loses the factor certificate.  Explicit AMD
+and the generic disable switch also report zero.  Reusing the same order and
+77,824-entry count for one cyclic SCC produces one 16,384-row block and is
+ineligible.  These negatives ensure the test cannot pass from order, density,
+or copied thresholds alone.
+
+Connected metamorphics append 2,048 reciprocal nodes to the original and
+move it to 22,688 rows and 103,497 entries, outside the former row window.
+The result has 4,861 blocks around a 14,230-row core, 165,878 retained factor
+entries, about 961K measured flops, and 348 off-diagonal pivots; it remains
+eligible.  Ten thousand adjacent simultaneous swaps change the symbolic and
+numeric fill, measured work, and pivot count to 361 while retaining the
+capability.  A complete shuffle instead causes AUTO to accept matching and
+an unscaled factor, so it correctly reports zero.  Appending 4,096 independent
+diagonal components produces 8,689 blocks in 24,736 rows, crosses the `n/3`
+fragmentation boundary, and also reports zero.
+
+Corpus screening used all 243 local Matrix Market files.  Sixty-four
+non-complex square inputs enter a deliberately broader 8,192--65,535-row and
+2--12-header-entries-per-row screen, and all analyze successfully.  Applying
+the selected orientation, ordering, rank, BTF geometry, and symbolic resource
+contract leaves only `rajat27`.  Nearby `rajat22` is also max-scaled but has
+fewer than `n/8` blocks and L/U streams beyond the 16-bit capacity;
+`rajat26` selects scale zero, while `circuit_3` and `powersim` are unscaled
+and fail the normalized core/fringe boundary.  Thus no unrelated corpus
+matrix inherits the row or accuracy shortcuts.
+
+Ten long interleaved generalized/parent pairs on the original put modeled
+cycle at `0.9953` by paired geometric mean (`0.9930` median,
+`0.9241`--`1.0800` range).  Factor, recurring refactor, and solve ratios are
+`0.9930`, `0.9972`, and `1.0024`, so replacing the exact predicate preserves
+its established target performance.  Eight long same-binary
+enabled/disabled pairs put modeled cycle at `0.8045` on the original,
+`0.8188` on the connected extension, `0.7948` after adjacent swaps, and
+`0.8910` on the independent synthetic.  The over-fragmented rejection is
+neutral at `0.9907` with both sides ineligible.  The admitted cases reduce
+solve ratios to `0.4755`, `0.4125`, `0.3297`, and `0.7974`, respectively,
+while factor time remains within 1.5%.
+
+The original, connected extension, adjacent-swap extension, and independent
+synthetic each completed 100 verified entrywise generations at amplitudes
+0.001, 0.01, and 0.1.  The shuffled value/route rejection and over-fragmented
+topology rejection completed the same audit.  Across all 1,800 systems the
+worst per-generation relative-L2 residual was `2.17e-12`, below the `1e-8`
+contract; all eligibility decisions remained stable.  Release and
+ASan/UBSan/LSan CTest pass all four tests.  Leak-enabled sanitized runs also
+cover all four positives and both rejections with expected decisions; their
+worst verified residual was `4.62e-13`.

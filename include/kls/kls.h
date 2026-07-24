@@ -1364,6 +1364,9 @@ typedef struct kls_stats {
   /* The selected symbolic has low estimated work spread across many tiny BTF
      blocks, independent of the later numeric pivot verdict. */
   int low_work_tiny_block_btf_symbolic_eligible;
+  /* The retained scaled fragmented factor fits the compact paired-row
+     representation and its bounded-work lifecycle. */
+  int scaled_fragmented_compact_row_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

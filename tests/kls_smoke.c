@@ -13842,6 +13842,379 @@ cleanup:
   return ok;
 }
 
+static int test_scaled_fragmented_compact_row_policy(void) {
+  const int32_t n = 16384;
+  const int32_t core = 12288;
+  const int32_t fringe = n - core;
+  const int32_t core_degree = 6;
+  const int32_t nnz = core_degree * core + fringe;
+  int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
+  double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
+  double *changed = (double *)malloc((size_t)nnz * sizeof(*changed));
+  double *pivoted = (double *)malloc((size_t)nnz * sizeof(*pivoted));
+  double *expected = (double *)malloc((size_t)n * sizeof(*expected));
+  double *b = (double *)malloc((size_t)n * sizeof(*b));
+  double *x = (double *)malloc((size_t)n * sizeof(*x));
+  const char *saved_policy_value =
+    getenv("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY");
+  char *saved_policy = saved_policy_value != NULL
+    ? strdup(saved_policy_value) : NULL;
+  const int had_policy = saved_policy_value != NULL;
+  kls_solver *solver = NULL;
+  kls_solver *control_solver = NULL;
+  kls_options options;
+  kls_stats stats;
+  int ok = ap != NULL && ai != NULL && ax != NULL && changed != NULL &&
+    pivoted != NULL && expected != NULL && b != NULL && x != NULL &&
+    (!had_policy || saved_policy != NULL);
+
+  if (!ok) {
+    goto cleanup;
+  }
+  if (unsetenv("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY") != 0) {
+    perror("configure scaled fragmented compact-row policy");
+    ok = 0;
+    goto cleanup;
+  }
+
+  int32_t p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    ap[col] = p;
+    if (col < core) {
+      int32_t rows[6];
+      for (int32_t offset = 0; offset < core_degree; ++offset) {
+        rows[offset] = (col + offset) % core;
+      }
+      for (int32_t i = 1; i < core_degree; ++i) {
+        const int32_t row = rows[i];
+        int32_t insert = i;
+        while (insert > 0 && rows[insert - 1] > row) {
+          rows[insert] = rows[insert - 1];
+          --insert;
+        }
+        rows[insert] = row;
+      }
+      const int32_t strong_row = col;
+      for (int32_t i = 0; i < core_degree; ++i) {
+        const int32_t row = rows[i];
+        const double magnitude = row < core / 2 ? 1.0 : 1.0e8;
+        ai[p] = row;
+        ax[p] = magnitude * (row == strong_row ? 8.0 : -0.03125);
+        ++p;
+      }
+    } else {
+      ai[p] = col;
+      ax[p] = 1.0e8;
+      ++p;
+    }
+    expected[col] = 0.25 + 0.0078125 * (double)(col % 31);
+  }
+  ap[n] = p;
+  if (p != nnz) {
+    fprintf(stderr,
+            "unexpected scaled fragmented compact-row nnz: %d/%d\n",
+            p, nnz);
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t entry = 0; entry < nnz; ++entry) {
+    changed[entry] = ax[entry] *
+      (1.0 + 1.0e-4 * (double)(entry % 19 - 9));
+  }
+  memcpy(pivoted, ax, (size_t)nnz * sizeof(*pivoted));
+  for (int32_t col = 0; col < core; ++col) {
+    const int32_t successor = (col + 1) % core;
+    int found_diagonal = 0;
+    int found_successor = 0;
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      const int32_t row = ai[entry];
+      const double magnitude = row < core / 2 ? 1.0 : 1.0e8;
+      if (row == col) {
+        pivoted[entry] = 1.0e-12 * magnitude;
+        found_diagonal = 1;
+      } else if (row == successor) {
+        pivoted[entry] = 8.0 * magnitude;
+        found_successor = 1;
+      }
+    }
+    if (!found_diagonal || !found_successor) {
+      fprintf(stderr,
+              "missing scaled fragmented pivot control entry at %d\n",
+              col);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  kls_default_options(&options);
+  options.threads = 8;
+  if (!require_ok(kls_create(&solver),
+                  "create scaled fragmented compact-row policy") ||
+      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
+                                  &options),
+                  "analyze scaled fragmented compact-row policy") ||
+      !require_ok(kls_factor(solver, ax),
+                  "factor scaled fragmented compact-row policy") ||
+      !require_ok(kls_refactor(solver, changed),
+                  "refactor scaled fragmented compact-row policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats scaled fragmented compact-row policy") ||
+      stats.scaled_fragmented_compact_row_policy_eligible != 1 ||
+      stats.selected_orientation != KLS_ORIENTATION_NORMAL ||
+      stats.selected_ordering != KLS_ORDERING_AMD ||
+      stats.selected_scale != 2 || !stats.selected_btf ||
+      stats.structural_rank != n || stats.nblocks != fringe + 1 ||
+      stats.max_block != core) {
+    fprintf(stderr,
+            "unexpected scaled fragmented compact-row policy: eligible=%d"
+            " orientation=%d ordering=%d scale=%d btf=%d"
+            " blocks=%" PRId64 " max=%" PRId64 " rank=%" PRId64
+            " fill=%" PRId64 "/%" PRId64 " work=%.17g pivots=%" PRId64
+            "\n",
+            stats.scaled_fragmented_compact_row_policy_eligible,
+            (int)stats.selected_orientation, (int)stats.selected_ordering,
+            stats.selected_scale, stats.selected_btf, stats.nblocks,
+            stats.max_block, stats.structural_rank, stats.nnz_l, stats.nnz_u,
+            stats.factor_flops, stats.offdiag_pivots);
+    ok = 0;
+    goto cleanup;
+  }
+
+  memset(b, 0, (size_t)n * sizeof(*b));
+  for (int32_t col = 0; col < n; ++col) {
+    for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+      b[ai[entry]] += changed[entry] * expected[col];
+    }
+  }
+  if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                  "solve scaled fragmented compact-row policy")) {
+    ok = 0;
+    goto cleanup;
+  }
+  for (int32_t row = 0; row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "scaled fragmented compact-row solve mismatch at %d: %.17g"
+              " vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+      goto cleanup;
+    }
+  }
+
+  /* Revalidate both the compact representation and its full-precision solve
+     contract across independent value generations up to ten percent. */
+  for (int generation = 1; generation <= 24; ++generation) {
+    for (int32_t entry = 0; entry < nnz; ++entry) {
+      const int delta = (entry * 23 + generation * 31) % 51 - 25;
+      changed[entry] = ax[entry] * (1.0 + 0.004 * (double)delta);
+    }
+    if (!require_ok(kls_refactor(solver, changed),
+                    "repeat scaled fragmented compact-row refactor")) {
+      ok = 0;
+      goto cleanup;
+    }
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    if (!require_ok(kls_get_stats(solver, &stats),
+                    "repeat scaled fragmented compact-row stats") ||
+        stats.scaled_fragmented_compact_row_policy_eligible != 1) {
+      fprintf(stderr,
+              "scaled fragmented compact-row policy did not survive"
+              " generation %d\n",
+              generation);
+      ok = 0;
+      goto cleanup;
+    }
+    memset(b, 0, (size_t)n * sizeof(*b));
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t entry = ap[col]; entry < ap[col + 1]; ++entry) {
+        b[ai[entry]] += changed[entry] * expected[col];
+      }
+    }
+    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                    "repeat scaled fragmented compact-row solve")) {
+      ok = 0;
+      goto cleanup;
+    }
+    for (int32_t row = 0; row < n; ++row) {
+      if (!close_enough(x[row], expected[row])) {
+        fprintf(stderr,
+                "repeated scaled fragmented compact-row solve mismatch"
+                " at generation %d row %d: %.17g vs %.17g\n",
+                generation, row, x[row], expected[row]);
+        ok = 0;
+        goto cleanup;
+      }
+    }
+  }
+  kls_destroy(solver);
+  solver = NULL;
+
+  /* The same topology with widespread threshold pivots must not inherit the
+     compact full-precision lifecycle. */
+  if (!require_ok(kls_create(&control_solver),
+                  "create scaled fragmented pivot control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze scaled fragmented pivot control") ||
+      !require_ok(kls_factor(control_solver, pivoted),
+                  "factor scaled fragmented pivot control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats scaled fragmented pivot control") ||
+      stats.scaled_fragmented_compact_row_policy_eligible != 0 ||
+      (stats.offdiag_pivots <= n / 32 && stats.selected_scale == 2)) {
+    fprintf(stderr,
+            "scaled fragmented pivot control retained policy: eligible=%d"
+            " scale=%d pivots=%" PRId64 "\n",
+            stats.scaled_fragmented_compact_row_policy_eligible,
+            stats.selected_scale, stats.offdiag_pivots);
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+
+  /* Explicit requests remain authoritative even when they reproduce the
+     same retained AMD factor. */
+  kls_options explicit_options = options;
+  explicit_options.ordering = KLS_ORDERING_AMD;
+  if (!require_ok(kls_create(&control_solver),
+                  "create scaled fragmented explicit control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &explicit_options),
+                  "analyze scaled fragmented explicit control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor scaled fragmented explicit control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats scaled fragmented explicit control") ||
+      stats.scaled_fragmented_compact_row_policy_eligible != 0) {
+    fprintf(stderr,
+            "explicit scaled fragmented control selected policy\n");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+
+  if (setenv("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY", "1", 1) !=
+        0 ||
+      !require_ok(kls_create(&control_solver),
+                  "create scaled fragmented disabled control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze scaled fragmented disabled control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor scaled fragmented disabled control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats scaled fragmented disabled control") ||
+      stats.scaled_fragmented_compact_row_policy_eligible != 0) {
+    fprintf(stderr,
+            "disabled scaled fragmented control selected policy\n");
+    ok = 0;
+    goto cleanup;
+  }
+  kls_destroy(control_solver);
+  control_solver = NULL;
+  if (unsetenv("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY") != 0) {
+    ok = 0;
+    goto cleanup;
+  }
+
+  /* Preserve order and density while replacing the fragmented core/fringe
+     geometry with one cyclic SCC. */
+  p = 0;
+  for (int32_t col = 0; col < n; ++col) {
+    const int32_t degree = col < core ? 5 : 4;
+    int32_t rows[5];
+    ap[col] = p;
+    for (int32_t offset = 0; offset < degree; ++offset) {
+      rows[offset] = (col + offset) % n;
+    }
+    for (int32_t i = 1; i < degree; ++i) {
+      const int32_t row = rows[i];
+      int32_t insert = i;
+      while (insert > 0 && rows[insert - 1] > row) {
+        rows[insert] = rows[insert - 1];
+        --insert;
+      }
+      rows[insert] = row;
+    }
+    for (int32_t i = 0; i < degree; ++i) {
+      const int32_t row = rows[i];
+      const double magnitude = row < n / 2 ? 1.0 : 1.0e8;
+      ai[p] = row;
+      ax[p] = magnitude * (row == col ? 8.0 : -0.03125);
+      ++p;
+    }
+  }
+  ap[n] = p;
+  if (p != nnz ||
+      !require_ok(kls_create(&control_solver),
+                  "create scaled fragmented structural control") ||
+      !require_ok(kls_analyze_csc(control_solver, KLS_INDEX_INT32, n,
+                                  ap, ai, 0, &options),
+                  "analyze scaled fragmented structural control") ||
+      !require_ok(kls_factor(control_solver, ax),
+                  "factor scaled fragmented structural control")) {
+    ok = 0;
+    goto cleanup;
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(control_solver, &stats),
+                  "stats scaled fragmented structural control") ||
+      stats.scaled_fragmented_compact_row_policy_eligible != 0 ||
+      stats.nblocks != 1 || stats.max_block != n) {
+    fprintf(stderr,
+            "cyclic scaled fragmented control selected policy: eligible=%d"
+            " blocks=%" PRId64 " max=%" PRId64 "\n",
+            stats.scaled_fragmented_compact_row_policy_eligible,
+            stats.nblocks, stats.max_block);
+    ok = 0;
+  }
+
+cleanup:
+  kls_destroy(control_solver);
+  kls_destroy(solver);
+  if (!restore_env_value("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY",
+                         had_policy,
+                         saved_policy != NULL ? saved_policy : "")) {
+    ok = 0;
+  }
+  free(ap);
+  free(ai);
+  free(ax);
+  free(changed);
+  free(pivoted);
+  free(expected);
+  free(b);
+  free(x);
+  free(saved_policy);
+  return ok;
+}
+
 static int test_pre_static_pivoting(void) {
   const int32_t n = 3000;
   int32_t *ap = (int32_t *)malloc(((size_t)n + 1u) * sizeof(*ap));
@@ -22792,6 +23165,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_low_work_tiny_block_btf_policy()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_scaled_fragmented_compact_row_policy()) {
     return EXIT_FAILURE;
   }
   if (!test_high_work_tiny_scalar_fringe_policy()) {
