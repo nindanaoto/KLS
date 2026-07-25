@@ -4458,8 +4458,10 @@ the actual elimination forest, shared top, and worker balance before the solve
 can be selected.  ASIC-specific reciprocal and compact-stream metadata choices
 were removed because isolated measurements showed no benefit.
 
-Set `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_BTF_PTS_POLICY=1` for a same-binary
-fallback.  Generic component controls are
+Set `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_BTF_PTS_POLICY=1` to disable this factor
+lifecycle.  Because a valid large PTS solve plan is now an independent generic
+capability, also set `KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY=1` when the
+comparison must restore its solve consultation.  Other component controls are
 `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES`,
 `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_PTS_CUT`, and
 `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM`; the former ASIC-named
@@ -4505,10 +4507,68 @@ enabled moved-size sweeps stay below `2.97e-15`; six of seven enabled target
 sweeps stay below `2.80e-15`.  One target sweep reached `2.85e-9`, matching a
 rare EGraph/refactor residual excursion also observed in frozen and disabled
 controls, so it is recorded as shared variability rather than hidden from the
-result.  The remaining evidence limit is explicit: the positives outside the
-original coordinate are metamorphic, while the natural SuiteSparse matrices
-are rejection controls.  A natural cross-family full-factor positive would be
-needed before widening this already normalized envelope.
+result.  The factor envelope remains deliberately narrow: the positives
+outside the original coordinate are metamorphic, while the natural
+SuiteSparse matrices reject that full factor lifecycle.  The solve-level
+generalization below does not widen these factor thresholds; it starts from
+the independently verified PTS plan that any installed numeric can build.
+
+## Verified large-PTS solve adoption
+
+Direct PTS solve selection no longer needs a matrix-family or factor-family
+label once the generic PTS builder has validated the actual installed factor.
+The builder checks ordered L/U streams, constructs and verifies an elimination
+forest against every dependency, cuts independent subtrees, balances them over
+the available workers, and bounds the shared ancestor top.  A solve-valid plan
+whose dominant block has at least 16,384 columns is therefore selected
+directly.  Valid smaller plans retain their existing measured family gates;
+all other factors retain the two-serial/two-PTS runtime consultation.
+
+This is intentionally a solve capability, not another approximation to the
+`ASIC_320k` factor profile.  It covers normal AMD, AMF, and METIS factors,
+single-block and fragmented BTF factors, scaled and unscaled numerics, and
+different pivot regimes whenever their realized forest passes the same proof.
+The refactor PTS gate remains separate and still uses its stricter
+flop-weighted serial-top test.  Compact permutations were also tested as a
+possible companion generalization, but a natural `epb3` A/B improved only
+about 0.7%, so that behavior remains under its existing narrow policies.
+
+`KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY=1` restores the four-solve runtime
+consultation for same-binary comparisons.  The appended
+`kls_stats.verified_large_pts_solve_policy_eligible` field and both benchmark
+JSON modes expose the verdict after solve metadata has been built (and report
+zero in analyze-only mode).  Natural positives and structural controls are
+recorded separately in
+`bench/suitesparse_verified_large_pts_solve_positive_manifest.txt` and
+`bench/suitesparse_verified_large_pts_solve_control_manifest.txt`.
+
+The discovery pass covered 52 natural paper-union matrices and 75 matrices
+from the generic development/holdout suites.  Every previously unclassified
+solve-valid plan that completed the old independent timing consultation chose
+PTS; none declined it.  The positives span the Sandia family plus `Raj1`,
+`G2_circuit`, `mc2depi`, `nxp1`, `ss1`, `scircuit`, and the natural
+cross-family `Averous/epb3`.  Nearby controls such as `rajat21`, `rajat24`,
+`transient`, `mac_econ_fwd500`, and `shallow_water1` stop at stream, forest,
+shared-top, or plan-construction gates.
+
+On `epb3`, the old consultation measured 1.724 ms for PTS versus 3.953 ms for
+serial.  Five alternating 100-update same-binary samples put the median first
+changed solve at 2.536 ms direct versus 5.360 ms with consultation, the steady
+solve at 1.906 versus 1.933 ms, and the modeled cycle at 1.108 versus 1.123
+seconds; every checked residual stayed near `5e-16`.  On `scircuit`, the old
+probe selected PTS at 0.801 versus 1.927 ms, and direct adoption reduced the
+median over 100 solves from 0.653 to 0.623 ms.  Three interleaved frozen-parent
+and current `ASIC_320k` 100-update runs retained identical factor geometry and
+`2.79e-15` residuals; modeled-cycle medians were 2.583 and 2.572 seconds,
+respectively.  The relabeled and +32,768 coupled structural positives also
+remain eligible and complete 100 checked updates below `3.72e-15`.
+
+The remaining limitation is hardware portability rather than benchmark
+identity: direct adoption relies on the conservative plan proof plus the
+observed CPU corpus, while a radically different thread/runtime cost model may
+still prefer consultation.  The master disable preserves that fallback.  The
+change does not broaden factor selection, refactor routing, or small-plan
+economics.
 
 ## License
 

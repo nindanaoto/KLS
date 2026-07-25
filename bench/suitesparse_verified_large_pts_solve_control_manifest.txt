@@ -1,0 +1,9 @@
+# Natural controls that reject before direct large-PTS solve adoption.  They
+# exercise malformed factor streams, excessive shared tops, unsuitable worker
+# partitions, and factors for which no qualifying large plan is built.
+
+rajat21
+rajat24
+transient
+mac_econ_fwd500
+shallow_water1

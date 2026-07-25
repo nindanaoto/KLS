@@ -20354,3 +20354,90 @@ development and holdout manifests preserve the twelve natural controls. The
 evidence boundary remains clear: the non-original positives are a relabeling
 and a coupled structural extension, not a naturally sourced second family.
 Thresholds should not be widened until such a natural factor-positive appears.
+
+VERIFIED LARGE-PTS SOLVE ADOPTION (2026-07-25). The remaining ASIC_320k
+limitation was narrower than the preceding factor-policy audit suggested. The
+factor envelope still had no natural cross-family positive and therefore was
+not safe to widen, but its direct-solve decision sat after a second, generic
+piece of evidence: `kls_pts_try_build` had already reconstructed the installed
+numeric's dependency forest, verified every L/U dependency against it, cut
+independent subtrees, balanced their work, and bounded the shared ancestor
+top. Several unrelated factors reached that same solve-valid state and then
+paid a two-serial/two-PTS timing consultation before selecting PTS. The next
+generalization target was consequently the verified plan, not another input or
+factor profile.
+
+The natural discovery scan covered 52 applicable paper-union matrices between
+16,384 and 1,048,576 rows. A second scan covered 75 matrices from the generic
+SuiteSparse development and holdout directories. Every unclassified plan that
+passed `solve_ok` and completed the independent consultation adopted PTS; no
+valid plan declined it. Examples span normal AMD, AMF, and METIS, one-block and
+fragmented BTF, and multiple scale/pivot regimes. Observed positives include
+the Sandia ASIC variants, Raj1, G2_circuit, mc2depi, nxp1, ss1, and scircuit.
+The installed numeric can vary across AUTO races, so a matrix name is not the
+decision: ASIC_320k and ASIC_680k runs whose alternate factor stream failed
+the tree check correctly reported zero, while their solve-valid installed
+factors reported one.
+
+`Averous/epb3` supplies the missing natural cross-family positive. Its ordinary
+AUTO factor is a normal unscaled AMF single block with 84,617 columns,
+2,359,084 entries in each triangular factor, and about 479.2 million measured
+operations. The generic builder found 21 chunks and a 1,764-column shared top;
+the top carried 27.97% of entry work and the heaviest worker bin 9.79%. The
+frozen parent measured PTS at 1.724 ms versus 3.953 ms serial and adopted it.
+Near controls remain independent: rajat24 rejects L stream order, rajat21 and
+transient reject their realized stream/forest plans, while mac_econ_fwd500 and
+shallow_water1 fail to construct a qualifying solve plan. A scircuit AUTO
+route initially observed with a U-order rejection later retained a different
+normal-AMD factor with a valid 170,493-column plan; the frozen parent then
+measured PTS at 0.801 ms versus 1.927 ms serial and adopted it. This variation
+reinforces plan-state dispatch over matrix-name labeling.
+
+The implementation adds
+`kls_verified_large_pts_solve_policy_eligible`. It requires a built,
+solve-valid plan, at least two workers, a dominant block of at least 16,384
+columns, and an enabled master control. Such plans set `solve_decision=1`
+immediately. The previous factor-family direct-adoption list remains only for
+sub-16K plans, whose fixed dispatch overhead still needs separate economic
+evidence; all rejected plans retain the existing behavior. Setting
+`KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY=1` restores the four-solve
+consultation for large plans. An appended public stats field and both JSON
+modes expose the post-build verdict. The generated 32,000-row pivoted
+single-block smoke fixture verifies direct eligibility, correctness, the
+master-disabled fallback solve, and a zero disabled verdict.
+
+A companion attempt generalized compact 32-bit P/Q permutations to every
+verified plan. Five 1,000-solve epb3 comparisons measured only about a 0.7%
+median improvement, smaller than the setup/factor noise and insufficient to
+authorize extra persistent allocation. That change was removed completely;
+the pre-existing narrow compact-permutation policies are byte-for-byte
+unchanged. No factor, refactor, stream representation, or solve kernel changes
+in the retained patch.
+
+Five alternating 100-update epb3 A/B samples used deterministic entrywise
+0.1% value changes and verified every solve. Direct versus disabled medians
+were 2.536 versus 5.360 ms for the first changed solve, 1.906 versus 1.933 ms
+for the steady changed solve, and 1.108 versus 1.123 seconds for the modeled
+cycle. Refactor medians were 7.392 versus 7.348 ms; unrelated disabled-arm
+outliers reached 22.6 ms, so no refactor claim is made. Every residual stayed
+near `5e-16`.
+
+Three interleaved frozen-parent/current ASIC_320k 100-update pairs retained
+identical BTF geometry, L/U counts, measured work, and `2.79083e-15` worst
+residuals. Current versus parent medians were 14.159 versus 13.822 ms for the
+steady refactor, 3.697 versus 3.793 ms for the steady changed solve, and 2.572
+versus 2.583 seconds for the modeled cycle. Thus the target's complete horizon
+does not regress despite ordinary refactor dispersion. Final current sweeps on
+the simultaneous relabeling and +32,768 coupled extension also report generic
+eligibility and complete 100 checked updates with `3.71393e-15` and
+`2.96181e-15` worst residuals.
+
+The new positive and control manifests record the natural corpus boundary.
+The remaining limitation is platform economics: the forest proof establishes
+correctness and conservative parallel structure, while the no-decline result
+is empirical on the current CPU/OpenMP runtime. A radically different spawn or
+memory cost can use the master disable to retain dynamic consultation. This
+work deliberately does not generalize factor selection, PTS refactor, compact
+permutations, or sub-16K dispatch. Release CTest and the leak-enabled
+ASan/UBSan/LSan build both pass all four tests; the generated-policy sanitizer
+smoke completes in 60.16 seconds.

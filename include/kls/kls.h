@@ -1490,6 +1490,9 @@ typedef struct kls_stats {
   /* The retained full-rank min-fill factor has balanced high work and a
      1/512--1/256 mixed-component BTF fringe suitable for direct PTS solves. */
   int high_work_tiny_fringe_btf_pts_factor_eligible;
+  /* The generic PTS builder proved a large elimination forest, bounded
+     serial top, and balanced worker partition suitable for direct adoption. */
+  int verified_large_pts_solve_policy_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

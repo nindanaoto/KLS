@@ -151044,6 +151044,18 @@ static int kls_pts_solve_available(const kls_solver *solver) {
          solver->pts->solve_decision >= 0;
 }
 
+/* Once the generic PTS builder has proved a large block's forest, bounded
+   serial top, and worker balance, every natural corpus plan that reached this
+   state selected PTS in the independent two-by-two runtime comparison.  Make
+   that measured plan state the capability: it covers unrelated BTF and
+   one-block factors without teaching solve dispatch their matrix families. */
+static int kls_verified_large_pts_solve_policy_eligible(
+  const kls_solver *solver) {
+  return solver != NULL && solver->pts != NULL && solver->pts->solve_ok &&
+    solver->pts->nk >= 16384u && solver->pts->nthreads >= 2 &&
+    getenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY") == NULL;
+}
+
 static void kls_pts_free(kls_solver *solver) {
   kls_pts *pts = solver->pts;
   if (pts == NULL) {
@@ -151645,19 +151657,27 @@ static void kls_pts_try_build(kls_solver *solver) {
       }
     }
     solver->pts = pts;
-    if ((kls_medium_partial_static_metis_adopted(solver) ||
-         kls_extreme_symmetric_single_block_cycle(solver) ||
-         kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) ||
-         kls_pivoted_high_work_single_block_factor_cycle(solver) ||
-         kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
-         kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
-         kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
-         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) &&
+    const int verified_large_pts_solve =
+      kls_verified_large_pts_solve_policy_eligible(solver);
+    const int retained_small_pts_solve = pts->nk < 16384u &&
+      (kls_medium_partial_static_metis_adopted(solver) ||
+       kls_extreme_symmetric_single_block_cycle(solver) ||
+       kls_pivoted_high_work_single_block_factor_cycle(solver) ||
+       kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
+       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
+       kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
+       kls_symmetric_partial_diagonal_match_factor_cycle(solver));
+    if ((verified_large_pts_solve || retained_small_pts_solve) &&
         pts->solve_ok) {
-      /* The retained factor forest has a verified PTS plan that is
-         materially faster on these narrow classes.  Select it directly so
-         four solve probes do not perturb the neighboring refactors. */
+      /* Large plans are already authorized by their measured forest and
+         balance proof.  Keep the old class verdicts only for sub-16K plans,
+         where dispatch overhead still needs a separate economic reason. */
       pts->solve_decision = 1;
+      if (trace && verified_large_pts_solve) {
+        fprintf(stderr,
+                "KLS pts solve: direct verified large plan (nk=%ld)\n",
+                (long)pts->nk);
+      }
     }
     if ((solver->large_bounded_no_btf_amf_path ||
          kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
@@ -161321,6 +161341,12 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->high_work_tiny_fringe_btf_pts_factor_eligible)) {
     stats->high_work_tiny_fringe_btf_pts_factor_eligible =
       kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, verified_large_pts_solve_policy_eligible) +
+        sizeof(stats->verified_large_pts_solve_policy_eligible)) {
+    stats->verified_large_pts_solve_policy_eligible =
+      kls_verified_large_pts_solve_policy_eligible(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

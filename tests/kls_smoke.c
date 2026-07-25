@@ -23220,15 +23220,20 @@ static int test_pivoted_high_work_single_block_policy(void) {
   const char *saved_legacy_value =
     getenv("KLS_DISABLE_RAJAT15_H100_POLICY");
   const char *saved_race_value = getenv("KLS_DISABLE_METIS_RACE");
+  const char *saved_verified_pts_value =
+    getenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
   char *saved_legacy = saved_legacy_value != NULL
     ? strdup(saved_legacy_value) : NULL;
   char *saved_race = saved_race_value != NULL
     ? strdup(saved_race_value) : NULL;
+  char *saved_verified_pts = saved_verified_pts_value != NULL
+    ? strdup(saved_verified_pts_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
   const int had_legacy = saved_legacy_value != NULL;
   const int had_race = saved_race_value != NULL;
+  const int had_verified_pts = saved_verified_pts_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *negative_solver = NULL;
   kls_solver *explicit_solver = NULL;
@@ -23239,13 +23244,15 @@ static int test_pivoted_high_work_single_block_policy(void) {
     ax_no_pivots != NULL && expected != NULL && b != NULL && x != NULL &&
     (!had_policy || saved_policy != NULL) &&
     (!had_legacy || saved_legacy != NULL) &&
-    (!had_race || saved_race != NULL);
+    (!had_race || saved_race != NULL) &&
+    (!had_verified_pts || saved_verified_pts != NULL);
 
   if (!ok) {
     goto cleanup;
   }
   if (unsetenv("KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY") != 0 ||
       unsetenv("KLS_DISABLE_RAJAT15_H100_POLICY") != 0 ||
+      unsetenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY") != 0 ||
       setenv("KLS_DISABLE_METIS_RACE", "1", 1) != 0) {
     perror("configure pivoted high-work single-block policy");
     ok = 0;
@@ -23387,6 +23394,18 @@ static int test_pivoted_high_work_single_block_policy(void) {
       goto cleanup;
     }
   }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (!require_ok(kls_get_stats(solver, &stats),
+                  "stats verified large PTS solve policy") ||
+      stats.verified_large_pts_solve_policy_eligible != 1) {
+    fprintf(stderr,
+            "verified large PTS solve policy did not accept its generated"
+            " plan (eligible=%d)\n",
+            stats.verified_large_pts_solve_policy_eligible);
+    ok = 0;
+    goto cleanup;
+  }
 
   /* The same topology and symbolic estimates with strong diagonals must be
      rejected by the measured pivot gate. */
@@ -23418,6 +23437,11 @@ static int test_pivoted_high_work_single_block_policy(void) {
   explicit_options.orientation = KLS_ORIENTATION_NORMAL;
   explicit_options.ordering = KLS_ORDERING_AMD;
   explicit_options.scale = -1;
+  if (setenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY", "1", 1) != 0) {
+    perror("disable verified large PTS solve policy");
+    ok = 0;
+    goto cleanup;
+  }
   if (!require_ok(kls_create(&explicit_solver),
                   "create pivoted high-work explicit control") ||
       !require_ok(kls_analyze_csc(explicit_solver, KLS_INDEX_INT32, n,
@@ -23440,6 +23464,39 @@ static int test_pivoted_high_work_single_block_policy(void) {
             "explicit pivoted high-work control changed or became eligible\n");
     ok = 0;
   }
+  if (ok &&
+      !require_ok(kls_refactor(explicit_solver, ax_changed),
+                  "refactor verified large PTS fallback")) {
+    ok = 0;
+  }
+  for (int sample = 0; ok && sample < 4; ++sample) {
+    if (!require_ok(kls_solve(explicit_solver, 1, b, 0, x, 0),
+                    "solve verified large PTS fallback")) {
+      ok = 0;
+    }
+  }
+  for (int32_t row = 0; ok && row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "verified large PTS fallback solve mismatch at %d:"
+              " %.17g vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+    }
+  }
+  if (ok) {
+    memset(&stats, 0, sizeof(stats));
+    stats.struct_size = sizeof(stats);
+    if (!require_ok(kls_get_stats(explicit_solver, &stats),
+                    "stats verified large PTS fallback") ||
+        stats.verified_large_pts_solve_policy_eligible != 0) {
+      fprintf(stderr,
+              "verified large PTS fallback ignored its master disable"
+              " (eligible=%d)\n",
+              stats.verified_large_pts_solve_policy_eligible);
+      ok = 0;
+    }
+  }
 cleanup:
   kls_destroy(explicit_solver);
   kls_destroy(negative_solver);
@@ -23457,6 +23514,12 @@ cleanup:
                          saved_race != NULL ? saved_race : "")) {
     ok = 0;
   }
+  if (!restore_env_value(
+        "KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY",
+        had_verified_pts,
+        saved_verified_pts != NULL ? saved_verified_pts : "")) {
+    ok = 0;
+  }
   free(ap);
   free(ai);
   free(ax);
@@ -23468,6 +23531,7 @@ cleanup:
   free(saved_policy);
   free(saved_legacy);
   free(saved_race);
+  free(saved_verified_pts);
   return ok;
 }
 

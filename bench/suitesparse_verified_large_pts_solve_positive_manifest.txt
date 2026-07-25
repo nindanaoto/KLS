@@ -1,0 +1,17 @@
+# Natural matrices observed with a solve-valid large PTS forest.  Eligibility
+# is a property of the installed numeric, so an AUTO race may occasionally
+# retain a different factor whose forest correctly rejects.
+
+ASIC_100k
+ASIC_100ks
+ASIC_320k
+ASIC_320ks
+ASIC_680k
+ASIC_680ks
+G2_circuit
+Raj1
+epb3
+mc2depi
+nxp1
+scircuit
+ss1
