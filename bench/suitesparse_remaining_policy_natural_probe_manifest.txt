@@ -1,0 +1,67 @@
+# Predeclared natural SuiteSparse probe for the remaining policy-evidence gaps.
+# SuiteSparse index timestamp: 31-Oct-2023 18:12:37
+# SuiteSparse index SHA256: 9bc797ab989331afbc9e0e51236d9145c2ac7f76c0913e9677ae07c4913a2aad
+#
+# Selection was fixed before any matrix below was fetched or measured.  Start
+# from real square matrices in each policy's coarse row/density resource
+# envelope, exclude every SuiteSparse group represented by the paper manifest,
+# then choose the lowest-reported-nnz matrix per remaining group.  The existing
+# near-symmetric/dominant-hub focused manifests are also excluded for those two
+# policies so this extension adds new matrices rather than replaying controls.
+# Multiple policy tags mean one predeclared matrix covers several envelopes.
+# The initial manifest followed the audit text's 131,072-row bounded-degree
+# floor.  Its first symbolic-only pass exposed that the implemented resource
+# floor is 65,536; the three otherwise missing least-nnz group representatives
+# below (`ncvxqp3`, `vsp_mod2_pgp2_slptsk`, and `uni_chimera_i2`) were appended
+# before any factor/lifecycle measurements.
+
+shallow_water1  # group=MaxPlanck rows=81920 nnz=327680 density=4.000 policies=medium_spike
+shyy161  # group=Shyy rows=76480 nnz=329762 density=4.312 policies=medium_spike
+me2010  # group=DIMACS10 rows=69518 nnz=335476 density=4.826 policies=medium_spike
+a2nnsnsl  # group=GHS_indef rows=80016 nnz=347222 density=4.339 policies=medium_spike
+onera_dual  # group=Pothen rows=85567 nnz=419201 density=4.899 policies=medium_spike
+epb3  # group=Averous rows=84617 nnz=463625 density=5.479 policies=medium_spike
+lung2  # group=Norris rows=109460 nnz=492564 density=4.500 policies=medium_spike
+uni_chimera_i3  # group=FlowIPM22 rows=100000 nnz=499696 density=4.997 policies=medium_spike
+ncvxqp3  # group=GHS_indef rows=75000 nnz=499964 density=6.666 policies=bounded_degree_amf
+soc-Epinions1  # group=SNAP rows=75888 nnz=508837 density=6.705 policies=medium_spike,bounded_degree_amf
+apache1  # group=GHS_psdef rows=80800 nnz=542184 density=6.710 policies=medium_spike,bounded_degree_amf
+rail_79841  # group=Oberwolfach rows=79841 nnz=553921 density=6.938 policies=medium_spike,bounded_degree_amf
+thermal1  # group=Schmid rows=82654 nnz=574458 density=6.950 policies=medium_spike,bounded_degree_amf
+sx-askubuntu  # group=SNAP rows=159316 nnz=596933 density=3.747 policies=sparse_broad_column_amf
+finan512  # group=Mulvey rows=74752 nnz=596992 density=7.986 policies=medium_spike,bounded_degree_amf
+nd2010  # group=DIMACS10 rows=133769 nnz=625946 density=4.679 policies=sparse_broad_column_amf
+thermomech_TC  # group=Botonakis rows=102158 nnz=711558 density=6.965 policies=medium_spike,bounded_degree_amf
+Baumann  # group=Watson rows=112211 nnz=748331 density=6.669 policies=medium_spike,bounded_degree_amf
+vsp_mod2_pgp2_slptsk  # group=DIMACS10 rows=101364 nnz=778736 density=7.683 policies=bounded_degree_amf
+uni_chimera_i2  # group=FlowIPM22 rows=100000 nnz=797974 density=7.980 policies=bounded_degree_amf
+delaunay_n17  # group=DIMACS10 rows=131072 nnz=786352 density=5.999 policies=high_work_tiny_fringe
+m133-b3  # group=JGD_Homology rows=200200 nnz=800800 density=4.000 policies=sparse_broad_column_amf,medium_spike
+soc-sign-epinions  # group=SNAP rows=131828 nnz=841372 density=6.382 policies=high_work_tiny_fringe,bounded_degree_amf
+ch7-8-b5  # group=JGD_Homology rows=141120 nnz=846720 density=6.000 policies=high_work_tiny_fringe,bounded_degree_amf
+matrix-new_3  # group=Schenk_IBMSDS rows=125329 nnz=893984 density=7.133 policies=medium_spike,bounded_degree_amf
+cont-300  # group=GHS_indef rows=180895 nnz=988195 density=5.463 policies=high_work_tiny_fringe,sparse_broad_column_amf
+Spielman_k100  # group=FlowIPM22 rows=338402 nnz=1025404 density=3.030 policies=sparse_broad_column_amf
+vsp_finan512_scagr7-2c_rlfddd  # group=DIMACS10 rows=139752 nnz=1104040 density=7.900 policies=bounded_degree_amf
+Linux_call_graph  # group=Sorensen rows=324085 nnz=1208908 density=3.730 policies=sparse_broad_column_amf
+language  # group=Tromble rows=399130 nnz=1216334 density=3.047 policies=sparse_broad_column_amf
+c-73  # group=Schenk_IBMNA rows=169422 nnz=1279274 density=7.551 policies=bounded_degree_amf,medium_spike
+thermomech_dM  # group=Botonakis rows=204316 nnz=1423116 density=6.965 policies=high_work_tiny_fringe,bounded_degree_amf
+dblp-2010  # group=LAW rows=326186 nnz=1615400 density=4.952 policies=sparse_broad_column_amf
+lp1  # group=Andrianov rows=534388 nnz=1643420 density=3.075 policies=sparse_broad_column_amf
+Lin  # group=Lin rows=256000 nnz=1766400 density=6.900 policies=high_work_tiny_fringe,bounded_degree_amf,medium_spike
+analytics  # group=Precima rows=303813 nnz=2006126 density=6.603 policies=high_work_tiny_fringe,bounded_degree_amf
+c-big  # group=Schenk_IBMNA rows=345241 nnz=2340859 density=6.780 policies=high_work_tiny_fringe
+helm2d03  # group=GHS_indef rows=392257 nnz=2741935 density=6.990 policies=bounded_degree_amf
+parabolic_fem  # group=Wissgott rows=525825 nnz=3674625 density=6.988 policies=high_work_tiny_fringe,bounded_degree_amf
+debr  # group=AG-Monien rows=1048576 nnz=4194298 density=4.000 policies=sparse_broad_column_amf
+tmt_unsym  # group=CEMW rows=917825 nnz=4584801 density=4.995 policies=sparse_broad_column_amf
+apache2  # group=GHS_psdef rows=715176 nnz=4817870 density=6.737 policies=high_work_tiny_fringe,bounded_degree_amf
+ecology2  # group=McRae rows=999999 nnz=4995991 density=4.996 policies=sparse_broad_column_amf
+tmt_sym  # group=CEMW rows=726713 nnz=5080961 density=6.992 policies=high_work_tiny_fringe,bounded_degree_amf
+amazon-2008  # group=LAW rows=735323 nnz=5158388 density=7.015 policies=bounded_degree_amf
+rgg_n_2_20_s0  # group=DIMACS10 rows=1048576 nnz=13783240 density=13.145 policies=near_symmetric_mega_hub
+in-2004  # group=LAW rows=1382908 nnz=16917053 density=12.233 policies=near_symmetric_mega_hub
+as-Skitter  # group=SNAP rows=1696415 nnz=22190596 density=13.081 policies=near_symmetric_mega_hub
+CurlCurl_4  # group=Bodendiek rows=2380515 nnz=26515867 density=11.139 policies=near_symmetric_mega_hub,giant_dominant_hub
+wikipedia-20060925  # group=Gleich rows=2983494 nnz=37269096 density=12.492 policies=near_symmetric_mega_hub

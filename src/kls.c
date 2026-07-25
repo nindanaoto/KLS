@@ -633,10 +633,13 @@ struct kls_solver {
                                            pre-static METIS adoption */
   int dense_spiked_original_pivot_path; /* dense spike kept the incumbent
                                            pivoted METIS numeric */
+  int medium_spike_minfill_candidate; /* input proposed guarded AMMF/BTF */
   int medium_spike_minfill_path; /* full-diagonal medium spike selected the
                                     retained AMMF numeric */
+  int large_sparse_amf3_candidate; /* input proposed broad-column AMF3 */
   int large_sparse_amf3_path;    /* broad-column sparse diagonal system
                                     passed the AMF3/no-BTF contract */
+  int large_bounded_no_btf_amf_candidate; /* input proposed bounded AMF */
   int large_bounded_no_btf_amf_path; /* bounded-degree diagonal system
                                         passed the one-block AMF contract */
   int partial_diagonal_many_block_no_btf_cycle; /* compact sparse fringe:
@@ -27608,8 +27611,11 @@ static void clear_matrix(kls_solver *solver) {
   solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
   solver->dense_spiked_original_pivot_path = 0;
+  solver->medium_spike_minfill_candidate = 0;
   solver->medium_spike_minfill_path = 0;
+  solver->large_sparse_amf3_candidate = 0;
   solver->large_sparse_amf3_path = 0;
+  solver->large_bounded_no_btf_amf_candidate = 0;
   solver->large_bounded_no_btf_amf_path = 0;
   solver->partial_diagonal_many_block_no_btf_cycle = 0;
   solver->sparse_diagonal_row_hub_no_btf_cycle = 0;
@@ -42582,6 +42588,17 @@ static int kls_sparse_partial_diagonal_amd_btf_cycle(
    the caller's gap to kls_factor and the whole main-side first factor.
    kls_signal_metis_race_values releases the value-dependent stages. */
 static void kls_maybe_start_metis_race(kls_solver *solver) {
+  if (solver != NULL && solver->symbolic != NULL &&
+      solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
+      solver->symbolic->structural_rank < solver->n &&
+      !kls_singular_completion_enabled(solver)) {
+    /* Ordering cannot repair a known structural-rank deficit.  Without an
+       explicit singular-completion request, a background NodeND/scale race
+       has no admissible recurring factor to promote and can make analyze +
+       destroy wait on an otherwise immediate rejection.  Keep the existing
+       race available when completion is deliberate. */
+    return;
+  }
   if (solver->metis_race != NULL || solver->auto_metis_checked ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
@@ -46447,27 +46464,35 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
 #else
   solver->medium_partial_static_metis_path = 0;
 #endif
-  solver->medium_spike_minfill_path =
+  solver->medium_spike_minfill_candidate =
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
     solver->options.ordering == KLS_ORDERING_AUTO &&
     solver->options.scale == KLS_SCALE_AUTO &&
     solver->options.threads == 8 &&
     candidate->orientation == KLS_ORIENTATION_NORMAL &&
-    candidate->selected_ordering == KLS_ORDERING_AMF &&
     getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
     is_medium_full_diagonal_spike_minfill_pattern(
-      candidate->n, candidate->col_ptr, candidate->row_idx) &&
+      candidate->n, candidate->col_ptr, candidate->row_idx);
+  solver->medium_spike_minfill_path =
+    solver->medium_spike_minfill_candidate &&
+    candidate->selected_ordering == KLS_ORDERING_AMF &&
     kls_medium_full_diagonal_spike_minfill_symbolic_contract(
       candidate->n, candidate->symbolic);
-  solver->large_sparse_amf3_path =
+  solver->large_sparse_amf3_candidate =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
     candidate->large_sparse_full_diagonal_amf3_class &&
-    kls_large_sparse_amf3_policy_enabled(&solver->options) &&
+    kls_large_sparse_amf3_policy_enabled(&solver->options);
+  solver->large_sparse_amf3_path =
+    solver->large_sparse_amf3_candidate &&
     kls_large_sparse_amf3_symbolic_contract(
       candidate->n, candidate->orientation,
       candidate->selected_ordering, candidate->symbolic);
-  solver->large_bounded_no_btf_amf_path =
+  solver->large_bounded_no_btf_amf_candidate =
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
     candidate->large_bounded_degree_no_btf_amf_class &&
-    kls_large_bounded_no_btf_amf_policy_enabled(&solver->options) &&
+    kls_large_bounded_no_btf_amf_policy_enabled(&solver->options);
+  solver->large_bounded_no_btf_amf_path =
+    solver->large_bounded_no_btf_amf_candidate &&
     kls_large_bounded_no_btf_amf_symbolic_contract(
       candidate->n, candidate->orientation,
       candidate->selected_ordering, candidate->symbolic);
@@ -161492,6 +161517,43 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->verified_large_pts_solve_policy_eligible)) {
     stats->verified_large_pts_solve_policy_eligible =
       kls_verified_large_pts_solve_policy_eligible(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats, medium_spike_minfill_candidate) +
+        sizeof(stats->medium_spike_minfill_candidate)) {
+    stats->medium_spike_minfill_candidate =
+      solver->medium_spike_minfill_candidate;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, medium_spike_minfill_symbolic_eligible) +
+        sizeof(stats->medium_spike_minfill_symbolic_eligible)) {
+    stats->medium_spike_minfill_symbolic_eligible =
+      solver->medium_spike_minfill_path;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, sparse_broad_column_amf_no_btf_candidate) +
+        sizeof(stats->sparse_broad_column_amf_no_btf_candidate)) {
+    stats->sparse_broad_column_amf_no_btf_candidate =
+      solver->large_sparse_amf3_candidate;
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               sparse_broad_column_amf_no_btf_symbolic_eligible) +
+        sizeof(stats->sparse_broad_column_amf_no_btf_symbolic_eligible)) {
+    stats->sparse_broad_column_amf_no_btf_symbolic_eligible =
+      solver->large_sparse_amf3_path;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, bounded_degree_amf_no_btf_candidate) +
+        sizeof(stats->bounded_degree_amf_no_btf_candidate)) {
+    stats->bounded_degree_amf_no_btf_candidate =
+      solver->large_bounded_no_btf_amf_candidate;
+  }
+  if (copy_size >=
+      offsetof(kls_stats, bounded_degree_amf_no_btf_symbolic_eligible) +
+        sizeof(stats->bounded_degree_amf_no_btf_symbolic_eligible)) {
+    stats->bounded_degree_amf_no_btf_symbolic_eligible =
+      solver->large_bounded_no_btf_amf_path;
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

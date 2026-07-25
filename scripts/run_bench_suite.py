@@ -296,6 +296,11 @@ def main() -> int:
     parser.add_argument("--jsonl", type=pathlib.Path)
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument(
+        "--analyze-only",
+        action="store_true",
+        help="run only symbolic analysis and select the median analysis time",
+    )
+    parser.add_argument(
         "--factor-repeat",
         type=int,
         default=None,
@@ -469,17 +474,20 @@ def main() -> int:
             samples: list[dict[str, object]] = []
             sample_failures: list[str] = []
             for _ in range(args.passes):
-                cmd = [
-                    str(args.kls_bench),
-                    str(matrix),
-                    "--repeat",
-                    str(args.repeat),
-                    "--refactor-repeat",
-                    str(args.refactor_repeat),
-                    "--json",
-                ]
-                if args.factor_repeat is not None:
-                    cmd.extend(["--factor-repeat", str(args.factor_repeat)])
+                cmd = [str(args.kls_bench), str(matrix), "--json"]
+                if args.analyze_only:
+                    cmd.append("--analyze-only")
+                else:
+                    cmd.extend(
+                        [
+                            "--repeat",
+                            str(args.repeat),
+                            "--refactor-repeat",
+                            str(args.refactor_repeat),
+                        ]
+                    )
+                    if args.factor_repeat is not None:
+                        cmd.extend(["--factor-repeat", str(args.factor_repeat)])
                 append_solver_options(cmd, args)
                 try:
                     proc = subprocess.run(
@@ -509,7 +517,11 @@ def main() -> int:
                         + ", ".join(missing_features)
                     )
                     continue
-                sample["spice_cycle_seconds"] = spice_cycle_seconds(sample)
+                if args.analyze_only:
+                    sample["selection_seconds"] = float(sample["analysis_seconds"])
+                else:
+                    sample["spice_cycle_seconds"] = spice_cycle_seconds(sample)
+                    sample["selection_seconds"] = sample["spice_cycle_seconds"]
                 samples.append(sample)
             if not samples:
                 failure = {
@@ -525,11 +537,16 @@ def main() -> int:
                     failure_out.write(json.dumps(failure, sort_keys=True) + "\n")
                     failure_out.flush()
                 continue
-            samples.sort(key=lambda row: float(row["spice_cycle_seconds"]))
+            samples.sort(key=lambda row: float(row["selection_seconds"]))
             row = dict(samples[len(samples) // 2])
-            cycle_samples = [float(sample["spice_cycle_seconds"]) for sample in samples]
-            row["spice_cycle_seconds_samples"] = cycle_samples
-            row["spice_cycle_seconds_median"] = row["spice_cycle_seconds"]
+            selection_samples = [
+                float(sample["selection_seconds"]) for sample in samples
+            ]
+            row["selection_seconds_samples"] = selection_samples
+            row["selection_seconds_median"] = row["selection_seconds"]
+            if not args.analyze_only:
+                row["spice_cycle_seconds_samples"] = selection_samples
+                row["spice_cycle_seconds_median"] = row["spice_cycle_seconds"]
             row["passes_ok"] = len(samples)
             row["passes_failed"] = len(sample_failures)
             rows.append(row)
@@ -537,10 +554,10 @@ def main() -> int:
                 out.write(json.dumps(row, sort_keys=True) + "\n")
                 out.flush()
             if args.passes == 1:
-                print(f"{matrix}: {row['spice_cycle_seconds']:.6g}s")
+                print(f"{matrix}: {row['selection_seconds']:.6g}s")
             else:
                 print(
-                    f"{matrix}: {row['spice_cycle_seconds']:.6g}s "
+                    f"{matrix}: {row['selection_seconds']:.6g}s "
                     f"median of {len(samples)} pass(es)"
                 )
     finally:
@@ -549,12 +566,16 @@ def main() -> int:
         if failure_out is not None:
             failure_out.close()
 
-    cycle_values = [float(row["spice_cycle_seconds"]) for row in rows]
+    selection_values = [float(row["selection_seconds"]) for row in rows]
     summary = {
         "matrices_total": len(matrices),
         "matrices_ok": len(rows),
         "matrices_failed": len(failures),
-        "spice_cycle_geomean_seconds": geometric_mean(cycle_values),
+        (
+            "analysis_geomean_seconds"
+            if args.analyze_only
+            else "spice_cycle_geomean_seconds"
+        ): geometric_mean(selection_values),
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     if failures:

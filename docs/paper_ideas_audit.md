@@ -20458,8 +20458,9 @@ and maximum column degree 65--512. Its actual normal AMF/no-BTF symbolic must
 be one full-size block, have full or unknown structural rank, balanced L/U,
 8--32 factor entries per row, and 512--4,096 estimated operations per row.
 An absolute 600-million-operation ceiling records the current machine's
-factor/setup budget. The bounded-degree proposal uses the same resource order
-range, six--eight entries per row, at least 99.5% diagonal coverage, no empty
+factor/setup budget. The bounded-degree proposal uses a
+65,536--1,048,576-row resource range, six--eight entries per row, at least
+99.5% diagonal coverage, no empty
 row or column, maximum row and column degrees at most 64, and an observed
 maximum degree of at least 32. Its retained one-block AMF symbolic requires
 balanced 8--32-entry-per-row fill and 64--512 operations per row. If either
@@ -20778,3 +20779,77 @@ variability rather than the solve-plan change.
 Final release and leak-enabled ASan/UBSan/LSan CTest runs pass all four tests.
 A sanitized `c-67` replay completed 20 independently checked entrywise updates
 with a `1.52e-16` worst relative-L2 residual and no sanitizer finding.
+
+## Remaining Natural-Policy Probe and Rank-Deficit Race Guard (2026-07-25)
+
+The remaining natural-positive caveats were tested with two frozen SuiteSparse
+strata rather than by expanding a target box until something matched. The
+50-matrix discovery manifest
+`bench/suitesparse_remaining_policy_natural_probe_manifest.txt` selects the
+lowest-reported-nnz real square matrix per remaining non-paper group in
+each coarse policy resource envelope. The 30-matrix
+`bench/suitesparse_remaining_policy_natural_holdout_manifest.txt` applies the
+same premeasurement rule to a disjoint within-group second choice. Both exclude
+paper-corpus groups and existing focused hub controls, and both pin the
+31-Oct-2023 SuiteSparse index with SHA-256
+`9bc797ab989331afbc9e0e51236d9145c2ac7f76c0913e9677ae07c4913a2aad`.
+The discovery list began with 47 entries; its first symbolic screen exposed a
+documentation/implementation mismatch in the bounded-degree row floor, so the
+three missing least-nnz group representatives were appended before factor or
+lifecycle measurements. The disjoint holdout was then frozen before fetch or
+measurement.
+
+New public stats and benchmark JSON now separate a cheap structural proposal
+from the authoritative symbolic verdict for the medium spike, broad-column
+AMF/no-BTF, and bounded-degree AMF/no-BTF routes.
+`kls_bench --structure-only` reports exact clean-CSC diagonal, empty/scalar,
+maximum-degree, and row/column-degree-mismatch metrics without constructing a
+solver; `run_bench_suite.py --analyze-only` selects and summarizes analysis
+time rather than a synthetic numeric cycle. These diagnostics are
+observational on normal runs: the structural scan executes only in
+structure-only mode, while the six policy bits are cached from analysis state
+and make `kls_get_stats` O(1).
+
+All 80 manifest matrices completed symbolic analysis. No medium-spike input
+proposed its shortcut. `Spielman_k100` and `language` proposed the broad-column
+route, while `finan512` and the disjoint `pfinan512` proposed the bounded-degree
+route; all four failed their realized symbolic contracts and resumed ordinary
+AUTO selection. Neither hub policy admitted a symbolic, and all fourteen
+high-work/tiny-fringe resource candidates failed before numeric-factor
+eligibility. In particular, the two Finan patterns select ordinary one-block
+AMD geometry with about 2.84 million L and U entries and 1.257 billion
+estimated operations, outside the bounded AMF work contract. Alternating
+analysis of `pfinan512` measured an 8.65 ms one-time proposal cost, and numeric
+setup then reported singularity, so it supplies rejection evidence rather than
+a lifecycle positive. Tightening the input predicate merely to name that
+symmetric family would make the proposal look cleaner without strengthening
+the representation-level contract.
+
+The screen therefore found no defensible threshold widening. The policies stay
+conservative: the large AMF and high-work factor capabilities still lack a
+second unrelated natural factor-level positive, but they now have disjoint
+natural counterexamples on both sides of their staged contracts. That is an
+evidence limitation, not a reason to grant input dimensions authority over
+realized fill, work, rank, fragmentation, or factor accuracy.
+
+The holdout did expose a generic lifecycle bug in `Gleich/flickr`. Its selected
+symbolic proves structural rank 367,147 below order 820,878, so ordinary setup
+must reject it, but AUTO launched an unabortable background METIS NodeND race
+whose result could never become an admissible factor. Analyze plus destroy
+timed out beyond 300 seconds even though forced AMD/AMF analyses took only a
+few seconds. AUTO now declines the background race when a known
+structural-rank deficit exists and singular completion is disabled. The
+default analyze-only wall time fell to 3.43 seconds (2.45 seconds reported
+analysis), retaining the same AMF incumbent. Explicit
+`KLS_ENABLE_SINGULAR_COMPLETION=1` deliberately keeps the race available.
+
+Finally, seven alternating pinned comparisons against commit `70ff9f7`
+retained exact factor geometry on the original positives. Current/base
+modeled-cycle median ratios were 0.9988 for `transient`, 1.0084 for
+`ASIC_320ks`, 1.0068 for `hvdc2`, and 0.9988 for `ASIC_320k`; paired medians
+stayed within 0.88%, the observed host-noise floor. Thus the diagnostics and
+rank-deficit guard do not trade benchmark performance for broader evidence.
+Final release CTest passed all four tests in 17.99 seconds. The leak-enabled
+ASan/UBSan/LSan build passed all four in 57.68 seconds; a separate sanitized
+`flickr` analyze replay reported 3.56 seconds of analysis, retained its
+AMF/rank-deficient symbolic, and produced no sanitizer finding.

@@ -1493,6 +1493,22 @@ typedef struct kls_stats {
   /* The generic PTS builder proved a large elimination forest, bounded
      serial top, and balanced worker partition suitable for direct adoption. */
   int verified_large_pts_solve_policy_eligible;
+  /* A medium full-diagonal input with one macroscopic column spike proposed
+     the guarded AMMF/BTF ordering. */
+  int medium_spike_minfill_candidate;
+  /* The selected AMMF symbolic also proved the dominant-core, fill, and work
+     contract used by the recurring lifecycle. */
+  int medium_spike_minfill_symbolic_eligible;
+  /* A large full-diagonal sparse input with a bounded broad column proposed
+     the one-block AMF/no-BTF ordering. */
+  int sparse_broad_column_amf_no_btf_candidate;
+  /* The selected one-block AMF symbolic passed its balanced fill/work budget. */
+  int sparse_broad_column_amf_no_btf_symbolic_eligible;
+  /* A large almost-full-diagonal bounded-degree input proposed the guarded
+     one-block AMF/no-BTF ordering. */
+  int bounded_degree_amf_no_btf_candidate;
+  /* The selected one-block AMF symbolic passed its bounded-work contract. */
+  int bounded_degree_amf_no_btf_symbolic_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

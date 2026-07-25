@@ -1,0 +1,42 @@
+# Predeclared disjoint SuiteSparse holdout for the remaining policy-evidence gaps.
+# SuiteSparse index timestamp: 31-Oct-2023 18:12:37
+# SuiteSparse index SHA256: 9bc797ab989331afbc9e0e51236d9145c2ac7f76c0913e9677ae07c4913a2aad
+#
+# Selection was fixed before any matrix below was fetched or measured.  For
+# each policy and SuiteSparse group, select the lowest-reported-nnz real square
+# matrix inside the policy's coarse resource envelope that is not named by any
+# existing bench manifest.  As in the natural-probe stratum, exclude all groups
+# represented by the paper corpus and exclude existing focused hub-policy
+# matrices from the corresponding hub selections.  The result is a disjoint
+# within-group holdout rather than another replay of existing controls.
+
+shallow_water2  # group=MaxPlanck rows=81920 nnz=327680 density=4.000 policies=medium_spike
+ct2010  # group=DIMACS10 rows=67578 nnz=336352 density=4.977 policies=medium_spike
+a0nsdsil  # group=GHS_indef rows=80016 nnz=355034 density=4.437 policies=medium_spike
+uni_chimera_i5  # group=FlowIPM22 rows=100000 nnz=499982 density=5.000 policies=medium_spike
+soc-sign-Slashdot081106  # group=SNAP rows=77357 nnz=516575 density=6.678 policies=medium_spike,bounded_degree_amf
+ford2  # group=GHS_psdef rows=100196 nnz=544688 density=5.436 policies=medium_spike
+ncvxqp7  # group=GHS_indef rows=87500 nnz=574962 density=6.571 policies=bounded_degree_amf
+pfinan512  # group=Mulvey rows=74752 nnz=596992 density=7.986 policies=medium_spike,bounded_degree_amf
+wv2010  # group=DIMACS10 rows=135218 nnz=662922 density=4.903 policies=sparse_broad_column_amf
+thermomech_TK  # group=Botonakis rows=102158 nnz=711558 density=6.965 policies=medium_spike,bounded_degree_amf
+fe_ocean  # group=DIMACS10 rows=143437 nnz=819186 density=5.711 policies=high_work_tiny_fringe
+sx-superuser  # group=SNAP rows=194085 nnz=924886 density=4.765 policies=sparse_broad_column_amf
+caidaRouterLevel  # group=DIMACS10 rows=192244 nnz=1218132 density=6.336 policies=bounded_degree_amf
+c-73b  # group=Schenk_IBMNA rows=169422 nnz=1279274 density=7.551 policies=medium_spike,bounded_degree_amf
+rgg_n_2_17_s0  # group=DIMACS10 rows=131072 nnz=1457506 density=11.120 policies=near_symmetric_mega_hub,giant_dominant_hub
+boyd2  # group=GHS_indef rows=466316 nnz=1500397 density=3.218 policies=sparse_broad_column_amf
+turon_m  # group=GHS_indef rows=189924 nnz=1690876 density=8.903 policies=near_symmetric_mega_hub,giant_dominant_hub
+crashbasis  # group=QLi rows=160000 nnz=1750416 density=10.940 policies=near_symmetric_mega_hub,giant_dominant_hub
+com-Amazon  # group=SNAP rows=334863 nnz=1851744 density=5.530 policies=high_work_tiny_fringe
+loc-Gowalla  # group=SNAP rows=196591 nnz=1900654 density=9.668 policies=near_symmetric_mega_hub,giant_dominant_hub
+para-10  # group=Schenk_ISEI rows=155924 nnz=2094873 density=13.435 policies=near_symmetric_mega_hub
+darcy003  # group=GHS_indef rows=389874 nnz=2097566 density=5.380 policies=high_work_tiny_fringe
+wave  # group=AG-Monien rows=156317 nnz=2118662 density=13.554 policies=near_symmetric_mega_hub
+Stanford  # group=Kamvar rows=281903 nnz=2312497 density=8.203 policies=near_symmetric_mega_hub,giant_dominant_hub
+thermomech_dK  # group=Botonakis rows=204316 nnz=2846228 density=13.931 policies=near_symmetric_mega_hub
+cnr-2000  # group=LAW rows=325557 nnz=3216152 density=9.879 policies=near_symmetric_mega_hub,giant_dominant_hub
+ecology1  # group=McRae rows=1000000 nnz=4996000 density=4.996 policies=sparse_broad_column_amf
+CurlCurl_2  # group=Bodendiek rows=806529 nnz=8921789 density=11.062 policies=near_symmetric_mega_hub,giant_dominant_hub
+flickr  # group=Gleich rows=820878 nnz=9837214 density=11.984 policies=near_symmetric_mega_hub,giant_dominant_hub
+Hardesty1  # group=Hardesty rows=938905 nnz=12143314 density=12.933 policies=near_symmetric_mega_hub

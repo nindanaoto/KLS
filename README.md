@@ -253,7 +253,11 @@ default `kls_bench` uses `--input-index auto`, which passes 32-bit CSC indices
 when the MatrixMarket problem fits the public `KLS_INDEX_INT32` API and falls
 back to 64-bit otherwise; use `--input-index 64` or `--input-index 32` for
 forced A/B runs. Use `--analyze-only` to measure symbolic analysis and ordering
-decisions without running numeric factorization. JSON fields
+decisions without running numeric factorization. Use `--structure-only` to stop
+after MatrixMarket cleanup/deduplication and report exact CSC diagonal coverage,
+empty/scalar row and column counts, maximum row and column degrees, and total
+row/column-degree mismatch. The two diagnostic modes are mutually exclusive.
+JSON fields
 `compact_solve_index_bytes` and `compact_solve_fused_rhs` report whether a
 2- or 4-byte triangular-solve mirror was prepared and whether its public-RHS
 permutation was precomposed; zero index bytes means the native factor storage
@@ -274,7 +278,10 @@ checked rank-completion path can opt in with
 the corresponding degrees of freedom (through matched stored entries when
 available), retains the true values for residual refinement, and carries those
 constraints across refactorization.  `KLS_DISABLE_SINGULAR_COMPLETION=1`
-overrides the opt-in.
+overrides the opt-in. If analysis has already proved a structural-rank deficit
+and completion is not enabled, AUTO also suppresses its background METIS race:
+ordering cannot repair the deficit, and no resulting factor could be adopted.
+The race remains available when singular completion is explicitly enabled.
 
 ### Opt-in lean serial backend
 
@@ -2352,6 +2359,14 @@ core, balanced fill, and full or unknown structural rank. Rejected AMD
 symbolics are freed before normal AUTO selection continues. Set
 `KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH=1` or
 `KLS_DISABLE_AUTO_AMD_SHORTCUT=1` to restore the respective generic fallback.
+The public stats/benchmark JSON expose proposal and post-symbolic verdicts as
+`medium_spike_minfill_candidate`/`medium_spike_minfill_symbolic_eligible`,
+`sparse_broad_column_amf_no_btf_candidate`/
+`sparse_broad_column_amf_no_btf_symbolic_eligible`, and
+`bounded_degree_amf_no_btf_candidate`/
+`bounded_degree_amf_no_btf_symbolic_eligible`. This lets corpus scans separate
+a cheap input-stage near miss from a representation that can actually own the
+recurring lifecycle.
 
 For large paper-style diagonal patterns, `auto` can start directly with METIS
 when the structure is a very-low-degree full diagonal, a sparse full diagonal
@@ -2430,6 +2445,25 @@ Use `--index path/to/ssstats.csv` to regenerate from a pinned SuiteSparse
 metadata snapshot. Generated manifests record the index timestamp and SHA-256;
 `python3 scripts/build_generalization_manifests.py --check` verifies that the
 committed files still match the selected metadata and seed.
+
+Two additional frozen manifests target the remaining large-policy evidence
+gaps rather than the general suite score:
+`bench/suitesparse_remaining_policy_natural_probe_manifest.txt` and the
+disjoint `bench/suitesparse_remaining_policy_natural_holdout_manifest.txt`.
+Both record their SuiteSparse-index snapshot and premeasurement selection
+rules. Run them symbolically without paying for unrelated numeric failures:
+
+```sh
+python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
+  --matrix-dir data/suitesparse \
+  --manifest bench/suitesparse_remaining_policy_natural_holdout_manifest.txt \
+  --analyze-only --threads 8 --timeout 300 \
+  --jsonl build/remaining_policy_holdout_analyze.jsonl
+```
+
+In analyze-only suite mode, `selection_seconds` and the summary geometric mean
+refer to `analysis_seconds`; ordinary suite runs retain the modeled SPICE-cycle
+selection metric.
 
 The default split caps matrices at 300,000 rows and one million entries so it
 stays practical for routine development. A second deterministic 12+12 tier
