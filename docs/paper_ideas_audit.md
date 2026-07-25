@@ -20441,3 +20441,130 @@ work deliberately does not generalize factor selection, PTS refactor, compact
 permutations, or sub-16K dispatch. Release CTest and the leak-enabled
 ASan/UBSan/LSan build both pass all four tests; the generated-policy sanitizer
 smoke completes in 60.16 seconds.
+
+POST-SYMBOLIC AMF AND VALUE-TOLERANCE GENERALIZATION (2026-07-25). Three
+remaining AUTO decisions still began with narrow benchmark coordinates. The
+AMF3/no-BTF proposal used a 300,000--350,000-row, 4--4.5-entry density box
+around `ASIC_320ks`; the bounded-degree AMF/no-BTF proposal used a
+180,000--200,000-row box around `hvdc2`; and the initial `1e-4` pivot
+tolerance used a 1,200--1,700-row, four--five-entry box around `qh1484`.
+These policies had good target evidence, but their input dimensions were the
+authority rather than the representations that later kernels consume.
+
+The two large routes now separate a cheap structural proposal from an
+authoritative post-symbolic contract. The broad-column proposal admits
+131,072--1,048,576-row, full-diagonal inputs with three--six entries per row
+and maximum column degree 65--512. Its actual normal AMF/no-BTF symbolic must
+be one full-size block, have full or unknown structural rank, balanced L/U,
+8--32 factor entries per row, and 512--4,096 estimated operations per row.
+An absolute 600-million-operation ceiling records the current machine's
+factor/setup budget. The bounded-degree proposal uses the same resource order
+range, six--eight entries per row, at least 99.5% diagonal coverage, no empty
+row or column, maximum row and column degrees at most 64, and an observed
+maximum degree of at least 32. Its retained one-block AMF symbolic requires
+balanced 8--32-entry-per-row fill and 64--512 operations per row. If either
+symbolic contract fails, the proposal is freed, its thread-local tuning is
+cleared, and the ordinary AUTO tournament is rerun. Thus topology can no
+longer force the recurring lifecycle by itself.
+
+The new generic diagnostics are
+`KLS_DISABLE_SPARSE_BROAD_COLUMN_AMF_NO_BTF` and
+`KLS_DISABLE_BOUNDED_DEGREE_AMF_NO_BTF`; the former large-path names remain
+compatibility aliases. A scan using stored-zero-independent degree counts
+found only `ASIC_320ks` inside the final broad proposal and only `hvdc2`
+inside the final bounded proposal. The initially nearby held-out
+`Watson/Baumann` input has maximum degree seven and is now rejected before a
+speculative symbolic analysis. This is a natural negative, not a size-based
+exception.
+
+Metamorphic extensions demonstrate admission beyond the old boxes. Appending
+32,768 independent diagonal blocks to `ASIC_320ks` raises its order to
+354,439 while leaving the accepted AMF work at 559.3 million operations. In
+three same-executable generic/disabled pairs, median modeled H100 cycle fell
+from 3.5393 to 1.7099 seconds; the generic factor retained one AMF block and
+machine-precision residuals. Appending 32,768 weakly coupled nodes instead
+raises proposed AMF work to 617.8 million. An early version admitted it and a
+100-update run reached a `6.97e-8` residual, so the work ceiling was added.
+The final guard rejects that factor and reproduces ordinary AMD/BTF geometry:
+249 blocks, a 353,603-row core, about 1.166 billion operations, and a
+`3.82e-15` residual. The negative therefore changed the contract rather than
+being waived as an outlier.
+
+The analogous 32,768-node coupled extension of `hvdc2` has 222,628 rows,
+outside the former upper bound, and passes the bounded symbolic contract. Its
+three-pair median modeled cycle is 0.5962 seconds versus 1.6482 seconds with
+the generic policy disabled. The accepted factor is one AMF block with 43.37
+million measured operations and a roughly `3.3e-16` terminal residual; the
+ordinary AMD/BTF fallback has 69 blocks and a roughly `4.3e-14` terminal
+residual. Original and extended large positives completed 100 independently
+checked value updates at amplitudes 0.001, 0.01, and 0.1. Worst residuals were
+`6.04e-15` for the broad-column cohort and `1.08e-13` for the bounded-degree
+cohort.
+
+The original benchmark paths retain exact geometry. `ASIC_320ks` remains a
+normal, scale-zero, one-block AMF factor with 1,861,939/1,882,867 L/U entries,
+553.6 million measured operations, and no off-diagonal pivots. Seven
+high-priority alternating parent/current H100 pairs had all-sample median
+cycles of 1.8123 and 1.6858 seconds respectively; worker-preemption outliers
+occurred in both arms, while the central clean cluster was within about one
+percent. `hvdc2` remains normal AMF, scale `-1`, one block,
+1,350,666/1,335,108 entries, 45.27 million estimated operations, and 12
+off-diagonal pivots. Across twelve alternating samples collected in two
+series, current/parent modeled-cycle medians were 0.5460/0.5438 seconds
+(`1.004x`), which is neutral at the observed scheduling noise floor.
+
+The small tolerance policy now asks why `1e-4` helps. For an ordinary normal
+AMD/scale-`-1` fragmented factor, it validates the symbolic permutations and
+BTF ranges, then counts preferred symbolic diagonals whose magnitude is at
+least `1e-4` but below `1e-3` of their active block-column maximum. Admission
+requires at least 16 crossings and at least one per 64 rows, a 75% dominant
+core, a fringe represented by separate BTF blocks, balanced 4--32-entry fill,
+and at most 512 estimated operations per row. The 65,535-row ceiling is the
+compact-index resource boundary. `qh1484` has 40 crossings against a
+24-crossing requirement and retains its exact 70-off-diagonal-pivot,
+5,691/5,801-entry factor. Eight other local candidates in the broad resource
+range reject, including `Kaufhold`, whose 24 crossings are below its required
+137. `KLS_DISABLE_VALUE_TOLERANCE_CROSSING_POLICY` restores the requested
+tolerance and `KLS_TRACE_INITIAL_TOLERANCE_CROSSINGS` exposes the count.
+
+Appending 256 diagonal blocks raises `qh1484` to 1,740 rows, outside the old
+box. The generic value capability still finds 40 crossings, selects `1e-4`,
+and retains 70 off-diagonal pivots; the disabled arm selects `0.001` and takes
+137. Ten same-binary comparisons put their modeled-cycle medians within 0.7%
+of each other, while 100 independently verified updates stayed below
+`1.76e-16`. Twenty alternating parent/current comparisons on the original
+benchmark likewise differed by about 0.2% in median modeled cycle. The
+generalization therefore preserves performance without claiming a material
+speedup for this cache-sized case.
+
+A separate Rommes/BIPS audit found that the old `bips98` lean classifier was
+not merely narrow but unreachable in the current selected factors. It
+required 1,200--2,700 BTF blocks and a 75--85% core, whereas all current BIPS
+targets are selected by the generic partial-diagonal no-BTF policy as one
+block. No local 7,000--12,000-row matrix matched it. The dead classifier,
+direct off-diagonal refresh, and its downstream branches were removed rather
+than generalized. `bips98_1142` and `bips98_606` retain exact ordering, scale,
+factor counts, off-diagonal pivots, and row-refactor path; 100 checked updates
+remain below `1.74e-16`.
+
+One proposed cleanup was deliberately rejected. Replacing the remaining
+`ASIC_100ks` sparse-100K PTS width clause with the otherwise generic
+sparse-symmetric-fragmented factor capability produced an initial alternating
+series with a 1.72-second current median versus 1.19 seconds for the frozen
+parent, and three of five current runs ended near `1.17e-11` rather than
+machine precision. Later runs showed substantial host-induced parallel
+dispersion in both binaries, so the evidence could not prove the replacement
+safe. The generic change was removed and the exact sparse-100K clause remains.
+The final build restores its 249-block, 98,843-row-core geometry and completed
+100 checked updates with a `3.23e-15` worst residual. This is the principal
+remaining benchmark-dependent decision and should be revisited only with a
+stable independent PTS schedule/accuracy signal, not a wider size box.
+
+Release CTest passes all four tests in 19.50 seconds. A fresh
+ASan/UBSan/LSan rebuild also passes all four in 61.59 seconds, including the
+generated-policy smoke suite. The retained limitations are explicit: the two
+large AMF policies have strong out-of-box metamorphic positives but no second
+natural-family positive, the small tolerance capability is performance
+neutral rather than faster on its extension, and the sparse-100K PTS gate is
+still benchmark-shaped because the attempted factor-capability replacement
+did not clear the no-regression bar.
