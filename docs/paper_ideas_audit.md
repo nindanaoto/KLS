@@ -20694,7 +20694,7 @@ may use the 45% solve-top bound only when the dominant block has at least
 16,384 columns, the top is above 30% but no more than 45% of entry-weighted
 work, shared-top columns are at most 2% of the block, there are at least four
 independent chunks per worker, and the heaviest worker bin is no more than
-1.25 times average private work. Existing wide and very-wide policy routes are
+1.20 times average private work. Existing wide and very-wide policy routes are
 untouched. Refactor PTS remains gated independently by flop-weighted top work.
 The exact sparse-100K helper is gone. The explicit-METIS behavior that also
 depended on it is preserved by a separate callback-block capability: a
@@ -20736,3 +20736,45 @@ passes all four tests in 18.91 seconds, and the fresh ASan/UBSan/LSan build
 passes all four in 59.68 seconds. A leak-enabled sanitized replay of the
 105,390-row holdout also completed eight checked changes below `2.79e-15`
 without a sanitizer finding.
+
+The remaining natural-family caveat was tested with a predeclared twelve-matrix
+SuiteSparse extension: real, square, structurally symmetric matrices with
+50,000--300,000 rows, four--twelve reported nonzeros per row in the collection
+index, and orders outside the deleted 95,000--105,000 interval. The independent
+positive is `Schenk_IBMNA/c-67`. Its AUTO factor has a 57,293-column dominant
+block, 3,595 chunks, 706 shared-top columns, 32.67% entry-weighted top work,
+and an 8.42% heaviest bin. The frozen parent builds the same 342-block factor
+with 616,152/571,351 entries and 33,444,339 operations but cannot select PTS.
+Seven final alternating 100-update pairs measured 0.732ms versus 0.364ms
+median steady changed solves and a 0.9436 current/parent paired modeled-cycle
+ratio. Current and parent worst residuals were `1.61e-16` and `1.67e-16`.
+This is a natural optimization
+matrix from an unrelated SuiteSparse group, not a relabeling or extension of
+the motivating circuit.
+
+The extension also exposed a false positive before it could become supporting
+evidence. Explicit-METIS `Rajat/rajat25`, at 87,190 rows, produced a valid
+83,463-column plan with 786 chunks, 955 top columns, 39.09% top work, and a
+9.33% heaviest bin. The old 1.25 balance bound admitted it, but nine
+alternating 100-update pairs put the direct-PTS/current modeled cycle at
+1.3093 of the serial/frozen parent; median changed solve rose from 1.694ms to
+2.293ms. Factor geometry was identical. Its heaviest bin is 1.225 times the
+average private share, whereas `c-67`, `ASIC_100ks`, and the 105,390-row
+holdout measure about 1.000, 1.181, and 1.155. Tightening the schedule proof
+from 1.25 to 1.20 therefore rejects the observed loser using realized worker
+balance rather than matrix identity.
+
+Seven post-fix `rajat25` pairs retained the exact factor, reported direct-PTS
+eligibility zero in both arms, matched steady changed solves at 1.741ms versus
+1.739ms, and had a 0.9936 paired modeled-cycle ratio; worst residual was
+`1.47e-13` in both. A clean nine-round three-way `ASIC_100ks` comparison put
+the tightened build at 0.9966 of the pre-tightening executable and 0.9617 of
+the frozen parent by paired modeled-cycle medians. All three retained the same
+249-block, 1,455,321/1,455,321-entry, 505,636,401-operation factor and direct
+PTS route. The shared rare `1.30e-9` changed-value excursion reappeared in all
+three executables, consistent with the previously recorded factor/refactor
+variability rather than the solve-plan change.
+
+Final release and leak-enabled ASan/UBSan/LSan CTest runs pass all four tests.
+A sanitized `c-67` replay completed 20 independently checked entrywise updates
+with a `1.52e-16` worst relative-L2 residual and no sanitizer finding.

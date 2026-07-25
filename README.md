@@ -4538,8 +4538,8 @@ recorded separately in
 The discovery pass covered 52 natural paper-union matrices and 75 matrices
 from the generic development/holdout suites.  Every previously unclassified
 solve-valid plan that completed the old independent timing consultation chose
-PTS; none declined it.  The positives span the Sandia family plus `Raj1`,
-`G2_circuit`, `mc2depi`, `nxp1`, `ss1`, `scircuit`, and the natural
+PTS; none declined it.  That pass's positives span the Sandia family plus
+`Raj1`, `G2_circuit`, `mc2depi`, `nxp1`, `ss1`, `scircuit`, and the natural
 cross-family `Averous/epb3`.  Nearby controls such as `rajat21`, `rajat24`,
 `transient`, `mac_econ_fwd500`, and `shallow_water1` stop at stream, forest,
 shared-top, or plan-construction gates.
@@ -4568,7 +4568,7 @@ After the ordinary stream and forest proof, a previously unauthorized plan
 may extend the solve top from 30% to 45% only when its block has at least
 16,384 columns, its shared top spans at most 2% of those columns, it exposes at
 least four independent chunks per worker, and its heaviest worker bin is at
-most 1.25 times the average private work.  Existing family-authorized wide
+most 1.20 times the average private work.  Existing family-authorized wide
 plans are unchanged.  The resulting large plan still uses the same direct
 verified-PTS policy; the stricter flop-weighted refactor gate remains separate.
 
@@ -4583,6 +4583,28 @@ modeled cycle from `1.4398s` to `1.3099s`.  On the original `ASIC_100ks`, 20
 final AUTO samples preserved the exact factor and direct PTS route; the
 generic/frozen medians were within 0.36%, while the 10%-trimmed mean favored
 the generic build by 0.6%.
+
+A predeclared twelve-matrix natural SuiteSparse probe set now supplies the
+previously missing unrelated-family positive.  AUTO `Schenk_IBMNA/c-67` has a
+57,293-column core, 3,595 independent chunks, 706 shared-top columns, 32.67%
+top work, and an 8.42% heaviest bin.  It is outside the deleted input box and
+selects the measured certificate directly.  Seven final alternating H100
+pairs preserved the parent's exact 616,152/571,351-entry factor and reduced
+the median changed solve from 0.732ms to 0.364ms; the paired modeled-cycle
+ratio was 0.9436 and all 100-update residuals stayed below `1.61e-16`.  The
+probe cohort is recorded in
+`bench/suitesparse_balanced_wide_pts_natural_probe_manifest.txt`.
+
+That same pass found a useful counterexample.  Explicit-METIS `rajat25`
+initially passed the 1.25 private-bin bound with 39.09% top work but a 1.225x
+heaviest-bin skew; direct PTS regressed nine paired modeled cycles by a 1.3093
+median despite identical factors.  Tightening the generic balance proof to
+1.20 rejects that direct-solve adoption while retaining `c-67`, `ASIC_100ks`,
+and the coupled holdout.  Seven post-fix pairs restored `rajat25` to its
+serial route and a 0.9936 paired cycle ratio.  Nine clean three-way target
+rounds put the post-fix build at 0.9966 of the pre-tightening build and 0.9617
+of the frozen parent, with identical `ASIC_100ks` factor geometry and PTS
+eligibility.
 
 The compact 1K circuit helper has also been removed from orientation,
 tolerance, thread-count, and lean-refactor selection.  The ordinary small

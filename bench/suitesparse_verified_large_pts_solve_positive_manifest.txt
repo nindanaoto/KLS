@@ -10,6 +10,7 @@ ASIC_680k
 ASIC_680ks
 G2_circuit
 Raj1
+c-67
 epb3
 mc2depi
 nxp1

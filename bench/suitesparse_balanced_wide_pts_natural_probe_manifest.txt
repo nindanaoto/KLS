@@ -1,0 +1,21 @@
+# Predeclared natural SuiteSparse probes for the moderately-wide PTS
+# certificate.  Selection preceded execution of the cohort.
+#
+# Source index: SuiteSparse sstats.csv, 31-Oct-2023 18:12:37
+# SHA256: 9bc797ab989331afbc9e0e51236d9145c2ac7f76c0913e9677ae07c4913a2aad
+# Filters: real square structurally symmetric matrices; rows=50000..300000;
+# index nnz/row=4..12; rows outside the deleted 95000..105000 input interval.
+# Groups and application kinds are independent of Sandia.
+
+loc-Brightkite  # group=SNAP rows=58228 nnz=428156 kind=undirected graph
+3D_51448_3D  # group=Schenk_IBMSDS rows=51448 nnz=537038 kind=semiconductor device problem
+delaunay_n16  # group=DIMACS10 rows=65536 nnz=393150 kind=undirected graph
+c-67  # group=Schenk_IBMNA rows=57975 nnz=530229 kind=optimization problem sequence
+rail_79841  # group=Oberwolfach rows=79841 nnz=553921 kind=model reduction problem
+thermal1  # group=Schmid rows=82654 nnz=574458 kind=thermal problem
+tandem_dual  # group=Pothen rows=94069 nnz=460493 kind=structural problem
+matrix-new_3  # group=Schenk_IBMSDS rows=125329 nnz=893984 kind=semiconductor device problem
+delaunay_n17  # group=DIMACS10 rows=131072 nnz=786352 kind=undirected graph
+c-73  # group=Schenk_IBMNA rows=169422 nnz=1279274 kind=optimization problem sequence
+cont-300  # group=GHS_indef rows=180895 nnz=988195 kind=optimization problem
+Lin  # group=Lin rows=256000 nnz=1766400 kind=structural problem

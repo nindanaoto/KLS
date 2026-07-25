@@ -151212,11 +151212,14 @@ static int kls_balanced_wide_pts_solve_plan_eligible(
   double total,
   double top_work,
   double max_bin) {
+  /* With more than 30% of solve work already serialized in the shared top,
+     a 25% private-bin skew can erase the remaining parallel gain on sparse
+     factors.  Keep the slowest private bin within 20% of the ideal share. */
   return !already_authorized && nk >= 16384u &&
     nchunks >= 4 * (int64_t)nthreads &&
     ntop <= (int64_t)(nk / 50u) && total > 0.0 &&
     top_work > 0.30 * total && top_work <= 0.45 * total &&
-    max_bin * (double)nthreads <= 1.25 * (total - top_work);
+    max_bin * (double)nthreads <= 1.20 * (total - top_work);
 }
 
 static void kls_pts_free(kls_solver *solver) {
