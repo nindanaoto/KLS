@@ -1,0 +1,10 @@
+# Development family for the high-work tiny-fringe BTF/PTS factor policy.
+# ASIC_320k is the motivating positive.  The remaining Sandia rows separate
+# order, density, selected ordering/scale, and BTF-fringe geometry.
+
+ASIC_320k
+ASIC_100k
+ASIC_100ks
+ASIC_320ks
+ASIC_680k
+ASIC_680ks

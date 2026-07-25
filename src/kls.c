@@ -32311,46 +32311,71 @@ static int kls_low_work_tiny_block_btf_factor_profile(
       2.0 * (double)solver->numeric->lnz;
 }
 
-/* Large, lightly fragmented circuit with one dominant BTF component and a
-   balanced subtree-solve forest.  This envelope has one member in the
-   110-matrix paper union (ASIC_320k); the closely sized ASIC_320ks is a
-   single-block, lower-degree pattern and deliberately does not match.
-
-   The retained AMF/scale-0 numeric wins every measured ordering/scale arm.
-   Re-running synchronous METIS and three scale factors on the first changed
-   input therefore adds about 2.3 seconds without changing the winner.  Its
-   verified PTS split has a 35.5% entry-weighted top and cuts the repeated
-   solve from roughly 3.6 to 2.1 ms, while the few Algorithm 5 prefactors add
-   about 0.5 ms to the EGraph refactor.  Pair/quad dispatch, the lower batch
-   floor, and padded panels also lose their completed timing consultations.
-   Keep these horizon decisions on the same post-factor structural/numeric
-   contract. */
-static int kls_is_asic320k_dominant_btf_cycle(
+/* A sparse, high-work min-fill factor with a tiny mixed-component BTF fringe
+   can expose a useful subtree solve even though its EGraph numeric update
+   remains the recurring refactor winner.  Admit that retained resource state
+   from normalized symbolic and numeric evidence: the factor must be balanced,
+   full-rank, unscaled, pivot-stable, and have both a 1/512--1/256 fringe and
+   2,048--4,096 operations per row.  The PTS builder independently validates
+   its actual forest before any solve is routed through it. */
+static int kls_high_work_tiny_fringe_btf_pts_factor_cycle(
   const kls_solver *solver) {
   if (solver == NULL || solver->col_ptr == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL ||
+      getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_BTF_PTS_POLICY") != NULL ||
       solver->options.orientation != KLS_ORIENTATION_AUTO ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale != KLS_SCALE_AUTO ||
       solver->options.backend != KLS_BACKEND_AUTO ||
-      solver->options.threads != 8 ||
+      solver->options.threads != 8 || !solver->options.use_btf ||
+      !solver->options.static_pivoting ||
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->stats.selected_ordering != KLS_ORDERING_AMF ||
-      solver->common.scale != 0 || solver->numeric->Rs != NULL ||
-      solver->n < 300000u || solver->n > 350000u ||
+      (solver->stats.selected_ordering != KLS_ORDERING_AMD &&
+       solver->stats.selected_ordering != KLS_ORDERING_AMF) ||
+      (solver->common.scale != -1 && solver->common.scale != 0) ||
+      solver->numeric->Rs != NULL ||
+      solver->n < 131072u || solver->n > 1048576u ||
+      solver->n > UF_long_max / 512u ||
       solver->nnz < 5u * solver->n || solver->nnz > 7u * solver->n ||
       solver->col_ptr[solver->n] != solver->nnz ||
       !solver->symbolic->do_btf ||
       solver->symbolic->structural_rank != solver->n ||
-      solver->symbolic->nblocks < 300u ||
-      solver->symbolic->nblocks > 500u ||
-      solver->symbolic->maxblock * 100u < 99u * solver->n) {
+      solver->symbolic->nblocks < 2u ||
+      solver->symbolic->maxblock >= solver->n ||
+      !(solver->symbolic->lnz > 0.0) ||
+      !(solver->symbolic->unz > 0.0) ||
+      !(solver->symbolic->est_flops > 0.0) ||
+      (solver->common.noffdiag == KLS_KLU_EMPTY &&
+       !solver->numeric_is_predicted) ||
+      (solver->common.noffdiag != KLS_KLU_EMPTY &&
+       512u * solver->common.noffdiag > solver->n) ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.flops > 0.0)) {
     return 0;
   }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  return fill >= 3500000u && fill <= 5000000u &&
-         solver->common.flops >= 5.0e8 &&
-         solver->common.flops <= 1.2e9;
+  const UF_long fringe = solver->n - solver->symbolic->maxblock;
+  const UF_long fringe_blocks = solver->symbolic->nblocks - 1u;
+  const double n = (double)solver->n;
+  const double symbolic_fill =
+    solver->symbolic->lnz + solver->symbolic->unz;
+  const double numeric_fill =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  return 512u * fringe >= solver->n && 256u * fringe <= solver->n &&
+    fringe_blocks <= fringe && 16u * fringe_blocks >= fringe &&
+    symbolic_fill >= 10.0 * n && symbolic_fill <= 16.0 * n &&
+    solver->symbolic->est_flops >= 2048.0 * n &&
+    solver->symbolic->est_flops <= 4096.0 * n &&
+    solver->symbolic->lnz <= 2.0 * solver->symbolic->unz &&
+    solver->symbolic->unz <= 2.0 * solver->symbolic->lnz &&
+    numeric_fill >= 10.0 * n && numeric_fill <= 16.0 * n &&
+    solver->common.flops >= 2048.0 * n &&
+    solver->common.flops <= 4096.0 * n &&
+    (double)solver->numeric->lnz <=
+      2.0 * (double)solver->numeric->unz &&
+    (double)solver->numeric->unz <=
+      2.0 * (double)solver->numeric->lnz;
 }
 
 static int kls_moderate_fragmented_egraph_policy_disabled(void) {
@@ -42681,7 +42706,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
   if (kls_large_low_degree_fragmented_btf_shape(solver)) {
     return 0;
   }
-  if (kls_is_asic320k_dominant_btf_cycle(solver)) {
+  if (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver)) {
     return 0;
   }
   if (kls_sparse_spiked_predicted_factor_cycle(solver)) {
@@ -43146,7 +43171,7 @@ static int should_try_auto_metis(const kls_solver *solver) {
   if (kls_fragmented_medium_dominant_btf_shape(solver)) {
     return 0;
   }
-  if (kls_is_asic320k_dominant_btf_cycle(solver)) {
+  if (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver)) {
     return 0;
   }
   if (kls_dense_reciprocal_hub_metis_symbolic_cycle(solver)) {
@@ -109486,7 +109511,7 @@ static int kls_egraph_algorithm5_prefactor_update_requested(
   if (kls_medium_partial_static_metis_adopted(solver)) {
     return 0;
   }
-  if (kls_is_asic320k_dominant_btf_cycle(solver)) {
+  if (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver)) {
     return 0;
   }
   if (kls_dense_reciprocal_hub_metis_factor_cycle(solver)) {
@@ -113138,7 +113163,8 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       kls_sparse_spiked_predicted_clustered_cycle(solver) ||
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
       kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
-      (kls_is_asic320k_dominant_btf_cycle(solver) &&
+      (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
+       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL &&
        getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
       kls_extreme_symmetric_single_block_cycle(solver)) {
     /* These retained numeric classes have already selected full width, while
@@ -151379,7 +151405,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL ||
     kls_pivoted_high_work_single_block_factor_cycle(solver) ||
     kls_medium_partial_static_metis_adopted(solver) ||
-    kls_is_asic320k_dominant_btf_cycle(solver) ||
+    kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) ||
     solver->large_sparse_amf3_path ||
     (kls_is_sparse_100k_nd_refine_pattern(solver->n, solver->col_ptr) &&
      symbolic->nblocks >= 100u && symbolic->nblocks <= 500u &&
@@ -151402,7 +151428,8 @@ static void kls_pts_try_build(kls_solver *solver) {
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ? 0.9 :
       (kls_hybrid_huge_single_egraph_factor_cycle(solver) ||
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) ? 1.0 :
-      (kls_is_asic320k_dominant_btf_cycle(solver) &&
+      (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
+       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_PTS_CUT") == NULL &&
        getenv("KLS_DISABLE_ASIC320K_PTS_CUT") == NULL) ? 1.5 :
       (solver->large_sparse_amf3_path ? 1.5 : 2.0);
     {
@@ -151620,7 +151647,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     solver->pts = pts;
     if ((kls_medium_partial_static_metis_adopted(solver) ||
          kls_extreme_symmetric_single_block_cycle(solver) ||
-         kls_is_asic320k_dominant_btf_cycle(solver) ||
+         kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) ||
          kls_pivoted_high_work_single_block_factor_cycle(solver) ||
          kls_low_work_many_fringe_dominant_btf_pts_factor_cycle(solver) ||
          kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
@@ -153182,8 +153209,6 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
        !kls_compact_amf_two_block_factor_cycle(solver) &&
        !kls_moderate_work_single_block_lean_policy_enabled(solver) &&
        !kls_low_work_single_block_policy_enabled(solver) &&
-       !(kls_is_asic320k_dominant_btf_cycle(solver) &&
-         getenv("KLS_DISABLE_ASIC320K_PTS_RECIP") == NULL) &&
        solver->i16solve_singleton_run == NULL &&
        solver->i32solve_singleton_run == NULL)) {
     return 0;
@@ -153422,7 +153447,8 @@ static int kls_i32_solve_ready(kls_solver *solver) {
       free(urows);
     }
   }
-  if ((kls_is_asic320k_dominant_btf_cycle(solver) &&
+  if ((kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
+       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM") == NULL &&
        getenv("KLS_DISABLE_ASIC320K_COMPACT_PERM") == NULL) ||
       (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
        getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_PERM") == NULL &&
@@ -153443,12 +153469,10 @@ static int kls_i32_solve_ready(kls_solver *solver) {
       free(q32);
     }
   }
-  if ((kls_is_asic320k_dominant_btf_cycle(solver) &&
-       getenv("KLS_DISABLE_ASIC320K_COMPACT_STREAM_META") == NULL) ||
-      (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
+  if (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
        getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_STREAM_META") ==
          NULL &&
-       getenv("KLS_DISABLE_ASIC100K_COMPACT_STREAM_META") == NULL)) {
+       getenv("KLS_DISABLE_ASIC100K_COMPACT_STREAM_META") == NULL) {
     uint32_t *llen32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*llen32));
     uint32_t *ulen32 = (uint32_t *)malloc(
@@ -158501,7 +158525,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_pivoted_high_work_single_block_factor_cycle(solver) ||
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
        kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
-       (kls_is_asic320k_dominant_btf_cycle(solver) &&
+       (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
+        getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL &&
         getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->floor_choice == 0) {
@@ -158513,7 +158538,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_pivoted_high_work_single_block_factor_cycle(solver) ||
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
        kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
-       (kls_is_asic320k_dominant_btf_cycle(solver) &&
+       (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
+        getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL &&
         getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->padded_choice == 0) {
@@ -161288,6 +161314,13 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
         sizeof(stats->giant_dominant_hub_metis_dense_tail_factor_eligible)) {
     stats->giant_dominant_hub_metis_dense_tail_factor_eligible =
       kls_giant_dominant_hub_metis_dense_tail_factor_cycle(solver);
+  }
+  if (copy_size >=
+      offsetof(kls_stats,
+               high_work_tiny_fringe_btf_pts_factor_eligible) +
+        sizeof(stats->high_work_tiny_fringe_btf_pts_factor_eligible)) {
+    stats->high_work_tiny_fringe_btf_pts_factor_eligible =
+      kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

@@ -4430,6 +4430,86 @@ residuals (`4.12e-16` and `7.37e-17`). No SuiteSparse coordinate replaces the
 deleted box. Release and leak-enabled ASan/UBSan/LSan CTest pass all four
 tests.
 
+## High-work tiny-fringe BTF/PTS factor lifecycle
+
+The former `ASIC_320k` post-factor selector is now a normalized resource
+capability.  The old selector required scale 0, but the current AUTO factor of
+the motivating matrix selects scale `-1`; instrumenting all 24 calls across
+three changed-value updates showed that the old policy was dormant.  The new
+gate therefore does more than rename an active benchmark exception.
+
+Under the standard AUTO, eight-worker, BTF, static-pivoting contract, the
+installed numeric must use normal AMD or AMF with no scale vector, cover
+131,072--1,048,576 rows at five--seven stored entries per row, and have full
+structural rank.  Its dominant BTF block must leave a fringe between `n/512`
+and `n/256`; the remaining block count must be between one per sixteen fringe
+rows and one per fringe row.  Both symbolic and measured L+U fill must be
+balanced within 2x and total 10--16 entries per row.  Estimated and measured
+work must each lie between 2,048 and 4,096 operations per row, with no pivot
+nudge or perturbation and at most `n/512` known off-diagonal pivots.  A
+predicted first factor may defer the last pivot count until it is installed.
+
+That factor evidence authorizes only the retained decisions supported by the
+component controls: skip redundant scale/METIS consultations, decline the
+Algorithm-5 prefactor update, settle the EGraph width/floor probes, admit the
+wider PTS forest and its 1.5 cut, select a validated PTS solve directly, and
+store the solve permutations in 32-bit form.  The PTS builder still verifies
+the actual elimination forest, shared top, and worker balance before the solve
+can be selected.  ASIC-specific reciprocal and compact-stream metadata choices
+were removed because isolated measurements showed no benefit.
+
+Set `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_BTF_PTS_POLICY=1` for a same-binary
+fallback.  Generic component controls are
+`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES`,
+`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_PTS_CUT`, and
+`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM`; the former ASIC-named
+component spellings remain compatibility aliases.  `kls_stats` and both
+benchmark JSON modes expose
+`high_work_tiny_fringe_btf_pts_factor_eligible`.
+
+The Sandia development family demonstrates independent rejections:
+`ASIC_100k` and `ASIC_100ks` fall below the order floor and select METIS;
+`ASIC_320ks` has one block; and the `ASIC_680k` variants have a much larger
+fringe or select METIS.  Cross-family controls `scircuit`, `Raj1`, `transient`,
+`rajat24`, `nxp1`, and `mac_econ_fwd500` all report zero for independent work,
+fringe, block-count, fill, or scale reasons.  The corresponding development
+and holdout manifests live under `bench/`.
+
+Two generated positives remove the original coordinate.  A complete
+simultaneous relabeling keeps 321,821 rows but changes AUTO from AMF to AMD and
+changes measured fill/work to 2,120,493 L and U entries and 924.6 million
+operations; it remains eligible and completes 100 checked updates with a
+`3.71e-15` worst relative-L2 residual.  Appending 32,768 weakly coupled nodes
+produces a 354,589-row, 2,030,132-entry matrix outside the old row ceiling.  It
+selects AMD, has 105 blocks with a 353,691-row core, measures 2,290,549 L and U
+entries and 1.152 billion operations, and also remains eligible.  In contrast,
+appending the same number of independent diagonal blocks creates a 33,663-row
+fringe and reports zero.  Appending 131,072 coupled nodes changes the selected
+factor to a scale-2 single block and likewise rejects, showing that extension
+alone is not sufficient.
+
+Final pinned same-binary measurements use 100 deterministic entrywise 0.1%
+updates and independently verify every generation.  Because refactor times on
+the shared host have occasional multi-fold outliers in both arms, the table
+reports medians rather than selected runs:
+
+| matrix / policy | samples | steady refactor | steady changed solve | modeled 100-state cycle |
+| --- | ---: | ---: | ---: | ---: |
+| `ASIC_320k`, enabled | 7 | 13.88 ms | 3.65 ms | 2.99 s |
+| `ASIC_320k`, disabled | 5 | 24.67 ms | 6.04 ms | 4.28 s |
+| coupled +32,768, enabled | 6 | 16.29 ms | 4.20 ms | 2.90 s |
+| coupled +32,768, disabled | 5 | 21.32 ms | 6.56 ms | 3.82 s |
+
+Factor geometry is identical between enabled and disabled arms.  All six
+enabled moved-size sweeps stay below `2.97e-15`; six of seven enabled target
+sweeps stay below `2.80e-15`.  One target sweep reached `2.85e-9`, matching a
+rare EGraph/refactor residual excursion also observed in frozen and disabled
+controls, so it is recorded as shared variability rather than hidden from the
+result.  The remaining evidence limit is explicit: the positives outside the
+original coordinate are metamorphic, while the natural SuiteSparse matrices
+are rejection controls.  A natural cross-family full-factor positive would be
+needed before widening this already normalized envelope.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

@@ -20269,3 +20269,88 @@ matrix setup error, so retiring the performance selector does not alter the
 mathematical completion contract. Release CTest passes all four tests; the
 leak-enabled ASan/UBSan/LSan build also passes all four, including the
 59.89-second generated-policy smoke suite.
+
+HIGH-WORK TINY-FRINGE BTF/PTS FACTOR GENERALIZATION (2026-07-25). The residual
+ASIC_320k helper was a post-factor envelope over 300,000--350,000 rows,
+five--seven entries per row, 300--500 BTF blocks, a 99% dominant block,
+3.5--5.0 million factor entries, and 0.5--1.2 billion operations. Although it
+did not compare an exact matrix identity, ASIC_320k was its only paper-union
+member. More importantly, the helper required AMF and scale 0. GDB probes at
+every call site across the initial factor and three value updates found normal
+AMF and scale `-1` on all 24 calls, so the old policy was completely dormant in
+the current solver.
+
+The replacement is deliberately a numeric resource capability rather than an
+input classifier. It requires the ordinary AUTO, eight-thread, BTF,
+static-pivoting, 0.001-threshold contract and an installed normal AMD/AMF factor
+without a scale vector. The admitted order is 131,072--1,048,576 and effective
+density is five--seven. A full-rank multi-block symbolic must leave a fringe of
+`n/512`--`n/256`, with between `fringe/16` and `fringe` non-core blocks. Both
+symbolic and numeric L+U must be balanced within 2x and total 10n--16n; both
+estimated and measured work must be 2,048n--4,096n. The numeric must have no
+nudge or perturbation and no more than `n/512` known off-diagonal pivots. A
+predicted numeric is admitted while that final count still has its sentinel.
+These conditions name measured costs and representation properties, not a
+SuiteSparse coordinate.
+
+The capability gates twelve historical call sites, but component isolation
+removed two behaviors rather than carrying the whole bundle forward. Building
+U-diagonal reciprocals and compact 32-bit stream lengths/offsets were neutral
+or slightly slower, so ASIC_320k no longer activates them. The retained
+behaviors suppress redundant AUTO scale/METIS and Algorithm-5 consultations,
+settle EGraph width/floor probes, admit the wide PTS tree and 1.5 cut, choose a
+validated PTS solve without four timing probes, and build compact 32-bit solve
+permutations. Disabling PTS raised the target modeled cycle to 6.02 seconds;
+disabling compact permutations raised it to 7.47 seconds. Re-enabling
+Algorithm 5 raised it modestly to 2.97 seconds. The PTS builder's independent
+forest, serial-top, bin-balance, and flop-top checks remain authoritative, so
+passing the factor profile alone cannot route an invalid tree.
+
+The Sandia family provides close negatives. ASIC_100k and ASIC_100ks have
+about 99,000 rows and select METIS. ASIC_320ks is a scale-0 AMF factor but has
+one BTF block. ASIC_680k has a 98,843-row core inside a 682,862-row problem,
+and ASIC_680ks selects METIS with the same large fringe. Natural controls add
+orthogonal boundaries: scircuit has a 505-row fringe and matching AMD/fill but
+only about 286 estimated operations per row; Raj1 has only a 172-row fringe;
+transient has a 43-row fringe; rajat24 has 3,905 fringe rows; nxp1 is one block;
+and mac_econ_fwd500 selects scaled METIS with very high fill. Every control
+reports `high_work_tiny_fringe_btf_pts_factor_eligible=0`.
+
+Metamorphic tests provide positive and negative evidence outside those natural
+controls. A complete deterministic simultaneous relabeling preserves order
+and BTF geometry but changes AUTO from AMF to AMD, L/U from 2,060,430 each to
+2,120,493 each, and work from 824.2 million to 924.6 million; it remains
+eligible and its worst checked 100-update residual is `3.71393e-15`. Appending
+32,768 weakly coupled nodes crosses the old 350,000-row ceiling, changes AUTO
+to AMD and the BTF from 399 to 105 blocks, and produces a 353,691-row core,
+2,290,549 L/U entries, and 1.1523 billion operations. It remains eligible.
+Appending the same number of independent diagonal blocks instead creates
+33,167 blocks and a 33,663-row fringe and rejects. A larger 131,072-node
+coupled extension changes the selected representation to a scale-2 one-block
+factor and also rejects; growth by itself is therefore not a positive label.
+
+The final comparison uses the same executable with
+`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_BTF_PTS_POLICY=1` as its fallback, pinned to
+cores 0--7. Each sample contains 100 deterministic entrywise 0.1% updates and
+checks every changed solve. ASIC_320k medians over seven enabled and five
+disabled samples are 13.88 versus 24.67 ms for the steady refactor, 3.65 versus
+6.04 ms for the steady solve, and 2.99 versus 4.28 seconds for the modeled
+cycle. The +32,768 coupled holdout medians over six enabled and five disabled
+samples are 16.29 versus 21.32 ms, 4.20 versus 6.56 ms, and 2.90 versus 3.82
+seconds. Cold-factor geometry is unchanged in each pair.
+
+Timing dispersion is material: both arms occasionally show multi-fold EGraph
+refactor delays. One of seven enabled target sweeps also reached a
+`2.85047e-9` worst residual while the other six stayed below `2.80e-15`;
+frozen and disabled controls independently exhibited comparable rare
+`1e-9`-scale excursions, including a frozen target run and a disabled coupled
+run. The result therefore claims the median lifecycle and consistent PTS solve
+improvement, not elimination of that pre-existing refactor variability.
+
+The generic master disable and three generic component disables are public
+environment controls; old ASIC component names remain aliases. One appended
+`kls_stats` field and analyze/full JSON expose factor eligibility. Separate
+development and holdout manifests preserve the twelve natural controls. The
+evidence boundary remains clear: the non-original positives are a relabeling
+and a coupled structural extension, not a naturally sourced second family.
+Thresholds should not be widened until such a natural factor-positive appears.

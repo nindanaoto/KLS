@@ -1487,6 +1487,9 @@ typedef struct kls_stats {
   /* The installed full-rank pipelined numeric also proved the dense-tail,
      pivot, fill, work, and residual-refinement representation. */
   int giant_dominant_hub_metis_dense_tail_factor_eligible;
+  /* The retained full-rank min-fill factor has balanced high work and a
+     1/512--1/256 mixed-component BTF fringe suitable for direct PTS solves. */
+  int high_work_tiny_fringe_btf_pts_factor_eligible;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

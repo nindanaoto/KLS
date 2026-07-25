@@ -1,0 +1,9 @@
+# Cross-family controls held outside the normalized factor thresholds.
+# They exercise near-miss fringe, work, fill, scale, and block-count regimes.
+
+scircuit
+Raj1
+transient
+rajat24
+nxp1
+mac_econ_fwd500
