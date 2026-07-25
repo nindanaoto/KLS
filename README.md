@@ -131,8 +131,8 @@ economics from recurring-engine eligibility.
 `compact_missing_diagonal_match_selected`, and
 `compact_missing_diagonal_factor_eligible`.  Set
 `KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH=1` to disable the complete policy;
-the former `KLS_*GEMAT*` switches remain diagnostic aliases for individual
-stages.  `Hamrle2` is included in the extended SuiteSparse manifest as a
+the former matrix-named `KLS_*GEMAT*` switches are no longer recognized.
+`Hamrle2` is included in the extended SuiteSparse manifest as a
 cross-family one-block holdout.  The exact Gemat selector and Gemat-named
 internal representations are removed.
 
@@ -1817,9 +1817,8 @@ overlapped preparations without an input-size fingerprint. The pre-static
 factor-worker counterpart uses the trial symbolic's normalized SCC shape,
 fill, and estimated work because no accepted numeric exists yet. Benchmark
 JSON exposes `moderate_fragmented_policy_eligible`. Set
-`KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY=1` to disable the bundle; the
-former `KLS_DISABLE_ONETONE2_H100_POLICY` switch and its component switches
-remain compatibility aliases.
+`KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY=1` to disable the bundle.
+The former `KLS_*ONETONE2*` environment spellings are no longer recognized.
 
 A compact AMF two-block policy is selected from computed symbolic and numeric
 state rather than an input fingerprint. The symbolic proposal requires
@@ -1839,8 +1838,8 @@ changed numeric retains the strict relative-L2 residual guard. Benchmark JSON
 exposes `compact_amf_two_block_policy_eligible`. Set
 `KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_POLICY=1` to disable the whole policy or
 `KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_SPECIALIZED_WORKER=1` to retain the policy
-without its specialized worker; the former `KLS_*TSOPF_B9*` controls remain
-diagnostic aliases.
+without its specialized worker. The former `KLS_*TSOPF_B9*` controls are no
+longer recognized.
 
 A dense reciprocal-hub METIS policy replaces the former dense-ASIC size
 window. Normal AUTO input with at least 65,536 rows only proposes the route
@@ -1854,8 +1853,7 @@ defaults additionally require the measured unscaled factor to have no
 off-diagonal pivots or numeric `Rs`, 24--48 factor entries per row, and
 4,096--8,192 factor flops per row. Benchmark JSON exposes
 `dense_reciprocal_hub_policy_eligible`; set
-`KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY=1` for an A/B fallback. The
-former `KLS_DISABLE_ASIC100K_DENSE_H100_POLICY` switch remains an alias.
+`KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY=1` for an A/B fallback.
 
 A symmetric scalar-fringe AMD policy replaces the former `rajat03` size and
 nonzero window. Under the standard AUTO/8-thread BTF/static-pivoting contract,
@@ -1869,8 +1867,6 @@ numeric with no off-diagonal pivots, nudges, perturbations, or numeric `Rs`
 array and the same measured factor bounds. Benchmark JSON exposes
 `symmetric_scalar_fringe_policy_eligible`; set
 `KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY=1` for an A/B fallback.
-The former `KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY` switch remains an
-alias.
 
 A pivoted high-work single-block policy replaces the former `rajat15` order
 and nonzero window. Under the standard AUTO/8-thread BTF/static-pivoting
@@ -1885,7 +1881,6 @@ suppress AUTO's ordinary ordering race because identical patterns can produce
 different pivot behavior. Benchmark JSON exposes
 `pivoted_high_work_single_block_policy_eligible`; set
 `KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY=1` for an A/B fallback.
-The former `KLS_DISABLE_RAJAT15_H100_POLICY` switch remains an alias.
 
 A low-work many-fringe BTF/PTS policy replaces the former `rajat21` order,
 nonzero, block-count, and core-size box. Under the standard AUTO/8-thread
@@ -1899,8 +1894,7 @@ nudges, or perturbations; at most `n/512` off-diagonal pivots; balanced L/U
 storage; 4--16 retained factor entries per row; and 8--128 measured flops per
 row inside a 2M--64M resource band. Benchmark JSON exposes
 `low_work_many_fringe_btf_pts_policy_eligible`; set
-`KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY=1` for an A/B fallback. The
-former `KLS_DISABLE_RAJAT21_H100_POLICY` switch remains an alias.
+`KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY=1` for an A/B fallback.
 
 A hubbed scalar-fringe subtype replaces the former `rajat29` order and
 nonzero window.  A cheap input proposal requires the same broad order and
@@ -1918,8 +1912,7 @@ Benchmark JSON exposes
 `low_work_hubbed_scalar_fringe_pts_policy_eligible`.  Set
 `KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY=1` to disable only this
 subtype, or use the many-fringe master switch above to disable the whole
-family.  The former `KLS_DISABLE_RAJAT29_H100_POLICY` switch remains a
-subtype-only alias.
+family.
 
 A high-work tiny scalar-fringe AMD policy replaces the former `Raj1` order,
 nonzero, block-count, and core-size box. Under the standard AUTO/8-thread
@@ -1935,8 +1928,7 @@ perturbations; either a verified predicted no-pivot factor or at most `n/512`
 off-diagonal pivots; balanced L/U storage; and normalized measured fill and
 work. Benchmark JSON exposes
 `high_work_tiny_scalar_fringe_policy_eligible`; set
-`KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY=1` for an A/B fallback. The
-former `KLS_DISABLE_RAJ1_H100_POLICY` switch remains an alias.
+`KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY=1` for an A/B fallback.
 
 The metamorphic holdout utility can produce deterministic simultaneous
 row/column relabelings without checking generated matrices into the tree. For
@@ -1965,9 +1957,7 @@ fill of 32--64 entries per row, and estimated work of 1,000--8,192 flops per
 row. The accepted state stays unscaled and does not pay later row-matching,
 scale, or METIS replacement trials. A rejected proposal resumes ordinary AUTO
 ordering and orientation selection. Set
-`KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD=1` to disable the policy;
-`KLS_DISABLE_HTC336_9129_H100_POLICY` remains as a compatibility alias for the
-superseded matrix-window switch.
+`KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD=1` to disable the policy.
 
 When row refactor has retained exact compact dense groups, normal and transpose
 row solves consume complete groups as row-major triangular panels for one RHS
@@ -3820,9 +3810,7 @@ nudges, or perturbations and measured balanced fill/work suppresses the later
 scale trial. A rejection at either measured stage resumes ordinary AUTO.
 
 `KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY=1` provides a generic
-same-binary control; the old `KLS_DISABLE_ASIC100KS_H100_POLICY` and
-`KLS_ASIC100KS_METIS_NDP_NPES` names remain compatibility aliases. The generic
-leaf-count override is
+same-binary control. The leaf-count override is
 `KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES`.
 `sparse_symmetric_fragmented_metis_symbolic_eligible` and
 `sparse_symmetric_fragmented_metis_policy_eligible` expose the accepted
@@ -3859,8 +3847,7 @@ bounds. A topology or factor that fails either measured stage follows the
 ordinary AUTO schedule.
 
 `KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY=1` is the generic same-binary
-control; `KLS_DISABLE_NXP1_H100_POLICY` remains a compatibility alias. The
-candidate, factor, and clustered decisions are exposed through `kls_stats`
+control. The candidate, factor, and clustered decisions are exposed through `kls_stats`
 and benchmark JSON as `sparse_spiked_predicted_candidate`,
 `sparse_spiked_predicted_factor_eligible`, and
 `sparse_spiked_predicted_clustered_eligible`.
@@ -3888,8 +3875,7 @@ work, and dense-input ratio all fall inside normalized bounds. A failed factor
 gate retains the generic update engine.
 
 `KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY=1` provides a generic
-same-binary control; `KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY` remains a
-compatibility alias. `dense_fragmented_scaled_row_factor_eligible` exposes the
+same-binary control. `dense_fragmented_scaled_row_factor_eligible` exposes the
 measured decision through `kls_stats` and benchmark JSON.
 
 The smoke test supplies an independent 4,096-row family with 16 dense
@@ -3933,9 +3919,7 @@ row updates. The final proof applies to a predicted bootstrap or a later KLU
 replacement. A rejection at any stage resumes ordinary AUTO behavior.
 
 `KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY=1` provides a generic
-same-binary control; `KLS_DISABLE_MC2DEPI_H100_POLICY` and
-`KLS_DISABLE_G3_CIRCUIT_H100_POLICY` remain compatibility aliases. The
-candidate, symbolic, and factor decisions are exposed through `kls_stats` and
+same-binary control. The candidate, symbolic, and factor decisions are exposed through `kls_stats` and
 benchmark JSON as
 `sparse_full_diagonal_metis_row_candidate`,
 `sparse_full_diagonal_metis_row_symbolic_eligible`, and
@@ -3996,8 +3980,7 @@ recomputes the verdict.
 
 Set
 `KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY=1` for a generic
-same-binary control. `KLS_DISABLE_RAJAT31_H100_POLICY` remains a compatibility
-alias. Candidate, symbolic, and numeric decisions are exposed in `kls_stats`
+same-binary control. Candidate, symbolic, and numeric decisions are exposed in `kls_stats`
 and benchmark JSON as
 `giant_symmetric_scalar_fringe_metis_row_candidate`,
 `giant_symmetric_scalar_fringe_metis_row_symbolic_eligible`, and
@@ -4143,8 +4126,7 @@ not an inference from matrix identity.
 
 Set
 `KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY=1` for a generic
-same-binary control. `KLS_DISABLE_HAMRLE3_H100_POLICY` remains a compatibility
-alias. `kls_stats` and benchmark JSON expose
+same-binary control. `kls_stats` and benchmark JSON expose
 `bounded_degree_retained_preconditioner_candidate`,
 `bounded_degree_retained_preconditioner_symbolic_eligible`,
 `bounded_degree_retained_preconditioner_factor_eligible`, and
@@ -4210,10 +4192,8 @@ the coupled holdout showed that shortcut was not a generic SCC property.
 
 Set
 `KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY=1` for a generic
-same-binary control. `KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY` remains a
-compatibility alias. The generic NodeNDP leaf-count override is
-`KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES`;
-`KLS_FREESCALE_CHAIN_METIS_NDP_NPES` remains its legacy fallback. `kls_stats`
+same-binary control. The NodeNDP leaf-count override is
+`KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES`. `kls_stats`
 and benchmark JSON expose
 `asymmetric_bounded_degree_direct_metis_candidate`,
 `asymmetric_bounded_degree_direct_metis_tuning_class`,
@@ -4269,8 +4249,7 @@ suppresses redundant scale, METIS, predicted-pattern, and diagonal-equivalent
 trials and retains the row-scale vector across changed-value EGraph refactors.
 
 Set `KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY=1` for a generic
-same-binary control. `KLS_DISABLE_CIRCUIT5M_H100_POLICY` remains a
-compatibility alias. `kls_stats` and benchmark JSON expose
+same-binary control. `kls_stats` and benchmark JSON expose
 `near_symmetric_mega_hub_amd_candidate`,
 `near_symmetric_mega_hub_amd_symbolic_eligible`, and
 `near_symmetric_mega_hub_amd_factor_eligible`.
@@ -4344,9 +4323,8 @@ does not silently change any ordinary singular problem.
 
 Set
 `KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY=1` for a generic
-same-binary control. `KLS_DISABLE_FULLCHIP_H100_POLICY` remains a compatibility
-alias, as do the old route-specific environment names. Generic route controls
-are `KLS_DISABLE_GIANT_DOMINANT_HUB_ROUTED_FACTOR`,
+same-binary control. Route controls are
+`KLS_DISABLE_GIANT_DOMINANT_HUB_ROUTED_FACTOR`,
 `KLS_DISABLE_GIANT_DOMINANT_HUB_ZERO_DISCOVERY`, and
 `KLS_DISABLE_GIANT_DOMINANT_HUB_COMPLETION_PIPE`; the dense-tail override is
 `KLS_GIANT_DOMINANT_HUB_DENSE_TAIL`. `kls_stats` and analyze/full benchmark JSON
@@ -4464,8 +4442,7 @@ capability, also set `KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY=1` when the
 comparison must restore its solve consultation.  Other component controls are
 `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES`,
 `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_PTS_CUT`, and
-`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM`; the former ASIC-named
-component spellings remain compatibility aliases.  `kls_stats` and both
+`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM`. `kls_stats` and both
 benchmark JSON modes expose
 `high_work_tiny_fringe_btf_pts_factor_eligible`.
 

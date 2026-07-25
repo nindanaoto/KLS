@@ -20568,3 +20568,14 @@ natural-family positive, the small tolerance capability is performance
 neutral rather than faster on its extension, and the sparse-100K PTS gate is
 still benchmark-shaped because the attempted factor-capability replacement
 did not clear the no-regression bar.
+
+## Compatibility Alias Removal (2026-07-25)
+
+All matrix- and benchmark-family-named environment compatibility aliases were
+removed from the implementation, smoke tests, and current README. Historical
+statements above saying that an old `ASIC`, `BIPS`, `Circuit`, `CKT`,
+`Freescale`, `FullChip`, `Gemat`, `Hamrle`, `HTC`, `NXP`, `OneTone`, `Rajat`,
+or `TSOPF` spelling remains an alias are superseded by this section. Only the
+capability-named policy and component controls documented in the README are
+recognized. This is intentionally an environment-control API break; default
+AUTO behavior and the underlying capability selectors are unchanged.

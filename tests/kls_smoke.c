@@ -1397,13 +1397,12 @@ static int test_moderate_single_block_lean_policy(void) {
 
   const char *env_names[] = {
     "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_POLICY",
-    "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR",
-    "KLS_DISABLE_ADD20_DIRECT_REFACTOR"
+    "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR"
   };
-  char *saved_env[3] = {NULL, NULL, NULL};
-  int had_env[3] = {0, 0, 0};
+  char *saved_env[2] = {NULL, NULL};
+  int had_env[2] = {0, 0};
   int ok = 1;
-  for (size_t k = 0; k < 3u; ++k) {
+  for (size_t k = 0; k < 2u; ++k) {
     const char *value = getenv(env_names[k]);
     had_env[k] = value != NULL;
     saved_env[k] = value != NULL ? strdup(value) : NULL;
@@ -1488,7 +1487,7 @@ static int test_moderate_single_block_lean_policy(void) {
   }
   kls_destroy(solver);
 
-  for (size_t k = 0; k < 3u; ++k) {
+  for (size_t k = 0; k < 2u; ++k) {
     if (!(had_env[k] && saved_env[k] == NULL) &&
         !restore_env_value(env_names[k], had_env[k], saved_env[k])) {
       ok = 0;
@@ -3261,7 +3260,7 @@ static int test_small_pivot_low_work_dominant_btf(void) {
   char *saved_env[2] = {NULL, NULL};
   int had_env[2] = {0, 0};
   int ok = 1;
-  for (size_t k = 0; k < 2u; ++k) {
+  for (size_t k = 0; k < 1u; ++k) {
     const char *value = getenv(env_names[k]);
     had_env[k] = value != NULL;
     saved_env[k] = value != NULL ? strdup(value) : NULL;
@@ -3414,13 +3413,12 @@ static int test_dense_group_near_single_btf_stays_mapped(void) {
   }
 
   const char *env_names[] = {
-    "KLS_DISABLE_HIGH_WORK_NEAR_SINGLE_BTF_EGRAPH",
-    "KLS_DISABLE_TSOPF_B39_C19_H100_POLICY"
+    "KLS_DISABLE_HIGH_WORK_NEAR_SINGLE_BTF_EGRAPH"
   };
-  char *saved_env[2] = {NULL, NULL};
-  int had_env[2] = {0, 0};
+  char *saved_env[1] = {NULL};
+  int had_env[1] = {0};
   int ok = 1;
-  for (size_t k = 0; k < 2u; ++k) {
+  for (size_t k = 0; k < 1u; ++k) {
     const char *value = getenv(env_names[k]);
     had_env[k] = value != NULL;
     saved_env[k] = value != NULL ? strdup(value) : NULL;
@@ -6085,8 +6083,7 @@ static int test_verified_rhs_reuse_contract(void) {
   const double expected2[] = {-0.75, 1.25, 2.0, -1.5};
   const char *env_names[] = {
     "KLS_ENABLE_ROW_REFACTOR",
-    "KLS_DISABLE_VERIFIED_RHS_REUSE",
-    "KLS_DISABLE_CIRCUIT3_H100_POLICY"
+    "KLS_DISABLE_VERIFIED_RHS_REUSE"
   };
   enum { ENV_COUNT = (int)(sizeof(env_names) / sizeof(env_names[0])) };
   char *saved_env[ENV_COUNT];
@@ -6332,7 +6329,6 @@ static int test_small_compact_deep_fill_worker_spin(void) {
 
   const char *env_names[] = {
     "KLS_DISABLE_SMALL_COMPACT_DOMINANT_BTF_WORKER_SPIN",
-    "KLS_DISABLE_ACTIVSG2000_H100_POLICY",
     "KLS_LEAN_CHOICE",
     "KLS_EGRAPH_WORKER_SPIN_OVERRIDE"
   };
@@ -6445,19 +6441,16 @@ static int test_small_compact_deep_fill_worker_spin(void) {
     }
   }
 
-  /* Enabled, generic-disable, compatibility-alias, and a four-worker
-     concurrency control all retain the same factor and scalar lean engine.
+  /* Enabled, generic-disable, and a four-worker concurrency control all
+     retain the same factor and scalar lean engine.
      Only the eligible eight-worker case extends the crew's spin window. */
-  for (int mode = 0; ok && mode < 4; ++mode) {
+  for (int mode = 0; ok && mode < 3; ++mode) {
     if (mode == 1 && setenv(env_names[0], "1", 1) != 0) {
-      ok = 0;
-    }
-    if (mode == 2 && setenv(env_names[1], "1", 1) != 0) {
       ok = 0;
     }
     kls_options options;
     kls_default_options(&options);
-    options.threads = mode == 3 ? 4 : 8;
+    options.threads = mode == 2 ? 4 : 8;
     options.ordering = KLS_ORDERING_AMD;
     options.orientation = KLS_ORIENTATION_NORMAL;
     options.scale = -1;
@@ -6521,7 +6514,6 @@ static int test_small_compact_deep_fill_worker_spin(void) {
     }
     kls_destroy(solver);
     if (mode == 1 && unsetenv(env_names[0]) != 0) ok = 0;
-    if (mode == 2 && unsetenv(env_names[1]) != 0) ok = 0;
   }
 
   for (int i = 0; i < ENV_COUNT; ++i) {
@@ -22197,14 +22189,9 @@ static int test_bounded_degree_retained_preconditioner(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_disable_value =
     getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_HAMRLE3_H100_POLICY");
   char *saved_disable = saved_disable_value != NULL
     ? strdup(saved_disable_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_disable = saved_disable_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_options options;
   kls_stats stats;
@@ -22212,8 +22199,7 @@ static int test_bounded_degree_retained_preconditioner(void) {
 
   if (ap == NULL || ai == NULL || ax == NULL || changed == NULL ||
       expected == NULL || b == NULL || x == NULL ||
-      (had_disable && saved_disable == NULL) ||
-      (had_legacy && saved_legacy == NULL)) {
+      (had_disable && saved_disable == NULL)) {
     ok = 0;
     goto cleanup;
   }
@@ -22258,8 +22244,7 @@ static int test_bounded_degree_retained_preconditioner(void) {
   }
 
   if (unsetenv(
-        "KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_HAMRLE3_H100_POLICY") != 0) {
+        "KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") != 0) {
     perror("configure bounded-degree retained preconditioner");
     ok = 0;
     goto cleanup;
@@ -22441,10 +22426,6 @@ cleanup:
         had_disable, saved_disable != NULL ? saved_disable : "")) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_DISABLE_HAMRLE3_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
-    ok = 0;
-  }
   free(ap);
   free(ai);
   free(ax);
@@ -22453,7 +22434,6 @@ cleanup:
   free(b);
   free(x);
   free(saved_disable);
-  free(saved_legacy);
   return ok;
 }
 
@@ -22572,18 +22552,12 @@ static int test_sparse_partial_diagonal_direct_amd_analysis(void) {
   int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_HTC336_9129_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   int ok = ap != NULL && ai != NULL &&
-    (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    (!had_policy || saved_policy != NULL);
 
   if (!ok) {
     goto cleanup;
@@ -22634,8 +22608,7 @@ static int test_sparse_partial_diagonal_direct_amd_analysis(void) {
     goto cleanup;
   }
 
-  if (unsetenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD") != 0 ||
-      unsetenv("KLS_DISABLE_HTC336_9129_H100_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD") != 0) {
     perror("unsetenv sparse partial-diagonal direct AMD");
     ok = 0;
     goto cleanup;
@@ -22764,15 +22737,12 @@ cleanup:
   kls_destroy(solver);
   if (!restore_env_value("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD",
                          had_policy,
-                         saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_HTC336_9129_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+                         saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(ap);
   free(ai);
   free(saved_policy);
-  free(saved_legacy);
   return ok;
 }
 
@@ -22972,28 +22942,21 @@ static int test_symmetric_scalar_fringe_amd_lean_policy(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *negative_solver = NULL;
   kls_options options;
   kls_stats stats;
   int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
     expected != NULL && b != NULL && x != NULL &&
-    (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    (!had_policy || saved_policy != NULL);
 
   if (!ok) {
     goto cleanup;
   }
-  if (unsetenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY") != 0) {
     perror("unsetenv symmetric scalar fringe policy");
     ok = 0;
     goto cleanup;
@@ -23171,11 +23134,6 @@ cleanup:
         had_policy, saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY",
-                         had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
-    ok = 0;
-  }
   free(ap);
   free(ai);
   free(ax);
@@ -23184,7 +23142,6 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
-  free(saved_legacy);
   return ok;
 }
 
@@ -23217,21 +23174,16 @@ static int test_pivoted_high_work_single_block_policy(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_RAJAT15_H100_POLICY");
   const char *saved_race_value = getenv("KLS_DISABLE_METIS_RACE");
   const char *saved_verified_pts_value =
     getenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   char *saved_race = saved_race_value != NULL
     ? strdup(saved_race_value) : NULL;
   char *saved_verified_pts = saved_verified_pts_value != NULL
     ? strdup(saved_verified_pts_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   const int had_race = saved_race_value != NULL;
   const int had_verified_pts = saved_verified_pts_value != NULL;
   kls_solver *solver = NULL;
@@ -23243,7 +23195,6 @@ static int test_pivoted_high_work_single_block_policy(void) {
   int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
     ax_no_pivots != NULL && expected != NULL && b != NULL && x != NULL &&
     (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL) &&
     (!had_race || saved_race != NULL) &&
     (!had_verified_pts || saved_verified_pts != NULL);
 
@@ -23251,7 +23202,6 @@ static int test_pivoted_high_work_single_block_policy(void) {
     goto cleanup;
   }
   if (unsetenv("KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_RAJAT15_H100_POLICY") != 0 ||
       unsetenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY") != 0 ||
       setenv("KLS_DISABLE_METIS_RACE", "1", 1) != 0) {
     perror("configure pivoted high-work single-block policy");
@@ -23506,10 +23456,6 @@ cleanup:
         had_policy, saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_DISABLE_RAJAT15_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
-    ok = 0;
-  }
   if (!restore_env_value("KLS_DISABLE_METIS_RACE", had_race,
                          saved_race != NULL ? saved_race : "")) {
     ok = 0;
@@ -23529,7 +23475,6 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
-  free(saved_legacy);
   free(saved_race);
   free(saved_verified_pts);
   return ok;
@@ -23561,24 +23506,14 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_RAJAT21_H100_POLICY");
   const char *saved_hubbed_policy_value =
     getenv("KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY");
-  const char *saved_hubbed_legacy_value =
-    getenv("KLS_DISABLE_RAJAT29_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   char *saved_hubbed_policy = saved_hubbed_policy_value != NULL
     ? strdup(saved_hubbed_policy_value) : NULL;
-  char *saved_hubbed_legacy = saved_hubbed_legacy_value != NULL
-    ? strdup(saved_hubbed_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   const int had_hubbed_policy = saved_hubbed_policy_value != NULL;
-  const int had_hubbed_legacy = saved_hubbed_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *negative_solver = NULL;
   kls_solver *explicit_solver = NULL;
@@ -23588,17 +23523,13 @@ static int test_low_work_many_fringe_btf_pts_policy(void) {
   int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
     ax_pivoted != NULL && expected != NULL && b != NULL && x != NULL &&
     (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL) &&
-    (!had_hubbed_policy || saved_hubbed_policy != NULL) &&
-    (!had_hubbed_legacy || saved_hubbed_legacy != NULL);
+    (!had_hubbed_policy || saved_hubbed_policy != NULL);
 
   if (!ok) {
     goto cleanup;
   }
   if (unsetenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_RAJAT21_H100_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_RAJAT29_H100_POLICY") != 0) {
+      unsetenv("KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY") != 0) {
     perror("configure low-work many-fringe BTF PTS policy");
     ok = 0;
     goto cleanup;
@@ -23808,20 +23739,10 @@ cleanup:
         had_policy, saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_DISABLE_RAJAT21_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
-    ok = 0;
-  }
   if (!restore_env_value(
         "KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY",
         had_hubbed_policy,
         saved_hubbed_policy != NULL ? saved_hubbed_policy : "")) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_DISABLE_RAJAT29_H100_POLICY",
-                         had_hubbed_legacy,
-                         saved_hubbed_legacy != NULL
-                           ? saved_hubbed_legacy : "")) {
     ok = 0;
   }
   free(ap);
@@ -23833,9 +23754,7 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
-  free(saved_legacy);
   free(saved_hubbed_policy);
-  free(saved_hubbed_legacy);
   return ok;
 }
 
@@ -23862,13 +23781,9 @@ static int test_high_work_tiny_scalar_fringe_policy(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY");
-  const char *saved_legacy_value = getenv("KLS_DISABLE_RAJ1_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *negative_solver = NULL;
   kls_solver *explicit_solver = NULL;
@@ -23877,14 +23792,12 @@ static int test_high_work_tiny_scalar_fringe_policy(void) {
   kls_stats stats;
   int ok = ap != NULL && ai != NULL && ax != NULL && ax_changed != NULL &&
     ax_pivoted != NULL && expected != NULL && b != NULL && x != NULL &&
-    (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    (!had_policy || saved_policy != NULL);
 
   if (!ok) {
     goto cleanup;
   }
-  if (unsetenv("KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_RAJ1_H100_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY") != 0) {
     perror("configure high-work tiny scalar-fringe policy");
     ok = 0;
     goto cleanup;
@@ -24089,10 +24002,6 @@ cleanup:
         had_policy, saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_DISABLE_RAJ1_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
-    ok = 0;
-  }
   free(ap);
   free(ai);
   free(ax);
@@ -24102,7 +24011,6 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
-  free(saved_legacy);
   return ok;
 }
 
@@ -24293,20 +24201,13 @@ cleanup:
 static int test_symmetric_partial_diagonal_match_lifecycles(void) {
   const char *saved_policy_value =
     getenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
-  int ok = (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+  int ok = (!had_policy || saved_policy != NULL);
 
   if (!ok ||
-      unsetenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY") != 0) {
+      unsetenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY") != 0) {
     perror("configure symmetric partial-diagonal match policy");
     ok = 0;
     goto cleanup;
@@ -24332,14 +24233,10 @@ static int test_symmetric_partial_diagonal_match_lifecycles(void) {
 cleanup:
   if (!restore_env_value(
         "KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY",
-        had_policy, saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY",
-                         had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(saved_policy);
-  free(saved_legacy);
   return ok;
 }
 
@@ -24366,22 +24263,16 @@ static int test_sparse_symmetric_fragmented_metis_policy(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_ASIC100KS_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *csr_solver = NULL;
   kls_solver *negative_solver = NULL;
   kls_solver *disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && ai_asymmetric != NULL && ax != NULL &&
     changed != NULL && expected != NULL && b != NULL && x != NULL &&
-    (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    (!had_policy || saved_policy != NULL);
 
   if (!ok) {
     goto cleanup;
@@ -24455,8 +24346,7 @@ static int test_sparse_symmetric_fragmented_metis_policy(void) {
     changed[entry] = ax[entry] * (1.0 + 2.5e-5 * (double)variation);
   }
 
-  if (unsetenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_ASIC100KS_H100_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY") != 0) {
     perror("configure sparse symmetric fragmented METIS policy");
     ok = 0;
     goto cleanup;
@@ -24606,9 +24496,7 @@ cleanup:
   kls_destroy(solver);
   if (!restore_env_value(
         "KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY", had_policy,
-        saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_ASIC100KS_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+        saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(ap);
@@ -24620,7 +24508,6 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
-  free(saved_legacy);
   return ok;
 }
 
@@ -24703,20 +24590,15 @@ static int test_sparse_spiked_predicted_policy(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY");
-  const char *saved_legacy_value = getenv("KLS_DISABLE_NXP1_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *control_solver = NULL;
   kls_solver *disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && control_ap != NULL &&
     control_ai != NULL && ax != NULL && changed != NULL && expected != NULL &&
-    b != NULL && x != NULL && (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    b != NULL && x != NULL && (!had_policy || saved_policy != NULL);
 
   if (!ok || !build_sparse_spiked_predicted_fixture(ap, ai, ax, 1) ||
       !build_sparse_spiked_predicted_fixture(
@@ -24734,8 +24616,7 @@ static int test_sparse_spiked_predicted_policy(void) {
       b[ai[entry]] += changed[entry] * expected[col];
     }
   }
-  if (unsetenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_NXP1_H100_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY") != 0) {
     perror("configure sparse spiked predicted policy");
     ok = 0;
     goto cleanup;
@@ -24857,9 +24738,7 @@ cleanup:
   kls_destroy(solver);
   if (!restore_env_value("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY",
                          had_policy,
-                         saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_NXP1_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+                         saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(ap);
@@ -24872,7 +24751,6 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
-  free(saved_legacy);
   return ok;
 }
 
@@ -24935,31 +24813,17 @@ static int test_sparse_full_diagonal_metis_row_policy(void) {
     (size_t)SPARSE_FULL_DIAGONAL_WIDE_FIXTURE_NNZ * sizeof(*wide_ai));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_MC2DEPI_H100_POLICY");
-  const char *saved_g3_legacy_value =
-    getenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
-  char *saved_g3_legacy = saved_g3_legacy_value != NULL
-    ? strdup(saved_g3_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
-  const int had_g3_legacy = saved_g3_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *csr_solver = NULL;
   kls_solver *wide_solver = NULL;
   kls_solver *control_solver = NULL;
   kls_solver *disabled_solver = NULL;
-  kls_solver *legacy_disabled_solver = NULL;
-  kls_solver *g3_legacy_disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && control_ap != NULL &&
     control_ai != NULL && wide_ap != NULL && wide_ai != NULL &&
-    (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL) &&
-    (!had_g3_legacy || saved_g3_legacy != NULL);
+    (!had_policy || saved_policy != NULL);
 
   if (!ok ||
       !build_sparse_full_diagonal_metis_row_fixture(ap, ai, 0, 0) ||
@@ -24970,9 +24834,7 @@ static int test_sparse_full_diagonal_metis_row_policy(void) {
     ok = 0;
     goto cleanup;
   }
-  if (unsetenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_MC2DEPI_H100_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY") != 0) {
     perror("configure sparse full-diagonal METIS row policy");
     ok = 0;
     goto cleanup;
@@ -25108,49 +24970,7 @@ static int test_sparse_full_diagonal_metis_row_policy(void) {
     goto cleanup;
   }
 
-  if (unsetenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY") != 0 ||
-      setenv("KLS_DISABLE_MC2DEPI_H100_POLICY", "1", 1) != 0 ||
-      !require_ok(kls_create(&legacy_disabled_solver),
-                  "create legacy-disabled sparse full-diagonal control") ||
-      !require_ok(kls_analyze_csc(legacy_disabled_solver, KLS_INDEX_INT32, n,
-                                  ap, ai, 0, &options),
-                  "analyze legacy-disabled sparse full-diagonal control")) {
-    ok = 0;
-    goto cleanup;
-  }
-  memset(&stats, 0, sizeof(stats));
-  stats.struct_size = sizeof(stats);
-  if (!require_ok(kls_get_stats(legacy_disabled_solver, &stats),
-                  "stats legacy-disabled sparse full-diagonal control") ||
-      stats.sparse_full_diagonal_metis_row_candidate != 0) {
-    fprintf(stderr,
-            "legacy-disabled sparse full-diagonal control became eligible\n");
-    ok = 0;
-  }
-
-  if (unsetenv("KLS_DISABLE_MC2DEPI_H100_POLICY") != 0 ||
-      setenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY", "1", 1) != 0 ||
-      !require_ok(kls_create(&g3_legacy_disabled_solver),
-                  "create G3-legacy-disabled full-diagonal control") ||
-      !require_ok(kls_analyze_csc(
-        g3_legacy_disabled_solver, KLS_INDEX_INT32, n, wide_ap, wide_ai, 0,
-        &options), "analyze G3-legacy-disabled full-diagonal control")) {
-    ok = 0;
-    goto cleanup;
-  }
-  memset(&stats, 0, sizeof(stats));
-  stats.struct_size = sizeof(stats);
-  if (!require_ok(kls_get_stats(g3_legacy_disabled_solver, &stats),
-                  "stats G3-legacy-disabled full-diagonal control") ||
-      stats.sparse_full_diagonal_metis_row_candidate != 0) {
-    fprintf(stderr,
-            "G3-legacy-disabled sparse full-diagonal control became eligible\n");
-    ok = 0;
-  }
-
 cleanup:
-  kls_destroy(g3_legacy_disabled_solver);
-  kls_destroy(legacy_disabled_solver);
   kls_destroy(disabled_solver);
   kls_destroy(control_solver);
   kls_destroy(wide_solver);
@@ -25158,11 +24978,7 @@ cleanup:
   kls_destroy(solver);
   if (!restore_env_value(
         "KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY", had_policy,
-        saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_MC2DEPI_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "") ||
-      !restore_env_value("KLS_DISABLE_G3_CIRCUIT_H100_POLICY", had_g3_legacy,
-                         saved_g3_legacy != NULL ? saved_g3_legacy : "")) {
+        saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(ap);
@@ -25172,8 +24988,6 @@ cleanup:
   free(wide_ap);
   free(wide_ai);
   free(saved_policy);
-  free(saved_legacy);
-  free(saved_g3_legacy);
   return ok;
 }
 
@@ -25300,14 +25114,9 @@ static int test_asymmetric_bounded_degree_direct_metis_policy(void) {
     (int32_t *)malloc(thin_capacity * sizeof(*thin_ai));
   const char *saved_policy_value = getenv(
     "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *extension_solver = NULL;
   kls_solver *thin_solver = NULL;
@@ -25315,12 +25124,10 @@ static int test_asymmetric_bounded_degree_direct_metis_policy(void) {
   kls_solver *symmetric_solver = NULL;
   kls_solver *degree_solver = NULL;
   kls_solver *disabled_solver = NULL;
-  kls_solver *legacy_disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && symmetric_ap != NULL &&
     symmetric_ai != NULL && degree_ap != NULL && degree_ai != NULL &&
     extension_ap != NULL && extension_ai != NULL && thin_ap != NULL &&
-    thin_ai != NULL && (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    thin_ai != NULL && (!had_policy || saved_policy != NULL);
   int32_t base_nnz = 0;
   int32_t symmetric_nnz = 0;
   int32_t degree_nnz = 0;
@@ -25344,8 +25151,7 @@ static int test_asymmetric_bounded_degree_direct_metis_policy(void) {
     goto cleanup;
   }
   if (unsetenv(
-        "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY") != 0) {
+        "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY") != 0) {
     perror("configure asymmetric bounded-degree direct-METIS policy");
     ok = 0;
     goto cleanup;
@@ -25441,22 +25247,7 @@ static int test_asymmetric_bounded_degree_direct_metis_policy(void) {
     goto cleanup;
   }
 
-  if (unsetenv(
-        "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY") != 0 ||
-      setenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY", "1", 1) != 0 ||
-      !require_ok(kls_create(&legacy_disabled_solver),
-                  "create legacy-disabled asymmetric direct control") ||
-      !require_ok(kls_analyze_csc(legacy_disabled_solver, KLS_INDEX_INT32, n,
-                                  ap, ai, 0, &options),
-                  "analyze legacy-disabled asymmetric direct control") ||
-      !check_asymmetric_direct_metis_stages(
-        legacy_disabled_solver,
-        "stats legacy-disabled asymmetric direct control", 0, 0)) {
-    ok = 0;
-  }
-
 cleanup:
-  kls_destroy(legacy_disabled_solver);
   kls_destroy(disabled_solver);
   kls_destroy(degree_solver);
   kls_destroy(symmetric_solver);
@@ -25466,10 +25257,7 @@ cleanup:
   kls_destroy(solver);
   if (!restore_env_value(
         "KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY",
-        had_policy, saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY",
-                         had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(thin_ai);
@@ -25482,7 +25270,6 @@ cleanup:
   free(symmetric_ap);
   free(ai);
   free(ap);
-  free(saved_legacy);
   free(saved_policy);
   return ok;
 }
@@ -25609,14 +25396,9 @@ static int test_near_symmetric_mega_hub_amd_policy(void) {
     (int32_t *)malloc(extension_capacity * sizeof(*extension_ai));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *extension_solver = NULL;
   kls_solver *csr_solver = NULL;
@@ -25625,14 +25407,12 @@ static int test_near_symmetric_mega_hub_amd_policy(void) {
   kls_solver *oversized_solver = NULL;
   kls_solver *single_block_solver = NULL;
   kls_solver *disabled_solver = NULL;
-  kls_solver *legacy_disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && unsorted_ap != NULL &&
     unsorted_ai != NULL && symmetric_ap != NULL && symmetric_ai != NULL &&
     oversized_ap != NULL && oversized_ai != NULL &&
     single_block_ap != NULL && single_block_ai != NULL &&
     extension_ap != NULL && extension_ai != NULL &&
-    (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    (!had_policy || saved_policy != NULL);
   int32_t nnz = 0;
   if (ok) {
     nnz = build_near_symmetric_mega_hub_fixture(
@@ -25659,8 +25439,7 @@ static int test_near_symmetric_mega_hub_amd_policy(void) {
     unsorted_ai[first] = unsorted_ai[first + 1];
     unsorted_ai[first + 1] = swap;
   }
-  if (unsetenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY") != 0) {
     perror("configure near-symmetric mega-hub AMD policy");
     ok = 0;
     goto cleanup;
@@ -25709,17 +25488,9 @@ static int test_near_symmetric_mega_hub_amd_policy(void) {
   }
   ANALYZE_MEGA_HUB(disabled_solver, "disabled mega-hub control",
                    n, ap, ai, 0, 0);
-  if (unsetenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY") != 0 ||
-      setenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY", "1", 1) != 0) {
-    ok = 0;
-    goto cleanup;
-  }
-  ANALYZE_MEGA_HUB(legacy_disabled_solver,
-                   "legacy-disabled mega-hub control", n, ap, ai, 0, 0);
 #undef ANALYZE_MEGA_HUB
 
 cleanup:
-  kls_destroy(legacy_disabled_solver);
   kls_destroy(disabled_solver);
   kls_destroy(single_block_solver);
   kls_destroy(oversized_solver);
@@ -25730,9 +25501,7 @@ cleanup:
   kls_destroy(solver);
   if (!restore_env_value(
         "KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY", had_policy,
-        saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_CIRCUIT5M_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+        saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(extension_ai);
@@ -25747,7 +25516,6 @@ cleanup:
   free(unsorted_ap);
   free(ai);
   free(ap);
-  free(saved_legacy);
   free(saved_policy);
   return ok;
 }
@@ -25864,13 +25632,9 @@ static int test_giant_dominant_hub_metis_dense_tail_policy(void) {
     (int32_t *)malloc(extension_capacity * sizeof(*extension_ai));
   const char *saved_policy_value = getenv(
     "KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY");
-  const char *saved_legacy_value = getenv("KLS_DISABLE_FULLCHIP_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *extension_solver = NULL;
   kls_solver *csr_solver = NULL;
@@ -25879,13 +25643,11 @@ static int test_giant_dominant_hub_metis_dense_tail_policy(void) {
   kls_solver *moderate_solver = NULL;
   kls_solver *oversized_solver = NULL;
   kls_solver *disabled_solver = NULL;
-  kls_solver *legacy_disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && unsorted_ap != NULL &&
     unsorted_ai != NULL && symmetric_ap != NULL && symmetric_ai != NULL &&
     moderate_ap != NULL && moderate_ai != NULL && oversized_ap != NULL &&
     oversized_ai != NULL && extension_ap != NULL && extension_ai != NULL &&
-    (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    (!had_policy || saved_policy != NULL);
   int32_t nnz = 0;
   if (ok) {
     nnz = build_giant_dominant_hub_fixture(n, 0, 0, ap, ai);
@@ -25912,8 +25674,7 @@ static int test_giant_dominant_hub_metis_dense_tail_policy(void) {
     unsorted_ai[first + 1] = swap;
   }
   if (unsetenv("KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY") !=
-        0 ||
-      unsetenv("KLS_DISABLE_FULLCHIP_H100_POLICY") != 0) {
+        0) {
     perror("configure giant dominant-hub METIS dense-tail policy");
     ok = 0;
     goto cleanup;
@@ -25966,19 +25727,9 @@ static int test_giant_dominant_hub_metis_dense_tail_policy(void) {
   ANALYZE_DOMINANT_HUB(disabled_solver,
                        "disabled giant dominant-hub control",
                        n, ap, ai, 0, 0);
-  if (unsetenv("KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY") !=
-        0 ||
-      setenv("KLS_DISABLE_FULLCHIP_H100_POLICY", "1", 1) != 0) {
-    ok = 0;
-    goto cleanup;
-  }
-  ANALYZE_DOMINANT_HUB(legacy_disabled_solver,
-                       "legacy-disabled giant dominant-hub control",
-                       n, ap, ai, 0, 0);
 #undef ANALYZE_DOMINANT_HUB
 
 cleanup:
-  kls_destroy(legacy_disabled_solver);
   kls_destroy(disabled_solver);
   kls_destroy(oversized_solver);
   kls_destroy(moderate_solver);
@@ -25989,9 +25740,7 @@ cleanup:
   kls_destroy(solver);
   if (!restore_env_value(
         "KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY",
-        had_policy, saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_FULLCHIP_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+        had_policy, saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(extension_ai);
@@ -26006,7 +25755,6 @@ cleanup:
   free(unsorted_ap);
   free(ai);
   free(ap);
-  free(saved_legacy);
   free(saved_policy);
   return ok;
 }
@@ -26081,27 +25829,21 @@ static int test_giant_symmetric_scalar_fringe_metis_row_policy(void) {
     (size_t)GIANT_SYMMETRIC_SCALAR_FRINGE_FIXTURE_NNZ * sizeof(*ai));
   const char *saved_policy_value = getenv(
     "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY");
-  const char *saved_legacy_value = getenv("KLS_DISABLE_RAJAT31_H100_POLICY");
   const char *saved_race_value = getenv("KLS_DISABLE_METIS_RACE");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   char *saved_race = saved_race_value != NULL
     ? strdup(saved_race_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   const int had_race = saved_race_value != NULL;
   int32_t reciprocal_pos = -1;
   kls_solver *solver = NULL;
   int ok = ap != NULL && ai != NULL && (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL) &&
     (!had_race || saved_race != NULL) &&
     build_giant_symmetric_scalar_fringe_fixture(ap, ai, &reciprocal_pos);
   if (!ok ||
       unsetenv(
         "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_RAJAT31_H100_POLICY") != 0 ||
       setenv("KLS_DISABLE_METIS_RACE", "1", 1) != 0 ||
       !require_ok(kls_create(&solver),
                   "create giant symmetric scalar-fringe proposal")) {
@@ -26207,8 +25949,8 @@ static int test_giant_symmetric_scalar_fringe_metis_row_policy(void) {
     goto cleanup;
   }
 
-  /* Restore reciprocity and prove both same-binary disable names suppress the
-     otherwise unchanged proposal. */
+  /* Restore reciprocity and prove the generic same-binary disable suppresses
+     the otherwise unchanged proposal. */
   for (int32_t q = ap[hub]; q < ap[hub + 1]; ++q) {
     if (ai[q] == hub + 10) {
       ai[q] = core;
@@ -26235,32 +25977,11 @@ static int test_giant_symmetric_scalar_fringe_metis_row_policy(void) {
     ok = 0;
     goto cleanup;
   }
-  if (unsetenv(
-        "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY") != 0 ||
-      setenv("KLS_DISABLE_RAJAT31_H100_POLICY", "1", 1) != 0 ||
-      !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai, 0,
-                                  &options),
-                  "analyze legacy-disabled giant scalar-fringe control")) {
-    ok = 0;
-    goto cleanup;
-  }
-  memset(&stats, 0, sizeof(stats));
-  stats.struct_size = sizeof(stats);
-  if (!require_ok(kls_get_stats(solver, &stats),
-                  "stats legacy-disabled giant scalar-fringe control") ||
-      stats.giant_symmetric_scalar_fringe_metis_row_candidate != 0) {
-    fprintf(stderr,
-            "legacy-disabled giant scalar-fringe control became eligible\n");
-    ok = 0;
-  }
-
 cleanup:
   kls_destroy(solver);
   if (!restore_env_value(
         "KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY",
         had_policy, saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_RAJAT31_H100_POLICY", had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "") ||
       !restore_env_value("KLS_DISABLE_METIS_RACE", had_race,
                          saved_race != NULL ? saved_race : "")) {
     ok = 0;
@@ -26268,7 +25989,6 @@ cleanup:
   free(ap);
   free(ai);
   free(saved_policy);
-  free(saved_legacy);
   free(saved_race);
   return ok;
 }
@@ -26335,23 +26055,16 @@ static int test_dense_fragmented_scaled_row_policy(void) {
   double *x = (double *)malloc((size_t)n * sizeof(*x));
   const char *saved_policy_value =
     getenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY");
-  const char *saved_legacy_value =
-    getenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY");
   char *saved_policy = saved_policy_value != NULL
     ? strdup(saved_policy_value) : NULL;
-  char *saved_legacy = saved_legacy_value != NULL
-    ? strdup(saved_legacy_value) : NULL;
   const int had_policy = saved_policy_value != NULL;
-  const int had_legacy = saved_legacy_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *csr_solver = NULL;
   kls_solver *control_solver = NULL;
   kls_solver *disabled_solver = NULL;
-  kls_solver *legacy_disabled_solver = NULL;
   int ok = ap != NULL && ai != NULL && control_ap != NULL &&
     control_ai != NULL && ax != NULL && changed != NULL && expected != NULL &&
-    b != NULL && x != NULL && (!had_policy || saved_policy != NULL) &&
-    (!had_legacy || saved_legacy != NULL);
+    b != NULL && x != NULL && (!had_policy || saved_policy != NULL);
 
   if (!ok ||
       !build_dense_fragmented_scaled_row_fixture(ap, ai, ax, 0) ||
@@ -26370,8 +26083,7 @@ static int test_dense_fragmented_scaled_row_policy(void) {
       b[ai[entry]] += changed[entry] * expected[col];
     }
   }
-  if (unsetenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY") != 0 ||
-      unsetenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY") != 0) {
+  if (unsetenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY") != 0) {
     perror("configure dense fragmented scaled row policy");
     ok = 0;
     goto cleanup;
@@ -26522,40 +26234,14 @@ static int test_dense_fragmented_scaled_row_policy(void) {
     ok = 0;
   }
 
-  if (unsetenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY") != 0 ||
-      setenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY", "1", 1) != 0 ||
-      !require_ok(kls_create(&legacy_disabled_solver),
-                  "create legacy-disabled dense fragmented control") ||
-      !require_ok(kls_analyze_csc(legacy_disabled_solver, KLS_INDEX_INT32, n,
-                                  ap, ai, 0, &options),
-                  "analyze legacy-disabled dense fragmented control") ||
-      !require_ok(kls_factor(legacy_disabled_solver, ax),
-                  "factor legacy-disabled dense fragmented control")) {
-    ok = 0;
-    goto cleanup;
-  }
-  memset(&stats, 0, sizeof(stats));
-  stats.struct_size = sizeof(stats);
-  if (!require_ok(kls_get_stats(legacy_disabled_solver, &stats),
-                  "stats legacy-disabled dense fragmented control") ||
-      stats.dense_fragmented_scaled_row_factor_eligible != 0) {
-    fprintf(stderr,
-            "legacy-disabled dense fragmented control became eligible\n");
-    ok = 0;
-  }
-
 cleanup:
-  kls_destroy(legacy_disabled_solver);
   kls_destroy(disabled_solver);
   kls_destroy(control_solver);
   kls_destroy(csr_solver);
   kls_destroy(solver);
   if (!restore_env_value("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY",
                          had_policy,
-                         saved_policy != NULL ? saved_policy : "") ||
-      !restore_env_value("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY",
-                         had_legacy,
-                         saved_legacy != NULL ? saved_legacy : "")) {
+                         saved_policy != NULL ? saved_policy : "")) {
     ok = 0;
   }
   free(ap);
@@ -26568,7 +26254,6 @@ cleanup:
   free(b);
   free(x);
   free(saved_policy);
-  free(saved_legacy);
   return ok;
 }
 

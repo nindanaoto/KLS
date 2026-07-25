@@ -21306,27 +21306,20 @@ static void free_egraph_worker_scratch(kls_solver *solver) {
 }
 
 static int kls_compact_amf_two_block_policy_disabled(void) {
-  return getenv("KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_POLICY") != NULL ||
-    /* Compatibility alias for the superseded benchmark-specific selector. */
-    getenv("KLS_DISABLE_TSOPF_B9_H100_POLICY") != NULL;
+  return getenv("KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_POLICY") != NULL;
 }
 
 static int kls_compact_amf_two_block_specialized_worker_disabled(void) {
   return getenv("KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_SPECIALIZED_WORKER") !=
-      NULL ||
-    getenv("KLS_DISABLE_TSOPF_B9_SPECIALIZED_WORKER") != NULL;
+    NULL;
 }
 
 static int kls_compact_amf_two_block_trace_enabled(void) {
-  return getenv("KLS_TRACE_COMPACT_AMF_TWO_BLOCK") != NULL ||
-    getenv("KLS_TRACE_TSOPF_B9_H100") != NULL;
+  return getenv("KLS_TRACE_COMPACT_AMF_TWO_BLOCK") != NULL;
 }
 
 static const char *kls_compact_amf_two_block_schedule_weights(void) {
-  const char *weights =
-    getenv("KLS_COMPACT_AMF_TWO_BLOCK_SCHEDULE_WEIGHTS");
-  return weights != NULL ? weights :
-    getenv("KLS_TSOPF_B9_SCHEDULE_WEIGHTS");
+  return getenv("KLS_COMPACT_AMF_TWO_BLOCK_SCHEDULE_WEIGHTS");
 }
 
 /* The packed dependency stream uses twelve bits for a row and the retained
@@ -21497,8 +21490,7 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
                                                      int thread_count) {
   const int affinity_cycle = kls_compact_amf_two_block_factor_cycle(solver) ||
     (kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver) &&
-     getenv("KLS_DISABLE_COMPACT_PARTIAL_COLUMN_FRINGE_AFFINITY") == NULL &&
-     getenv("KLS_DISABLE_CIRCUIT204_AFFINITY_SCHEDULE") == NULL);
+     getenv("KLS_DISABLE_COMPACT_PARTIAL_COLUMN_FRINGE_AFFINITY") == NULL);
   if (!affinity_cycle || thread_count < 2 ||
       thread_count > 8 ||
       solver->n == 0u ||
@@ -28115,9 +28107,7 @@ static int kls_large_sparse_amf3_policy_enabled(
          options->orientation == KLS_ORIENTATION_AUTO &&
          options->scale == KLS_SCALE_AUTO && options->threads == 8 &&
          options->backend == KLS_BACKEND_AUTO && options->static_pivoting &&
-         getenv("KLS_DISABLE_SPARSE_BROAD_COLUMN_AMF_NO_BTF") == NULL &&
-         /* Retain the former diagnostic name as a compatibility alias. */
-         getenv("KLS_DISABLE_LARGE_SPARSE_AMF3_PATH") == NULL;
+         getenv("KLS_DISABLE_SPARSE_BROAD_COLUMN_AMF_NO_BTF") == NULL;
 }
 
 static int kls_large_bounded_no_btf_amf_policy_enabled(
@@ -28126,8 +28116,7 @@ static int kls_large_bounded_no_btf_amf_policy_enabled(
          options->orientation == KLS_ORIENTATION_AUTO &&
          options->scale == KLS_SCALE_AUTO && options->threads == 8 &&
          options->backend == KLS_BACKEND_AUTO && options->static_pivoting &&
-         getenv("KLS_DISABLE_BOUNDED_DEGREE_AMF_NO_BTF") == NULL &&
-         getenv("KLS_DISABLE_LARGE_BOUNDED_NO_BTF_AMF_PATH") == NULL;
+         getenv("KLS_DISABLE_BOUNDED_DEGREE_AMF_NO_BTF") == NULL;
 }
 
 /* Input topology proposes the fast analyze.  Retain it only when the actual
@@ -28294,13 +28283,7 @@ static int kls_partial_diagonal_many_block_no_btf_policy_enabled(
     options->backend == KLS_BACKEND_AUTO && options->static_pivoting &&
     options->use_btf &&
     fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    getenv("KLS_DISABLE_PARTIAL_DIAGONAL_MANY_BLOCK_NO_BTF") == NULL &&
-    /* Retain the former exact switches as diagnostic aliases. */
-    getenv("KLS_DISABLE_BIPS98_1142_NO_BTF_CYCLE") == NULL &&
-    getenv("KLS_DISABLE_ROMMES_SPARSE_NO_BTF_CYCLE") == NULL &&
-    getenv("KLS_DISABLE_BIPS07_1693_NO_BTF_CYCLE") == NULL &&
-    getenv("KLS_DISABLE_ZEROS_NOPSS_13K_NO_BTF_CYCLE") == NULL &&
-    getenv("KLS_DISABLE_NOPSS11_NO_BTF_H100_POLICY") == NULL;
+    getenv("KLS_DISABLE_PARTIAL_DIAGONAL_MANY_BLOCK_NO_BTF") == NULL;
 }
 
 static int kls_partial_diagonal_many_block_no_btf_cycle(
@@ -28393,9 +28376,7 @@ static int kls_sparse_diagonal_row_hub_no_btf_policy_enabled(
     options->backend == KLS_BACKEND_AUTO && options->static_pivoting &&
     options->use_btf &&
     fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    getenv("KLS_DISABLE_SPARSE_DIAGONAL_ROW_HUB_NO_BTF") == NULL &&
-    /* Retain the former exact switch as a diagnostic alias. */
-    getenv("KLS_DISABLE_HVDC1_NO_BTF_H100_POLICY") == NULL;
+    getenv("KLS_DISABLE_SPARSE_DIAGONAL_ROW_HUB_NO_BTF") == NULL;
 }
 
 static int kls_sparse_diagonal_row_hub_no_btf_cycle(
@@ -28566,9 +28547,7 @@ static int kls_large_reciprocal_hub_amd_btf_policy_enabled(
     options->backend == KLS_BACKEND_AUTO && options->static_pivoting &&
     options->use_btf &&
     fabs(options->pivot_tolerance - 0.001) <= 1.0e-12 &&
-    getenv("KLS_DISABLE_LARGE_RECIPROCAL_HUB_AMD_BTF") == NULL &&
-    /* Retain the former exact switch as a diagnostic alias. */
-    getenv("KLS_DISABLE_IBM_DC_H100_POLICY") == NULL;
+    getenv("KLS_DISABLE_LARGE_RECIPROCAL_HUB_AMD_BTF") == NULL;
 }
 
 static int kls_large_reciprocal_hub_amd_btf_cycle(
@@ -28908,16 +28887,8 @@ static int kls_balanced_moderate_hub_amd_class_enabled(
   if (!kls_balanced_moderate_hub_amd_policy_enabled(options)) {
     return 0;
   }
-  if (profile_class == KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF) {
-    /* Former direct-AMD switch retained as a class-specific alias. */
-    return getenv("KLS_DISABLE_CKT11752_AMD_H100_POLICY") == NULL;
-  }
-  if (profile_class ==
-      KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF) {
-    /* Former transient no-BTF switch retained as a class-specific alias. */
-    return getenv("KLS_DISABLE_CKT11752_TR0_H100_POLICY") == NULL;
-  }
-  return 0;
+  return profile_class == KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF ||
+    profile_class == KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF;
 }
 
 static int kls_balanced_moderate_hub_amd_input_enabled(
@@ -29854,8 +29825,6 @@ static int kls_symmetric_partial_diagonal_match_policy_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY") == NULL &&
-    /* Compatibility alias for the superseded exact selector. */
-    getenv("KLS_DISABLE_LARGE_WEAK_PTS_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -29922,8 +29891,6 @@ static int kls_low_work_hubbed_scalar_fringe_options_enabled(
   return options != NULL &&
     getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") == NULL &&
     getenv("KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY") == NULL &&
-    /* Compatibility alias for the superseded benchmark-specific selector. */
-    getenv("KLS_DISABLE_RAJAT29_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -30154,13 +30121,11 @@ static int kls_sparse_symmetric_fragmented_metis_input_profile(
     n, col_ptr, row_idx, columns_sorted, max_column_degree);
 }
 
-/* Preserve the standard AUTO/8T contract.  The old matrix-named switch is a
-   compatibility alias for existing A/B scripts, not part of classification. */
+/* Preserve the standard AUTO/8T contract. */
 static int kls_sparse_symmetric_fragmented_metis_policy_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY") == NULL &&
-    getenv("KLS_DISABLE_ASIC100KS_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -30171,13 +30136,11 @@ static int kls_sparse_symmetric_fragmented_metis_policy_enabled(
 
 /* Capability contract for the guarded dense reciprocal-hub route.  Explicit
    orientation, ordering, scaling, backend, BTF, and pivot choices retain
-   their documented meaning.  The former matrix-specific switch remains a
-   diagnostic alias for existing benchmark scripts. */
+   their documented meaning. */
 static int kls_dense_reciprocal_hub_metis_policy_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY") == NULL &&
-    getenv("KLS_DISABLE_ASIC100K_DENSE_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -30199,7 +30162,6 @@ static int kls_sparse_spiked_predicted_options_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY") == NULL &&
-    getenv("KLS_DISABLE_NXP1_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -30307,15 +30269,13 @@ static int kls_sparse_spiked_predicted_clustered_cycle(
 
 /* Direct NodeNDP is a capability of sparse asymmetric graphs with bounded
    in/out degree and one nearly spanning strongly connected component.  Keep
-   the standard AUTO/8T contract explicit.  The former family switch remains
-   a same-binary A/B alias; it is not used to recognize an input. */
+   the standard AUTO/8T contract explicit. */
 static int kls_asymmetric_bounded_degree_direct_metis_options_enabled(
   const kls_options *options) {
 #ifdef KLS_HAVE_METIS
   return options != NULL &&
     getenv("KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY") ==
       NULL &&
-    getenv("KLS_DISABLE_FREESCALE_CHAIN_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -30594,14 +30554,12 @@ static int kls_asymmetric_bounded_degree_direct_metis_factor_cycle(
 
 /* Dense, almost-full-diagonal directed graphs with one dominant in/out hub
    can settle into a giant unscaled METIS block whose trailing pivot panel is
-   profitable as a pipelined dense tail.  The matrix-named switch is retained
-   only as a same-binary compatibility alias. */
+   profitable as a pipelined dense tail. */
 static int kls_giant_dominant_hub_metis_dense_tail_options_enabled(
   const kls_options *options) {
 #ifdef KLS_HAVE_METIS
   return options != NULL &&
     getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY") == NULL &&
-    getenv("KLS_DISABLE_FULLCHIP_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -30872,14 +30830,11 @@ static int kls_singular_completion_enabled(const kls_solver *solver) {
 
 /* A dense, almost-full-diagonal graph with nearly balanced directed degrees,
    one macroscopic-but-bounded hub, and a thin disconnected fringe is a
-   proposal for direct AMD/BTF analysis and max row scaling.  The old
-   matrix-named switch remains a compatibility alias for same-binary A/B
-   runs; no SuiteSparse coordinate is recognized. */
+   proposal for direct AMD/BTF analysis and max row scaling. */
 static int kls_near_symmetric_mega_hub_amd_options_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY") == NULL &&
-    getenv("KLS_DISABLE_CIRCUIT5M_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -31093,7 +31048,6 @@ static int kls_dense_fragmented_scaled_row_options_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY") == NULL &&
-    getenv("KLS_DISABLE_TSOPF_RS_B2383_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -31161,14 +31115,12 @@ static void kls_bounded_degree_arm_retained_preconditioner(
 static int kls_bounded_degree_update_is_preconditioner_safe(
   const kls_solver *solver, const double *numeric_values);
 
-/* Capability contract for giant symmetric scalar-fringe systems.  The old
-   matrix-named switch remains a same-binary compatibility alias only. */
+/* Capability contract for giant symmetric scalar-fringe systems. */
 static int kls_giant_symmetric_scalar_fringe_metis_row_options_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY") ==
       NULL &&
-    getenv("KLS_DISABLE_RAJAT31_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -31262,14 +31214,11 @@ static int kls_giant_symmetric_scalar_fringe_metis_row_candidate_cycle(
    symbolic floors decide whether a graph can actually repay row metadata,
    while measured fill separates the fine and wider giant-matrix schedules.
    Topology only proposes the lifecycle; the retained symbolic and numeric
-   must independently prove their fill, work, and separator bounds.
-   The matrix-named switch remains solely as a compatibility alias. */
+   must independently prove their fill, work, and separator bounds. */
 static int kls_sparse_full_diagonal_metis_row_options_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY") == NULL &&
-    getenv("KLS_DISABLE_MC2DEPI_H100_POLICY") == NULL &&
-    getenv("KLS_DISABLE_G3_CIRCUIT_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -32001,7 +31950,6 @@ static int kls_compact_partial_diagonal_column_fringe_btf_cycle(
   if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
       !solver->compact_partial_diagonal_column_fringe ||
       getenv("KLS_DISABLE_COMPACT_PARTIAL_DIAGONAL_COLUMN_FRINGE") != NULL ||
-      getenv("KLS_DISABLE_CIRCUIT204_H100_POLICY") != NULL ||
       !kls_compact_partial_diagonal_column_fringe_profile_enabled(
         solver->n, solver->nnz, &solver->options) ||
       solver->stats.selected_ordering != KLS_ORDERING_AMD ||
@@ -32145,7 +32093,6 @@ static int kls_small_pivot_low_work_dominant_btf_shape(
 static int kls_high_work_near_single_btf_shape(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       getenv("KLS_DISABLE_HIGH_WORK_NEAR_SINGLE_BTF_EGRAPH") != NULL ||
-      getenv("KLS_DISABLE_TSOPF_B39_C19_H100_POLICY") != NULL ||
       solver->options.backend == KLS_BACKEND_SERIAL ||
       solver->options.threads < 4 ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
@@ -32451,16 +32398,7 @@ static int kls_high_work_tiny_fringe_btf_pts_factor_cycle(
 }
 
 static int kls_moderate_fragmented_egraph_policy_disabled(void) {
-  return getenv("KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY") != NULL ||
-    /* Compatibility alias for the superseded exact selector. */
-    getenv("KLS_DISABLE_ONETONE2_H100_POLICY") != NULL;
-}
-
-static int kls_moderate_fragmented_env_alias_set(
-  const char *generic_name,
-  const char *legacy_name) {
-  return (generic_name != NULL && getenv(generic_name) != NULL) ||
-    (legacy_name != NULL && getenv(legacy_name) != NULL);
+  return getenv("KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY") != NULL;
 }
 
 __attribute__((noinline))
@@ -32531,9 +32469,6 @@ static int kls_small_compact_deep_fill_worker_spin_policy_enabled(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       getenv("KLS_DISABLE_SMALL_COMPACT_DOMINANT_BTF_WORKER_SPIN") != NULL ||
-      /* Keep the former diagnostic switch as an alias for the generic
-         policy instead of retaining a matrix-specific selector. */
-      getenv("KLS_DISABLE_ACTIVSG2000_H100_POLICY") != NULL ||
       solver->options.threads != 8 ||
       solver->options.backend == KLS_BACKEND_SERIAL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
@@ -32562,9 +32497,6 @@ static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
   return solver != NULL && solver->symbolic != NULL &&
     solver->numeric != NULL && solver->col_ptr != NULL &&
     getenv("KLS_DISABLE_VERIFIED_RHS_REUSE") == NULL &&
-    /* Retain the former diagnostic switch as an alias for the generic
-       capability rather than a matrix-specific selector. */
-    getenv("KLS_DISABLE_CIRCUIT3_H100_POLICY") == NULL &&
     solver->orientation == KLS_ORIENTATION_NORMAL &&
     solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
@@ -32674,10 +32606,8 @@ kls_symmetric_scalar_fringe_input_profile(
 
 static __attribute__((cold, noinline)) int
 kls_symmetric_scalar_fringe_policy_disabled(void) {
-  return
-    getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY") != NULL ||
-    /* Retain the former benchmark-specific switch as a diagnostic alias. */
-    getenv("KLS_DISABLE_MEDIUM_SYMMETRIC_AMD_LEAN_POLICY") != NULL;
+  return getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY") !=
+    NULL;
 }
 
 static __attribute__((cold, noinline)) int
@@ -32779,8 +32709,6 @@ static int kls_pivoted_high_work_single_block_symbolic_profile(
   if (solver == NULL || solver->symbolic == NULL ||
       solver->col_ptr == NULL ||
       getenv("KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY") != NULL ||
-      /* Retain the former benchmark-specific switch as an A/B alias. */
-      getenv("KLS_DISABLE_RAJAT15_H100_POLICY") != NULL ||
       solver->options.orientation != KLS_ORIENTATION_AUTO ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale != KLS_SCALE_AUTO ||
@@ -32885,9 +32813,6 @@ static int kls_low_work_many_fringe_dominant_btf_pts_factor_profile(
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->col_ptr == NULL ||
       getenv("KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY") != NULL ||
-      /* Retain the former benchmark-specific switch as an A/B alias. */
-      (!hubbed_scalar_fringe &&
-       getenv("KLS_DISABLE_RAJAT21_H100_POLICY") != NULL) ||
       (solver->low_work_hubbed_scalar_fringe_input_class &&
        !kls_low_work_hubbed_scalar_fringe_options_enabled(
          &solver->options)) ||
@@ -32979,8 +32904,6 @@ static int kls_high_work_tiny_scalar_fringe_amd_symbolic_profile(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->col_ptr == NULL ||
       getenv("KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY") != NULL ||
-      /* Retain the former benchmark-specific switch as an A/B alias. */
-      getenv("KLS_DISABLE_RAJ1_H100_POLICY") != NULL ||
       solver->options.orientation != KLS_ORIENTATION_AUTO ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale != KLS_SCALE_AUTO ||
@@ -35596,9 +35519,6 @@ static UF_long kls_metis_order_inner(UF_long n,
        their packed solve substantially. */
     const char *npes_env = getenv(
       "KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES");
-    if (npes_env == NULL || npes_env[0] == '\0') {
-      npes_env = getenv("KLS_FREESCALE_CHAIN_METIS_NDP_NPES");
-    }
     metis_ndp_npes = npes_env != NULL && npes_env[0] != '\0'
       ? (idx_t)atol(npes_env)
       : (kls_asymmetric_bounded_degree_direct_metis_analyze_class ==
@@ -35608,9 +35528,6 @@ static UF_long kls_metis_order_inner(UF_long n,
   if (kls_fragmented_metis_tuning_ctx == 3) {
     const char *npes_env =
       getenv("KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES");
-    if (npes_env == NULL || npes_env[0] == '\0') {
-      npes_env = getenv("KLS_ASIC100KS_METIS_NDP_NPES");
-    }
     metis_ndp_npes =
       npes_env != NULL && npes_env[0] != '\0' ? (idx_t)atol(npes_env) : 8;
   } else if (kls_medium_partial_static_metis_ctx) {
@@ -35872,8 +35789,7 @@ static UF_long kls_metis_order_inner(UF_long n,
     const int skip_camd_refine =
       getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL ||
       (kls_fragmented_metis_tuning_ctx == 2 &&
-       getenv("KLS_ENABLE_DENSE_RECIPROCAL_HUB_CAMD_REFINE") == NULL &&
-       getenv("KLS_ENABLE_ASIC100K_CAMD_REFINE") == NULL);
+       getenv("KLS_ENABLE_DENSE_RECIPROCAL_HUB_CAMD_REFINE") == NULL);
     UF_long camd_lnz;
     if (skip_camd_refine) {
       /* The pre-static raced-symbolic path subsequently constructs and
@@ -36480,8 +36396,6 @@ static int kls_compact_partial_diagonal_column_fringe_options_enabled(
   const kls_options *options) {
   return
     getenv("KLS_DISABLE_COMPACT_PARTIAL_DIAGONAL_COLUMN_FRINGE") == NULL &&
-    /* Retain the former exact-selector switch as a diagnostic alias. */
-    getenv("KLS_DISABLE_SMALL_SINGLE_BLOCK_AMD_H100_POLICY") == NULL &&
     kls_compact_partial_diagonal_column_fringe_profile_enabled(
       n, nnz, options);
 }
@@ -38951,8 +38865,7 @@ static int build_greedy_numeric_row_match(UF_long n,
   if (improve_matching &&
       compact_missing_diagonal_match &&
       getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") == NULL &&
-      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL &&
-      getenv("KLS_DISABLE_GEMAT_COMPACT_MATCH") == NULL) {
+      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL) {
     return build_compact_numeric_row_match(
       n, nnz, col_ptr, row_idx, numeric_values,
       row_perm_out, matched_out);
@@ -40901,7 +40814,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   if (kls_low_work_hubbed_scalar_fringe_amd_symbolic_cycle(solver) &&
       getenv("KLS_ENABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_STATIC_MATCH") ==
         NULL &&
-      getenv("KLS_ENABLE_RAJAT29_STATIC_MATCH") == NULL &&
       solver->common.status >= TRILINOS_KLU_OK &&
       solver->common.status != TRILINOS_KLU_SINGULAR) {
     /* Exact/auction matching would replace an already validated low-work AMD
@@ -41104,12 +41016,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   compact_missing_diagonal_matcher =
     compact_missing_diagonal_match &&
     solver->nnz >= 4u * solver->n &&
-    getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL &&
-    getenv("KLS_DISABLE_GEMAT_COMPACT_MATCH") == NULL;
+    getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL;
   UF_long missing_diagonal = 0;
   UF_long weak = 0u;
-  if (getenv("KLS_DISABLE_GEMAT_FAST_WEAK_COUNT") == NULL &&
-      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_FAST_WEAK_COUNT") ==
+  if (getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_FAST_WEAK_COUNT") ==
         NULL &&
       solver->compact_missing_diagonal_match_candidate) {
     missing_diagonal = count_missing_diagonal_rows_compact(
@@ -41712,9 +41622,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     trial_est_flops <= 16384.0 * (double)solver->n &&
     trial_est_flops >= 1.0e8 && trial_est_flops <= 1.0e9 &&
     trial_ordering == KLS_ORDERING_AMD && trial_common.scale == -1 &&
-    !kls_moderate_fragmented_env_alias_set(
-      "KLS_DISABLE_MODERATE_FRAGMENTED_PIPE_FACTOR",
-      "KLS_DISABLE_ONETONE2_PIPE_FACTOR");
+    getenv("KLS_DISABLE_MODERATE_FRAGMENTED_PIPE_FACTOR") == NULL;
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr,
             "KLS pre-static: moderate-fragmented pipe=%d"
@@ -42421,8 +42329,6 @@ static int kls_sparse_partial_diagonal_amd_btf_options_enabled(
   const kls_options *options) {
   return options != NULL &&
     getenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD") == NULL &&
-    /* Compatibility alias for the superseded matrix-window policy. */
-    getenv("KLS_DISABLE_HTC336_9129_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -42498,7 +42404,6 @@ static int kls_sparse_partial_diagonal_amd_btf_cycle(
   const kls_solver *solver) {
   return solver != NULL && solver->sparse_partial_diagonal_amd_btf_cycle &&
     getenv("KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD") == NULL &&
-    getenv("KLS_DISABLE_HTC336_9129_H100_POLICY") == NULL &&
     kls_sparse_fragmented_dominant_btf_symbolic_work(solver);
 }
 
@@ -44853,7 +44758,6 @@ static int choose_symbolic_for_pattern(UF_long n,
   const int compact_missing_diagonal_analysis_probe =
     kls_compact_missing_diagonal_match_policy_enabled(options) &&
     getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_ANALYSIS_PROBE") == NULL &&
-    getenv("KLS_DISABLE_GEMAT_ANALYSIS_PROBE") == NULL &&
     kls_compact_missing_diagonal_input_profile(n, col_ptr, row_idx);
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       getenv("KLS_DISABLE_AUTO_AMD_SHORTCUT") == NULL &&
@@ -67442,7 +67346,6 @@ static int kls_build_lean_row_refactor_pattern_parallel(
     ok = input_cols != NULL && input_pos != NULL;
     if (ok && lean_only &&
         getenv("KLS_DISABLE_LEAN_PACKED_INPUT") == NULL &&
-        getenv("KLS_DISABLE_RAJAT_PACKED_INPUT") == NULL &&
         kls_lean_packed_input_shape(solver) &&
         solver->n <= (UF_long)UINT16_MAX + 1u &&
         solver->nnz <= (UF_long)UINT16_MAX + 1u) {
@@ -67581,7 +67484,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
       (kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
        kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver)) &&
-      getenv("KLS_DISABLE_BIPS98_DIRECT_ROW_PATTERN") == NULL &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 1, 1)) {
     if (trace_prep) {
       const double trace_end = kls_now_seconds();
@@ -74008,8 +73910,7 @@ static KLS_ALWAYS_INLINE int kls_lean_parallel_process_row(
 
 static int kls_build_compact_match_direct_value_maps(kls_solver *solver) {
   if (solver != NULL && solver->row_refactor_input_cols16 == NULL &&
-      (getenv("KLS_ENABLE_COMPACT_MATCH_INPUT_COLS16") != NULL ||
-       getenv("KLS_ENABLE_GEMAT_INPUT_COLS16") != NULL) &&
+      getenv("KLS_ENABLE_COMPACT_MATCH_INPUT_COLS16") != NULL &&
       solver->row_refactor_input_ptr != NULL &&
       solver->row_refactor_input_cols != NULL &&
       solver->n <= (UF_long)UINT16_MAX + 1u &&
@@ -74102,8 +74003,7 @@ static int kls_build_compact_match_direct_value_maps(kls_solver *solver) {
     }
   }
   free(inverse);
-  if (getenv("KLS_DISABLE_COMPACT_MATCH_PACKED_INPUT") == NULL &&
-      getenv("KLS_DISABLE_GEMAT_PACKED_INPUT") == NULL) {
+  if (getenv("KLS_DISABLE_COMPACT_MATCH_PACKED_INPUT") == NULL) {
     uint32_t *packed = (uint32_t *)malloc(
       (size_t)(row_count > 0u ? row_count : 1u) * sizeof(*packed));
     if (packed != NULL) {
@@ -75284,11 +75184,9 @@ static void kls_lean_parallel_worker_run(
   const int clean_scratch_disabled =
     getenv("KLS_DISABLE_LEAN_CLEAN_SCRATCH") != NULL ||
     (shared->lean_compact_match_mode &&
-     (getenv("KLS_DISABLE_COMPACT_MATCH_CLEAN_SCRATCH") != NULL ||
-      getenv("KLS_DISABLE_GEMAT_CLEAN_SCRATCH") != NULL)) ||
+     getenv("KLS_DISABLE_COMPACT_MATCH_CLEAN_SCRATCH") != NULL) ||
     (symmetric_scalar_fringe_lean_class &&
-     (getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_CLEAN_SCRATCH") != NULL ||
-      getenv("KLS_DISABLE_RAJAT_CLEAN_SCRATCH") != NULL));
+     getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_CLEAN_SCRATCH") != NULL);
   if (!solver->lean_parallel_scratch_clean || clean_scratch_disabled) {
     memset(worker->x, 0, (size_t)solver->n * sizeof(*worker->x));
   }
@@ -75298,7 +75196,6 @@ static void kls_lean_parallel_worker_run(
   const UF_long stride = (UF_long)shared->thread_count;
   const int symmetric_scalar_fringe_hoisted_worker =
     getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_HOISTED_WORKER") == NULL &&
-    getenv("KLS_DISABLE_RAJAT_HOISTED_WORKER") == NULL &&
     symmetric_scalar_fringe_lean_class && shared->rs == NULL &&
     solver->row_refactor_input_ptr != NULL &&
     solver->row_refactor_input_cols != NULL &&
@@ -75385,7 +75282,6 @@ static void kls_lean_parallel_worker_run(
   if (shared->lean_compact_match_mode) {
     const int hoisted_worker =
       getenv("KLS_DISABLE_COMPACT_MATCH_HOISTED_WORKER") == NULL &&
-      getenv("KLS_DISABLE_GEMAT_HOISTED_WORKER") == NULL &&
       solver->lean_user_values_active &&
       shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
       solver->row_refactor_input_user_pos != NULL &&
@@ -75598,8 +75494,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_grouped_done_mode =
     grouped_done_ready &&
     ((shared->lean_compact_match_mode &&
-      getenv("KLS_DISABLE_COMPACT_MATCH_GROUPED_DONE") == NULL &&
-      getenv("KLS_DISABLE_GEMAT_GROUPED_DONE") == NULL) ||
+      getenv("KLS_DISABLE_COMPACT_MATCH_GROUPED_DONE") == NULL) ||
      (!shared->lean_compact_match_mode &&
       !symmetric_scalar_fringe_lean_mode &&
       !fragmented_grouped_hazard && rs == NULL &&
@@ -75615,14 +75510,11 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       solver->i16solve_l != NULL && solver->i16solve_u != NULL &&
       solver->i16solve_loff != NULL && solver->i16solve_uoff != NULL &&
       getenv("KLS_DISABLE_GENERIC_LEAN_ROW_FACTOR") == NULL)) &&
-    getenv("KLS_DISABLE_COMPACT_MATCH_ROW_FACTOR") == NULL &&
-    getenv("KLS_DISABLE_GEMAT_ROW_FACTOR") == NULL;
+    getenv("KLS_DISABLE_COMPACT_MATCH_ROW_FACTOR") == NULL;
   if (shared->lean_row_values_mode &&
       kls_scaled_fragmented_compact_row_factor_profile(solver) &&
       getenv("KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_DEFER_VALUE_SCATTER")
-        == NULL &&
-      /* Retain the former matrix-specific switch as a diagnostic alias. */
-      getenv("KLS_DISABLE_RAJAT27_DEFER_VALUE_SCATTER") == NULL) {
+        == NULL) {
     /* The retained solve consumes the flat row mirrors directly.  Avoid the
        duplicate random stores through LU pointer mirrors on every numeric
        generation; any later column-path consumer already publishes dirty
@@ -85991,8 +85883,7 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
       const int giant_scalar_fringe_help_priority =
         kls_giant_symmetric_scalar_fringe_metis_row_factor_cycle(solver) &&
         getenv("KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_DENSE_HELP_PRIORITY")
-          == NULL &&
-        getenv("KLS_DISABLE_RAJAT31_DENSE_HELP_PRIORITY") == NULL;
+          == NULL;
       const int wait_large_enabled =
         giant_scalar_fringe_help_priority || kls_dense_help_wait_large_enabled();
       const UF_long large_width = giant_scalar_fringe_help_priority
@@ -111352,9 +111243,6 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     const char *spin_iters = NULL;
     if (solver->compact_missing_diagonal_match_candidate) {
       spin_iters = getenv("KLS_COMPACT_MATCH_WORKER_SPIN_ITERS");
-      if (spin_iters == NULL) {
-        spin_iters = getenv("KLS_GEMAT_WORKER_SPIN_ITERS");
-      }
     } else {
       spin_iters = getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE");
     }
@@ -111641,9 +111529,7 @@ static int kls_parallel_prepare_moderate_fragmented_values(
       solver->input_to_csc == NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->options.threads < 2 ||
       !kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
-      kls_moderate_fragmented_env_alias_set(
-        "KLS_DISABLE_MODERATE_FRAGMENTED_PARALLEL_VALUE_PREP",
-        "KLS_DISABLE_ONETONE2_PARALLEL_VALUE_PREP") ||
+      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_PARALLEL_VALUE_PREP") != NULL ||
       !kls_build_prepared_value_input_pos(solver)) {
     return 0;
   }
@@ -113252,8 +113138,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       kls_dense_reciprocal_hub_metis_factor_cycle(solver) ||
       kls_moderate_work_fragmented_dominant_btf_cycle(solver) ||
       (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
-       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL &&
-       getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
+       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL) ||
       kls_extreme_symmetric_single_block_cycle(solver)) {
     /* These retained numeric classes have already selected full width, while
        pair/quad fusion is slower (roughly 2x on the extreme symmetric single
@@ -113393,26 +113278,19 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
   solver->scalar_refactor_scatter =
     kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
-    !kls_moderate_fragmented_env_alias_set(
-      "KLS_ENABLE_MODERATE_FRAGMENTED_AVX512_SCATTER",
-      "KLS_ENABLE_ONETONE2_AVX512_SCATTER");
+    getenv("KLS_ENABLE_MODERATE_FRAGMENTED_AVX512_SCATTER") == NULL;
   solver->snode_tail_chunk128 =
     (kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
-     !kls_moderate_fragmented_env_alias_set(
-       "KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_CHUNK128",
-       "KLS_DISABLE_ONETONE2_SNODE_TAIL_CHUNK128")) ||
+     getenv("KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_CHUNK128") == NULL) ||
     getenv("KLS_EXPERIMENT_SNODE_TAIL_CHUNK128") != NULL;
   solver->snode_tail_chunk144 =
     (kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
-     !kls_moderate_fragmented_env_alias_set(
-       "KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_CHUNK144",
-       "KLS_DISABLE_ONETONE2_SNODE_TAIL_CHUNK144")) ||
+     getenv("KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_CHUNK144") == NULL) ||
     getenv("KLS_EXPERIMENT_SNODE_TAIL_CHUNK144") != NULL;
   solver->snode_tail_masked_remainder =
     (kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
-     !kls_moderate_fragmented_env_alias_set(
-       "KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_MASKED_REMAINDER",
-       "KLS_DISABLE_ONETONE2_SNODE_TAIL_MASKED_REMAINDER")) ||
+     getenv("KLS_DISABLE_MODERATE_FRAGMENTED_SNODE_TAIL_MASKED_REMAINDER") ==
+       NULL) ||
     getenv("KLS_EXPERIMENT_SNODE_TAIL_MASKED_REMAINDER") != NULL;
   if (solver->common.scale <= 0 && solver->numeric->Rs != NULL) {
     return -1;
@@ -151523,8 +151401,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       (kls_hybrid_huge_single_egraph_factor_cycle(solver) ||
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) ? 1.0 :
       (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
-       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_PTS_CUT") == NULL &&
-       getenv("KLS_DISABLE_ASIC320K_PTS_CUT") == NULL) ? 1.5 :
+       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_PTS_CUT") == NULL) ? 1.5 :
       (solver->large_sparse_amf3_path ? 1.5 : 2.0);
     {
       const char *env = getenv("KLS_PTS_CUT_MULTIPLIER");
@@ -151715,8 +151592,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       }
     }
     if (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
-        getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_PTS_RUN_SCATTER") == NULL &&
-        getenv("KLS_DISABLE_ASIC100K_PTS_RUN_SCATTER") == NULL) {
+        getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_PTS_RUN_SCATTER") == NULL) {
       /* This factor's shared top streams consist mostly of contiguous row
          runs.  Retain only run starts and lengths so each serial top scatter
          becomes a unit-stride SIMD loop instead of an indexed scalar walk. */
@@ -152952,7 +152828,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
     }
   }
   if (getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
-      getenv("KLS_DISABLE_GEMAT_FUSED_RHS_PERM") == NULL &&
       solver->row_perm != NULL && solver->row_scale == NULL) {
     uint16_t *row_inverse = (uint16_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
@@ -153245,8 +153120,7 @@ static int kls_moderate_work_fragmented_btf_solve_tier(
     return KLS_FRAGMENTED_BTF_SOLVE_OTHER;
   }
   if (solver->row_perm != NULL &&
-      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE") == NULL &&
-      getenv("KLS_DISABLE_HTC4438_I32_H100_POLICY") == NULL) {
+      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE") == NULL) {
     return KLS_FRAGMENTED_BTF_SOLVE_I32;
   }
   return KLS_FRAGMENTED_BTF_SOLVE_NATIVE;
@@ -153401,7 +153275,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
        kls_compact_partial_diagonal_column_fringe_btf_cycle(solver) ||
        kls_compact_amf_two_block_factor_cycle(solver) ||
        kls_low_work_single_block_policy_enabled(solver)) &&
-      getenv("KLS_DISABLE_BIPS98_DIRECT_I16_SOLVE") == NULL &&
       getenv("KLS_DISABLE_I16_SOLVE") == NULL &&
       n <= (UF_long)UINT16_MAX &&
       numeric->Llen != NULL && numeric->Ulen != NULL) {
@@ -153514,9 +153387,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     !(mixed_i16_env[0] == '0' && mixed_i16_env[1] == '\0');
   const int mixed_i16_default =
     kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
-    !kls_moderate_fragmented_env_alias_set(
-      "KLS_DISABLE_MODERATE_FRAGMENTED_MIXED_I16_SOLVE",
-      "KLS_DISABLE_ONETONE2_MIXED_I16_SOLVE");
+    getenv("KLS_DISABLE_MODERATE_FRAGMENTED_MIXED_I16_SOLVE") == NULL;
   if ((mixed_i16_forced || mixed_i16_default) &&
       n <= (UF_long)UINT16_MAX && lcur >= 0 && ucur >= 0) {
     uint16_t *lrows = (uint16_t *)malloc(
@@ -153549,11 +153420,9 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
   }
   if ((kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
-       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM") == NULL &&
-       getenv("KLS_DISABLE_ASIC320K_COMPACT_PERM") == NULL) ||
+       getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM") == NULL) ||
       (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
-       getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_PERM") == NULL &&
-       getenv("KLS_DISABLE_ASIC100K_COMPACT_PERM") == NULL)) {
+       getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_PERM") == NULL)) {
     uint32_t *pnum32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*pnum32));
     uint32_t *q32 = (uint32_t *)malloc(
@@ -153571,9 +153440,8 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
   }
   if (kls_dense_reciprocal_hub_metis_factor_cycle(solver) &&
-       getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_STREAM_META") ==
-         NULL &&
-       getenv("KLS_DISABLE_ASIC100K_COMPACT_STREAM_META") == NULL) {
+      getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_COMPACT_STREAM_META") ==
+        NULL) {
     uint32_t *llen32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*llen32));
     uint32_t *ulen32 = (uint32_t *)malloc(
@@ -153646,8 +153514,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
       solver->row_perm != NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       numeric->Rs == NULL && n <= (UF_long)UINT32_MAX &&
-      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS") == NULL &&
-      getenv("KLS_DISABLE_HTC4438_FUSED_RHS") == NULL) {
+      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS") == NULL) {
     uint32_t *row_inverse = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
     uint32_t *rhs_perm32 = (uint32_t *)malloc(
@@ -156383,16 +156250,12 @@ static int kls_try_singular_rank_completion(kls_solver *solver,
       ? kls_pipe_first_factor_threads(solver, solver->symbolic) : 0;
     UF_long completion_dense_tail = 0u;
     if (giant_dominant_hub_pipe &&
-        getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_COMPLETION_PIPE") == NULL &&
-        getenv("KLS_DISABLE_FULLCHIP_COMPLETION_PIPE") == NULL) {
+        getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_COMPLETION_PIPE") == NULL) {
       if (completion_pipe_threads == 0) {
         completion_pipe_threads = solver->options.threads;
       }
       completion_dense_tail = 4096u;
       const char *tail_env = getenv("KLS_GIANT_DOMINANT_HUB_DENSE_TAIL");
-      if (tail_env == NULL || tail_env[0] == '\0') {
-        tail_env = getenv("KLS_FULLCHIP_DENSE_TAIL");
-      }
       if (tail_env != NULL && tail_env[0] != '\0') {
         const long parsed = atol(tail_env);
         if (parsed >= 0 && parsed <= 16384) {
@@ -156867,9 +156730,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       if (kls_diagonal_equiv_candidate &&
           solver->diagonal_equiv_plan_state == 0 &&
           !(kls_moderate_work_fragmented_dominant_btf_cycle(solver) &&
-            !kls_moderate_fragmented_env_alias_set(
-              "KLS_ENABLE_MODERATE_FRAGMENTED_DIAGONAL_PLAN",
-              "KLS_ENABLE_ONETONE2_DIAGONAL_PLAN"))) {
+            getenv("KLS_ENABLE_MODERATE_FRAGMENTED_DIAGONAL_PLAN") == NULL)) {
         const double plan_start = kls_now_seconds();
         kls_prepare_diagonal_equiv_plan(solver, numeric_values);
         elapsed += kls_now_seconds() - plan_start;
@@ -157283,8 +157144,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         kls_compact_partial_diagonal_column_fringe_btf_cycle(solver);
       const int partial_column_fringe_single_block_lean_prewarm =
         kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver) &&
-        getenv("KLS_DISABLE_COMPACT_PARTIAL_COLUMN_FRINGE_PREWARM") == NULL &&
-        getenv("KLS_DISABLE_CIRCUIT204_SINGLE_BLOCK_PREWARM") == NULL;
+        getenv("KLS_DISABLE_COMPACT_PARTIAL_COLUMN_FRINGE_PREWARM") == NULL;
       if (!had_numeric && solver->options.threads > 1 &&
           solver->egraph_pool == NULL &&
           (kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver) ||
@@ -157333,8 +157193,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       const int giant_dominant_hub_routed_factor =
         !had_numeric &&
         kls_giant_dominant_hub_metis_dense_tail_symbolic_cycle(solver) &&
-        getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_ROUTED_FACTOR") == NULL &&
-        getenv("KLS_DISABLE_FULLCHIP_ROUTED_FACTOR") == NULL;
+        getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_ROUTED_FACTOR") == NULL;
       if (giant_dominant_hub_routed_factor) {
         if (kls_klu_pipe_threads == 0) {
           kls_klu_pipe_threads = solver->options.threads;
@@ -157344,7 +157203,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       const int giant_dominant_hub_completion_discovery =
         giant_dominant_hub_routed_factor &&
         getenv("KLS_DISABLE_GIANT_DOMINANT_HUB_ZERO_DISCOVERY") == NULL &&
-        getenv("KLS_DISABLE_FULLCHIP_ZERO_DISCOVERY") == NULL &&
         kls_singular_completion_enabled(solver);
       const UF_long dominant_hub_zero_capacity = 4096u;
       const UF_long dominant_hub_saved_halt = solver->common.halt_if_singular;
@@ -157808,7 +157666,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     }
     if (getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_SKIP_GENERIC_PREPS") ==
           NULL &&
-        getenv("KLS_DISABLE_RAJAT_SKIP_GENERIC_PREPS") == NULL &&
         kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver)) {
       return;
     }
@@ -158112,7 +157969,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_low_work_btf_map32_policy_enabled(solver);
   if (getenv(
         "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR") == NULL &&
-      getenv("KLS_DISABLE_ADD20_DIRECT_REFACTOR") == NULL &&
       kls_moderate_work_single_block_lean_policy_enabled(solver) &&
       solver->lean_choice == 1 &&
       solver->solve_contract_probe == 1 &&
@@ -158326,7 +158182,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->compact_match_offdiag_user_pos != NULL &&
     solver->col_scale == NULL &&
     getenv("KLS_DISABLE_COMPACT_MATCH_DIRECT_VALUES") == NULL &&
-    getenv("KLS_DISABLE_GEMAT_DIRECT_VALUES") == NULL &&
     kls_compact_missing_diagonal_matched_factor_profile(solver);
   const int pts_direct_values =
     kls_pts_direct_user_values_enabled(solver) &&
@@ -158584,8 +158439,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     /* This factor's long relaxed runs win with the lower consume floors;
        padded panels and timing probes lose over H100. */
     solver->floor_choice =
-      getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_LOW_FLOOR") == NULL &&
-      getenv("KLS_DISABLE_ASIC100K_DENSE_LOW_FLOOR") == NULL ? 1 : -1;
+      getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_LOW_FLOOR") == NULL ? 1 : -1;
     solver->padded_choice = -1;
   } else if (kls_moderate_work_fragmented_dominant_btf_cycle(solver)) {
     /* This bounded-work factor class has already selected full-width EGraph
@@ -158626,8 +158480,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
        kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
        (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
-        getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL &&
-        getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
+        getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->floor_choice == 0) {
     solver->floor_choice = -1;
@@ -158639,8 +158492,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        kls_low_work_symmetric_partial_diagonal_pts_cycle(solver) ||
        kls_symmetric_partial_diagonal_match_factor_cycle(solver) ||
        (kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) &&
-        getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL &&
-        getenv("KLS_DISABLE_ASIC320K_SETTLED_PROBES") == NULL) ||
+        getenv("KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES") == NULL) ||
        kls_fragmented_medium_dominant_btf_shape(solver)) &&
       solver->padded_choice == 0) {
     solver->padded_choice = -1;
@@ -159505,7 +159357,6 @@ static int kls_prepare_balanced_moderate_hub_refine_csr(
   solver->solve_refine_csr32_state = -1;
   if (!kls_balanced_moderate_hub_scaled_btf_cycle(solver) ||
       getenv("KLS_DISABLE_BALANCED_MODERATE_HUB_PARALLEL_RESIDUAL") != NULL ||
-      getenv("KLS_DISABLE_CKT11752_PARALLEL_RESIDUAL") != NULL ||
       solver->n >= (UF_long)UINT16_MAX ||
       solver->nnz > (UF_long)UINT32_MAX || solver->col_ptr == NULL ||
       solver->row_idx == NULL) {
@@ -159860,7 +159711,6 @@ static int solve_impl(kls_solver *solver,
     kls_serial_mapped_prefers_vendor_solve(solver);
   const int fused_compact_match_rhs =
     getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
-    getenv("KLS_DISABLE_GEMAT_FUSED_RHS_PERM") == NULL &&
     !solver->diagonal_equiv_active &&
     solver->row_perm != NULL && !kernel_transpose && nrhs == 1 &&
     !has_row_scale && solver->numeric->Rs == NULL &&
@@ -161498,8 +161348,6 @@ static int kls_bounded_degree_retained_preconditioner_options_enabled(
   return options != NULL &&
     getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") ==
       NULL &&
-    /* Compatibility alias for same-binary comparisons. */
-    getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") == NULL &&
     options->orientation == KLS_ORIENTATION_AUTO &&
     options->ordering == KLS_ORDERING_AUTO &&
     options->scale == KLS_SCALE_AUTO &&
@@ -161563,7 +161411,6 @@ static int kls_bounded_degree_retained_preconditioner_skip_no_btf_retry(
   if (options == NULL ||
       getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") !=
         NULL ||
-      getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") != NULL ||
       options->backend != KLS_BACKEND_AUTO || options->threads < 2 ||
       !options->use_btf || !options->static_pivoting ||
       !kls_bounded_degree_retained_preconditioner_input_profile(
@@ -161614,8 +161461,7 @@ static int kls_bounded_degree_retained_preconditioner_factor_cycle(
   const kls_solver *solver) {
   if (solver == NULL ||
       getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") !=
-        NULL ||
-      getenv("KLS_DISABLE_HAMRLE3_H100_POLICY") != NULL) {
+        NULL) {
     return 0;
   }
   return solver->bounded_degree_retained_preconditioner_numeric_eligible != 0
