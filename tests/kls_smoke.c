@@ -3545,7 +3545,7 @@ static int test_dense_group_near_single_btf_stays_mapped(void) {
   }
 
   kls_destroy(solver);
-  for (size_t k = 0; k < 2u; ++k) {
+  for (size_t k = 0; k < 1u; ++k) {
     if (!(had_env[k] && saved_env[k] == NULL) &&
         !restore_env_value(env_names[k], had_env[k], saved_env[k])) {
       ok = 0;
