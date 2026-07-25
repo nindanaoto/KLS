@@ -4563,6 +4563,35 @@ still prefer consultation.  The master disable preserves that fallback.  The
 change does not broaden factor selection, refactor routing, or small-plan
 economics.
 
+Moderately wide-top plans no longer need the former sparse-100K input box.
+After the ordinary stream and forest proof, a previously unauthorized plan
+may extend the solve top from 30% to 45% only when its block has at least
+16,384 columns, its shared top spans at most 2% of those columns, it exposes at
+least four independent chunks per worker, and its heaviest worker bin is at
+most 1.25 times the average private work.  Existing family-authorized wide
+plans are unchanged.  The resulting large plan still uses the same direct
+verified-PTS policy; the stricter flop-weighted refactor gate remains separate.
+
+The old 95,000--105,000-row/five--seven-entry sparse helper has been removed
+from both PTS and METIS refinement.  An explicit METIS callback instead
+recognizes a realized full-diagonal, bounded-hub core with balanced triangular
+structure and scales its CAMD window with the core order.  A 105,390-row
+coupled holdout, whose 105,003-column core is outside the old callback box,
+independently satisfies both structural capabilities and completes 100 checked
+updates below `3.06e-15`.  Five final AUTO H100 pairs reduced its median
+modeled cycle from `1.4398s` to `1.3099s`.  On the original `ASIC_100ks`, 20
+final AUTO samples preserved the exact factor and direct PTS route; the
+generic/frozen medians were within 0.36%, while the 10%-trimmed mean favored
+the generic build by 0.6%.
+
+The compact 1K circuit helper has also been removed from orientation,
+tolerance, thread-count, and lean-refactor selection.  The ordinary small
+AUTO policy now selects the faster normal frame for `orsirr_1`; eleven final
+alternating H100 pairs measured a `0.8582` current/parent ratio.  The four
+nearby natural controls (`circuit204`, `orsirr_2`, `rdb968`, and
+`fpga_dcop_04`) remained within 0.6%, with unchanged factor decisions and
+residuals.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

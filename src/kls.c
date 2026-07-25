@@ -32037,12 +32037,6 @@ static int choose_auto_scale_from_values(const kls_solver *solver,
   return pattern_scale;
 }
 
-static int kls_is_compact_small_circuit_pattern(UF_long n,
-                                                const UF_long *col_ptr) {
-  return col_ptr != NULL && n >= 1000u && n <= 1100u &&
-         col_ptr[n] >= 5u * n && col_ptr[n] <= 7u * n;
-}
-
 static int kls_compact_partial_diagonal_column_fringe_options_enabled(
   UF_long n,
   UF_long nnz,
@@ -33242,10 +33236,8 @@ static int kls_uses_structural_initial_pivot_tolerance(
      solver->options.ordering == KLS_ORDERING_AUTO &&
      solver->options.scale == KLS_SCALE_AUTO &&
      solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
-     ((solver->common.scale == -1 &&
-       kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr)) ||
-      (solver->common.scale == 0 &&
-       kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)))) ||
+     solver->common.scale == 0 &&
+     kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)) ||
     (solver != NULL &&
      solver->options.orientation == KLS_ORIENTATION_AUTO &&
      solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -33316,13 +33308,11 @@ static double choose_initial_auto_pivot_tolerance(
       solver->options.ordering == KLS_ORDERING_AUTO &&
       solver->options.scale == KLS_SCALE_AUTO &&
       solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
-      ((solver->common.scale == -1 &&
-        kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr)) ||
-       (solver->common.scale == 0 &&
-        kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)))) {
-    /* These diagonal, nearly symmetric classes retain the same pivot
-       sequence at 1e-6.  Starting there avoids an unnecessary solve-side
-       tolerance contract and keeps their fast column solves. */
+      solver->common.scale == 0 &&
+      kls_symmetric_scalar_fringe_amd_lean_symbolic_cycle(solver)) {
+    /* This nearly symmetric class retains the same pivot sequence at 1e-6.
+       Starting there avoids an unnecessary solve-side tolerance contract and
+       keeps its fast column solves. */
     return 1.0e-6;
   }
   if (solver->options.orientation == KLS_ORIENTATION_AUTO &&
@@ -34365,13 +34355,6 @@ static UF_long kls_metis_order(UF_long n,
   return r;
 }
 
-static int kls_is_sparse_100k_nd_refine_pattern(
-  UF_long n,
-  const UF_long *col_ptr) {
-  return col_ptr != NULL && n >= 95000u && n <= 105000u &&
-    col_ptr[n] >= 5u * n && col_ptr[n] <= 7u * n;
-}
-
 /* The retained proposal must expose a nearly spanning BTF core whose small
    fringe is substantially represented by separate components.  Symbolic fill
    and separator bounds keep the tuned eight-leaf ordering inside its intended
@@ -34538,6 +34521,68 @@ static int kls_dense_reciprocal_hub_metis_factor_cycle(
    the fine sparse resource class; two is its wider giant-graph class. */
 static _Thread_local int kls_sparse_full_diagonal_metis_row_ctx;
 
+/* A sparse full-diagonal block with a moderate hub and balanced triangular
+   structure can benefit from a fine CAMD pass over the NodeND ranks even when
+   it reached explicit METIS without an enclosing AUTO topology proposal.
+   Recognize the callback's realized block rather than an outer matrix order
+   or density coordinate. */
+__attribute__((noinline, cold))
+static int kls_sparse_full_diagonal_hubbed_metis_core_refine_profile(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  if (col_ptr == NULL || row_idx == NULL || n < 32768u || n > 262144u ||
+      n > UF_long_max / 8u || col_ptr[0] != 0u ||
+      col_ptr[n] < 4u * n || col_ptr[n] > 8u * n) {
+    return 0;
+  }
+  const UF_long nnz = col_ptr[n];
+  UF_long diagonal_columns = 0u;
+  UF_long scalar_columns = 0u;
+  UF_long max_column_degree = 0u;
+  UF_long lower_entries = 0u;
+  UF_long upper_entries = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end > nnz || end - begin > 512u) {
+      return 0;
+    }
+    const UF_long degree = end - begin;
+    scalar_columns += degree == 1u;
+    if (degree > max_column_degree) {
+      max_column_degree = degree;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n) {
+        return 0;
+      }
+      has_diagonal |= row == col;
+      lower_entries += row > col;
+      upper_entries += row < col;
+    }
+    diagonal_columns += (UF_long)has_diagonal;
+  }
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr,
+            "KLS metis: hubbed core proposal n=%ld nnz=%ld diag=%ld "
+            "scalar=%ld maxdeg=%ld lower=%ld upper=%ld\n",
+            (long)n, (long)nnz, (long)diagonal_columns,
+            (long)scalar_columns, (long)max_column_degree,
+            (long)lower_entries, (long)upper_entries);
+  }
+  if (diagonal_columns != n || 1024u * scalar_columns > n ||
+      512u * max_column_degree < n || 64u * max_column_degree > n ||
+      4.0 * (double)lower_entries > 5.0 * (double)upper_entries ||
+      4.0 * (double)upper_entries > 5.0 * (double)lower_entries) {
+    return 0;
+  }
+  return 1;
+}
+
+__attribute__((noinline, cold))
 static UF_long kls_metis_camd_group_size(UF_long n,
                                          const UF_long *col_ptr,
                                          const UF_long *row_idx) {
@@ -34616,8 +34661,26 @@ static UF_long kls_metis_camd_group_size(UF_long n,
        structurally proposed and post-symbolically guarded AUTO route. */
     return 2304u;
   }
-  if (kls_is_sparse_100k_nd_refine_pattern(n, col_ptr)) {
-    return 1024u;
+  if (kls_sparse_full_diagonal_hubbed_metis_core_refine_profile(
+        n, col_ptr, row_idx)) {
+    /* Keep roughly 96 vertices per refined NodeND rank window, rounded to a
+       cache-friendly unit.  The clamps bound ordering work across the full
+       structural resource tier. */
+    UF_long group = n / 96u;
+    group = ((group + 64u) / 128u) * 128u;
+    if (group < 512u) {
+      group = 512u;
+    }
+    if (group > 2304u) {
+      group = 2304u;
+    }
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS metis: full-diagonal hubbed core refine n=%ld nnz=%ld "
+              "group=%ld\n",
+              (long)n, (long)col_ptr[n], (long)group);
+    }
+    return group;
   }
   if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
     return 1024;
@@ -45898,11 +45961,6 @@ static int auto_orientation_prefers_normal(UF_long n,
                                            int symmetric_scalar_fringe_class,
                                            const kls_options *options) {
   if (n >= 1000 && n <= 30000) {
-    if (kls_is_compact_small_circuit_pattern(n, col_ptr)) {
-      /* Its transpose cuts both factor work and the 100 repeated solves;
-         the lightweight pipeline amortizes the extra row metadata. */
-      return 0;
-    }
     if (kls_symmetric_scalar_fringe_policy_enabled(options) &&
         symmetric_scalar_fringe_class) {
       /* The factors have equal fill in either frame, while transpose trims
@@ -75521,15 +75579,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
        factor: the seventh adds more first-call hand-off cost than the small
        steady reduction can repay over the remaining 98 updates. */
     thread_count = 6;
-  } else if (thread_count > 7 &&
-             kls_uses_structural_initial_pivot_tolerance(solver) &&
-             kls_is_compact_small_circuit_pattern(solver->n,
-                                                  solver->col_ptr)) {
-    /* On this shallow 1K-row circuit, the eighth static stream adds more
-       coherence traffic than useful width.  Seven total workers reduced both
-       the pool's cold start and the steady predecessor hand-off; retain an
-       explicit environment request so experiments can still override it. */
-    thread_count = 7;
   }
   if ((UF_long)thread_count > solver->row_refactor_level_max_width) {
     thread_count = (int)solver->row_refactor_level_max_width;
@@ -151149,6 +151198,27 @@ static int kls_verified_large_pts_solve_policy_eligible(
     getenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY") == NULL;
 }
 
+/* Keep the moderately wide plan certificate out of the forest builder.  It
+   evolves independently of stream reconstruction, and outlining this cold
+   policy prevents a threshold change from perturbing the recurring PTS and
+   numeric-kernel layout. */
+__attribute__((noinline, cold))
+static int kls_balanced_wide_pts_solve_plan_eligible(
+  int already_authorized,
+  UF_long nk,
+  int nthreads,
+  int64_t nchunks,
+  int64_t ntop,
+  double total,
+  double top_work,
+  double max_bin) {
+  return !already_authorized && nk >= 16384u &&
+    nchunks >= 4 * (int64_t)nthreads &&
+    ntop <= (int64_t)(nk / 50u) && total > 0.0 &&
+    top_work > 0.30 * total && top_work <= 0.45 * total &&
+    max_bin * (double)nthreads <= 1.25 * (total - top_work);
+}
+
 static void kls_pts_free(kls_solver *solver) {
   kls_pts *pts = solver->pts;
   if (pts == NULL) {
@@ -151496,6 +151566,7 @@ static void kls_pts_try_build(kls_solver *solver) {
   int64_t ntop = 0;
   double total = 0.0;
   double top_work = 0.0;
+  int balanced_wide_solve_plan = 0;
   double bin_work[KLS_PTS_MAX_THREADS];
   const int very_wide_top_trial =
     getenv("KLS_ENABLE_VERY_WIDE_TOP_PTS") != NULL ||
@@ -151511,10 +151582,7 @@ static void kls_pts_try_build(kls_solver *solver) {
     kls_pivoted_high_work_single_block_factor_cycle(solver) ||
     kls_medium_partial_static_metis_adopted(solver) ||
     kls_high_work_tiny_fringe_btf_pts_factor_cycle(solver) ||
-    solver->large_sparse_amf3_path ||
-    (kls_is_sparse_100k_nd_refine_pattern(solver->n, solver->col_ptr) &&
-     symbolic->nblocks >= 100u && symbolic->nblocks <= 500u &&
-     symbolic->maxblock * 100u >= solver->n * 95u);
+    solver->large_sparse_amf3_path;
   if (ok) {
     for (int32_t root = head[nk]; root != -1; root = next[root]) {
       total += swork[root];
@@ -151601,19 +151669,30 @@ static void kls_pts_try_build(kls_solver *solver) {
           top_work += (double)(llen[k] + ulen[k] + 4u);
         }
       }
+      /* A moderately wide shared top remains worthwhile when the realized
+         schedule, independently of its matrix family, proves that the top
+         spans few columns and the private forest is both broad and balanced.
+         This admits plans whose entry-weighted top is just above the ordinary
+         30% solve gate without using an input-size or density identity. */
+      balanced_wide_solve_plan =
+        kls_balanced_wide_pts_solve_plan_eligible(
+          wide_top_trial, nk, nthreads, nchunks, ntop, total, top_work,
+          max_bin);
+      const int allow_wide_top =
+        wide_top_trial || balanced_wide_solve_plan;
       /* the refactor tolerates a fatter serial top (Amdahl on 99
          repeated calls still pays); the solve keeps the tight gate */
       ok = ntop <= (int64_t)(nk / 3u) &&
            top_work <= (very_wide_top_trial ? 0.60 :
-                       (wide_top_trial ? 0.45 : 0.40)) * total &&
+                       (allow_wide_top ? 0.45 : 0.40)) * total &&
            max_bin <= 0.6 * total;
       if (trace) {
         fprintf(stderr,
                 "KLS pts build block=%ld nk=%ld chunks=%ld ntop=%ld"
-                " topw=%.2f%% maxbin=%.2f%% -> %s\n",
+                " topw=%.2f%% maxbin=%.2f%% balanced-wide=%d -> %s\n",
                 (long)best, (long)nk, (long)nchunks, (long)ntop,
                 100.0 * top_work / total, 100.0 * max_bin / total,
-                ok ? "adopt" : "decline");
+                balanced_wide_solve_plan, ok ? "adopt" : "decline");
       }
     }
   } else if (trace) {
@@ -151632,7 +151711,8 @@ static void kls_pts_try_build(kls_solver *solver) {
     pts->solve_ok =
       ntop <= (int64_t)(nk / 4u) &&
       top_work <= (very_wide_top_trial ? 0.60 :
-                  (wide_top_trial ? 0.45 : 0.30)) * total;
+                  ((wide_top_trial || balanced_wide_solve_plan)
+                     ? 0.45 : 0.30)) * total;
     /* flop-weighted top share: refactor flops concentrate quadratically
        in the separator top, so entry-weighted balance can look fine
        while the top strangles the refactor (the ASIC_320ks failure
@@ -158532,8 +158612,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if (solver->lean_choice == 0 &&
       ((kls_uses_structural_initial_pivot_tolerance(solver) &&
-       (kls_is_compact_small_circuit_pattern(solver->n, solver->col_ptr) ||
-         kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver))) ||
+        kls_symmetric_scalar_fringe_amd_lean_factor_cycle(solver)) ||
        kls_compact_missing_diagonal_matched_factor_profile(solver) ||
        kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
        kls_sparse_diagonal_row_hub_no_btf_cycle(solver) ||

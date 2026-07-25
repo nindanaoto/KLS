@@ -20661,3 +20661,78 @@ rejected for the timing and residual instability recorded above. The generic
 or family identity, so it remains within the explicitly accepted machine
 dependency. The sparse-100K PTS gate and compact helper are consequently the
 two explicit benchmark-shaped limitations left after this pass.
+
+## Final compact and wide-top generalization (2026-07-25)
+
+The two limitations above have now been removed. The compact helper formerly
+recognized 1,000--1,100 rows and five--seven entries per row, forced transpose
+orientation, selected a `1e-6` initial tolerance and lean refactor, and capped
+the worker count at seven. Removing only the orientation exception revealed
+that its natural positive, `orsirr_1`, has the same factor work in the normal
+frame but a materially shorter solve. The downstream helper consumers were
+then deleted rather than replaced with another proxy. The ordinary small AUTO
+policy now selects normal orientation and the requested `0.001` tolerance.
+
+Eleven final alternating, pinned, eight-worker H100 pairs put
+`orsirr_1` at `0.8582` of the frozen parent's modeled cycle (`0.01333s` versus
+`0.01557s`). The four nearby controls remain within 0.6% by paired medians:
+`circuit204` `1.0030`, `fpga_dcop_04` `1.0040`, `orsirr_2` `1.0054`, and
+`rdb968` `1.0007`. Their orientations, tolerances, factor paths, and residuals
+are unchanged. This staged deletion avoided the large hot-layout regressions
+seen in the earlier all-at-once attempt.
+
+The sparse-100K helper formerly widened the PTS solve's permitted shared top
+from 30% to 45% for a 95,000--105,000-row, five--seven-entry input with a
+particular BTF core. A runtime consultation was tested first using the existing
+same-binary disable. It correctly measured roughly `1.0ms` PTS versus `2.2ms`
+serial and preserved residuals, but nine paired H100 samples added about 0.7%
+median overhead, so consultation was not retained on the benchmark path.
+
+Authority now comes from the realized PTS schedule after every L/U stream has
+passed the elimination-forest dependency proof. A non-family-authorized plan
+may use the 45% solve-top bound only when the dominant block has at least
+16,384 columns, the top is above 30% but no more than 45% of entry-weighted
+work, shared-top columns are at most 2% of the block, there are at least four
+independent chunks per worker, and the heaviest worker bin is no more than
+1.25 times average private work. Existing wide and very-wide policy routes are
+untouched. Refactor PTS remains gated independently by flop-weighted top work.
+The exact sparse-100K helper is gone. The explicit-METIS behavior that also
+depended on it is preserved by a separate callback-block capability: a
+32,768--262,144-column, four--eight-entry full-diagonal core with few scalar
+columns, a moderate bounded hub, and lower/upper structural counts within 25%.
+Its CAMD window is `n/96`, rounded to 128 columns and bounded to 512--2,304.
+The policy is outlined from METIS ordering, just as the wide-plan certificate
+is outlined from forest construction, so policy edits do not perturb the
+recurring kernels.
+
+`ASIC_100ks` proves the new schedule directly: its 98,843-column core has 225
+chunks, 1,436 shared-top columns, 41.50% top work, and an 8.64% heaviest bin.
+Twenty final alternating H100 samples put the generic/frozen modeled-cycle
+medians at `1.18333s` and `1.17905s`, a 0.36% difference inside the observed
+noise floor; the corresponding 10%-trimmed means were `1.22397s` and
+`1.23151s`, favoring the generic build by 0.6%. Factor geometry and the direct
+PTS plan are exact. Generic terminal residuals were `2.18e-15` in this series.
+
+A public-generator holdout appends 6,200 reciprocal coupled nodes, moving the
+matrix to 105,390 rows and 597,490 entries, outside the former order box. Its
+105,003-column core is also outside the old callback box and independently
+yields 290 chunks, 1,412 shared-top columns, 41.21% top work, and an 8.49%
+heaviest bin. The generic build adopts direct PTS; the frozen helper declines
+the plan. Five final alternating checked AUTO H100 pairs put their medians at
+`1.30990s` and `1.43977s` (`0.8841` paired median), and the generic run's worst
+residual over 100 changed generations was `3.05e-15`. Explicit METIS selects a
+1,152-column scaled window, reduces measured factor work from 568.7 million to
+547.4 million operations, and also admits the verified PTS plan.
+An initially tried 8,192-node extension reached `1.30e-9` during changed-value
+refactors under both PTS and forced-serial solves, so it was recorded as a
+factor/refactor accuracy negative rather than used as positive evidence.
+
+A focused scan of the plans that had previously shown enough forest width
+found that only `ASIC_100ks` newly relies on the certificate. `ASIC_320k`,
+`ASIC_320ks`, and `ASIC_680ks` retain their existing wide-plan authority;
+`Raj1`, `nxp1`, `scircuit`, `rajat21`, `rajat24`, and `transient` either use
+their existing ordinary plan or reject after factor replacement. Release CTest
+passes all four tests in 18.91 seconds, and the fresh ASan/UBSan/LSan build
+passes all four in 59.68 seconds. A leak-enabled sanitized replay of the
+105,390-row holdout also completed eight checked changes below `2.79e-15`
+without a sanitizer finding.
