@@ -2337,6 +2337,22 @@ small BTF-dominant matrices whose first AMD/COLAMD factorization shows both
 many off-diagonal pivots and high actual fill/flop growth; this catches
 power-grid-style cases where the symbolic estimate alone understates the
 benefit of nested dissection.
+
+Two analyze-time shortcuts use staged capability contracts rather than a
+benchmark-sized input box. A 65,536--262,144-row, almost-full-diagonal input
+with one macroscopic column spike may propose AMMF. KLS retains that proposal
+only when the resulting symbolic has a nearly spanning BTF core, bounded
+fragmentation, balanced fill, and 512--2,048 estimated operations per row
+below the current setup-work ceiling; rejection resumes the ordinary ordering
+tournament. A separate 32,768--131,072-row sparse-diagonal proposal may skip
+the rest of the tournament after AMD proves one of three realized regimes:
+fragmented bounded work, one-block bounded work, or a bounded-degree exactly
+symmetric high-work grid. This second contract also requires a substantial
+core, balanced fill, and full or unknown structural rank. Rejected AMD
+symbolics are freed before normal AUTO selection continues. Set
+`KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH=1` or
+`KLS_DISABLE_AUTO_AMD_SHORTCUT=1` to restore the respective generic fallback.
+
 For large paper-style diagonal patterns, `auto` can start directly with METIS
 when the structure is a very-low-degree full diagonal, a sparse full diagonal
 with bounded but nontrivial row/column degree, a sparse-diagonal low-degree

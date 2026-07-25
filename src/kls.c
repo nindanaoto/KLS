@@ -29005,15 +29005,15 @@ static _Thread_local int
 /* Medium, almost fully diagonal circuits with one macroscopic spike are a
    distinct ordering regime: mean-local-fill AMMF removes substantially more
    update work than AMD without destroying the wide dependency front.  The
-   paper-union audit leaves only transient and scircuit in the size/density
-   window; the spike bound separates their maximum column degrees (60K versus
-   353) without using a matrix identity. */
+   bounds are resource tiers for the serial deficiency analysis; the spike
+   proof, rather than a narrow order/nonzero window, separates ordinary
+   bounded-degree circuits. */
 static int is_medium_full_diagonal_spike_minfill_pattern(
   UF_long n,
   const UF_long *col_ptr,
   const UF_long *row_idx) {
-  if (n < 150000u || n > 200000u || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 6u || col_ptr[n] < 5u * n || col_ptr[n] > 6u * n) {
+  if (n < 65536u || n > 262144u || col_ptr == NULL || row_idx == NULL ||
+      n > UF_long_max / 8u || col_ptr[n] < 4u * n || col_ptr[n] > 8u * n) {
     return 0;
   }
 
@@ -29035,17 +29035,124 @@ static int is_medium_full_diagonal_spike_minfill_pattern(
          4u * max_col_degree >= n && 2u * max_col_degree <= n;
 }
 
+/* The input spike is only a proposal.  Retain AMMF when its actual symbolic
+   exposes one nearly spanning BTF core, bounded fragmentation, balanced fill,
+   and enough work to amortize the dependency-aware recurring numeric. */
+static int kls_medium_full_diagonal_spike_minfill_symbolic_contract(
+  UF_long n,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (n < 65536u || n > 262144u || symbolic == NULL || !symbolic->do_btf ||
+      symbolic->nblocks < 2u || symbolic->nblocks > n / 1024u ||
+      symbolic->maxblock * 200u < 199u * n ||
+      (symbolic->structural_rank != KLS_KLU_EMPTY &&
+       symbolic->structural_rank != n) ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
+      !(symbolic->est_flops > 0.0)) {
+    return 0;
+  }
+  const double rows = (double)n;
+  const double fill = symbolic->lnz + symbolic->unz;
+  return fill >= 8.0 * rows && fill <= 32.0 * rows &&
+    symbolic->est_flops >= 512.0 * rows &&
+    symbolic->est_flops <= 2048.0 * rows &&
+    symbolic->est_flops <= 5.0e8 &&
+    symbolic->lnz <= 2.0 * symbolic->unz &&
+    symbolic->unz <= 2.0 * symbolic->lnz;
+}
+
+static int kls_exact_structural_symmetry(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  int columns_sorted,
+  UF_long max_column_degree);
+
 static int is_medium_sparse_full_diagonal_amd_pattern(
   UF_long n,
   const UF_long *col_ptr,
   const UF_long *row_idx) {
-  /* circuit_4/activsg70k class: the full AUTO ordering tournament returns
-     AMD, but spends an order of magnitude longer proving it than the AMD
-     symbolic itself.  Keep the bound narrow; larger members of the broader
-     circuit-like family include METIS-critical Rajat/ASIC systems. */
-  return n >= 60000u && n <= 85000u && col_ptr != NULL &&
-         n <= UF_long_max / 4u && col_ptr[n] <= 4u * n &&
+  /* A sparse, nearly full-diagonal graph is only an inexpensive AMD
+     proposal.  The actual symbolic below must prove either bounded recurring
+     work or the regular symmetric high-work regime before AUTO may skip its
+     remaining ordering analyses. */
+  return n >= 32768u && n <= 131072u && col_ptr != NULL &&
+         n <= UF_long_max / 4u && col_ptr[n] >= 2u * n &&
+         col_ptr[n] <= 4u * n &&
          is_large_diagonal_circuit_like_pattern(n, col_ptr, row_idx);
+}
+
+static int kls_medium_sparse_full_diagonal_amd_high_work_input(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx) {
+  int columns_sorted = 1;
+  for (UF_long col = 0u; col < n; ++col) {
+    const UF_long begin = col_ptr[col];
+    const UF_long end = col_ptr[col + 1u];
+    if (begin >= end || end - begin > 16u) {
+      return 0;
+    }
+    int has_diagonal = 0;
+    for (UF_long p = begin; p < end; ++p) {
+      if (row_idx[p] >= n) {
+        return 0;
+      }
+      columns_sorted &= p == begin || row_idx[p - 1u] <= row_idx[p];
+      has_diagonal |= row_idx[p] == col;
+    }
+    if (!has_diagonal) {
+      return 0;
+    }
+  }
+  return kls_exact_structural_symmetry(
+    n, col_ptr, row_idx, columns_sorted, 16u);
+}
+
+/* The low-work branch makes skipping NodeND an analysis-economics decision.
+   The separate high-work branch covers bounded-degree symmetric grids: AMD's
+   realized one-block symbolic must land in the measured regular-grid band.
+   Rejection resumes the ordinary AUTO tournament. */
+static int kls_medium_sparse_full_diagonal_amd_symbolic_contract(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const trilinos_klu_l_symbolic *symbolic) {
+  if (!is_medium_sparse_full_diagonal_amd_pattern(
+        n, col_ptr, row_idx) || symbolic == NULL ||
+      (symbolic->structural_rank != KLS_KLU_EMPTY &&
+       symbolic->structural_rank != n) ||
+      symbolic->nblocks == 0u || symbolic->nblocks > n ||
+      symbolic->maxblock > n || 16u * symbolic->maxblock < 7u * n ||
+      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
+      !(symbolic->est_flops > 0.0)) {
+    return 0;
+  }
+  const double rows = (double)n;
+  const double fill = symbolic->lnz + symbolic->unz;
+  const int balanced =
+    symbolic->lnz <= 2.0 * symbolic->unz &&
+    symbolic->unz <= 2.0 * symbolic->lnz;
+  const int fragmented_low_work =
+    symbolic->do_btf && symbolic->nblocks >= 2u &&
+    fill >= 4.0 * rows && fill <= 16.0 * rows &&
+    symbolic->est_flops >= 32.0 * rows &&
+    symbolic->est_flops <= 256.0 * rows;
+  const int single_low_work =
+    symbolic->do_btf && symbolic->nblocks == 1u &&
+    symbolic->maxblock == n && fill >= 8.0 * rows &&
+    fill <= 16.0 * rows &&
+    symbolic->est_flops >= 96.0 * rows &&
+    symbolic->est_flops <= 256.0 * rows;
+  const int regular_symmetric_high_work =
+    symbolic->do_btf && symbolic->nblocks == 1u &&
+    symbolic->maxblock == n && fill >= 56.0 * rows &&
+    fill <= 64.0 * rows &&
+    symbolic->est_flops >= 12800.0 * rows &&
+    symbolic->est_flops <= 16384.0 * rows &&
+    kls_medium_sparse_full_diagonal_amd_high_work_input(
+      n, col_ptr, row_idx);
+  return balanced && (fragmented_low_work || single_low_work ||
+                       regular_symmetric_high_work);
 }
 
 /* A many-component matrix with one dominant SCC can have a cheap numeric
@@ -43666,13 +43773,20 @@ static int kls_choose_symbolic_inner(UF_long n,
     int status = analyze_with_ordering(n, col_ptr, row_idx, options,
                                        KLS_ORDERING_AMF, symbolic_out,
                                        common_out, separator_out);
-    if (status == KLS_OK) {
+    if (status == KLS_OK &&
+        kls_medium_full_diagonal_spike_minfill_symbolic_contract(
+          n, *symbolic_out)) {
       *selected_ordering_out = KLS_ORDERING_AMF;
       *score_out = symbolic_score(*symbolic_out);
       return KLS_OK;
     }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
     /* Preserve the ordinary ordering competition as a recovery path if the
-       deficiency analysis cannot allocate or rejects the pattern. */
+       deficiency analysis cannot allocate or its symbolic contract rejects
+       the proposal. */
   }
 
 #ifdef KLS_HAVE_SPRAL_SCALING
@@ -44199,6 +44313,8 @@ static int kls_choose_symbolic_inner(UF_long n,
           getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
           is_medium_full_diagonal_spike_minfill_pattern(
             n, col_ptr, row_idx) &&
+          kls_medium_full_diagonal_spike_minfill_symbolic_contract(
+            n, amf_spec.symbolic) &&
           amf_spec.symbolic->est_flops > 0.0 &&
           best_symbolic->est_flops > 0.0 &&
           amf_spec.symbolic->est_flops <= 0.85 * best_symbolic->est_flops;
@@ -44765,9 +44881,21 @@ static int choose_symbolic_for_pattern(UF_long n,
       is_medium_sparse_full_diagonal_amd_pattern(n, col_ptr, row_idx)) {
     kls_options amd_options = *options;
     amd_options.ordering = KLS_ORDERING_AMD;
-    return choose_symbolic_for_pattern(
+    const int status = choose_symbolic_for_pattern(
       n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
       selected_ordering_out, score_out, separator_out);
+    if (status == KLS_OK &&
+        kls_medium_sparse_full_diagonal_amd_symbolic_contract(
+          n, col_ptr, row_idx, *symbolic_out)) {
+      return KLS_OK;
+    }
+    if (*symbolic_out != NULL) {
+      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
+    }
+    kls_separator_analysis_clear(separator_out);
+    *score_out = DBL_MAX;
+    /* A topology proposal is never authoritative: allocation failure or a
+       rejected AMD symbolic resumes the complete AUTO selection below. */
   }
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       options->static_pivoting && options->use_btf &&
@@ -46221,8 +46349,11 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   }
   solver->auto_amd_shortcut =
     solver->options.ordering == KLS_ORDERING_AUTO &&
-    is_medium_sparse_full_diagonal_amd_pattern(
-      candidate->n, candidate->col_ptr, candidate->row_idx);
+    candidate->orientation == KLS_ORIENTATION_NORMAL &&
+    candidate->selected_ordering == KLS_ORDERING_AMD &&
+    kls_medium_sparse_full_diagonal_amd_symbolic_contract(
+      candidate->n, candidate->col_ptr, candidate->row_idx,
+      candidate->symbolic);
   solver->compact_partial_diagonal_column_fringe =
     candidate->compact_partial_diagonal_column_fringe_class ||
     candidate->compact_partial_diagonal_column_fringe_transpose_class;
@@ -46267,7 +46398,9 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     candidate->selected_ordering == KLS_ORDERING_AMF &&
     getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
     is_medium_full_diagonal_spike_minfill_pattern(
-      candidate->n, candidate->col_ptr, candidate->row_idx);
+      candidate->n, candidate->col_ptr, candidate->row_idx) &&
+    kls_medium_full_diagonal_spike_minfill_symbolic_contract(
+      candidate->n, candidate->symbolic);
   solver->large_sparse_amf3_path =
     candidate->large_sparse_full_diagonal_amf3_class &&
     kls_large_sparse_amf3_policy_enabled(&solver->options) &&
@@ -113054,7 +113187,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
          small_compact_btf ? 5.0e5 :
          low_work_btf ? 1.0e6 :
          low_work_dominant_btf ? 1.0e7 :
-         solver->medium_spike_minfill_path ? 8.0e7 : 1.0e8)
+         solver->medium_spike_minfill_path ? 7.5e7 : 1.0e8)
       : (moderate_single ? 2.0e7 :
          low_work_single ? 1.0e6 : 1.5e8);
   if (solver->refactor_dependency_work < min_dependency_work) {

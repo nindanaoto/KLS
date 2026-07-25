@@ -20579,3 +20579,85 @@ or `TSOPF` spelling remains an alias are superseded by this section. Only the
 capability-named policy and component controls documented in the README are
 recognized. This is intentionally an environment-control API break; default
 AUTO behavior and the underlying capability selectors are unchanged.
+
+## Remaining Benchmark-Generalization Pass (2026-07-25)
+
+The medium full-diagonal spike selector no longer derives authority from its
+old 150,000--200,000-row, five--six-entry density window. Its cheap proposal
+now covers the 65,536--262,144 resource tier with four--eight input entries per
+row, at least 99.9% structural-diagonal coverage, and one column spanning
+one-quarter to one-half of the order. The proposed AMMF symbolic is retained
+only when BTF exposes 2--`n/1024` components, a core covering at least 99.5% of
+the matrix, full or unknown structural rank, balanced 8--32-entry-per-row
+fill, and 512--2,048 estimated operations per row below 500 million. A failed
+analysis or contract now frees the proposal and resumes the ordinary AUTO
+tournament. Speculative AMMF promotion and recurring-policy adoption apply the
+same post-symbolic proof.
+
+Appending 32,768 weakly coupled nodes to `transient` produces 211,634 rows and
+1,059,672 compact entries, outside both old input bounds. It retains a
+21-block AMMF symbolic with a 211,562-row core, 1,131,144/1,131,362 L/U
+entries, and 157,962,966 measured factor operations. The same final executable
+with `KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH=1` selects AMD/scale zero and
+measures 256,876,135 operations. Five alternating H100 samples put the generic
+and disabled modeled-cycle medians at 0.75854 and 1.14087 seconds; steady
+refactor medians are about 5.19 and 8.70 ms. Every changed solve was checked,
+with worst residuals `1.37e-12` and `1.17e-12`. Appending the same number of
+independent diagonal blocks creates 32,789 BTF components, fails the symbolic
+contract, and exactly reproduces the ordinary AMD fallback. Seven final
+parent/current H100 samples on the original target preserve identical factor
+geometry and have medians of 0.74203 and 0.71272 seconds respectively.
+
+The medium sparse-diagonal AMD analysis shortcut was also changed from a
+60,000--85,000-row input verdict into a staged proposal. Its resource envelope
+is now 32,768--131,072 rows and two--four input entries per row, with at least
+90% structural-diagonal coverage and no empty rows. The actual AMD symbolic
+must have full or unknown rank, balanced L/U, and a core spanning at least
+7/16 of the matrix. Authority then comes from one of three realized regimes:
+a fragmented 4--16-fill/32--256-work-per-row factor, a stricter one-block
+low-work factor, or an exactly symmetric degree-16 one-block grid with
+56--64 fill and 12,800--16,384 estimated operations per row. Rejected
+symbolics are discarded before normal AUTO selection continues, and the same
+contract controls downstream suppression of the block-ordering trial.
+
+A 32,768-node coupled extension of `circuit_4` has 112,977 rows, beyond the
+old upper bound, and passes the fragmented contract. It preserves ordering,
+BTF geometry, factor counts, recurring engine, and residual while reducing
+analysis from a 0.123-second median to 0.020 seconds. Three same-binary H100
+generic/disabled pairs have modeled-cycle medians of 0.17886 and 0.28518
+seconds, with a `7.91e-17` worst checked residual. A 32,768-node independent
+extension of `ACTIVSg70K` also crosses the old bound, passes through its
+fragmented symbolic, and halves analysis while preserving its factor. An
+over-fragmented 131,072-row circuit extension fails the dominant-core proof
+and reproduces the fallback.
+
+The post-symbolic distinction was necessary, not decorative. An early draft
+also accepted a coupled one-block `ACTIVSg70K` extension; its three-sample
+H100 median regressed from 0.24975 to 0.42383 seconds despite identical factor
+counts. Requiring stronger realized fill/work for the one-block subtype makes
+the final policy reject it. A coupled high-work grid whose ordinary AUTO route
+was unstable between AMD and METIS is likewise rejected by the final band.
+The three original natural matrices retain exact ordering, scale, BTF, fill,
+and work. Fifteen additional alternating `ACTIVSg70K` samples have
+parent/current medians of 0.15910 and 0.15955 seconds; five `circuit_4` pairs
+have medians of 0.11246 and 0.11252 seconds. High-work grid samples show large
+host preemption outliers in both binaries, but their central cluster and exact
+numeric geometry remain at parity.
+
+A structural scan of all 248 locally installed natural matrices finds only
+`transient` inside the widened spike proposal and only `circuit_4`,
+`ACTIVSg70K`, and `shallow_water1` inside the widened AMD proposal. The
+out-of-box positives are therefore metamorphic structural extensions, not a
+second natural family. That evidence is stronger than the former size boxes
+but still limits claims about unseen families.
+
+Two additional cleanup attempts were not retained. Removing the compact
+1,000--1,100-row circuit helper left `circuit204` correct but shifted hot-code
+layout enough to regress untouched `orsirr_2`, `rdb968`, and `circuit204`
+medians by roughly 30%, 9%, and 1%; the source was restored. The earlier
+factor-capability replacement for the sparse-100K PTS width clause remains
+rejected for the timing and residual instability recorded above. The generic
+1,000--2,000-row scale suppression is a machine-cost tier rather than a matrix
+or family identity, so it remains within the explicitly accepted machine
+dependency. The sparse-100K PTS gate and compact helper are consequently the
+two explicit benchmark-shaped limitations left after this pass.
