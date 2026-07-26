@@ -1,0 +1,17 @@
+# Primary validation-only matrices for the diagnostic machine-cost profile.
+# None are used by the primary fit.  A separately reported target-inclusive
+# control deliberately fits them to measure the cost of benchmark dependence.
+#
+# Existing policy positives test whether the fitted model preserves the
+# incumbent decision without learning from their identities.  The four
+# natural proposal-stage counterexamples test false-positive resistance.
+
+transient  # existing medium-spike positive; group=Freescale
+ASIC_320ks  # existing broad-column AMF/no-BTF positive; group=Sandia
+hvdc2  # existing bounded-degree AMF/no-BTF positive; group=HVDC
+ASIC_320k  # existing high-work tiny-fringe positive; group=Sandia
+
+Spielman_k100  # broad-column proposal rejected symbolically; group=FlowIPM22
+language  # broad-column proposal rejected symbolically; group=Tromble
+finan512  # bounded-degree proposal rejected symbolically; group=Mulvey
+pfinan512  # disjoint bounded-degree proposal rejected symbolically; group=Mulvey

@@ -679,6 +679,11 @@ if(KLS_BUILD_TESTS)
               --holdout
               "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_large_holdout_manifest.txt"
               --expected-count 12)
+    add_test(
+      NAME kls_machine_cost_calibration
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/scripts/calibrate_machine_cost.py"
+              self-test)
   endif()
   add_executable(kls_smoke
     tests/kls_smoke.c)

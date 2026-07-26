@@ -20853,3 +20853,78 @@ Final release CTest passed all four tests in 17.99 seconds. The leak-enabled
 ASan/UBSan/LSan build passed all four in 57.68 seconds; a separate sanitized
 `flickr` analyze replay reported 3.56 seconds of analysis, retained its
 AMF/rank-deficient symbolic, and produced no sanitizer finding.
+
+## Persistent Machine-Cost Threshold Experiment (2026-07-26)
+
+The proposed one-time, machine-local calibration was implemented as the
+diagnostic `scripts/calibrate_machine_cost.py`. Collection pins the executable
+hash, CPU identity, kernel, parent affinity, requested CPU set, thread count,
+and controlled threading environment. Each pass runs a separate analyze-only
+probe and a verified numeric benchmark for explicit AMD/BTF, AMF/BTF, and
+AMF/no-BTF configurations. The persisted profile contains fitted stage rates,
+paired log-ratio models, uncertainty, manifest hashes, and aggregate counts;
+it contains no matrix names or per-matrix decisions. `calibrate-margin` stores
+the smallest margin that rejects every greater-than-2% raw regression observed
+for one explicit refactor/solve horizon. `evaluate` uses that margin only for
+the exact prediction mode, horizon, and regression tolerance that produced it.
+
+The primary fit used three passes on twelve numerically valid matrices from the
+group-disjoint generalization development suite. Thirteen additional matrices
+from thirteen unrelated holdout families were measured twice; `shyy41` was
+excluded by the predeclared `1e-8` residual gate, leaving twelve evaluable
+holdouts. The four existing policy positives (`transient`, `ASIC_320ks`,
+`hvdc2`, and `ASIC_320k`) were reserved as targets and measured three times.
+All runs used eight threads pinned to CPUs 0--7, five entrywise refactors, and a
+`0.001` perturbation amplitude on the AMD Ryzen 9 9950X3D host. A separate
+large-development screen did not supply scale training: `ins2`, `mt2010`, and
+`soc-sign-epinions` were singular for all three variants, `shar_te2-b3` failed
+factorization for all three, and all three `Lin` variants exceeded the 30-second
+per-run cap.
+
+The paired model's 90th-percentile relative errors on development were
+28.6%/43.8%/19.0% for AMF/BTF factor/refactor/solve and
+38.1%/61.1%/62.6% for AMF/no-BTF. Absolute stage rates were less accurate.
+This is not timer noise: `struct4` and `MISKnowledgeMap` appear 18.8% and 15.8%
+better to the symbolic-only 100-update model, yet the predicted variants are
+actually about 17.9% and 12.6% slower. Adding problem scale, BTF block count,
+dominant-core fraction, fill density, and arithmetic-intensity terms did not
+improve leave-one-out refactor prediction across the combined 24-matrix
+general pool. Identical-looking fill/work reductions can enter mapped,
+row-refactor, KLU-refactor, or egraph representations with materially different
+throughput.
+
+The empirically safe symbolic-only margins were 8.806% for a 20-refactor,
+20-solve horizon and 18.842% for a 100-refactor, 100-solve horizon. Both had
+zero greater-than-2% regressions on the twelve-matrix holdout, selecting one
+nonbaseline there. Neither selected a target. At 20 updates, the largest target
+predictions were only 4.7% for `ASIC_320k` and 2.9% for `ASIC_320ks`; at 100
+updates they were 8.4% and 5.3%. The model predicted AMD for `hvdc2` and
+`transient` despite their measured AMF wins. Even fitting the rates and margin
+with all four targets included raised the safe margins to 15.325% and 20.715%
+and still selected none of them. Thus using benchmark matrices for aggregate
+calibration did not recover benchmark behavior; it merely made the persisted
+threshold benchmark-dependent.
+
+A generic three-way symbolic tournament also cost 77.5--146.6 ms beyond the
+AMD probe on each target, about 2.9--3.1 times one AMD symbolic in total. The
+reported decision result is optimistic because it does not charge that common
+sunk probe cost against the incumbent. Explicit forced variants also cannot
+exactly reproduce every AUTO-only downstream representation policy. Both facts
+strengthen the rejection: a production scorer would currently add setup cost
+while choosing the incumbent on every target.
+
+The experiment therefore lands only the reproducible collector/fitter/margin
+calibrator, its deterministic self-test, and a validation manifest. No solver
+routing or threshold changed, so current benchmark performance is retained.
+A future calibrated policy needs a symbolic predictor of the eventual numeric
+representation and refactor kernel, plus an independently validated large,
+full-rank calibration tier; more timing samples alone cannot repair the missing
+state variable.
+
+Final release CTest passed all five tests in 18.12 seconds, including the new
+deterministic calibration self-test. A three-pass pinned AUTO sanity run on the
+four targets had no failure and retained the expected AMF/BTF egraph route for
+`transient` and `ASIC_320k`, AMF/no-BTF egraph for `ASIC_320ks`, and
+AMF/no-BTF mapped refactor for `hvdc2`. Its modeled-cycle geometric mean was
+1.2058 seconds. Since the library source and AUTO decisions are unchanged,
+there is no production try cost or benchmark-path regression in this commit.

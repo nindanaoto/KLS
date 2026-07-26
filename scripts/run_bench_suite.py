@@ -336,7 +336,11 @@ def main() -> int:
         "--backend", choices=["auto", "kls", "serial"], default="auto"
     )
     parser.add_argument("--timeout", type=float)
-    parser.add_argument("--ordering", choices=["auto", "amd", "colamd", "natural", "metis", "scotch"], default="auto")
+    parser.add_argument(
+        "--ordering",
+        choices=["auto", "amd", "colamd", "natural", "metis", "scotch", "amf"],
+        default="auto",
+    )
     parser.add_argument("--orientation", choices=["auto", "normal", "transpose"], default="auto")
     parser.add_argument("--scale", choices=["auto", "-1", "0", "1", "2"], default="auto")
     parser.add_argument("--input-index", choices=["auto", "32", "64"], default="auto")
