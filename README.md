@@ -2485,49 +2485,6 @@ Regenerate that tier from a pinned `ssstats.csv` with
 131,072--1,048,576, nonzero bounds 393,216--8,388,608, and explicit large
 development/holdout output paths.
 
-### Offline machine-cost calibration
-
-`scripts/calibrate_machine_cost.py` tests whether symbolic work estimates can
-support a persistent, machine-local ordering/BTF decision margin. It collects
-explicit variants, fits absolute stage rates and paired ratios, stores an exact
-CPU/build/thread/affinity fingerprint, and can calibrate a no-regression margin
-for a caller-specified factor/refactor/solve horizon. Profiles contain manifest
-digests and aggregate counts, not matrix names. A mismatched executable or
-machine is rejected.
-
-The default `symbolic-only` evaluation uses only information available before
-numeric factorization. `baseline-measured` is an explicitly optimistic
-diagnostic that anchors predictions to a completed baseline factor. The tool
-does not load profiles into the library or alter AUTO routing: the current
-cross-family experiment found that the safe margins reject the known target
-wins, so enabling the scorer would add proposal cost without preserving
-benchmark performance.
-
-```sh
-python3 scripts/calibrate_machine_cost.py collect \
-  --kls-bench build/kls_bench --matrix-dir data/suitesparse \
-  --manifest bench/suitesparse_generalization_dev_manifest.txt \
-  --samples build/machine-cost-dev.jsonl --threads 8 --cpu-list 0-7 \
-  --variants amd_btf,amf_btf,amf_no_btf
-python3 scripts/calibrate_machine_cost.py fit \
-  --samples build/machine-cost-dev.jsonl \
-  --profile build/kls-machine-cost-profile.json
-python3 scripts/calibrate_machine_cost.py calibrate-margin \
-  --profile build/kls-machine-cost-profile.json \
-  --output-profile build/kls-machine-cost-profile.json \
-  --samples build/machine-cost-dev.jsonl \
-  --expected-refactors 100 --expected-solves 100
-python3 scripts/calibrate_machine_cost.py evaluate \
-  --profile build/kls-machine-cost-profile.json \
-  --samples build/machine-cost-holdout.jsonl \
-  --expected-refactors 100 --expected-solves 100
-```
-
-Margins are keyed by lifecycle horizon as well as prediction mode. Hardware
-rates can remain stable on one machine while the safe decision boundary changes
-with the expected number of refactors and solves. Candidate symbolic probes are
-also real setup cost and must be charged before any production integration.
-
 For SubtreeLU-specific tuning, `bench/suitesparse_subtreelu_manifest.txt`
 contains the exact 46 public SuiteSparse circuit labels from SubtreeLU Fig. 7.
 Fetch it into its own directory when running the full set, so the suite runners
