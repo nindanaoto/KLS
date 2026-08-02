@@ -888,6 +888,8 @@ struct kls_solver {
   int certified_unscaled_l2_contract; /* a condition-sensitive unscaled
                                          lifecycle trial must verify every
                                          returned single-RHS solve */
+  int certified_unscaled_recovery_scale; /* scaled incumbent to restore if
+                                            that measured contract fails */
   int solve_refine_single_shot; /* probe-validated: one correction, no
                                    post-verification sweep */
   int row_solve_self_check;     /* row-engine-published values serve the
@@ -27399,6 +27401,7 @@ static void free_numeric(kls_solver *solver) {
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   solver->certified_unscaled_l2_contract = 0;
+  solver->certified_unscaled_recovery_scale = 0;
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
   solver->verified_rhs_valid = 0;
@@ -27539,6 +27542,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->solve_contract_verified = 0;
   solver->promoted_tolerance_l2_recovery_required = 0;
   solver->certified_unscaled_l2_contract = 0;
+  solver->certified_unscaled_recovery_scale = 0;
   solver->verified_rhs_valid = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
@@ -42656,6 +42660,20 @@ static int kls_prestatic_reuse_raced_metis_symbolic(
   trilinos_klu_l_common *common_out,
   kls_separator_analysis *separator_out);
 
+static double kls_column_pair_work(UF_long n,
+                                   const UF_long *col_ptr) {
+  if (col_ptr == NULL) {
+    return DBL_MAX;
+  }
+  double work = 0.0;
+  for (UF_long col = 0u; col < n; ++col) {
+    const double degree =
+      (double)(col_ptr[col + 1u] - col_ptr[col]);
+    work += degree * degree;
+  }
+  return work;
+}
+
 static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values,
@@ -42943,6 +42961,18 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
             (long)weak, (long)missing_diagonal);
   }
   if (!legacy_shape_policies && deferred && !forced_match &&
+      solver->rowmatch_deferred &&
+      getenv("KLS_DISABLE_GENERIC_SINGLE_EXACT_MATCH_TRIAL") == NULL &&
+      should_try_spral_hungarian_numeric_trial(solver) &&
+      kls_column_pair_work(solver->n, base_col_ptr) > 1.0e7) {
+    /* Both deferred matchers are performance challengers to the same valid
+       numeric.  If the exact sparse-assignment trial is already admissible,
+       do not first build and factor a second greedy permutation: the exact
+       trial below retains the stronger matching coverage and is judged by
+       the same fill, work, conditioning, and residual contracts. */
+    goto done;
+  }
+  if (!legacy_shape_policies && deferred && !forced_match &&
       solver->numeric != NULL &&
       solver->common.noffdiag <= weak / 20u + 16u) {
     /* The live numeric already meets the same pivot-deviation bound required
@@ -43153,12 +43183,8 @@ matching_admitted:;
       solver->options.backend != KLS_BACKEND_SERIAL &&
       solver->options.threads >= 2 && solver->options.use_btf &&
       kls_repeated_update_workload(&solver->options)) {
-    matched_column_pair_work = 0.0;
-    for (UF_long col = 0u; col < solver->n; ++col) {
-      const double degree =
-        (double)(base_col_ptr[col + 1u] - base_col_ptr[col]);
-      matched_column_pair_work += degree * degree;
-    }
+    matched_column_pair_work =
+      kls_column_pair_work(solver->n, base_col_ptr);
   }
   if (kls_trace_pre_static_enabled() &&
       isfinite(matched_column_pair_work)) {
@@ -45671,6 +45697,7 @@ static int maybe_select_auto_scale(kls_solver *solver,
 
     trilinos_klu_l_common trial_common;
     trilinos_klu_l_numeric *trial_numeric = NULL;
+    int refactor_stale_raced_candidate = 0;
     if (raced) {
       int have = 0;
       for (int s = 0; s < race->scale_count; ++s) {
@@ -45685,7 +45712,33 @@ static int maybe_select_auto_scale(kls_solver *solver,
       if (!have) {
         continue;
       }
-    } else {
+      const int numeric_controls_match =
+        trial_common.tol == solver->common.tol &&
+        trial_common.halt_if_singular == solver->common.halt_if_singular &&
+        trial_common.kls_static_perturb ==
+          solver->common.kls_static_perturb &&
+        trial_common.kls_zero_pivot_replacement ==
+          solver->common.kls_zero_pivot_replacement;
+      if (trial_numeric != NULL && !numeric_controls_match) {
+        /* The scale race starts before the foreground factor, so analysis
+           may subsequently select a different pivot tolerance or numeric
+           safety contract.  Such a raced factor changed more than the scale
+           axis and cannot be compared or published as a scale candidate.
+           Recompute this one arm from the live Common; missing raced arms
+           remain skipped, preserving the bounded generic race portfolio. */
+        if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+          fprintf(stderr,
+                  "KLS scale trial mode=%d stale raced controls"
+                  " tol=%.3e/%.3e static=%.3e/%.3e; refactor live\n",
+                  candidates[i], trial_common.tol, solver->common.tol,
+                  trial_common.kls_static_perturb,
+                  solver->common.kls_static_perturb);
+        }
+        trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+        refactor_stale_raced_candidate = 1;
+      }
+    }
+    if (!raced || refactor_stale_raced_candidate) {
       /* Change one policy axis.  Reinitializing Common from public options
          discards analyze-selected factor controls, so the resulting
          "scale" candidate can have a different pivot path even at the same
@@ -45781,6 +45834,9 @@ static int maybe_select_auto_scale(kls_solver *solver,
     solver->common = trial_common;
     solver->certified_unscaled_l2_contract =
       certified_unscaled_overhead_candidate_is_better;
+    solver->certified_unscaled_recovery_scale =
+      certified_unscaled_overhead_candidate_is_better
+        ? (int)old_common.scale : 0;
     trilinos_klu_l_free_numeric(&old_numeric, &old_common);
     accepted = 1;
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
@@ -47285,12 +47341,7 @@ generic_ordering_tournament:;
      matched factors whose whole retained numeric horizon was cheaper than
      those workers (the measured setup exceeded five steady updates).
      This is a workload budget, independent of dimensions and family. */
-  double column_pair_work = 0.0;
-  for (UF_long col = 0u; col < n; ++col) {
-    const double degree =
-      (double)(col_ptr[col + 1u] - col_ptr[col]);
-    column_pair_work += degree * degree;
-  }
+  const double column_pair_work = kls_column_pair_work(n, col_ptr);
   const double requested_numeric_horizon = 1.0 +
     (double)options->expected_refactorizations +
     (double)options->expected_solves;
@@ -47681,8 +47732,14 @@ generic_ordering_tournament:;
           spec->symbolic->est_flops <= 1.02 * ordinary_amf3->est_flops &&
           spec->score <= 1.01 * best_score &&
           spec->symbolic->est_flops <= 1.02 * best_symbolic->est_flops &&
-          20.0 * (double)spec->etree_levels <=
-            19.0 * (double)ordinary_amf3->etree_levels;
+          /* A shallow five-percent depth win is inside the error of the
+             approximate fill/work model: one audited variant reduced the
+             etree by seven percent yet made the realized numeric cycle 2.5x
+             slower.  Require a decisive ten-percent dependency-depth win;
+             the independently useful twelve-percent variant remains in the
+             portfolio. */
+          10.0 * (double)spec->etree_levels <=
+            9.0 * (double)ordinary_amf3->etree_levels;
         const int matched_decisive_span_refinement =
           generic_policy && kls_value_matched_ordering_ctx &&
           spec->amf3_span_variant &&
@@ -159269,6 +159326,34 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   return 1;
 }
 
+static void kls_reset_unsettled_egraph_trials_after_pts(
+  kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  if (solver->eg_separator_choice == 0) {
+    solver->eg_separator_pending = 0;
+    memset(solver->eg_separator_samples, 0,
+           sizeof(solver->eg_separator_samples));
+    memset(solver->eg_separator_min, 0,
+           sizeof(solver->eg_separator_min));
+  }
+  if (solver->eg_tt_choice == 0) {
+    solver->eg_tt_pending = 0;
+    memset(solver->eg_tt_counts, 0, sizeof(solver->eg_tt_counts));
+    memset(solver->eg_tt_samples, 0, sizeof(solver->eg_tt_samples));
+    memset(solver->eg_tt_min, 0, sizeof(solver->eg_tt_min));
+  }
+  if (solver->eg_pair_choice == 0) {
+    solver->eg_pair_pending = 0;
+    memset(solver->eg_fuse_min, 0, sizeof(solver->eg_fuse_min));
+  }
+  if (solver->eg_stream_choice == 0) {
+    solver->eg_stream_pending = 0;
+    memset(solver->eg_stream_min, 0, sizeof(solver->eg_stream_min));
+  }
+}
+
 /* Event-driven acceptance for the subtree refactor above the egraph
    floor (the below-floor dispatch keeps using it unconditionally): the
    incumbent runs on one call and is timed by kls_refactor's wrapper,
@@ -159284,6 +159369,9 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
       solver->options.threads <= 1) {
     return 0;
   }
+  const int repeated_generic =
+    !kls_legacy_shape_policies_enabled() &&
+    kls_repeated_update_workload(&solver->options);
   if (solver->pts_ref_decision > 0) {
     const int ok = kls_pts_mapped_refactor(solver, numeric_values);
     if (ok < 0) {
@@ -159323,9 +159411,6 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
      If the challenger loses, do not publish its representation as the return
      state: the caller continues through the incumbent engine below, restoring
      all of that engine's recurring state on this same numeric. */
-  const int repeated_generic =
-    !kls_legacy_shape_policies_enabled() &&
-    kls_repeated_update_workload(&solver->options);
   const double acceptance_ratio = repeated_generic ? 0.95 : 0.75;
   const double incumbent_seconds = solver->pts_ref_incumbent_seconds;
   if (solver->pts_ref_incumbent_min <= 0.0 ||
@@ -159372,6 +159457,16 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
             solver->pts_ref_reaudit,
             solver->pts_ref_decision > 0 ? "adopted" :
               solver->pts_ref_decision < 0 ? "rejected" : "repeat");
+  }
+  if (repeated_generic && solver->pts_ref_decision <= 0 &&
+      getenv("KLS_DISABLE_GENERIC_PTS_EGRAPH_TRIAL_RESET") == NULL) {
+    /* A losing PTS challenger is followed by an EGraph restore in this same
+       public refactor.  Its elapsed sample therefore contains both complete
+       engines and cannot score any still-undecided EGraph width, fusion,
+       stream, or separator arm.  Restart only those timing consultations;
+       the restored EGraph pass becomes their unscored warm-up, while an
+       already-settled implementation choice remains untouched. */
+    kls_reset_unsettled_egraph_trials_after_pts(solver);
   }
   if (computed && solver->pts_ref_decision > 0) {
     *ok_out = (UF_long)computed;
@@ -163342,6 +163437,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   solver->certified_unscaled_l2_contract = 0;
+  solver->certified_unscaled_recovery_scale = 0;
   if (!solver->solve_recovery_active) {
     /* An explicit public factor call begins a fresh numeric contract epoch.
        A guarded recovery factor sets this state again only after it succeeds. */
@@ -165843,18 +165939,19 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_choice = 2;
   }
   if (!legacy_shape_policies && solver->lean_choice == 0 &&
+      getenv("KLS_ENABLE_GENERIC_SCALED_LEAN_DECLINE") != NULL &&
       solver->common.scale > 0 && solver->numeric->Rs != NULL &&
       solver->numeric->lnz <= UF_long_max - solver->numeric->unz) {
     const UF_long factor_entries =
       solver->numeric->lnz + solver->numeric->unz;
     if (factor_entries > 0u && solver->common.flops > 0.0 &&
         solver->common.flops < 16.0 * (double)factor_entries) {
-      /* A scaled row walk must retain the scale refresh and publish another
-         complete factor representation.  Below sixteen realized operations
-         per factor entry, that extra stream is first-order work rather than
-         something arithmetic can hide.  Keep the compact incumbent instead
-         of timing several discarded row numerics; higher-intensity scaled
-         factors remain eligible for the ordinary measured consultation. */
+      /* Retain the old work-model shortcut only as a diagnostic control.
+         A scaled row walk must refresh Rs, but realized measurements show
+         that its cache-local traversal can still dominate the incumbent at
+         low arithmetic intensity.  Production AUTO therefore leaves the
+         ordinary bounded row/column tournament open and publishes only its
+         measured winner. */
       solver->lean_choice = -1;
     }
   }
@@ -168379,6 +168476,15 @@ static int solve_impl(kls_solver *solver,
     kls_verified_rhs_reuse_capable(solver);
   const int repeated_rhs_raw_l2_contract =
     compact_amf_two_block_raw_l2_contract;
+  const int certified_unscaled_transpose_l2_contract =
+    kernel_transpose && nrhs == 1 && b != x &&
+    solver->certified_unscaled_l2_contract &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    !solver->numeric_is_predicted && !solver->fp32_last_used &&
+    !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
+    solver->pivot_nudge_count == 0u &&
+    solver->common.kls_perturb_count == 0u;
   const int verified_rhs_contract =
     repeated_rhs_raw_l2_contract || verified_rhs_cache_candidate;
   const int repeated_rhs_verified =
@@ -168535,7 +168641,8 @@ static int solve_impl(kls_solver *solver,
           (verified_rhs_contract ||
           retained_preconditioner_contract ||
           promoted_tolerance_l2_contract ||
-          ordinary_self_check_l2_contract)) {
+          ordinary_self_check_l2_contract ||
+          certified_unscaled_transpose_l2_contract)) {
         const int cached_rhs_norm = verified_rhs_contract &&
           solver->verified_rhs != NULL &&
           (nloc == 0u ||
@@ -168761,7 +168868,8 @@ static int solve_impl(kls_solver *solver,
             if (verified_rhs_contract ||
                 retained_preconditioner_contract ||
                 promoted_tolerance_l2_contract ||
-                ordinary_self_check_l2_contract) {
+                ordinary_self_check_l2_contract ||
+                certified_unscaled_transpose_l2_contract) {
               rnorm2 += residual[i] * residual[i];
             }
           }
@@ -168775,6 +168883,10 @@ static int solve_impl(kls_solver *solver,
         const double l2_scale = bnorm2 > 0.0 ? bnorm2 : 1.0;
         const int raw_l2_ok = repeated_rhs_raw_l2_contract &&
           (iter == 0 || solver->certified_unscaled_l2_contract) &&
+          isfinite(bnorm2) && isfinite(rnorm2) &&
+          rnorm2 <= raw_l2_limit_squared * l2_scale;
+        const int certified_unscaled_transpose_l2_ok =
+          certified_unscaled_transpose_l2_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= raw_l2_limit_squared * l2_scale;
         /* A 5e-9 ordinary self-check limit retains a 2x margin below the
@@ -168822,7 +168934,8 @@ static int solve_impl(kls_solver *solver,
         retained_preconditioner_verified |= retained_preconditioner_l2_ok;
         ordinary_self_check_l2_verified |= ordinary_self_check_l2_ok;
         promoted_tolerance_l2_verified |= promoted_tolerance_l2_ok;
-        certified_unscaled_l2_verified |= raw_l2_ok;
+        certified_unscaled_l2_verified |=
+          raw_l2_ok || certified_unscaled_transpose_l2_ok;
         if (raw_l2_ok || verified_rhs_cache_ok) {
           kls_remember_verified_rhs(solver, brhs, bnorm2);
         }
@@ -168834,11 +168947,13 @@ static int solve_impl(kls_solver *solver,
                   (verified_rhs_contract ||
                    retained_preconditioner_contract ||
                    promoted_tolerance_l2_contract ||
-                   ordinary_self_check_l2_contract)
+                   ordinary_self_check_l2_contract ||
+                   certified_unscaled_transpose_l2_contract)
                     ? sqrt(rnorm2 / l2_scale) : -1.0,
                   raw_l2_ok || verified_rhs_cache_ok ||
                     retained_preconditioner_l2_ok ||
-                    ordinary_self_check_l2_ok || promoted_tolerance_l2_ok);
+                    ordinary_self_check_l2_ok || promoted_tolerance_l2_ok ||
+                    certified_unscaled_transpose_l2_ok);
         }
         if (initial_rmax < 0.0) {
           initial_rmax = rmax;
@@ -168886,6 +169001,7 @@ static int solve_impl(kls_solver *solver,
             raw_l2_ok || retained_preconditioner_l2_ok ||
             ordinary_self_check_l2_ok ||
             promoted_tolerance_l2_ok ||
+            certified_unscaled_transpose_l2_ok ||
             (!promoted_tolerance_l2_contract &&
              !(rmax < (self_check_only ? 0.999 : 0.5) * last_rmax))) {
           if (!promoted_tolerance_l2_contract &&
@@ -169053,6 +169169,55 @@ static int solve_impl(kls_solver *solver,
           }
         }
         ok = 0;
+      }
+      if (!certified_unscaled_l2_verified &&
+          solver->certified_unscaled_l2_contract &&
+          !solver->solve_recovery_active &&
+          solver->certified_unscaled_recovery_scale > 0 &&
+          solver->input_to_csc == NULL && solver->row_perm == NULL &&
+          solver->user_col_perm == NULL && solver->row_scale == NULL &&
+          solver->col_scale == NULL && solver->nnz > 0u &&
+          solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double))) {
+        /* The unscaled lifecycle trial is a performance speculation, not a
+           correctness promise about every future value generation.  Its
+           true-current-matrix residual has now disproved the retained pivot
+           sequence.  Rebuild this generation with the scaled incumbent that
+           authorized the trial, then retry the public solve once.  Stable
+           unscaled lifecycles never enter this cold recovery path. */
+        double *recovery_values = (double *)malloc(
+          (size_t)solver->nnz * sizeof(*recovery_values));
+        if (recovery_values != NULL) {
+          memcpy(recovery_values, refine_a,
+                 (size_t)solver->nnz * sizeof(*recovery_values));
+          const int recovery_scale =
+            solver->certified_unscaled_recovery_scale;
+          const int saved_option_scale = solver->options.scale;
+          const int saved_full_factor_preferred =
+            solver->full_factor_preferred;
+          solver->solve_recovery_active = 1;
+          solver->options.scale = recovery_scale;
+          solver->common.scale = recovery_scale;
+          /* Do not replay the disproved fixed-pivot numeric through a fast
+             factor path.  The ordinary full factor establishes a fresh
+             robust pivot sequence and invalidates its stale descriptors. */
+          solver->full_factor_preferred = 1;
+          if (getenv("KLS_TRACE_REFINE") != NULL) {
+            fprintf(stderr,
+                    "KLS certified-unscaled recovery factor: scale=%d\n",
+                    recovery_scale);
+          }
+          const int factor_status = kls_factor(solver, recovery_values);
+          const int recovery_status = factor_status == KLS_OK
+            ? solve_impl(solver, transpose, 1, brhs, nloc, xrhs, nloc)
+            : factor_status;
+          solver->options.scale = saved_option_scale;
+          solver->full_factor_preferred = saved_full_factor_preferred;
+          free(recovery_values);
+          solver->solve_recovery_active = 0;
+          solver->base_solve_seconds = kls_now_seconds() - start;
+          solver->stats.solve_seconds = solver->base_solve_seconds;
+          return recovery_status;
+        }
       }
       if (ordinary_self_check_l2_contract &&
           !ordinary_self_check_l2_verified && !kernel_transpose &&
