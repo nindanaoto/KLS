@@ -4850,6 +4850,47 @@ cycle, while `ckt11752_tr_0` measured `0.997`.  A separate stability audit put
 median with a `3.39e-14` maximum generation residual; 20/20
 `ckt11752_tr_0` runs retained EGraph at a `0.4091 s` median.
 
+## Value-certified BTF lifecycle selection
+
+AUTO repeated-update analysis can now retain a bounded BTF symbolic when the
+ordinary structural tournament selects its no-BTF counterpart.  This does not
+classify the input by name, dimensions, or a matrix-family signature.  A
+fixed-cost sample of elimination positions must first show decisive static
+pivot relief.  The complete BTF numeric must then beat the selected symbolic's
+fill and work estimates, have a finite positive diagonal condition estimate,
+and pass a deterministic backward-residual solve before it can be installed.
+The independently analyzed AMF portfolio is preserved: when the existing AMD
+race already speculates on no-BTF, AMF starts on that same representation and
+reruns only if BTF wins.
+
+An accepted unscaled factor records its initial condition regime.  Every
+changed numeric receives a vectorized diagonal-ratio check; an eightfold
+deterioration rebuilds that generation with the scaled AUTO mode that
+authorized the trial.  If AUTO had already selected an unscaled incumbent,
+the alternative introduces no new scaling risk.  The controls
+`KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION=1` and
+`KLS_DISABLE_GENERIC_UNSCALED_RCOND_GUARD=1` restore the previous selector and
+disable the changed-value guard, respectively.
+
+On the final eight-core, 20-entrywise-update gap suite, the feature/control
+geometric-mean ratio over 27 matrices was `0.9866`.  Fifteen-pass medians put
+`rajat26` at `0.1420 s` versus `0.2773 s` with the selector disabled and
+`rajat23` at `0.3595 s` versus `0.3620 s`; both are below the saved CKTSO
+medians (`0.1433 s` and `0.3884 s`).  The same-session 27-matrix KLS geometric
+mean was `0.1976 s`, versus `0.2096 s` for CKTSO and `0.5731 s` for SubtreeLU.
+KLS won all 27 SubtreeLU comparisons and 15 of 27 CKTSO comparisons, so this is
+an aggregate and targeted gap closure rather than an all-matrix dominance
+claim.
+
+The 93-matrix paper scan adopted only `rajat23` and `rajat26`; `bips98_606`
+was sampled and rejected, with a 15-pass selector/control ratio of `1.0024`.
+The 48 group-disjoint development/holdout scan found no adoption and one
+value-profile rejection.  One hundred checked entrywise and localized updates
+on both positives stayed below `2.13e-13` relative L2 residual at ordinary
+amplitude.  At 90% entrywise perturbation, `rajat26` crossed its recorded
+condition floor, rebuilt scaled, and stayed below `1.06e-11`; ASan/UBSan runs
+exercised both the retained and recovery paths without findings.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

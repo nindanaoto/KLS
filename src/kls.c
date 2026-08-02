@@ -694,6 +694,12 @@ struct kls_solver {
   int generic_amf3_span_variant_selected; /* lower-span AMF3 portfolio arm;
                                               first numeric must validate or
                                               restore ordinary AMF3 */
+  trilinos_klu_l_symbolic *generic_btf_value_symbolic;
+  trilinos_klu_l_common generic_btf_value_common;
+  kls_separator_analysis generic_btf_value_separator;
+  kls_ordering generic_btf_value_ordering;
+  int generic_btf_unscaled_recovery_scale;
+  double generic_btf_unscaled_rcond_floor;
   kls_ordering generic_nd_fallback_ordering;
   int generic_nd_fallback_use_btf;
   double generic_nd_fallback_fill;
@@ -2666,6 +2672,10 @@ typedef struct kls_pattern_candidate {
   int generic_nd_bounded_symmetric_union;
   int generic_nd_lifecycle_near_tie;
   int generic_amf3_span_variant_selected;
+  trilinos_klu_l_symbolic *generic_btf_value_symbolic;
+  trilinos_klu_l_common generic_btf_value_common;
+  kls_separator_analysis generic_btf_value_separator;
+  kls_ordering generic_btf_value_ordering;
   kls_ordering generic_nd_fallback_ordering;
   int generic_nd_fallback_use_btf;
   double generic_nd_fallback_fill;
@@ -27157,8 +27167,14 @@ static void free_symbolic(kls_solver *solver) {
     trilinos_klu_l_free_symbolic(&solver->symbolic, &solver->common);
     solver->symbolic = NULL;
   }
+  if (solver->generic_btf_value_symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(
+      &solver->generic_btf_value_symbolic,
+      &solver->generic_btf_value_common);
+  }
   solver->snb_trial_verdict = 0;
   kls_separator_analysis_clear(&solver->separator);
+  kls_separator_analysis_clear(&solver->generic_btf_value_separator);
   kls_invalidate_factor_etree_stats(solver);
 }
 
@@ -27402,6 +27418,8 @@ static void free_numeric(kls_solver *solver) {
   solver->solve_refine_single_shot = 0;
   solver->certified_unscaled_l2_contract = 0;
   solver->certified_unscaled_recovery_scale = 0;
+  solver->generic_btf_unscaled_recovery_scale = 0;
+  solver->generic_btf_unscaled_rcond_floor = 0.0;
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
   solver->verified_rhs_valid = 0;
@@ -27543,6 +27561,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->promoted_tolerance_l2_recovery_required = 0;
   solver->certified_unscaled_l2_contract = 0;
   solver->certified_unscaled_recovery_scale = 0;
+  solver->generic_btf_unscaled_recovery_scale = 0;
+  solver->generic_btf_unscaled_rcond_floor = 0.0;
   solver->verified_rhs_valid = 0;
   solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_numeric_eligible = 0;
@@ -37597,6 +37617,11 @@ static int btf_low_work_many_block_retry_shape_is_allowed(
    candidate, ~40% of each analyze side).  Reset per analyzed pattern;
    thread-local so the two orientation sides stay independent. */
 static _Thread_local int kls_no_btf_retry_hopeless;
+/* Each orientation owns its kls_pattern_candidate, and generic orientation
+   analyses may run concurrently.  A thread-local capture target lets the
+   representation comparison retain one bounded BTF alternative without
+   sharing ownership across those independent tournaments. */
+static _Thread_local kls_pattern_candidate *kls_generic_btf_capture_candidate;
 
 /* A no-BTF symbolic is independent of the BTF incumbent it challenges.  A
    repeated-update caller can therefore build the two representations in
@@ -37833,7 +37858,33 @@ static void maybe_retry_without_btf(UF_long n,
        no_btf_score <= 1.75 * current_score &&
        no_btf_symbolic->est_flops > 0.0 &&
        no_btf_symbolic->est_flops <= 1.50 * (*symbolic)->est_flops)) {
-    trilinos_klu_l_free_symbolic(symbolic, common);
+    const int capture_btf_value_alternative =
+      generic_policy && kls_generic_btf_capture_candidate != NULL &&
+      kls_generic_btf_capture_candidate->generic_btf_value_symbolic == NULL &&
+      getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
+      options->ordering == KLS_ORDERING_AUTO &&
+      kls_repeated_update_workload(options) &&
+      (*symbolic)->do_btf && (*symbolic)->nblocks > 1u &&
+      (*symbolic)->maxblock < n &&
+      (double)(n - (*symbolic)->maxblock) >= 0.02 * (double)n &&
+      current_score_known && current_score > 0.0 &&
+      no_btf_score > 0.0 && isfinite(no_btf_score) &&
+      current_score <= 1.35 * no_btf_score &&
+      (*symbolic)->est_flops > 0.0 &&
+      no_btf_symbolic->est_flops > 0.0 &&
+      (*symbolic)->est_flops <= 2.0 * no_btf_symbolic->est_flops;
+    if (capture_btf_value_alternative) {
+      kls_pattern_candidate *capture =
+        kls_generic_btf_capture_candidate;
+      capture->generic_btf_value_symbolic = *symbolic;
+      capture->generic_btf_value_common = *common;
+      capture->generic_btf_value_ordering = ordering;
+      *symbolic = NULL;
+      kls_separator_analysis_move(
+        &capture->generic_btf_value_separator, separator_io);
+    } else {
+      trilinos_klu_l_free_symbolic(symbolic, common);
+    }
     *symbolic = no_btf_symbolic;
     *common = no_btf_common;
     *score = no_btf_score;
@@ -38574,6 +38625,29 @@ static void kls_update_numeric_rcond(kls_solver *solver) {
     fprintf(stderr, "KLS diag: flops 0.000s rcond %.3fs\n",
             kls_now_seconds() - t0);
   }
+}
+
+/* The lifecycle guard needs only KLU's documented diagonal ratio.  Keep the
+   scan branch-free so compilers can reduce min/max in vector lanes; the
+   general diagnostic routine above retains KLU's full status semantics. */
+static void kls_update_numeric_rcond_guard(kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Udiag == NULL || solver->n == 0u) {
+    return;
+  }
+  const double *restrict udiag =
+    (const double *)solver->numeric->Udiag;
+  double umin = DBL_MAX;
+  double umax = 0.0;
+  int invalid = 0;
+#pragma omp simd reduction(min:umin) reduction(max:umax) reduction(|:invalid)
+  for (UF_long k = 0u; k < solver->n; ++k) {
+    const double pivot = fabs(udiag[k]);
+    invalid |= !isfinite(pivot) || pivot == 0.0;
+    umin = pivot < umin ? pivot : umin;
+    umax = pivot > umax ? pivot : umax;
+  }
+  solver->common.rcond = !invalid && umax > 0.0 ? umin / umax : 0.0;
 }
 
 #ifdef KLS_HAVE_SPRAL_SCALING
@@ -47359,6 +47433,18 @@ generic_ordering_tournament:;
     generic_policy && kls_repeated_update_workload(options) &&
     amf_trial_economically_relevant &&
     options->threads >= 4 && n <= 1000000u && col_ptr[n] <= 8000000u;
+  const double no_btf_lifecycle_work =
+    (double)col_ptr[n] * requested_numeric_horizon;
+  const int parallel_no_btf_trial_wanted =
+    generic_policy && symbolic_options->use_btf && n >= 4000u &&
+    kls_repeated_update_workload(options) && options->threads >= 4 &&
+    (!broad_amf_portfolio || options->threads >= 8) &&
+    n <= 1000000u && col_ptr[n] <= 8000000u &&
+    isfinite(no_btf_lifecycle_work) && no_btf_lifecycle_work >= 1.0e7 &&
+    isfinite(column_pair_work) &&
+    column_pair_work * requested_numeric_horizon >= 2.0e8 &&
+    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
+    getenv("KLS_DISABLE_PARALLEL_NO_BTF_TRIAL") == NULL;
   /* Eight available workers can also overlap a second AMF3 scoring power.
      Its selector below is based on estimated work and actual elimination-
      tree depth, not on dimensions or a matrix-family label.  An explicit
@@ -47396,6 +47482,14 @@ generic_ordering_tournament:;
       amf_spec[i].row_idx = row_idx;
       amf_spec[i].ordering = amf_spec_ordering[ordering_index];
       amf_spec[i].options = *symbolic_options;
+      /* The AMD representation race is already evaluating no-BTF under the
+         same lifecycle budget.  Start independent AMF workers on that arm
+         too; if BTF wins, their existing verdict repair reruns them there.
+         This removes a duplicate BTF graph pass without narrowing the
+         ordering portfolio. */
+      if (parallel_no_btf_trial_wanted) {
+        amf_spec[i].options.use_btf = 0;
+      }
       amf_spec[i].measure_etree_levels =
         amf3_span_portfolio && i >= 1;
       amf_spec[i].amf3_span_variant =
@@ -47420,16 +47514,7 @@ generic_ordering_tournament:;
      challenger on demand when that result makes it relevant.  Keep enough
      caller-supplied worker budget for the broader AMF portfolio when that is
      also active. */
-  const double no_btf_lifecycle_work =
-    (double)col_ptr[n] * requested_numeric_horizon;
-  if (generic_policy && symbolic_options->use_btf && n >= 4000u &&
-      kls_repeated_update_workload(options) && options->threads >= 4 &&
-      (!broad_amf_portfolio || options->threads >= 8) &&
-      n <= 1000000u && col_ptr[n] <= 8000000u &&
-      isfinite(no_btf_lifecycle_work) && no_btf_lifecycle_work >= 1.0e7 &&
-      isfinite(column_pair_work) &&
-      column_pair_work * requested_numeric_horizon >= 2.0e8 &&
-      getenv("KLS_DISABLE_PARALLEL_NO_BTF_TRIAL") == NULL) {
+  if (parallel_no_btf_trial_wanted) {
     no_btf_spec.n = n;
     no_btf_spec.col_ptr = col_ptr;
     no_btf_spec.row_idx = row_idx;
@@ -48873,7 +48958,13 @@ static void free_candidate(kls_pattern_candidate *candidate) {
   if (candidate->symbolic != NULL) {
     trilinos_klu_l_free_symbolic(&candidate->symbolic, &candidate->common);
   }
+  if (candidate->generic_btf_value_symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(
+      &candidate->generic_btf_value_symbolic,
+      &candidate->generic_btf_value_common);
+  }
   kls_separator_analysis_clear(&candidate->separator);
+  kls_separator_analysis_clear(&candidate->generic_btf_value_separator);
   free(candidate->col_ptr);
   free(candidate->row_idx);
   free(candidate->input_to_csc);
@@ -49310,11 +49401,22 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     free(kls_block_order_proposal);
     kls_block_order_proposal = NULL;
     kls_amf3_span_variant_selected = 0;
+    if (candidate->generic_btf_value_symbolic != NULL) {
+      trilinos_klu_l_free_symbolic(
+        &candidate->generic_btf_value_symbolic,
+        &candidate->generic_btf_value_common);
+    }
+    kls_separator_analysis_clear(
+      &candidate->generic_btf_value_separator);
+    kls_pattern_candidate *saved_capture =
+      kls_generic_btf_capture_candidate;
+    kls_generic_btf_capture_candidate = candidate;
     const int status = choose_symbolic_for_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx, options,
       &candidate->symbolic, &candidate->common,
       &candidate->selected_ordering, &candidate->score,
       &candidate->separator);
+    kls_generic_btf_capture_candidate = saved_capture;
     candidate->generic_amf3_span_variant_selected =
       status == KLS_OK &&
       candidate->selected_ordering == KLS_ORDERING_AMF3 &&
@@ -50382,6 +50484,16 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->generic_amf3_span_variant_selected =
     candidate->generic_amf3_span_variant_selected &&
     candidate->selected_ordering == KLS_ORDERING_AMF3;
+  solver->generic_btf_value_symbolic =
+    candidate->generic_btf_value_symbolic;
+  solver->generic_btf_value_common =
+    candidate->generic_btf_value_common;
+  solver->generic_btf_value_ordering =
+    candidate->generic_btf_value_ordering;
+  kls_separator_analysis_move(
+    &solver->generic_btf_value_separator,
+    &candidate->generic_btf_value_separator);
+  candidate->generic_btf_value_symbolic = NULL;
   solver->generic_nd_fallback_ordering =
     candidate->generic_nd_fallback_ordering;
   solver->generic_nd_fallback_use_btf =
@@ -50756,6 +50868,257 @@ static int kls_restore_generic_amf3_span_symbolic(kls_solver *solver,
             "KLS AMF3 span portfolio: numeric rejected; restored "
             "ordinary power\n");
   }
+  return 1;
+}
+
+typedef struct kls_symbolic_pivot_profile {
+  UF_long missing;
+  UF_long weak_1e3;
+  UF_long weak_1e2;
+} kls_symbolic_pivot_profile;
+
+/* Bound value-admission work independently of matrix size.  Evenly spaced
+   elimination positions cover the whole symbolic while keeping a rejected
+   alternative cheaper than the numeric factor trial it avoids.  Acceptance
+   still depends on the complete candidate factor and backward residual. */
+static kls_symbolic_pivot_profile kls_sample_symbolic_pivots(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const double *values,
+  const trilinos_klu_l_symbolic *symbolic) {
+  kls_symbolic_pivot_profile profile;
+  memset(&profile, 0, sizeof(profile));
+  if (n == 0u || col_ptr == NULL || row_idx == NULL || values == NULL ||
+      symbolic == NULL || symbolic->P == NULL || symbolic->Q == NULL) {
+    profile.missing = n;
+    return profile;
+  }
+  const UF_long sample_count = n < 1024u ? n : 1024u;
+  const double stride = (double)n / (double)sample_count;
+  for (UF_long sample = 0u; sample < sample_count; ++sample) {
+    const UF_long k = sample_count == n
+      ? sample
+      : (UF_long)(((double)sample + 0.5) * stride);
+    const UF_long col = symbolic->Q[k];
+    const UF_long row = symbolic->P[k];
+    if (col >= n || row >= n) {
+      profile.missing++;
+      continue;
+    }
+    double column_max = 0.0;
+    double pivot_abs = 0.0;
+    int found = 0;
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const double av = fabs(values[p]);
+      column_max = column_max < av ? av : column_max;
+      if (row_idx[p] == row) {
+        pivot_abs = av;
+        found = 1;
+      }
+    }
+    if (!found) {
+      profile.missing++;
+      continue;
+    }
+    const double ratio = column_max > 0.0 ? pivot_abs / column_max : 1.0;
+    profile.weak_1e3 += ratio < 1.0e-3;
+    profile.weak_1e2 += ratio < 1.0e-2;
+  }
+  return profile;
+}
+
+static void kls_discard_generic_btf_value_alternative(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  if (solver->generic_btf_value_symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(
+      &solver->generic_btf_value_symbolic,
+      &solver->generic_btf_value_common);
+  }
+  kls_separator_analysis_clear(&solver->generic_btf_value_separator);
+  solver->generic_btf_value_ordering = KLS_ORDERING_AUTO;
+}
+
+/* The structural tournament has already paid for both AMD representations.
+   If it retained a bounded BTF alternative, use the first value frame to
+   decide which symbolic to factor first.  Static pivot strength is only an
+   admission signal: the candidate must then beat the selected symbolic's
+   estimated work and storage decisively and pass a true backward-residual
+   solve before it can replace the ordinary no-BTF route. */
+static int maybe_factor_generic_btf_value_alternative(
+  kls_solver *solver,
+  const double *numeric_values,
+  double *elapsed) {
+  if (solver == NULL || numeric_values == NULL || elapsed == NULL ||
+      solver->generic_btf_value_symbolic == NULL) {
+    return 0;
+  }
+  trilinos_klu_l_symbolic *candidate_symbolic =
+    solver->generic_btf_value_symbolic;
+  const int capable =
+    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
+    !kls_legacy_shape_policies_enabled() &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->options.use_btf &&
+    kls_repeated_update_workload(&solver->options) &&
+    !solver->solve_recovery_active && solver->numeric == NULL &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->input_format == KLS_INPUT_CSC &&
+    solver->input_to_csc == NULL && solver->values == NULL &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    solver->block_order_perm == NULL && !solver->diagonal_equiv_active &&
+    solver->symbolic != NULL && !solver->symbolic->do_btf &&
+    candidate_symbolic->do_btf && candidate_symbolic->nblocks > 1u &&
+    candidate_symbolic->maxblock < solver->n;
+  if (!capable) {
+    kls_discard_generic_btf_value_alternative(solver);
+    return 0;
+  }
+  const double decision_start = kls_now_seconds();
+
+  const kls_symbolic_pivot_profile incumbent_profile =
+    kls_sample_symbolic_pivots(
+      solver->n, solver->col_ptr, solver->row_idx, numeric_values,
+      solver->symbolic);
+  const kls_symbolic_pivot_profile candidate_profile =
+    kls_sample_symbolic_pivots(
+      solver->n, solver->col_ptr, solver->row_idx, numeric_values,
+      candidate_symbolic);
+  const int decisive_value_strength =
+    candidate_profile.missing == 0u &&
+    incumbent_profile.missing >= 8u &&
+    incumbent_profile.weak_1e3 >= 8u &&
+    (double)candidate_profile.weak_1e3 <=
+      0.75 * (double)incumbent_profile.weak_1e3 &&
+    (double)candidate_profile.weak_1e2 <=
+      0.75 * (double)incumbent_profile.weak_1e2;
+  if (!decisive_value_strength) {
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS generic BTF values: missing=%ld/%ld "
+              "weak1e3=%ld/%ld weak1e2=%ld/%ld -> reject\n",
+              (long)candidate_profile.missing,
+              (long)incumbent_profile.missing,
+              (long)candidate_profile.weak_1e3,
+              (long)incumbent_profile.weak_1e3,
+              (long)candidate_profile.weak_1e2,
+              (long)incumbent_profile.weak_1e2);
+    }
+    kls_discard_generic_btf_value_alternative(solver);
+    *elapsed += kls_now_seconds() - decision_start;
+    return 0;
+  }
+
+  trilinos_klu_l_common candidate_common =
+    solver->generic_btf_value_common;
+  const int recovery_scale = (int)solver->common.scale;
+  candidate_common.scale = -1;
+  candidate_common.tol = solver->common.tol;
+  candidate_common.halt_if_singular = solver->common.halt_if_singular;
+  candidate_common.kls_static_perturb = solver->common.kls_static_perturb;
+  candidate_common.kls_zero_pivot_replacement =
+    solver->common.kls_zero_pivot_replacement;
+  const double trial_start = kls_now_seconds();
+  trilinos_klu_l_numeric *candidate_numeric = trilinos_klu_l_factor(
+    solver->col_ptr, solver->row_idx,
+    (double *)(uintptr_t)numeric_values, candidate_symbolic,
+    &candidate_common);
+  const double factor_seconds = kls_now_seconds() - trial_start;
+  int candidate_ok = candidate_numeric != NULL &&
+    candidate_common.status >= TRILINOS_KLU_OK &&
+    candidate_common.status != TRILINOS_KLU_SINGULAR;
+  if (candidate_ok) {
+    (void)trilinos_klu_l_flops(
+      candidate_symbolic, candidate_numeric, &candidate_common);
+    (void)trilinos_klu_l_rcond(
+      candidate_symbolic, candidate_numeric, &candidate_common);
+  }
+  const double incumbent_estimated_fill = symbolic_score(solver->symbolic);
+  const double incumbent_estimated_flops = solver->symbolic->est_flops;
+  const double candidate_fill = candidate_ok
+    ? (double)candidate_numeric->lnz + (double)candidate_numeric->unz
+    : DBL_MAX;
+  candidate_ok = candidate_ok && incumbent_estimated_fill > 0.0 &&
+    isfinite(incumbent_estimated_fill) &&
+    incumbent_estimated_flops > 0.0 &&
+    candidate_fill <= 0.90 * incumbent_estimated_fill &&
+    candidate_common.flops > 0.0 &&
+    candidate_common.flops <= 0.75 * incumbent_estimated_flops &&
+    isfinite(candidate_common.rcond) && candidate_common.rcond > 0.0;
+
+  int residual_ok = 0;
+  if (candidate_ok) {
+    trilinos_klu_l_symbolic *incumbent_symbolic = solver->symbolic;
+    trilinos_klu_l_numeric *incumbent_numeric = solver->numeric;
+    const trilinos_klu_l_common incumbent_common = solver->common;
+    solver->symbolic = candidate_symbolic;
+    solver->numeric = candidate_numeric;
+    solver->common = candidate_common;
+    residual_ok = kls_direct_klu_numeric_residual_probe(
+      solver, numeric_values);
+    candidate_common = solver->common;
+    solver->symbolic = incumbent_symbolic;
+    solver->numeric = incumbent_numeric;
+    solver->common = incumbent_common;
+  }
+  candidate_ok = candidate_ok && residual_ok;
+  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+    fprintf(stderr,
+            "KLS generic BTF values: fill %.4e/%.4e flops %.4e/%.4e "
+            "pivots=%ld rcond=%.3e residual=%d -> %s\n",
+            candidate_fill, incumbent_estimated_fill,
+            candidate_common.flops, incumbent_estimated_flops,
+            (long)candidate_common.noffdiag, candidate_common.rcond,
+            residual_ok, candidate_ok ? "adopt" : "reject");
+  }
+  if (!candidate_ok) {
+    if (candidate_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&candidate_numeric, &candidate_common);
+    }
+    kls_discard_generic_btf_value_alternative(solver);
+    *elapsed += kls_now_seconds() - decision_start;
+    return 0;
+  }
+
+  trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
+  trilinos_klu_l_common old_common = solver->common;
+  solver->symbolic = candidate_symbolic;
+  solver->numeric = candidate_numeric;
+  solver->common = candidate_common;
+  solver->generic_btf_value_symbolic = NULL;
+  kls_separator_analysis_clear(&solver->separator);
+  kls_separator_analysis_move(
+    &solver->separator, &solver->generic_btf_value_separator);
+  solver->stats.selected_ordering = solver->generic_btf_value_ordering;
+  solver->generic_btf_value_ordering = KLS_ORDERING_AUTO;
+  solver->generic_nd_portfolio_selected = 0;
+  solver->generic_nd_numeric_validated = 0;
+  solver->generic_amf3_span_variant_selected = 0;
+  solver->auto_scale_checked = 1;
+  solver->auto_scale_value_certified = 1;
+  kls_metis_race_abandon(solver);
+  kls_invalidate_factor_etree_stats(solver);
+  kls_numeric_replaced_invalidate(solver);
+  solver->generic_btf_unscaled_recovery_scale = recovery_scale;
+  /* The first factor's true residual certifies its absolute conditioning
+     regime.  Future value frames may remain in that regime; recover only
+     after the cheap diagonal estimate deteriorates by a full factor of
+     eight, rather than imposing a matrix-independent absolute cutoff on an
+     already accurate ill-conditioned solve. */
+  solver->generic_btf_unscaled_rcond_floor =
+    fmax(DBL_MIN, 0.125 * candidate_common.rcond);
+  solver->numeric_full_factor_seconds = factor_seconds;
+  solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
+  solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
+  solver->stats.structural_rank =
+    (int64_t)solver->symbolic->structural_rank;
+  solver->stats.estimated_flops = solver->symbolic->est_flops;
+  trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
+  *elapsed += kls_now_seconds() - decision_start;
   return 1;
 }
 
@@ -163438,6 +163801,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   solver->certified_unscaled_l2_contract = 0;
   solver->certified_unscaled_recovery_scale = 0;
+  solver->generic_btf_unscaled_recovery_scale = 0;
+  solver->generic_btf_unscaled_rcond_floor = 0.0;
   if (!solver->solve_recovery_active) {
     /* An explicit public factor call begins a fresh numeric contract epoch.
        A guarded recovery factor sets this state again only after it succeeds. */
@@ -163984,9 +164349,14 @@ int kls_factor(kls_solver *solver, const double *values) {
     kls_signal_metis_race_values(solver, numeric_values);
   }
   KLS_ENTRY_PHASE("auto_scale")
-  int kls_first_factor_used = 0;
+  int kls_first_factor_used = !had_numeric &&
+    maybe_factor_generic_btf_value_alternative(
+      solver, numeric_values, &elapsed);
+  if (kls_first_factor_used) {
+    kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLU_FIRST);
+  }
   if (!had_numeric && !solver->generic_amf3_span_variant_selected &&
-      kls_should_try_first_factor(solver)) {
+      !kls_first_factor_used && kls_should_try_first_factor(solver)) {
     const double start = kls_now_seconds();
     kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FIRST);
     kls_first_factor_used =
@@ -166922,6 +167292,44 @@ int kls_refactor(kls_solver *solver, const double *values) {
     /* classify each numeric on its first refactorization — once per
        numeric, off the solve path; numeric_values is the prepared
        internal-frame array, current for THIS call */
+    if (solver->generic_btf_unscaled_recovery_scale > 0 &&
+        solver->generic_btf_unscaled_rcond_floor > 0.0 &&
+        solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
+        getenv("KLS_DISABLE_GENERIC_UNSCALED_RCOND_GUARD") == NULL) {
+      kls_update_numeric_rcond_guard(solver);
+      if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
+        fprintf(stderr,
+                "KLS generic unscaled refactor rcond %.3e floor %.3e\n",
+                solver->common.rcond,
+                solver->generic_btf_unscaled_rcond_floor);
+      }
+      if (!(solver->common.rcond >=
+              solver->generic_btf_unscaled_rcond_floor) &&
+          !solver->solve_recovery_active) {
+        const int recovery_scale =
+          solver->generic_btf_unscaled_recovery_scale;
+        const int saved_option_scale = solver->options.scale;
+        const int saved_full_factor_preferred =
+          solver->full_factor_preferred;
+        solver->solve_recovery_active = 1;
+        solver->options.scale = recovery_scale;
+        solver->common.scale = recovery_scale;
+        solver->full_factor_preferred = 1;
+        if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
+          fprintf(stderr,
+                  "KLS generic unscaled refactor recovery: scale=%d\n",
+                  recovery_scale);
+        }
+        const int recovery_status = kls_factor(solver, values);
+        solver->options.scale = saved_option_scale;
+        solver->full_factor_preferred = saved_full_factor_preferred;
+        solver->solve_recovery_active = 0;
+        solver->stats.refactor_seconds =
+          kls_now_seconds() - refactor_call_start;
+        fill_numeric_stats(solver);
+        return recovery_status;
+      }
+    }
     kls_solve_contract_classify(solver, numeric_values);
 #ifdef KLS_HAVE_CBLAS
     kls_dense_tail_refactor_validate(solver, numeric_values);
@@ -170067,7 +170475,13 @@ static void kls_reset_candidate_analysis(kls_pattern_candidate *candidate) {
   if (candidate->symbolic != NULL) {
     trilinos_klu_l_free_symbolic(&candidate->symbolic, &candidate->common);
   }
+  if (candidate->generic_btf_value_symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(
+      &candidate->generic_btf_value_symbolic,
+      &candidate->generic_btf_value_common);
+  }
   kls_separator_analysis_clear(&candidate->separator);
+  kls_separator_analysis_clear(&candidate->generic_btf_value_separator);
   memset(&candidate->common, 0, sizeof(candidate->common));
   candidate->selected_ordering = KLS_ORDERING_AUTO;
   candidate->score = DBL_MAX;
