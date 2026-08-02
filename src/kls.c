@@ -650,6 +650,9 @@ struct kls_solver {
   int pts_ref_decision;     /* 0 untried, 1 adopted, -1 rejected */
   double pts_ref_incumbent_seconds;
   double pts_ref_trial_seconds;   /* factor-time trial, charged once */
+  int pts_ref_reaudit;      /* close first timing pair gets one warm re-audit */
+  double pts_ref_incumbent_min;
+  double pts_ref_trial_min;
   int row_accept_decision;      /* 0 undecided, 1 row engine, -1 column */
   int row_accept_publish_preferred; /* measured: column solve beats row solve */
   int prestatic_adopted_unfactored; /* matched pattern installed, numeric
@@ -767,8 +770,10 @@ struct kls_solver {
                           0 undecided, 1 low floors, -1 defaults */
   int floor_pending;   /* low-floor probe refactor outstanding */
   int floor_wait;
+  int floor_reaudit;   /* close first sample gets one adjacent low-floor run */
   int floor_min_path;  /* engine the steady floor-min came from */
   double mapped_steady_min;
+  double floor_probe_min;
   int direct_klu_choice; /* measured fixed-pattern engine verdict:
                             0 untried, 1 enter KLU directly, -1 keep the
                             adaptive mapped/parallel incumbent */
@@ -2289,6 +2294,8 @@ struct kls_solver {
   int auto_scale_checked;
   int auto_scale_value_certified;
   int auto_scale_deferred;
+  int tight_pivot_deferred; /* repeated lifecycle: evaluate the tight-pivot
+                               numeric after pending representation trials */
   int auto_amd_shortcut;
   int compact_partial_diagonal_column_fringe;
   int exact_matching_selected;
@@ -27595,6 +27602,9 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->pts_ref_decision = 0;
   solver->pts_ref_incumbent_seconds = 0.0;
   solver->pts_ref_trial_seconds = 0.0;
+  solver->pts_ref_reaudit = 0;
+  solver->pts_ref_incumbent_min = 0.0;
+  solver->pts_ref_trial_min = 0.0;
   solver->tight_tol_refine = 0;
   solver->row_accept_decision = 0;
   solver->row_accept_publish_preferred = 0;
@@ -27644,6 +27654,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->floor_choice = 0;
   solver->floor_pending = 0;
   solver->floor_wait = 0;
+  solver->floor_reaudit = 0;
   solver->floor_min_path = 0;
   solver->direct_klu_choice = 0;
   solver->lean_choice = 0;
@@ -27666,6 +27677,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->padded_probe_min = 0.0;
   solver->padded_probe_min_off = 0.0;
   solver->mapped_steady_min = 0.0;
+  solver->floor_probe_min = 0.0;
   free_pivot_nudges(solver);
   free_snode_panels(solver);
   free_egraph_algorithm5_payoff_queue(solver);
@@ -27838,6 +27850,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->lean_scale_rs_snapshot = NULL;
   solver->lean_scale_input_state = 0;
   solver->auto_scale_deferred = 0;
+  solver->tight_pivot_deferred = 0;
   solver->solve_perm_workspace = NULL;
   solver->solve_refine_workspace = NULL;
   solver->solve_refine_values = NULL;
@@ -27877,6 +27890,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_scale_checked = 0;
   solver->auto_scale_value_certified = 0;
   solver->auto_scale_deferred = 0;
+  solver->tight_pivot_deferred = 0;
   solver->auto_amd_shortcut = 0;
   solver->compact_partial_diagonal_column_fringe = 0;
   solver->exact_matching_selected = 0;
@@ -41519,8 +41533,6 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   if (status != KLS_OK) {
     goto done;
   }
-
-
   kls_options trial_options = solver->options;
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
@@ -41552,17 +41564,47 @@ static int maybe_accept_spral_hungarian_numeric_trial(
 
   (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric, &trial_common);
   (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric, &trial_common);
-  maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
-                                   trial_row_idx, &solver->options,
-                                   trial_symbolic, &trial_values,
-                                   &row_scale, &col_scale, &trial_numeric,
-                                   &trial_common);
-  if (!numeric_candidate_is_better(&solver->common, solver->numeric,
-                                   &trial_common, trial_numeric) ||
-      !spral_hungarian_candidate_has_value(&solver->common, solver->numeric,
-                                           &trial_common, trial_numeric) ||
-      (solver->common.rcond > 0.0 && trial_common.rcond > 0.0 &&
-       trial_common.rcond < 0.01 * solver->common.rcond)) {
+  const int retain_native_matching_scale =
+    !kls_legacy_shape_policies_enabled() &&
+    kls_repeated_update_workload(&solver->options) &&
+    getenv("KLS_DISABLE_GENERIC_NATIVE_MATCHING_SCALE") == NULL &&
+    trial_common.rcond > 0.0 &&
+    (solver->common.rcond <= 0.0 ||
+     trial_common.rcond >= solver->common.rcond) &&
+    trial_common.noffdiag <= solver->common.noffdiag &&
+    numeric_candidate_is_better(&solver->common, solver->numeric,
+                                &trial_common, trial_numeric) &&
+    spral_hungarian_candidate_has_value(&solver->common, solver->numeric,
+                                        &trial_common, trial_numeric);
+  if (retain_native_matching_scale) {
+    /* Exact matching has already produced a conventionally scaled KLU
+       factor with no conditioning or pivot-quality loss relative to the
+       incumbent and a decisive realized lifecycle win.  A second factor in
+       the external matching equilibration has identical coordinates and
+       arithmetic, but makes every later refactor refresh two extra dense
+       scale vectors.  Keep the numerically certified native frame; the
+       ordinary solve contract continues to police subsequent values. */
+    free(row_scale);
+    free(col_scale);
+    row_scale = NULL;
+    col_scale = NULL;
+  } else {
+    maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
+                                     trial_row_idx, &solver->options,
+                                     trial_symbolic, &trial_values,
+                                     &row_scale, &col_scale, &trial_numeric,
+                                     &trial_common);
+  }
+  const int numeric_better =
+    numeric_candidate_is_better(&solver->common, solver->numeric,
+                                &trial_common, trial_numeric);
+  const int lifecycle_value =
+    spral_hungarian_candidate_has_value(&solver->common, solver->numeric,
+                                        &trial_common, trial_numeric);
+  const int conditioning_ok =
+    !(solver->common.rcond > 0.0 && trial_common.rcond > 0.0 &&
+      trial_common.rcond < 0.01 * solver->common.rcond);
+  if (!numeric_better || !lifecycle_value || !conditioning_ok) {
     goto done;
   }
 
@@ -47275,7 +47317,6 @@ generic_ordering_tournament:;
     broad_amf_portfolio && options->threads >= 8 &&
     !kls_prestatic_ordering_ctx &&
     !kls_matched_low_pair_ordering_ctx &&
-    !kls_value_matched_ordering_ctx &&
     getenv("KLS_AMF3_POWER") == NULL;
   const int amf_spec_count = amf3_span_portfolio ? 3 :
     (broad_amf_portfolio ? 2 : 1);
@@ -47617,12 +47658,12 @@ generic_ordering_tournament:;
             amf3_fill_saving * requested_numeric_horizon >= 2.0e6));
         /* Approximate fill does not describe dependency stalls in the
            retained parallel refactor.  Compare a lower-power AMF3 ordering
-           only with the ordinary AMF3 run on the identical representation:
-           admit it when fill and arithmetic remain within two percent of
-           both that control and the current winner, while the computed
-           elimination-tree span falls by at least five percent.  The later
-           predicted numeric and exact residual remain mandatory; rejection
-           restores the ordinary AMF3 symbolic before KLU factorization. */
+           with the ordinary AMF3 run on the identical representation.  A
+           close general candidate stays within the narrow Pareto band.  In
+           an exact value-matched frame, also admit a decisive span reduction
+           under bounded five-percent-versus-control and twenty-percent-
+           versus-winner work caps: the following real KLU factor still has
+           to beat the incumbent on fill, work, pivots, and conditioning. */
         const struct kls_amf_spec_job *ordinary_amf3 =
           amf3_span_portfolio ? &amf_spec[1] : NULL;
         const int span_parallel_refinement =
@@ -47642,6 +47683,25 @@ generic_ordering_tournament:;
           spec->symbolic->est_flops <= 1.02 * best_symbolic->est_flops &&
           20.0 * (double)spec->etree_levels <=
             19.0 * (double)ordinary_amf3->etree_levels;
+        const int matched_decisive_span_refinement =
+          generic_policy && kls_value_matched_ordering_ctx &&
+          spec->amf3_span_variant &&
+          kls_repeated_update_workload(options) &&
+          getenv("KLS_DISABLE_MATCHED_DECISIVE_SPAN_REFINEMENT") == NULL &&
+          ordinary_amf3 != NULL &&
+          ordinary_amf3->status == KLS_OK &&
+          ordinary_amf3->score > 0.0 &&
+          isfinite(ordinary_amf3->score) &&
+          ordinary_amf3->est_flops > 0.0 &&
+          isfinite(ordinary_amf3->est_flops) &&
+          ordinary_amf3->etree_levels > 0u &&
+          spec->etree_levels > 0u &&
+          spec->score <= 1.02 * ordinary_amf3->score &&
+          spec->symbolic->est_flops <= 1.05 * ordinary_amf3->est_flops &&
+          spec->score <= 1.05 * best_score &&
+          spec->symbolic->est_flops <= 1.20 * best_symbolic->est_flops &&
+          5.0 * (double)spec->etree_levels <=
+            3.0 * (double)ordinary_amf3->etree_levels;
         if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL &&
             spec->amf3_span_variant) {
           fprintf(stderr,
@@ -47654,7 +47714,8 @@ generic_ordering_tournament:;
                   (long)spec->etree_levels,
                   ordinary_amf3 != NULL
                     ? (long)ordinary_amf3->etree_levels : 0L,
-                  span_parallel_refinement ? "adopt" : "reject");
+                  (span_parallel_refinement ||
+                   matched_decisive_span_refinement) ? "adopt" : "reject");
         }
         if ((isfinite(spec->score) &&
             spec->score <= amf_ratio * best_score) ||
@@ -47663,6 +47724,7 @@ generic_ordering_tournament:;
             minimum_fill_pareto_refinement ||
             amortized_amf3_pareto_refinement ||
             span_parallel_refinement ||
+            matched_decisive_span_refinement ||
             medium_spike_minfill_wins) {
           trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
           best_symbolic = spec->symbolic;
@@ -119006,6 +119068,28 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
       }
       solver->eg_fuse_min[probe - 1] = seconds;
       if (probe == 1) {
+        const int side =
+          solver->eg_tt_choice == solver->eg_tt_counts[1] ? 1 : 0;
+        const double none = solver->eg_tt_min[side];
+        const double pairm = solver->eg_fuse_min[0];
+        if (none > 0.0 && pairm > 1.25 * none &&
+            getenv("KLS_DISABLE_EGRAPH_DOMINATED_QUAD_SKIP") == NULL) {
+          /* Pair fusion and quad fusion share the same cross-column
+             synchronization and extra SPAs.  Once the cheaper fused arm is
+             already materially slower than the measured unfused executor,
+             a still-wider probe has no lifecycle support.  Settle from the
+             realized timings and release its scratch rather than charging a
+             second dominated refactor. */
+          solver->eg_pair_choice = -1;
+          kls_egraph_release_unused_quad_scratch(solver);
+          if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+            fprintf(stderr,
+                    "KLS egraph fuse probe: early off"
+                    " (none %.3f, pair %.3f ms)\n",
+                    1e3 * none, 1e3 * pairm);
+          }
+          return;
+        }
         /* Quad probes next.  Both plain single-block and plain BTF kernels
            have dependency-safe k-way implementations; other kernels retain
            pair dispatch, and the strict better-than-pair requirement below
@@ -159239,17 +159323,55 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
      If the challenger loses, do not publish its representation as the return
      state: the caller continues through the incumbent engine below, restoring
      all of that engine's recurring state on this same numeric. */
-  const double acceptance_ratio =
+  const int repeated_generic =
     !kls_legacy_shape_policies_enabled() &&
-    kls_repeated_update_workload(&solver->options)
-      ? 0.95 : 0.75;
-  solver->pts_ref_decision =
-    t < acceptance_ratio * solver->pts_ref_incumbent_seconds ? 1 : -1;
+    kls_repeated_update_workload(&solver->options);
+  const double acceptance_ratio = repeated_generic ? 0.95 : 0.75;
+  const double incumbent_seconds = solver->pts_ref_incumbent_seconds;
+  if (solver->pts_ref_incumbent_min <= 0.0 ||
+      incumbent_seconds < solver->pts_ref_incumbent_min) {
+    solver->pts_ref_incumbent_min = incumbent_seconds;
+  }
+  if (solver->pts_ref_trial_min <= 0.0 ||
+      t < solver->pts_ref_trial_min) {
+    solver->pts_ref_trial_min = t;
+  }
+  if (solver->pts_ref_reaudit == 1) {
+    /* Once a re-audit is armed, settle it only from the paired minima.
+       Otherwise a noisy second incumbent can satisfy the single-pair fast
+       path and override the faster first incumbent that triggered the
+       re-audit in the first place. */
+    solver->pts_ref_reaudit = 2;
+    solver->pts_ref_decision =
+      solver->pts_ref_trial_min <
+        0.98 * solver->pts_ref_incumbent_min ? 1 : -1;
+  } else if (t < acceptance_ratio * incumbent_seconds) {
+    solver->pts_ref_decision = 1;
+  } else if (repeated_generic && solver->pts_ref_reaudit == 0 &&
+             t <= 1.05 * incumbent_seconds &&
+             getenv("KLS_DISABLE_PTS_CLOSE_REAUDIT") == NULL) {
+    /* One timing pair can compare a cold subtree pass with a noisy incumbent
+       (or vice versa).  Re-audit only the ambiguous five-percent band: a
+       challenger already slower by more than that cannot satisfy the warm
+       recurring gate, and another representation round-trip would only
+       disturb the incumbent's cache state.  Continue through the incumbent
+       in this call, then compare a second adjacent pair and settle from the
+       two warm minima. */
+    solver->pts_ref_decision = 0;
+    solver->pts_ref_reaudit = 1;
+    solver->pts_ref_incumbent_seconds = -1.0;
+    solver->pts_ref_trial_seconds = 0.0;
+  } else {
+    solver->pts_ref_decision = -1;
+  }
   if (getenv("KLS_TRACE_PTS") != NULL) {
     fprintf(stderr,
-            "KLS pts refactor acceptance incumbent %.3fms pts %.3fms -> %s\n",
-            solver->pts_ref_incumbent_seconds * 1e3, t * 1e3,
-            solver->pts_ref_decision > 0 ? "adopted" : "rejected");
+            "KLS pts refactor acceptance incumbent %.3fms pts %.3fms"
+            " reaudit=%d -> %s\n",
+            incumbent_seconds * 1e3, t * 1e3,
+            solver->pts_ref_reaudit,
+            solver->pts_ref_decision > 0 ? "adopted" :
+              solver->pts_ref_decision < 0 ? "rejected" : "repeat");
   }
   if (computed && solver->pts_ref_decision > 0) {
     *ok_out = (UF_long)computed;
@@ -164534,8 +164656,20 @@ int kls_factor(kls_solver *solver, const double *values) {
   const int allow_deferred_generic_tight_pivot =
     kls_oneshot_lean && !kls_legacy_shape_policies_enabled() &&
     kls_repeated_update_workload(&solver->options);
+  const int representation_trial_precedes_tight_pivot =
+    allow_deferred_generic_tight_pivot &&
+    !kls_diagonal_equiv_candidate &&
+    getenv("KLS_DISABLE_GENERIC_TIGHT_PIVOT_DEFERRAL") == NULL &&
+    (solver->prestatic_deferred || solver->rowmatch_deferred ||
+     solver->metis_race_deferred || solver->block_order_deferred);
   int early_tight_pivot_attempted = 0;
-  if (allow_deferred_generic_tight_pivot &&
+  if (representation_trial_precedes_tight_pivot) {
+    /* A tight-pivot trial is a complete numeric tied to the current
+       ordering and row frame.  Evaluate it only after the already-pending
+       representation portfolio settles, so a repeated lifecycle never pays
+       to optimize a numeric that the first changed update discards. */
+    solver->tight_pivot_deferred = 1;
+  } else if (allow_deferred_generic_tight_pivot &&
       !kls_diagonal_equiv_candidate &&
       maybe_select_tight_pivot_tolerance(
         solver, &elapsed, numeric_values, &early_tight_pivot_attempted)) {
@@ -164610,6 +164744,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if ((!kls_oneshot_lean || allow_deferred_generic_tight_pivot) &&
       !early_tight_pivot_attempted &&
+      !solver->tight_pivot_deferred &&
       !kls_diagonal_equiv_candidate &&
       maybe_select_tight_pivot_tolerance(
         solver, &elapsed, numeric_values, NULL)) {
@@ -165576,6 +165711,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
     double scale_elapsed = 0.0;
     (void)maybe_select_auto_scale(solver, &scale_elapsed, numeric_values, 1);
   }
+  if (solver->tight_pivot_deferred) {
+    solver->tight_pivot_deferred = 0;
+    double tight_pivot_elapsed = 0.0;
+    if (maybe_select_tight_pivot_tolerance(
+          solver, &tight_pivot_elapsed, numeric_values, NULL)) {
+      kls_update_numeric_diagnostics(solver, 1);
+    }
+  }
   kls_run_deferred_factor_preps(solver, numeric_values);
   int generic_hoisted_snode_lean_predicted = 0;
   /* Development/selection hook: choose the already-implemented lean row walk
@@ -165786,6 +165929,17 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->floor_choice == 0) {
     solver->floor_choice = -1;
   }
+  if (!legacy_shape_policies && solver->floor_choice > 0 &&
+      solver->padded_choice == 0 && solver->padded_pending == 0 &&
+      solver->padded_run_of == NULL &&
+      getenv("KLS_ENABLE_PADDED_AFTER_LOW_FLOOR") == NULL) {
+    /* The realized low-floor win says these relaxed supernode runs benefit
+       from smaller consumer batches.  Padded panels add dense zero slots to
+       those same runs and require eight more alternating refactors to prove
+       otherwise.  Settle the shared consumer axis from the existing timed
+       verdict; a losing/default floor leaves the padded portfolio intact. */
+    solver->padded_choice = -1;
+  }
   if ((getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL ||
        (legacy_shape_policies &&
         (kls_hybrid_huge_single_egraph_factor_cycle(solver) ||
@@ -165802,6 +165956,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
   /* batch-floor trial for mapped-path rows (bcircuit: low floors
      measured -13.3% steady; nearly-missing-diagonal one-block: -7%).
      Probe once at steady state, adopt on a decisive margin. */
+  const int floor_probe_warm_samples =
+    !legacy_shape_policies &&
+    kls_repeated_update_workload(&solver->options) &&
+    getenv("KLS_DISABLE_GENERIC_EARLY_BATCH_FLOOR_PROBE") == NULL ? 3 : 8;
   if (solver->floor_choice > 0) {
     kls_snode_floor_batch_override = 2;
     kls_snode_floor_work_override = 48;
@@ -165811,7 +165969,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
               solver->stats.last_refactor_path ==
                 KLS_REFACTOR_PATH_EGRAPH) &&
              solver->mapped_steady_min > 0.0 &&
-             ++solver->floor_wait >= 8) {
+             ++solver->floor_wait >= floor_probe_warm_samples) {
     solver->floor_pending = 1;
     kls_snode_floor_batch_override = 2;
     kls_snode_floor_work_override = 48;
@@ -166593,18 +166751,46 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->floor_pending) {
     solver->floor_pending = 0;
     if (solver->floor_choice == 0) {
-      solver->floor_choice =
+      const int valid_low_sample =
         ok && solver->common.status >= 0 &&
-            (int)solver->stats.last_refactor_path ==
-              solver->floor_min_path &&
-            elapsed < 0.95 * solver->mapped_steady_min
-          ? 1 : -1;
+        (int)solver->stats.last_refactor_path == solver->floor_min_path &&
+        elapsed > 0.0 && solver->mapped_steady_min > 0.0;
+      if (valid_low_sample &&
+          (solver->floor_probe_min <= 0.0 ||
+           elapsed < solver->floor_probe_min)) {
+        solver->floor_probe_min = elapsed;
+      }
+      if (valid_low_sample &&
+          elapsed < 0.95 * solver->mapped_steady_min) {
+        solver->floor_choice = 1;
+      } else if (!legacy_shape_policies && valid_low_sample &&
+                 solver->floor_reaudit == 0 &&
+                 elapsed <= 1.10 * solver->mapped_steady_min &&
+                 kls_repeated_update_workload(&solver->options) &&
+                 getenv("KLS_DISABLE_BATCH_FLOOR_CLOSE_REAUDIT") == NULL) {
+        /* A close first low-floor sample may still carry worker warm-up.
+           Keep that minimum and issue one adjacent sample rather than
+           turning a noisy five-percent boundary into a permanent default
+           verdict plus a separate eight-refactor padded-panel trial. */
+        solver->floor_reaudit = 1;
+        solver->floor_wait = floor_probe_warm_samples - 1;
+      } else if (solver->floor_reaudit == 1) {
+        solver->floor_reaudit = 2;
+        solver->floor_choice =
+          valid_low_sample && solver->floor_probe_min > 0.0 &&
+          solver->floor_probe_min < 0.98 * solver->mapped_steady_min
+            ? 1 : -1;
+      } else {
+        solver->floor_choice = -1;
+      }
       if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
         fprintf(stderr,
                 "KLS batch-floor probe: %s (low %.3f ms vs steady min"
-                " %.3f ms)\n",
-                solver->floor_choice > 0 ? "LOW" : "default",
-                1e3 * elapsed, 1e3 * solver->mapped_steady_min);
+                " %.3f ms, reaudit %d)\n",
+                solver->floor_choice > 0 ? "LOW" :
+                  solver->floor_choice < 0 ? "default" : "repeat",
+                1e3 * elapsed, 1e3 * solver->mapped_steady_min,
+                solver->floor_reaudit);
       }
     }
   } else if (ok && solver->common.status >= 0 &&
@@ -168600,6 +168786,19 @@ static int solve_impl(kls_solver *solver,
           ordinary_self_check_l2_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= ordinary_self_check_l2_limit_squared * l2_scale;
+        const int settled_pts_raw_l2_ok =
+          contract_armed && iter == 0 && ordinary_self_check_l2_contract &&
+          !legacy_shape_policies &&
+          kls_repeated_update_workload(&solver->options) &&
+          solver->pts_ref_decision > 0 &&
+          solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
+          !solver->fp32_last_used && solver->pivot_nudge_count == 0u &&
+          solver->common.kls_perturb_count == 0u &&
+          !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
+          solver->row_scale == NULL && solver->col_scale == NULL &&
+          getenv("KLS_DISABLE_SETTLED_PTS_RAW_L2_CERTIFICATE") == NULL &&
+          isfinite(bnorm2) && isfinite(rnorm2) &&
+          rnorm2 <= 1.0e-18 * l2_scale;
         const int verified_rhs_cache_ok =
           verified_rhs_cache_candidate && iter == 0 &&
           (ordinary_self_check_l2_contract
@@ -168709,8 +168908,8 @@ static int solve_impl(kls_solver *solver,
             }
           } else if (contract_probe_wanted) {
             /* first-solve verdict for this numeric: clean factors meet
-               the line on the raw solve and never pay again; misses stay
-               armed so every solve carries its correction */
+               the componentwise line on the raw solve and never pay again;
+               misses stay armed so every solve carries its correction */
             solver->solve_contract_probe =
               (iter == 0 && rmax <= target) ? 1 : 2;
             if (solver->solve_contract_probe == 2 && rmax <= target) {
@@ -168719,6 +168918,15 @@ static int solve_impl(kls_solver *solver,
           } else if (contract_armed && iter > 0 && rmax <= target) {
             /* the armed correction verified against the residual: later
                solves may take the single-shot exit */
+            solver->solve_contract_verified = 1;
+          } else if (settled_pts_raw_l2_ok) {
+            /* A measured subtree refactor has won its engine tournament and
+               has now reproduced the numeric on a later generation.  Its
+               raw solve also clears a relative-L2 line ten times tighter
+               than the public contract.  This is sufficient lifecycle
+               evidence to retire the componentwise probe; unsettled EGraph
+               and close engine verdicts remain armed. */
+            solver->solve_contract_probe = 1;
             solver->solve_contract_verified = 1;
           }
           break;

@@ -4803,6 +4803,53 @@ All remain below `2.35e-14` worst relative-L2 residual.  A seven-generation
 ASan/UBSan `FullChip` replay exercised the two-direction GMRES path with no
 sanitizer finding and the same `3.23e-9` externally audited maximum.
 
+## Generic matched-lifecycle portfolio completion
+
+The remaining exact-update portfolio now settles from realized symbolic,
+numeric, and recurring costs rather than matrix dimensions or provenance.  A
+value-matched AMF3 factor may admit a lower-power ordering when its measured
+elimination-tree span falls by at least 40%, while its estimated score and
+work stay inside bounded control/incumbent caps.  The resulting real KLU
+numeric must still pass the ordinary fill, work, pivot, conditioning, and
+lifecycle gates.  An accepted exact match may retain native KLU scaling only
+when it has no `rcond` or off-diagonal-pivot loss and independently clears the
+same realized recurring-value test.  Pending representation trials now
+settle before a full tight-pivot numeric is evaluated, so the lifecycle does
+not optimize a factor that the next representation candidate discards.
+
+The recurring executor portfolio follows the same rule.  A pair-fusion trial
+more than 25% slower than the measured unfused EGraph executor cancels the
+wider quad trial.  Generic repeated workloads can issue the batch-floor probe
+after three warm samples; a close result receives one adjacent re-audit, and
+a measured low-floor win settles the overlapping padded-panel choice.  The
+PTS refactor challenger is adopted immediately only on its normal 5% win.  A
+first result within 5% of parity receives one paired re-audit, which settles
+from the two warm minima; a clearly slower challenger is rejected without a
+second representation round-trip.  Once PTS has won, reproduced the numeric,
+and passed a `1e-9` relative-L2 line in an unscaled full-precision frame, the
+ordinary solve contract may retire its componentwise probe.  Unsettled
+EGraph states retain the existing armed recovery contract.
+
+The individual A/B controls are
+`KLS_DISABLE_MATCHED_DECISIVE_SPAN_REFINEMENT`,
+`KLS_DISABLE_GENERIC_NATIVE_MATCHING_SCALE`,
+`KLS_DISABLE_GENERIC_TIGHT_PIVOT_DEFERRAL`,
+`KLS_DISABLE_EGRAPH_DOMINATED_QUAD_SKIP`,
+`KLS_DISABLE_GENERIC_EARLY_BATCH_FLOOR_PROBE`,
+`KLS_DISABLE_BATCH_FLOOR_CLOSE_REAUDIT`,
+`KLS_DISABLE_PTS_CLOSE_REAUDIT`, and
+`KLS_DISABLE_SETTLED_PTS_RAW_L2_CERTIFICATE`.
+
+On the final eight-core, 20-entrywise-update audit, two counterbalanced passes
+over 18 development and unrelated holdout matrices completed all 72 checked
+runs below the `1e-8` residual limit.  The combined current/control H100
+geometric mean was `0.9142`: eight matrices improved by more than 2%, and none
+regressed by more than 2%.  `ckt11752_dc_1` measured `0.485` of the control
+cycle, while `ckt11752_tr_0` measured `0.997`.  A separate stability audit put
+40/40 checked `ckt11752_dc_1` runs on the selected mapped path at a `0.3701 s`
+median with a `3.39e-14` maximum generation residual; 20/20
+`ckt11752_tr_0` runs retained EGraph at a `0.4091 s` median.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine
