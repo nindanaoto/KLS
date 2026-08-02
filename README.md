@@ -4750,6 +4750,59 @@ nearby natural controls (`circuit204`, `orsirr_2`, `rdb968`, and
 `fpga_dcop_04`) remained within 0.6%, with unchanged factor decisions and
 residuals.
 
+## Resource-scaled portfolio completion and solve recovery
+
+Three final AUTO gaps now use lifecycle evidence or a measured numerical
+failure rather than matrix coordinates.  First, a matched pre-static proposal
+whose estimated numeric storage exceeds a 32 MiB budget per requested worker
+can skip its duplicate speculative serial factor when at least 16 advertised
+refactors repay the match.  The ordinary post-match diagonal-strength scan is
+still mandatory, and the normal predicted/pivoted first-factor path remains
+the acceptance authority.  Set
+`KLS_DISABLE_GENERIC_RESOURCE_SCALED_PRESTATIC_FIRST=1` to restore the
+speculative factor for an A/B run.
+
+Second, when nested dissection is only a near-tie lifecycle win in the first
+AUTO orientation, KLS completes the independently realized ND portfolio in the
+other orientation before comparing lifecycle scores.  This is limited by the
+same ND admission and rollback contracts as the first candidate; it does not
+select an orientation from dimensions, density, or matrix provenance.  Set
+`KLS_DISABLE_GENERIC_NEAR_TIE_CROSS_ORIENTATION_ND=1` to retain the first-frame
+shortcut.
+
+Finally, an ordinary row-published factor or armed solve probe now verifies
+the same relative-L2 quantity used by the benchmark validity rule, with a
+`5e-9` acceptance line that leaves a factor-of-two margin below `1e-8`.
+Stationary iterative refinement remains first.  If its measured residual
+stalls, a cold restarted right-preconditioned GMRES recovery combines at most
+eight applications of the installed LU and verifies the result against the
+current stored matrix before returning it.  The recovery allocates its short
+basis only after a real residual failure and is capability-gated to a plain
+normal coordinate frame; transformed and transpose frames retain their
+existing checked refinement paths.  The controls are
+`KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT=1` and
+`KLS_DISABLE_GMRES_SOLVE_RECOVERY=1`.
+
+Focused eight-core entrywise-H100 measurements on the current machine give
+the following development results.  They are one-pass engineering evidence,
+not a replacement for the paper's counterbalanced 110-matrix campaign.
+
+| case | prior generalized build | current build | accuracy / path result |
+| --- | ---: | ---: | --- |
+| `pre2` initial factor | 386.225 s | 9.730 s | relative residual `1.78e-16` |
+| `mc2depi` H100 | 22.166 s | 17.861 s | worst generation `4.15e-13`; normal METIS + PTS |
+| `FullChip` H100 | 237.224 s | 219.475 s | worst generation `3.23e-9`; stalled generation recovered in two GMRES directions |
+
+The `mc2depi` result is below the saved CKTSO (`20.091 s`) and SubtreeLU
+(`19.213 s`) measurements.  `FullChip` previously failed the paper's validity
+rule at `7.72e-8`; the recovered run completes without a recovery refactor.
+Five unrelated holdouts preserve their orientation and ordering decisions:
+current/prior H100 ratios are `0.982` on `ASIC_100ks`, `1.007` on `Raj1`,
+`0.967` on `rajat25`, `0.996` on `coupled`, and `0.980` on `G2_circuit`.
+All remain below `2.35e-14` worst relative-L2 residual.  A seven-generation
+ASan/UBSan `FullChip` replay exercised the two-direction GMRES path with no
+sanitizer finding and the same `3.23e-9` externally audited maximum.
+
 ## License
 
 KLS is licensed under LGPL-2.1-or-later. The current in-tree solver engine

@@ -43777,11 +43777,37 @@ matching_attempt:;
     trial_symbolic != NULL && trial_symbolic->est_flops > 0.0 &&
     trial_symbolic->est_flops <= 1.0e7 &&
     trial_score > 0.0 && trial_score <= 2.0e6;
+  /* A matched numeric larger than the workers' aggregate cache should not be
+     discovered inside the speculative pre-static executor and then prepared
+     again by the normal lifecycle machinery.  When the caller advertises a
+     long update horizon that repays the match, adopt only after the same
+     post-match diagonal-strength scan below, then let the normal predicted /
+     pivoted first-factor path build and validate the numeric.  The thresholds
+     are execution-resource and lifecycle budgets; no input dimension,
+     density, or matrix-family coordinate participates. */
+  const double generic_trial_storage_bytes =
+    trial_score * (double)(sizeof(UF_long) + sizeof(double));
+  const double generic_aggregate_cache_bytes =
+    32.0 * 1024.0 * 1024.0 * (double)solver->options.threads;
+  const double generic_match_lifecycle_work =
+    matched_column_pair_work *
+      (1.0 + (double)solver->options.expected_refactorizations);
+  const int generic_resource_scaled_parallel_first =
+    !legacy_shape_policies && !deferred && solver->options.threads > 1 &&
+    kls_repeated_update_workload(&solver->options) &&
+    solver->options.expected_refactorizations >= 16 &&
+    isfinite(generic_trial_storage_bytes) &&
+    generic_trial_storage_bytes >= generic_aggregate_cache_bytes &&
+    isfinite(generic_match_lifecycle_work) &&
+    isfinite(trial_score) && trial_score > 0.0 &&
+    generic_match_lifecycle_work >= 8.0 * trial_score &&
+    getenv("KLS_DISABLE_GENERIC_RESOURCE_SCALED_PRESTATIC_FIRST") == NULL;
   const int skip_trial_factor_requested =
     !deferred &&
     (auto_raced_spiked_match ||
      low_work_partial_diagonal_pts_cycle ||
      generic_bounded_parallel_first ||
+     generic_resource_scaled_parallel_first ||
      getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL);
   if (skip_trial_factor_requested &&
       trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
@@ -50079,15 +50105,22 @@ static int select_candidate(kls_pattern_candidate *normal,
           kls_candidate_lifecycle_score(other, generic_options);
         const int inspect_other_nd =
           !(*chosen_out)->generic_nd_portfolio_selected ||
+          ((*chosen_out)->generic_nd_lifecycle_near_tie &&
+           getenv("KLS_DISABLE_GENERIC_NEAR_TIE_CROSS_ORIENTATION_ND") ==
+             NULL) ||
           (isfinite(chosen_lifecycle) && chosen_lifecycle > 0.0 &&
            isfinite(other_lifecycle) && other_lifecycle > 0.0 &&
            other_lifecycle < 0.98 * chosen_lifecycle);
-        /* Once the lifecycle-preferred orientation has produced an accepted
+        /* Once the lifecycle-preferred orientation has produced a decisive
            ND representation, a second NodeND pass has no supporting signal
            unless the other orientation was already decisively cheaper.  A
-           rejected first proposal still gives the other side its full trial.
-           This is a portfolio-economics decision over realized symbolic
-           costs, not an orientation, dimension, or matrix-family rule. */
+           near-tie ND admission is different: its win over minimum degree is
+           small enough that the other frame's independently realized tree
+           can reverse the lifecycle verdict, so complete that portfolio too.
+           A rejected first proposal still gives the other side its full
+           trial.  This is a portfolio-economics decision over realized
+           symbolic costs, not an orientation, dimension, or matrix-family
+           rule. */
         if (inspect_other_nd) {
           kls_maybe_promote_selected_generic_nd(
             other, generic_options, bounded_symmetric_union,
@@ -167430,6 +167463,207 @@ static int kls_promoted_tolerance_l2_recovery_factor_cycle(
     (solver->solve_refine_values != NULL || solver->values != NULL);
 }
 
+/* Restarted right-preconditioned GMRES for the cold solve-recovery path.
+   Ordinary refinement is Richardson iteration with the installed LU as its
+   preconditioner; when that iteration measurably stalls, a few Krylov
+   directions can still combine the same inexpensive triangular solves into
+   a contract-valid answer.  This implementation is intentionally limited to
+   the plain normal frame in which A*x and the public residual coincide. */
+static int kls_try_gmres_solve_recovery(kls_solver *solver,
+                                        const double *a,
+                                        const double *b,
+                                        double *x,
+                                        double bnorm2,
+                                        double *residual) {
+  enum { KLS_GMRES_RESTART = 4, KLS_GMRES_CYCLES = 2 };
+  if (solver == NULL || a == NULL || b == NULL || x == NULL ||
+      residual == NULL || !isfinite(bnorm2) || bnorm2 < 0.0 ||
+      getenv("KLS_DISABLE_GMRES_SOLVE_RECOVERY") != NULL ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->row_perm != NULL || solver->user_col_perm != NULL ||
+      solver->row_scale != NULL || solver->col_scale != NULL ||
+      solver->col_ptr == NULL || solver->row_idx == NULL ||
+      solver->n > (UF_long)(SIZE_MAX /
+        ((2u * KLS_GMRES_RESTART + 1u) * sizeof(double)))) {
+    return 0;
+  }
+  const UF_long n = solver->n;
+  const size_t vector_count = 2u * KLS_GMRES_RESTART + 1u;
+  double *vectors = (double *)malloc(
+    vector_count * (size_t)(n > 0u ? n : 1u) * sizeof(*vectors));
+  if (vectors == NULL) {
+    return 0;
+  }
+  double *v[KLS_GMRES_RESTART + 1u];
+  double *z[KLS_GMRES_RESTART];
+  for (size_t j = 0u; j <= KLS_GMRES_RESTART; ++j) {
+    v[j] = vectors + j * (size_t)n;
+  }
+  for (size_t j = 0u; j < KLS_GMRES_RESTART; ++j) {
+    z[j] = vectors + (KLS_GMRES_RESTART + 1u + j) * (size_t)n;
+  }
+  const double l2_scale = bnorm2 > 0.0 ? bnorm2 : 1.0;
+  const double limit2 = 25.0e-18 * l2_scale;
+  int verified = 0;
+
+  for (int cycle = 0; cycle < KLS_GMRES_CYCLES && !verified; ++cycle) {
+    memcpy(residual, b, (size_t)n * sizeof(*residual));
+    for (UF_long col = 0u; col < n; ++col) {
+      const double xv = x[col];
+      for (UF_long p = solver->col_ptr[col];
+           p < solver->col_ptr[col + 1u]; ++p) {
+        const UF_long row = solver->row_idx[p];
+        residual[row] = fma(-a[p], xv, residual[row]);
+      }
+    }
+    long double beta2_ld = 0.0L;
+    for (UF_long i = 0u; i < n; ++i) {
+      beta2_ld += (long double)residual[i] * residual[i];
+    }
+    const double beta2 = (double)beta2_ld;
+    if (isfinite(beta2) && beta2 <= limit2) {
+      verified = 1;
+      break;
+    }
+    const double beta = sqrt(beta2);
+    if (!(beta > 0.0) || !isfinite(beta)) {
+      break;
+    }
+    for (UF_long i = 0u; i < n; ++i) {
+      v[0][i] = residual[i] / beta;
+    }
+
+    double h[(KLS_GMRES_RESTART + 1u) * KLS_GMRES_RESTART];
+    double cs[KLS_GMRES_RESTART];
+    double sn[KLS_GMRES_RESTART];
+    double g[KLS_GMRES_RESTART + 1u];
+    memset(h, 0, sizeof(h));
+    memset(cs, 0, sizeof(cs));
+    memset(sn, 0, sizeof(sn));
+    memset(g, 0, sizeof(g));
+    g[0] = beta;
+    int steps = 0;
+    for (int j = 0; j < KLS_GMRES_RESTART; ++j) {
+      solver->in_solve_refinement = 1;
+      const int precondition_status =
+        solve_impl(solver, 0, 1, v[j], n, z[j], n);
+      solver->in_solve_refinement = 0;
+      if (precondition_status != KLS_OK) {
+        break;
+      }
+      memset(v[j + 1], 0, (size_t)n * sizeof(*v[j + 1]));
+      for (UF_long col = 0u; col < n; ++col) {
+        const double zv = z[j][col];
+        for (UF_long p = solver->col_ptr[col];
+             p < solver->col_ptr[col + 1u]; ++p) {
+          const UF_long row = solver->row_idx[p];
+          v[j + 1][row] = fma(a[p], zv, v[j + 1][row]);
+        }
+      }
+      /* Twice-modified Gram-Schmidt keeps the short Krylov basis reliable on
+         the same ill-conditioned numerics that reached this cold path. */
+      for (int pass = 0; pass < 2; ++pass) {
+        for (int i = 0; i <= j; ++i) {
+          long double dot = 0.0L;
+          for (UF_long k = 0u; k < n; ++k) {
+            dot += (long double)v[j + 1][k] * v[i][k];
+          }
+          const double projection = (double)dot;
+          h[(size_t)i * KLS_GMRES_RESTART + (size_t)j] += projection;
+          for (UF_long k = 0u; k < n; ++k) {
+            v[j + 1][k] -= projection * v[i][k];
+          }
+        }
+      }
+      long double next2_ld = 0.0L;
+      for (UF_long k = 0u; k < n; ++k) {
+        next2_ld += (long double)v[j + 1][k] * v[j + 1][k];
+      }
+      const double next = sqrt((double)next2_ld);
+      h[(size_t)(j + 1) * KLS_GMRES_RESTART + (size_t)j] = next;
+      for (int i = 0; i < j; ++i) {
+        const size_t hi = (size_t)i * KLS_GMRES_RESTART + (size_t)j;
+        const size_t hip1 =
+          (size_t)(i + 1) * KLS_GMRES_RESTART + (size_t)j;
+        const double top = cs[i] * h[hi] + sn[i] * h[hip1];
+        h[hip1] = -sn[i] * h[hi] + cs[i] * h[hip1];
+        h[hi] = top;
+      }
+      const size_t hjj = (size_t)j * KLS_GMRES_RESTART + (size_t)j;
+      const size_t hj1j =
+        (size_t)(j + 1) * KLS_GMRES_RESTART + (size_t)j;
+      const double rho = hypot(h[hjj], h[hj1j]);
+      if (!(rho > 0.0) || !isfinite(rho)) {
+        break;
+      }
+      cs[j] = h[hjj] / rho;
+      sn[j] = h[hj1j] / rho;
+      h[hjj] = rho;
+      h[hj1j] = 0.0;
+      g[j + 1] = -sn[j] * g[j];
+      g[j] = cs[j] * g[j];
+      steps = j + 1;
+      if (!(next > 0.0) || !isfinite(next) ||
+          g[j + 1] * g[j + 1] <= limit2) {
+        break;
+      }
+      for (UF_long k = 0u; k < n; ++k) {
+        v[j + 1][k] /= next;
+      }
+    }
+    if (steps == 0) {
+      break;
+    }
+    double y[KLS_GMRES_RESTART];
+    memset(y, 0, sizeof(y));
+    for (int ii = steps; ii > 0; --ii) {
+      const int i = ii - 1;
+      double value = g[i];
+      for (int j = i + 1; j < steps; ++j) {
+        value -= h[(size_t)i * KLS_GMRES_RESTART + (size_t)j] * y[j];
+      }
+      const double diagonal =
+        h[(size_t)i * KLS_GMRES_RESTART + (size_t)i];
+      if (diagonal == 0.0 || !isfinite(diagonal)) {
+        steps = 0;
+        break;
+      }
+      y[i] = value / diagonal;
+    }
+    if (steps == 0) {
+      break;
+    }
+    for (int j = 0; j < steps; ++j) {
+      for (UF_long i = 0u; i < n; ++i) {
+        x[i] += y[j] * z[j][i];
+      }
+    }
+
+    memcpy(residual, b, (size_t)n * sizeof(*residual));
+    for (UF_long col = 0u; col < n; ++col) {
+      const double xv = x[col];
+      for (UF_long p = solver->col_ptr[col];
+           p < solver->col_ptr[col + 1u]; ++p) {
+        const UF_long row = solver->row_idx[p];
+        residual[row] = fma(-a[p], xv, residual[row]);
+      }
+    }
+    long double rnorm2_ld = 0.0L;
+    for (UF_long i = 0u; i < n; ++i) {
+      rnorm2_ld += (long double)residual[i] * residual[i];
+    }
+    const double rnorm2 = (double)rnorm2_ld;
+    verified = isfinite(rnorm2) && rnorm2 <= limit2;
+    if (getenv("KLS_TRACE_REFINE") != NULL) {
+      fprintf(stderr,
+              "KLS GMRES recovery cycle=%d steps=%d rel2=%.3e l2ok=%d\n",
+              cycle, steps, sqrt(rnorm2 / l2_scale), verified);
+    }
+  }
+  free(vectors);
+  return verified;
+}
+
 static int solve_impl(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
@@ -168086,6 +168320,23 @@ static int solve_impl(kls_solver *solver,
         getenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") == NULL &&
         solver->row_perm == NULL && solver->row_scale == NULL &&
         solver->col_scale == NULL && solver->symbolic != NULL;
+      /* A row-published numeric or armed solve probe already pays for an
+         honest user-frame residual.  Make that existing check match the
+         public relative-L2 validity contract too: a max-norm pass alone can
+         hide the aggregate error of a very long vector.  This is a measured
+         result contract, independent of dimensions, sparsity, ordering, or
+         matrix identity.  Specialized raw/recovery contracts below retain
+         their own independently audited thresholds. */
+      const int ordinary_self_check_l2_contract = self_check_only &&
+        b != x &&
+        (solver->row_solve_self_check || contract_probe_wanted ||
+         contract_armed) &&
+        !promoted_tolerance_l2_contract &&
+        !retained_preconditioner_contract &&
+        !repeated_rhs_raw_l2_contract &&
+        getenv("KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT") == NULL &&
+        /* compatibility spelling from the row-only prototype */
+        getenv("KLS_DISABLE_ROW_SELF_CHECK_L2_CONTRACT") == NULL;
       if (promoted_tolerance_l2_contract) {
         solver->promoted_tolerance_l2_contract_run_count++;
       }
@@ -168097,7 +168348,8 @@ static int solve_impl(kls_solver *solver,
       if (!parallel_plain_contract_stats &&
           (verified_rhs_contract ||
           retained_preconditioner_contract ||
-          promoted_tolerance_l2_contract)) {
+          promoted_tolerance_l2_contract ||
+          ordinary_self_check_l2_contract)) {
         const int cached_rhs_norm = verified_rhs_contract &&
           solver->verified_rhs != NULL &&
           (nloc == 0u ||
@@ -168166,6 +168418,8 @@ static int solve_impl(kls_solver *solver,
       int have_previous_residual = 0;
       int promoted_tolerance_l2_verified =
         !promoted_tolerance_l2_contract;
+      int ordinary_self_check_l2_verified =
+        !ordinary_self_check_l2_contract;
       int certified_unscaled_l2_verified =
         !solver->certified_unscaled_l2_contract;
       int retained_preconditioner_verified =
@@ -168320,7 +168574,8 @@ static int solve_impl(kls_solver *solver,
             rmax = rmax < av ? av : rmax;
             if (verified_rhs_contract ||
                 retained_preconditioner_contract ||
-                promoted_tolerance_l2_contract) {
+                promoted_tolerance_l2_contract ||
+                ordinary_self_check_l2_contract) {
               rnorm2 += residual[i] * residual[i];
             }
           }
@@ -168336,14 +168591,21 @@ static int solve_impl(kls_solver *solver,
           (iter == 0 || solver->certified_unscaled_l2_contract) &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= raw_l2_limit_squared * l2_scale;
-        /* The ordinary row self-check remains authoritative.  Merely record
-           its raw-solve verdict when that same accepted solution also has a
-           strict relative-L2 margin; a miss follows the unchanged refinement
-           controller and is not cached. */
-        const int verified_rhs_cache_ok =
-          verified_rhs_cache_candidate && iter == 0 && rmax <= target &&
+        /* A 5e-9 ordinary self-check limit retains a 2x margin below the
+           public 1e-8 validity line.  It also avoids chasing maximal
+           componentwise accuracy when one correction has already produced
+           a contract-valid long-vector answer. */
+        const double ordinary_self_check_l2_limit_squared = 25.0e-18;
+        const int ordinary_self_check_l2_ok =
+          ordinary_self_check_l2_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
-          rnorm2 <= 1.0e-18 * l2_scale;
+          rnorm2 <= ordinary_self_check_l2_limit_squared * l2_scale;
+        const int verified_rhs_cache_ok =
+          verified_rhs_cache_candidate && iter == 0 &&
+          (ordinary_self_check_l2_contract
+             ? ordinary_self_check_l2_ok
+             : rmax <= target && isfinite(bnorm2) && isfinite(rnorm2) &&
+               rnorm2 <= 1.0e-18 * l2_scale);
         const int retained_preconditioner_l2_ok =
           retained_preconditioner_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
@@ -168359,6 +168621,7 @@ static int solve_impl(kls_solver *solver,
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= promoted_tolerance_l2_limit_squared * l2_scale;
         retained_preconditioner_verified |= retained_preconditioner_l2_ok;
+        ordinary_self_check_l2_verified |= ordinary_self_check_l2_ok;
         promoted_tolerance_l2_verified |= promoted_tolerance_l2_ok;
         certified_unscaled_l2_verified |= raw_l2_ok;
         if (raw_l2_ok || verified_rhs_cache_ok) {
@@ -168371,25 +168634,32 @@ static int solve_impl(kls_solver *solver,
                   iter, rmax, target,
                   (verified_rhs_contract ||
                    retained_preconditioner_contract ||
-                   promoted_tolerance_l2_contract)
+                   promoted_tolerance_l2_contract ||
+                   ordinary_self_check_l2_contract)
                     ? sqrt(rnorm2 / l2_scale) : -1.0,
                   raw_l2_ok || verified_rhs_cache_ok ||
                     retained_preconditioner_l2_ok ||
-                    promoted_tolerance_l2_ok);
+                    ordinary_self_check_l2_ok || promoted_tolerance_l2_ok);
         }
         if (initial_rmax < 0.0) {
           initial_rmax = rmax;
         }
-        if (promoted_tolerance_l2_contract &&
-            !promoted_tolerance_l2_ok &&
+        const int damped_l2_recovery_contract =
+          promoted_tolerance_l2_contract ||
+          ordinary_self_check_l2_contract;
+        const int damped_l2_recovery_ok =
+          promoted_tolerance_l2_ok || ordinary_self_check_l2_ok;
+        if (damped_l2_recovery_contract &&
+            !damped_l2_recovery_ok &&
             have_previous_residual && isfinite(rnorm2) &&
             !(rnorm2 < 0.998 * last_rnorm2)) {
-          /* A weak-pivot correction can overshoot even though a shorter
-             step along the same direction lowers the true residual.  Use
-             the two already-computed residuals for an exact scalar
-             least-squares line search: r(alpha)=r_old+alpha*(r_new-r_old).
-             This costs two vector reductions only on an observed
-             overshoot; the ordinary one-correction path is unchanged. */
+          /* A weak-pivot or row-published correction can overshoot even
+             though a shorter step along the same direction lowers the true
+             residual.  Use the two already-computed residuals for an exact
+             scalar least-squares line search:
+             r(alpha)=r_old+alpha*(r_new-r_old).  This costs two vector
+             reductions only on an observed overshoot; ordinary successful
+             one-correction paths are unchanged. */
           long double numerator = 0.0L;
           long double denominator = 0.0L;
           for (UF_long i = 0; i < nloc; ++i) {
@@ -168412,8 +168682,10 @@ static int solve_impl(kls_solver *solver,
             continue;
           }
         }
-        if ((!promoted_tolerance_l2_contract && rmax <= target) ||
+        if ((!promoted_tolerance_l2_contract &&
+             !ordinary_self_check_l2_contract && rmax <= target) ||
             raw_l2_ok || retained_preconditioner_l2_ok ||
+            ordinary_self_check_l2_ok ||
             promoted_tolerance_l2_ok ||
             (!promoted_tolerance_l2_contract &&
              !(rmax < (self_check_only ? 0.999 : 0.5) * last_rmax))) {
@@ -168453,7 +168725,7 @@ static int solve_impl(kls_solver *solver,
         }
         last_rmax = rmax;
         last_rnorm2 = rnorm2;
-        if (promoted_tolerance_l2_contract) {
+        if (damped_l2_recovery_contract) {
           memcpy(previous_residual, residual,
                  (size_t)nloc * sizeof(*previous_residual));
           have_previous_residual = 1;
@@ -168469,6 +168741,7 @@ static int solve_impl(kls_solver *solver,
           xrhs[i] += correction[i];
         }
         if (!promoted_tolerance_l2_contract &&
+            !ordinary_self_check_l2_contract &&
             !solver->certified_unscaled_l2_contract &&
             (solver->solve_refine_single_shot ||
              solver->common.tol < 1.0e-6 ||
@@ -168537,6 +168810,10 @@ static int solve_impl(kls_solver *solver,
               previous_recovery_tolerance = recovery_tolerances[attempt];
               solver->options.pivot_tolerance =
                 recovery_tolerances[attempt];
+              /* A repeated kls_factor preserves the installed common frame;
+                 update the actual numeric control as well as the caller
+                 option used by cold-factor policy. */
+              solver->common.tol = recovery_tolerances[attempt];
               if (getenv("KLS_TRACE_REFINE") != NULL) {
                 fprintf(stderr,
                         "KLS promoted-tolerance recovery refactor:"
@@ -168569,10 +168846,26 @@ static int solve_impl(kls_solver *solver,
         }
         ok = 0;
       }
+      if (ordinary_self_check_l2_contract &&
+          !ordinary_self_check_l2_verified && !kernel_transpose &&
+          nrhs == 1 && b != x &&
+          kls_try_gmres_solve_recovery(
+            solver, refine_a, brhs, xrhs, bnorm2, residual)) {
+        ordinary_self_check_l2_verified = 1;
+        solver->fp32_decision = -1;
+        if (contract_probe_wanted || contract_armed) {
+          solver->solve_contract_probe = 2;
+        }
+      }
       if (!retained_preconditioner_verified) {
         /* This path deliberately retained an older factor.  Never return a
            merely plausible correction if the true current-matrix residual
            failed the public 1e-9 relative-L2 contract. */
+        ok = 0;
+      }
+      if (!ordinary_self_check_l2_verified) {
+        /* An ordinary self-check must not silently return an answer that
+           exhausted both stationary and Krylov recovery above the contract. */
         ok = 0;
       }
       if (!certified_unscaled_l2_verified) {
