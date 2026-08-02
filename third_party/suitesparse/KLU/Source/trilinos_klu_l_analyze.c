@@ -14,6 +14,36 @@
 #include <stdlib.h>
 #include "trilinos_klu_internal.h"
 
+/* Detect factor-time edits to a retained ordering.  KLS has specialized
+ * ordering trials that may legitimately rewrite P/Q after analysis; an
+ * alternate maximum matching must not silently undo one of those choices. */
+static size_t kls_symbolic_matching_fingerprint
+(
+    TRILINOS_KLU_symbolic *Symbolic
+)
+{
+    size_t h = (size_t) 2166136261u ;
+    Int k, n = Symbolic->n, nblocks = Symbolic->nblocks ;
+#define KLS_MATCH_HASH(v) do { \
+    h ^= (size_t) (v) + (h << 6) + (h >> 2) ; \
+    h *= (size_t) 16777619u ; \
+} while (0)
+    KLS_MATCH_HASH (n) ;
+    KLS_MATCH_HASH (nblocks) ;
+    KLS_MATCH_HASH (Symbolic->ordering) ;
+    for (k = 0 ; k < n ; k++)
+    {
+	KLS_MATCH_HASH (Symbolic->P [k]) ;
+	KLS_MATCH_HASH (Symbolic->Q [k]) ;
+    }
+    for (k = 0 ; k <= nblocks ; k++)
+    {
+	KLS_MATCH_HASH (Symbolic->R [k]) ;
+    }
+#undef KLS_MATCH_HASH
+    return (h != 0 ? h : (size_t) 1) ;
+}
+
 /* ========================================================================== */
 /* === analyze_worker ======================================================= */
 /* ========================================================================== */
@@ -294,7 +324,8 @@ static TRILINOS_KLU_symbolic *order_and_analyze	/* returns NULL if error, or a v
     Int Ap [ ],		/* size n+1, column pointers */
     Int Ai [ ],		/* size nz, row indices */
     /* --------------------- */
-    TRILINOS_KLU_common *Common
+    TRILINOS_KLU_common *Common,
+    Int kls_force_hk
 )
 {
     double work ;
@@ -302,7 +333,7 @@ static TRILINOS_KLU_symbolic *order_and_analyze	/* returns NULL if error, or a v
     double *Lnz ;
     Int *Qbtf, *Cp, *Ci, *Pinv, *Pblk, *Pbtf, *P, *Q, *R ;
     Int nblocks, nz, block, maxblock, k1, k2, nk, do_btf, ordering, k, Cilen,
-	*Work ;
+	kls_make_matching_alt = FALSE, *Work ;
 
     /* ---------------------------------------------------------------------- */
     /* allocate the Symbolic object, and check input matrix */
@@ -409,8 +440,28 @@ static TRILINOS_KLU_symbolic *order_and_analyze	/* returns NULL if error, or a v
 	    return (NULL) ;
 	}
 
-	nblocks = BTF_order (n, Ap, Ai, Common->maxwork, &work, Pbtf, Qbtf, R,
-		&(Symbolic->structural_rank), Work) ;
+#ifdef DLONG
+	if (kls_force_hk)
+	{
+	    nblocks = trilinos_btf_l_order_hk (n, Ap, Ai, Common->maxwork,
+		&work, Pbtf, Qbtf, R, &(Symbolic->structural_rank), Work) ;
+	}
+	else
+#endif
+	{
+	    nblocks = BTF_order (n, Ap, Ai, Common->maxwork, &work, Pbtf,
+		Qbtf, R, &(Symbolic->structural_rank), Work) ;
+	}
+
+#ifdef DLONG
+	/* A positive work count means the bounded stock matching completed.
+	 * Its zero-work greedy case is identical to Hopcroft-Karp's warm start,
+	 * so only the genuinely different case needs a second candidate. */
+	kls_make_matching_alt = !kls_force_hk &&
+	    Common->kls_btf_match_trial && ordering == 0 && n >= 30000 &&
+	    Common->maxwork <= 0 && work > 0 &&
+	    getenv ("KLS_NO_HK_MAXTRANS") == NULL ;
+#endif
 	Common->structural_rank = Symbolic->structural_rank ;
 	Common->work += work ;
 
@@ -495,6 +546,48 @@ static TRILINOS_KLU_symbolic *order_and_analyze	/* returns NULL if error, or a v
     {
 	TRILINOS_KLU_free_symbolic (&Symbolic, Common) ;
     }
+
+#ifdef DLONG
+    /* Preserve both deterministic maximum matchings until factor entry.  A
+     * material AMD-fill advantage is enough to avoid a redundant factor;
+     * ambiguous estimates are resolved by realized numeric fill. */
+    if (Symbolic != NULL && kls_make_matching_alt)
+    {
+	double primary_work = Common->work ;
+	Int primary_rank = Common->structural_rank ;
+	Int saved_trial = Common->kls_btf_match_trial ;
+	TRILINOS_KLU_symbolic *Alt ;
+	Common->kls_btf_match_trial = FALSE ;
+	Alt = order_and_analyze (n, Ap, Ai, Common, TRUE) ;
+	Common->kls_btf_match_trial = saved_trial ;
+	if (Alt != NULL && Common->status == TRILINOS_KLU_OK)
+	{
+	    Symbolic->kls_matching_fingerprint =
+		kls_symbolic_matching_fingerprint (Symbolic) ;
+	    Alt->kls_matching_fingerprint =
+		kls_symbolic_matching_fingerprint (Alt) ;
+	    Symbolic->kls_matching_alt = Alt ;
+	    if (getenv ("KLS_TRACE_BTF_MATCH") != NULL)
+	    {
+		fprintf (stderr,
+		    "KLS BTF match candidates: n=%ld stock_lnz=%.0f hk_lnz=%.0f\n",
+		    (long) n, Symbolic->lnz, Alt->lnz) ;
+	    }
+	}
+	else
+	{
+	    if (Alt != NULL)
+	    {
+		TRILINOS_KLU_free_symbolic (&Alt, Common) ;
+	    }
+	    /* The alternate is an optimization, not a reason to discard a valid
+	     * primary analysis when memory is tight. */
+	    Common->status = TRILINOS_KLU_OK ;
+	}
+	Common->structural_rank = primary_rank ;
+	Common->work = primary_work ;
+    }
+#endif
     return (Symbolic) ;
 }
 
@@ -538,6 +631,6 @@ TRILINOS_KLU_symbolic *TRILINOS_KLU_analyze	/* returns NULL if error, or a valid
     else
     {
 	/* order with P and Q */
-	return (order_and_analyze (n, Ap, Ai, Common)) ;
+	return (order_and_analyze (n, Ap, Ai, Common, FALSE)) ;
     }
 }

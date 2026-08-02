@@ -20,7 +20,7 @@ extern "C" {
 /* Symbolic object - contains the pre-ordering computed by klu_analyze */
 /* -------------------------------------------------------------------------- */
 
-typedef struct
+typedef struct trilinos_klu_symbolic_struct
 {
     /* A (P,Q) is in upper block triangular form.  The kth block goes from
      * row/col index R [k] to R [k+1]-1.  The estimated number of nonzeros
@@ -51,14 +51,23 @@ typedef struct
 			* deficient.  -1 if not computed.  n if the matrix has
 			* full structural rank */
 
+    /* KLS extension: an optional alternative maximum-matching ordering.  It
+     * is consumed by the first numeric factorization and never exposed as a
+     * second public Symbolic handle. */
+    struct trilinos_klu_symbolic_struct *kls_matching_alt ;
+    size_t kls_matching_fingerprint ;
+
 } trilinos_klu_symbolic ;
 
-typedef struct		/* 64-bit version (otherwise same as above) */
+typedef struct trilinos_klu_l_symbolic_struct /* 64-bit version */
 {
     double symmetry, est_flops, lnz, unz ;
     double *Lnz ;
     UF_long n, nz, *P, *Q, *R, nzoff, nblocks, maxblock, ordering, do_btf,
 	structural_rank ;
+
+    struct trilinos_klu_l_symbolic_struct *kls_matching_alt ;
+    size_t kls_matching_fingerprint ;
 
 } trilinos_klu_l_symbolic ;
 
@@ -219,6 +228,7 @@ typedef struct trilinos_klu_common_struct
     const int *kls_btf_R ;
     int kls_btf_nblocks ;
     int kls_btf_structural_rank ;
+    int kls_btf_match_trial ;
     double kls_kernel_flops ;
     int kls_dense_panels ;
     double kls_static_perturb ;
@@ -257,6 +267,8 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
     const UF_long *kls_btf_R ;
     UF_long kls_btf_nblocks ;
     UF_long kls_btf_structural_rank ;
+    UF_long kls_btf_match_trial ; /* retain both cheap maximum matchings until
+                                     numeric fill can arbitrate them */
 
     /* KLS extension: flop count accumulated by the factorization
        kernel at column assembly (same formula as TRILINOS_KLU_flops,

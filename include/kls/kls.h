@@ -34,7 +34,13 @@ typedef enum kls_ordering {
   KLS_ORDERING_NATURAL = 3,
   KLS_ORDERING_METIS = 4,
   KLS_ORDERING_SCOTCH = 5,
-  KLS_ORDERING_AMF = 6
+  KLS_ORDERING_AMF = 6,
+  /* Deterministic approximate-minimum-fill variants used by AUTO's
+     lifecycle tournament.  AMF retains the historical adaptive/default
+     mode; AMMF amortizes local fill by supervariable size and AMF3 uses
+     the tighter clique-deficiency bound. */
+  KLS_ORDERING_AMMF = 7,
+  KLS_ORDERING_AMF3 = 8
 } kls_ordering;
 
 typedef enum kls_orientation {
@@ -112,6 +118,12 @@ typedef struct kls_options {
   int fast_factor;
   int static_pivoting;
   kls_backend backend;
+  /* Expected calls after the initial factorization.  They are workload
+     hints, not correctness controls: zero preserves the one-shot policy.
+     Repeated-workload AUTO may use them to include value-remapping and
+     triangular-solve traffic in representation selection. */
+  int64_t expected_refactorizations;
+  int64_t expected_solves;
 } kls_options;
 
 typedef struct kls_stats {

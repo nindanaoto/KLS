@@ -65,6 +65,7 @@ Int TRILINOS_KLU_defaults
     Common->kls_btf_R = NULL ;
     Common->kls_btf_nblocks = 0 ;
     Common->kls_btf_structural_rank = -1 ;
+    Common->kls_btf_match_trial = 0 ;
     Common->kls_kernel_flops = 0 ;
 
     Common->kls_kernel_flops = 0 ;

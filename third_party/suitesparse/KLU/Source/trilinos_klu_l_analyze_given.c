@@ -120,6 +120,8 @@ TRILINOS_KLU_symbolic *TRILINOS_KLU_alloc_symbolic
     Symbolic->Q = Q ;
     Symbolic->R = R ;
     Symbolic->Lnz = Lnz ;
+    Symbolic->kls_matching_alt = NULL ;
+    Symbolic->kls_matching_fingerprint = 0 ;
 
     if (Common->status < TRILINOS_KLU_OK)
     {

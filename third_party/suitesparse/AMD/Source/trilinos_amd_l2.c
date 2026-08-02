@@ -28,6 +28,10 @@
  * list each variable sits in.  Not thread-safe: KLS's ordering
  * competition runs analyses serially. */
 GLOBAL _Thread_local Int trilinos_amd_l2_amf = 0 ;
+/* Supervariable amortization exponent selected by KLS's ordering portfolio.
+ * Mode 2 defaults to mean local fill (power 1); mode 3 retains its calibrated
+ * fractional bound (power 0.445). */
+GLOBAL _Thread_local double trilinos_amd_l2_amf_power = 1.0 ;
 
 /* ========================================================================= */
 /* === clear_flag ========================================================== */
@@ -1532,10 +1536,11 @@ GLOBAL void TRILINOS_AMD_2
 			    def = 0.5 * (double) deg * (double) deg
 				- (double) amf_cliq [i]
 				- 0.5 * (double) dme * (double) dme ;
-			    if (nvi > 1)
-			    {
-				def /= pow ((double) nvi, 0.445) ;
-			    }
+				if (nvi > 1)
+				{
+				    def /= pow ((double) nvi,
+					trilinos_amd_l2_amf_power) ;
+				}
 			}
 			else
 			{
@@ -1547,7 +1552,8 @@ GLOBAL void TRILINOS_AMD_2
 				/* Approximate minimum MEAN local fill (AMMF):
 				 * amortize deficiency over the pivots represented by
 				 * this supervariable. */
-				def /= (double) nvi ;
+				def /= pow ((double) nvi,
+				    trilinos_amd_l2_amf_power) ;
 			    }
 			}
 			if (def < 0.0) def = 0.0 ;

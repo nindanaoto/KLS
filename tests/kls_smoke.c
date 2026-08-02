@@ -735,8 +735,8 @@ static int test_serial_backend(void) {
   legacy_options.fast_factor = 1;
   legacy_options.static_pivoting = 1;
   solver = NULL;
-  if (sizeof(legacy_options) != sizeof(kls_options)) {
-    fprintf(stderr, "legacy options ABI size changed: %zu vs %zu\n",
+  if (sizeof(legacy_options) > sizeof(kls_options)) {
+    fprintf(stderr, "legacy options ABI grew past current options: %zu vs %zu\n",
             sizeof(legacy_options), sizeof(kls_options));
     return 0;
   }
@@ -1439,6 +1439,7 @@ static int test_moderate_single_block_lean_policy(void) {
   options.scale = -1;
   options.use_btf = 0;
   options.static_pivoting = 0;
+  options.expected_refactorizations = 100;
 
   kls_solver *solver = NULL;
   if (ok && !require_ok(kls_create(&solver),
@@ -21868,6 +21869,63 @@ static int test_diagonal_equivalent_refactor(void) {
   return ok;
 }
 
+static int legacy_shape_stats_are_zero(const kls_stats *stats) {
+  return stats != NULL &&
+    stats->moderate_fragmented_policy_eligible == 0 &&
+    stats->compact_amf_two_block_policy_eligible == 0 &&
+    stats->dense_reciprocal_hub_policy_eligible == 0 &&
+    stats->symmetric_scalar_fringe_policy_eligible == 0 &&
+    stats->pivoted_high_work_single_block_policy_eligible == 0 &&
+    stats->low_work_many_fringe_btf_pts_policy_eligible == 0 &&
+    stats->high_work_tiny_scalar_fringe_policy_eligible == 0 &&
+    stats->low_work_hubbed_scalar_fringe_pts_policy_eligible == 0 &&
+    stats->nearly_missing_diagonal_early_match_selected == 0 &&
+    stats->low_work_tiny_block_btf_policy_eligible == 0 &&
+    stats->low_work_tiny_block_btf_symbolic_eligible == 0 &&
+    stats->scaled_fragmented_compact_row_policy_eligible == 0 &&
+    stats->compact_missing_diagonal_match_candidate == 0 &&
+    stats->compact_missing_diagonal_match_selected == 0 &&
+    stats->compact_missing_diagonal_factor_eligible == 0 &&
+    stats->symmetric_partial_diagonal_match_candidate == 0 &&
+    stats->symmetric_partial_diagonal_match_selected == 0 &&
+    stats->symmetric_partial_diagonal_factor_eligible == 0 &&
+    stats->symmetric_partial_diagonal_low_work_eligible == 0 &&
+    stats->sparse_symmetric_fragmented_metis_symbolic_eligible == 0 &&
+    stats->sparse_symmetric_fragmented_metis_policy_eligible == 0 &&
+    stats->sparse_spiked_predicted_candidate == 0 &&
+    stats->sparse_spiked_predicted_factor_eligible == 0 &&
+    stats->sparse_spiked_predicted_clustered_eligible == 0 &&
+    stats->dense_fragmented_scaled_row_factor_eligible == 0 &&
+    stats->sparse_full_diagonal_metis_row_candidate == 0 &&
+    stats->sparse_full_diagonal_metis_row_symbolic_eligible == 0 &&
+    stats->sparse_full_diagonal_metis_row_factor_eligible == 0 &&
+    stats->giant_symmetric_scalar_fringe_metis_row_candidate == 0 &&
+    stats->giant_symmetric_scalar_fringe_metis_row_symbolic_eligible == 0 &&
+    stats->giant_symmetric_scalar_fringe_metis_row_factor_eligible == 0 &&
+    stats->hybrid_huge_single_egraph_factor_eligible == 0 &&
+    stats->bounded_degree_retained_preconditioner_candidate == 0 &&
+    stats->bounded_degree_retained_preconditioner_symbolic_eligible == 0 &&
+    stats->bounded_degree_retained_preconditioner_factor_eligible == 0 &&
+    stats->bounded_degree_retained_preconditioner_reuse_count == 0 &&
+    stats->asymmetric_bounded_degree_direct_metis_candidate == 0 &&
+    stats->asymmetric_bounded_degree_direct_metis_tuning_class == 0 &&
+    stats->asymmetric_bounded_degree_direct_metis_symbolic_eligible == 0 &&
+    stats->asymmetric_bounded_degree_direct_metis_factor_eligible == 0 &&
+    stats->near_symmetric_mega_hub_amd_candidate == 0 &&
+    stats->near_symmetric_mega_hub_amd_symbolic_eligible == 0 &&
+    stats->near_symmetric_mega_hub_amd_factor_eligible == 0 &&
+    stats->giant_dominant_hub_metis_dense_tail_candidate == 0 &&
+    stats->giant_dominant_hub_metis_dense_tail_symbolic_eligible == 0 &&
+    stats->giant_dominant_hub_metis_dense_tail_factor_eligible == 0 &&
+    stats->high_work_tiny_fringe_btf_pts_factor_eligible == 0 &&
+    stats->medium_spike_minfill_candidate == 0 &&
+    stats->medium_spike_minfill_symbolic_eligible == 0 &&
+    stats->sparse_broad_column_amf_no_btf_candidate == 0 &&
+    stats->sparse_broad_column_amf_no_btf_symbolic_eligible == 0 &&
+    stats->bounded_degree_amf_no_btf_candidate == 0 &&
+    stats->bounded_degree_amf_no_btf_symbolic_eligible == 0;
+}
+
 static int test_large_sparse_low_degree_retained_tolerance(void) {
   const int32_t n = 150000;
   const int32_t block_size = 1000;
@@ -22137,6 +22195,11 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
   stats.struct_size = sizeof(stats);
   if (ok && !require_ok(kls_get_stats(solver, &stats),
                         "stats low-degree retained tolerance")) {
+    ok = 0;
+  }
+  if (ok && !legacy_shape_stats_are_zero(&stats)) {
+    fprintf(stderr,
+            "generalized AUTO exposed an archived shape-policy stat\n");
     ok = 0;
   }
   if (ok && (stats.selected_ordering != KLS_ORDERING_METIS ||
@@ -26489,6 +26552,10 @@ cleanup:
 }
 
 int main(void) {
+  if (unsetenv("KLS_ENABLE_LEGACY_SHAPE_POLICIES") != 0) {
+    perror("unsetenv KLS_ENABLE_LEGACY_SHAPE_POLICIES");
+    return EXIT_FAILURE;
+  }
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
     return EXIT_FAILURE;
@@ -26504,6 +26571,14 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_large_sparse_low_degree_retained_tolerance()) {
+    return EXIT_FAILURE;
+  }
+  /* The production default above is the generalized evidence-driven policy.
+     The remaining policy fixtures intentionally exercise the archived
+     family classifiers so their compatibility mode stays testable while it
+     is available for A/B comparisons. */
+  if (setenv("KLS_ENABLE_LEGACY_SHAPE_POLICIES", "1", 1) != 0) {
+    perror("setenv KLS_ENABLE_LEGACY_SHAPE_POLICIES=1");
     return EXIT_FAILURE;
   }
   if (!test_bounded_degree_retained_preconditioner()) {

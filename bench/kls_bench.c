@@ -474,6 +474,10 @@ static kls_ordering parse_ordering(const char *s) {
   if (strcmp(s, "metis") == 0) return KLS_ORDERING_METIS;
   if (strcmp(s, "scotch") == 0) return KLS_ORDERING_SCOTCH;
   if (strcmp(s, "amf") == 0) return KLS_ORDERING_AMF;
+  if (strcmp(s, "ammf") == 0 || strcmp(s, "amf2") == 0) {
+    return KLS_ORDERING_AMMF;
+  }
+  if (strcmp(s, "amf3") == 0) return KLS_ORDERING_AMF3;
   return KLS_ORDERING_AUTO;
 }
 
@@ -738,7 +742,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only|--structure-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only|--structure-only] [--json]\n",
           argv0);
 }
 
@@ -780,6 +784,10 @@ int main(int argc, char **argv) {
   bench_index_mode input_index_mode = BENCH_INDEX_AUTO;
   kls_options options;
   kls_default_options(&options);
+  /* The reported spice_cycle_seconds metric is an H100 lifecycle even when
+     fewer samples are requested to estimate its steady terms. */
+  options.expected_refactorizations = 99;
+  options.expected_solves = 100;
 
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--json") == 0) {
@@ -794,6 +802,12 @@ int main(int argc, char **argv) {
       factor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
       refactor_repeat = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--expected-refactors") == 0 &&
+               i + 1 < argc) {
+      options.expected_refactorizations = atoll(argv[++i]);
+    } else if (strcmp(argv[i], "--expected-solves") == 0 &&
+               i + 1 < argc) {
+      options.expected_solves = atoll(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-values") == 0 &&
                i + 1 < argc) {
       if (!bench_parse_refactor_value_mode(argv[++i], &refactor_value_mode)) {

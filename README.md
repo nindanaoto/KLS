@@ -9,8 +9,9 @@ This repository currently contains the first working KLS implementation:
 - A stable C API in `include/kls/kls.h`
 - A vendored SuiteSparse-derived 64-bit symbolic/numeric engine
 - CSC and CSR input paths with 32-bit or 64-bit index arrays
-- AMD-first automatic symbolic ordering with explicit AMD, COLAMD, natural,
-  METIS, and SCOTCH nested-dissection ordering controls
+- Evidence-driven automatic symbolic ordering across AMD, COLAMD, AMMF, AMF3,
+  and guarded nested dissection, with explicit AMD, COLAMD, natural, METIS,
+  SCOTCH, AMF, AMMF, and AMF3 controls
 - SPICE-cycle-oriented normal-vs-transpose internal orientation selection, with
   explicit orientation controls
 - Factor, refactor, solve, transpose-solve, and statistics APIs
@@ -25,6 +26,105 @@ This repository currently contains the first working KLS implementation:
 - A MatrixMarket benchmark tool
 - A small correctness smoke test
 - A SuiteSparse Matrix Collection downloader script for public benchmark cases
+
+## AUTO policy
+
+The production `AUTO` path is matrix-family agnostic. It compares affordable
+orientation, ordering, BTF, matching, scaling, and numeric candidates, then
+uses realized fill, factor work, pivot behavior, residual checks, dependency
+parallelism, and timed recurring kernels to retain a choice. Small problems
+use resource-based amortization floors so candidate setup cannot dominate the
+numeric work. Fixed-width index limits and storage prerequisites remain hard
+capability gates.
+
+In particular, a retained row-matched factor can compare both minimum-degree
+orderings and switch only on numeric Pareto evidence (fill, work, pivot detours,
+and conditioning). A rejected checked-factor suffix compares its measured
+repair lower bound with the measured full rebuild instead of entering a
+family-specific repair engine. Verified subtree solve plans and equivalent
+EGraph dispatch, fusion, indexed-scatter, and supernode-tail kernels are timed
+on the realized factor; conservative margins keep the incumbent on close
+draws. These consultations are cached for that numeric lifecycle.
+
+For a caller-declared repeated lifecycle, AUTO also admits one post-orientation
+nested-dissection symbolic candidate when the selected minimum-degree estimate
+has enough storage and arithmetic to amortize it. The pre-numeric choice is
+predicted only when the symmetric union is bounded, where the row/column
+symbolic frame has a finite expansion certificate, and is skipped when a
+pending generic block order will replace it. An unbounded frame can still enter
+as a numeric-provisional candidate when at least 16 refactors and (10^{12})
+estimated lifecycle flops can repay an ordinary pivoted trial. That candidate
+must realize less than 95% of the recorded fallback fill; rejection restores
+the minimum-degree symbolic and factors it normally. Within this high-work
+provisional path, the incumbent's realized flops-per-fill ratio selects between
+coarse and fine resource-scaled CAMD windows, while the exact factor remains
+the acceptance authority. Bounded candidates retain their predicted-fill
+validation. These are lifecycle, representation, and measured-factor contracts
+rather than dimension or matrix-family selectors. Set
+`KLS_DISABLE_GENERIC_ND_PORTFOLIO=1` for A/B runs.
+
+When that repeated lifecycle has already selected nested dissection, a
+value-aware static row-match candidate is allowed to settle before the initial
+factor instead of waiting for the first changed numeric. It must still pass the
+ordinary weak-diagonal admission and measured match/factor quality gates; the
+ordering choice and caller lifecycle are the only extra evidence. Set
+`KLS_DISABLE_REPEATED_ND_STATIC_SETTLEMENT=1` for a deferred A/B run.
+
+The recurring numeric router is measurement-based as well. A timed lean-row
+winner uses compact 16-bit streams whenever every retained index and pointer
+fits that representation. After eight direct-worker samples, AUTO replays two
+incumbent column numerics and reverses a cold-start row decision only when the
+warmed incumbent is at least 2% faster. Symmetrically, a timed row decline
+retains its already-built best arm; after eight real incumbent calls, AUTO
+replays that arm twice and adopts it only for a 5% win. These audits use
+realized runtimes and representation capability, not dimensions or a matrix
+profile. The individual A/B controls are `KLS_DISABLE_LEAN_I16_INDICES=1`,
+`KLS_DISABLE_LEAN_STEADY_REAUDIT=1`,
+`KLS_DISABLE_DECLINED_LEAN_STEADY_REAUDIT=1`, and
+`KLS_DISABLE_SETTLED_LEAN_DIRECT_REFACTOR=1`.
+
+The cooperative row/column tournament is front-loaded into the first changed
+numeric. A decisive cold result settles immediately; an inconclusive
+model-selected row takes one identically positioned warm row/column pair.
+Material warm losses seed the existing solve-aware tournament instead of
+occupying several public refactors. Once the following column solve arrives,
+row is rejected whenever its refactor alone exceeds the complete measured
+column refactor-plus-solve cycle; otherwise both representations continue to
+receive paired samples. One complete row pair that is already 25% slower may
+also settle early, whereas positive row adoption still requires two solve
+samples per side. Provisional winners are re-audited after four real row cycles
+with two warmed column refactor/solve cycles. All of these decisions use
+realized lifecycle time and representation validity, not matrix dimensions or
+sparsity fingerprints.
+
+The older profile selectors are retained only for reproducible A/B work. Set
+`KLS_ENABLE_LEGACY_SHAPE_POLICIES=1` to enable them; they are off by default.
+This compatibility switch covers the historical dimension/degree/BTF windows,
+direct family routes, family-specific EGraph layouts, and residual-check
+bypasses. Explicit API choices and explicit experiment environment variables
+continue to take effect in either mode.
+
+Callers that know their numeric lifecycle can set
+`expected_refactorizations` and `expected_solves` in `kls_options`. These are
+performance hints only; they do not weaken factor or solve correctness checks.
+On heterogeneous-cache Linux systems, the implementation may keep a repeated
+factor's cooperative worker pool on distinct physical cores in the largest LLC
+domain when its retained working set exceeds a smaller eligible LLC. The
+choice uses the caller's CPU set, hardware topology, cache capacity, realized
+factor storage, and lifecycle hint—not matrix dimensions or a matrix-family
+detector. It is a no-op on uniform-cache systems and when the work fits every
+eligible LLC. Set `KLS_DISABLE_COMPACT_LLC_AFFINITY=1` for scheduler-controlled
+placement, or `KLS_TRACE_AFFINITY=1` to report an adopted placement.
+
+When a recurring solve contract needs a snapshot of the current coefficient
+values, an already-active numeric worker pool also copies disjoint value
+slices while completing the refactor. Set
+`KLS_DISABLE_PARALLEL_REFINE_COPY=1` for a serial-copy A/B comparison.
+
+Many later sections in this README document the development history of those
+profile selectors. Unless a section explicitly describes a capability- or
+measurement-based default, treat its named AUTO policy as compatibility-mode
+documentation rather than the current production router.
 
 ## Build
 
@@ -1695,11 +1795,13 @@ comparisons. Benchmark JSON reports `refactor_map_index32_enabled` and
 `refactor_map_index32_entries`, `refactor_l_index32_enabled` and
 `refactor_l_index32_entries`, plus `refactor_u_index32_enabled` and
 `refactor_u_index32_entries` so runs can verify whether each mirror was active.
-The EGraph numeric kernels enable a guarded CKTSO Algorithm 5-style prefactor
-slice automatically when the retained EGraph pipeline has at least
-`KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK` modeled dependency work; set
+The EGraph numeric kernels include a guarded CKTSO Algorithm 5-style prefactor
+slice. The production generic policy leaves this scalar experiment disabled:
+enabling it globally excludes the narrower fused BTF dispatch even when no
+profitable speculative dependency is found. Set
 `KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` to force it or
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=0` to disable it for A/B runs. When a
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=0` to disable it for A/B runs; legacy
+compatibility mode retains its historical work-threshold selection. When a
 pipeline column is
 blocked on its current U predecessor, the kernel scans later U predecessors that
 are already published, applies only those whose workspace entry cannot be

@@ -17,6 +17,16 @@ KLS_BACKEND=${KLS_BACKEND:-auto}
 TIMEOUT=${TIMEOUT:-120}
 PASSES=${PASSES:-1}
 ROTATE_SIDES=${ROTATE_SIDES:-0}
+# For a four-solver campaign, use a balanced four-order block rather than
+# cyclic rotation.  Every solver occupies every launch position once and
+# every unordered solver pair appears in both precedence orders twice:
+# ABCD, BADC, CDAB, DCBA.  Repeat the block by choosing PASSES divisible by 4.
+COUNTERBALANCE_SIDES=${COUNTERBALANCE_SIDES:-0}
+# A strict coverage campaign need not repeat a side whose first returned JSON
+# is already numerically ineligible.  When enabled, retain that audited record
+# and skip only that solver for the remaining passes of the current matrix.
+STOP_INVALID_SIDES=${STOP_INVALID_SIDES:-0}
+RESIDUAL_LIMIT=${RESIDUAL_LIMIT:-1e-8}
 # Optional explicit subset/order for pairwise audits.  The default preserves
 # the historical behavior inferred from the supplied harness paths.
 PAIRED_SIDES=${PAIRED_SIDES:-}
@@ -87,7 +97,19 @@ passes_sides=""
 p=0
 while [ "$p" -lt "$PASSES" ]; do
   pass_sides=$sides
-  if [ "$ROTATE_SIDES" -ne 0 ]; then
+  if [ "$COUNTERBALANCE_SIDES" -ne 0 ]; then
+    set -- $sides
+    [ "$#" -eq 4 ] || {
+      echo "COUNTERBALANCE_SIDES requires exactly four selected solvers" >&2
+      exit 2
+    }
+    case $((p % 4)) in
+      0) pass_sides="$1 $2 $3 $4" ;;
+      1) pass_sides="$2 $1 $4 $3" ;;
+      2) pass_sides="$3 $4 $1 $2" ;;
+      3) pass_sides="$4 $3 $2 $1" ;;
+    esac
+  elif [ "$ROTATE_SIDES" -ne 0 ]; then
     shift_count=$((p % 4))
     while [ "$shift_count" -gt 0 ]; do
       first=${pass_sides%% *}
@@ -149,11 +171,38 @@ while IFS= read -r name; do
       dst=$OUT_KLU
     fi
     if [ -n "$out" ]; then
-      printf '%s' "$out" | python3 -c "
-import json,sys
+      parsed=$(printf '%s' "$out" | python3 -c "
+import json, math, sys
 d=json.load(sys.stdin)
 d['matrix']='$matrix'
-print(json.dumps(d))" >> "$dst" 2>/dev/null || echo "{\"matrix\":\"$matrix\",\"status\":\"parse_error\"}" >> "$dst"
+print(json.dumps(d))
+def finite(value):
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+valid = (
+    d.get('status') in (None, 0)
+    and d.get('verify_each_refactor') is True
+    and finite(d.get('relative_residual_l2'))
+    and finite(d.get('refactor_max_relative_residual'))
+    and float(d['relative_residual_l2']) <= float('$RESIDUAL_LIMIT')
+    and float(d['refactor_max_relative_residual']) <= float('$RESIDUAL_LIMIT')
+)
+if int('$STOP_INVALID_SIDES') and not valid:
+    sys.exit(3)
+" 2>/dev/null)
+      parsed_status=$?
+      if [ -n "$parsed" ]; then
+        printf '%s\n' "$parsed" >> "$dst"
+      else
+        echo "{\"matrix\":\"$matrix\",\"status\":\"parse_error\"}" >> "$dst"
+      fi
+      if [ "$parsed_status" -ne 0 ]; then
+        # Exit 3 is a well-formed but strictly invalid audit; other nonzero
+        # exits are parse failures.  Neither can contribute timing samples.
+        failed_sides="$failed_sides $side"
+      fi
     else
       echo "{\"matrix\":\"$matrix\",\"status\":\"timeout_or_fail\"}" >> "$dst"
       # A timeout or solver failure is deterministic for this fixed matrix

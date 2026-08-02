@@ -16,7 +16,9 @@
  * them with a no-pivot blocked LU after this scalar walk.  Their
  * off-diagonal entries must still be consumed here (poff runs
  * sequentially over every column), but the block-entry scatter and the
- * scalar consumption are skipped. */
+ * scalar consumption are skipped.  Snapshot these thread-local controls
+ * once per call and split each affected block into scalar and tail ranges;
+ * checking TLS in every ordinary column materially slows stock KLU refactors. */
 _Thread_local long kls_klu_refactor_tail_skip = 0 ;
 _Thread_local long kls_klu_refactor_tail_block = -1 ;
 
@@ -45,8 +47,9 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 	*Ulen ;
     Unit **LUbx ;
     Unit *LU ;
-    Int k1, k2, nk, k, block, oldcol, pend, oldrow, n, p, newrow, scale,
-	nblocks, poff, i, j, up, ulen, llen, maxblock, nzoff ;
+    Int k1, k2, nk, scalar_nk, k, block, oldcol, pend, oldrow, n, p,
+	newrow, scale, nblocks, poff, i, j, up, ulen, llen, maxblock, nzoff,
+	dense_tail_skip, dense_tail_block ;
 
     /* ---------------------------------------------------------------------- */
     /* check inputs */
@@ -119,6 +122,8 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
     Common->nrealloc = 0 ;
     Udiag = (double*) Numeric->Udiag ;
     nzoff = Symbolic->nzoff ;
+    dense_tail_skip = (Int) kls_klu_refactor_tail_skip ;
+    dense_tail_block = (Int) kls_klu_refactor_tail_block ;
 
     /* ---------------------------------------------------------------------- */
     /* check the input matrix compute the row scale factors, Rs */
@@ -208,30 +213,14 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 		Uip  = Numeric->Uip  + k1 ;
 		Ulen = Numeric->Ulen + k1 ;
 		LU = LUbx [block] ;
-
-		for (k = 0 ; k < nk ; k++)
+		scalar_nk = nk ;
+		if (dense_tail_skip > 0 && block == dense_tail_block)
 		{
+		    scalar_nk = MAX (0, nk - dense_tail_skip) ;
+		}
 
-		    if (kls_klu_refactor_tail_skip > 0 &&
-			block == (Int) kls_klu_refactor_tail_block &&
-			k >= nk - (Int) kls_klu_refactor_tail_skip)
-		    {
-			/* dense-tail column: advance the off-diagonal walk,
-			 * leave the block entries to the BLAS3 refresh */
-			oldcol = Q [k+k1] ;
-			pend = Ap [oldcol+1] ;
-			for (p = Ap [oldcol] ; p < pend ; p++)
-			{
-			    newrow = Pinv [Ai [p]] - k1 ;
-			    if (newrow < 0 && poff < nzoff)
-			    {
-				Offx [poff] = Az [p] ;
-				poff++ ;
-			    }
-			}
-			continue ;
-		    }
-
+		for (k = 0 ; k < scalar_nk ; k++)
+		{
 		    /* ------------------------------------------------------ */
 		    /* scatter kth column of the block into workspace X */
 		    /* ------------------------------------------------------ */
@@ -304,6 +293,22 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 		    }
 
 		}
+		for ( ; k < nk ; k++)
+		{
+		    /* dense-tail column: advance the off-diagonal walk,
+		     * leave the block entries to the BLAS3 refresh */
+		    oldcol = Q [k+k1] ;
+		    pend = Ap [oldcol+1] ;
+		    for (p = Ap [oldcol] ; p < pend ; p++)
+		    {
+			newrow = Pinv [Ai [p]] - k1 ;
+			if (newrow < 0 && poff < nzoff)
+			{
+			    Offx [poff] = Az [p] ;
+			    poff++ ;
+			}
+		    }
+		}
 	    }
 	}
 
@@ -369,32 +374,14 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 		Uip  = Numeric->Uip  + k1 ;
 		Ulen = Numeric->Ulen + k1 ;
 		LU = LUbx [block] ;
-
-		for (k = 0 ; k < nk ; k++)
+		scalar_nk = nk ;
+		if (dense_tail_skip > 0 && block == dense_tail_block)
 		{
+		    scalar_nk = MAX (0, nk - dense_tail_skip) ;
+		}
 
-		    if (kls_klu_refactor_tail_skip > 0 &&
-			block == (Int) kls_klu_refactor_tail_block &&
-			k >= nk - (Int) kls_klu_refactor_tail_skip)
-		    {
-			/* dense-tail column: advance the off-diagonal walk,
-			 * leave the block entries to the BLAS3 refresh */
-			oldcol = Q [k+k1] ;
-			pend = Ap [oldcol+1] ;
-			for (p = Ap [oldcol] ; p < pend ; p++)
-			{
-			    oldrow = Ai [p] ;
-			    newrow = Pinv [oldrow] - k1 ;
-			    if (newrow < 0 && poff < nzoff)
-			    {
-				SCALE_DIV_ASSIGN (Offx [poff], Az [p],
-						  Rs [oldrow]) ;
-				poff++ ;
-			    }
-			}
-			continue ;
-		    }
-
+		for (k = 0 ; k < scalar_nk ; k++)
+		{
 		    /* ------------------------------------------------------ */
 		    /* scatter kth column of the block into workspace X */
 		    /* ------------------------------------------------------ */
@@ -467,6 +454,23 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 			i = Li [p] ;
 			DIV (Lx [p], X [i], ukk) ;
 			CLEAR (X [i]) ;
+		    }
+		}
+		for ( ; k < nk ; k++)
+		{
+		    /* dense-tail column: advance the off-diagonal walk,
+		     * leave the block entries to the BLAS3 refresh */
+		    oldcol = Q [k+k1] ;
+		    pend = Ap [oldcol+1] ;
+		    for (p = Ap [oldcol] ; p < pend ; p++)
+		    {
+			oldrow = Ai [p] ;
+			newrow = Pinv [oldrow] - k1 ;
+			if (newrow < 0 && poff < nzoff)
+			{
+			    SCALE_DIV_ASSIGN (Offx [poff], Az [p], Rs [oldrow]) ;
+			    poff++ ;
+			}
 		    }
 		}
 	    }

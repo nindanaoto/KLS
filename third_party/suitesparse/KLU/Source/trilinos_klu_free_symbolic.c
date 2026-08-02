@@ -24,6 +24,12 @@ Int TRILINOS_KLU_free_symbolic
     }
     Symbolic = *SymbolicHandle ;
     n = Symbolic->n ;
+    if (Symbolic->kls_matching_alt != NULL)
+    {
+	TRILINOS_KLU_symbolic *Alt = Symbolic->kls_matching_alt ;
+	Symbolic->kls_matching_alt = NULL ;
+	TRILINOS_KLU_free_symbolic (&Alt, Common) ;
+    }
     TRILINOS_KLU_free (Symbolic->P, n, sizeof (Int), Common) ;
     TRILINOS_KLU_free (Symbolic->Q, n, sizeof (Int), Common) ;
     TRILINOS_KLU_free (Symbolic->R, n+1, sizeof (Int), Common) ;

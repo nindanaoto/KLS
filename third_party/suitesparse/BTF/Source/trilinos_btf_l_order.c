@@ -36,6 +36,12 @@
 /* This function only operates on square matrices (either structurally full-
  * rank, or structurally rank deficient). */
 
+/* Before using the faster Hopcroft-Karp matcher, give the stock matcher a
+ * bounded chance to preserve its permutation.  Maximum matchings have the
+ * same cardinality, but their exact row/column labels can change downstream
+ * ordering tie-breaking and numeric fill substantially. */
+#define KLS_BTF_STOCK_PROBE_WORK_LIMIT 1000000.0
+
 /* Hopcroft-Karp maximum bipartite matching: BFS phases + layered DFS,
  * O(sqrt(n) * nnz) worst case vs the depth-first augmenting maxtrans,
  * whose pathological chains cost ~9s on mac_econ-class patterns
@@ -68,10 +74,33 @@ static Int kls_hk_maxtrans
 	Match [i] = TRILINOS_BTF_EMPTY ;
 	match_col [i] = TRILINOS_BTF_EMPTY ;
     }
-    /* greedy warm start */
+    /* Preserve every available diagonal edge before the ordinary greedy
+     * pass.  This is still just a warm start for exact Hopcroft--Karp, but it
+     * avoids manufacturing long alternating paths on nearly diagonal sparse
+     * systems.  It is label-stable and applies to every matrix; the second
+     * pass completes the same unrestricted greedy matching for the fringe. */
     nmatch = 0 ;
     for (j = 0 ; j < n ; j++)
     {
+	for (p = Ap [j] ; p < Ap [j+1] ; p++)
+	{
+	    i = Ai [p] ;
+	    if (i == j)
+	    {
+		Match [i] = j ;
+		match_col [j] = i ;
+		nmatch++ ;
+		break ;
+	    }
+	}
+    }
+    /* Greedily match only the columns left by the diagonal pass. */
+    for (j = 0 ; j < n ; j++)
+    {
+	if (match_col [j] != TRILINOS_BTF_EMPTY)
+	{
+	    continue ;
+	}
 	for (p = Ap [j] ; p < Ap [j+1] ; p++)
 	{
 	    i = Ai [p] ;
@@ -194,7 +223,7 @@ static Int kls_hk_maxtrans
     return (nmatch) ;
 }
 
-Int TRILINOS_BTF(order)	    /* returns number of blocks found */
+static Int kls_btf_order_impl    /* returns number of blocks found */
 (
     /* input, not modified: */
     Int n,	    /* A is n-by-n in compressed column form */
@@ -211,21 +240,25 @@ Int TRILINOS_BTF(order)	    /* returns number of blocks found */
     Int *nmatch,    /* # nonzeros on diagonal of P*A*Q */
 
     /* workspace, not defined on input or output */
-    Int Work [ ]    /* size 5n */
+    Int Work [ ],   /* size 5n */
+
+    /* KLS-private matching choice */
+    Int force_hk
 )
 {
     Int *Flag ;
-    Int nblocks, i, j, nbadcol ;
+    Int nblocks, i, j, nbadcol, hk ;
+    double probe_maxwork, probe_work ;
 
     /* ---------------------------------------------------------------------- */
     /* compute the maximum matching */
     /* ---------------------------------------------------------------------- */
 
     /* Zero-free diagonal quick check: a full structural diagonal is already
-     * a maximum matching, and every maximum matching yields the same block
-     * triangular form.  The cheap-match phase in maxtrans assigns the first
-     * unmatched row of each column, so full-diagonal circuit matrices would
-     * otherwise pay an augmenting-path repair for nearly every column. */
+     * a stable maximum matching that preserves the input labeling.  The
+     * cheap-match phase in maxtrans assigns the first unmatched row of each
+     * column, so full-diagonal circuit matrices would otherwise pay an
+     * augmenting-path repair for nearly every column. */
     {
 	Int diag_full = 1 ;
 	for (j = 0 ; diag_full && j < n ; j++)
@@ -260,9 +293,9 @@ Int TRILINOS_BTF(order)	    /* returns number of blocks found */
 
     /* if maxwork > 0, then a maximum matching might not be found */
 
-    if (n >= 30000 && getenv ("KLS_NO_HK_MAXTRANS") == NULL)
+    if (force_hk || getenv ("KLS_FORCE_HK_MAXTRANS") != NULL)
     {
-	Int hk = kls_hk_maxtrans (n, Ap, Ai, Q, Work) ;
+	hk = kls_hk_maxtrans (n, Ap, Ai, Q, Work) ;
 	if (hk != TRILINOS_BTF_EMPTY)
 	{
 	    *nmatch = hk ;
@@ -273,8 +306,55 @@ Int TRILINOS_BTF(order)	    /* returns number of blocks found */
 	}
 	else
 	{
+	    /* The accelerated matcher is optional.  Allocation failure keeps
+	     * the original unlimited algorithm as a correctness fallback. */
 	    *nmatch = TRILINOS_BTF(maxtrans) (n, n, Ap, Ai, maxwork, work,
-					      Q, Work) ;
+		Q, Work) ;
+	}
+    }
+    else if (n >= 30000 && maxwork <= 0 &&
+	getenv ("KLS_NO_HK_MAXTRANS") == NULL)
+    {
+	/* Always make the same bounded stock probe.  A downstream fill selector
+	 * decides which permutation to retain; no matrix-density or benchmark-
+	 * family classifier participates in this choice. */
+	double probe_work_limit = KLS_BTF_STOCK_PROBE_WORK_LIMIT ;
+	const char *probe_work_env =
+	    getenv ("KLS_BTF_STOCK_PROBE_WORK_LIMIT") ;
+	if (probe_work_env != NULL && probe_work_env [0] != '\0')
+	{
+	    double requested = strtod (probe_work_env, NULL) ;
+	    if (requested > 0)
+	    {
+		probe_work_limit = requested ;
+	    }
+	}
+	probe_maxwork = probe_work_limit /
+	    ((Ap [n] > 0) ? ((double) Ap [n]) : 1.0) ;
+	*nmatch = TRILINOS_BTF(maxtrans) (n, n, Ap, Ai, probe_maxwork,
+	    &probe_work, Q, Work) ;
+	if (probe_work == TRILINOS_BTF_EMPTY)
+	{
+	    hk = kls_hk_maxtrans (n, Ap, Ai, Q, Work) ;
+	    if (hk != TRILINOS_BTF_EMPTY)
+	    {
+		*nmatch = hk ;
+		if (work != NULL)
+		{
+		    *work = 0 ;
+		}
+	    }
+	    else
+	    {
+		/* Allocation failure in the optional matcher: retain the stock
+		 * implementation's original unlimited fallback. */
+		*nmatch = TRILINOS_BTF(maxtrans) (n, n, Ap, Ai, maxwork,
+		    work, Q, Work) ;
+	    }
+	}
+	else if (work != NULL)
+	{
+	    *work = probe_work ;
 	}
     }
     else
@@ -349,4 +429,43 @@ Int TRILINOS_BTF(order)	    /* returns number of blocks found */
 
     nblocks = TRILINOS_BTF(strongcomp) (n, Ap, Ai, Q, P, R, Work) ;
     return (nblocks) ;
+}
+
+Int TRILINOS_BTF(order)	    /* returns number of blocks found */
+(
+    Int n,
+    Int Ap [ ],
+    Int Ai [ ],
+    double maxwork,
+    double *work,
+    Int P [ ],
+    Int Q [ ],
+    Int R [ ],
+    Int *nmatch,
+    Int Work [ ]
+)
+{
+    return (kls_btf_order_impl (n, Ap, Ai, maxwork, work, P, Q, R,
+	nmatch, Work, FALSE)) ;
+}
+
+/* KLS-private entry point used to construct the alternate ordering candidate.
+ * It deliberately shares all post-matching completion and SCC code with the
+ * public BTF order routine. */
+Int trilinos_btf_l_order_hk
+(
+    Int n,
+    Int Ap [ ],
+    Int Ai [ ],
+    double maxwork,
+    double *work,
+    Int P [ ],
+    Int Q [ ],
+    Int R [ ],
+    Int *nmatch,
+    Int Work [ ]
+)
+{
+    return (kls_btf_order_impl (n, Ap, Ai, maxwork, work, P, Q, R,
+	nmatch, Work, TRUE)) ;
 }

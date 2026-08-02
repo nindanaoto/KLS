@@ -214,6 +214,11 @@ int trilinos_btf_order	    /* returns number of blocks found */
 UF_long trilinos_btf_l_order (UF_long, UF_long *, UF_long *, double , double *,
     UF_long *, UF_long *, UF_long *, UF_long *, UF_long *) ;
 
+/* KLS-private variant used to build a Hopcroft-Karp matching candidate while
+ * sharing BTF_ORDER's permutation-completion and SCC implementation. */
+UF_long trilinos_btf_l_order_hk (UF_long, UF_long *, UF_long *, double,
+    double *, UF_long *, UF_long *, UF_long *, UF_long *, UF_long *) ;
+
 
 /* ========================================================================== */
 /* === TRILINOS_BTF marking of singular columns ====================================== */
