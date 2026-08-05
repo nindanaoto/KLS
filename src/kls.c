@@ -37846,7 +37846,54 @@ static void maybe_retry_without_btf(UF_long n,
          (!(no_btf_symbolic->est_flops > 0.0) ||
           !((*symbolic)->est_flops > 0.0) ||
           no_btf_symbolic->est_flops <= (*symbolic)->est_flops));
-  if (generic_accept ||
+  /* A non-degenerate BTF splits a material fraction of the recurring
+     numeric into block/off-block executors.  When the ordinary no-BTF
+     symbolic stays inside a narrow work-and-storage Pareto band, the
+     caller's long update horizon can repay that representation without
+     identifying the graph by name or dimensions.  Retain the BTF symbolic
+     as a value-certified fallback: the first numeric can still recover it
+     when its pivots are decisively stronger.  Near-degenerate BTFs remain
+     on the stricter estimate rule because their tiny fringe cannot justify
+     this executor change and symbolic work poorly predicts pivot fill there. */
+  const int amortized_non_degenerate_no_btf =
+    generic_comparison && repeated_generic_comparison && !btf_degenerate &&
+    kls_generic_btf_capture_candidate != NULL &&
+    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
+    getenv("KLS_DISABLE_AMORTIZED_NONDEGENERATE_NO_BTF") == NULL &&
+    current_score_known && current_score > 0.0 &&
+    isfinite(no_btf_score) && no_btf_score > 0.0 &&
+    (*symbolic)->nblocks > 1u && no_btf_symbolic->nblocks == 1u &&
+    no_btf_score <= 1.15 * current_score &&
+    (*symbolic)->est_flops > 0.0 &&
+    no_btf_symbolic->est_flops > 0.0 &&
+    no_btf_symbolic->est_flops <= 1.15 * (*symbolic)->est_flops;
+  /* A tiny BTF fringe can cost more recurring executor dispatch than it
+     saves in arithmetic.  Admit the no-BTF arm only when both symbolic
+     portfolios fit a 64 MiB L/U value+index budget and a BTF fallback can be
+     retained (or exact value matching has already certified the pivot
+     frame).  Large factors stay on the stricter estimate rule because small
+     symbolic errors there can expose substantial pivot fill. */
+  const double btf_cache_entry_budget =
+    (double)(64u * 1024u * 1024u) /
+    (double)(sizeof(double) + sizeof(UF_long));
+  const int amortized_cache_resident_tiny_fringe_no_btf =
+    generic_comparison && repeated_generic_comparison &&
+    ((*symbolic)->nblocks > 1u) &&
+    (double)(n - (*symbolic)->maxblock) <= 0.02 * (double)n &&
+    (kls_generic_btf_capture_candidate != NULL ||
+     kls_value_matched_ordering_ctx) &&
+    getenv("KLS_DISABLE_CACHE_RESIDENT_TINY_FRINGE_NO_BTF") == NULL &&
+    current_score_known && current_score > 0.0 &&
+    isfinite(no_btf_score) && no_btf_score > 0.0 &&
+    current_score <= btf_cache_entry_budget &&
+    no_btf_score <= btf_cache_entry_budget &&
+    no_btf_symbolic->nblocks == 1u &&
+    no_btf_score <= 1.15 * current_score &&
+    (*symbolic)->est_flops > 0.0 &&
+    no_btf_symbolic->est_flops > 0.0 &&
+    no_btf_symbolic->est_flops <= 1.15 * (*symbolic)->est_flops;
+  if (generic_accept || amortized_non_degenerate_no_btf ||
+      amortized_cache_resident_tiny_fringe_no_btf ||
       (single_block && no_btf_score <= 1.02 * current_score) ||
       (dominant_block && current_score_known && isfinite(no_btf_score) &&
        no_btf_score <= 0.80 * current_score) ||
@@ -37866,7 +37913,8 @@ static void maybe_retry_without_btf(UF_long n,
       kls_repeated_update_workload(options) &&
       (*symbolic)->do_btf && (*symbolic)->nblocks > 1u &&
       (*symbolic)->maxblock < n &&
-      (double)(n - (*symbolic)->maxblock) >= 0.02 * (double)n &&
+      ((double)(n - (*symbolic)->maxblock) >= 0.02 * (double)n ||
+       amortized_cache_resident_tiny_fringe_no_btf) &&
       current_score_known && current_score > 0.0 &&
       no_btf_score > 0.0 && isfinite(no_btf_score) &&
       current_score <= 1.35 * no_btf_score &&
@@ -166187,6 +166235,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   kls_run_deferred_factor_preps(solver, numeric_values);
   int generic_hoisted_snode_lean_predicted = 0;
+  int generic_low_intensity_column_preselected = 0;
   /* Development/selection hook: choose the already-implemented lean row walk
      without paying the production timing consultation (which can execute up
      to seven complete numeric passes in the first public refactor).  This is
@@ -166275,6 +166324,34 @@ int kls_refactor(kls_solver *solver, const double *values) {
          settled so later steady re-audits do not reintroduce discarded
          column numerics into an otherwise fixed H100 lifecycle. */
       solver->lean_reaudit_state = 5;
+    }
+  }
+  if (!legacy_shape_policies && solver->lean_choice == 0 &&
+      getenv("KLS_DISABLE_LOW_INTENSITY_COLUMN_PRESELECTION") == NULL &&
+      kls_repeated_update_workload(&solver->options) &&
+      solver->symbolic->nblocks == 1u &&
+      solver->symbolic->maxblock == solver->n &&
+      solver->n >= 512u && solver->n <= 131072u &&
+      solver->n <= UF_long_max / 10u &&
+      solver->numeric->lnz <= UF_long_max - solver->numeric->unz &&
+      solver->pivot_nudge_count == 0u &&
+      solver->common.kls_perturb_count == 0u) {
+    const UF_long factor_entries =
+      solver->numeric->lnz + solver->numeric->unz;
+    if (factor_entries <= 1000000u &&
+        factor_entries > 10u * solver->n &&
+        solver->common.flops > 0.0 &&
+        solver->common.flops <= 16.0 * (double)factor_entries) {
+      /* A broad but low-intensity retained factor has too little arithmetic
+         per entry for either row mirror to repay its construction and extra
+         traversal over the declared lifecycle.  The retained mapped column
+         walk is already available, so settle it before the multi-pass lean
+         consultation.  These are properties of the realized numeric
+         representation, not of a matrix family or exact shape fingerprint;
+         compact high-intensity factors remain eligible for the measured
+         row/column tournament. */
+      solver->lean_choice = -1;
+      generic_low_intensity_column_preselected = 1;
     }
   }
   if (legacy_shape_policies && solver->lean_choice == 0 &&
@@ -166522,8 +166599,34 @@ int kls_refactor(kls_solver *solver, const double *values) {
     ok = kls_parallel_refactor(solver, numeric_values, 0);
     elapsed = kls_now_seconds() - start;
   }
+  const UF_long retained_factor_entries =
+    solver->numeric->lnz <= UF_long_max - solver->numeric->unz
+      ? solver->numeric->lnz + solver->numeric->unz : UF_long_max;
+  const UF_long direct_klu_cache_entry_budget =
+    (UF_long)(512u * 1024u / (sizeof(double) + sizeof(UF_long)));
+  const int direct_klu_preselected_cache_resident_row =
+    retained_factor_entries <= direct_klu_cache_entry_budget &&
+    kls_moderate_work_single_block_lean_policy_enabled(solver);
+  const int direct_klu_row_challenger =
+    solver->lean_choice > 0 && solver->lean_reaudit_state == 5 &&
+    direct_klu_preselected_cache_resident_row &&
+    getenv("KLS_LEAN_CHOICE") == NULL &&
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW;
+  /* A low-work column incumbent already enters the settled direct-KLU arm
+     on the next public update.  Re-timing that same representation would
+     add two numeric walks and a residual probe without changing its route.
+     Likewise, the low-intensity verdict has just declined a multi-pass
+     executor consultation; do not replace it immediately with another one.
+     Retain the tournament for other mapped incumbents above the crossover
+     and for preselected row incumbents that would otherwise remain on row. */
+  const int direct_klu_column_challenger =
+    solver->lean_choice < 0 &&
+    !generic_low_intensity_column_preselected &&
+    !kls_low_work_single_block_direct_csc_capable(solver) &&
+    (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU ||
+     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED);
   if (!legacy_shape_policies && ok && solver->common.status >= 0 &&
-      solver->direct_klu_choice == 0 && solver->lean_choice < 0 &&
+      solver->direct_klu_choice == 0 &&
       solver->row_accept_decision <= 0 &&
       solver->solve_contract_probe == 0 &&
       kls_repeated_update_workload(&solver->options) &&
@@ -166534,8 +166637,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u &&
       getenv("KLS_DISABLE_DIRECT_KLU_TOURNAMENT") == NULL &&
-      (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU ||
-       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED)) {
+      (direct_klu_row_challenger || direct_klu_column_challenger)) {
     const int incumbent_path = (int)solver->stats.last_refactor_path;
     if (incumbent_path == KLS_REFACTOR_PATH_KLU) {
       /* The adaptive dispatcher has already certified the vendor walk on
@@ -166553,33 +166655,71 @@ int kls_refactor(kls_solver *solver, const double *values) {
          trial cost at least twice over the remaining caller-declared
          updates.  A loss is restored immediately, so no solve can observe a
          representation different from the measured verdict. */
-      const double incumbent_seconds = elapsed;
+      double incumbent_seconds = elapsed;
+      double challenger_overhead = 0.0;
+      int incumbent_ok = 1;
+      {
+        /* Both a policy-preselected row arm and an adaptive mapped arm can
+           build retained metadata during the first update.  Time one
+           complete warm incumbent before comparing it with KLU; otherwise
+           setup would masquerade as recurring work.  The row admission
+           budget above describes cache residency of the retained factor,
+           not a matrix shape. */
+        solver->common.status = TRILINOS_KLU_OK;
+        solver->common.numerical_rank = KLS_KLU_EMPTY;
+        solver->common.singular_col = KLS_KLU_EMPTY;
+        const double warm_start = kls_now_seconds();
+        incumbent_ok = kls_parallel_refactor(solver, numeric_values, 0) &&
+          solver->common.status >= 0;
+        incumbent_seconds = kls_now_seconds() - warm_start;
+        challenger_overhead += incumbent_seconds;
+      }
       solver->common.status = TRILINOS_KLU_OK;
       solver->common.numerical_rank = KLS_KLU_EMPTY;
       solver->common.singular_col = KLS_KLU_EMPTY;
       const double direct_start = kls_now_seconds();
-      const UF_long direct_ok =
+      UF_long direct_ok =
         trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                                 (double *)(uintptr_t)values,
                                 solver->symbolic, solver->numeric,
                                 &solver->common);
-      const double direct_seconds = kls_now_seconds() - direct_start;
+      double direct_seconds = kls_now_seconds() - direct_start;
+      challenger_overhead += direct_seconds;
+      if (direct_ok && solver->common.status >= 0) {
+        /* Give the challenger the same warm-state comparison.  The first
+           direct pass remains charged to the lifecycle verdict. */
+        solver->common.status = TRILINOS_KLU_OK;
+        solver->common.numerical_rank = KLS_KLU_EMPTY;
+        solver->common.singular_col = KLS_KLU_EMPTY;
+        const double direct_warm_start = kls_now_seconds();
+        direct_ok = trilinos_klu_l_refactor(
+          solver->col_ptr, solver->row_idx,
+          (double *)(uintptr_t)values, solver->symbolic,
+          solver->numeric, &solver->common);
+        direct_seconds = kls_now_seconds() - direct_warm_start;
+        challenger_overhead += direct_seconds;
+      }
       const double probe_start = kls_now_seconds();
       const int direct_probe_ok =
         direct_ok && solver->common.status >= 0 &&
         kls_direct_klu_numeric_residual_probe(solver, values);
       const double probe_seconds = kls_now_seconds() - probe_start;
+      challenger_overhead += probe_seconds;
       const double remaining =
         (double)(solver->options.expected_refactorizations - 1);
       const double projected_saving =
         remaining * (incumbent_seconds - direct_seconds);
       const int adopt_direct =
-        direct_probe_ok && direct_seconds > 0.0 &&
+        incumbent_ok && direct_probe_ok && direct_seconds > 0.0 &&
         incumbent_seconds > 0.0 &&
         direct_seconds < 0.80 * incumbent_seconds &&
-        projected_saving > 2.0 * (direct_seconds + probe_seconds);
+        projected_saving > 2.0 * challenger_overhead;
       if (adopt_direct) {
         solver->direct_klu_choice = 1;
+        solver->lean_choice = -1;
+        solver->lean_probe_arm = 0;
+        solver->lean_pair_active = 0;
+        solver->lean_reaudit_state = 5;
         solver->row_accept_decision = -1;
         /* A rejected/timed row challenger may have left a valid but now
            stale solve-value replica.  Direct KLU updates only the retained
@@ -166891,12 +167031,54 @@ int kls_refactor(kls_solver *solver, const double *values) {
           }
         }
         solver->lean_pair_active = 0;
+        const double best_row_seconds =
+          lean_ok > 0 && t_lean > 0.0 &&
+          (pair_ok <= 0 || !(t_pair > 0.0) || t_lean <= t_pair)
+            ? t_lean : t_pair;
+        if (solver->common.scale == -1 &&
+            best_row_seconds > 0.0 && t_inc > 0.0 &&
+            best_row_seconds < 0.95 * t_inc &&
+            getenv("KLS_DISABLE_LEAN_COLUMN_CONFIRMATION") == NULL) {
+          /* A row arm runs after its mirror/preparation pass, while the
+             incumbent's first refresh can still be paying deferred map and
+             cache setup.  Confirm only an apparent row win with one more
+             retained-column pass.  This keeps losing consultations bounded
+             and prevents a cold incumbent from publishing several slow row
+             updates before the later steady re-audit can repair it. */
+          solver->lean_choice = -1;
+          solver->row_accept_decision = -1;
+          solver->row_refactor_auto_enabled = 0;
+          solver->lean_probe_arm = 0;
+          solver->common.status = TRILINOS_KLU_OK;
+          solver->common.numerical_rank = KLS_KLU_EMPTY;
+          solver->common.singular_col = KLS_KLU_EMPTY;
+          t0 = kls_now_seconds();
+          const UF_long confirm_ok =
+            kls_parallel_refactor(solver, numeric_values, 0);
+          if (confirm_ok && solver->common.status >= 0) {
+            const double confirmed_inc = kls_now_seconds() - t0;
+            if (confirmed_inc < t_inc) {
+              t_inc = confirmed_inc;
+            }
+          }
+          solver->row_accept_decision = saved_row_accept_decision;
+          solver->row_refactor_auto_enabled = saved_row_auto_enabled;
+          solver->lean_probe_arm = saved_lean_probe_arm;
+        }
+        /* Publish only a decisive first-call row win on an unscaled factor.
+           Narrower apparent wins are revisited below after the incumbent has
+           entered its settled direct path; the pre-solve consultation cannot
+           measure that path fairly because its solve contract is not
+           certified yet.  A scaled factor must refresh Rs in either path and
+           therefore retains the ordinary close timing verdict. */
+        const double initial_row_margin =
+          solver->common.scale == -1 ? 0.60 : 0.95;
         if (lean_ok > 0 && t_lean > 0.0 && t_inc > 0.0 &&
-            t_lean < 0.95 * t_inc &&
+            t_lean < initial_row_margin * t_inc &&
             (pair_ok <= 0 || t_lean <= t_pair)) {
           solver->lean_choice = 1;
         } else if (pair_ok > 0 && t_pair > 0.0 && t_inc > 0.0 &&
-                   t_pair < 0.95 * t_inc) {
+                   t_pair < initial_row_margin * t_inc) {
           solver->lean_choice = 2;
         }
         if (solver->lean_choice > 0 && exact_row_reaudit_skip &&
@@ -166915,7 +167097,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
         }
         if (generic_declined_lean_reaudit && solver->lean_choice < 0 &&
             lean_ok > 0 && pair_ok > 0 &&
-            t_lean > 0.0 && t_pair > 0.0) {
+            t_lean > 0.0 && t_pair > 0.0 &&
+            best_row_seconds <= 1.05 * t_inc) {
           /* A close consultation can reject a durable row win when the
              incumbent and alternative streams are at different warm-up
              points.  Remember the faster built row arm and revisit it only
