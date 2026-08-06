@@ -815,6 +815,14 @@ struct kls_solver {
   double lean_reaudit_column_min;
   int lean_reaudit_row_arm;
   double lean_reaudit_row_min;
+  int lean_reaudit_row_samples;
+  double lean_reaudit_candidate_row_seconds;
+  int lean_reaudit_pending_side; /* 0 none, 1 column, 2 declined-row arm:
+                                    refactor awaits its following solve */
+  int lean_reaudit_column_solve_samples;
+  double lean_reaudit_column_solve_min;
+  int lean_reaudit_row_solve_samples;
+  double lean_reaudit_row_solve_min;
   int lean_user_values_active;
   int lean_deferred_value_prep_active;
   int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
@@ -27742,6 +27750,13 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->lean_reaudit_column_min = 0.0;
   solver->lean_reaudit_row_arm = 0;
   solver->lean_reaudit_row_min = 0.0;
+  solver->lean_reaudit_row_samples = 0;
+  solver->lean_reaudit_candidate_row_seconds = 0.0;
+  solver->lean_reaudit_pending_side = 0;
+  solver->lean_reaudit_column_solve_samples = 0;
+  solver->lean_reaudit_column_solve_min = 0.0;
+  solver->lean_reaudit_row_solve_samples = 0;
+  solver->lean_reaudit_row_solve_min = 0.0;
   solver->padded_choice = 0;
   solver->padded_pending = 0;
   solver->padded_probe_build = 0;
@@ -78699,6 +78714,34 @@ static void kls_row_refactor_acceptance_record_solve(kls_solver *solver,
     return;
   }
   kls_row_refactor_acceptance_try_decide(solver);
+}
+
+/* Pair the close declined-lean re-audit with the solve that immediately
+   follows each sampled numeric.  A row representation can be neutral in
+   refactor time yet materially cheaper to solve, while another row engine
+   with identical factor work can be much worse.  Recording the realized
+   public lifecycle lets the later verdict distinguish those cases without
+   inferring anything from matrix dimensions or sparsity shape. */
+static void kls_declined_lean_reaudit_record_solve(kls_solver *solver,
+                                                   double seconds) {
+  if (solver == NULL || solver->lean_reaudit_pending_side == 0 ||
+      !(seconds > 0.0) || !isfinite(seconds)) {
+    return;
+  }
+  if (solver->lean_reaudit_pending_side == 1) {
+    if (solver->lean_reaudit_column_solve_samples == 0 ||
+        seconds < solver->lean_reaudit_column_solve_min) {
+      solver->lean_reaudit_column_solve_min = seconds;
+    }
+    solver->lean_reaudit_column_solve_samples++;
+  } else if (solver->lean_reaudit_pending_side == 2) {
+    if (solver->lean_reaudit_row_solve_samples == 0 ||
+        seconds < solver->lean_reaudit_row_solve_min) {
+      solver->lean_reaudit_row_solve_min = seconds;
+    }
+    solver->lean_reaudit_row_solve_samples++;
+  }
+  solver->lean_reaudit_pending_side = 0;
 }
 
 /* Post-adoption audit of the row-value solve. The pair verdict is two
@@ -168332,6 +168375,32 @@ int kls_refactor(kls_solver *solver, const double *values) {
      (memplus: lean-pair 244us vs incumbent 493, under CKTSO; mimo-class
      keeps the incumbent).  Runs after the floor probe settles so the
      incumbent arm samples its final configuration. */
+  if (generic_declined_lean_reaudit && solver->lean_choice < 0 &&
+      solver->lean_reaudit_state == 10 &&
+      solver->lean_reaudit_candidate_row_seconds > 0.0 &&
+      solver->lean_reaudit_column_min > 0.0 &&
+      solver->lean_reaudit_column_solve_samples > 0 &&
+      solver->lean_reaudit_column_solve_min > 0.0 &&
+      solver->lean_reaudit_candidate_row_seconds >
+        1.25 * (solver->lean_reaudit_column_min +
+                solver->lean_reaudit_column_solve_min)) {
+    /* Once the first real solve supplies the missing lifecycle term, reject
+       any candidate whose already-measured refactor alone exceeds the whole
+       incumbent cycle.  Its solve cost is nonnegative, so no later row probe
+       can reverse this lower bound.  The same decisive 25-percent band used
+       by the row-engine tournament keeps a single cold row sample from
+       suppressing the warm paired audit. */
+    solver->lean_reaudit_state = 5;
+    solver->lean_reaudit_pending_side = 0;
+    if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
+      fprintf(stderr,
+              "KLS declined lean lifecycle lower bound: row ref %.3f ms "
+              "vs column cycle %.3f ms -> COLUMN\n",
+              1e3 * solver->lean_reaudit_candidate_row_seconds,
+              1e3 * (solver->lean_reaudit_column_min +
+                      solver->lean_reaudit_column_solve_min));
+    }
+  }
   if (generic_lean_reaudit && solver->lean_choice > 0 &&
       (solver->lean_reaudit_state == 1 ||
        solver->lean_reaudit_state == 3)) {
@@ -168606,6 +168675,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->lean_reaudit_column_min = elapsed;
       }
       solver->lean_reaudit_column_samples++;
+      solver->lean_reaudit_pending_side = 1;
       if (++solver->lean_reaudit_samples >= 8) {
         solver->lean_reaudit_state = 11;
       }
@@ -168616,24 +168686,38 @@ int kls_refactor(kls_solver *solver, const double *values) {
           elapsed < solver->lean_reaudit_row_min) {
         solver->lean_reaudit_row_min = elapsed;
       }
-      if (solver->lean_reaudit_state == 12) {
+      solver->lean_reaudit_row_samples++;
+      solver->lean_reaudit_pending_side = 2;
+      if (solver->lean_reaudit_row_samples < 8) {
         solver->lean_reaudit_state = 13;
       } else {
+        const int solve_pair_ready =
+          solver->lean_reaudit_column_solve_samples > 0 &&
+          solver->lean_reaudit_row_solve_samples > 0 &&
+          solver->lean_reaudit_column_solve_min > 0.0 &&
+          solver->lean_reaudit_row_solve_min > 0.0;
+        const double column_cycle = solver->lean_reaudit_column_min +
+          (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
+        const double row_cycle = solver->lean_reaudit_row_min +
+          (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
+        const double adoption_margin = solve_pair_ready ? 0.98 : 0.95;
         if (solver->lean_reaudit_column_samples >= 8 &&
             solver->lean_reaudit_column_min > 0.0 &&
             solver->lean_reaudit_row_min > 0.0 &&
-            solver->lean_reaudit_row_min <
-              0.95 * solver->lean_reaudit_column_min) {
+            row_cycle < adoption_margin * column_cycle) {
           solver->lean_choice = solver->lean_reaudit_row_arm;
           solver->lean_pair_active = solver->lean_choice == 2;
         }
         solver->lean_reaudit_state = 5;
         if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
           fprintf(stderr,
-                  "KLS declined lean steady re-audit: column min %.3f ms "
-                  "row min %.3f ms -> %s\n",
+                  "KLS declined lean steady re-audit: ref %.3f/%.3f ms "
+                  "solve %.3f/%.3f ms over %d row samples -> %s\n",
                   1e3 * solver->lean_reaudit_column_min,
                   1e3 * solver->lean_reaudit_row_min,
+                  1e3 * solver->lean_reaudit_column_solve_min,
+                  1e3 * solver->lean_reaudit_row_solve_min,
+                  solver->lean_reaudit_row_samples,
                   solver->lean_choice > 0 ? "LEAN" : "COLUMN");
         }
       }
@@ -168900,18 +168984,30 @@ int kls_refactor(kls_solver *solver, const double *values) {
         if (generic_declined_lean_reaudit && solver->lean_choice < 0 &&
             lean_ok > 0 && pair_ok > 0 &&
             t_lean > 0.0 && t_pair > 0.0 &&
-            best_row_seconds <= 1.05 * t_inc) {
-          /* A close consultation can reject a durable row win when the
-             incumbent and alternative streams are at different warm-up
-             points.  Remember the faster built row arm and revisit it only
-             after the real incumbent has accumulated a steady window. */
+            (best_row_seconds <= 1.05 * t_inc ||
+             solver->options.expected_solves > 0)) {
+          /* A close consultation can reject a durable row win when either
+             the engines are at different warm-up points or a modestly slower
+             row refactor retains a faster solve representation.  For a solve
+             lifecycle, retain that candidate until the first incumbent solve
+             supplies a complete lower bound; clearly impossible candidates
+             are rejected before the row window.  Revisit the faster built row
+             arm after the incumbent accumulates a steady window, then decide
+             from realized paired lifecycle timings. */
           solver->lean_reaudit_state = 10;
           solver->lean_reaudit_row_arm = t_lean <= t_pair ? 1 : 2;
+          solver->lean_reaudit_candidate_row_seconds = best_row_seconds;
           solver->lean_reaudit_samples = 0;
           solver->lean_reaudit_seconds = 0.0;
           solver->lean_reaudit_column_samples = 0;
           solver->lean_reaudit_column_min = 0.0;
           solver->lean_reaudit_row_min = 0.0;
+          solver->lean_reaudit_row_samples = 0;
+          solver->lean_reaudit_pending_side = 0;
+          solver->lean_reaudit_column_solve_samples = 0;
+          solver->lean_reaudit_column_solve_min = 0.0;
+          solver->lean_reaudit_row_solve_samples = 0;
+          solver->lean_reaudit_row_solve_min = 0.0;
         }
       }
     }
@@ -171753,6 +171849,8 @@ refine_skip:;
        the orientation in which AUTO stored the matrix.  A normal solve on a
        transposed internal factor still belongs to the normal repeated-solve
        workload and must participate in the row/column timing verdict. */
+    kls_declined_lean_reaudit_record_solve(
+      solver, solver->stats.solve_seconds);
     kls_row_refactor_acceptance_record_solve(solver,
                                              solver->stats.solve_seconds);
     kls_row_solve_steady_audit(solver, solver->stats.solve_seconds);
