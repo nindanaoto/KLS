@@ -388,6 +388,8 @@ typedef struct kls_row_solve_transpose_plan {
   UF_long *ptr;
   UF_long *cols;
   UF_long *source_pos;
+  uint16_t *cols16;
+  uint16_t *source_pos16;
   UF_long *slice_bounds;
   UF_long *segment_split;
   UF_long *thread_bounds;
@@ -408,6 +410,7 @@ typedef struct kls_row_solve_transpose_plan {
   int source_upper;
   int upper;
   int diagonal;
+  int serial_only;
 } kls_row_solve_transpose_plan;
 
 typedef struct kls_row_solve_factor_view {
@@ -19853,6 +19856,8 @@ static void kls_clear_row_solve_transpose_plan(
   free(plan->ptr);
   free(plan->cols);
   free(plan->source_pos);
+  free(plan->cols16);
+  free(plan->source_pos16);
   free(plan->slice_bounds);
   free(plan->segment_split);
   free(plan->thread_bounds);
@@ -68624,10 +68629,11 @@ static UF_long kls_row_solve_sparse_cluster_levels(
   return level;
 }
 
-static int kls_build_one_row_solve_transpose_plan(
+static int kls_build_one_row_solve_transpose_plan_impl(
   kls_solver *solver,
   int source_upper,
-  kls_row_solve_transpose_plan *plan) {
+  kls_row_solve_transpose_plan *plan,
+  int build_parallel_metadata) {
   if (solver == NULL || plan == NULL ||
       solver->row_refactor_pattern_n != solver->n) {
     return 0;
@@ -68673,19 +68679,33 @@ static int kls_build_one_row_solve_transpose_plan(
   const UF_long nnz = ptr[n];
   UF_long *cols = NULL;
   UF_long *source_pos = NULL;
+  uint16_t *cols16 = NULL;
+  uint16_t *source_pos16 = NULL;
   UF_long *next = NULL;
   if (nnz > 0u) {
+    const int compact_serial = !build_parallel_metadata &&
+      n <= (UF_long)UINT16_MAX + 1u && nnz <= (UF_long)UINT16_MAX;
     if (nnz > (UF_long)(SIZE_MAX / sizeof(*cols))) {
       free(ptr);
       return 0;
     }
-    cols = (UF_long *)malloc((size_t)nnz * sizeof(*cols));
-    source_pos = (UF_long *)malloc((size_t)nnz * sizeof(*source_pos));
+    cols = compact_serial ? NULL
+      : (UF_long *)malloc((size_t)nnz * sizeof(*cols));
+    source_pos = compact_serial ? NULL
+      : (UF_long *)malloc((size_t)nnz * sizeof(*source_pos));
+    cols16 = compact_serial
+      ? (uint16_t *)malloc((size_t)nnz * sizeof(*cols16)) : NULL;
+    source_pos16 = compact_serial
+      ? (uint16_t *)malloc((size_t)nnz * sizeof(*source_pos16)) : NULL;
     next = (UF_long *)malloc((size_t)n * sizeof(*next));
-    if (cols == NULL || source_pos == NULL || next == NULL) {
+    if ((!compact_serial && (cols == NULL || source_pos == NULL)) ||
+        (compact_serial && (cols16 == NULL || source_pos16 == NULL)) ||
+        next == NULL) {
       free(ptr);
       free(cols);
       free(source_pos);
+      free(cols16);
+      free(source_pos16);
       free(next);
       return 0;
     }
@@ -68694,8 +68714,13 @@ static int kls_build_one_row_solve_transpose_plan(
       for (UF_long p = src_ptr[row]; p < src_ptr[row + 1u]; ++p) {
         const UF_long col = src_cols[p];
         const UF_long dst = next[col]++;
-        cols[dst] = row;
-        source_pos[dst] = p;
+        if (compact_serial) {
+          cols16[dst] = (uint16_t)row;
+          source_pos16[dst] = (uint16_t)p;
+        } else {
+          cols[dst] = row;
+          source_pos[dst] = p;
+        }
       }
     }
     free(next);
@@ -68704,11 +68729,14 @@ static int kls_build_one_row_solve_transpose_plan(
   plan->ptr = ptr;
   plan->cols = cols;
   plan->source_pos = source_pos;
+  plan->cols16 = cols16;
+  plan->source_pos16 = source_pos16;
   plan->source_upper = source_upper ? 1 : 0;
   plan->upper = source_upper ? 0 : 1;
   plan->diagonal = source_upper ? 1 : 0;
+  plan->serial_only = build_parallel_metadata ? 0 : 1;
 
-  if (nnz == 0u) {
+  if (nnz == 0u || !build_parallel_metadata) {
     return 1;
   }
 
@@ -68733,6 +68761,14 @@ static int kls_build_one_row_solve_transpose_plan(
       &plan->tri_entries);
   }
   return 1;
+}
+
+static int kls_build_one_row_solve_transpose_plan(
+  kls_solver *solver,
+  int source_upper,
+  kls_row_solve_transpose_plan *plan) {
+  return kls_build_one_row_solve_transpose_plan_impl(
+    solver, source_upper, plan, 1);
 }
 
 static void kls_build_row_solve_transpose_plans(kls_solver *solver) {
@@ -85178,6 +85214,148 @@ static int kls_try_row_refactor_solve_one_rhs(kls_solver *solver,
     }
   }
 
+  return 1;
+}
+
+/* A lean row refactor can deliberately leave KLU's column value streams
+   stale while its flat row factor is current.  For a transposed kernel, the
+   immutable transpose plans turn that row factor back into a dot-product
+   triangular walk without first scattering every value through the column
+   pointer mirrors.  BTF off-diagonal updates retain the ordinary block
+   order; only the two diagonal solves consume the transposed row graph. */
+static int kls_try_dirty_row_transpose_plan_solve_one_rhs(
+  kls_solver *solver,
+  double *x) {
+  const int force =
+    getenv("KLS_ENABLE_DIRTY_ROW_TRANSPOSE_PLAN_SOLVE") != NULL;
+  if (solver == NULL || x == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL ||
+      !solver->lean_compact_match_row_factor_active ||
+      !solver->row_refactor_values_dirty ||
+      solver->row_refactor_values_ready ||
+      solver->row_refactor_pattern_n != solver->n ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_l_row_values == NULL ||
+      solver->row_refactor_u_row_values == NULL ||
+      solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
+      solver->numeric->Pnum == NULL || solver->numeric->Udiag == NULL ||
+      solver->numeric->Xwork == NULL ||
+      getenv("KLS_DISABLE_DIRTY_ROW_TRANSPOSE_PLAN_SOLVE") != NULL ||
+      (!force &&
+       (solver->options.expected_solves < 16 ||
+        solver->n > (UF_long)UINT16_MAX + 1u ||
+        solver->row_refactor_l_ptr[solver->n] > (UF_long)UINT16_MAX ||
+        solver->row_refactor_u_ptr[solver->n] > (UF_long)UINT16_MAX))) {
+    return 0;
+  }
+
+  if (solver->row_solve_ut_plan.ptr == NULL ||
+      solver->row_solve_lt_plan.ptr == NULL) {
+    (void)kls_build_one_row_solve_transpose_plan_impl(
+      solver, 1, &solver->row_solve_ut_plan, 0);
+    (void)kls_build_one_row_solve_transpose_plan_impl(
+      solver, 0, &solver->row_solve_lt_plan, 0);
+  }
+  const kls_row_solve_transpose_plan *ut = &solver->row_solve_ut_plan;
+  const kls_row_solve_transpose_plan *lt = &solver->row_solve_lt_plan;
+  if (ut->ptr == NULL || lt->ptr == NULL ||
+      (ut->ptr[solver->n] > 0u &&
+       ((ut->cols == NULL || ut->source_pos == NULL) &&
+        (ut->cols16 == NULL || ut->source_pos16 == NULL))) ||
+      (lt->ptr[solver->n] > 0u &&
+       ((lt->cols == NULL || lt->source_pos == NULL) &&
+        (lt->cols16 == NULL || lt->source_pos16 == NULL)))) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  const UF_long nblocks = solver->symbolic->nblocks;
+  const UF_long *restrict r = solver->symbolic->R;
+  const UF_long *restrict q = solver->symbolic->Q;
+  const UF_long *restrict pnum = solver->numeric->Pnum;
+  const UF_long *restrict offp = solver->numeric->Offp;
+  const UF_long *restrict offi = solver->numeric->Offi;
+  const double *restrict offx = (const double *)solver->numeric->Offx;
+  const double *restrict udiag =
+    (const double *)solver->numeric->Udiag;
+  const double *restrict rs = solver->numeric->Rs;
+  const double *restrict u_values = solver->row_refactor_u_row_values;
+  const double *restrict l_values = solver->row_refactor_l_row_values;
+  double *restrict work = (double *)solver->numeric->Xwork;
+  if (nblocks == 0u || r[0] != 0u || r[nblocks] != n ||
+      (nblocks > 1u && (offp == NULL || offi == NULL || offx == NULL)) ||
+      (solver->common.scale > 0 && rs == NULL) ||
+      (solver->common.scale <= 0 && rs != NULL)) {
+    return 0;
+  }
+
+  for (UF_long k = 0u; k < n; ++k) {
+    work[k] = x[q[k]];
+  }
+  for (UF_long block = 0u; block < nblocks; ++block) {
+    const UF_long k1 = r[block];
+    const UF_long k2 = r[block + 1u];
+    if (k1 > k2 || k2 > n) {
+      return 0;
+    }
+    if (block > 0u) {
+      for (UF_long k = k1; k < k2; ++k) {
+        double value = work[k];
+        const UF_long begin = offp[k];
+        const UF_long end = offp[k + 1u];
+        for (UF_long p = begin; p < end; ++p) {
+          const UF_long row = offi[p];
+          if (row >= k1) {
+            return 0;
+          }
+          value -= offx[p] * work[row];
+        }
+        work[k] = value;
+      }
+    }
+
+    if (ut->cols16 != NULL && ut->source_pos16 != NULL) {
+      for (UF_long row = k1; row < k2; ++row) {
+        double value = work[row];
+        for (UF_long p = ut->ptr[row]; p < ut->ptr[row + 1u]; ++p) {
+          value -= u_values[ut->source_pos16[p]] * work[ut->cols16[p]];
+        }
+        work[row] = value / udiag[row];
+      }
+    } else {
+      for (UF_long row = k1; row < k2; ++row) {
+        double value = work[row];
+        for (UF_long p = ut->ptr[row]; p < ut->ptr[row + 1u]; ++p) {
+          value -= u_values[ut->source_pos[p]] * work[ut->cols[p]];
+        }
+        work[row] = value / udiag[row];
+      }
+    }
+    if (lt->cols16 != NULL && lt->source_pos16 != NULL) {
+      for (UF_long remaining = k2; remaining > k1; --remaining) {
+        const UF_long row = remaining - 1u;
+        double value = work[row];
+        for (UF_long p = lt->ptr[row]; p < lt->ptr[row + 1u]; ++p) {
+          value -= l_values[lt->source_pos16[p]] * work[lt->cols16[p]];
+        }
+        work[row] = value;
+      }
+    } else {
+      for (UF_long remaining = k2; remaining > k1; --remaining) {
+        const UF_long row = remaining - 1u;
+        double value = work[row];
+        for (UF_long p = lt->ptr[row]; p < lt->ptr[row + 1u]; ++p) {
+          value -= l_values[lt->source_pos[p]] * work[lt->cols[p]];
+        }
+        work[row] = value;
+      }
+    }
+  }
+  for (UF_long k = 0u; k < n; ++k) {
+    const double result = work[k];
+    x[pnum[k]] = rs != NULL ? result / rs[k] : result;
+  }
   return 1;
 }
 
@@ -120748,7 +120926,13 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
     return 0;
   }
 
-  if (solver->row_solve_ut_plan.ptr == NULL &&
+  if (solver->row_solve_ut_plan.serial_only ||
+      solver->row_solve_lt_plan.serial_only) {
+    /* A dirty lean solve may have built only the immutable transpose graph.
+       Materialize the scheduling metadata if a later factor asks for the
+       parallel row solver. */
+    kls_build_row_solve_transpose_plans(solver);
+  } else if (solver->row_solve_ut_plan.ptr == NULL &&
       solver->row_solve_lt_plan.ptr == NULL &&
       (getenv("KLS_DEFER_ROW_TRANSPOSE_PLANS") != NULL ||
        kls_dense_spiked_fast_defaults_enabled(solver))) {
@@ -171315,6 +171499,12 @@ static int solve_impl(kls_solver *solver,
                        NULL, NULL, 0);
     if (trace_solve_path) {
       fprintf(stderr, "KLS solve path: fused compact-match rhs\n");
+    }
+  } else if (kernel_transpose && nrhs == 1 &&
+             kls_try_dirty_row_transpose_plan_solve_one_rhs(solver, x)) {
+    ok = 1;
+    if (trace_solve_path) {
+      fprintf(stderr, "KLS solve path: dirty-row transpose plan\n");
     }
   } else if (kls_try_row_refactor_solve(solver, kernel_transpose, nrhs,
                                          x, ldx)) {
