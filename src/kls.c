@@ -2319,6 +2319,7 @@ struct kls_solver {
   int auto_pivot_checked;
   int auto_scale_checked;
   int auto_scale_value_certified;
+  int auto_scale_unscaled_trial_certified;
   int auto_scale_deferred;
   int tight_pivot_deferred; /* repeated lifecycle: evaluate the tight-pivot
                                numeric after pending representation trials */
@@ -27960,6 +27961,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
   solver->auto_scale_value_certified = 0;
+  solver->auto_scale_unscaled_trial_certified = 0;
   solver->auto_scale_deferred = 0;
   solver->tight_pivot_deferred = 0;
   solver->auto_amd_shortcut = 0;
@@ -32158,9 +32160,13 @@ static int choose_auto_scale_from_pattern_impl(
     const UF_long *row_idx,
     const kls_options *options,
     const double *numeric_values,
-    int *unscaled_value_certified_out) {
+    int *unscaled_value_certified_out,
+    int *unscaled_trial_certified_out) {
   if (unscaled_value_certified_out != NULL) {
     *unscaled_value_certified_out = 0;
+  }
+  if (unscaled_trial_certified_out != NULL) {
+    *unscaled_trial_certified_out = 0;
   }
   if (options == NULL || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
       options->scale != KLS_SCALE_AUTO || n <= 0) {
@@ -32371,6 +32377,15 @@ static int choose_auto_scale_from_pattern_impl(
          flattening the ordinary diagonal population.  This complements the
          wide-central-range unscaled certificate above and depends only on
          the current values, not the matrix dimensions or source family. */
+      if (unscaled_trial_certified_out != NULL &&
+          row_p90 / row_p10 <= row_p90_p10_limit) {
+        /* The central 80% of rows already fits in the same balanced value
+           range used by the ordinary generic scale chooser.  Only the
+           extreme tail motivates scaling, so a long repeated lifecycle may
+           compare the unscaled specialized executor.  Realized fill/work,
+           pivoting, and a complete residual still arbitrate adoption. */
+        *unscaled_trial_certified_out = 1;
+      }
       free(diag_max);
       free(row_max);
       return 1;
@@ -32402,7 +32417,7 @@ static int choose_auto_scale_from_pattern(UF_long n,
                                           const kls_options *options,
                                           const double *numeric_values) {
   return choose_auto_scale_from_pattern_impl(
-    n, col_ptr, row_idx, options, numeric_values, NULL);
+    n, col_ptr, row_idx, options, numeric_values, NULL, NULL);
 }
 
 static int is_medium_spiked_many_block_scale0_pattern(
@@ -32517,13 +32532,16 @@ static int choose_auto_scale_from_values(kls_solver *solver,
        expensive factor can subsequently compare every KLU scale mode using
        realized fill, work, pivoting, and condition estimates. */
     int value_certified = 0;
+    int trial_certified = 0;
     const int selected = choose_auto_scale_from_pattern_impl(
       solver->n, solver->col_ptr, solver->row_idx, &solver->options,
-      numeric_values, &value_certified);
+      numeric_values, &value_certified, &trial_certified);
     solver->auto_scale_value_certified = value_certified;
+    solver->auto_scale_unscaled_trial_certified = trial_certified;
     return selected;
   }
   solver->auto_scale_value_certified = 0;
+  solver->auto_scale_unscaled_trial_certified = 0;
   if (kls_asymmetric_bounded_degree_direct_metis_symbolic_cycle(solver)) {
     /* The accepted generic direct-METIS symbolic, not a family-sized input
        box, proves that this factor lifecycle requires no row scaling. */
@@ -38311,7 +38329,7 @@ static int kls_generic_nd_trial_start(
   if (candidate->values != NULL) {
     trial->scale_hint = choose_auto_scale_from_pattern_impl(
       candidate->n, candidate->col_ptr, candidate->row_idx, options,
-      candidate->values, NULL);
+      candidate->values, NULL, NULL);
   }
   trial->status = KLS_ERR_ANALYZE_FAILED;
   if (pthread_create(&trial->thread, NULL,
@@ -38416,7 +38434,7 @@ static void kls_maybe_promote_selected_generic_nd(
   if (candidate->values != NULL) {
     scale_hint = choose_auto_scale_from_pattern_impl(
       candidate->n, candidate->col_ptr, candidate->row_idx, options,
-      candidate->values, NULL);
+      candidate->values, NULL, NULL);
   }
   int status = KLS_ERR_ANALYZE_FAILED;
   double trial_seconds = 0.0;
@@ -45897,6 +45915,46 @@ static int kls_certified_unscaled_lifecycle_trial_capable(
     solver->numeric->unz <= (UF_long)UINT16_MAX;
 }
 
+/* A scaled factor can be numerically condition-sensitive yet structurally
+   stable, while scaling also excludes the branch-reduced unscaled EGraph
+   kernels on every later update.  For a long caller-declared lifecycle,
+   compare one unscaled numeric when the trial itself has bounded factor and
+   storage work.  This only authorizes measurement: adoption still requires
+   close realized fill/work/pivoting plus the complete residual probe below,
+   and a low-rcond adoption retains the scaled recovery contract. */
+static int kls_repeated_scaled_egraph_unscaled_trial_enabled(
+  const kls_solver *solver) {
+  if (kls_legacy_shape_policies_enabled() || solver == NULL ||
+      solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->options.scale != KLS_SCALE_AUTO ||
+      !kls_repeated_update_workload(&solver->options) ||
+      solver->options.expected_refactorizations < 64 ||
+      solver->options.threads <= 1 ||
+      !solver->auto_scale_unscaled_trial_certified ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->input_format != KLS_INPUT_CSC ||
+      solver->input_to_csc != NULL || solver->row_perm != NULL ||
+      solver->user_col_perm != NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL || solver->diagonal_equiv_active ||
+      solver->numeric_is_predicted || solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      solver->common.scale <= 0 || solver->numeric->Rs == NULL ||
+      solver->n < 5000u || solver->nnz == 0u ||
+      !(solver->common.rcond > 0.0) ||
+      solver->common.rcond >= sqrt(DBL_EPSILON) ||
+      !(solver->common.flops > 0.0) ||
+      solver->common.flops > 5.0e9 ||
+      solver->common.flops <
+        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+          (double)solver->options.threads) {
+    return 0;
+  }
+  const double fill =
+    (double)(solver->numeric->lnz + solver->numeric->unz);
+  return fill > 0.0 && fill <= 2.0e7 &&
+    getenv("KLS_DISABLE_SCALED_EGRAPH_UNSCALED_TRIAL") == NULL;
+}
+
 static int kls_repeated_scaled_overhead_trial_enabled(
   const kls_solver *solver) {
   if (kls_legacy_shape_policies_enabled() || solver == NULL ||
@@ -45928,7 +45986,8 @@ static int kls_repeated_scaled_overhead_trial_enabled(
     solver->numeric->unz <= (UF_long)UINT16_MAX &&
     scale_pass_work >= 2.0 * (solver->common.flops + fill);
   return horizon > 1.0 && isfinite(horizon) &&
-    (conventional_scale_overhead || packed_row_opportunity);
+    (conventional_scale_overhead || packed_row_opportunity ||
+     kls_repeated_scaled_egraph_unscaled_trial_enabled(solver));
 }
 
 static int should_try_auto_scale(const kls_solver *solver) {
@@ -46237,6 +46296,14 @@ static int maybe_select_auto_scale(kls_solver *solver,
         solver->common.noffdiag + solver->common.noffdiag / 20u + 16u &&
       (!(solver->common.rcond > 0.0) || !(trial_common.rcond > 0.0) ||
        trial_common.rcond >= 0.01 * solver->common.rcond);
+    const int egraph_unscaled_specialization_economics =
+      kls_repeated_scaled_egraph_unscaled_trial_enabled(solver) &&
+      repeated_scaled_overhead_trial && trial_common.scale <= 0 &&
+      trial_numeric->Rs == NULL && trial_fill <= 1.02 * incumbent_fill &&
+      trial_common.flops > 0.0 && solver->common.flops > 0.0 &&
+      trial_common.flops <= 1.05 * solver->common.flops &&
+      trial_common.noffdiag <= solver->common.noffdiag +
+        solver->common.noffdiag / 10u + 16u;
     const int unscaled_overhead_economics =
       (repeated_scaled_overhead_trial && trial_common.scale <= 0 &&
        trial_numeric->Rs == NULL && trial_fill <= 1.02 * incumbent_fill &&
@@ -46245,14 +46312,16 @@ static int maybe_select_auto_scale(kls_solver *solver,
        trial_common.noffdiag <= solver->common.noffdiag &&
        (!(solver->common.rcond > 0.0) || !(trial_common.rcond > 0.0) ||
         trial_common.rcond >= 0.01 * solver->common.rcond)) ||
-      relaxed_unscaled_lifecycle_economics;
+      relaxed_unscaled_lifecycle_economics ||
+      egraph_unscaled_specialization_economics;
     const int condition_sensitive_unscaled_trial =
       solver->common.rcond > 0.0 &&
       solver->common.rcond < sqrt(DBL_EPSILON) &&
       !kls_certified_unscaled_lifecycle_trial_capable(solver);
     const int residual_guarded_unscaled_trial =
       condition_sensitive_unscaled_trial ||
-      relaxed_unscaled_lifecycle_economics;
+      relaxed_unscaled_lifecycle_economics ||
+      egraph_unscaled_specialization_economics;
     int unscaled_overhead_residual_ok = 0;
     if (unscaled_overhead_economics && residual_guarded_unscaled_trial &&
         getenv("KLS_DISABLE_GUARDED_UNSCALED_SCALE_TRIAL") == NULL) {
@@ -48226,6 +48295,17 @@ generic_ordering_tournament:;
         const double amf3_fill_saving = best_score - spec->score;
         const double amf3_work_saving =
           best_symbolic->est_flops - spec->symbolic->est_flops;
+        const int amortized_amf3_work_pareto_refinement = generic_policy &&
+          kls_repeated_update_workload(options) &&
+          best_ordering == KLS_ORDERING_AMMF &&
+          spec->ordering == KLS_ORDERING_AMF3 &&
+          getenv("KLS_DISABLE_AMF3_WORK_PARETO") == NULL &&
+          isfinite(spec->score) && spec->score <= best_score &&
+          spec->symbolic->est_flops > 0.0 &&
+          best_symbolic->est_flops > 0.0 &&
+          spec->symbolic->est_flops <= 0.99 * best_symbolic->est_flops &&
+          isfinite(amf3_work_saving) && amf3_work_saving > 0.0 &&
+          amf3_work_saving * requested_numeric_horizon >= 5.0e8;
         const int amortized_amf3_pareto_refinement = generic_policy &&
           kls_repeated_update_workload(options) &&
           best_ordering == KLS_ORDERING_AMMF &&
@@ -48310,6 +48390,7 @@ generic_ordering_tournament:;
             decisive_work_pareto ||
             repeated_work_for_bounded_fill ||
             minimum_fill_pareto_refinement ||
+            amortized_amf3_work_pareto_refinement ||
             amortized_amf3_pareto_refinement ||
             span_parallel_refinement ||
             matched_decisive_span_refinement ||
@@ -51574,6 +51655,8 @@ static int maybe_factor_generic_btf_value_alternative(
   const int old_auto_scale_checked = solver->auto_scale_checked;
   const int old_auto_scale_value_certified =
     solver->auto_scale_value_certified;
+  const int old_auto_scale_unscaled_trial_certified =
+    solver->auto_scale_unscaled_trial_certified;
   const int old_factor_preps_deferred = solver->factor_preps_deferred;
   kls_separator_analysis old_separator;
   memset(&old_separator, 0, sizeof(old_separator));
@@ -51591,6 +51674,7 @@ static int maybe_factor_generic_btf_value_alternative(
   solver->generic_amf3_span_variant_selected = 0;
   solver->auto_scale_checked = 1;
   solver->auto_scale_value_certified = 1;
+  solver->auto_scale_unscaled_trial_certified = 0;
   kls_invalidate_factor_etree_stats(solver);
   kls_numeric_replaced_invalidate(solver);
   solver->generic_btf_unscaled_recovery_scale = recovery_scale;
@@ -51636,6 +51720,8 @@ static int maybe_factor_generic_btf_value_alternative(
       solver->auto_scale_checked = old_auto_scale_checked;
       solver->auto_scale_value_certified =
         old_auto_scale_value_certified;
+      solver->auto_scale_unscaled_trial_certified =
+        old_auto_scale_unscaled_trial_certified;
       kls_separator_analysis_clear(&solver->separator);
       kls_separator_analysis_move(&solver->separator, &old_separator);
       kls_invalidate_factor_etree_stats(solver);
