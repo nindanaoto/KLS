@@ -589,6 +589,8 @@ struct kls_solver {
   int32_t *refactor_input_pos32;
   int32_t *refactor_input_oldrow32;
   int32_t *refactor_input_user_pos32;
+  UF_long *refactor_scale_row_ptr;
+  int32_t *refactor_scale_input_pos32;
   uint32_t *lean_btf_off_input_pos;
   uint32_t *lean_btf_off_user_pos;
   int refactor_direct_user_values_active;
@@ -2748,6 +2750,9 @@ typedef struct kls_egraph_refactor_shared {
   const double *rs;
   int check_pivots;
   int scale;
+  int parallel_scale_rows;
+  int parallel_scale_method;
+  const double *parallel_scale_input_values;
   kls_egraph_refactor_kernel kernel;
   int thread_count;
   atomic_int stop;
@@ -18463,6 +18468,8 @@ static void free_refactor_map(kls_solver *solver) {
   free(solver->refactor_input_pos32);
   free(solver->refactor_input_oldrow32);
   free(solver->refactor_input_user_pos32);
+  free(solver->refactor_scale_row_ptr);
+  free(solver->refactor_scale_input_pos32);
   free(solver->lean_btf_off_input_pos);
   free(solver->lean_btf_off_user_pos);
   free(solver->refactor_block_start);
@@ -18474,6 +18481,8 @@ static void free_refactor_map(kls_solver *solver) {
   solver->refactor_input_pos32 = NULL;
   solver->refactor_input_oldrow32 = NULL;
   solver->refactor_input_user_pos32 = NULL;
+  solver->refactor_scale_row_ptr = NULL;
+  solver->refactor_scale_input_pos32 = NULL;
   solver->lean_btf_off_input_pos = NULL;
   solver->lean_btf_off_user_pos = NULL;
   solver->refactor_direct_user_values_active = 0;
@@ -60369,6 +60378,58 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
   solver->refactor_input_oldrow32 = input_oldrow32;
   solver->refactor_map_indices32_count = solver->nnz;
   solver->refactor_map_index32_enabled = 1;
+  return 1;
+}
+
+/* Transpose only the input-position metadata, not the matrix values.  Rows
+   are disjoint scale reductions and positions remain in original CSC order,
+   preserving KLU's summation order exactly while exposing all rows to the
+   already-resident numeric worker crew. */
+static int kls_build_refactor_scale_rows(kls_solver *solver) {
+  if (solver == NULL || solver->row_idx == NULL || solver->n == 0u ||
+      solver->nnz == 0u || solver->nnz > (UF_long)INT32_MAX ||
+      solver->n > (UF_long)(SIZE_MAX / sizeof(UF_long)) - 1u ||
+      solver->nnz > (UF_long)(SIZE_MAX / sizeof(int32_t))) {
+    return 0;
+  }
+  if (solver->refactor_scale_row_ptr != NULL &&
+      solver->refactor_scale_input_pos32 != NULL) {
+    return 1;
+  }
+
+  UF_long *row_ptr = (UF_long *)calloc(
+    (size_t)solver->n + 1u, sizeof(*row_ptr));
+  UF_long *cursor = (UF_long *)malloc(
+    (size_t)solver->n * sizeof(*cursor));
+  int32_t *input_pos = (int32_t *)malloc(
+    (size_t)solver->nnz * sizeof(*input_pos));
+  if (row_ptr == NULL || cursor == NULL || input_pos == NULL) {
+    free(row_ptr);
+    free(cursor);
+    free(input_pos);
+    return 0;
+  }
+  for (UF_long p = 0u; p < solver->nnz; ++p) {
+    const UF_long row = solver->row_idx[p];
+    if (row >= solver->n) {
+      free(row_ptr);
+      free(cursor);
+      free(input_pos);
+      return 0;
+    }
+    row_ptr[row + 1u]++;
+  }
+  for (UF_long row = 0u; row < solver->n; ++row) {
+    row_ptr[row + 1u] += row_ptr[row];
+    cursor[row] = row_ptr[row];
+  }
+  for (UF_long p = 0u; p < solver->nnz; ++p) {
+    const UF_long row = solver->row_idx[p];
+    input_pos[cursor[row]++] = (int32_t)p;
+  }
+  free(cursor);
+  solver->refactor_scale_row_ptr = row_ptr;
+  solver->refactor_scale_input_pos32 = input_pos;
   return 1;
 }
 
@@ -116111,6 +116172,35 @@ static KLS_ALWAYS_INLINE void kls_egraph_cluster_barrier_wait(
   }
 }
 
+static UF_long kls_egraph_scale_row_boundary(
+  const UF_long *row_ptr,
+  UF_long n,
+  UF_long nnz,
+  int part,
+  int parts) {
+  if (part <= 0) {
+    return 0u;
+  }
+  if (part >= parts) {
+    return n;
+  }
+  const UF_long total = n + nnz;
+  const UF_long target =
+    (total / (UF_long)parts) * (UF_long)part +
+    ((total % (UF_long)parts) * (UF_long)part) / (UF_long)parts;
+  UF_long low = 0u;
+  UF_long high = n;
+  while (low < high) {
+    const UF_long middle = low + (high - low) / 2u;
+    if (row_ptr[middle] + middle < target) {
+      low = middle + 1u;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
 static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL) {
     return;
@@ -116119,6 +116209,46 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   const kls_solver *solver = shared->solver;
   if (solver == NULL) {
     return;
+  }
+
+  if (shared->parallel_scale_rows) {
+    const UF_long *restrict row_ptr = solver->refactor_scale_row_ptr;
+    const int32_t *restrict input_pos =
+      solver->refactor_scale_input_pos32;
+    const double *restrict values = shared->parallel_scale_input_values;
+    double *restrict rs = (double *)shared->rs;
+    if (row_ptr == NULL || input_pos == NULL || values == NULL || rs == NULL) {
+      if (worker->tid == 0) {
+        kls_egraph_refactor_record_invalid(shared);
+      }
+      kls_egraph_cluster_barrier_wait(shared);
+      return;
+    }
+    const UF_long row_begin = kls_egraph_scale_row_boundary(
+      row_ptr, solver->n, solver->nnz, worker->tid,
+      shared->thread_count);
+    const UF_long row_end = kls_egraph_scale_row_boundary(
+      row_ptr, solver->n, solver->nnz, worker->tid + 1,
+      shared->thread_count);
+    if (shared->parallel_scale_method == 1) {
+      for (UF_long row = row_begin; row < row_end; ++row) {
+        double sum = 0.0;
+        for (UF_long p = row_ptr[row]; p < row_ptr[row + 1u]; ++p) {
+          sum += fabs(values[(UF_long)input_pos[p]]);
+        }
+        rs[row] = sum != 0.0 ? sum : 1.0;
+      }
+    } else {
+      for (UF_long row = row_begin; row < row_end; ++row) {
+        double maximum = 0.0;
+        for (UF_long p = row_ptr[row]; p < row_ptr[row + 1u]; ++p) {
+          maximum = fmax(maximum,
+                         fabs(values[(UF_long)input_pos[p]]));
+        }
+        rs[row] = maximum != 0.0 ? maximum : 1.0;
+      }
+    }
+    kls_egraph_cluster_barrier_wait(shared);
   }
 
   UF_long cluster_levels = shared->cluster_level_count;
@@ -120566,7 +120696,21 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const int retain_mega_hub_row_scale =
     kls_legacy_shape_policies_enabled() &&
     kls_near_symmetric_mega_hub_amd_factor_cycle(solver);
+  const char *parallel_scale_env =
+    getenv("KLS_ENABLE_EGRAPH_PARALLEL_SCALE_ROWS");
+  const int parallel_scale_requested =
+    parallel_scale_env != NULL && parallel_scale_env[0] != '\0'
+      ? strcmp(parallel_scale_env, "0") != 0
+      : kls_repeated_update_workload(&solver->options) &&
+        solver->options.expected_refactorizations >= 16 &&
+        solver->n >= (UF_long)(4096 * thread_count) &&
+        solver->nnz >= (UF_long)(32768 * thread_count);
+  const int parallel_scale_rows =
+    common->scale > 0 && !retain_mega_hub_row_scale &&
+    parallel_scale_requested &&
+    kls_build_refactor_scale_rows(solver);
   if (common->scale > 0 && !retain_mega_hub_row_scale &&
+      !parallel_scale_rows &&
       !trilinos_klu_l_scale((UF_long)common->scale, solver->n,
                             solver->col_ptr, solver->row_idx,
                             numeric_values, solver->numeric->Rs, NULL,
@@ -120973,6 +121117,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->rs = solver->numeric->Rs;
   shared->check_pivots = check_pivots;
   shared->scale = (int)common->scale;
+  shared->parallel_scale_rows = parallel_scale_rows;
+  shared->parallel_scale_method = (int)common->scale;
+  shared->parallel_scale_input_values = numeric_values;
   shared->kernel = selected_kernel;
   shared->thread_count = thread_count;
   shared->snode_run_end = kls_refactor_snode_run_end(solver);
