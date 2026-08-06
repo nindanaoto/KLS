@@ -814,6 +814,7 @@ struct kls_solver {
   int lean_reaudit_row_arm;
   double lean_reaudit_row_min;
   int lean_user_values_active;
+  int lean_deferred_value_prep_active;
   int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
                           -1 declined (panels torn down) */
   int padded_pending;  /* probe refactors remaining (8, alternating) */
@@ -79453,6 +79454,17 @@ static int kls_direct_user_value_maps_capable(const kls_solver *solver) {
     solver->numeric->Rs == NULL && solver->nnz <= (UF_long)UINT16_MAX;
 }
 
+static int kls_deferred_lean_value_prep_capable(
+  const kls_solver *solver) {
+  return solver != NULL && solver->values != NULL &&
+    solver->input_to_csc != NULL &&
+    solver->prepared_value_input_pos != NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    solver->common.scale <= 0 && solver->numeric != NULL &&
+    solver->numeric->Rs == NULL &&
+    kls_repeated_update_workload(&solver->options);
+}
+
 static int kls_build_compact_match_direct_value_maps(kls_solver *solver) {
   const int direct_capable =
     kls_direct_user_value_maps_capable(solver);
@@ -81172,6 +81184,54 @@ static void kls_lean_parallel_worker_run(
   if (!solver->lean_parallel_scratch_clean || clean_scratch_disabled) {
     memset(worker->x, 0, (size_t)solver->n * sizeof(*worker->x));
   }
+  if (shared->value_prep_input != NULL &&
+      shared->value_prep_output != NULL &&
+      shared->value_prep_input_to_csc != NULL) {
+    const UF_long begin =
+      (shared->value_prep_nnz * (UF_long)worker->tid) /
+      (UF_long)shared->thread_count;
+    const UF_long end =
+      (shared->value_prep_nnz * (UF_long)(worker->tid + 1)) /
+      (UF_long)shared->thread_count;
+    const double *restrict input = shared->value_prep_input;
+    double *restrict output = shared->value_prep_output;
+    const UF_long *restrict input_pos =
+      shared->value_prep_input_to_csc;
+    for (UF_long p = begin; p < end; ++p) {
+      output[p] = input[input_pos[p]];
+    }
+    pthread_barrier_wait(&shared->barrier);
+    const UF_long prefix = solver->lean_scalar_btf_prefix;
+    const UF_long *restrict in_ptr = solver->row_refactor_input_ptr;
+    const UF_long *restrict in_cols = solver->row_refactor_input_cols;
+    const UF_long *restrict in_pos = solver->row_refactor_input_pos;
+    double *restrict udiag = (double *)solver->numeric->Udiag;
+    for (UF_long row = (UF_long)worker->tid; row < prefix;
+         row += (UF_long)shared->thread_count) {
+      int found = 0;
+      double pivot = 0.0;
+      for (UF_long p = in_ptr[row]; p < in_ptr[row + 1u]; ++p) {
+        if (in_cols[p] == row) {
+          pivot = output[in_pos[p]];
+          found = 1;
+          break;
+        }
+      }
+      if (!found) {
+        kls_egraph_refactor_record_invalid(shared);
+        break;
+      }
+      udiag[row] = pivot;
+      if (pivot == 0.0) {
+        kls_egraph_refactor_record_singular(shared, row, row);
+      }
+    }
+    pthread_barrier_wait(&shared->barrier);
+    if (shared->invalid ||
+        (shared->singular && solver->common.halt_if_singular)) {
+      return;
+    }
+  }
   const unsigned int generation = shared->pipeline_generation;
   const UF_long *restrict rows = shared->lean_rows != NULL
     ? shared->lean_rows : solver->row_refactor_level_rows;
@@ -81505,6 +81565,9 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       kls_prepare_lean_grouped_done(solver, thread_count, rows);
     solver->lean_parallel_owner_thread_count = thread_count;
   }
+  const int deferred_value_prep =
+    solver->lean_deferred_value_prep_active && rs == NULL &&
+    kls_deferred_lean_value_prep_capable(solver);
   kls_egraph_refactor_shared *shared = &pool->shared;
   pthread_mutex_lock(&shared->lock);
   if (pool->active_workers != 0) {
@@ -81512,7 +81575,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     return -1;
   }
   shared->solver = solver;
-  shared->values = numeric_values;
+  shared->values = deferred_value_prep ? solver->values : numeric_values;
   shared->rs = rs;
   shared->thread_count = thread_count;
   shared->lean_done = done;
@@ -81527,8 +81590,16 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
      solver->row_refactor_input_user_pos != NULL &&
      solver->compact_match_offdiag_user_pos != NULL);
   shared->lean_parallel_offdiag_mode =
-    !solver->lean_user_values_active &&
-    kls_parallel_offdiag_is_profitable(solver);
+    deferred_value_prep ||
+    (!solver->lean_user_values_active &&
+     kls_parallel_offdiag_is_profitable(solver));
+  shared->value_prep_input =
+    deferred_value_prep ? numeric_values : NULL;
+  shared->value_prep_output =
+    deferred_value_prep ? solver->values : NULL;
+  shared->value_prep_input_to_csc =
+    deferred_value_prep ? solver->prepared_value_input_pos : NULL;
+  shared->value_prep_nnz = deferred_value_prep ? solver->nnz : 0u;
   const int symmetric_scalar_fringe_lean_mode =
     !shared->lean_compact_match_mode &&
     ((legacy_shape_policies &&
@@ -81644,31 +81715,35 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     }
     const UF_long prefix = solver->symbolic->R[block];
     if (prefix >= 64u) {
-      const UF_long *restrict in_ptr = solver->row_refactor_input_ptr;
-      const UF_long *restrict in_cols = solver->row_refactor_input_cols;
-      const UF_long *restrict in_pos = solver->row_refactor_input_pos;
-      double *restrict udiag = (double *)solver->numeric->Udiag;
-      for (UF_long row = 0u; row < prefix; ++row) {
-        int found = 0;
-        double pivot = 0.0;
-        for (UF_long p = in_ptr[row]; p < in_ptr[row + 1u]; ++p) {
-          if (in_cols[p] == row) {
-            pivot = numeric_values[in_pos[p]];
-            found = 1;
+      if (deferred_value_prep) {
+        solver->lean_scalar_btf_prefix = prefix;
+      } else {
+        const UF_long *restrict in_ptr = solver->row_refactor_input_ptr;
+        const UF_long *restrict in_cols = solver->row_refactor_input_cols;
+        const UF_long *restrict in_pos = solver->row_refactor_input_pos;
+        double *restrict udiag = (double *)solver->numeric->Udiag;
+        for (UF_long row = 0u; row < prefix; ++row) {
+          int found = 0;
+          double pivot = 0.0;
+          for (UF_long p = in_ptr[row]; p < in_ptr[row + 1u]; ++p) {
+            if (in_cols[p] == row) {
+              pivot = numeric_values[in_pos[p]];
+              found = 1;
+              break;
+            }
+          }
+          if (!found) {
+            kls_egraph_refactor_record_invalid(shared);
             break;
           }
+          udiag[row] = pivot;
+          if (pivot == 0.0) {
+            kls_egraph_refactor_record_singular(shared, row, row);
+          }
         }
-        if (!found) {
-          kls_egraph_refactor_record_invalid(shared);
-          break;
+        if (!shared->invalid) {
+          solver->lean_scalar_btf_prefix = prefix;
         }
-        udiag[row] = pivot;
-        if (pivot == 0.0) {
-          kls_egraph_refactor_record_singular(shared, row, row);
-        }
-      }
-      if (!shared->invalid) {
-        solver->lean_scalar_btf_prefix = prefix;
       }
     }
   }
@@ -81739,6 +81814,10 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_row_values_mode = 0;
   shared->lean_fused_scale_mode = 0;
   shared->row_refactor_defer_value_scatter = 0;
+  shared->value_prep_input = NULL;
+  shared->value_prep_output = NULL;
+  shared->value_prep_input_to_csc = NULL;
+  shared->value_prep_nnz = 0u;
   shared->lean_done = NULL;
   shared->lean_rows = NULL;
   shared->pipeline_generation = 0u;
@@ -81823,14 +81902,19 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     (void)kls_build_lean_row_i16_indices(solver);
   }
   const double trace_pattern = trace_phases ? kls_now_seconds() : 0.0;
+  const int deferred_value_map_ready =
+    solver->input_to_csc != NULL && solver->values != NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    !scaled && kls_repeated_update_workload(&solver->options) &&
+    kls_build_prepared_value_input_pos(solver);
   const int direct_value_maps_ready =
     kls_build_compact_match_direct_value_maps(solver);
   const double trace_ready = trace_phases ? kls_now_seconds() : 0.0;
   if (trace_phases) {
     fprintf(stderr,
-            "KLS lean direct maps: ready=%d input=%p offdiag=%p "
+            "KLS lean direct maps: ready=%d deferred=%d input=%p offdiag=%p "
             "generic_map=%p\n",
-            direct_value_maps_ready,
+            direct_value_maps_ready, deferred_value_map_ready,
             (void *)solver->row_refactor_input_user_pos,
             (void *)solver->compact_match_offdiag_user_pos,
             (void *)solver->refactor_input_pos);
@@ -81888,8 +81972,9 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   }
   const char *parallel_gate = getenv("KLS_ENABLE_LEAN_PARALLEL");
   const int parallel_direct_offdiag =
-    solver->lean_user_values_active &&
-    solver->compact_match_offdiag_user_pos != NULL &&
+    (solver->lean_deferred_value_prep_active ||
+     (solver->lean_user_values_active &&
+      solver->compact_match_offdiag_user_pos != NULL)) &&
     solver->options.threads > 1 &&
     solver->n >= 800u && solver->common.flops >= 100000.0 &&
     solver->row_refactor_level_max_width >=
@@ -81949,11 +82034,48 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
       kls_lean_parallel_refactor_run(
         solver, numeric_values, rs, fused_scale_mode);
     solver->lean_parallel_last_used = parallel_status > 0;
+    if (parallel_status == 0 &&
+        solver->lean_deferred_value_prep_active) {
+      /* A synchronized gather changes the launch order seen by the retained
+         dependency executor.  Rare valid factors reject that launch even
+         though the gathered internal frame is exact.  Retry from the
+         ordinary prepared frame so this optimization remains an optional
+         executor fast path, not a new numerical contract or matrix policy. */
+      double *prepared = NULL;
+      if (prepare_numeric_values(solver, numeric_values, &prepared) != KLS_OK ||
+          prepared == NULL) {
+        common->status = TRILINOS_KLU_INVALID;
+        return 0;
+      }
+      numeric_values = prepared;
+      solver->lean_deferred_value_prep_active = 0;
+      common->status = TRILINOS_KLU_OK;
+      common->numerical_rank = KLS_KLU_EMPTY;
+      common->singular_col = KLS_KLU_EMPTY;
+      if (!kls_refresh_row_refactor_offdiag_values(
+            solver, numeric_values)) {
+        common->status = TRILINOS_KLU_INVALID;
+        return 0;
+      }
+      parallel_status = kls_lean_parallel_refactor_run(
+        solver, numeric_values, rs, fused_scale_mode);
+      solver->lean_parallel_last_used = parallel_status > 0;
+    }
     if (parallel_status == 0) {
       return 0;
     }
   }
   if (parallel_status < 0) {
+    if (solver->lean_deferred_value_prep_active) {
+      double *prepared = NULL;
+      if (prepare_numeric_values(solver, numeric_values, &prepared) != KLS_OK ||
+          prepared == NULL) {
+        common->status = TRILINOS_KLU_INVALID;
+        return 0;
+      }
+      numeric_values = prepared;
+      solver->lean_deferred_value_prep_active = 0;
+    }
     if (fused_scale_mode &&
         !trilinos_klu_l_scale((UF_long)common->scale, n,
                               solver->col_ptr, solver->row_idx,
@@ -167370,6 +167492,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   solver->diagonal_equiv_active = 0;
   double *numeric_values = NULL;
   solver->lean_user_values_active = 0;
+  solver->lean_deferred_value_prep_active = 0;
   solver->refactor_direct_user_values_active = 0;
   const int compact_match_maps_ready =
     solver->row_refactor_input_user_pos != NULL &&
@@ -167386,6 +167509,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
       kls_compact_missing_diagonal_matched_factor_profile(solver)) ||
      (!legacy_shape_policies &&
       kls_direct_user_value_maps_capable(solver)));
+  const int deferred_lean_value_prep =
+    !compact_match_direct_values && solver->lean_choice > 0 &&
+    (!generic_lean_reaudit || solver->lean_reaudit_state == 0 ||
+     solver->lean_reaudit_state == 5) &&
+    kls_deferred_lean_value_prep_capable(solver) &&
+    getenv("KLS_DISABLE_DEFERRED_LEAN_VALUE_PREP") == NULL;
   const int pts_direct_values =
     kls_pts_direct_user_values_enabled(solver) &&
     solver->lean_choice < 0 && solver->pts != NULL &&
@@ -167435,6 +167564,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (compact_match_direct_values) {
     numeric_values = (double *)values;
     solver->lean_user_values_active = 1;
+  } else if (deferred_lean_value_prep) {
+    numeric_values = (double *)values;
+    solver->lean_deferred_value_prep_active = 1;
   } else if (diagonal_equiv_values != NULL) {
     numeric_values = diagonal_equiv_values;
   } else if (pts_direct_values || symmetric_partial_diagonal_direct_values ||
@@ -167906,9 +168038,26 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   const int automatic_lean_attempt =
     solver->lean_probe_arm > 0 && getenv("KLS_LEAN_CHOICE") == NULL;
+  if (solver->lean_deferred_value_prep_active &&
+      solver->lean_probe_arm <= 0) {
+    double *prepared = NULL;
+    status = prepare_numeric_values(solver, numeric_values, &prepared);
+    if (status != KLS_OK || prepared == NULL) {
+      return status != KLS_OK ? status : KLS_ERR_REFACTOR_FAILED;
+    }
+    numeric_values = prepared;
+    solver->lean_deferred_value_prep_active = 0;
+  }
   const double start = kls_now_seconds();
   UF_long ok = kls_parallel_refactor(solver, numeric_values, 0);
   double elapsed = kls_now_seconds() - start;
+  if (deferred_lean_value_prep && solver->values != NULL) {
+    /* The lean workers completed the deferred user->internal gather before
+       touching the factor.  Any adaptive restore or challenger later in
+       this same public call must consume that prepared frame. */
+    numeric_values = solver->values;
+    solver->lean_deferred_value_prep_active = 0;
+  }
   if ((generic_hoisted_snode_lean_predicted || automatic_lean_attempt) &&
       (!ok || solver->common.status < 0)) {
     /* Every automatic lean choice is a performance prediction, whether it
@@ -168206,11 +168355,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->refactor_direct_user_values_active = 0;
     elapsed = kls_now_seconds() - start;
   }
-  if (symmetric_partial_diagonal_direct_values && solver->values != NULL) {
-    /* The direct mapped kernels fused user->internal preparation into their
-       scatter and refreshed solver->values entrywise.  Everything below this
-       point expects the prepared internal frame. */
+  if ((symmetric_partial_diagonal_direct_values ||
+       deferred_lean_value_prep) &&
+      solver->values != NULL) {
+    /* The mapped kernels or the lean pool have refreshed solver->values in
+       the internal CSC frame.  Everything below expects that frame. */
     numeric_values = solver->values;
+    solver->lean_deferred_value_prep_active = 0;
   }
   int generic_hoisted_snode_lean_viable = 0;
   if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
