@@ -49358,6 +49358,79 @@ static int choose_symbolic_for_pattern(UF_long n,
           amd_symbolic->lnz <= 2.0 * amd_symbolic->unz &&
           amd_symbolic->unz <= 2.0 * amd_symbolic->lnz;
         if (bounded) {
+          /* The inexpensive one-block proposal is a setup shortcut, not a
+             proof that BTF loses over the requested numeric lifecycle.  If
+             the ordinary AMD/BTF symbolic is work-Pareto and its projected
+             recurring savings repay both its quotient-graph analysis and a
+             numeric trial, retain it for the value-time residual tournament.
+             This compares computed representations and caller work only; it
+             does not classify the input by dimensions or sparsity shape. */
+          kls_pattern_candidate *capture =
+            kls_generic_btf_capture_candidate;
+          if (capture != NULL &&
+              capture->generic_btf_value_symbolic == NULL &&
+              getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL) {
+            kls_options btf_options = *options;
+            btf_options.ordering = KLS_ORDERING_AMD;
+            btf_options.use_btf = 1;
+            trilinos_klu_l_symbolic *btf_symbolic = NULL;
+            trilinos_klu_l_common btf_common;
+            kls_separator_analysis btf_separator;
+            memset(&btf_separator, 0, sizeof(btf_separator));
+            const int btf_status = analyze_with_ordering(
+              n, col_ptr, row_idx, &btf_options, KLS_ORDERING_AMD,
+              &btf_symbolic, &btf_common, &btf_separator);
+            const double btf_score = btf_symbolic != NULL
+              ? symbolic_score(btf_symbolic) : DBL_MAX;
+            const double recurring_frames =
+              (double)options->expected_refactorizations;
+            const double solve_frames =
+              (double)options->expected_solves;
+            const double saved_fill = isfinite(btf_score)
+              ? fmax(0.0, amd_score - btf_score) : 0.0;
+            const double saved_flops = btf_symbolic != NULL
+              ? fmax(0.0,
+                     amd_symbolic->est_flops - btf_symbolic->est_flops)
+              : 0.0;
+            const double projected_savings =
+              recurring_frames * (saved_fill + saved_flops) +
+              solve_frames * saved_fill;
+            const double comparison_work = btf_symbolic != NULL
+              ? quotient_pair_work + btf_score : DBL_MAX;
+            const int retain_btf = btf_status == KLS_OK &&
+              btf_symbolic != NULL && btf_symbolic->do_btf &&
+              btf_symbolic->nblocks > 1u &&
+              btf_symbolic->maxblock < n &&
+              isfinite(btf_score) && btf_score > 0.0 &&
+              btf_score <= amd_score &&
+              btf_symbolic->est_flops > 0.0 &&
+              btf_symbolic->est_flops <= amd_symbolic->est_flops &&
+              isfinite(projected_savings) &&
+              isfinite(comparison_work) && comparison_work > 0.0 &&
+              projected_savings >= 2.0 * comparison_work;
+            if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+              fprintf(stderr,
+                      "KLS bounded AMD BTF challenger: fill %.4e/%.4e "
+                      "flops %.4e/%.4e savings %.4e cost %.4e -> %s\n",
+                      btf_score, amd_score,
+                      btf_symbolic != NULL
+                        ? btf_symbolic->est_flops : DBL_MAX,
+                      amd_symbolic->est_flops, projected_savings,
+                      comparison_work, retain_btf ? "retain" : "reject");
+            }
+            if (retain_btf) {
+              capture->generic_btf_value_symbolic = btf_symbolic;
+              capture->generic_btf_value_common = btf_common;
+              capture->generic_btf_value_ordering = KLS_ORDERING_AMD;
+              kls_separator_analysis_move(
+                &capture->generic_btf_value_separator, &btf_separator);
+            } else {
+              if (btf_symbolic != NULL) {
+                trilinos_klu_l_free_symbolic(&btf_symbolic, &btf_common);
+              }
+              kls_separator_analysis_clear(&btf_separator);
+            }
+          }
           *symbolic_out = amd_symbolic;
           *common_out = amd_common;
           *selected_ordering_out = KLS_ORDERING_AMD;
@@ -50439,6 +50512,18 @@ static double kls_candidate_lifecycle_score(
     options->expected_refactorizations > 0
       ? (double)options->expected_refactorizations : 0.0;
   double score = (1.0 + refactors) * candidate->score;
+  if (candidate->generic_btf_value_symbolic != NULL) {
+    const double alternative_score =
+      symbolic_score(candidate->generic_btf_value_symbolic);
+    if (isfinite(alternative_score) && alternative_score > 0.0) {
+      /* A retained representation is a real factor-time candidate, so the
+         orientation decision must price the cheapest representation it can
+         actually publish.  Otherwise a no-BTF bootstrap can choose one
+         coordinate frame while its BTF challenger proves the other frame is
+         cheaper.  Numeric fill and residual gates remain authoritative. */
+      score = fmin(score, (1.0 + refactors) * alternative_score);
+    }
+  }
   if (refactors > 0.0 && candidate->input_to_csc != NULL) {
     score += refactors * (3.0 / 8.0) * (double)candidate->nnz;
   }
@@ -51582,6 +51667,11 @@ static int kls_generic_hoisted_snode_worker_capable(
 static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver);
 static int kls_build_row_refactor_pattern(kls_solver *solver,
                                           int compact_only);
+typedef struct kls_lean_prewarm_job {
+  kls_solver *solver;
+  int thread_count;
+} kls_lean_prewarm_job;
+static void *kls_lean_prewarm_main(void *arg);
 
 /* The structural tournament has already paid for both AMD representations.
    If it retained a bounded BTF alternative, use the first value frame to
@@ -51608,9 +51698,7 @@ static int maybe_factor_generic_btf_value_alternative(
     solver->options.use_btf &&
     kls_repeated_update_workload(&solver->options) &&
     !solver->solve_recovery_active && solver->numeric == NULL &&
-    solver->orientation == KLS_ORIENTATION_NORMAL &&
     solver->input_format == KLS_INPUT_CSC &&
-    solver->input_to_csc == NULL && solver->values == NULL &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
     solver->block_order_perm == NULL && !solver->diagonal_equiv_active &&
@@ -51641,6 +51729,32 @@ static int maybe_factor_generic_btf_value_alternative(
       0.75 * (double)incumbent_profile.weak_1e2;
   const double candidate_symbolic_fill =
     candidate_symbolic->lnz + candidate_symbolic->unz;
+  const double incumbent_symbolic_fill = symbolic_score(solver->symbolic);
+  const double recurring_frames =
+    (double)solver->options.expected_refactorizations;
+  const double solve_frames = (double)solver->options.expected_solves;
+  const double symbolic_saved_fill =
+    fmax(0.0, incumbent_symbolic_fill - candidate_symbolic_fill);
+  const double symbolic_saved_flops =
+    fmax(0.0,
+         solver->symbolic->est_flops - candidate_symbolic->est_flops);
+  const double projected_symbolic_savings =
+    recurring_frames * (symbolic_saved_fill + symbolic_saved_flops) +
+    solve_frames * symbolic_saved_fill;
+  const double symbolic_trial_work =
+    candidate_symbolic_fill + candidate_symbolic->est_flops;
+  const int repeated_symbolic_pareto_proposal =
+    incumbent_symbolic_fill > 0.0 &&
+    isfinite(incumbent_symbolic_fill) &&
+    candidate_symbolic_fill > 0.0 &&
+    isfinite(candidate_symbolic_fill) &&
+    candidate_symbolic_fill <= incumbent_symbolic_fill &&
+    solver->symbolic->est_flops > 0.0 &&
+    candidate_symbolic->est_flops > 0.0 &&
+    candidate_symbolic->est_flops <= solver->symbolic->est_flops &&
+    isfinite(projected_symbolic_savings) &&
+    isfinite(symbolic_trial_work) && symbolic_trial_work > 0.0 &&
+    projected_symbolic_savings >= 2.0 * symbolic_trial_work;
   const int hoisted_row_executor_proposal =
     getenv("KLS_DISABLE_GENERIC_BTF_HOISTED_ROW_RECOVERY") == NULL &&
     solver->n >= 512u && solver->n <= 131072u &&
@@ -51649,17 +51763,20 @@ static int maybe_factor_generic_btf_value_alternative(
     candidate_symbolic->est_flops > 0.0 &&
     candidate_symbolic->est_flops >=
       32.0 * candidate_symbolic_fill;
-  if (!decisive_value_strength && !hoisted_row_executor_proposal) {
+  if (!decisive_value_strength && !repeated_symbolic_pareto_proposal &&
+      !hoisted_row_executor_proposal) {
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
       fprintf(stderr,
               "KLS generic BTF values: missing=%ld/%ld "
-              "weak1e3=%ld/%ld weak1e2=%ld/%ld -> reject\n",
+              "weak1e3=%ld/%ld weak1e2=%ld/%ld "
+              "symbolic_savings=%.4e/%.4e -> reject\n",
               (long)candidate_profile.missing,
               (long)incumbent_profile.missing,
               (long)candidate_profile.weak_1e3,
               (long)incumbent_profile.weak_1e3,
               (long)candidate_profile.weak_1e2,
-              (long)incumbent_profile.weak_1e2);
+              (long)incumbent_profile.weak_1e2,
+              projected_symbolic_savings, symbolic_trial_work);
     }
     kls_discard_generic_btf_value_alternative(solver);
     *elapsed += kls_now_seconds() - decision_start;
@@ -51669,18 +51786,41 @@ static int maybe_factor_generic_btf_value_alternative(
   trilinos_klu_l_common candidate_common =
     solver->generic_btf_value_common;
   const int recovery_scale = (int)solver->common.scale;
-  candidate_common.scale = -1;
+  /* A representation admitted by recurring symbolic Pareto economics uses
+     AUTO's value-selected scale.  Its purpose is lower recurring structure,
+     not an unscaled-conditioning gamble.  Pivot-strength and row-executor
+     recoveries retain the historical unscaled trial and its residual guard. */
+  candidate_common.scale = repeated_symbolic_pareto_proposal
+    ? recovery_scale : -1;
   candidate_common.tol = solver->common.tol;
   candidate_common.halt_if_singular = solver->common.halt_if_singular;
   candidate_common.kls_static_perturb = solver->common.kls_static_perturb;
   candidate_common.kls_zero_pivot_replacement =
     solver->common.kls_zero_pivot_replacement;
+  pthread_t prewarm_thread;
+  kls_lean_prewarm_job prewarm_job;
+  int prewarm_active = 0;
+  if (repeated_symbolic_pareto_proposal && solver->options.threads > 1 &&
+      solver->egraph_pool == NULL &&
+      getenv("KLS_DISABLE_GENERIC_BTF_LEAN_PREWARM") == NULL) {
+    /* The admitted symbolic has already proved enough recurring savings to
+       repay its numeric trial.  Build the representation-independent worker
+       crew beside that serial KLU factor so a successful candidate does not
+       move thread startup onto its first public update. */
+    prewarm_job.solver = solver;
+    prewarm_job.thread_count = solver->options.threads;
+    prewarm_active = pthread_create(
+      &prewarm_thread, NULL, kls_lean_prewarm_main, &prewarm_job) == 0;
+  }
   const double trial_start = kls_now_seconds();
   trilinos_klu_l_numeric *candidate_numeric = trilinos_klu_l_factor(
     solver->col_ptr, solver->row_idx,
     (double *)(uintptr_t)numeric_values, candidate_symbolic,
     &candidate_common);
   const double factor_seconds = kls_now_seconds() - trial_start;
+  if (prewarm_active) {
+    pthread_join(prewarm_thread, NULL);
+  }
   int candidate_ok = candidate_numeric != NULL &&
     candidate_common.status >= TRILINOS_KLU_OK &&
     candidate_common.status != TRILINOS_KLU_SINGULAR;
@@ -51793,14 +51933,16 @@ static int maybe_factor_generic_btf_value_alternative(
   solver->auto_scale_unscaled_trial_certified = 0;
   kls_invalidate_factor_etree_stats(solver);
   kls_numeric_replaced_invalidate(solver);
-  solver->generic_btf_unscaled_recovery_scale = recovery_scale;
+  solver->generic_btf_unscaled_recovery_scale =
+    candidate_common.scale <= 0 ? recovery_scale : 0;
   /* The first factor's true residual certifies its absolute conditioning
      regime.  Future value frames may remain in that regime; recover only
      after the cheap diagonal estimate deteriorates by a full factor of
      eight, rather than imposing a matrix-independent absolute cutoff on an
      already accurate ill-conditioned solve. */
   solver->generic_btf_unscaled_rcond_floor =
-    fmax(DBL_MIN, 0.125 * candidate_common.rcond);
+    candidate_common.scale <= 0
+      ? fmax(DBL_MIN, 0.125 * candidate_common.rcond) : 0.0;
   solver->numeric_full_factor_seconds = factor_seconds;
   solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
   solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
@@ -81161,18 +81303,21 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
   const UF_long *restrict pnum = solver->numeric->Pnum;
   const UF_long *restrict in_ptr = solver->row_refactor_input_ptr;
   const uint32_t *restrict in_ptr32 = solver->row_refactor_input_ptr32;
+  const uint16_t *restrict in_ptr16 = solver->row_refactor_input_ptr16;
   const UF_long *restrict in_cols = solver->row_refactor_input_cols;
   const UF_long *restrict in_pos = solver->row_refactor_input_pos;
   const uint32_t *restrict in_packed =
     solver->row_refactor_input_col_user32;
   const UF_long *restrict l_ptr = solver->row_refactor_l_ptr;
   const uint32_t *restrict l_ptr32 = solver->row_refactor_l_ptr32;
+  const uint16_t *restrict l_ptr16 = solver->row_refactor_l_ptr16;
   const UF_long *restrict l_cols = solver->row_refactor_l_cols;
   const uint16_t *restrict l_cols16 = solver->row_refactor_l_cols16;
   double **restrict l_lu = solver->row_refactor_l_values;
   double *restrict l_val = solver->row_refactor_l_row_values;
   const UF_long *restrict u_ptr = solver->row_refactor_u_ptr;
   const uint32_t *restrict u_ptr32 = solver->row_refactor_u_ptr32;
+  const uint16_t *restrict u_ptr16 = solver->row_refactor_u_ptr16;
   const UF_long *restrict u_cols = solver->row_refactor_u_cols;
   const uint16_t *restrict u_cols16 = solver->row_refactor_u_cols16;
   double *restrict u_val = solver->row_refactor_u_row_values;
@@ -81185,14 +81330,18 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
 
   for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
     const UF_long row = rows[pos];
-    const UF_long input_begin = compact_ptrs
-      ? (UF_long)in_ptr32[row] : in_ptr[row];
-    const UF_long input_end = compact_ptrs
-      ? (UF_long)in_ptr32[row + 1u] : in_ptr[row + 1u];
-    const UF_long dependency_begin = compact_ptrs
-      ? (UF_long)l_ptr32[row] : l_ptr[row];
-    const UF_long dependency_end = compact_ptrs
-      ? (UF_long)l_ptr32[row + 1u] : l_ptr[row + 1u];
+    const UF_long input_begin = compact_ptrs == 1
+      ? (UF_long)in_ptr32[row]
+      : compact_ptrs == 2 ? (UF_long)in_ptr16[row] : in_ptr[row];
+    const UF_long input_end = compact_ptrs == 1
+      ? (UF_long)in_ptr32[row + 1u]
+      : compact_ptrs == 2 ? (UF_long)in_ptr16[row + 1u] : in_ptr[row + 1u];
+    const UF_long dependency_begin = compact_ptrs == 1
+      ? (UF_long)l_ptr32[row]
+      : compact_ptrs == 2 ? (UF_long)l_ptr16[row] : l_ptr[row];
+    const UF_long dependency_end = compact_ptrs == 1
+      ? (UF_long)l_ptr32[row + 1u]
+      : compact_ptrs == 2 ? (UF_long)l_ptr16[row + 1u] : l_ptr[row + 1u];
     double row_scale = 0.0;
     if (fused_scale_mode) {
       if (in_packed != NULL) {
@@ -81293,10 +81442,12 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
         *l_lu[p] = lik;
       }
       if (branchless_update_mode || lik != 0.0) {
-        const UF_long update_begin = compact_ptrs
-          ? (UF_long)u_ptr32[dep] : u_ptr[dep];
-        const UF_long update_end = compact_ptrs
-          ? (UF_long)u_ptr32[dep + 1u] : u_ptr[dep + 1u];
+        const UF_long update_begin = compact_ptrs == 1
+          ? (UF_long)u_ptr32[dep]
+          : compact_ptrs == 2 ? (UF_long)u_ptr16[dep] : u_ptr[dep];
+        const UF_long update_end = compact_ptrs == 1
+          ? (UF_long)u_ptr32[dep + 1u]
+          : compact_ptrs == 2 ? (UF_long)u_ptr16[dep + 1u] : u_ptr[dep + 1u];
         for (UF_long q = update_begin; q < update_end; ++q) {
           const UF_long col = compact_cols
             ? (UF_long)u_cols16[q] : u_cols[q];
@@ -81311,10 +81462,12 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
     const double pivot = x[row];
     x[row] = 0.0;
     udiag[row] = pivot;
-    const UF_long output_begin = compact_ptrs
-      ? (UF_long)u_ptr32[row] : u_ptr[row];
-    const UF_long output_end = compact_ptrs
-      ? (UF_long)u_ptr32[row + 1u] : u_ptr[row + 1u];
+    const UF_long output_begin = compact_ptrs == 1
+      ? (UF_long)u_ptr32[row]
+      : compact_ptrs == 2 ? (UF_long)u_ptr16[row] : u_ptr[row];
+    const UF_long output_end = compact_ptrs == 1
+      ? (UF_long)u_ptr32[row + 1u]
+      : compact_ptrs == 2 ? (UF_long)u_ptr16[row + 1u] : u_ptr[row + 1u];
     for (UF_long q = output_begin; q < output_end; ++q) {
       const UF_long col = compact_cols
         ? (UF_long)u_cols16[q] : u_cols[q];
@@ -81369,6 +81522,22 @@ static void kls_scaled_generic_i16_hoisted_worker_run(
   UF_long stride) {
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 0,
+    worker->shared->lean_row_values_mode,
+    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 0);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_i16ptr_hoisted_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 2,
     worker->shared->lean_row_values_mode,
     worker->shared->lean_grouped_done_mode, 1, 1,
     worker->shared->lean_fused_scale_mode,
@@ -81602,6 +81771,13 @@ static void kls_lean_parallel_worker_run(
   if (generic_hoisted_worker) {
     if (scaled_generic_hoisted_worker) {
       if (solver->row_refactor_l_cols16 != NULL &&
+          solver->row_refactor_u_cols16 != NULL &&
+          solver->row_refactor_l_ptr16 != NULL &&
+          solver->row_refactor_u_ptr16 != NULL &&
+          solver->row_refactor_input_ptr16 != NULL) {
+        kls_scaled_generic_i16ptr_hoisted_worker_run(
+          worker, generation, rows, stride);
+      } else if (solver->row_refactor_l_cols16 != NULL &&
           solver->row_refactor_u_cols16 != NULL &&
           solver->row_refactor_l_ptr32 != NULL &&
           solver->row_refactor_u_ptr32 != NULL &&
@@ -163924,11 +164100,6 @@ static void kls_solve_contract_classify(kls_solver *solver,
             solver->solve_contract_probe);
   }
 }
-
-typedef struct kls_lean_prewarm_job {
-  kls_solver *solver;
-  int thread_count;
-} kls_lean_prewarm_job;
 
 static void *kls_lean_prewarm_main(void *arg) {
   kls_lean_prewarm_job *job = (kls_lean_prewarm_job *)arg;
