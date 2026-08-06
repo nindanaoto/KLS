@@ -2270,6 +2270,10 @@ struct kls_solver {
   int lean_parallel_owner_thread_count;
   UF_long *lean_parallel_affinity_rows;
   int lean_parallel_affinity_thread_count;
+  int lean_parallel_affinity_decision; /* -1 level order, 0 unknown, 1 list */
+  int lean_parallel_affinity_decision_thread_count;
+  double lean_parallel_affinity_baseline_work;
+  double lean_parallel_affinity_candidate_work;
   UF_long lean_scalar_btf_prefix;
   atomic_uint *lean_parallel_grouped_done;
   uint32_t *lean_parallel_grouped_token;
@@ -20062,6 +20066,10 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_level_rows16 = NULL;
   solver->lean_parallel_affinity_rows = NULL;
   solver->lean_parallel_affinity_thread_count = 0;
+  solver->lean_parallel_affinity_decision = 0;
+  solver->lean_parallel_affinity_decision_thread_count = 0;
+  solver->lean_parallel_affinity_baseline_work = 0.0;
+  solver->lean_parallel_affinity_candidate_work = 0.0;
   solver->lean_parallel_owner_thread_count = 0;
   solver->lean_parallel_offdiag_decision = 0;
   solver->row_refactor_group_ptr = NULL;
@@ -21691,6 +21699,10 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
   free(solver->lean_parallel_affinity_rows);
   solver->lean_parallel_affinity_rows = NULL;
   solver->lean_parallel_affinity_thread_count = 0;
+  solver->lean_parallel_affinity_decision = 0;
+  solver->lean_parallel_affinity_decision_thread_count = 0;
+  solver->lean_parallel_affinity_baseline_work = 0.0;
+  solver->lean_parallel_affinity_candidate_work = 0.0;
   free(solver->lean_parallel_grouped_done);
   free(solver->lean_parallel_grouped_token);
   free(solver->lean_parallel_l_dep_work64);
@@ -21711,18 +21723,33 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
 static int kls_compact_partial_diagonal_column_fringe_single_block_cycle(
   const kls_solver *solver);
 
-/* Build a dependency-aware static worker order for compact retained-row
-   cycles.  Every worker consumes its interleaved subsequence in the
-   original topological direction, so the existing completion scoreboard
-   remains the only run-time synchronization. */
+/* Build a dependency-aware static worker order for retained-row refactors.
+   Every worker consumes its interleaved subsequence in the original
+   topological direction, so the existing completion scoreboard remains the
+   only run-time synchronization. */
 static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
                                                      int thread_count) {
   const int legacy_shape_policies = kls_legacy_shape_policies_enabled();
   const int partial_column_fringe_cycle =
     legacy_shape_policies &&
     kls_compact_partial_diagonal_column_fringe_single_block_cycle(solver);
+  const int packed_affinity_cycle =
+    kls_packed_row_worker_representation_capable(solver);
+  /* List scheduling examines every eligible worker for each row.  Require
+     enough numeric work per retained factor entry to cover half of that
+     thread-scaled search before constructing the generic candidate. */
+  const int generic_affinity_cycle =
+    !legacy_shape_policies && !packed_affinity_cycle && solver != NULL &&
+    solver->common.scale > 0 && solver->numeric != NULL &&
+    solver->numeric->Rs != NULL &&
+    solver->numeric->lnz <= UF_long_max - solver->numeric->unz &&
+    solver->common.flops >= 0.5 * (double)thread_count *
+      (double)(solver->numeric->lnz + solver->numeric->unz) &&
+    kls_repeated_update_workload(&solver->options) &&
+    getenv("KLS_DISABLE_GENERIC_LEAN_AFFINITY") == NULL;
   const int affinity_cycle =
-    kls_packed_row_worker_representation_capable(solver) ||
+    packed_affinity_cycle ||
+    generic_affinity_cycle ||
     (partial_column_fringe_cycle &&
      getenv("KLS_DISABLE_COMPACT_PARTIAL_COLUMN_FRINGE_AFFINITY") == NULL);
   if (!affinity_cycle || thread_count < 2 ||
@@ -21734,6 +21761,14 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
       solver->row_refactor_u_ptr == NULL ||
       solver->row_refactor_input_ptr == NULL) {
     return solver != NULL ? solver->row_refactor_level_rows : NULL;
+  }
+  if (generic_affinity_cycle &&
+      solver->lean_parallel_affinity_decision != 0 &&
+      solver->lean_parallel_affinity_decision_thread_count == thread_count) {
+    return solver->lean_parallel_affinity_decision > 0 &&
+        solver->lean_parallel_affinity_rows != NULL
+      ? solver->lean_parallel_affinity_rows
+      : solver->row_refactor_level_rows;
   }
   if (solver->lean_parallel_affinity_rows != NULL &&
       solver->lean_parallel_affinity_thread_count == thread_count) {
@@ -21749,13 +21784,14 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
     return solver->row_refactor_level_rows;
   }
 
-  double dependency_base_weight =
-    partial_column_fringe_cycle ? 1.0 : 0.64784;
-  double dependency_output_weight =
-    partial_column_fringe_cycle ? 1.0 : 0.06639;
-  double input_weight = partial_column_fringe_cycle ? 1.0 : 0.06292;
-  double row_output_weight =
-    partial_column_fringe_cycle ? 2.0 : 0.92651;
+  double dependency_base_weight = generic_affinity_cycle
+    ? 1.0 : partial_column_fringe_cycle ? 1.0 : 0.64784;
+  double dependency_output_weight = generic_affinity_cycle
+    ? 1.0 : partial_column_fringe_cycle ? 1.0 : 0.06639;
+  double input_weight = generic_affinity_cycle
+    ? 0.0 : partial_column_fringe_cycle ? 1.0 : 0.06292;
+  double row_output_weight = generic_affinity_cycle
+    ? 0.0 : partial_column_fringe_cycle ? 2.0 : 0.92651;
   const char *weight_override =
     kls_compact_amf_two_block_schedule_weights();
   if (weight_override != NULL) {
@@ -21783,6 +21819,100 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
   }
 
   int valid = 1;
+  double affinity_finish = 0.0;
+  double baseline_finish = 0.0;
+  const double comparison_work =
+    (double)n * (double)thread_count +
+    (double)solver->row_refactor_l_ptr[n];
+  if (generic_affinity_cycle) {
+    double *dependency_finish =
+      (double *)malloc((size_t)n * sizeof(*dependency_finish));
+    double dependency_critical_finish = 0.0;
+    double total_work = 0.0;
+    if (dependency_finish == NULL) {
+      valid = 0;
+    }
+    for (UF_long pos = 0u; pos < n && valid; ++pos) {
+      const UF_long row = solver->row_refactor_level_rows[pos];
+      if (row >= n || solver->row_refactor_l_ptr[row] >
+                        solver->row_refactor_l_ptr[row + 1u] ||
+          solver->row_refactor_u_ptr[row] >
+            solver->row_refactor_u_ptr[row + 1u] ||
+          solver->row_refactor_input_ptr[row] >
+            solver->row_refactor_input_ptr[row + 1u]) {
+        valid = 0;
+        break;
+      }
+      double row_work = 1.0 + input_weight *
+        (double)(solver->row_refactor_input_ptr[row + 1u] -
+                 solver->row_refactor_input_ptr[row]) + row_output_weight *
+        (double)(solver->row_refactor_u_ptr[row + 1u] -
+                 solver->row_refactor_u_ptr[row]);
+      double dependency_ready = 0.0;
+      double dependency_critical_ready = 0.0;
+      for (UF_long p = solver->row_refactor_l_ptr[row];
+           p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
+        const UF_long dep = solver->row_refactor_l_cols[p];
+        if (dep >= row) {
+          valid = 0;
+          break;
+        }
+        row_work += dependency_base_weight + dependency_output_weight *
+          (double)(solver->row_refactor_u_ptr[dep + 1u] -
+                   solver->row_refactor_u_ptr[dep]);
+        if (finish[dep] > dependency_ready) {
+          dependency_ready = finish[dep];
+        }
+        if (dependency_finish[dep] > dependency_critical_ready) {
+          dependency_critical_ready = dependency_finish[dep];
+        }
+      }
+      if (!valid) {
+        break;
+      }
+      const int tid = (int)(pos % (UF_long)thread_count);
+      const double ready = worker_finish[tid] > dependency_ready
+        ? worker_finish[tid] : dependency_ready;
+      finish[row] = ready + row_work;
+      worker_finish[tid] = finish[row];
+      dependency_finish[row] = dependency_critical_ready + row_work;
+      if (dependency_finish[row] > dependency_critical_finish) {
+        dependency_critical_finish = dependency_finish[row];
+      }
+      total_work += row_work;
+    }
+    for (int tid = 0; tid < thread_count; ++tid) {
+      if (worker_finish[tid] > baseline_finish) {
+        baseline_finish = worker_finish[tid];
+      }
+      worker_finish[tid] = 0.0;
+    }
+    free(dependency_finish);
+    const double ideal_finish = fmax(dependency_critical_finish,
+                                     total_work / (double)thread_count);
+    const double maximum_projected_savings =
+      (double)solver->options.expected_refactorizations *
+      fmax(0.0, baseline_finish - ideal_finish);
+    solver->lean_parallel_affinity_baseline_work = baseline_finish;
+    if (!valid || baseline_finish <= 0.0 ||
+        ((ideal_finish > 0.98 * baseline_finish ||
+          maximum_projected_savings < 2.0 * comparison_work) &&
+         getenv("KLS_ENABLE_GENERIC_LEAN_AFFINITY") == NULL)) {
+      if (getenv("KLS_TRACE_LEAN_AFFINITY") != NULL) {
+        fprintf(stderr,
+                "KLS generic lean affinity: baseline=%.0f lower=%.0f "
+                "maximum-savings=%.0f cost=%.0f -> reject\n",
+                baseline_finish, ideal_finish, maximum_projected_savings,
+                comparison_work);
+      }
+      free(schedule);
+      free(finish);
+      solver->lean_parallel_affinity_decision = -1;
+      solver->lean_parallel_affinity_decision_thread_count = thread_count;
+      return solver->row_refactor_level_rows;
+    }
+  }
+
   for (UF_long pos = 0u; pos < n && valid; ++pos) {
     const UF_long row = solver->row_refactor_level_rows[pos];
     if (row >= n || solver->row_refactor_l_ptr[row] >
@@ -21854,6 +21984,35 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
       valid = 0;
     }
   }
+  if (valid && generic_affinity_cycle) {
+    for (int tid = 0; tid < thread_count; ++tid) {
+      if (worker_finish[tid] > affinity_finish) {
+        affinity_finish = worker_finish[tid];
+      }
+    }
+    const double projected_savings =
+      (double)solver->options.expected_refactorizations *
+      fmax(0.0, baseline_finish - affinity_finish);
+    const int retain_generic_affinity = baseline_finish > 0.0 &&
+      affinity_finish > 0.0 && affinity_finish <= 0.98 * baseline_finish &&
+      projected_savings >= 2.0 * comparison_work;
+    solver->lean_parallel_affinity_baseline_work = baseline_finish;
+    solver->lean_parallel_affinity_candidate_work = affinity_finish;
+    if (getenv("KLS_TRACE_LEAN_AFFINITY") != NULL) {
+      fprintf(stderr,
+              "KLS generic lean affinity: baseline=%.0f candidate=%.0f "
+              "ratio=%.4f savings=%.0f cost=%.0f -> %s\n",
+              baseline_finish, affinity_finish,
+              baseline_finish > 0.0
+                ? affinity_finish / baseline_finish : DBL_MAX,
+              projected_savings, comparison_work,
+              retain_generic_affinity ? "retain" : "reject");
+    }
+    if (!retain_generic_affinity &&
+        getenv("KLS_ENABLE_GENERIC_LEAN_AFFINITY") == NULL) {
+      valid = 0;
+    }
+  }
   if (kls_compact_amf_two_block_trace_enabled()) {
     fprintf(stderr,
             "KLS compact AMF two-block schedule weights=%g/%g/%g/%g:",
@@ -21868,11 +22027,19 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
   free(finish);
   if (!valid) {
     free(schedule);
+    if (generic_affinity_cycle) {
+      solver->lean_parallel_affinity_decision = -1;
+      solver->lean_parallel_affinity_decision_thread_count = thread_count;
+    }
     return solver->row_refactor_level_rows;
   }
   free(solver->lean_parallel_affinity_rows);
   solver->lean_parallel_affinity_rows = schedule;
   solver->lean_parallel_affinity_thread_count = thread_count;
+  if (generic_affinity_cycle) {
+    solver->lean_parallel_affinity_decision = 1;
+    solver->lean_parallel_affinity_decision_thread_count = thread_count;
+  }
   solver->lean_parallel_owner_thread_count = 0;
   return schedule;
 }
@@ -168290,6 +168457,68 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->lean_reaudit_state = 5;
         generic_hoisted_snode_lean_predicted = 1;
       }
+    }
+  }
+  if (!legacy_shape_policies && solver->lean_choice == 0 &&
+      getenv("KLS_DISABLE_GENERIC_SCALED_LEAN_PRESELECTION") == NULL &&
+      solver->common.scale > 0 && solver->numeric->Rs != NULL &&
+      kls_repeated_update_workload(&solver->options) &&
+      solver->options.threads > 1 && solver->n >= 512u &&
+      solver->n <= 131072u && solver->common.flops >= 100000.0 &&
+      solver->pivot_nudge_count == 0u &&
+      solver->common.kls_perturb_count == 0u &&
+      solver->numeric->lnz <= UF_long_max - solver->numeric->unz &&
+      solver->numeric->lnz + solver->numeric->unz <= 1000000u &&
+      kls_build_row_refactor_pattern(solver, 1)) {
+    int modeled_threads = solver->options.threads;
+    if ((UF_long)modeled_threads > solver->row_refactor_level_max_width) {
+      modeled_threads = (int)solver->row_refactor_level_max_width;
+    }
+    if (modeled_threads >= 2) {
+      (void)kls_prepare_lean_affinity_rows(solver, modeled_threads);
+    }
+    const double modeled_row_work =
+      solver->lean_parallel_affinity_decision > 0
+        ? solver->lean_parallel_affinity_candidate_work
+        : solver->lean_parallel_affinity_baseline_work;
+    const double construction_work = modeled_threads >= 2 &&
+        solver->row_refactor_l_ptr != NULL &&
+        solver->row_refactor_u_ptr != NULL &&
+        solver->row_refactor_input_ptr != NULL
+      ? (double)solver->n * (double)modeled_threads +
+        (double)solver->row_refactor_l_ptr[solver->n] +
+        (double)solver->row_refactor_u_ptr[solver->n] +
+        (double)solver->row_refactor_input_ptr[solver->n]
+      : DBL_MAX;
+    const double projected_savings = modeled_row_work > 0.0
+      ? (double)solver->options.expected_refactorizations *
+        fmax(0.0, solver->common.flops - 3.0 * modeled_row_work)
+      : 0.0;
+    /* The retained row graph supplies an exact critical-path work model.
+       When its dependency-balanced schedule has already passed its own
+       lifecycle gate and leaves at least three units of serial numeric work
+       per critical-path unit, the row arm has enough structural parallelism
+       to absorb launch and synchronization costs.  Its projected saving must
+       also repay the complete pattern/schedule construction twice.  This is
+       a representation-and-lifecycle proof, independent of matrix identity,
+       dimensions beyond the executor's existing eligibility envelope, or
+       sparsity-shape fingerprints. */
+    if (solver->lean_parallel_affinity_decision > 0 &&
+        modeled_row_work > 0.0 &&
+        3.0 * modeled_row_work <= solver->common.flops &&
+        isfinite(construction_work) && construction_work > 0.0 &&
+        isfinite(projected_savings) &&
+        projected_savings >= 2.0 * construction_work) {
+      solver->lean_choice = 1;
+      solver->lean_reaudit_state = 5;
+    }
+    if (getenv("KLS_TRACE_GENERIC_SCALED_LEAN_PRESELECTION") != NULL) {
+      fprintf(stderr,
+              "KLS generic scaled lean preselection: work %.0f/flops %.0f "
+              "savings %.0f/cost %.0f affinity=%d -> %s\n",
+              modeled_row_work, solver->common.flops, projected_savings,
+              construction_work, solver->lean_parallel_affinity_decision,
+              solver->lean_choice > 0 ? "LEAN" : "measure");
     }
   }
   if (legacy_shape_policies && solver->lean_choice == 0 &&
