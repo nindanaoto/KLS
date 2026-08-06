@@ -48436,6 +48436,74 @@ generic_ordering_tournament:;
         &best_separator);
     }
   }
+
+  /* The representation race captures the base BTF symbolic before the
+     independent minimum-fill workers settle the no-BTF ordering axis.  Do
+     not later compare different representation *and* ordering choices: when
+     the retained ordering changed, rebuild the captured BTF arm with that
+     same ordering and keep it only if it Pareto-improves the captured base
+     estimate.  The value-time factor comparison remains authoritative. */
+  if (generic_policy && kls_generic_btf_capture_candidate != NULL &&
+      kls_repeated_update_workload(options) && best_symbolic != NULL &&
+      !best_symbolic->do_btf &&
+      kls_generic_btf_capture_candidate->generic_btf_value_symbolic != NULL &&
+      kls_generic_btf_capture_candidate->generic_btf_value_ordering !=
+        best_ordering &&
+      getenv("KLS_DISABLE_ALIGNED_BTF_ORDERING_CHALLENGER") == NULL) {
+    kls_pattern_candidate *capture = kls_generic_btf_capture_candidate;
+    trilinos_klu_l_symbolic *captured =
+      capture->generic_btf_value_symbolic;
+    const double captured_score = symbolic_score(captured);
+    const double captured_flops = captured->est_flops;
+    kls_options aligned_options = *symbolic_options;
+    aligned_options.use_btf = 1;
+    aligned_options.ordering = best_ordering;
+    trilinos_klu_l_symbolic *aligned_symbolic = NULL;
+    trilinos_klu_l_common aligned_common;
+    kls_separator_analysis aligned_separator;
+    memset(&aligned_separator, 0, sizeof(aligned_separator));
+    const int aligned_status = analyze_with_ordering(
+      n, col_ptr, row_idx, &aligned_options, best_ordering,
+      &aligned_symbolic, &aligned_common, &aligned_separator);
+    const double aligned_score = aligned_symbolic != NULL
+      ? symbolic_score(aligned_symbolic) : DBL_MAX;
+    const int aligned_pareto = aligned_status == KLS_OK &&
+      aligned_symbolic != NULL && aligned_symbolic->do_btf &&
+      aligned_symbolic->nblocks > 1u &&
+      isfinite(aligned_score) && aligned_score > 0.0 &&
+      isfinite(captured_score) && captured_score > 0.0 &&
+      aligned_score <= captured_score &&
+      aligned_symbolic->est_flops > 0.0 && captured_flops > 0.0 &&
+      aligned_symbolic->est_flops <= captured_flops;
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS aligned BTF challenger: %s fill %.4e/%.4e "
+              "flops %.4e/%.4e -> %s\n",
+              kls_ordering_name(best_ordering), aligned_score,
+              captured_score,
+              aligned_symbolic != NULL
+                ? aligned_symbolic->est_flops : DBL_MAX,
+              captured_flops, aligned_pareto ? "retain" : "reject");
+    }
+    if (aligned_pareto) {
+      trilinos_klu_l_free_symbolic(
+        &capture->generic_btf_value_symbolic,
+        &capture->generic_btf_value_common);
+      kls_separator_analysis_clear(
+        &capture->generic_btf_value_separator);
+      capture->generic_btf_value_symbolic = aligned_symbolic;
+      capture->generic_btf_value_common = aligned_common;
+      capture->generic_btf_value_ordering = best_ordering;
+      kls_separator_analysis_move(
+        &capture->generic_btf_value_separator, &aligned_separator);
+    } else {
+      if (aligned_symbolic != NULL) {
+        trilinos_klu_l_free_symbolic(
+          &aligned_symbolic, &aligned_common);
+      }
+      kls_separator_analysis_clear(&aligned_separator);
+    }
+  }
 #ifdef KLS_HAVE_METIS
   /* Generic AUTO defers nested dissection until numeric values are
      available.  kls_maybe_start_metis_race launches it only for a
@@ -51482,10 +51550,9 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
    If it retained a bounded BTF alternative, use the first value frame to
    decide which symbolic to factor first.  Static pivot strength or bounded
    recurring-work economics is only an admission signal: the candidate must
-   then pass a true backward-residual solve.  A candidate admitted for its
-   recurring-work economics must additionally build the exact retained-row
-   executor that justified the trial before it can replace the ordinary
-   no-BTF route. */
+   then pass a true backward-residual solve.  A non-Pareto candidate admitted
+   specifically for row-executor economics must additionally build that exact
+   retained-row executor before it can replace the ordinary no-BTF route. */
 static int maybe_factor_generic_btf_value_alternative(
   kls_solver *solver,
   const double *numeric_values,
@@ -51596,17 +51663,29 @@ static int maybe_factor_generic_btf_value_alternative(
     candidate_fill <= 0.90 * incumbent_estimated_fill &&
     candidate_common.flops > 0.0 &&
     candidate_common.flops <= 0.75 * incumbent_estimated_flops;
+  const int repeated_numeric_pareto =
+    kls_repeated_update_workload(&solver->options) &&
+    candidate_fill <= 0.99 * incumbent_estimated_fill &&
+    candidate_common.flops > 0.0 &&
+    candidate_common.flops <= 0.99 * incumbent_estimated_flops;
   const int hoisted_row_numeric_economics =
     hoisted_row_executor_proposal && candidate_fill > 0.0 &&
     candidate_fill <= 1000000.0 &&
     candidate_fill <= 1.05 * incumbent_estimated_fill &&
     candidate_common.flops >= 32.0 * candidate_fill &&
-    candidate_common.flops <= 1.25 * incumbent_estimated_flops &&
+    /* Executor capability does not erase numeric work.  A candidate whose
+       row schedule is merely buildable can still lose every retained update
+       when its factor performs more arithmetic than the incumbent EGraph.
+       Keep this representation change work-Pareto; the exact row-capability
+       and backward-residual gates below continue to arbitrate candidates
+       whose recurring work is no larger. */
+    candidate_common.flops <= incumbent_estimated_flops &&
     candidate_common.noffdiag <= stable_pivot_cap;
   candidate_ok = candidate_ok && incumbent_estimated_fill > 0.0 &&
     isfinite(incumbent_estimated_fill) &&
     incumbent_estimated_flops > 0.0 &&
-    (decisive_numeric_economics || hoisted_row_numeric_economics) &&
+    (decisive_numeric_economics || repeated_numeric_pareto ||
+     hoisted_row_numeric_economics) &&
     isfinite(candidate_common.rcond) && candidate_common.rcond > 0.0;
 
   int residual_ok = 0;
@@ -51691,7 +51770,7 @@ static int maybe_factor_generic_btf_value_alternative(
   solver->stats.structural_rank =
     (int64_t)solver->symbolic->structural_rank;
   solver->stats.estimated_flops = solver->symbolic->est_flops;
-  if (hoisted_row_numeric_economics) {
+  if (hoisted_row_numeric_economics && !repeated_numeric_pareto) {
     const int row_ready =
       kls_generic_hoisted_snode_worker_candidate(solver) &&
       kls_build_row_refactor_pattern(solver, 1);
