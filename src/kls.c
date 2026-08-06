@@ -587,6 +587,7 @@ struct kls_solver {
   UF_long *refactor_input_pos;
   int32_t *refactor_row_idx32;
   int32_t *refactor_input_pos32;
+  int32_t *refactor_input_oldrow32;
   int32_t *refactor_input_user_pos32;
   uint32_t *lean_btf_off_input_pos;
   uint32_t *lean_btf_off_user_pos;
@@ -783,6 +784,14 @@ struct kls_solver {
   int direct_klu_choice; /* measured fixed-pattern engine verdict:
                             0 untried, 1 enter KLU directly, -1 keep the
                             adaptive mapped/parallel incumbent */
+  int compact_map32_choice; /* fixed-pattern KLU representation verdict:
+                               0 untried, 1 compact mapped stream,
+                               -1 vendor KLU */
+  int compact_map32_probe_active;
+  int compact_map32_trial_state;
+  int compact_map32_trial_probe_ok;
+  double compact_map32_trial_samples[2][3];
+  double compact_map32_trial_overhead;
   int lean_choice;     /* lean-row-walk trial (low-flop cohort):
                           0 undecided, 1 lean, 2 lean-pair, -1 incumbent */
   int lean_pending;    /* alternating three-arm probe refactors left */
@@ -18452,6 +18461,7 @@ static void free_refactor_map(kls_solver *solver) {
   free(solver->refactor_input_pos);
   free(solver->refactor_row_idx32);
   free(solver->refactor_input_pos32);
+  free(solver->refactor_input_oldrow32);
   free(solver->refactor_input_user_pos32);
   free(solver->lean_btf_off_input_pos);
   free(solver->lean_btf_off_user_pos);
@@ -18462,6 +18472,7 @@ static void free_refactor_map(kls_solver *solver) {
   solver->refactor_input_pos = NULL;
   solver->refactor_row_idx32 = NULL;
   solver->refactor_input_pos32 = NULL;
+  solver->refactor_input_oldrow32 = NULL;
   solver->refactor_input_user_pos32 = NULL;
   solver->lean_btf_off_input_pos = NULL;
   solver->lean_btf_off_user_pos = NULL;
@@ -27681,6 +27692,13 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->floor_reaudit = 0;
   solver->floor_min_path = 0;
   solver->direct_klu_choice = 0;
+  solver->compact_map32_choice = 0;
+  solver->compact_map32_probe_active = 0;
+  solver->compact_map32_trial_state = 0;
+  solver->compact_map32_trial_probe_ok = 0;
+  memset(solver->compact_map32_trial_samples, 0,
+         sizeof(solver->compact_map32_trial_samples));
+  solver->compact_map32_trial_overhead = 0.0;
   solver->lean_choice = 0;
   solver->lean_pending = 0;
   solver->lean_wait = 0;
@@ -42796,6 +42814,99 @@ static double kls_column_pair_work(UF_long n,
   return work;
 }
 
+/* A static row match can improve pivot stability while making the retained
+   ordering more expensive than an ordinary ordering on the public frame.
+   Run one bounded original-frame challenger alongside the matched factor so
+   the comparison usually overlaps the critical path.  Retained-factor and
+   quotient-pair work bound the trial up front; complete numeric fill/work,
+   conditioning, and a backward residual decide whether the result may be
+   published. */
+typedef struct kls_unmatched_colamd_job {
+  UF_long n;
+  const UF_long *col_ptr;
+  const UF_long *row_idx;
+  const double *values;
+  kls_options options;
+  double matched_estimated_fill;
+  trilinos_klu_l_symbolic *symbolic;
+  trilinos_klu_l_numeric *numeric;
+  trilinos_klu_l_common common;
+  kls_separator_analysis separator;
+  double score;
+  double factor_seconds;
+  int status;
+} kls_unmatched_colamd_job;
+
+static void *kls_unmatched_colamd_main(void *arg) {
+  kls_unmatched_colamd_job *job =
+    (kls_unmatched_colamd_job *)arg;
+  memset(&job->separator, 0, sizeof(job->separator));
+  job->symbolic = NULL;
+  job->numeric = NULL;
+  job->score = DBL_MAX;
+  job->factor_seconds = 0.0;
+  job->status = analyze_with_ordering(
+    job->n, (UF_long *)(uintptr_t)job->col_ptr,
+    (UF_long *)(uintptr_t)job->row_idx, &job->options,
+    KLS_ORDERING_COLAMD, &job->symbolic, &job->common,
+    &job->separator);
+  if (job->status != KLS_OK || job->symbolic == NULL) {
+    return NULL;
+  }
+  job->score = symbolic_score(job->symbolic);
+  if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
+    fprintf(stderr,
+            "KLS pre-static: unmatched COLAMD symbolic fill=%.4e "
+            "matched=%.4e\n",
+            job->score, job->matched_estimated_fill);
+  }
+  /* COLAMD does not publish a fill estimate in every build.  Use an estimate
+     when it exists, but do not turn an unavailable estimate into a rejection:
+     the caller has already bounded the quotient-pair analysis work and the
+     complete candidate factor is the authoritative cost measurement. */
+  if (isfinite(job->score) && job->score < DBL_MAX &&
+      (job->score > 2000000.0 ||
+       job->score > 1.05 * job->matched_estimated_fill)) {
+    return NULL;
+  }
+  job->common.scale =
+    job->options.scale == KLS_SCALE_AUTO
+      ? choose_auto_scale_from_pattern(
+          job->n, job->col_ptr, job->row_idx, &job->options,
+          job->values)
+      : job->options.scale;
+  job->common.tol = job->options.pivot_tolerance;
+  const double start = kls_now_seconds();
+  job->numeric = trilinos_klu_l_factor(
+    (UF_long *)(uintptr_t)job->col_ptr,
+    (UF_long *)(uintptr_t)job->row_idx,
+    (double *)(uintptr_t)job->values, job->symbolic, &job->common);
+  job->factor_seconds = kls_now_seconds() - start;
+  if (job->numeric == NULL || job->common.status < TRILINOS_KLU_OK ||
+      job->common.status == TRILINOS_KLU_SINGULAR) {
+    return NULL;
+  }
+  (void)trilinos_klu_l_flops(job->symbolic, job->numeric,
+                             &job->common);
+  (void)trilinos_klu_l_rcond(job->symbolic, job->numeric,
+                             &job->common);
+  return NULL;
+}
+
+static void kls_unmatched_colamd_discard(
+  kls_unmatched_colamd_job *job) {
+  if (job == NULL) {
+    return;
+  }
+  if (job->numeric != NULL) {
+    trilinos_klu_l_free_numeric(&job->numeric, &job->common);
+  }
+  if (job->symbolic != NULL) {
+    trilinos_klu_l_free_symbolic(&job->symbolic, &job->common);
+  }
+  kls_separator_analysis_clear(&job->separator);
+}
+
 static void maybe_select_pre_static_row_match(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values,
@@ -42951,6 +43062,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   double alternate_score = DBL_MAX;
   double trial_factor_seconds = 0.0;
   double alternate_factor_seconds = 0.0;
+  kls_unmatched_colamd_job unmatched_colamd_job;
+  memset(&unmatched_colamd_job, 0, sizeof(unmatched_colamd_job));
+  pthread_t unmatched_colamd_thread;
+  int unmatched_colamd_launched = 0;
+  int unmatched_colamd_joined = 0;
+  int selected_unmatched_colamd = 0;
   int matching_equilibration_deferred = 0;
   int accepted = 0;
   int compact_missing_diagonal_match = 0;
@@ -44201,6 +44318,44 @@ matching_attempt:;
             moderate_fragmented_pipe_factor,
             trial_est_flops, trial_est_fill);
   }
+  const int generic_unmatched_colamd_proposal =
+    !legacy_shape_policies && !deferred && !forced_match &&
+    getenv("KLS_DISABLE_GENERIC_UNMATCHED_COLAMD_CHALLENGER") == NULL &&
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->input_format == KLS_INPUT_CSC &&
+    solver->input_to_csc == NULL && solver->values == NULL &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    solver->block_order_perm == NULL && !solver->diagonal_equiv_active &&
+    solver->options.orientation == KLS_ORIENTATION_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.scale == KLS_SCALE_AUTO && solver->options.use_btf &&
+    solver->options.backend != KLS_BACKEND_SERIAL &&
+    solver->options.threads >= 2 &&
+    solver->options.expected_refactorizations >= 16 &&
+    kls_repeated_update_workload(&solver->options) &&
+    trial_symbolic != NULL && !trial_symbolic->do_btf &&
+    trial_symbolic->nblocks == 1u &&
+    trial_symbolic->maxblock == solver->n &&
+    trial_est_fill > 0.0 && trial_est_fill <= 3000000.0 &&
+    trial_est_flops >= 64.0 * trial_est_fill &&
+    isfinite(matched_column_pair_work) &&
+    matched_column_pair_work <= 10000000.0;
+  if (generic_unmatched_colamd_proposal) {
+    unmatched_colamd_job.n = solver->n;
+    unmatched_colamd_job.col_ptr = base_col_ptr;
+    unmatched_colamd_job.row_idx = base_row_idx;
+    unmatched_colamd_job.values = base_values;
+    unmatched_colamd_job.options = solver->options;
+    unmatched_colamd_job.options.ordering = KLS_ORDERING_COLAMD;
+    unmatched_colamd_job.options.orientation = KLS_ORIENTATION_NORMAL;
+    unmatched_colamd_job.options.use_btf = 0;
+    unmatched_colamd_job.matched_estimated_fill = trial_est_fill;
+    unmatched_colamd_launched =
+      pthread_create(&unmatched_colamd_thread, NULL,
+                     kls_unmatched_colamd_main,
+                     &unmatched_colamd_job) == 0;
+  }
   if (moderate_fragmented_pipe_factor) {
     /* A moderate-work symbolic with this fragmented dominant core exposes
        enough independent block/front work to amortize the full crew even
@@ -44339,6 +44494,130 @@ matching_attempt:;
       kls_separator_analysis_clear(&alternate_separator);
     }
   }
+  if (unmatched_colamd_launched) {
+    pthread_join(unmatched_colamd_thread, NULL);
+    unmatched_colamd_joined = 1;
+    const int unmatched_numeric_ok =
+      unmatched_colamd_job.status == KLS_OK &&
+      unmatched_colamd_job.symbolic != NULL &&
+      unmatched_colamd_job.numeric != NULL &&
+      unmatched_colamd_job.common.status >= TRILINOS_KLU_OK &&
+      unmatched_colamd_job.common.status != TRILINOS_KLU_SINGULAR &&
+      unmatched_colamd_job.common.flops > 0.0 &&
+      isfinite(unmatched_colamd_job.common.rcond) &&
+      unmatched_colamd_job.common.rcond > 0.0;
+    int unmatched_residual_ok = 0;
+    if (unmatched_numeric_ok) {
+      trilinos_klu_l_symbolic *saved_symbolic = solver->symbolic;
+      trilinos_klu_l_numeric *saved_numeric = solver->numeric;
+      const trilinos_klu_l_common saved_common = solver->common;
+      solver->symbolic = unmatched_colamd_job.symbolic;
+      solver->numeric = unmatched_colamd_job.numeric;
+      solver->common = unmatched_colamd_job.common;
+      unmatched_residual_ok = kls_direct_klu_numeric_residual_probe(
+        solver, base_values);
+      unmatched_colamd_job.common = solver->common;
+      solver->symbolic = saved_symbolic;
+      solver->numeric = saved_numeric;
+      solver->common = saved_common;
+    }
+    const double matched_numeric_fill = trial_numeric_ok
+      ? (double)trial_numeric->lnz + (double)trial_numeric->unz
+      : DBL_MAX;
+    const double unmatched_numeric_fill = unmatched_numeric_ok
+      ? (double)unmatched_colamd_job.numeric->lnz +
+          (double)unmatched_colamd_job.numeric->unz
+      : DBL_MAX;
+    const int unmatched_pareto =
+      unmatched_numeric_ok && unmatched_residual_ok && trial_numeric_ok &&
+      unmatched_numeric_fill <= 0.98 * matched_numeric_fill &&
+      unmatched_colamd_job.common.flops <= 0.80 * trial_common.flops &&
+      !(trial_common.rcond > 0.0 &&
+        unmatched_colamd_job.common.rcond < 0.01 * trial_common.rcond);
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr,
+              "KLS pre-static: unmatched COLAMD fill=%.4e/%.4e "
+              "work=%.4e/%.4e pivots=%ld/%ld rcond=%.3e/%.3e "
+              "residual=%d -> %s\n",
+              unmatched_numeric_fill, matched_numeric_fill,
+              unmatched_numeric_ok
+                ? unmatched_colamd_job.common.flops : -1.0,
+              trial_numeric_ok ? trial_common.flops : -1.0,
+              unmatched_numeric_ok
+                ? (long)unmatched_colamd_job.common.noffdiag : -1L,
+              trial_numeric_ok ? (long)trial_common.noffdiag : -1L,
+              unmatched_numeric_ok
+                ? unmatched_colamd_job.common.rcond : -1.0,
+              trial_numeric_ok ? trial_common.rcond : -1.0,
+              unmatched_residual_ok,
+              unmatched_pareto ? "candidate" : "reject");
+    }
+    UF_long *unmatched_col_ptr = NULL;
+    UF_long *unmatched_row_idx = NULL;
+    double *unmatched_values = NULL;
+    if (unmatched_pareto &&
+        solver->n < (UF_long)(SIZE_MAX / sizeof(*unmatched_col_ptr)) &&
+        solver->nnz <= (UF_long)(SIZE_MAX / sizeof(*unmatched_row_idx)) &&
+        solver->nnz <= (UF_long)(SIZE_MAX / sizeof(*unmatched_values))) {
+      unmatched_col_ptr = (UF_long *)malloc(
+        ((size_t)solver->n + 1u) * sizeof(*unmatched_col_ptr));
+      unmatched_row_idx = (UF_long *)malloc(
+        (size_t)solver->nnz * sizeof(*unmatched_row_idx));
+      unmatched_values = (double *)malloc(
+        (size_t)solver->nnz * sizeof(*unmatched_values));
+    }
+    if (unmatched_col_ptr != NULL && unmatched_row_idx != NULL &&
+        unmatched_values != NULL) {
+      memcpy(unmatched_col_ptr, base_col_ptr,
+             ((size_t)solver->n + 1u) * sizeof(*unmatched_col_ptr));
+      memcpy(unmatched_row_idx, base_row_idx,
+             (size_t)solver->nnz * sizeof(*unmatched_row_idx));
+      memcpy(unmatched_values, base_values,
+             (size_t)solver->nnz * sizeof(*unmatched_values));
+      trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+      trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
+      kls_separator_analysis_clear(&trial_separator);
+      free(row_perm);
+      free(trial_col_ptr);
+      free(trial_row_idx);
+      free(trial_input_to_csc);
+      free(trial_values);
+      free(trial_row_scale);
+      free(trial_col_scale);
+      free(match_row_scale);
+      free(match_col_scale);
+      row_perm = NULL;
+      trial_col_ptr = unmatched_col_ptr;
+      trial_row_idx = unmatched_row_idx;
+      trial_input_to_csc = NULL;
+      trial_values = unmatched_values;
+      trial_row_scale = NULL;
+      trial_col_scale = NULL;
+      match_row_scale = NULL;
+      match_col_scale = NULL;
+      trial_symbolic = unmatched_colamd_job.symbolic;
+      trial_numeric = unmatched_colamd_job.numeric;
+      trial_common = unmatched_colamd_job.common;
+      trial_ordering = KLS_ORDERING_COLAMD;
+      trial_score = unmatched_colamd_job.score;
+      trial_factor_seconds = unmatched_colamd_job.factor_seconds;
+      kls_separator_analysis_move(&trial_separator,
+                                  &unmatched_colamd_job.separator);
+      unmatched_colamd_job.symbolic = NULL;
+      unmatched_colamd_job.numeric = NULL;
+      exact_matching = 0;
+      exact_matching_scaling = 0;
+      spral_matching = 0;
+      solver->nearly_missing_diagonal_early_match_selected = 0;
+      selected_unmatched_colamd = 1;
+      trial_numeric_ok = 1;
+    } else {
+      free(unmatched_col_ptr);
+      free(unmatched_row_idx);
+      free(unmatched_values);
+    }
+    kls_unmatched_colamd_discard(&unmatched_colamd_job);
+  }
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr, "KLS pre-static: stage klu_factor done %.3fms"
             " perturbed=%ld\n",
@@ -44379,7 +44658,8 @@ matching_attempt:;
     free(trial_col_scale);
     trial_row_scale = NULL;
     trial_col_scale = NULL;
-  } else if (!preapplied_matching_equilibration) {
+  } else if (!preapplied_matching_equilibration &&
+             !selected_unmatched_colamd) {
     maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
                                      trial_row_idx, &solver->options,
                                      trial_symbolic, &trial_values,
@@ -44396,7 +44676,8 @@ matching_attempt:;
             (long)trial_common.noffdiag, trial_common.rcond,
             trial_common.flops);
   }
-  if (trial_common.noffdiag > weak / 20u + 16u ||
+  if ((!selected_unmatched_colamd &&
+       trial_common.noffdiag > weak / 20u + 16u) ||
       trial_common.rcond <= 0.0) {
     if (kls_trace_pre_static_enabled()) {
       fprintf(stderr, "KLS pre-static: reject quality gate\n");
@@ -44506,6 +44787,11 @@ kls_adopt_unfactored:;
   accepted = 1;
 
 done:
+  if (unmatched_colamd_launched && !unmatched_colamd_joined) {
+    pthread_join(unmatched_colamd_thread, NULL);
+    unmatched_colamd_joined = 1;
+  }
+  kls_unmatched_colamd_discard(&unmatched_colamd_job);
   kls_medium_partial_static_metis_ctx = 0;
   kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
   kls_large_weak_diagonal_static_metis_ctx = 0;
@@ -50989,12 +51275,22 @@ static void kls_discard_generic_btf_value_alternative(kls_solver *solver) {
   solver->generic_btf_value_ordering = KLS_ORDERING_AUTO;
 }
 
+static int kls_generic_hoisted_snode_worker_candidate(
+  const kls_solver *solver);
+static int kls_generic_hoisted_snode_worker_capable(
+  const kls_solver *solver);
+static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver);
+static int kls_build_row_refactor_pattern(kls_solver *solver,
+                                          int compact_only);
+
 /* The structural tournament has already paid for both AMD representations.
    If it retained a bounded BTF alternative, use the first value frame to
-   decide which symbolic to factor first.  Static pivot strength is only an
-   admission signal: the candidate must then beat the selected symbolic's
-   estimated work and storage decisively and pass a true backward-residual
-   solve before it can replace the ordinary no-BTF route. */
+   decide which symbolic to factor first.  Static pivot strength or bounded
+   recurring-work economics is only an admission signal: the candidate must
+   then pass a true backward-residual solve.  A candidate admitted for its
+   recurring-work economics must additionally build the exact retained-row
+   executor that justified the trial before it can replace the ordinary
+   no-BTF route. */
 static int maybe_factor_generic_btf_value_alternative(
   kls_solver *solver,
   const double *numeric_values,
@@ -51044,7 +51340,17 @@ static int maybe_factor_generic_btf_value_alternative(
       0.75 * (double)incumbent_profile.weak_1e3 &&
     (double)candidate_profile.weak_1e2 <=
       0.75 * (double)incumbent_profile.weak_1e2;
-  if (!decisive_value_strength) {
+  const double candidate_symbolic_fill =
+    candidate_symbolic->lnz + candidate_symbolic->unz;
+  const int hoisted_row_executor_proposal =
+    getenv("KLS_DISABLE_GENERIC_BTF_HOISTED_ROW_RECOVERY") == NULL &&
+    solver->n >= 512u && solver->n <= 131072u &&
+    candidate_symbolic_fill > 0.0 &&
+    candidate_symbolic_fill <= 1000000.0 &&
+    candidate_symbolic->est_flops > 0.0 &&
+    candidate_symbolic->est_flops >=
+      32.0 * candidate_symbolic_fill;
+  if (!decisive_value_strength && !hoisted_row_executor_proposal) {
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
       fprintf(stderr,
               "KLS generic BTF values: missing=%ld/%ld "
@@ -51090,12 +51396,22 @@ static int maybe_factor_generic_btf_value_alternative(
   const double candidate_fill = candidate_ok
     ? (double)candidate_numeric->lnz + (double)candidate_numeric->unz
     : DBL_MAX;
+  const UF_long stable_pivot_cap = solver->n / 10000u + 16u;
+  const int decisive_numeric_economics =
+    candidate_fill <= 0.90 * incumbent_estimated_fill &&
+    candidate_common.flops > 0.0 &&
+    candidate_common.flops <= 0.75 * incumbent_estimated_flops;
+  const int hoisted_row_numeric_economics =
+    hoisted_row_executor_proposal && candidate_fill > 0.0 &&
+    candidate_fill <= 1000000.0 &&
+    candidate_fill <= 1.05 * incumbent_estimated_fill &&
+    candidate_common.flops >= 32.0 * candidate_fill &&
+    candidate_common.flops <= 1.25 * incumbent_estimated_flops &&
+    candidate_common.noffdiag <= stable_pivot_cap;
   candidate_ok = candidate_ok && incumbent_estimated_fill > 0.0 &&
     isfinite(incumbent_estimated_fill) &&
     incumbent_estimated_flops > 0.0 &&
-    candidate_fill <= 0.90 * incumbent_estimated_fill &&
-    candidate_common.flops > 0.0 &&
-    candidate_common.flops <= 0.75 * incumbent_estimated_flops &&
+    (decisive_numeric_economics || hoisted_row_numeric_economics) &&
     isfinite(candidate_common.rcond) && candidate_common.rcond > 0.0;
 
   int residual_ok = 0;
@@ -51134,11 +51450,24 @@ static int maybe_factor_generic_btf_value_alternative(
 
   trilinos_klu_l_symbolic *old_symbolic = solver->symbolic;
   trilinos_klu_l_common old_common = solver->common;
+  const kls_stats old_stats = solver->stats;
+  const int old_generic_nd_portfolio_selected =
+    solver->generic_nd_portfolio_selected;
+  const int old_generic_nd_numeric_validated =
+    solver->generic_nd_numeric_validated;
+  const int old_generic_amf3_span_variant_selected =
+    solver->generic_amf3_span_variant_selected;
+  const int old_auto_scale_checked = solver->auto_scale_checked;
+  const int old_auto_scale_value_certified =
+    solver->auto_scale_value_certified;
+  const int old_factor_preps_deferred = solver->factor_preps_deferred;
+  kls_separator_analysis old_separator;
+  memset(&old_separator, 0, sizeof(old_separator));
+  kls_separator_analysis_move(&old_separator, &solver->separator);
   solver->symbolic = candidate_symbolic;
   solver->numeric = candidate_numeric;
   solver->common = candidate_common;
   solver->generic_btf_value_symbolic = NULL;
-  kls_separator_analysis_clear(&solver->separator);
   kls_separator_analysis_move(
     &solver->separator, &solver->generic_btf_value_separator);
   solver->stats.selected_ordering = solver->generic_btf_value_ordering;
@@ -51148,7 +51477,6 @@ static int maybe_factor_generic_btf_value_alternative(
   solver->generic_amf3_span_variant_selected = 0;
   solver->auto_scale_checked = 1;
   solver->auto_scale_value_certified = 1;
-  kls_metis_race_abandon(solver);
   kls_invalidate_factor_etree_stats(solver);
   kls_numeric_replaced_invalidate(solver);
   solver->generic_btf_unscaled_recovery_scale = recovery_scale;
@@ -51165,6 +51493,50 @@ static int maybe_factor_generic_btf_value_alternative(
   solver->stats.structural_rank =
     (int64_t)solver->symbolic->structural_rank;
   solver->stats.estimated_flops = solver->symbolic->est_flops;
+  if (hoisted_row_numeric_economics) {
+    const int row_ready =
+      kls_generic_hoisted_snode_worker_candidate(solver) &&
+      kls_build_row_refactor_pattern(solver, 1);
+    if (row_ready) {
+      kls_lean_row_refactor_ensure_snode_runs(solver);
+    }
+    if (!row_ready || !kls_generic_hoisted_snode_worker_capable(solver)) {
+      /* The fill/work screen is only an admission signal.  If the realized
+         factor cannot build the executor whose recurring traffic justified
+         the extra numeric, restore the ordinary symbolic before publishing
+         any result.  No input dimensions or family identity participate in
+         this final capability certificate. */
+      trilinos_klu_l_symbolic *rejected_symbolic = solver->symbolic;
+      trilinos_klu_l_numeric *rejected_numeric = solver->numeric;
+      trilinos_klu_l_common rejected_common = solver->common;
+      solver->symbolic = old_symbolic;
+      solver->numeric = NULL;
+      solver->common = old_common;
+      solver->stats = old_stats;
+      solver->generic_nd_portfolio_selected =
+        old_generic_nd_portfolio_selected;
+      solver->generic_nd_numeric_validated =
+        old_generic_nd_numeric_validated;
+      solver->generic_amf3_span_variant_selected =
+        old_generic_amf3_span_variant_selected;
+      solver->auto_scale_checked = old_auto_scale_checked;
+      solver->auto_scale_value_certified =
+        old_auto_scale_value_certified;
+      kls_separator_analysis_clear(&solver->separator);
+      kls_separator_analysis_move(&solver->separator, &old_separator);
+      kls_invalidate_factor_etree_stats(solver);
+      kls_numeric_replaced_invalidate(solver);
+      solver->factor_preps_deferred = old_factor_preps_deferred;
+      trilinos_klu_l_free_numeric(&rejected_numeric, &rejected_common);
+      trilinos_klu_l_free_symbolic(&rejected_symbolic, &rejected_common);
+      *elapsed += kls_now_seconds() - decision_start;
+      return 0;
+    }
+    solver->lean_choice = 1;
+    solver->lean_reaudit_state = 5;
+  }
+  kls_metis_race_abandon(solver);
+  kls_separator_analysis_clear(&old_separator);
   trilinos_klu_l_free_symbolic(&old_symbolic, &old_common);
   *elapsed += kls_now_seconds() - decision_start;
   return 1;
@@ -59936,7 +60308,8 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
   if (!kls_refactor_map_index32_env_enabled()) {
     return 1;
   }
-  if (solver != NULL &&
+  if (solver != NULL && !solver->compact_map32_probe_active &&
+      getenv("KLS_ENABLE_SETTLED_COMPACT_MAP32_REFACTOR") == NULL &&
       (kls_moderate_work_single_block_lean_policy_enabled(solver) ||
        kls_moderate_work_fragmented_btf_lean_policy_enabled(solver) ||
        (kls_legacy_shape_policies_enabled() &&
@@ -59958,7 +60331,8 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
     return 1;
   }
   if (solver->refactor_row_idx32 != NULL &&
-      solver->refactor_input_pos32 != NULL) {
+      solver->refactor_input_pos32 != NULL &&
+      solver->refactor_input_oldrow32 != NULL) {
     return 1;
   }
 
@@ -59966,25 +60340,33 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
     (int32_t *)malloc((size_t)solver->nnz * sizeof(*row_idx32));
   int32_t *input_pos32 =
     (int32_t *)malloc((size_t)solver->nnz * sizeof(*input_pos32));
-  if (row_idx32 == NULL || input_pos32 == NULL) {
+  int32_t *input_oldrow32 =
+    (int32_t *)malloc((size_t)solver->nnz * sizeof(*input_oldrow32));
+  if (row_idx32 == NULL || input_pos32 == NULL || input_oldrow32 == NULL) {
     free(row_idx32);
     free(input_pos32);
+    free(input_oldrow32);
     return 1;
   }
   for (UF_long p = 0; p < solver->nnz; ++p) {
     const UF_long row = solver->refactor_row_idx[p];
     const UF_long input_pos = solver->refactor_input_pos[p];
-    if (row > (UF_long)INT32_MAX || input_pos > (UF_long)INT32_MAX) {
+    if (row > (UF_long)INT32_MAX || input_pos > (UF_long)INT32_MAX ||
+        input_pos >= solver->nnz || solver->row_idx == NULL ||
+        solver->row_idx[input_pos] > (UF_long)INT32_MAX) {
       free(row_idx32);
       free(input_pos32);
+      free(input_oldrow32);
       return 0;
     }
     row_idx32[p] = (int32_t)row;
     input_pos32[p] = (int32_t)input_pos;
+    input_oldrow32[p] = (int32_t)solver->row_idx[input_pos];
   }
 
   solver->refactor_row_idx32 = row_idx32;
   solver->refactor_input_pos32 = input_pos32;
+  solver->refactor_input_oldrow32 = input_oldrow32;
   solver->refactor_map_indices32_count = solver->nnz;
   solver->refactor_map_index32_enabled = 1;
   return 1;
@@ -96228,7 +96610,6 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
                                                 double *numeric_values) {
   if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
       solver->numeric->Udiag == NULL || solver->numeric->Lip == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Uip == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->LUbx == NULL ||
@@ -96236,7 +96617,12 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
       !kls_build_refactor_map(solver) ||
       solver->refactor_col_ptr == NULL ||
       solver->refactor_row_idx32 == NULL ||
-      solver->refactor_input_pos32 == NULL) {
+      solver->refactor_input_pos32 == NULL ||
+      (solver->common.scale > 0 &&
+       (solver->numeric->Rs == NULL ||
+        solver->numeric->Pnum == NULL ||
+        solver->refactor_input_oldrow32 == NULL)) ||
+      (solver->common.scale <= 0 && solver->numeric->Rs != NULL)) {
     return -1;
   }
 
@@ -96254,17 +96640,30 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
   const UF_long *q = symbolic->Q;
   const int32_t *restrict map_row = solver->refactor_row_idx32;
   const int32_t *restrict map_input = solver->refactor_input_pos32;
+  const int32_t *restrict map_oldrow = solver->refactor_input_oldrow32;
+  const int scaled = common->scale > 0;
+  const double *restrict rs = (const double *)numeric->Rs;
 
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
+  if (scaled && !trilinos_klu_l_scale(
+        (UF_long)common->scale, solver->n, solver->col_ptr,
+        solver->row_idx, numeric_values, (double *)numeric->Rs, NULL,
+        common)) {
+    return 0;
+  }
 
   for (UF_long k = 0u; k < solver->n; ++k) {
     const UF_long input_begin = solver->refactor_col_ptr[k];
     const UF_long input_end = solver->refactor_col_ptr[k + 1u];
     for (UF_long p = input_begin; p < input_end; ++p) {
-      x[(UF_long)map_row[p]] = numeric_values[(UF_long)map_input[p]];
+      double value = numeric_values[(UF_long)map_input[p]];
+      if (scaled) {
+        value /= rs[(UF_long)map_oldrow[p]];
+      }
+      x[(UF_long)map_row[p]] = value;
     }
 
     UF_long *ui = NULL;
@@ -96316,6 +96715,152 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
   }
   if (diag_recip != NULL) {
     solver->i32solve_udiag_recip_fresh = 1;
+  }
+  if (scaled) {
+    double *restrict numeric_rs = (double *)numeric->Rs;
+    for (UF_long k = 0u; k < solver->n; ++k) {
+      x[k] = numeric_rs[numeric->Pnum[k]];
+    }
+    for (UF_long k = 0u; k < solver->n; ++k) {
+      numeric_rs[k] = x[k];
+      x[k] = 0.0;
+    }
+  }
+  return 1;
+}
+
+/* Compare the vendor fixed-pattern walk with the compact predecoded stream
+   only at a dispatch point that has already selected serial KLU.  Both arms
+   recompute the same numeric on the same values; the compact arm is retained
+   only after a deterministic solve/residual certificate and only when its
+   projected recurring saving repays the one-time trial twice. */
+static int kls_try_compact_map32_klu_tournament(
+  kls_solver *solver,
+  double *numeric_values,
+  UF_long *ok_out,
+  int *compact_used_out) {
+  if (ok_out != NULL) {
+    *ok_out = 0u;
+  }
+  if (compact_used_out != NULL) {
+    *compact_used_out = 0;
+  }
+  if (solver == NULL || numeric_values == NULL || ok_out == NULL ||
+      compact_used_out == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
+      solver->dense_tail_cols != 0u || solver->n > (UF_long)INT32_MAX ||
+      solver->nnz > (UF_long)INT32_MAX ||
+      !kls_direct_klu_public_csc_capable(solver)) {
+    return 0;
+  }
+
+  const int force_compact =
+    getenv("KLS_ENABLE_SETTLED_COMPACT_MAP32_REFACTOR") != NULL;
+  if (!force_compact &&
+      (solver->compact_map32_choice < 0 ||
+       getenv("KLS_DISABLE_COMPACT_MAP32_TOURNAMENT") != NULL ||
+       !kls_repeated_update_workload(&solver->options) ||
+       solver->options.expected_refactorizations <= 6)) {
+    return 0;
+  }
+
+  if (force_compact || solver->compact_map32_choice > 0) {
+    solver->compact_map32_probe_active = 1;
+    const int compact_ok =
+      kls_lean_single_block_map32_refactor(solver, numeric_values);
+    solver->compact_map32_probe_active = 0;
+    if (compact_ok >= 0) {
+      *ok_out = (UF_long)compact_ok;
+      *compact_used_out = 1;
+      return 1;
+    }
+    if (!force_compact) {
+      solver->compact_map32_choice = -1;
+    }
+    return 0;
+  }
+
+  const int state = solver->compact_map32_trial_state;
+  if (state == 0) {
+    const double prep_start = kls_now_seconds();
+    solver->compact_map32_probe_active = 1;
+    const int map_ready = kls_build_refactor_map(solver);
+    solver->compact_map32_probe_active = 0;
+    solver->compact_map32_trial_overhead +=
+      kls_now_seconds() - prep_start;
+    if (!map_ready) {
+      solver->compact_map32_choice = -1;
+      return 0;
+    }
+  }
+
+  const int compact_arm = (state & 1) == 0;
+  solver->common.status = TRILINOS_KLU_OK;
+  const double arm_start = kls_now_seconds();
+  int arm_ok = 0;
+  if (compact_arm) {
+    arm_ok = kls_lean_single_block_map32_refactor(
+      solver, numeric_values);
+  } else {
+    arm_ok = (int)trilinos_klu_l_refactor(
+      solver->col_ptr, solver->row_idx, numeric_values, solver->symbolic,
+      solver->numeric, &solver->common);
+  }
+  const double arm_seconds = kls_now_seconds() - arm_start;
+  if (arm_ok <= 0 || solver->common.status < 0) {
+    solver->compact_map32_choice = -1;
+    if (compact_arm) {
+      return 0;
+    }
+    *ok_out = (UF_long)arm_ok;
+    return 1;
+  }
+  const int arm = compact_arm ? 0 : 1;
+  solver->compact_map32_trial_samples[arm][state / 2] = arm_seconds;
+
+  if (state == 2) {
+    const double probe_start = kls_now_seconds();
+    solver->compact_map32_trial_probe_ok =
+      kls_direct_klu_numeric_residual_probe(solver, numeric_values);
+    solver->compact_map32_trial_overhead +=
+      kls_now_seconds() - probe_start;
+  }
+  solver->compact_map32_trial_state = state + 1;
+  *ok_out = (UF_long)arm_ok;
+  *compact_used_out = compact_arm;
+
+  if (state == 5) {
+    const double compact_seconds = fmin(
+      solver->compact_map32_trial_samples[0][0],
+      fmin(solver->compact_map32_trial_samples[0][1],
+           solver->compact_map32_trial_samples[0][2]));
+    const double vendor_seconds = fmin(
+      solver->compact_map32_trial_samples[1][0],
+      fmin(solver->compact_map32_trial_samples[1][1],
+           solver->compact_map32_trial_samples[1][2]));
+    const double remaining =
+      (double)(solver->options.expected_refactorizations - 6);
+    const double projected_saving =
+      remaining * (vendor_seconds - compact_seconds);
+    /* Below this absolute delta, timer/scheduler noise can dominate the
+       complete expected run and the maximum possible gain is immaterial. */
+    const int adopt_compact =
+      solver->compact_map32_trial_probe_ok && compact_seconds > 0.0 &&
+      vendor_seconds > 0.0 && compact_seconds < 0.98 * vendor_seconds &&
+      vendor_seconds - compact_seconds >= 50.0e-6 &&
+      projected_saving >
+        2.0 * solver->compact_map32_trial_overhead;
+    solver->compact_map32_choice = adopt_compact ? 1 : -1;
+    if (getenv("KLS_TRACE_SETTLED_COMPACT_MAP32_REFACTOR") != NULL) {
+      fprintf(stderr,
+              "KLS compact map32 tournament: compact %.3f ms vendor %.3f "
+              "ms overhead %.3f ms projected %.3f ms valid=%d -> %s\n",
+              1e3 * compact_seconds, 1e3 * vendor_seconds,
+              1e3 * solver->compact_map32_trial_overhead,
+              1e3 * projected_saving,
+              solver->compact_map32_trial_probe_ok,
+              adopt_compact ? "COMPACT" : "KLU");
+    }
   }
   return 1;
 }
@@ -96531,6 +97076,19 @@ static inline int kls_egraph_copy_refactor_values(
   UF_long out_pos = *out_pos_io;
   if (solver->refactor_input_pos32 != NULL) {
     const int32_t *restrict input_pos32 = solver->refactor_input_pos32;
+    if (scale > 0 && rs != NULL &&
+        solver->refactor_input_oldrow32 != NULL) {
+      const int32_t *restrict oldrow32 = solver->refactor_input_oldrow32;
+      for (UF_long p = begin; p < end; ++p) {
+        const UF_long oldrow = (UF_long)oldrow32[p];
+        if (out_pos >= out_end || oldrow >= solver->n || rs[oldrow] == 0.0) {
+          return 0;
+        }
+        out[out_pos++] = values[(UF_long)input_pos32[p]] / rs[oldrow];
+      }
+      *out_pos_io = out_pos;
+      return 1;
+    }
     for (UF_long p = begin; p < end; ++p) {
       if (out_pos >= out_end) {
         return 0;
@@ -96577,6 +97135,20 @@ static inline int kls_egraph_scatter_refactor_input(
       solver->refactor_input_pos32 != NULL) {
     const int32_t *restrict row_idx32 = solver->refactor_row_idx32;
     const int32_t *restrict input_pos32 = solver->refactor_input_pos32;
+    if (scale > 0 && rs != NULL &&
+        solver->refactor_input_oldrow32 != NULL) {
+      const int32_t *restrict oldrow32 = solver->refactor_input_oldrow32;
+      for (UF_long p = begin; p < end; ++p) {
+        const UF_long row = (UF_long)row_idx32[p];
+        const UF_long oldrow = (UF_long)oldrow32[p];
+        if (row < row_base || row >= row_limit || oldrow >= solver->n ||
+            rs[oldrow] == 0.0) {
+          return 0;
+        }
+        x[row - row_base] = values[(UF_long)input_pos32[p]] / rs[oldrow];
+      }
+      return 1;
+    }
     for (UF_long p = begin; p < end; ++p) {
       const UF_long row = (UF_long)row_idx32[p];
       if (row < row_base || row >= row_limit) {
@@ -128952,9 +129524,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
        the serial mapped refactor under it and keep the EGraph for
        shapes it cannot cover. */
     if (kls_low_work_single_block_direct_csc_capable(solver)) {
-      const UF_long serial_ok =
-        kls_serial_klu_refactor_dense_tail(solver, numeric_values, 0);
-      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
+      UF_long serial_ok = 0u;
+      int compact_used = 0;
+      if (!kls_try_compact_map32_klu_tournament(
+            solver, numeric_values, &serial_ok, &compact_used)) {
+        serial_ok =
+          kls_serial_klu_refactor_dense_tail(solver, numeric_values, 0);
+      }
+      kls_set_last_refactor_path(
+        solver, compact_used
+          ? KLS_REFACTOR_PATH_MAPPED : KLS_REFACTOR_PATH_KLU);
       return serial_ok;
     }
     {
@@ -128977,10 +129556,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
       return (UF_long)mapped;
     }
-    const UF_long serial_ok =
-      kls_serial_klu_refactor_dense_tail(solver, numeric_values,
-                                         check_pivots);
-    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
+    UF_long serial_ok = 0u;
+    int compact_used = 0;
+    if (!kls_try_compact_map32_klu_tournament(
+          solver, numeric_values, &serial_ok, &compact_used)) {
+      serial_ok = kls_serial_klu_refactor_dense_tail(
+        solver, numeric_values, check_pivots);
+    }
+    kls_set_last_refactor_path(
+      solver, compact_used
+        ? KLS_REFACTOR_PATH_MAPPED : KLS_REFACTOR_PATH_KLU);
     if (!serial_ok) {
       kls_record_fast_factor_failure(
         solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
@@ -129168,10 +129753,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         return (UF_long)checked;
       }
     }
-    const UF_long ok =
-      kls_serial_klu_refactor_dense_tail(solver, numeric_values,
-                                         check_pivots);
-    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
+    UF_long ok = 0u;
+    int compact_used = 0;
+    if (!kls_try_compact_map32_klu_tournament(
+          solver, numeric_values, &ok, &compact_used)) {
+      ok = kls_serial_klu_refactor_dense_tail(
+        solver, numeric_values, check_pivots);
+    }
+    kls_set_last_refactor_path(
+      solver, compact_used
+        ? KLS_REFACTOR_PATH_MAPPED : KLS_REFACTOR_PATH_KLU);
     if (!ok) {
       kls_record_fast_factor_failure(
         solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
@@ -129220,10 +129811,16 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         return snb_ok;
       }
     }
-    const UF_long ok =
-      kls_serial_klu_refactor_dense_tail(solver, numeric_values,
-                                         check_pivots);
-    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
+    UF_long ok = 0u;
+    int compact_used = 0;
+    if (!kls_try_compact_map32_klu_tournament(
+          solver, numeric_values, &ok, &compact_used)) {
+      ok = kls_serial_klu_refactor_dense_tail(
+        solver, numeric_values, check_pivots);
+    }
+    kls_set_last_refactor_path(
+      solver, compact_used
+        ? KLS_REFACTOR_PATH_MAPPED : KLS_REFACTOR_PATH_KLU);
     if (!ok) {
       kls_record_fast_factor_failure(
         solver, KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED,
@@ -159268,8 +159865,23 @@ static int kls_pts_top_pipeline_is_profitable(const kls_pts *pts) {
 
 static int kls_pts_top_pipeline_enabled(const kls_solver *solver,
                                         const kls_pts *pts) {
+  if (getenv("KLS_DISABLE_PTS_PIPE_TOP") != NULL) {
+    return 0;
+  }
   if (getenv("KLS_PTS_PIPE_TOP") != NULL) {
     return pts != NULL && pts->ntop > 0;
+  }
+  if (!kls_legacy_shape_policies_enabled() && solver != NULL &&
+      solver->symbolic != NULL && solver->symbolic->nblocks == 1u) {
+    /* The subtree bins already expose all parallelism available below a
+       one-block separator.  Replaying that separator through per-column
+       atomic claims and dependency publication adds a second scheduler to
+       its intrinsically ordered top; across the paper and held-out
+       one-block PTS cohort the ordinary serial top was uniformly faster or
+       neutral.  Fragmented factors can overlap other blocks with that top
+       and retain the measured pipeline gate below.  This is a property of
+       the retained factor representation, not of the input matrix shape. */
+    return 0;
   }
   if (kls_legacy_shape_policies_enabled()) {
     return pts != NULL && pts->ntop > 0 &&
@@ -165894,11 +166506,15 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_clear_tail_last_stats(solver);
     kls_clear_row_refactor_last_stats(solver);
     solver->common.status = TRILINOS_KLU_OK;
-    const UF_long ok =
-      trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                              (double *)(uintptr_t)values,
-                              solver->symbolic, solver->numeric,
-                              &solver->common);
+    UF_long ok = 0u;
+    int compact_used = 0;
+    if (!kls_try_compact_map32_klu_tournament(
+          solver, (double *)(uintptr_t)values, &ok, &compact_used)) {
+      ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                                   (double *)(uintptr_t)values,
+                                   solver->symbolic, solver->numeric,
+                                   &solver->common);
+    }
     if (ok && solver->common.status >= 0 &&
         solver->solve_contract_probe == 2 && solver->nnz > 0u) {
       /* Growth-armed solves verify against the current numeric.  The full
@@ -165913,7 +166529,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
                (size_t)solver->nnz * sizeof(*values));
       }
     }
-    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_KLU);
+    kls_set_last_refactor_path(
+      solver, compact_used
+        ? KLS_REFACTOR_PATH_MAPPED : KLS_REFACTOR_PATH_KLU);
     if (ok && solver->common.status >= TRILINOS_KLU_OK) {
       (void)kls_refresh_i32_udiag_recip(solver);
     }
