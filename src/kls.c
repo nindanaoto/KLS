@@ -1030,6 +1030,7 @@ struct kls_solver {
   UF_long refactor_l_sorted_entries;
   UF_long refactor_u_indices32_count;
   UF_long *row_refactor_l_ptr;
+  uint32_t *row_refactor_l_ptr32;
   uint16_t *row_refactor_l_ptr16;
   UF_long *row_refactor_l_cols;
   int32_t *row_refactor_l_cols32;
@@ -1037,6 +1038,7 @@ struct kls_solver {
   double **row_refactor_l_values;
   double *row_refactor_l_row_values;
   UF_long *row_refactor_u_ptr;
+  uint32_t *row_refactor_u_ptr32;
   uint16_t *row_refactor_u_ptr16;
   UF_long *row_refactor_u_cols;
   int32_t *row_refactor_u_cols32;
@@ -1056,6 +1058,7 @@ struct kls_solver {
   atomic_ullong lsn_decl_norun, lsn_decl_short, lsn_decl_wait,
                 lsn_consumed;             /* decline-reason census */
   UF_long *row_refactor_input_ptr;
+  uint32_t *row_refactor_input_ptr32;
   uint16_t *row_refactor_input_ptr16;
   UF_long *row_refactor_input_cols;
   uint16_t *row_refactor_input_cols16;
@@ -3068,6 +3071,7 @@ typedef struct kls_egraph_refactor_shared {
   int lean_parallel_offdiag_mode;
   int lean_grouped_done_mode;
   int lean_row_values_mode;
+  int lean_fused_scale_mode;
   const UF_long *lean_rows;
   int row_refactor_mode;
   int row_refactor_scale_hoist;
@@ -19918,6 +19922,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->lean_grouped_profitability_decision = 0;
   kls_clear_row_solve_partition(solver);
   free(solver->row_refactor_l_ptr);
+  free(solver->row_refactor_l_ptr32);
   free(solver->row_refactor_l_ptr16);
   free(solver->row_refactor_l_cols);
   free(solver->row_refactor_l_cols32);
@@ -19925,6 +19930,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_l_values);
   free(solver->row_refactor_l_row_values);
   free(solver->row_refactor_u_ptr);
+  free(solver->row_refactor_u_ptr32);
   free(solver->row_refactor_u_ptr16);
   free(solver->row_refactor_u_cols);
   free(solver->row_refactor_u_cols32);
@@ -19934,6 +19940,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_sn_end);
   free(solver->lean_snode_run);
   free(solver->row_refactor_input_ptr);
+  free(solver->row_refactor_input_ptr32);
   free(solver->row_refactor_input_ptr16);
   free(solver->row_refactor_input_cols);
   free(solver->row_refactor_input_cols16);
@@ -19997,6 +20004,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_dense_producer_target_kind);
   free(solver->row_refactor_dense_producer_target_pos);
   solver->row_refactor_l_ptr = NULL;
+  solver->row_refactor_l_ptr32 = NULL;
   solver->row_refactor_l_ptr16 = NULL;
   solver->row_refactor_l_cols = NULL;
   solver->row_refactor_l_cols32 = NULL;
@@ -20004,6 +20012,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_l_values = NULL;
   solver->row_refactor_l_row_values = NULL;
   solver->row_refactor_u_ptr = NULL;
+  solver->row_refactor_u_ptr32 = NULL;
   solver->row_refactor_u_ptr16 = NULL;
   solver->row_refactor_u_cols = NULL;
   solver->row_refactor_u_cols32 = NULL;
@@ -20014,6 +20023,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->lean_snode_run = NULL;
   solver->lean_snode_worker_eligible = 0;
   solver->row_refactor_input_ptr = NULL;
+  solver->row_refactor_input_ptr32 = NULL;
   solver->row_refactor_input_ptr16 = NULL;
   solver->row_refactor_input_cols = NULL;
   solver->row_refactor_input_cols16 = NULL;
@@ -79127,6 +79137,14 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
     lcount <= (UF_long)UINT16_MAX &&
     ucount <= (UF_long)UINT16_MAX &&
     input_count <= (UF_long)UINT16_MAX;
+  const int compact_ptrs32 =
+    !compact_ptrs &&
+    solver->common.scale > 0 &&
+    kls_repeated_update_workload(&solver->options) &&
+    lcount <= (UF_long)UINT32_MAX &&
+    ucount <= (UF_long)UINT32_MAX &&
+    input_count <= (UF_long)UINT32_MAX &&
+    getenv("KLS_DISABLE_SCALED_LEAN_U32_PTRS") == NULL;
   uint16_t *lcols = (uint16_t *)malloc(
     (size_t)(lcount > 0u ? lcount : 1u) * sizeof(*lcols));
   uint16_t *ucols = (uint16_t *)malloc(
@@ -79137,17 +79155,28 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
     ((size_t)n + 1u) * sizeof(*uptr)) : NULL;
   uint16_t *input_ptr = compact_ptrs ? (uint16_t *)malloc(
     ((size_t)n + 1u) * sizeof(*input_ptr)) : NULL;
+  uint32_t *lptr32 = compact_ptrs32 ? (uint32_t *)malloc(
+    ((size_t)n + 1u) * sizeof(*lptr32)) : NULL;
+  uint32_t *uptr32 = compact_ptrs32 ? (uint32_t *)malloc(
+    ((size_t)n + 1u) * sizeof(*uptr32)) : NULL;
+  uint32_t *input_ptr32 = compact_ptrs32 ? (uint32_t *)malloc(
+    ((size_t)n + 1u) * sizeof(*input_ptr32)) : NULL;
   uint16_t *level_rows =
     compact_ptrs && getenv("KLS_DISABLE_LEAN_I16_ROWS") == NULL
       ? (uint16_t *)malloc((size_t)n * sizeof(*level_rows)) : NULL;
   if (lcols == NULL || ucols == NULL ||
       (compact_ptrs && (lptr == NULL || uptr == NULL ||
-                        input_ptr == NULL))) {
+                        input_ptr == NULL)) ||
+      (compact_ptrs32 && (lptr32 == NULL || uptr32 == NULL ||
+                          input_ptr32 == NULL))) {
     free(lcols);
     free(ucols);
     free(lptr);
     free(uptr);
     free(input_ptr);
+    free(lptr32);
+    free(uptr32);
+    free(input_ptr32);
     free(level_rows);
     return 0;
   }
@@ -79161,6 +79190,9 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
         free(lptr);
         free(uptr);
         free(input_ptr);
+        free(lptr32);
+        free(uptr32);
+        free(input_ptr32);
         free(level_rows);
         return 0;
       }
@@ -79179,6 +79211,12 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
         level_rows[pos] = (uint16_t)row;
       }
     }
+  } else if (compact_ptrs32) {
+    for (UF_long row = 0u; row <= n; ++row) {
+      lptr32[row] = (uint32_t)solver->row_refactor_l_ptr[row];
+      uptr32[row] = (uint32_t)solver->row_refactor_u_ptr[row];
+      input_ptr32[row] = (uint32_t)solver->row_refactor_input_ptr[row];
+    }
   }
   for (UF_long p = 0u; p < lcount; ++p) {
     const UF_long col = solver->row_refactor_l_cols[p];
@@ -79188,6 +79226,9 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
       free(lptr);
       free(uptr);
       free(input_ptr);
+      free(lptr32);
+      free(uptr32);
+      free(input_ptr32);
       free(level_rows);
       return 0;
     }
@@ -79201,6 +79242,9 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
       free(lptr);
       free(uptr);
       free(input_ptr);
+      free(lptr32);
+      free(uptr32);
+      free(input_ptr32);
       free(level_rows);
       return 0;
     }
@@ -79211,12 +79255,18 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
   free(solver->row_refactor_l_ptr16);
   free(solver->row_refactor_u_ptr16);
   free(solver->row_refactor_input_ptr16);
+  free(solver->row_refactor_l_ptr32);
+  free(solver->row_refactor_u_ptr32);
+  free(solver->row_refactor_input_ptr32);
   free(solver->row_refactor_level_rows16);
   solver->row_refactor_l_cols16 = lcols;
   solver->row_refactor_u_cols16 = ucols;
   solver->row_refactor_l_ptr16 = lptr;
   solver->row_refactor_u_ptr16 = uptr;
   solver->row_refactor_input_ptr16 = input_ptr;
+  solver->row_refactor_l_ptr32 = lptr32;
+  solver->row_refactor_u_ptr32 = uptr32;
+  solver->row_refactor_input_ptr32 = input_ptr32;
   solver->row_refactor_level_rows16 = level_rows;
   if (getenv("KLS_TRACE_LEAN_SOLVE_HIST") != NULL) {
     UF_long lh[7] = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
@@ -80750,6 +80800,351 @@ static void kls_generic_hoisted_worker_run(
   }
 }
 
+/* Scaling does not change the retained row graph: every input entry in one
+   pivot row uses the same original-row scale selected by Pnum.  Keep the
+   unscaled hot loop above unchanged, and specialize the scaled loop here so
+   the scale-mode test, row-value scatter choice, and representation checks
+   remain outside the dependency walk. */
+static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride,
+  int compact_cols,
+  int compact_ptrs,
+  int row_values_mode,
+  int grouped_done_mode,
+  int fused_update_mode,
+  int scaled_input_mode,
+  int fused_scale_mode,
+  int sum_scale_mode,
+  int branchless_update_mode) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  const UF_long n = solver->n;
+  const unsigned int tid = (unsigned int)worker->tid;
+  double *restrict x = worker->x;
+  const double *restrict values = shared->values;
+  double *restrict rs = (double *)(uintptr_t)shared->rs;
+  const UF_long *restrict pnum = solver->numeric->Pnum;
+  const UF_long *restrict in_ptr = solver->row_refactor_input_ptr;
+  const uint32_t *restrict in_ptr32 = solver->row_refactor_input_ptr32;
+  const UF_long *restrict in_cols = solver->row_refactor_input_cols;
+  const UF_long *restrict in_pos = solver->row_refactor_input_pos;
+  const uint32_t *restrict in_packed =
+    solver->row_refactor_input_col_user32;
+  const UF_long *restrict l_ptr = solver->row_refactor_l_ptr;
+  const uint32_t *restrict l_ptr32 = solver->row_refactor_l_ptr32;
+  const UF_long *restrict l_cols = solver->row_refactor_l_cols;
+  const uint16_t *restrict l_cols16 = solver->row_refactor_l_cols16;
+  double **restrict l_lu = solver->row_refactor_l_values;
+  double *restrict l_val = solver->row_refactor_l_row_values;
+  const UF_long *restrict u_ptr = solver->row_refactor_u_ptr;
+  const uint32_t *restrict u_ptr32 = solver->row_refactor_u_ptr32;
+  const UF_long *restrict u_cols = solver->row_refactor_u_cols;
+  const uint16_t *restrict u_cols16 = solver->row_refactor_u_cols16;
+  double *restrict u_val = solver->row_refactor_u_row_values;
+  double **restrict u_lu = solver->row_refactor_u_values;
+  double *restrict udiag = (double *)solver->numeric->Udiag;
+  kls_lean_done_slot *restrict done = shared->lean_done;
+  const uint32_t *restrict done_token =
+    solver->lean_parallel_grouped_token;
+  atomic_uint *restrict grouped_done = solver->lean_parallel_grouped_done;
+
+  for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
+    const UF_long row = rows[pos];
+    const UF_long input_begin = compact_ptrs
+      ? (UF_long)in_ptr32[row] : in_ptr[row];
+    const UF_long input_end = compact_ptrs
+      ? (UF_long)in_ptr32[row + 1u] : in_ptr[row + 1u];
+    const UF_long dependency_begin = compact_ptrs
+      ? (UF_long)l_ptr32[row] : l_ptr[row];
+    const UF_long dependency_end = compact_ptrs
+      ? (UF_long)l_ptr32[row + 1u] : l_ptr[row + 1u];
+    double row_scale = 0.0;
+    if (fused_scale_mode) {
+      if (in_packed != NULL) {
+        for (UF_long p = input_begin; p < input_end; ++p) {
+          const uint32_t packed = in_packed[p];
+          const double value = values[packed >> 16u];
+          x[packed & UINT32_C(0xffff)] = value;
+          const double magnitude = fabs(value);
+          if (sum_scale_mode) {
+            row_scale += magnitude;
+          } else if (magnitude > row_scale) {
+            row_scale = magnitude;
+          }
+        }
+      } else {
+        for (UF_long p = input_begin; p < input_end; ++p) {
+          const double value = values[in_pos[p]];
+          x[in_cols[p]] = value;
+          const double magnitude = fabs(value);
+          if (sum_scale_mode) {
+            row_scale += magnitude;
+          } else if (magnitude > row_scale) {
+            row_scale = magnitude;
+          }
+        }
+      }
+      if (row_scale == 0.0) {
+        row_scale = 1.0;
+      }
+      if (fused_scale_mode > 1) {
+        rs[row] = row_scale;
+      } else {
+        rs[pnum[row]] = row_scale;
+      }
+      const double row_rs_inv = 1.0 / row_scale;
+      if (in_packed != NULL) {
+        for (UF_long p = input_begin; p < input_end; ++p) {
+          x[in_packed[p] & UINT32_C(0xffff)] *= row_rs_inv;
+        }
+      } else {
+        for (UF_long p = input_begin; p < input_end; ++p) {
+          x[in_cols[p]] *= row_rs_inv;
+        }
+      }
+    } else if (scaled_input_mode) {
+      row_scale = rs[pnum[row]];
+      const double row_rs_inv = 1.0 / row_scale;
+      if (in_packed != NULL) {
+        for (UF_long p = input_begin; p < input_end; ++p) {
+          const uint32_t packed = in_packed[p];
+          x[packed & UINT32_C(0xffff)] =
+            values[packed >> 16u] * row_rs_inv;
+        }
+      } else {
+        for (UF_long p = input_begin; p < input_end; ++p) {
+          x[in_cols[p]] = values[in_pos[p]] * row_rs_inv;
+        }
+      }
+    } else if (in_packed != NULL) {
+      for (UF_long p = input_begin; p < input_end; ++p) {
+        const uint32_t packed = in_packed[p];
+        x[packed & UINT32_C(0xffff)] = values[packed >> 16u];
+      }
+    } else {
+      for (UF_long p = input_begin; p < input_end; ++p) {
+        x[in_cols[p]] = values[in_pos[p]];
+      }
+    }
+    for (UF_long p = dependency_begin; p < dependency_end; ++p) {
+      const UF_long dep = compact_cols
+        ? (UF_long)l_cols16[p] : l_cols[p];
+      if (grouped_done_mode) {
+        const uint32_t token = done_token[dep];
+        if ((unsigned int)(token >> KLS_LEAN_GROUPED_OWNER_SHIFT) != tid) {
+          const uint32_t slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
+          while (atomic_load_explicit(&grouped_done[slot],
+                                      memory_order_acquire) != generation) {
+            kls_cpu_relax();
+          }
+        }
+      } else if (done[dep].owner != tid) {
+        unsigned spin = 0u;
+        while (atomic_load_explicit(&done[dep].generation,
+                                    memory_order_acquire) != generation) {
+          if ((++spin & 255u) == 0u &&
+              atomic_load_explicit(&shared->stop,
+                                   memory_order_acquire) != 0) {
+            return;
+          }
+          kls_cpu_relax();
+        }
+      }
+      const double lik = x[dep] / udiag[dep];
+      x[dep] = 0.0;
+      if (row_values_mode) {
+        l_val[p] = lik;
+      } else {
+        *l_lu[p] = lik;
+      }
+      if (branchless_update_mode || lik != 0.0) {
+        const UF_long update_begin = compact_ptrs
+          ? (UF_long)u_ptr32[dep] : u_ptr[dep];
+        const UF_long update_end = compact_ptrs
+          ? (UF_long)u_ptr32[dep + 1u] : u_ptr[dep + 1u];
+        for (UF_long q = update_begin; q < update_end; ++q) {
+          const UF_long col = compact_cols
+            ? (UF_long)u_cols16[q] : u_cols[q];
+          if (fused_update_mode) {
+            x[col] = fma(-lik, u_val[q], x[col]);
+          } else {
+            x[col] -= lik * u_val[q];
+          }
+        }
+      }
+    }
+    const double pivot = x[row];
+    x[row] = 0.0;
+    udiag[row] = pivot;
+    const UF_long output_begin = compact_ptrs
+      ? (UF_long)u_ptr32[row] : u_ptr[row];
+    const UF_long output_end = compact_ptrs
+      ? (UF_long)u_ptr32[row + 1u] : u_ptr[row + 1u];
+    for (UF_long q = output_begin; q < output_end; ++q) {
+      const UF_long col = compact_cols
+        ? (UF_long)u_cols16[q] : u_cols[q];
+      const double value = x[col];
+      u_val[q] = value;
+      if (!row_values_mode) {
+        *u_lu[q] = value;
+      }
+      x[col] = 0.0;
+    }
+    if (pivot == 0.0) {
+      kls_egraph_refactor_record_singular(shared, row, row);
+    }
+    if (grouped_done_mode) {
+      const uint32_t slot =
+        done_token[row] & KLS_LEAN_GROUPED_SLOT_MASK;
+      atomic_store_explicit(&grouped_done[slot], generation,
+                            memory_order_release);
+    } else {
+      atomic_store_explicit(&done[row].generation, generation,
+                            memory_order_release);
+    }
+    if (atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
+      return;
+    }
+  }
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_hoisted_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 0, 0,
+    worker->shared->lean_row_values_mode,
+    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 0);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_i16_hoisted_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 0,
+    worker->shared->lean_row_values_mode,
+    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 0);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_i16_u32ptr_hoisted_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 1,
+    worker->shared->lean_row_values_mode,
+    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 0);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_i16_u32ptr_row_values_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 1, 1,
+    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 0);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_i16_u32ptr_row_values_grouped_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 1, 1, 1, 1, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 0);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_i16_u32ptr_row_values_grouped_nonfused_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 1, 1, 1, 0, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 0);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot))
+#endif
+static void kls_scaled_generic_i16_u32ptr_row_values_grouped_branchless_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_scaled_generic_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 1, 1, 1, 1, 1,
+    worker->shared->lean_fused_scale_mode,
+    worker->shared->solver->common.scale == 1, 1);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#define KLS_SCALED_EXACT_WORKER_ATTR __attribute__((noinline, hot))
+#else
+#define KLS_SCALED_EXACT_WORKER_ATTR
+#endif
+
+#define KLS_DEFINE_SCALED_EXACT_WORKER(name, sum_mode, branchless_mode) \
+  KLS_SCALED_EXACT_WORKER_ATTR static void name(                       \
+    kls_egraph_refactor_worker *worker,                                \
+    unsigned int generation,                                          \
+    const UF_long *restrict rows,                                      \
+    UF_long stride) {                                                  \
+    kls_scaled_generic_hoisted_worker_core(                            \
+      worker, generation, rows, stride, 1, 1, 1, 1, 1, 1,            \
+      2, sum_mode, branchless_mode);                                   \
+  }
+
+KLS_DEFINE_SCALED_EXACT_WORKER(
+  kls_scaled_exact_direct_max_worker_run, 0, 0)
+KLS_DEFINE_SCALED_EXACT_WORKER(
+  kls_scaled_exact_direct_max_branchless_worker_run, 0, 1)
+KLS_DEFINE_SCALED_EXACT_WORKER(
+  kls_scaled_exact_direct_sum_worker_run, 1, 0)
+KLS_DEFINE_SCALED_EXACT_WORKER(
+  kls_scaled_exact_direct_sum_branchless_worker_run, 1, 1)
+
+#undef KLS_DEFINE_SCALED_EXACT_WORKER
+#undef KLS_SCALED_EXACT_WORKER_ATTR
+
 static void kls_lean_parallel_worker_run(
   kls_egraph_refactor_worker *worker) {
   if (worker == NULL || worker->shared == NULL || worker->x == NULL) {
@@ -80803,10 +81198,14 @@ static void kls_lean_parallel_worker_run(
     }
     return;
   }
+  const int scaled_generic_hoisted_worker =
+    shared->rs != NULL &&
+    getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL;
   const int generic_hoisted_worker =
     getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
     !shared->lean_compact_match_mode &&
-    !symmetric_scalar_fringe_lean_class && shared->rs == NULL &&
+    !symmetric_scalar_fringe_lean_class &&
+    (shared->rs == NULL || scaled_generic_hoisted_worker) &&
     solver->lean_snode_run == NULL &&
     solver->row_refactor_input_ptr != NULL &&
     solver->row_refactor_input_cols != NULL &&
@@ -80818,8 +81217,70 @@ static void kls_lean_parallel_worker_run(
     solver->row_refactor_u_cols != NULL &&
     solver->row_refactor_u_values != NULL &&
     solver->row_refactor_u_row_values != NULL &&
-    solver->numeric != NULL && solver->numeric->Udiag != NULL;
+    solver->numeric != NULL && solver->numeric->Udiag != NULL &&
+    (shared->rs == NULL || solver->numeric->Pnum != NULL);
   if (generic_hoisted_worker) {
+    if (scaled_generic_hoisted_worker) {
+      if (solver->row_refactor_l_cols16 != NULL &&
+          solver->row_refactor_u_cols16 != NULL &&
+          solver->row_refactor_l_ptr32 != NULL &&
+          solver->row_refactor_u_ptr32 != NULL &&
+          solver->row_refactor_input_ptr32 != NULL) {
+        if (shared->lean_row_values_mode &&
+            shared->lean_grouped_done_mode &&
+            getenv("KLS_DISABLE_SCALED_ROW_VALUES_SPECIALIZATION") == NULL &&
+            getenv("KLS_DISABLE_SCALED_GROUPED_SPECIALIZATION") == NULL) {
+          if (getenv("KLS_DISABLE_SCALED_FMA_UPDATE") != NULL) {
+            kls_scaled_generic_i16_u32ptr_row_values_grouped_nonfused_worker_run(
+              worker, generation, rows, stride);
+          } else if (shared->lean_fused_scale_mode > 1 &&
+              getenv("KLS_DISABLE_SCALED_SCALE_SPECIALIZATION") == NULL) {
+            const int branchless =
+              getenv("KLS_DISABLE_SCALED_BRANCHLESS_UPDATE") == NULL;
+            if (solver->common.scale == 1) {
+              if (branchless) {
+                kls_scaled_exact_direct_sum_branchless_worker_run(
+                  worker, generation, rows, stride);
+              } else {
+                kls_scaled_exact_direct_sum_worker_run(
+                  worker, generation, rows, stride);
+              }
+            } else if (branchless) {
+              kls_scaled_exact_direct_max_branchless_worker_run(
+                worker, generation, rows, stride);
+            } else {
+              kls_scaled_exact_direct_max_worker_run(
+                worker, generation, rows, stride);
+            }
+          } else if (
+              getenv("KLS_DISABLE_SCALED_BRANCHLESS_UPDATE") == NULL) {
+            kls_scaled_generic_i16_u32ptr_row_values_grouped_branchless_worker_run(
+              worker, generation, rows, stride);
+          } else {
+            kls_scaled_generic_i16_u32ptr_row_values_grouped_worker_run(
+              worker, generation, rows, stride);
+          }
+        } else if (shared->lean_row_values_mode &&
+            getenv("KLS_DISABLE_SCALED_ROW_VALUES_SPECIALIZATION") == NULL) {
+          kls_scaled_generic_i16_u32ptr_row_values_worker_run(
+            worker, generation, rows, stride);
+        } else {
+          kls_scaled_generic_i16_u32ptr_hoisted_worker_run(
+            worker, generation, rows, stride);
+        }
+      } else if (solver->row_refactor_l_cols16 != NULL &&
+          solver->row_refactor_u_cols16 != NULL) {
+        kls_scaled_generic_i16_hoisted_worker_run(
+          worker, generation, rows, stride);
+      } else {
+        kls_scaled_generic_hoisted_worker_run(
+          worker, generation, rows, stride);
+      }
+      if (!kls_lean_parallel_refresh_offdiag_worker(worker, stride)) {
+        kls_egraph_refactor_record_invalid(shared);
+      }
+      return;
+    }
     const int compact_amf_two_block_specialized_worker =
       kls_packed_row_worker_representation_capable(solver) &&
       shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
@@ -80944,7 +81405,8 @@ static void kls_lean_parallel_worker_run(
 
 static int kls_lean_parallel_refactor_run(kls_solver *solver,
                                           double *numeric_values,
-                                          const double *rs) {
+                                          const double *rs,
+                                          int fused_scale_mode) {
   if (solver == NULL || numeric_values == NULL ||
       solver->row_refactor_level_rows == NULL ||
       solver->row_refactor_level_max_width < 2u ||
@@ -81056,6 +81518,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_done = done;
   shared->lean_rows = rows;
   shared->pipeline_generation = generation;
+  shared->lean_fused_scale_mode = fused_scale_mode;
   shared->row_refactor_defer_value_scatter = 0;
   shared->lean_compact_match_mode =
     (legacy_shape_policies &&
@@ -81102,8 +81565,13 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     shared->lean_compact_match_mode ||
     (!symmetric_scalar_fringe_lean_mode &&
      solver->lean_snode_run == NULL);
+  const int scaled_generic_grouped_done =
+    !legacy_shape_policies && rs != NULL &&
+    getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL &&
+    getenv("KLS_DISABLE_SCALED_GENERIC_GROUPED_DONE") == NULL;
   const int generic_grouped_done =
-    !legacy_shape_policies && grouped_done_ready && rs == NULL &&
+    !legacy_shape_policies && grouped_done_ready &&
+    (rs == NULL || scaled_generic_grouped_done) &&
     generic_grouped_done_consumer &&
     kls_lean_grouped_done_is_profitable(solver, thread_count, rows);
   shared->lean_grouped_done_mode =
@@ -81269,6 +81737,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_parallel_offdiag_mode = 0;
   shared->lean_grouped_done_mode = 0;
   shared->lean_row_values_mode = 0;
+  shared->lean_fused_scale_mode = 0;
   shared->row_refactor_defer_value_scatter = 0;
   shared->lean_done = NULL;
   shared->lean_rows = NULL;
@@ -81336,8 +81805,14 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     solver->numeric->lnz <= (UF_long)UINT16_MAX &&
     solver->numeric->unz <= (UF_long)UINT16_MAX &&
     !generic_supernode_values;
+  const int scaled_hoisted_i16_capable =
+    !legacy_shape_policies && scaled && !generic_supernode_values &&
+    kls_repeated_update_workload(&solver->options) &&
+    solver->n <= (UF_long)UINT16_MAX + 1u &&
+    getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL &&
+    getenv("KLS_DISABLE_SCALED_LEAN_I16_INDICES") == NULL;
   if (getenv("KLS_DISABLE_LEAN_I16_INDICES") == NULL &&
-      (generic_i16_capable ||
+      (generic_i16_capable || scaled_hoisted_i16_capable ||
        (legacy_shape_policies &&
         (kls_egraph_small_compact_dominant_btf_shape(solver) ||
          kls_partial_diagonal_many_block_no_btf_cycle(solver) ||
@@ -81374,16 +81849,40 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   trilinos_klu_l_common *common = &solver->common;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const UF_long n = solver->n;
+  const char *parallel_env = getenv("KLS_ENABLE_LEAN_PARALLEL");
+  int parallel_wanted =
+    solver->options.threads > 1 && solver->n >= 800u &&
+    solver->common.flops >= 100000.0 &&
+    solver->row_refactor_level_max_width >=
+      (UF_long)(2 * solver->options.threads);
+  if (parallel_env != NULL && parallel_env[0] != '\0') {
+    parallel_wanted =
+      !(parallel_env[0] == '0' && parallel_env[1] == '\0');
+  }
+  int fused_scale_mode = 0;
   if (scaled) {
     const int scale_cached =
       kls_lean_scale_input_is_unchanged(solver, numeric_values);
-    if (!scale_cached &&
+    fused_scale_mode =
+      !scale_cached && solver->lean_scale_input_state < 0 &&
+      parallel_wanted && !generic_supernode_values &&
+      solver->lean_snode_run == NULL &&
+      solver->row_refactor_input_ptr[n] == solver->nnz &&
+      solver->nnz >=
+        (UF_long)4096u * (UF_long)solver->options.threads &&
+      getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL &&
+      getenv("KLS_DISABLE_SCALED_FUSED_SCALE") == NULL;
+    if (fused_scale_mode &&
+        getenv("KLS_DISABLE_SCALED_FUSED_DIRECT_RS") == NULL) {
+      fused_scale_mode = 2;
+    }
+    if (!scale_cached && !fused_scale_mode &&
         !trilinos_klu_l_scale((UF_long)common->scale, n,
                               solver->col_ptr, solver->row_idx,
                               numeric_values, numeric->Rs, NULL, common)) {
       return 0;
     }
-    if (!scale_cached) {
+    if (!scale_cached && !fused_scale_mode) {
       kls_arm_lean_scale_input_cache(solver, numeric_values);
     }
   }
@@ -81445,25 +81944,22 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   const int pair_mode = solver->lean_pair_active;
   solver->lean_parallel_last_used = 0;
   int parallel_status = -1;
-  const char *parallel_env = getenv("KLS_ENABLE_LEAN_PARALLEL");
-  int parallel_wanted =
-    solver->options.threads > 1 && solver->n >= 800u &&
-    solver->common.flops >= 100000.0 &&
-    solver->row_refactor_level_max_width >=
-      (UF_long)(2 * solver->options.threads);
-  if (parallel_env != NULL && parallel_env[0] != '\0') {
-    parallel_wanted =
-      !(parallel_env[0] == '0' && parallel_env[1] == '\0');
-  }
   if (parallel_wanted) {
     parallel_status =
-      kls_lean_parallel_refactor_run(solver, numeric_values, rs);
+      kls_lean_parallel_refactor_run(
+        solver, numeric_values, rs, fused_scale_mode);
     solver->lean_parallel_last_used = parallel_status > 0;
     if (parallel_status == 0) {
       return 0;
     }
   }
   if (parallel_status < 0) {
+    if (fused_scale_mode &&
+        !trilinos_klu_l_scale((UF_long)common->scale, n,
+                              solver->col_ptr, solver->row_idx,
+                              numeric_values, numeric->Rs, NULL, common)) {
+      return 0;
+    }
     /* The coverage-selected descriptor is profitable in the hoisted pool
        executor, but its serial chain fallback adds more bookkeeping than it
        removes.  A resource failure or explicitly disabled pool therefore
@@ -81663,7 +82159,8 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
 #undef KLS_LEAN_L_COL
 #undef KLS_LEAN_U_COL
   }
-  if (scaled && !kls_parallel_refactor_permute_scale(solver)) {
+  if (scaled && fused_scale_mode < 2 &&
+      !kls_parallel_refactor_permute_scale(solver)) {
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
