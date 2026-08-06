@@ -2775,6 +2775,7 @@ typedef struct kls_egraph_refactor_shared {
   int parallel_scale_permute;
   const double *parallel_scale_input_values;
   kls_egraph_refactor_kernel kernel;
+  int single_unscaled_plain;
   int thread_count;
   atomic_int stop;
   int invalid;
@@ -105746,6 +105747,93 @@ static int kls_egraph_refactor_single_unscaled_column(
   return 1;
 }
 
+/* Once the realized single-block executor has declined every representation-
+   changing numeric surface, keep its scalar dependency walk free of the
+   corresponding per-dependency tests.  The capability gate is computed once
+   per refactor dispatch; this kernel retains the cached strict-supernode
+   consumer and the exact scalar arithmetic/storage order of the general
+   single-block path. */
+static int kls_egraph_refactor_single_unscaled_plain_column(
+  kls_egraph_refactor_worker *worker,
+  UF_long k,
+  int wait_for_dependencies) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  double *restrict x = worker->x;
+  double *restrict udiag = (double *)numeric->Udiag;
+  UF_long **restrict l_indices = solver->refactor_l_indices;
+  int32_t **restrict l_indices32 = solver->refactor_l_indices32;
+  double **restrict l_values = solver->refactor_l_values;
+  UF_long **restrict u_indices = solver->refactor_u_indices;
+  double **restrict u_values = solver->refactor_u_values;
+  if (solver->refactor_lu_pointer_count != solver->n ||
+      l_indices == NULL || l_values == NULL ||
+      u_indices == NULL || u_values == NULL) {
+    kls_egraph_refactor_record_invalid(shared);
+    return 0;
+  }
+
+  kls_egraph_scatter_unscaled_input(solver, shared->values, x,
+                                    solver->refactor_col_ptr[k],
+                                    solver->refactor_col_ptr[k + 1u]);
+
+  UF_long *restrict ui = u_indices[k];
+  const int32_t *restrict ui32 =
+    solver->refactor_u_indices32 != NULL
+      ? solver->refactor_u_indices32[k] : NULL;
+  double *restrict ux = u_values[k];
+  const UF_long ucol_len = numeric->Ulen[k];
+  UF_long up = 0u;
+  while (up < ucol_len) {
+    const UF_long consumed = kls_snode_batch_consume_cached(
+      l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
+      0u, k, shared->snode_run_end, shared, wait_for_dependencies, NULL);
+    if (consumed != 0u) {
+      up += consumed;
+      continue;
+    }
+
+    const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+    if (wait_for_dependencies && shared->pipeline_done != NULL &&
+        atomic_load_explicit(&shared->pipeline_done[j],
+                             memory_order_acquire) !=
+          shared->pipeline_generation &&
+        !kls_egraph_refactor_wait_done(shared, j)) {
+      return 0;
+    }
+    const double ujk = x[j];
+    x[j] = 0.0;
+    ux[up] = ujk;
+    if (ujk != 0.0) {
+      const UF_long lcol_len = numeric->Llen[j];
+      const int32_t *restrict li32 =
+        l_indices32 != NULL ? l_indices32[j] : NULL;
+      if (li32 != NULL || lcol_len == 0u) {
+        kls_scatter_subtract_refactor_i32(
+          solver, x, li32, l_values[j], lcol_len, ujk);
+      } else {
+        kls_scatter_subtract(x, l_indices[j], l_values[j], lcol_len, ujk);
+      }
+    }
+    up++;
+  }
+
+  const double ukk = x[k];
+  x[k] = 0.0;
+  if (ukk == 0.0) {
+    kls_egraph_refactor_record_singular(shared, k, symbolic->Q[k]);
+    if (solver->common.halt_if_singular) {
+      return 0;
+    }
+  }
+  kls_egraph_store_udiag(shared, udiag, k, ukk);
+  kls_egraph_store_l_column_from_workspace(
+    solver, x, k, l_indices[k], l_values[k], numeric->Llen[k], ukk);
+  return 1;
+}
+
 /* Two READY pipeline columns (readiness implies mutual independence)
    processed with one merged dependency walk so producer runs shared by
    both U patterns stream their tail panels once.  Plain configuration
@@ -107896,6 +107984,10 @@ static int kls_egraph_refactor_dispatch_column(
   }
   switch (worker->shared->kernel) {
     case KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED:
+      if (worker->shared->single_unscaled_plain) {
+        return kls_egraph_refactor_single_unscaled_plain_column(
+          worker, k, wait_for_dependencies);
+      }
       return kls_egraph_refactor_single_unscaled_column(
         worker, k, wait_for_dependencies);
     case KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_SCALED:
@@ -123129,6 +123221,41 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
        fp32 factors; skip the post-correction verification sweep */
     solver->solve_refine_single_shot =
       getenv("KLS_STRICT_PREDICTED_REFINEMENT") == NULL;
+  }
+  shared->single_unscaled_plain =
+    selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
+    !shared->check_pivots && !solver->padded_active &&
+    shared->snode_run_end != NULL && !kls_batch_consume_disabled() &&
+    solver->eg_pair_choice < 0 && !solver->eg_pair_pending &&
+    !kls_pair_dispatch_enabled() && !solver->eg_stream_pending &&
+    !shared->supernode_numeric_updates &&
+    !shared->supernode_consumer_plan_group_l_exec &&
+    !shared->supernode_consumer_plan_group_l_values &&
+    !shared->u_supernode_ragged_l_updates &&
+    !shared->u_supernode_values && !shared->algorithm5_prefactor_updates &&
+    !shared->supernode_algorithm5_payoff_direct_prefix_current_state &&
+    !shared->supernode_algorithm5_payoff_direct_prefix_advance_seed &&
+    !shared->supernode_algorithm5_payoff_direct_prefix_complete &&
+    !shared->use_fp32_l_values &&
+    getenv("KLS_DISABLE_PLAIN_SINGLE_UNSCALED_EGRAPH") == NULL;
+  if (getenv("KLS_TRACE_PLAIN_SINGLE_UNSCALED_EGRAPH") != NULL) {
+    fprintf(stderr,
+            "KLS plain single unscaled EGraph: active=%d kernel=%d "
+            "check=%d padded=%d snode=%d pair=%d/%d stream=%d/%d "
+            "advanced=%d%d%d%d%d%d%d%d fp32=%d\n",
+            shared->single_unscaled_plain, (int)selected_kernel,
+            shared->check_pivots, solver->padded_active,
+            shared->snode_run_end != NULL, solver->eg_pair_choice,
+            solver->eg_pair_pending, solver->eg_stream_choice,
+            solver->eg_stream_pending, shared->supernode_numeric_updates,
+            shared->supernode_consumer_plan_group_l_exec,
+            shared->supernode_consumer_plan_group_l_values,
+            shared->u_supernode_ragged_l_updates,
+            shared->u_supernode_values, shared->algorithm5_prefactor_updates,
+            shared->supernode_algorithm5_payoff_direct_prefix_current_state,
+            shared->supernode_algorithm5_payoff_direct_prefix_advance_seed ||
+              shared->supernode_algorithm5_payoff_direct_prefix_complete,
+            shared->use_fp32_l_values);
   }
   shared->pipeline_ready_queue = use_pipeline_ready_queue;
   shared->pipeline_ready_cols =
