@@ -591,6 +591,7 @@ struct kls_solver {
   int32_t *refactor_input_user_pos32;
   UF_long *refactor_scale_row_ptr;
   int32_t *refactor_scale_input_pos32;
+  double *refactor_scale_permute_values;
   uint32_t *lean_btf_off_input_pos;
   uint32_t *lean_btf_off_user_pos;
   int refactor_direct_user_values_active;
@@ -2752,6 +2753,7 @@ typedef struct kls_egraph_refactor_shared {
   int scale;
   int parallel_scale_rows;
   int parallel_scale_method;
+  int parallel_scale_permute;
   const double *parallel_scale_input_values;
   kls_egraph_refactor_kernel kernel;
   int thread_count;
@@ -18470,6 +18472,7 @@ static void free_refactor_map(kls_solver *solver) {
   free(solver->refactor_input_user_pos32);
   free(solver->refactor_scale_row_ptr);
   free(solver->refactor_scale_input_pos32);
+  free(solver->refactor_scale_permute_values);
   free(solver->lean_btf_off_input_pos);
   free(solver->lean_btf_off_user_pos);
   free(solver->refactor_block_start);
@@ -18483,6 +18486,7 @@ static void free_refactor_map(kls_solver *solver) {
   solver->refactor_input_user_pos32 = NULL;
   solver->refactor_scale_row_ptr = NULL;
   solver->refactor_scale_input_pos32 = NULL;
+  solver->refactor_scale_permute_values = NULL;
   solver->lean_btf_off_input_pos = NULL;
   solver->lean_btf_off_user_pos = NULL;
   solver->refactor_direct_user_values_active = 0;
@@ -117502,6 +117506,47 @@ static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
     kls_row_refactor_worker_run(worker);
   } else {
     kls_egraph_refactor_worker_run(worker);
+    if (shared->parallel_scale_permute) {
+      kls_solver *solver = shared->solver;
+      trilinos_klu_l_numeric *numeric = solver->numeric;
+      double *restrict rs = (double *)numeric->Rs;
+      double *restrict permuted = solver->refactor_scale_permute_values;
+      const UF_long *restrict pnum = numeric->Pnum;
+      pthread_barrier_wait(&shared->barrier);
+      if (!shared->invalid && !shared->pivot_rejected &&
+          !(shared->singular && solver->common.halt_if_singular)) {
+        const UF_long begin =
+          (solver->n / (UF_long)shared->thread_count) *
+            (UF_long)worker->tid +
+          ((solver->n % (UF_long)shared->thread_count) *
+            (UF_long)worker->tid) / (UF_long)shared->thread_count;
+        const UF_long end =
+          (solver->n / (UF_long)shared->thread_count) *
+            (UF_long)(worker->tid + 1) +
+          ((solver->n % (UF_long)shared->thread_count) *
+            (UF_long)(worker->tid + 1)) / (UF_long)shared->thread_count;
+        int invalid = rs == NULL || permuted == NULL || pnum == NULL;
+        for (UF_long k = begin; !invalid && k < end; ++k) {
+          const UF_long row = pnum[k];
+          if (row >= solver->n) {
+            invalid = 1;
+            break;
+          }
+          permuted[k] = rs[row];
+        }
+        if (invalid) {
+          kls_egraph_refactor_record_invalid(shared);
+        }
+        pthread_barrier_wait(&shared->barrier);
+        if (!shared->invalid) {
+          memcpy(rs + begin, permuted + begin,
+                 (size_t)(end - begin) * sizeof(*rs));
+        }
+        /* No third rendezvous is needed: every worker next performs only
+           disjoint optional maintenance, and the pool completion join keeps
+           the caller from observing Rs until all slices have returned. */
+      }
+    }
   }
   if (shared->refine_copy_input != NULL &&
       shared->refine_copy_output != NULL) {
@@ -120709,6 +120754,25 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     common->scale > 0 && !retain_mega_hub_row_scale &&
     parallel_scale_requested &&
     kls_build_refactor_scale_rows(solver);
+  const char *parallel_permute_env =
+    getenv("KLS_ENABLE_EGRAPH_PARALLEL_SCALE_PERMUTE");
+  const int parallel_permute_requested =
+    parallel_permute_env != NULL && parallel_permute_env[0] != '\0'
+      ? strcmp(parallel_permute_env, "0") != 0
+      : kls_repeated_update_workload(&solver->options) &&
+        solver->options.expected_refactorizations >= 16 &&
+        solver->n >= (UF_long)(4096 * thread_count);
+  int parallel_scale_permute =
+    common->scale > 0 && parallel_permute_requested &&
+    solver->n <= (UF_long)(SIZE_MAX / sizeof(double));
+  if (parallel_scale_permute &&
+      solver->refactor_scale_permute_values == NULL) {
+    solver->refactor_scale_permute_values = (double *)malloc(
+      (size_t)solver->n * sizeof(*solver->refactor_scale_permute_values));
+    if (solver->refactor_scale_permute_values == NULL) {
+      parallel_scale_permute = 0;
+    }
+  }
   if (common->scale > 0 && !retain_mega_hub_row_scale &&
       !parallel_scale_rows &&
       !trilinos_klu_l_scale((UF_long)common->scale, solver->n,
@@ -121119,6 +121183,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->scale = (int)common->scale;
   shared->parallel_scale_rows = parallel_scale_rows;
   shared->parallel_scale_method = (int)common->scale;
+  shared->parallel_scale_permute = parallel_scale_permute;
   shared->parallel_scale_input_values = numeric_values;
   shared->kernel = selected_kernel;
   shared->thread_count = thread_count;
@@ -123613,7 +123678,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     if (common->halt_if_singular) {
       return 0;
     }
-    if (common->scale > 0 && !kls_parallel_refactor_permute_scale(solver)) {
+    if (common->scale > 0 && !parallel_scale_permute &&
+        !kls_parallel_refactor_permute_scale(solver)) {
       common->status = TRILINOS_KLU_INVALID;
       return 0;
     }
@@ -123623,7 +123689,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
-  if (common->scale > 0 && !kls_parallel_refactor_permute_scale(solver)) {
+  if (common->scale > 0 && !parallel_scale_permute &&
+      !kls_parallel_refactor_permute_scale(solver)) {
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
