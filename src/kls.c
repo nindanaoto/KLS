@@ -45970,6 +45970,15 @@ static int kls_repeated_scaled_overhead_trial_enabled(
   const double fill =
     (double)(solver->numeric->lnz + solver->numeric->unz);
   const double scale_pass_work = horizon * (double)solver->nnz;
+  const int amortized_scale_overhead =
+    getenv("KLS_DISABLE_AMORTIZED_SCALE_OVERHEAD_TRIAL") == NULL &&
+    solver->options.expected_refactorizations >= 64 &&
+    solver->options.threads > 1 &&
+    solver->common.flops >=
+      KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+        (double)solver->options.threads &&
+    isfinite(fill) && fill > 0.0 &&
+    scale_pass_work >= 8.0 * (solver->common.flops + fill);
   const int conventional_scale_overhead =
     scale_pass_work >= 5.0e7 &&
     solver->common.flops <= 8.0 * (double)solver->nnz &&
@@ -45986,7 +45995,8 @@ static int kls_repeated_scaled_overhead_trial_enabled(
     solver->numeric->unz <= (UF_long)UINT16_MAX &&
     scale_pass_work >= 2.0 * (solver->common.flops + fill);
   return horizon > 1.0 && isfinite(horizon) &&
-    (conventional_scale_overhead || packed_row_opportunity ||
+    (amortized_scale_overhead || conventional_scale_overhead ||
+     packed_row_opportunity ||
      kls_repeated_scaled_egraph_unscaled_trial_enabled(solver));
 }
 
@@ -46285,6 +46295,17 @@ static int maybe_select_auto_scale(kls_solver *solver,
     const double unscaled_lifecycle_work_saved =
       (double)solver->options.expected_refactorizations *
       unscaled_recurring_work_saved;
+    const int amortized_scale_overhead_trial =
+      getenv("KLS_DISABLE_AMORTIZED_SCALE_OVERHEAD_TRIAL") == NULL &&
+      solver->options.expected_refactorizations >= 64 &&
+      solver->options.threads > 1 &&
+      solver->common.flops >=
+        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+          (double)solver->options.threads &&
+      isfinite(incumbent_fill) && incumbent_fill > 0.0 &&
+      (double)solver->options.expected_refactorizations *
+          (double)solver->nnz >=
+        8.0 * (solver->common.flops + incumbent_fill);
     const int relaxed_unscaled_lifecycle_economics =
       repeated_scaled_overhead_trial && trial_common.scale <= 0 &&
       trial_numeric->Rs == NULL && trial_fill <= 1.05 * incumbent_fill &&
@@ -46294,7 +46315,8 @@ static int maybe_select_auto_scale(kls_solver *solver,
       unscaled_lifecycle_work_saved >= 3.0 * trial_common.flops &&
       trial_common.noffdiag <=
         solver->common.noffdiag + solver->common.noffdiag / 20u + 16u &&
-      (!(solver->common.rcond > 0.0) || !(trial_common.rcond > 0.0) ||
+      (amortized_scale_overhead_trial ||
+       !(solver->common.rcond > 0.0) || !(trial_common.rcond > 0.0) ||
        trial_common.rcond >= 0.01 * solver->common.rcond);
     const int egraph_unscaled_specialization_economics =
       kls_repeated_scaled_egraph_unscaled_trial_enabled(solver) &&
@@ -122050,6 +122072,25 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     ensure_egraph_refactor_pool(solver, thread_count);
   if (pool == NULL) {
     return -1;
+  }
+  if (!kls_legacy_shape_policies_enabled() &&
+      getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
+      !check_pivots && kls_repeated_update_workload(&solver->options) &&
+      solver->options.expected_refactorizations >= 16 &&
+      kls_pts_solve_available(solver) &&
+      pool->worker_spin_iters < 200000u) {
+    /* A retained EGraph crew is reused by the following solve/value phases
+       and by the next numeric generation.  The generic pool default is
+       deliberately short for isolated calls, but it expires before these
+       back-to-back repeated-update phases and turns every generation into
+       N-1 condition-variable wakeups.  Once the realized executor and the
+       caller's repeated lifecycle establish reuse, keep the crew live over
+       that bounded gap only when the verified parallel triangular solve will
+       immediately dispatch the same pool again.  This is an implementation-
+       capability decision: serial solves plus row, lean, and direct numeric
+       executors retain their independently selected idle policies, and the
+       public override remains authoritative. */
+    pool->worker_spin_iters = 200000u;
   }
   kls_egraph_refactor_shared *shared = &pool->shared;
 
