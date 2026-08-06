@@ -44634,6 +44634,14 @@ matching_attempt:;
       spral_matching = 0;
       solver->nearly_missing_diagonal_early_match_selected = 0;
       selected_unmatched_colamd = 1;
+      /* This original-frame ordering has already won a complete numeric
+         portfolio against the matched representation: both factors were
+         built, residual-policed, and compared on realized fill/work.  Close
+         the ordering portfolio for this factor epoch instead of deferring a
+         second, unbounded METIS analysis+factor to the first changed input.
+         Failure recovery still clears/rebuilds the factor through the
+         ordinary paths; this only suppresses redundant speculation. */
+      solver->auto_metis_checked = 1;
       trial_numeric_ok = 1;
     } else {
       free(unmatched_col_ptr);
@@ -45894,16 +45902,6 @@ static int kls_repeated_scaled_overhead_trial_enabled(
       solver->common.kls_perturb_count != 0u) {
     return 0;
   }
-  if (solver->common.rcond > 0.0 &&
-      solver->common.rcond < sqrt(DBL_EPSILON) &&
-      !kls_certified_unscaled_lifecycle_trial_capable(solver)) {
-    /* Scaling already supports a condition-sensitive numeric.  Recurring
-       O(nnz) overhead alone is not evidence that removing it is safe: a
-       complete unscaled factor can cross a pivot/conditioning boundary after
-       an arbitrarily small value update.  Realized fill/work inflation may
-       still authorize the broader generic scale trial independently. */
-    return 0;
-  }
   const double horizon =
     (double)solver->options.expected_refactorizations;
   const double fill =
@@ -46208,14 +46206,61 @@ static int maybe_select_auto_scale(kls_solver *solver,
       (double)(solver->numeric->lnz + solver->numeric->unz);
     const double trial_fill =
       (double)(trial_numeric->lnz + trial_numeric->unz);
-    const int unscaled_overhead_candidate_is_better =
+    const double unscaled_extra_factor_work =
+      trial_common.flops > solver->common.flops
+        ? trial_common.flops - solver->common.flops : 0.0;
+    const double unscaled_recurring_work_saved =
+      (double)solver->nnz - unscaled_extra_factor_work;
+    const double unscaled_lifecycle_work_saved =
+      (double)solver->options.expected_refactorizations *
+      unscaled_recurring_work_saved;
+    const int relaxed_unscaled_lifecycle_economics =
       repeated_scaled_overhead_trial && trial_common.scale <= 0 &&
-      trial_numeric->Rs == NULL && trial_fill <= 1.02 * incumbent_fill &&
+      trial_numeric->Rs == NULL && trial_fill <= 1.05 * incumbent_fill &&
       trial_common.flops > 0.0 && solver->common.flops > 0.0 &&
-      trial_common.flops <= 1.05 * solver->common.flops &&
-      trial_common.noffdiag <= solver->common.noffdiag &&
+      unscaled_recurring_work_saved > 0.0 &&
+      isfinite(unscaled_lifecycle_work_saved) &&
+      unscaled_lifecycle_work_saved >= 4.0 * trial_common.flops &&
+      trial_common.noffdiag <=
+        solver->common.noffdiag + solver->common.noffdiag / 50u + 16u &&
       (!(solver->common.rcond > 0.0) || !(trial_common.rcond > 0.0) ||
        trial_common.rcond >= 0.01 * solver->common.rcond);
+    const int unscaled_overhead_economics =
+      (repeated_scaled_overhead_trial && trial_common.scale <= 0 &&
+       trial_numeric->Rs == NULL && trial_fill <= 1.02 * incumbent_fill &&
+       trial_common.flops > 0.0 && solver->common.flops > 0.0 &&
+       trial_common.flops <= 1.05 * solver->common.flops &&
+       trial_common.noffdiag <= solver->common.noffdiag &&
+       (!(solver->common.rcond > 0.0) || !(trial_common.rcond > 0.0) ||
+        trial_common.rcond >= 0.01 * solver->common.rcond)) ||
+      relaxed_unscaled_lifecycle_economics;
+    const int condition_sensitive_unscaled_trial =
+      solver->common.rcond > 0.0 &&
+      solver->common.rcond < sqrt(DBL_EPSILON) &&
+      !kls_certified_unscaled_lifecycle_trial_capable(solver);
+    int unscaled_overhead_residual_ok = 0;
+    if (unscaled_overhead_economics && condition_sensitive_unscaled_trial &&
+        getenv("KLS_DISABLE_GUARDED_UNSCALED_SCALE_TRIAL") == NULL) {
+      /* Removing a recurring scale pass can repay even when the scaled
+         incumbent is condition-sensitive, but fill/work similarity alone
+         is not an accuracy certificate.  Validate the complete candidate
+         against the current matrix before publication.  Adoption below
+         also arms an rcond floor that restores this scaled incumbent after
+         any later value update leaves the certified regime. */
+      trilinos_klu_l_numeric *saved_numeric = solver->numeric;
+      const trilinos_klu_l_common saved_common = solver->common;
+      solver->numeric = trial_numeric;
+      solver->common = trial_common;
+      unscaled_overhead_residual_ok =
+        kls_direct_klu_numeric_residual_probe(solver, numeric_values);
+      trial_common = solver->common;
+      solver->numeric = saved_numeric;
+      solver->common = saved_common;
+    }
+    const int unscaled_overhead_candidate_is_better =
+      unscaled_overhead_economics &&
+      (!condition_sensitive_unscaled_trial ||
+       unscaled_overhead_residual_ok);
     const int certified_unscaled_overhead_candidate_is_better =
       kls_certified_unscaled_lifecycle_trial_capable(solver) &&
       repeated_scaled_overhead_trial && trial_common.scale <= 0 &&
@@ -46264,6 +46309,18 @@ static int maybe_select_auto_scale(kls_solver *solver,
     solver->numeric = trial_numeric;
     kls_numeric_replaced_invalidate(solver);
     solver->common = trial_common;
+    if (unscaled_overhead_candidate_is_better &&
+        condition_sensitive_unscaled_trial && old_common.scale > 0 &&
+        trial_common.rcond > 0.0 && isfinite(trial_common.rcond)) {
+      solver->generic_btf_unscaled_recovery_scale =
+        (int)old_common.scale;
+      const double recovery_rcond_reference =
+        old_common.rcond > 0.0 && isfinite(old_common.rcond)
+          ? fmin(trial_common.rcond, old_common.rcond)
+          : trial_common.rcond;
+      solver->generic_btf_unscaled_rcond_floor =
+        fmax(DBL_MIN, 0.125 * recovery_rcond_reference);
+    }
     solver->certified_unscaled_l2_contract =
       certified_unscaled_overhead_candidate_is_better;
     solver->certified_unscaled_recovery_scale =
@@ -46798,6 +46855,14 @@ static int maybe_promote_auto_metis(kls_solver *solver,
     if (status != KLS_OK) {
       kls_separator_analysis_clear(&metis_separator);
       return 0;
+    }
+    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
+      fprintf(stderr,
+              "KLS metis symbolic: incumbent fill=%.4e work=%.4e; "
+              "candidate fill=%.4e work=%.4e\n",
+              (double)(solver->numeric->lnz + solver->numeric->unz),
+              solver->common.flops, symbolic_score(metis_symbolic),
+              metis_symbolic->est_flops);
     }
     start = kls_now_seconds();
     metis_numeric =
@@ -48480,7 +48545,9 @@ static int choose_symbolic_for_pattern(UF_long n,
         btf_symbolic->nblocks >= (n + 7u) / 8u;
       const int btf_dispatch_margin = !btf_dispatch_heavy ||
         (isfinite(btf_score) && btf_score <= 0.80 * direct_score &&
-         btf_symbolic->est_flops <= 0.80 * direct_symbolic->est_flops);
+         btf_symbolic->est_flops <= 0.80 * direct_symbolic->est_flops) ||
+        (isfinite(btf_score) && btf_score <= 0.90 * direct_score &&
+         btf_symbolic->est_flops <= 0.65 * direct_symbolic->est_flops);
       const int btf_fragmented_pareto = btf_valid && direct_valid &&
         btf_symbolic->do_btf && btf_symbolic->nblocks > 1u &&
         btf_symbolic->structural_rank == n &&
@@ -166576,7 +166643,9 @@ int kls_factor(kls_solver *solver, const double *values) {
        the same policy before doing numeric work. */
     solver->metis_race_deferred = 1;
     solver->metis_race_deferred_invalid = promoted_numeric;
-  } else if (kls_oneshot_lean) {
+  } else if (kls_oneshot_lean &&
+             (solver->metis_race != NULL ||
+              should_try_auto_metis(solver))) {
     /* one-shot-lean: the promotion consult is cycle-payoff work; run
        it from the first refactor's consult like the other deferrals.  A
        missing analyze-time race does not make synchronous NodeND part of
