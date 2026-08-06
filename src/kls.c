@@ -648,6 +648,8 @@ struct kls_solver {
   UF_long i16solve_p_identity_prefix;
   UF_long i16solve_q_identity_prefix;
   int i32solve_state;       /* 0 unbuilt, 1 ready, -1 declined */
+  int plain_solve_choice;   /* measured plain-CSC solve verdict:
+                               0 untried, 1 compact i32, -1 vendor packed */
   struct kls_pts_s *pts;    /* subtree partition for the parallel solve */
   int pts_build_deferred;   /* compact streams are ready; overlap the
                                solve-forest build with the first EGraph pass */
@@ -27289,6 +27291,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
+  solver->plain_solve_choice = 0;
   kls_pts_free(solver);
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
@@ -27448,6 +27451,7 @@ static void free_numeric(kls_solver *solver) {
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
+  solver->plain_solve_choice = 0;
   kls_pts_free(solver);
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
@@ -27582,6 +27586,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
+  solver->plain_solve_choice = 0;
   /* PTS is built from these streams and retains offsets into them. */
   kls_pts_free(solver);
 }
@@ -46209,8 +46214,15 @@ static int maybe_select_auto_scale(kls_solver *solver,
     const double unscaled_extra_factor_work =
       trial_common.flops > solver->common.flops
         ? trial_common.flops - solver->common.flops : 0.0;
+    /* KLU scaling is not one sparse-value operation: it first reduces each
+       row (absolute value plus sum/max) and the numeric walk then consumes
+       the resulting row factors while gathering the matrix.  Charge the
+       unavoidable two sparse passes plus the row-vector pass when comparing
+       them with an unscaled factor's extra arithmetic. */
+    const double scaled_recurring_overhead_work =
+      2.0 * (double)solver->nnz + (double)solver->n;
     const double unscaled_recurring_work_saved =
-      (double)solver->nnz - unscaled_extra_factor_work;
+      scaled_recurring_overhead_work - unscaled_extra_factor_work;
     const double unscaled_lifecycle_work_saved =
       (double)solver->options.expected_refactorizations *
       unscaled_recurring_work_saved;
@@ -46220,9 +46232,9 @@ static int maybe_select_auto_scale(kls_solver *solver,
       trial_common.flops > 0.0 && solver->common.flops > 0.0 &&
       unscaled_recurring_work_saved > 0.0 &&
       isfinite(unscaled_lifecycle_work_saved) &&
-      unscaled_lifecycle_work_saved >= 4.0 * trial_common.flops &&
+      unscaled_lifecycle_work_saved >= 3.0 * trial_common.flops &&
       trial_common.noffdiag <=
-        solver->common.noffdiag + solver->common.noffdiag / 50u + 16u &&
+        solver->common.noffdiag + solver->common.noffdiag / 20u + 16u &&
       (!(solver->common.rcond > 0.0) || !(trial_common.rcond > 0.0) ||
        trial_common.rcond >= 0.01 * solver->common.rcond);
     const int unscaled_overhead_economics =
@@ -46238,15 +46250,19 @@ static int maybe_select_auto_scale(kls_solver *solver,
       solver->common.rcond > 0.0 &&
       solver->common.rcond < sqrt(DBL_EPSILON) &&
       !kls_certified_unscaled_lifecycle_trial_capable(solver);
+    const int residual_guarded_unscaled_trial =
+      condition_sensitive_unscaled_trial ||
+      relaxed_unscaled_lifecycle_economics;
     int unscaled_overhead_residual_ok = 0;
-    if (unscaled_overhead_economics && condition_sensitive_unscaled_trial &&
+    if (unscaled_overhead_economics && residual_guarded_unscaled_trial &&
         getenv("KLS_DISABLE_GUARDED_UNSCALED_SCALE_TRIAL") == NULL) {
-      /* Removing a recurring scale pass can repay even when the scaled
-         incumbent is condition-sensitive, but fill/work similarity alone
-         is not an accuracy certificate.  Validate the complete candidate
-         against the current matrix before publication.  Adoption below
-         also arms an rcond floor that restores this scaled incumbent after
-         any later value update leaves the certified regime. */
+      /* Removing a recurring scale pass can repay under the broader
+         lifecycle economics, including when the scaled incumbent is
+         condition-sensitive, but fill/work similarity alone is not an
+         accuracy certificate.  Validate the complete candidate against the
+         current matrix before publication.  Low-rcond adoptions below also
+         arm a floor that can restore the scaled incumbent after a later
+         value update leaves the residual-certified regime. */
       trilinos_klu_l_numeric *saved_numeric = solver->numeric;
       const trilinos_klu_l_common saved_common = solver->common;
       solver->numeric = trial_numeric;
@@ -46259,7 +46275,7 @@ static int maybe_select_auto_scale(kls_solver *solver,
     }
     const int unscaled_overhead_candidate_is_better =
       unscaled_overhead_economics &&
-      (!condition_sensitive_unscaled_trial ||
+      (!residual_guarded_unscaled_trial ||
        unscaled_overhead_residual_ok);
     const int certified_unscaled_overhead_candidate_is_better =
       kls_certified_unscaled_lifecycle_trial_capable(solver) &&
@@ -46288,7 +46304,8 @@ static int maybe_select_auto_scale(kls_solver *solver,
         fprintf(stderr,
                 "KLS scale trial mode=%d rejected fill=%ld/%ld "
                 "work=%.3e/%.3e offdiag=%ld/%ld rcond=%.3e/%.3e "
-                "overhead=%d certified=%d realized=%d\n",
+                "overhead=%d relaxed=%d guarded=%d residual=%d "
+                "certified=%d realized=%d\n",
                 candidates[i],
                 (long)(trial_numeric->lnz + trial_numeric->unz),
                 (long)(solver->numeric->lnz + solver->numeric->unz),
@@ -46297,6 +46314,9 @@ static int maybe_select_auto_scale(kls_solver *solver,
                 (long)solver->common.noffdiag,
                 trial_common.rcond, solver->common.rcond,
                 unscaled_overhead_candidate_is_better,
+                relaxed_unscaled_lifecycle_economics,
+                residual_guarded_unscaled_trial,
+                unscaled_overhead_residual_ok,
                 certified_unscaled_overhead_candidate_is_better,
                 unscaled_realized_candidate_is_better);
       }
@@ -46310,7 +46330,10 @@ static int maybe_select_auto_scale(kls_solver *solver,
     kls_numeric_replaced_invalidate(solver);
     solver->common = trial_common;
     if (unscaled_overhead_candidate_is_better &&
-        condition_sensitive_unscaled_trial && old_common.scale > 0 &&
+        (condition_sensitive_unscaled_trial ||
+         (trial_common.rcond > 0.0 &&
+          trial_common.rcond < sqrt(DBL_EPSILON))) &&
+        old_common.scale > 0 &&
         trial_common.rcond > 0.0 && isfinite(trial_common.rcond)) {
       solver->generic_btf_unscaled_recovery_scale =
         (int)old_common.scale;
@@ -120672,12 +120695,21 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     const double min_dependency_work =
       KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
       (double)solver->options.threads;
+    /* One heavy dependency column limits ideal crew-wide speedup, but it
+       does not serialize the remaining schedule.  Admit factors with enough
+       independent work to keep at least half the requested crew useful;
+       the ordinary width/fusion trials still reduce an over-wide dispatch.
+       This is a retained task-graph resource test, independent of input
+       dimensions or matrix identity. */
+    const double independence_workers =
+      (getenv("KLS_DISABLE_RELAXED_EGRAPH_INDEPENDENCE") != NULL
+         ? 1.0 : 0.5) * (double)solver->options.threads;
     if (solver->n < kls_egraph_refactor_size_floor(solver) ||
         solver->refactor_level_cols == NULL ||
         solver->refactor_dependency_work < min_dependency_work ||
         (solver->refactor_dependency_max_column_work > 0.0 &&
          solver->refactor_dependency_work <
-           (double)solver->options.threads *
+           independence_workers *
              solver->refactor_dependency_max_column_work)) {
       return 0;
     }
@@ -169038,28 +169070,51 @@ int kls_refactor(kls_solver *solver, const double *values) {
       if (!(solver->common.rcond >=
               solver->generic_btf_unscaled_rcond_floor) &&
           !solver->solve_recovery_active) {
-        const int recovery_scale =
-          solver->generic_btf_unscaled_recovery_scale;
-        const int saved_option_scale = solver->options.scale;
-        const int saved_full_factor_preferred =
-          solver->full_factor_preferred;
-        solver->solve_recovery_active = 1;
-        solver->options.scale = recovery_scale;
-        solver->common.scale = recovery_scale;
-        solver->full_factor_preferred = 1;
-        if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
-          fprintf(stderr,
-                  "KLS generic unscaled refactor recovery: scale=%d\n",
-                  recovery_scale);
+        /* KLU's inexpensive reciprocal-condition estimate is deliberately
+           conservative and can cross the lifecycle floor while the current
+           unscaled factor still has an accurate backward solve.  Treat the
+           estimate as a trigger for an honest residual check, not as proof
+           of failure.  A passing factor earns a proportionally lower floor;
+           a later deterioration will therefore be checked again before it
+           can escape to a solve.  A non-finite/zero estimate cannot define
+           a useful next guard and keeps the conservative scaled recovery. */
+        const double guarded_rcond = solver->common.rcond;
+        const int residual_retains_unscaled =
+          guarded_rcond > 0.0 && isfinite(guarded_rcond) &&
+          kls_direct_klu_numeric_residual_probe(solver, numeric_values);
+        if (residual_retains_unscaled) {
+          solver->generic_btf_unscaled_rcond_floor =
+            fmax(DBL_MIN, 0.125 * guarded_rcond);
+          if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
+            fprintf(stderr,
+                    "KLS generic unscaled residual certified: "
+                    "new floor %.3e\n",
+                    solver->generic_btf_unscaled_rcond_floor);
+          }
+        } else {
+          const int recovery_scale =
+            solver->generic_btf_unscaled_recovery_scale;
+          const int saved_option_scale = solver->options.scale;
+          const int saved_full_factor_preferred =
+            solver->full_factor_preferred;
+          solver->solve_recovery_active = 1;
+          solver->options.scale = recovery_scale;
+          solver->common.scale = recovery_scale;
+          solver->full_factor_preferred = 1;
+          if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
+            fprintf(stderr,
+                    "KLS generic unscaled refactor recovery: scale=%d\n",
+                    recovery_scale);
+          }
+          const int recovery_status = kls_factor(solver, values);
+          solver->options.scale = saved_option_scale;
+          solver->full_factor_preferred = saved_full_factor_preferred;
+          solver->solve_recovery_active = 0;
+          solver->stats.refactor_seconds =
+            kls_now_seconds() - refactor_call_start;
+          fill_numeric_stats(solver);
+          return recovery_status;
         }
-        const int recovery_status = kls_factor(solver, values);
-        solver->options.scale = saved_option_scale;
-        solver->full_factor_preferred = saved_full_factor_preferred;
-        solver->solve_recovery_active = 0;
-        solver->stats.refactor_seconds =
-          kls_now_seconds() - refactor_call_start;
-        fill_numeric_stats(solver);
-        return recovery_status;
       }
     }
     kls_solve_contract_classify(solver, numeric_values);
@@ -170233,6 +170288,7 @@ static int solve_impl(kls_solver *solver,
     solver->i16solve_rhs_perm != NULL;
   const int fused_general_i32_rhs =
     getenv("KLS_DISABLE_GENERAL_FUSED_RHS") == NULL &&
+    solver->plain_solve_choice >= 0 &&
     solver->row_perm == NULL && !kernel_transpose && nrhs == 1 &&
     !has_row_scale && b != x &&
     !solver->row_refactor_values_ready &&
@@ -170448,20 +170504,92 @@ static int solve_impl(kls_solver *solver,
     if (lean_compact_match_direct_solve || fused_general_i32_rhs ||
         fused_matched_i32_rhs || fused_htc4438_i32_rhs ||
         (!kernel_transpose && nrhs == 1 &&
-        !serial_mapped_vendor_solve &&
-        kls_i32_solve_ready(solver))) {
-      solver->common.status = TRILINOS_KLU_OK;
-      ok = kls_i32_solve(solver,
-                         (fused_general_i32_rhs || fused_matched_i32_rhs)
-                           || fused_htc4438_i32_rhs
-                           ? b : x,
-                         x,
-                         fused_matched_i32_rhs
-                           ? solver->i16solve_rhs_perm : NULL,
-                         fused_general_i32_rhs
-                           ? diagonal_equiv_pre_scale : NULL,
-                         diagonal_equiv_post_scale,
-                         fused_htc4438_i32_rhs ? 2 : 0);
+         solver->plain_solve_choice >= 0 &&
+         !serial_mapped_vendor_solve &&
+         kls_i32_solve_ready(solver))) {
+      const UF_long factor_entries =
+        solver->numeric->lnz <= UF_long_max - solver->numeric->unz
+          ? solver->numeric->lnz + solver->numeric->unz : UF_long_max;
+      const int plain_solve_tournament =
+        fused_general_i32_rhs && !solver->in_solve_refinement &&
+        solver->plain_solve_choice == 0 &&
+        solver->options.backend == KLS_BACKEND_AUTO &&
+        solver->options.expected_refactorizations >= 32 &&
+        solver->symbolic->nblocks == 1u &&
+        solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
+        solver->row_perm == NULL && solver->user_col_perm == NULL &&
+        solver->row_scale == NULL && solver->col_scale == NULL &&
+        !solver->diagonal_equiv_active &&
+        factor_entries >= 2000000u &&
+        solver->n <= UF_long_max / 10u &&
+        factor_entries >= 4u * solver->n &&
+        factor_entries <= 10u * solver->n &&
+        getenv("KLS_DISABLE_PLAIN_SOLVE_TOURNAMENT") == NULL;
+      if (plain_solve_tournament) {
+        /* The compact index stream is not uniformly faster than KLU's
+           retained packed columns once both exceed cache.  Compare the two
+           exact engines on the same plain-frame RHS, including the vendor
+           route's required vector copy, and charge the extra solve to a
+           declared repeated-update lifecycle.  Fragmented BTF factors keep
+           the compact stream without a trial: it fuses the off-block and
+           singleton traversal that the vendor representation repeats, a
+           representation capability confirmed by the admitted-factor audit.
+           The vendor arm runs last, so either verdict leaves a valid answer
+           in x; later calls enter only the measured winner. */
+        solver->common.status = TRILINOS_KLU_OK;
+        const double i32_start = kls_now_seconds();
+        const UF_long i32_ok =
+          kls_i32_solve(solver, b, x, NULL, NULL, NULL, 0);
+        const double i32_seconds = kls_now_seconds() - i32_start;
+
+        solver->common.status = TRILINOS_KLU_OK;
+        const double vendor_start = kls_now_seconds();
+        memmove(x, b, (size_t)solver->n * sizeof(*x));
+        UF_long vendor_ok = trilinos_klu_l_solve(
+          solver->symbolic, solver->numeric, solver->n, 1u, x,
+          &solver->common);
+        const double vendor_seconds = kls_now_seconds() - vendor_start;
+        const double remaining =
+          (double)(solver->options.expected_refactorizations - 1);
+        const double projected_saving =
+          remaining * (i32_seconds - vendor_seconds);
+        const int adopt_vendor =
+          vendor_ok && solver->common.status >= TRILINOS_KLU_OK &&
+          (!i32_ok ||
+           (vendor_seconds > 0.0 && i32_seconds > 0.0 &&
+            vendor_seconds < 0.90 * i32_seconds &&
+            projected_saving > 2.0 * i32_seconds));
+        solver->plain_solve_choice = adopt_vendor ? -1 : 1;
+        if (!vendor_ok || solver->common.status < TRILINOS_KLU_OK) {
+          /* The incumbent succeeded before the failed challenger.  Rebuild
+             its answer because the vendor attempt may have modified x. */
+          solver->plain_solve_choice = 1;
+          solver->common.status = TRILINOS_KLU_OK;
+          vendor_ok = kls_i32_solve(solver, b, x, NULL, NULL, NULL, 0);
+        }
+        ok = vendor_ok;
+        if (getenv("KLS_TRACE_PLAIN_SOLVE_TOURNAMENT") != NULL) {
+          fprintf(stderr,
+                  "KLS plain solve tournament: i32 %.3f ms vendor "
+                  "%.3f ms projected %.3f ms -> %s\n",
+                  1e3 * i32_seconds, 1e3 * vendor_seconds,
+                  1e3 * projected_saving,
+                  solver->plain_solve_choice < 0 ? "VENDOR" : "I32");
+        }
+      } else {
+        solver->common.status = TRILINOS_KLU_OK;
+        ok = kls_i32_solve(solver,
+                           (fused_general_i32_rhs || fused_matched_i32_rhs)
+                             || fused_htc4438_i32_rhs
+                             ? b : x,
+                           x,
+                           fused_matched_i32_rhs
+                             ? solver->i16solve_rhs_perm : NULL,
+                           fused_general_i32_rhs
+                             ? diagonal_equiv_pre_scale : NULL,
+                           diagonal_equiv_post_scale,
+                           fused_htc4438_i32_rhs ? 2 : 0);
+      }
       diagonal_equiv_post_applied =
         diagonal_equiv_post_scale != NULL;
       if (trace_x) {
