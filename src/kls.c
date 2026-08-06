@@ -155774,7 +155774,10 @@ static int kls_generic_predicted_diagonal_values_capable(
   if (solver == NULL || solver->symbolic == NULL || numeric_values == NULL ||
       solver->col_ptr == NULL || solver->row_idx == NULL ||
       solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
-      solver->symbolic->R == NULL || solver->common.scale > 0) {
+      solver->symbolic->R == NULL ||
+      (solver->common.scale > 0 &&
+       (solver->options.scale != KLS_SCALE_AUTO ||
+        getenv("KLS_PREDICTED_TRY_SCALED") != NULL))) {
     return 0;
   }
   UF_long *pinv = (UF_long *)malloc((size_t)solver->n * sizeof(*pinv));
@@ -155940,6 +155943,14 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     solver->generic_nd_bounded_symmetric_union &&
     !(symbolic->lnz + symbolic->unz > 0.0) &&
     solver->options.scale == KLS_SCALE_AUTO && solver->common.scale > 0;
+  const int generic_scaled_auto_prediction_census =
+    !legacy_shape_policies && solver->options.scale == KLS_SCALE_AUTO &&
+    solver->common.scale > 0 &&
+    getenv("KLS_PREDICTED_TRY_SCALED") == NULL &&
+    solver->options.threads > 1 &&
+    kls_repeated_update_workload(&solver->options) &&
+    kls_symbolic_repeated_prediction_economic(
+      solver->symbolic, &solver->options);
   if (!legacy_shape_policies && solver->generic_nd_portfolio_selected &&
       !solver->generic_nd_bounded_symmetric_union) {
     /* On an ND frame with an unbounded A+A' stream, prediction's residual
@@ -155949,17 +155960,21 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     return 0;
   }
   if (!legacy_shape_policies &&
-      kls_generic_repeated_predicted_lifecycle_candidate(solver) &&
+      (kls_generic_repeated_predicted_lifecycle_candidate(solver) ||
+       generic_scaled_auto_prediction_census) &&
       !kls_generic_predicted_diagonal_values_capable(
         solver, numeric_values) &&
       !(solver->generic_nd_portfolio_selected &&
         solver->generic_nd_bounded_symmetric_union)) {
     /* For an ordinary minimum-degree proposal the census avoids a pattern
-       build whose selected diagonal is predictably unusable.  A provisional
-       bounded-union ND ordering is different: its otherwise-unavailable
-       fill evidence and mandatory exact-residual probe are the numeric
-       validation for the ordering itself.  Let that already-funded trial
-       proceed; any failed probe still restores the recorded incumbent. */
+       build whose selected diagonal is predictably unusable.  AUTO may have
+       selected a positive robust scale, but the prediction arm below still
+       runs unscaled; apply the same current-value pressure certificate before
+       paying for it.  A provisional bounded-union ND ordering is different:
+       its otherwise-unavailable fill evidence and mandatory exact-residual
+       probe are the numeric validation for the ordering itself.  Let that
+       already-funded trial proceed; any failed probe still restores the
+       recorded incumbent. */
     return 0;
   }
   if (legacy_shape_policies &&
