@@ -224,6 +224,9 @@ int main(int argc, char **argv) {
     return EXIT_FAILURE;
   }
   iparm[0] = 1;
+  if (const char *ordering = std::getenv("CKTSO_ORDERING_METHOD")) {
+    iparm[2] = std::atoi(ordering);
+  }
   ret = CKTSO_Analyze(inst, false, a.n, a.col_ptr.data(), a.row_idx.data(),
                       a.values.data(), threads);
   if (ret < 0) {
