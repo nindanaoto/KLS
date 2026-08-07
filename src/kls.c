@@ -771,6 +771,11 @@ struct kls_solver {
   int eg_separator_pending; /* probe out: 1 ordinary, 2 private domains */
   int eg_separator_samples[2]; /* private arm gets one unscored warm-up */
   double eg_separator_min[2];
+  int eg_premark_choice; /* cluster completion publication: 0 undecided,
+                            1 barrier-premarked, -1 per-column stores */
+  int eg_premark_pending; /* probe out: 1 per-column, 2 premarked */
+  int eg_premark_samples[2];
+  double eg_premark_min[2];
   int scalar_refactor_scatter; /* retained numeric prefers scalar indexed
                                   updates over AVX-512 gather/scatter */
   int snode_tail_chunk128; /* 128-entry fused-tail accumulator */
@@ -2966,6 +2971,7 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong supernode_consumer_plan_claim_waits;
   UF_long pipeline_pos_end;
   UF_long cluster_level_count;
+  int cluster_done_premarked;
   int separator_private;
   int pipeline_natural_order;
   int pipeline_supernode_tasks;
@@ -27896,6 +27902,11 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   memset(solver->eg_separator_samples, 0,
          sizeof(solver->eg_separator_samples));
   memset(solver->eg_separator_min, 0, sizeof(solver->eg_separator_min));
+  solver->eg_premark_choice = 0;
+  solver->eg_premark_pending = 0;
+  memset(solver->eg_premark_samples, 0,
+         sizeof(solver->eg_premark_samples));
+  memset(solver->eg_premark_min, 0, sizeof(solver->eg_premark_min));
   solver->scalar_refactor_scatter = 0;
   solver->snode_tail_chunk128 = 0;
   solver->snode_tail_chunk144 = 0;
@@ -117940,9 +117951,11 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           }
           break;
         }
-        atomic_store_explicit(&direct_cluster_done[col],
-                              direct_cluster_generation,
-                              memory_order_release);
+        if (!shared->cluster_done_premarked) {
+          atomic_store_explicit(&direct_cluster_done[col],
+                                direct_cluster_generation,
+                                memory_order_release);
+        }
       }
     } else if (begin > end ||
                end > solver->refactor_separator_private_column_count) {
@@ -117966,9 +117979,11 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           }
           break;
         }
-        atomic_store_explicit(&direct_cluster_done[col],
-                              direct_cluster_generation,
-                              memory_order_release);
+        if (!shared->cluster_done_premarked) {
+          atomic_store_explicit(&direct_cluster_done[col],
+                                direct_cluster_generation,
+                                memory_order_release);
+        }
       }
     }
     if (solver->refactor_separator_cluster_tail_column_count > 0u) {
@@ -118003,9 +118018,11 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
               break;
             }
             if (direct_cluster_done != NULL) {
-              atomic_store_explicit(&direct_cluster_done[col],
-                                    direct_cluster_generation,
-                                    memory_order_release);
+              if (!shared->cluster_done_premarked) {
+                atomic_store_explicit(&direct_cluster_done[col],
+                                      direct_cluster_generation,
+                                      memory_order_release);
+              }
             } else {
               kls_egraph_refactor_mark_done(shared, col);
               if (kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
@@ -118032,9 +118049,11 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
               break;
             }
             if (direct_cluster_done != NULL) {
-              atomic_store_explicit(&direct_cluster_done[col],
-                                    direct_cluster_generation,
-                                    memory_order_release);
+              if (!shared->cluster_done_premarked) {
+                atomic_store_explicit(&direct_cluster_done[col],
+                                      direct_cluster_generation,
+                                      memory_order_release);
+              }
             } else {
               kls_egraph_refactor_mark_done(shared, col);
               if (kls_egraph_refactor_try_claim_btf_scalar_run_group_currents(
@@ -121739,14 +121758,13 @@ static kls_egraph_refactor_kernel kls_egraph_refactor_kernel_for(
   return KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
 }
 
-/* Per-matrix steady dispatch-width trial for the pipelined egraph
-   refactor. Profiles show medium ND rows spend most of the 8T steady
-   refactor spinning on pipeline dependencies, and the best width is
-   row-dependent (several medium ND rows prefer half width, while stable
-   moderate fragmented and dense-ASIC factors prefer full width). Alternate
-   full and half width over
-   the first steady refactors, adopt the min-based winner. Width is
-   timing-only for the checkless refactor - results are identical. */
+/* Optional steady dispatch-width trial for the pipelined EGraph refactor.
+   Width is timing-only for the checkless refactor: results are identical.
+   The generalized executor now prepartitions level work for the complete
+   caller team; current development/holdout audits, including the former
+   half-width winners, all favor full width while a losing narrow probe costs
+   one complete numeric update.  Use the caller's full team by default and
+   retain the consultation for explicit sensitivity testing. */
 static int kls_egraph_steady_thread_count(kls_solver *solver,
                                           int thread_count,
                                           int check_pivots) {
@@ -121791,6 +121809,14 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
     solver->eg_pair_choice = -1;
     return thread_count;
   }
+  if (!kls_legacy_shape_policies_enabled() &&
+      getenv("KLS_ENABLE_EGRAPH_THREAD_TRIAL") == NULL &&
+      solver->eg_tt_choice == 0) {
+    solver->eg_tt_choice = thread_count;
+    solver->eg_tt_counts[0] = thread_count;
+    solver->eg_tt_pending = 1;
+    return thread_count;
+  }
   if (kls_legacy_shape_policies_enabled() &&
       solver->common.scale <= 0 &&
       symbolic_is_fragmented_many_block_unscaled_candidate(
@@ -121825,6 +121851,13 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
     return thread_count;
   }
   if (solver->eg_tt_choice > 0) {
+    if (!kls_legacy_shape_policies_enabled() &&
+        getenv("KLS_ENABLE_EGRAPH_THREAD_TRIAL") == NULL &&
+        solver->eg_tt_samples[0] < 2) {
+      solver->eg_tt_pending = 1;
+      return solver->eg_tt_choice <= thread_count ? solver->eg_tt_choice
+                                                  : thread_count;
+    }
     if (solver->eg_pair_choice == 0 && !solver->eg_pair_pending) {
       /* width settled: spend one refactor probing fused pair dispatch
          (rajat25 -31%, g2_circuit -11% measured; dc1 +39% - per-matrix
@@ -121860,8 +121893,113 @@ static void kls_egraph_release_unused_quad_scratch(kls_solver *solver) {
   }
 }
 
+static int kls_egraph_cluster_premark_dispatch(
+  kls_solver *solver,
+  const kls_egraph_refactor_shared *shared,
+  int check_pivots) {
+  if (solver == NULL || shared == NULL) {
+    return 0;
+  }
+  solver->eg_premark_pending = 0;
+  const char *forced = getenv("KLS_PREMARK_EGRAPH_CLUSTER");
+  if (forced != NULL && forced[0] != '\0') {
+    solver->eg_premark_choice =
+      (forced[0] == '0' && forced[1] == '\0') ? -1 : 1;
+    return solver->eg_premark_choice > 0;
+  }
+  if (kls_legacy_shape_policies_enabled() || check_pivots) {
+    return 0;
+  }
+  if (!kls_repeated_update_workload(&solver->options) ||
+      solver->options.expected_refactorizations < 16) {
+    solver->eg_premark_choice = -1;
+    return 0;
+  }
+  if (solver->eg_premark_choice != 0) {
+    return solver->eg_premark_choice > 0;
+  }
+
+  /* Consult this equivalent publication layout only after the other EGraph
+     executor trials have settled.  Otherwise their width, fusion, scatter,
+     or separator changes would be charged to the completion bitmap. */
+  if (solver->eg_separator_choice == 0 || solver->eg_tt_choice <= 0 ||
+      solver->eg_pair_choice == 0 || solver->eg_stream_choice == 0 ||
+      solver->eg_separator_pending || solver->eg_tt_pending ||
+      solver->eg_pair_pending || solver->eg_stream_pending) {
+    return 0;
+  }
+
+  if (shared->pipeline_done == NULL || shared->pipeline_generation == 0u ||
+      shared->pipeline_claimed != NULL || shared->cluster_level_count == 0u ||
+      shared->cluster_level_count > solver->refactor_level_count ||
+      solver->refactor_level_ptr == NULL ||
+      solver->refactor_level_cols == NULL ||
+      shared->btf_scalar_run_group_claims ||
+      shared->btf_scalar_run_group_prefix_stats ||
+      shared->btf_scalar_run_group_wake_stats ||
+      shared->btf_scalar_run_group_state_step_advance) {
+    solver->eg_premark_choice = -1;
+    return 0;
+  }
+
+  /* The immediately preceding stream-kernel consultation measured the exact
+     retained width/fusion/kernel combination with ordinary publication.  Use
+     that already-paid sample as the incumbent instead of charging the caller
+     two duplicate ordinary refactors; keep two independent samples for the
+     new arm before it can be adopted. */
+  if (solver->eg_premark_samples[0] == 0 &&
+      solver->eg_premark_samples[1] == 0) {
+    const int stream_side = solver->eg_stream_choice > 0 ? 1 : 0;
+    const double ordinary = solver->eg_stream_min[stream_side];
+    if (ordinary > 0.0) {
+      solver->eg_premark_samples[0] = 2;
+      solver->eg_premark_min[0] = ordinary;
+    }
+  }
+  /* If no equivalent predecessor sample exists, alternate two warm samples
+     per arm.  Both layouts execute the same columns and synchronize at the
+     same final barrier; only generation-store placement differs. */
+  const int side =
+    solver->eg_premark_samples[0] <= solver->eg_premark_samples[1] ? 0 : 1;
+  solver->eg_premark_pending = side + 1;
+  return side == 1;
+}
+
 static void kls_egraph_thread_trial_record(kls_solver *solver,
                                            double seconds) {
+  if (solver->eg_premark_pending) {
+    const int side = solver->eg_premark_pending - 1;
+    solver->eg_premark_pending = 0;
+    if (solver->eg_premark_choice != 0 || side < 0 || side > 1) {
+      return;
+    }
+    if (solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+      solver->eg_premark_choice = -1;
+      return;
+    }
+    solver->eg_premark_samples[side]++;
+    if (solver->eg_premark_min[side] <= 0.0 ||
+        seconds < solver->eg_premark_min[side]) {
+      solver->eg_premark_min[side] = seconds;
+    }
+    if (solver->eg_premark_samples[0] >= 2 &&
+        solver->eg_premark_samples[1] >= 2) {
+      const double ordinary = solver->eg_premark_min[0];
+      const double premarked = solver->eg_premark_min[1];
+      solver->eg_premark_choice =
+        ordinary > 0.0 && premarked > 0.0 &&
+            premarked < 0.995 * ordinary
+          ? 1 : -1;
+      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+        fprintf(stderr,
+                "KLS egraph cluster-publication probe: %s"
+                " (ordinary %.3f, premarked %.3f ms)\n",
+                solver->eg_premark_choice > 0 ? "PREMARK" : "ordinary",
+                1e3 * ordinary, 1e3 * premarked);
+      }
+    }
+    return;
+  }
   if (solver->eg_separator_pending) {
     const int side = solver->eg_separator_pending - 1;
     solver->eg_separator_pending = 0;
@@ -121943,7 +122081,9 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
           solver->eg_tt_choice == solver->eg_tt_counts[1] ? 1 : 0;
         const double none = solver->eg_tt_min[side];
         const double pairm = solver->eg_fuse_min[0];
-        if (none > 0.0 && pairm > 1.25 * none &&
+        const double dominated_pair_ratio =
+          kls_legacy_shape_policies_enabled() ? 1.25 : 1.10;
+        if (none > 0.0 && pairm > dominated_pair_ratio * none &&
             getenv("KLS_DISABLE_EGRAPH_DOMINATED_QUAD_SKIP") == NULL) {
           /* Pair fusion and quad fusion share the same cross-column
              synchronization and extra SPAs.  Once the cheaper fused arm is
@@ -122000,6 +122140,18 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
   }
   const int side = solver->eg_tt_pending - 1;
   solver->eg_tt_pending = 0;
+  if (side >= 0 && side <= 1 && solver->eg_tt_choice > 0 &&
+      solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH) {
+    solver->eg_tt_samples[side]++;
+    if (side == 0 && solver->eg_tt_samples[side] == 1) {
+      return;
+    }
+    if (solver->eg_tt_min[side] <= 0.0 ||
+        seconds < solver->eg_tt_min[side]) {
+      solver->eg_tt_min[side] = seconds;
+    }
+    return;
+  }
   if (side < 0 || solver->eg_tt_choice != 0 ||
       solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
     return;
@@ -122897,6 +123049,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->pipeline_done = pipeline_done;
   shared->pipeline_claimed = pipeline_claimed;
   shared->pipeline_generation = pipeline_generation;
+  shared->cluster_level_count =
+    pipeline_done != NULL ? cluster_level_count : solver->refactor_level_count;
   shared->pipeline_claim_generation = pipeline_claim_generation;
   shared->pipeline_lease_generation =
     pipeline_claim_generation != 0u ? pipeline_claim_generation + 1u : 0u;
@@ -123947,6 +124101,37 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                         memory_order_release);
   atomic_store_explicit(&shared->algorithm5_prefactor_deps, 0ul,
                         memory_order_release);
+  shared->cluster_done_premarked = 0;
+  if (kls_egraph_cluster_premark_dispatch(solver, shared, check_pivots) &&
+      !check_pivots && pipeline_done != NULL && pipeline_generation != 0u &&
+      pipeline_claimed == NULL && cluster_level_count > 0u &&
+      cluster_level_count <= solver->refactor_level_count &&
+      solver->refactor_level_ptr != NULL &&
+      solver->refactor_level_cols != NULL &&
+      !shared->btf_scalar_run_group_claims &&
+      !shared->btf_scalar_run_group_prefix_stats &&
+      !shared->btf_scalar_run_group_wake_stats &&
+      !shared->btf_scalar_run_group_state_step_advance) {
+    /* Every worker crosses the last cluster-level barrier before it can
+       enter the dependency-waiting pipeline.  Seed the generation bitmap in
+       one pre-dispatch pass instead of interleaving its stores with the hot
+       numeric columns; the barrier remains the publication boundary for the
+       numeric values themselves. */
+    const UF_long cluster_end =
+      solver->refactor_level_ptr[cluster_level_count];
+    if (cluster_end <= solver->n) {
+      for (UF_long pos = 0u; pos < cluster_end; ++pos) {
+        const UF_long col = solver->refactor_level_cols[pos];
+        if (col >= solver->n) {
+          shared->invalid = 1;
+          break;
+        }
+        atomic_store_explicit(&pipeline_done[col], pipeline_generation,
+                              memory_order_relaxed);
+      }
+      shared->cluster_done_premarked = !shared->invalid;
+    }
+  }
   atomic_store_explicit(
     &shared->next_pipeline_pos,
     (unsigned long)(pipeline_done != NULL
@@ -162313,6 +162498,12 @@ static void kls_reset_unsettled_egraph_trials_after_pts(
   if (solver->eg_stream_choice == 0) {
     solver->eg_stream_pending = 0;
     memset(solver->eg_stream_min, 0, sizeof(solver->eg_stream_min));
+  }
+  if (solver->eg_premark_choice == 0) {
+    solver->eg_premark_pending = 0;
+    memset(solver->eg_premark_samples, 0,
+           sizeof(solver->eg_premark_samples));
+    memset(solver->eg_premark_min, 0, sizeof(solver->eg_premark_min));
   }
 }
 
