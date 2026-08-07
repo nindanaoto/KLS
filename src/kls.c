@@ -2651,6 +2651,8 @@ static int kls_extreme_symmetric_single_block_cycle(
          solver->common.flops >= 5.0e10;
 }
 
+struct kls_generic_nd_trial;
+
 typedef struct kls_pattern_candidate {
   UF_long n;
   UF_long nnz;
@@ -2713,6 +2715,8 @@ typedef struct kls_pattern_candidate {
   kls_ordering generic_nd_fallback_ordering;
   int generic_nd_fallback_use_btf;
   double generic_nd_fallback_fill;
+  /* Analyze-time handoff only; owned by select_candidate's stack. */
+  struct kls_generic_nd_trial *generic_nd_overlap_target;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -38090,7 +38094,7 @@ static void maybe_retry_without_btf(UF_long n,
     (*symbolic)->est_flops > 0.0 &&
     no_btf_symbolic->est_flops <= 0.75 * (*symbolic)->est_flops;
   const int pivoted_representation_pareto =
-    getenv("KLS_ENABLE_GENERIC_PIVOTED_NO_BTF_REPRESENTATION") != NULL &&
+    getenv("KLS_DISABLE_GENERIC_PIVOTED_NO_BTF_REPRESENTATION") == NULL &&
     drops_repeated_prediction && repeated_generic_comparison &&
     current_score_known && isfinite(no_btf_score) &&
     no_btf_score <= 0.90 * current_score &&
@@ -38467,6 +38471,7 @@ static int kls_generic_nd_trial_start(
   const kls_options *options,
   int use_btf) {
   if (trial == NULL || candidate == NULL || options == NULL ||
+      trial->active || trial->symbolic != NULL ||
       candidate->col_ptr == NULL || candidate->row_idx == NULL ||
       options->ordering != KLS_ORDERING_AUTO ||
       !kls_repeated_update_workload(options) || options->threads < 2 ||
@@ -38538,8 +38543,8 @@ static int kls_generic_nd_trial_start(
   if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
     fprintf(stderr,
             "KLS generic ND: analyze overlap launched "
-            "(bytes=%.3e workers=%d)\n",
-            pattern_bytes, options->threads);
+            "(bytes=%.3e workers=%d btf=%d)\n",
+            pattern_bytes, options->threads, use_btf);
   }
   return 1;
 }
@@ -38607,16 +38612,11 @@ static void kls_maybe_promote_selected_generic_nd(
 
   kls_options trial_options = *options;
   trial_options.ordering = KLS_ORDERING_METIS;
-  /* Preserve the caller's requested structural decomposition.  Each BTF
-     block gets its own measured ND order, while a caller that disabled BTF
-     still receives the complete-graph ND candidate.  The realized symbolic
-     and numeric fill guards below arbitrate both representations without an
-     input-family classifier. */
-  /* The identity/SCC certificate can skip BTF for the minimum-degree
-     tournament, but a retained high-work ND factor still benefits from the
-     one-block BTF execution contract (without changing P/Q).  Reconstruct
-     that metadata only for this provisional ND candidate; rejection keeps
-     the cheaper certified no-BTF incumbent. */
+  /* Preserve the representation selected by the realized AMD fill/work
+     comparison.  Each retained BTF block gets its own measured ND order,
+     while a selected no-BTF arm receives the complete-graph candidate.  The
+     numeric fill guards below still arbitrate the provisional ordering
+     without an input-family classifier. */
   trial_options.use_btf = candidate->symbolic->do_btf ? 1 : 0;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_common trial_common;
@@ -48436,6 +48436,22 @@ generic_ordering_tournament:;
     atomic_store_explicit(&generic_representation_verdict,
                           best_symbolic->do_btf ? 1 : 2,
                           memory_order_release);
+#ifdef KLS_HAVE_METIS
+    /* The base AMD comparison has now settled the representation from
+       realized symbolic fill/work.  Launch NodeND in that same coordinate
+       frame while the independent minimum-fill workers finish.  This keeps
+       the useful analysis overlap without guessing BTF from the caller's
+       request; if the tournament takes an early route or the resource gate
+       declines, the ordinary synchronous portfolio remains the fallback. */
+    if (kls_generic_btf_capture_candidate != NULL &&
+        kls_generic_btf_capture_candidate->generic_nd_overlap_target !=
+          NULL) {
+      (void)kls_generic_nd_trial_start(
+        kls_generic_btf_capture_candidate->generic_nd_overlap_target,
+        kls_generic_btf_capture_candidate, options,
+        best_symbolic->do_btf ? 1 : 0);
+    }
+#endif
   }
 
   /* AMF (approximate minimum fill) rides the same quotient graph as AMD
@@ -51191,17 +51207,34 @@ static int select_candidate(kls_pattern_candidate *normal,
           KLS_ORIENTATION_TRANSPOSE
         ? transpose : normal;
       if (overlap_candidate != NULL) {
-        (void)kls_generic_nd_trial_start(
-          &overlapped_nd, overlap_candidate, generic_options,
-          getenv("KLS_ENABLE_GENERIC_PIVOTED_NO_BTF_REPRESENTATION") != NULL
-            ? 0
-            : (btf_is_provably_redundant ? 1 : generic_options->use_btf));
+        overlap_candidate->generic_nd_overlap_target = &overlapped_nd;
+        /* When BTF lacks the complete structural pivot diagonal required
+           for an independent concurrent decomposition, no-BTF is the only
+           coordinate-free NodeND arm that can run before the representation
+           verdict.  Speculate on that arm under the existing lifecycle and
+           cache gates; if the realized comparison retains BTF, promotion
+           rejects the mismatched result and rebuilds with the settled BTF
+           stash.  The post-verdict launch in choose_symbolic remains the
+           non-speculative fallback for every declined early trial. */
+        if (getenv("KLS_DISABLE_GENERIC_EARLY_COORDINATE_FREE_ND") == NULL) {
+          const int requested_btf = generic_options->use_btf;
+          const int started = kls_generic_nd_trial_start(
+            &overlapped_nd, overlap_candidate, generic_options,
+            requested_btf);
+          if (!started && requested_btf) {
+            (void)kls_generic_nd_trial_start(
+              &overlapped_nd, overlap_candidate, generic_options, 0);
+          }
+        }
       }
     }
 #endif
     const int status =
       select_candidate_inner(normal, transpose, generic_options, chosen_out);
 #ifdef KLS_HAVE_METIS
+    if (overlap_candidate != NULL) {
+      overlap_candidate->generic_nd_overlap_target = NULL;
+    }
     if (status == KLS_OK && chosen_out != NULL && *chosen_out != NULL) {
       /* Orientation is settled: pay for at most one tuned NodeND candidate
          first and compare it to the selected minimum-degree representation.
