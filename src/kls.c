@@ -38089,9 +38089,18 @@ static void maybe_retry_without_btf(UF_long n,
     no_btf_symbolic->est_flops > 0.0 &&
     (*symbolic)->est_flops > 0.0 &&
     no_btf_symbolic->est_flops <= 0.75 * (*symbolic)->est_flops;
+  const int pivoted_representation_pareto =
+    getenv("KLS_ENABLE_GENERIC_PIVOTED_NO_BTF_REPRESENTATION") != NULL &&
+    drops_repeated_prediction && repeated_generic_comparison &&
+    current_score_known && isfinite(no_btf_score) &&
+    no_btf_score <= 0.90 * current_score &&
+    no_btf_symbolic->est_flops > 0.0 &&
+    (*symbolic)->est_flops > 0.0 &&
+    no_btf_symbolic->est_flops <= (*symbolic)->est_flops;
   const int generic_accept = generic_comparison && current_score_known &&
     isfinite(no_btf_score) &&
-    (!drops_repeated_prediction || decisive_without_prediction) &&
+    (!drops_repeated_prediction || decisive_without_prediction ||
+     pivoted_representation_pareto) &&
     (single_block
        ? no_btf_score <= 1.02 * current_score
        : no_btf_score <=
@@ -38608,8 +38617,7 @@ static void kls_maybe_promote_selected_generic_nd(
      one-block BTF execution contract (without changing P/Q).  Reconstruct
      that metadata only for this provisional ND candidate; rejection keeps
      the cheaper certified no-BTF incumbent. */
-  trial_options.use_btf =
-    (options->use_btf || btf_redundant_certificate) ? 1 : 0;
+  trial_options.use_btf = candidate->symbolic->do_btf ? 1 : 0;
   trilinos_klu_l_symbolic *trial_symbolic = NULL;
   trilinos_klu_l_common trial_common;
   kls_separator_analysis trial_separator;
@@ -38786,7 +38794,8 @@ static void kls_maybe_promote_selected_generic_nd(
   const int lifecycle_near_tie =
     isfinite(trial_fill) && trial_fill > 0.0 &&
     trial_fill <= 1.02 * incumbent_fill &&
-    trial_symbolic->structural_rank == candidate->n &&
+    (trial_symbolic->structural_rank == candidate->n ||
+     trial_symbolic->structural_rank == KLS_KLU_EMPTY) &&
     isfinite(incumbent_lifecycle_work) &&
     incumbent_lifecycle_work >= 2.0e10 &&
     (!work_estimate_available || trial_flops <= 1.05 * incumbent_flops);
@@ -51184,7 +51193,9 @@ static int select_candidate(kls_pattern_candidate *normal,
       if (overlap_candidate != NULL) {
         (void)kls_generic_nd_trial_start(
           &overlapped_nd, overlap_candidate, generic_options,
-          btf_is_provably_redundant ? 1 : generic_options->use_btf);
+          getenv("KLS_ENABLE_GENERIC_PIVOTED_NO_BTF_REPRESENTATION") != NULL
+            ? 0
+            : (btf_is_provably_redundant ? 1 : generic_options->use_btf));
       }
     }
 #endif
@@ -57616,7 +57627,8 @@ static int kls_refresh_row_refactor_offdiag_values(kls_solver *solver,
   if (solver->lean_btf_off_input_pos != NULL &&
       numeric_values != NULL && solver->numeric != NULL &&
       solver->numeric->Offp != NULL && solver->numeric->Offx != NULL &&
-      solver->common.scale <= 0 && solver->numeric->Rs == NULL) {
+      ((solver->common.scale > 0 && solver->numeric->Rs != NULL) ||
+       (solver->common.scale <= 0 && solver->numeric->Rs == NULL))) {
     const UF_long offcount = solver->numeric->Offp[solver->n];
     double *restrict offx = (double *)solver->numeric->Offx;
     const uint32_t *restrict input = solver->lean_btf_off_input_pos;
@@ -57624,7 +57636,14 @@ static int kls_refresh_row_refactor_offdiag_values(kls_solver *solver,
       if ((UF_long)input[p] >= solver->nnz) {
         return 0;
       }
-      offx[p] = numeric_values[(UF_long)input[p]];
+      double value = 0.0;
+      if (!kls_refactor_input_value(
+            solver, numeric_values,
+            solver->common.scale > 0 ? solver->numeric->Rs : NULL,
+            (int)solver->common.scale, (UF_long)input[p], &value)) {
+        return 0;
+      }
+      offx[p] = value;
     }
     return 1;
   }
@@ -73114,6 +73133,7 @@ static int kls_direct_numeric_lean_pattern_capable(
 static int kls_compact_direct_numeric_row_pattern_capable(
   const kls_solver *solver) {
   return kls_direct_numeric_lean_pattern_capable(solver) &&
+    solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
     solver->n <= (UF_long)0x1000u &&
     solver->nnz <= (UF_long)UINT16_MAX &&
     solver->numeric->lnz <= (UF_long)UINT16_MAX &&
@@ -73200,7 +73220,8 @@ static int kls_build_lean_row_refactor_pattern_parallel(
       return 0;
     }
     if (!single_block &&
-        (mapped_user_frame ||
+        (mapped_user_frame || solver->input_to_csc != NULL ||
+         solver->common.scale > 0 ||
          solver->nnz > (UF_long)UINT16_MAX + 1u ||
          offcount > (UF_long)UINT16_MAX)) {
       offdiag_input_pos32 = (uint32_t *)malloc(
@@ -73410,20 +73431,32 @@ static int kls_direct_numeric_lean_pattern_capable(
       solver->numeric == NULL || solver->options.threads <= 1 ||
       !kls_repeated_update_workload(&solver->options) ||
       getenv("KLS_DISABLE_DIRECT_NUMERIC_LEAN_PATTERN") != NULL ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->user_col_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->diagonal_equiv_active ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
       solver->pivot_nudge_count != 0u ||
       solver->common.kls_perturb_count != 0u) {
     return 0;
   }
-  const int direct_input_frame =
+  const int plain_direct_input_frame =
+    solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
     solver->input_to_csc == NULL && solver->row_perm == NULL;
   const int mapped_user_frame =
     kls_direct_user_value_maps_capable(solver);
-  return direct_input_frame || mapped_user_frame;
+  /* Any selected candidate with a retained public-to-internal permutation
+     owns a complete internal CSC.  The direct builder reads that CSC (not the
+     caller frame), while normal value preparation gathers updates into the
+     same positions before the numeric walk.  This covers a transposed input
+     without detecting its matrix shape or reconstructing its public rows.
+     KLU row scaling is likewise numeric metadata: input positions remain
+     unchanged and the row worker applies Rs through Pnum. */
+  const int mapped_internal_frame =
+    solver->input_to_csc != NULL && solver->row_perm == NULL &&
+    ((solver->common.scale > 0 && solver->numeric->Rs != NULL) ||
+     (solver->common.scale <= 0 && solver->numeric->Rs == NULL));
+  return plain_direct_input_frame || mapped_user_frame ||
+    mapped_internal_frame;
 }
 
 static int kls_build_row_refactor_pattern(kls_solver *solver,
@@ -80297,6 +80330,29 @@ static int kls_lean_parallel_refresh_offdiag_worker(
       solver->numeric == NULL || solver->numeric->Offp == NULL ||
       solver->numeric->Offx == NULL) {
     return 0;
+  }
+  if (solver->lean_btf_off_input_pos != NULL &&
+      ((solver->common.scale > 0 && shared->rs != NULL) ||
+       (solver->common.scale <= 0 && shared->rs == NULL))) {
+    const UF_long offcount = solver->numeric->Offp[solver->n];
+    double *restrict offx = (double *)solver->numeric->Offx;
+    const uint32_t *restrict input = solver->lean_btf_off_input_pos;
+    for (UF_long p = (UF_long)worker->tid; p < offcount; p += stride) {
+      const UF_long input_pos = (UF_long)input[p];
+      if (input_pos >= solver->nnz) {
+        return 0;
+      }
+      double value = shared->values[input_pos];
+      if (shared->rs != NULL) {
+        const UF_long row = solver->row_idx[input_pos];
+        if (row >= solver->n || shared->rs[row] == 0.0) {
+          return 0;
+        }
+        value /= shared->rs[row];
+      }
+      offx[p] = value;
+    }
+    return 1;
   }
   if (solver->input_to_csc == NULL && solver->row_perm == NULL &&
       solver->compact_match_offdiag_user_pos != NULL &&
@@ -167256,6 +167312,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       if (!had_numeric && !legacy_shape_policies &&
           solver->generic_nd_portfolio_selected &&
           solver->symbolic->nblocks == 1u &&
+          solver->symbolic->est_flops > 0.0 &&
           kls_repeated_update_workload(&solver->options) &&
           solver->options.backend != KLS_BACKEND_SERIAL &&
           solver->options.threads > 1) {
