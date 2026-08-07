@@ -896,6 +896,12 @@ struct kls_solver {
   int solve_refine_csr32_state;
   int solve_refine_csr32_threads;
   uint32_t solve_refine_csr_row_bound32[9];
+  int contract_residual_choice; /* measured ordinary contract residual:
+                                   0 undecided, 1 parallel CSR, -1 CSC */
+  int contract_residual_pending; /* timed arm: 1 CSC, 2 parallel CSR */
+  int contract_residual_samples[2];
+  double contract_residual_min[2];
+  double contract_residual_build_seconds;
   UF_long *solve_refine_rinv;
   double *solve_refine_rs_inv;  /* 1/row_scale in internal row index space;
                                    rebuilt when row_scale moves (pointer
@@ -27545,6 +27551,13 @@ static void free_solve_refine_workspace(kls_solver *solver) {
   solver->solve_refine_csr32_threads = 0;
   memset(solver->solve_refine_csr_row_bound32, 0,
          sizeof(solver->solve_refine_csr_row_bound32));
+  solver->contract_residual_choice = 0;
+  solver->contract_residual_pending = 0;
+  memset(solver->contract_residual_samples, 0,
+         sizeof(solver->contract_residual_samples));
+  memset(solver->contract_residual_min, 0,
+         sizeof(solver->contract_residual_min));
+  solver->contract_residual_build_seconds = 0.0;
   free(solver->solve_refine_rinv);
   solver->solve_refine_rinv = NULL;
   free(solver->solve_refine_rs_inv);
@@ -28151,6 +28164,13 @@ static void clear_matrix(kls_solver *solver) {
   solver->solve_refine_csr32_threads = 0;
   memset(solver->solve_refine_csr_row_bound32, 0,
          sizeof(solver->solve_refine_csr_row_bound32));
+  solver->contract_residual_choice = 0;
+  solver->contract_residual_pending = 0;
+  memset(solver->contract_residual_samples, 0,
+         sizeof(solver->contract_residual_samples));
+  memset(solver->contract_residual_min, 0,
+         sizeof(solver->contract_residual_min));
+  solver->contract_residual_build_seconds = 0.0;
   solver->solve_perm_workspace_n = 0;
   solver->n = 0;
   solver->nnz = 0;
@@ -170873,6 +170893,42 @@ static int kls_run_compact_amf_two_block_parallel_residual(
    than a copied value array, so refactorized values are always current and
    no O(nnz) shuffle is added to each generation.  The admission below is
    expressed only in lifecycle, work, and representation-width terms. */
+static int kls_generic_contract_residual_thread_count(
+  const kls_solver *solver,
+  const kls_egraph_refactor_pool *pool,
+  int generic_candidate) {
+  if (solver == NULL || pool == NULL || pool->thread_count < 2) {
+    return 0;
+  }
+  int threads = pool->thread_count;
+  if (generic_candidate) {
+    /* Roughly 4K sparse multiply-adds per participant amortize one wake and
+       leave enough rows for independent CSR streams.  This selects a
+       resource width, not an input family: the timing tournament below can
+       still reject the whole parallel representation. */
+    const uint64_t work = (uint64_t)solver->nnz;
+    uint64_t wanted = (work + UINT64_C(4095)) / UINT64_C(4096);
+    if (wanted < 2u) {
+      wanted = 2u;
+    }
+    if (wanted < (uint64_t)threads) {
+      threads = (int)wanted;
+    }
+    while (threads > 2 &&
+           solver->n < (UF_long)512u * (UF_long)threads) {
+      threads--;
+    }
+  }
+  const char *env = getenv("KLS_GENERIC_CONTRACT_THREADS");
+  if (env != NULL && env[0] != '\0') {
+    const int parsed = atoi(env);
+    if (parsed >= 2 && parsed <= pool->thread_count) {
+      threads = parsed;
+    }
+  }
+  return threads;
+}
+
 static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
   if (solver == NULL) {
     return 0;
@@ -170887,6 +170943,9 @@ static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
     kls_repeated_update_workload(&solver->options) &&
     solver->options.expected_solves >= 16 &&
     getenv("KLS_DISABLE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") == NULL;
+  const int contract_threads =
+    kls_generic_contract_residual_thread_count(
+      solver, pool, generic_candidate);
   if ((!legacy_candidate && !generic_candidate) || pool == NULL ||
       pool->thread_count < 2 || pool->thread_count > 8 ||
       pool->created_count != pool->thread_count - 1 ||
@@ -170894,16 +170953,17 @@ static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
       solver->nnz > (UF_long)UINT32_MAX || solver->col_ptr == NULL ||
       solver->row_idx == NULL ||
       (generic_candidate &&
-       (solver->n < 4096u * (UF_long)pool->thread_count ||
-        solver->nnz < 32768u * (UF_long)pool->thread_count))) {
+       getenv("KLS_FORCE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") == NULL &&
+       (solver->n < 512u * (UF_long)contract_threads ||
+        solver->nnz < 2048u * (UF_long)contract_threads))) {
     return 0;
   }
   if (solver->solve_refine_csr32_state != 0) {
     return solver->solve_refine_csr32_state > 0 &&
-      solver->solve_refine_csr32_threads == pool->thread_count;
+      solver->solve_refine_csr32_threads == contract_threads;
   }
   solver->solve_refine_csr32_state = -1;
-  solver->solve_refine_csr32_threads = pool->thread_count;
+  solver->solve_refine_csr32_threads = contract_threads;
   if ((size_t)solver->n > SIZE_MAX / sizeof(uint32_t) - 1u ||
       (size_t)solver->nnz > SIZE_MAX / sizeof(uint32_t)) {
     return 0;
@@ -170974,9 +171034,9 @@ static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
     return 0;
   }
   solver->solve_refine_csr_row_bound32[0] = 0u;
-  for (int tid = 1; tid < pool->thread_count; ++tid) {
+  for (int tid = 1; tid < contract_threads; ++tid) {
     const UF_long target =
-      (solver->nnz * (UF_long)tid) / (UF_long)pool->thread_count;
+      (solver->nnz * (UF_long)tid) / (UF_long)contract_threads;
     UF_long lo =
       (UF_long)solver->solve_refine_csr_row_bound32[tid - 1];
     UF_long hi = solver->n;
@@ -170990,7 +171050,7 @@ static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
     }
     solver->solve_refine_csr_row_bound32[tid] = (uint32_t)lo;
   }
-  solver->solve_refine_csr_row_bound32[pool->thread_count] =
+  solver->solve_refine_csr_row_bound32[contract_threads] =
     (uint32_t)solver->n;
   solver->solve_refine_csr_ptr32 = ptr;
   solver->solve_refine_csr_pos32 = pos;
@@ -170998,6 +171058,91 @@ static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
   solver->solve_refine_csr_col32 = cols32;
   solver->solve_refine_csr32_state = 1;
   return 1;
+}
+
+/* The row-ordered residual is mathematically identical to the historical
+   CSC scatter but its worker wake and retained CSR map are not uniformly
+   profitable.  Compare complete residual-and-statistics executions on live
+   RHS vectors, then retain only a clear lifecycle winner. */
+static int kls_generic_contract_residual_parallel_dispatch(
+  kls_solver *solver) {
+  if (solver == NULL || kls_legacy_shape_policies_enabled() ||
+      !kls_repeated_update_workload(&solver->options) ||
+      solver->options.expected_solves < 16 ||
+      getenv("KLS_DISABLE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") != NULL) {
+    return 0;
+  }
+  solver->contract_residual_pending = 0;
+  if (getenv("KLS_FORCE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") != NULL) {
+    return kls_prepare_parallel_refine_csr(solver);
+  }
+  if (solver->contract_residual_choice < 0) {
+    return 0;
+  }
+  if (solver->contract_residual_choice > 0) {
+    return kls_prepare_parallel_refine_csr(solver);
+  }
+
+  const int total = solver->contract_residual_samples[0] +
+    solver->contract_residual_samples[1];
+  /* serial, CSR, CSR, serial: neither arm owns both the cold-first and
+     warm-last positions, while the CSR map is built before its timed arm. */
+  const int side = (total == 0 || total >= 3) ? 0 : 1;
+  if (side == 1) {
+    const int needed_build = solver->solve_refine_csr32_state == 0;
+    const double build_start = needed_build ? kls_now_seconds() : 0.0;
+    if (!kls_prepare_parallel_refine_csr(solver)) {
+      solver->contract_residual_choice = -1;
+      return 0;
+    }
+    if (needed_build) {
+      solver->contract_residual_build_seconds =
+        kls_now_seconds() - build_start;
+    }
+  }
+  solver->contract_residual_pending = side + 1;
+  return side == 1;
+}
+
+static void kls_generic_contract_residual_record(kls_solver *solver,
+                                                  double seconds) {
+  if (solver == NULL || solver->contract_residual_pending == 0) {
+    return;
+  }
+  const int side = solver->contract_residual_pending - 1;
+  solver->contract_residual_pending = 0;
+  if (side < 0 || side > 1 || solver->contract_residual_choice != 0 ||
+      !(seconds > 0.0) || !isfinite(seconds)) {
+    return;
+  }
+  solver->contract_residual_samples[side]++;
+  if (solver->contract_residual_min[side] <= 0.0 ||
+      seconds < solver->contract_residual_min[side]) {
+    solver->contract_residual_min[side] = seconds;
+  }
+  if (solver->contract_residual_samples[0] < 2 ||
+      solver->contract_residual_samples[1] < 2) {
+    return;
+  }
+  const double serial = solver->contract_residual_min[0];
+  const double parallel = solver->contract_residual_min[1];
+  const double remaining = solver->options.expected_solves > 4
+    ? (double)(solver->options.expected_solves - 4) : 0.0;
+  const double projected = remaining * (serial - parallel);
+  solver->contract_residual_choice =
+    parallel < 0.95 * serial &&
+        projected > 2.0 * solver->contract_residual_build_seconds
+      ? 1 : -1;
+  if (getenv("KLS_TRACE_CONTRACT_RESIDUAL") != NULL) {
+    fprintf(stderr,
+            "KLS contract residual: CSC %.3f us CSR/%d %.3f us"
+            " build %.3f us projected %.3f us -> %s\n",
+            1e6 * serial, solver->solve_refine_csr32_threads,
+            1e6 * parallel,
+            1e6 * solver->contract_residual_build_seconds,
+            1e6 * projected,
+            solver->contract_residual_choice > 0 ? "CSR" : "CSC");
+  }
 }
 
 static int kls_run_parallel_refine_csr_residual(
@@ -171016,9 +171161,12 @@ static int kls_run_parallel_refine_csr_residual(
   }
   kls_egraph_refactor_pool *pool = solver->egraph_pool;
   if (pool == NULL || pool->thread_count < 2 || pool->thread_count > 8 ||
-      pool->created_count != pool->thread_count - 1) {
+      pool->created_count != pool->thread_count - 1 ||
+      solver->solve_refine_csr32_threads < 2 ||
+      solver->solve_refine_csr32_threads > pool->thread_count) {
     return 0;
   }
+  const int contract_threads = solver->solve_refine_csr32_threads;
   const int collect_stats = bmax_out != NULL && bnorm2_out != NULL &&
     rmax_out != NULL && rnorm2_out != NULL;
   double results[4 * 8];
@@ -171032,7 +171180,7 @@ static int kls_run_parallel_refine_csr_residual(
   shared->solver = solver;
   shared->values = a;
   shared->rs = b;
-  shared->thread_count = pool->thread_count;
+  shared->thread_count = contract_threads;
   shared->lean_pattern_mode = 0;
   shared->lean_refactor_mode = 0;
   shared->row_publish_mode = 0;
@@ -171043,11 +171191,11 @@ static int kls_run_parallel_refine_csr_residual(
   shared->row_solve_work = residual;
   shared->row_solve_residual_x = x;
   shared->row_solve_mode = 5;
-  for (int tid = 0; tid < pool->thread_count; ++tid) {
+  for (int tid = 0; tid < contract_threads; ++tid) {
     pool->workers[tid].shared = shared;
   }
   kls_egraph_pool_dispatch_and_spin_wait(
-    pool, shared, pool->thread_count);
+    pool, shared, contract_threads);
   shared->row_solve_mode = 0;
   shared->contract_rgrowth_results = NULL;
   shared->row_solve_work = NULL;
@@ -171060,7 +171208,7 @@ static int kls_run_parallel_refine_csr_residual(
     double bnorm2 = 0.0;
     double rmax = 0.0;
     double rnorm2 = 0.0;
-    for (int tid = 0; tid < pool->thread_count; ++tid) {
+    for (int tid = 0; tid < contract_threads; ++tid) {
       bmax = bmax < results[4 * tid] ? results[4 * tid] : bmax;
       bnorm2 += results[4 * tid + 1];
       rmax = rmax < results[4 * tid + 2] ? results[4 * tid + 2] : rmax;
@@ -171085,7 +171233,8 @@ static int kls_generic_plain_contract_vector_stats_ready(
   const kls_egraph_refactor_pool *pool = solver->egraph_pool;
   return pool != NULL && pool->thread_count >= 2 &&
     pool->created_count == pool->thread_count - 1 &&
-    solver->n >= 4096u * (UF_long)pool->thread_count;
+    (solver->solve_refine_csr32_state > 0 ||
+     solver->n >= 4096u * (UF_long)pool->thread_count);
 }
 
 static int kls_run_generic_plain_contract_vector_stats(
@@ -172212,11 +172361,19 @@ static int solve_impl(kls_solver *solver,
         getenv("KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT") == NULL &&
         /* compatibility spelling from the row-only prototype */
         getenv("KLS_DISABLE_ROW_SELF_CHECK_L2_CONTRACT") == NULL;
+      const int generic_parallel_contract_residual =
+        ordinary_self_check_l2_contract &&
+        kls_generic_contract_residual_parallel_dispatch(solver);
+      const double contract_residual_probe_start =
+        solver->contract_residual_pending != 0
+          ? kls_now_seconds() : 0.0;
       if (promoted_tolerance_l2_contract) {
         solver->promoted_tolerance_l2_contract_run_count++;
       }
       const int parallel_plain_contract_stats =
-        promoted_tolerance_l2_contract && tight_tol_selected &&
+        ((ordinary_self_check_l2_contract &&
+          generic_parallel_contract_residual) ||
+         (promoted_tolerance_l2_contract && tight_tol_selected)) &&
         kls_generic_plain_contract_vector_stats_ready(solver);
       double bmax = 0.0;
       double bnorm2 = 0.0;
@@ -172319,6 +172476,8 @@ static int solve_impl(kls_solver *solver,
         const int generic_parallel_residual =
           !legacy_shape_policies && !kernel_transpose && nrhs == 1 &&
           b != x && kls_repeated_update_workload(&solver->options) &&
+          (!ordinary_self_check_l2_contract ||
+           generic_parallel_contract_residual) &&
           !compact_amf_two_block_parallel_residual &&
           !balanced_hub_parallel_residual &&
           kls_run_parallel_refine_csr_residual(
@@ -172456,6 +172615,11 @@ static int solve_impl(kls_solver *solver,
               rnorm2 += residual[i] * residual[i];
             }
           }
+        }
+        if (iter == 0 && ordinary_self_check_l2_contract &&
+            solver->contract_residual_pending != 0) {
+          kls_generic_contract_residual_record(
+            solver, kls_now_seconds() - contract_residual_probe_start);
         }
         /* The benchmark contract is relative L2, while the general
            refinement controller deliberately uses a much tighter max-norm
