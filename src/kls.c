@@ -1430,6 +1430,8 @@ struct kls_solver {
   UF_long *refactor_separator_private_cols;
   UF_long *refactor_separator_private_thread_ptr;
   UF_long *refactor_separator_cluster_tail_cols;
+  UF_long *refactor_separator_cluster_tail_level_ptr;
+  UF_long *refactor_separator_cluster_tail_level_thread_ptr;
   int refactor_level_thread_count;
   int refactor_separator_private_thread_count;
   int refactor_separator_private_plan_attempted;
@@ -7910,10 +7912,37 @@ static int kls_refactor_btf_scalar_run_stats_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
-static int kls_refactor_btf_scalar_run_exec_env_enabled(void) {
+static int kls_refactor_btf_scalar_run_exec_enabled(
+  const kls_solver *solver) {
   const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
+  if (value != NULL && value[0] != '\0') {
+    return !(value[0] == '0' && value[1] == '\0');
+  }
+  if (kls_legacy_shape_policies_enabled() || solver == NULL ||
+      solver->symbolic == NULL || solver->symbolic->nblocks <= 1u ||
+      solver->options.threads < 2 ||
+      !kls_repeated_update_workload(&solver->options) ||
+      solver->refactor_pipeline_column_count == 0u ||
+      solver->refactor_supernode_candidate_max_width < 64u ||
+      solver->refactor_dependency_pipeline_max_column_work <= 0.0 ||
+      solver->refactor_pipeline_work <= 0.0) {
+    return 0;
+  }
+
+  /* The run kernel replaces repeated sparse scatters with an ordered local
+     solve plus one deferred tail stream.  It pays only when the EGraph tail
+     is dominated by a few individually expensive columns; on a broad tail,
+     converting every small run merely disables the branch-light cluster
+     kernel.  Express that applicability in retained numeric work: require
+     one column to contain at least 1/(8*T) of pipeline work and enough work
+     to amortize the sorted L mirror.  This scales with the caller team and
+     is independent of matrix identity, dimensions, ordering, or family. */
+  const double max_work =
+    solver->refactor_dependency_pipeline_max_column_work;
+  const double team = (double)solver->options.threads;
+  return max_work >= 131072.0 * team &&
+         solver->refactor_pipeline_work <=
+           8.0 * team * max_work;
 }
 
 static int kls_refactor_btf_scalar_run_group_wait_stats_env_enabled(void) {
@@ -21376,6 +21405,8 @@ static void free_refactor_schedule(kls_solver *solver) {
   free(solver->refactor_separator_private_cols);
   free(solver->refactor_separator_private_thread_ptr);
   free(solver->refactor_separator_cluster_tail_cols);
+  free(solver->refactor_separator_cluster_tail_level_ptr);
+  free(solver->refactor_separator_cluster_tail_level_thread_ptr);
   free(solver->refactor_pipeline_successor_ptr);
   free(solver->refactor_pipeline_successors);
   free(solver->refactor_pipeline_pred_count);
@@ -21393,6 +21424,8 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_separator_private_cols = NULL;
   solver->refactor_separator_private_thread_ptr = NULL;
   solver->refactor_separator_cluster_tail_cols = NULL;
+  solver->refactor_separator_cluster_tail_level_ptr = NULL;
+  solver->refactor_separator_cluster_tail_level_thread_ptr = NULL;
   solver->refactor_pipeline_successor_ptr = NULL;
   solver->refactor_pipeline_successors = NULL;
   solver->refactor_pipeline_pred_count = NULL;
@@ -43459,15 +43492,25 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     solver->nearly_missing_diagonal_early_match_selected =
       nearly_missing_diagonal_early_match;
   }
+  /* A static row match changes the numeric coordinate frame.  Under a
+     recurring changed-value contract, keeping that frame unscaled requires
+     every later value consumer to preserve the exact matched coordinates.
+     That is a stronger invariant than a successful first factor proves.
+     Prefer the ordinary matched equilibration for generic AUTO, which has
+     the same representation contract on every value generation.  The
+     unscaled form remains available for explicit experiments and the
+     validated legacy policy. */
   int prefer_unscaled_static_match =
     getenv("KLS_STATIC_MATCH_SCALED") != NULL
       ? 0
-      : !legacy_shape_policies
+      : getenv("KLS_STATIC_MATCH_UNSCALED") != NULL
           ? 1
-          : static_match_prefers_unscaled(
-              solver->n, base_col_ptr,
-              solver->compact_missing_diagonal_match_candidate,
-              weak, missing_diagonal);
+          : !legacy_shape_policies
+              ? 0
+              : static_match_prefers_unscaled(
+                  solver->n, base_col_ptr,
+                  solver->compact_missing_diagonal_match_candidate,
+                  weak, missing_diagonal);
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr,
             "KLS pre-static: weak count done %.3fms weak=%ld missing=%ld\n",
@@ -43575,7 +43618,10 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       goto done;
     }
     if (!deferred && !forced_match && !inline_weak &&
-        kls_defer_cycle_trials_enabled()) {
+        (kls_defer_cycle_trials_enabled() ||
+         (kls_repeated_update_workload(&solver->options) &&
+          getenv("KLS_DISABLE_GENERIC_PRESTATIC_LIFECYCLE_DEFERRAL") ==
+            NULL))) {
       /* A partial weak diagonal is a recurring-cycle opportunity, not a
          reason to duplicate a healthy one-shot factor.  Reconsider it on
          the first changed numeric; a failed first factor still reaches the
@@ -43584,7 +43630,9 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          an ordering choice proves that matching will improve the realized
          numeric.  Measuring the incumbent first lets the existing fill/work,
          pivot, conditioning, and solve gates decline that speculation before
-         it duplicates an expensive factor. */
+         it duplicates an expensive factor.  This generic representation has
+         its own changed-value lifecycle, so retain its comparison even when
+         exact-input reuse is disabled; the opt-out is deliberately local. */
       solver->prestatic_deferred = 1;
 #ifdef KLS_HAVE_METIS
       kls_prestatic_ordering_ctx = 0;
@@ -43873,15 +43921,13 @@ matching_attempt:;
     goto done;
   }
   if (!legacy_shape_policies &&
-      getenv("KLS_STATIC_MATCH_SCALED") == NULL &&
+      getenv("KLS_STATIC_MATCH_AUTO_SCALE") != NULL &&
       solver->options.scale == KLS_SCALE_AUTO) {
     /* Matching changes which numerical entries become diagonal, so the
        original matrix's scale verdict is not evidence for the candidate's
-       value frame.  Let the ordinary value census choose the first matched
-       numeric instead of forcing every generic match to start unscaled.
-       The realized matching-equilibration comparison below remains the
-       final authority.  This also bounds badly scaled candidates before
-       their first KLU factor can grow far beyond the symbolic estimate. */
+       value frame.  This optional experiment lets the ordinary value census
+       choose the first matched numeric; the default keeps the stable matched
+       equilibration chosen above. */
     prefer_unscaled_static_match =
       choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
                                      trial_row_idx, &solver->options,
@@ -44354,7 +44400,9 @@ matching_attempt:;
   }
   int skip_trial_factor = 0;
   const int generic_bounded_parallel_first =
-    !legacy_shape_policies && !deferred && solver->options.threads > 1 &&
+    !legacy_shape_policies && !deferred &&
+    getenv("KLS_ENABLE_GENERIC_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL &&
+    solver->options.threads > 1 &&
     kls_repeated_update_workload(&solver->options) &&
     trial_symbolic != NULL && trial_symbolic->est_flops > 0.0 &&
     trial_symbolic->est_flops <= 1.0e7 &&
@@ -44375,7 +44423,9 @@ matching_attempt:;
     matched_column_pair_work *
       (1.0 + (double)solver->options.expected_refactorizations);
   const int generic_resource_scaled_parallel_first =
-    !legacy_shape_policies && !deferred && solver->options.threads > 1 &&
+    !legacy_shape_policies && !deferred &&
+    getenv("KLS_ENABLE_GENERIC_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL &&
+    solver->options.threads > 1 &&
     kls_repeated_update_workload(&solver->options) &&
     solver->options.expected_refactorizations >= 16 &&
     isfinite(generic_trial_storage_bytes) &&
@@ -48255,8 +48305,11 @@ generic_ordering_tournament:;
       if (parallel_no_btf_trial_wanted) {
         amf_spec[i].options.use_btf = 0;
       }
-      amf_spec[i].measure_etree_levels =
-        amf3_span_portfolio && i >= 1;
+      /* The recurrent executor pays for dependency depth, whereas quotient
+         fill approximates only storage.  Measure every member of the broad
+         portfolio so a later candidate can be compared with the current
+         minimum-fill winner on the same representation. */
+      amf_spec[i].measure_etree_levels = amf3_span_portfolio;
       amf_spec[i].amf3_span_variant =
         amf3_span_portfolio && i == 2;
       amf_spec[i].has_amf3_power_override =
@@ -48492,6 +48545,7 @@ generic_ordering_tournament:;
      base analyze; the promotion comparison is unchanged. */
   {
     int amf_done = 0;
+    UF_long best_etree_levels = 0u;
     for (int spec_index = 0; spec_index < amf_spec_count; ++spec_index) {
       if (!amf_spec_spawned[spec_index]) {
         continue;
@@ -48584,6 +48638,24 @@ generic_ordering_tournament:;
             amf3_work_saving * requested_numeric_horizon >= 5.0e8) ||
            (isfinite(amf3_fill_saving) && amf3_fill_saving > 0.0 &&
             amf3_fill_saving * requested_numeric_horizon >= 2.0e6));
+        /* A broad portfolio has already paid to construct both quotient
+           graphs.  A shallower exact elimination tree exposes more useful
+           parallel dependency levels even when approximate fill is a small
+           amount worse.  Admit that alternative only inside a tight
+           storage/work Pareto band and only for a decisive depth reduction;
+           the ordinary value-time factor and all numeric guards remain the
+           final authority. */
+        const int dependency_depth_pareto_refinement = generic_policy &&
+          kls_repeated_update_workload(options) &&
+          best_ordering == KLS_ORDERING_AMMF &&
+          spec->ordering == KLS_ORDERING_AMF3 &&
+          best_etree_levels > 0u && spec->etree_levels > 0u &&
+          isfinite(spec->score) && spec->score <= 1.01 * best_score &&
+          spec->symbolic->est_flops > 0.0 &&
+          best_symbolic->est_flops > 0.0 &&
+          spec->symbolic->est_flops <= 1.02 * best_symbolic->est_flops &&
+          10.0 * (double)spec->etree_levels <=
+            9.0 * (double)best_etree_levels;
         /* Approximate fill does not describe dependency stalls in the
            retained parallel refactor.  Compare a lower-power AMF3 ordering
            with the ordinary AMF3 run on the identical representation.  A
@@ -48658,6 +48730,7 @@ generic_ordering_tournament:;
             minimum_fill_pareto_refinement ||
             amortized_amf3_work_pareto_refinement ||
             amortized_amf3_pareto_refinement ||
+            dependency_depth_pareto_refinement ||
             span_parallel_refinement ||
             matched_decisive_span_refinement ||
             medium_spike_minfill_wins) {
@@ -48666,6 +48739,7 @@ generic_ordering_tournament:;
           best_common = spec->common;
           best_ordering = spec->ordering;
           best_score = spec->score;
+          best_etree_levels = spec->etree_levels;
           if (spec->amf3_span_variant) {
             kls_amf3_span_variant_selected = 1;
           }
@@ -61621,7 +61695,7 @@ static void kls_free_refactor_l_sorted_cache(kls_solver *solver) {
 }
 
 static int kls_ensure_refactor_l_sorted_cache(kls_solver *solver) {
-  if (!kls_refactor_btf_scalar_run_exec_env_enabled()) {
+  if (!kls_refactor_btf_scalar_run_exec_enabled(solver)) {
     return 1;
   }
   if (solver == NULL || solver->numeric == NULL ||
@@ -64913,7 +64987,7 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
 
   const int record_l_pattern = kls_refactor_l_pattern_stats_env_enabled();
   const int record_l_sorted =
-    kls_refactor_btf_scalar_run_exec_env_enabled() ||
+    kls_refactor_btf_scalar_run_exec_enabled(solver) ||
     kls_refactor_btf_scalar_run_group_state_exec_env_enabled();
   const int legacy_shape_policies = kls_legacy_shape_policies_enabled();
   const int build_l_index32 =
@@ -117429,8 +117503,14 @@ static int kls_egraph_separator_private_requested(const kls_solver *solver) {
     return kls_medium_partial_static_metis_adopted(solver) ||
       kls_dense_reciprocal_hub_metis_factor_cycle(solver);
   }
-  return solver != NULL && solver->generic_nd_numeric_validated &&
-    solver->symbolic != NULL && solver->symbolic->do_btf &&
+  return solver != NULL && solver->symbolic != NULL &&
+    /* A separator plan is an executor capability, not an ordering verdict.
+       A dominant block exposes its private domains directly even when the
+       factor arrived through a one-block, predicted, or preselected
+       ordering.  Let the existing timed ordinary/private trial arbitrate
+       that equivalent schedule; fragmented factors retain the ordinary
+       executor. */
+    solver->symbolic->maxblock >= 3u * solver->n / 4u &&
     solver->separator.n == solver->n &&
     solver->separator.thread_count >= 2u &&
     solver->separator.private_component_count >=
@@ -117983,30 +118063,77 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
     }
 
     /* Separator/rejected columns can depend on any completed private domain.
-       Natural factor order is topological, so one worker can finish this
-       compact remainder without restoring level-by-level global barriers. */
+       Private queues have joined above.  The retained tail is grouped by its
+       exact numeric dependency level, so a level's columns can run in
+       parallel while the level barriers preserve every dependency.  Older
+       schedules without the level index retain the conservative serial
+       natural-order fallback. */
     kls_egraph_cluster_barrier_wait(shared);
-    if (worker->tid == 0 && !kls_egraph_refactor_should_stop(shared)) {
-      for (UF_long pos = 0u;
-           pos < solver->refactor_separator_cluster_tail_column_count;
-           ++pos) {
-        const UF_long col =
-          solver->refactor_separator_cluster_tail_cols[pos];
-        if (col >= solver->n ||
-            !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
-          if (!kls_egraph_refactor_should_stop(shared)) {
-            kls_egraph_refactor_record_invalid(shared);
+    const UF_long *tail_level_ptr =
+      solver->refactor_separator_cluster_tail_level_ptr;
+    const UF_long *tail_level_thread_ptr =
+      solver->refactor_separator_cluster_tail_level_thread_ptr;
+    if (tail_level_ptr != NULL) {
+      for (UF_long level = 0u; level < cluster_levels; ++level) {
+        const UF_long begin = tail_level_ptr[level];
+        const UF_long end = tail_level_ptr[level + 1u];
+        if (begin > end ||
+            end > solver->refactor_separator_cluster_tail_column_count) {
+          kls_egraph_refactor_record_invalid(shared);
+        } else if (!kls_egraph_refactor_should_stop(shared)) {
+          UF_long local_begin = begin + (UF_long)worker->tid;
+          UF_long local_end = end;
+          if (tail_level_thread_ptr != NULL) {
+            const UF_long *parts = tail_level_thread_ptr +
+              level * (UF_long)(shared->thread_count + 1);
+            local_begin = parts[worker->tid];
+            local_end = parts[worker->tid + 1];
+            if (local_begin < begin || local_begin > local_end ||
+                local_end > end) {
+              kls_egraph_refactor_record_invalid(shared);
+              local_begin = local_end;
+            }
           }
-          break;
+          const UF_long stride = tail_level_thread_ptr != NULL
+            ? 1u : (UF_long)shared->thread_count;
+          for (UF_long pos = local_begin; pos < local_end; pos += stride) {
+            const UF_long col = solver->refactor_separator_cluster_tail_cols[pos];
+            if (col >= solver->n ||
+                !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
+              if (!kls_egraph_refactor_should_stop(shared)) {
+                kls_egraph_refactor_record_invalid(shared);
+              }
+              break;
+            }
+            if (!shared->cluster_done_premarked) {
+              atomic_store_explicit(&direct_cluster_done[col],
+                                    direct_cluster_generation,
+                                    memory_order_release);
+            }
+          }
         }
-        if (!shared->cluster_done_premarked) {
-          atomic_store_explicit(&direct_cluster_done[col],
-                                direct_cluster_generation,
-                                memory_order_release);
+        kls_egraph_cluster_barrier_wait(shared);
+      }
+    } else {
+      if (worker->tid == 0 && !kls_egraph_refactor_should_stop(shared)) {
+        for (UF_long pos = 0u;
+             pos < solver->refactor_separator_cluster_tail_column_count;
+             ++pos) {
+          const UF_long col = solver->refactor_separator_cluster_tail_cols[pos];
+          if (col >= solver->n ||
+              !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
+            if (!kls_egraph_refactor_should_stop(shared)) {
+              kls_egraph_refactor_record_invalid(shared);
+            }
+            break;
+          }
+          if (!shared->cluster_done_premarked) {
+            atomic_store_explicit(&direct_cluster_done[col],
+                                  direct_cluster_generation,
+                                  memory_order_release);
+          }
         }
       }
-    }
-    if (solver->refactor_separator_cluster_tail_column_count > 0u) {
       kls_egraph_cluster_barrier_wait(shared);
     }
   } else {
@@ -121793,11 +121920,15 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
     return thread_count;
   }
   if (thread_count < 4 ||
-      getenv("KLS_DISABLE_EGRAPH_THREAD_TRIAL") != NULL) {
-    /* Explicitly settle the dependent implementation trials as well.  A
-       disabled width consultation means full width and no fusion, rather
-       than leaving their state permanently indistinguishable from a trial
-       that has not started yet. */
+      getenv("KLS_DISABLE_EGRAPH_THREAD_TRIAL") != NULL ||
+      (!kls_legacy_shape_policies_enabled() &&
+       getenv("KLS_ENABLE_EGRAPH_THREAD_TRIAL") == NULL)) {
+    /* The retained plan already partitions work for the complete caller
+       team.  Default to that full-width, unfused executor: each alternative
+       consultation consumes a complete numerical update and can perturb the
+       short recurring lifecycle even when its eventual verdict is unchanged.
+       Keep the equivalent width/fusion tournament behind an explicit
+       diagnostic request. */
     solver->eg_tt_choice = thread_count;
     solver->eg_pair_choice = -1;
     return thread_count;
@@ -122426,7 +122557,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const int btf_scalar_run_stats_requested =
     kls_refactor_btf_scalar_run_stats_env_enabled();
   const int btf_scalar_run_exec_requested =
-    kls_refactor_btf_scalar_run_exec_env_enabled();
+    kls_refactor_btf_scalar_run_exec_enabled(solver);
   const int btf_scalar_run_group_wait_stats_requested =
     kls_refactor_btf_scalar_run_group_wait_stats_env_enabled();
   const int btf_scalar_run_group_claims_requested =
@@ -130247,6 +130378,8 @@ static int kls_build_refactor_separator_private_plan(
   UF_long **private_cols_out,
   UF_long **thread_ptr_out,
   UF_long **tail_cols_out,
+  UF_long **tail_level_ptr_out,
+  UF_long **tail_level_thread_ptr_out,
   UF_long *private_column_count_out,
   UF_long *tail_column_count_out,
   UF_long *private_component_count_out,
@@ -130259,6 +130392,12 @@ static int kls_build_refactor_separator_private_plan(
   }
   if (tail_cols_out != NULL) {
     *tail_cols_out = NULL;
+  }
+  if (tail_level_ptr_out != NULL) {
+    *tail_level_ptr_out = NULL;
+  }
+  if (tail_level_thread_ptr_out != NULL) {
+    *tail_level_thread_ptr_out = NULL;
   }
   if (private_column_count_out != NULL) {
     *private_column_count_out = 0u;
@@ -130276,6 +130415,7 @@ static int kls_build_refactor_separator_private_plan(
       levels == NULL || column_work == NULL || thread_count <= 1 ||
       cluster_levels == 0u || private_cols_out == NULL ||
       thread_ptr_out == NULL || tail_cols_out == NULL ||
+      tail_level_ptr_out == NULL || tail_level_thread_ptr_out == NULL ||
       private_column_count_out == NULL || tail_column_count_out == NULL ||
       private_component_count_out == NULL ||
       unsafe_component_count_out == NULL ||
@@ -130320,6 +130460,9 @@ static int kls_build_refactor_separator_private_plan(
   UF_long *thread_ptr = NULL;
   UF_long *private_cols = NULL;
   UF_long *tail_cols = NULL;
+  UF_long *tail_level_ptr = NULL;
+  UF_long *tail_level_thread_ptr = NULL;
+  UF_long *tail_next = NULL;
   int ok = 0;
   if (unsafe == NULL || component_columns == NULL ||
       component_work == NULL || component_thread == NULL ||
@@ -130461,7 +130604,36 @@ static int kls_build_refactor_separator_private_plan(
     goto cleanup;
   }
 
-  UF_long tail_pos = 0u;
+  if (tail_column_count > 0u) {
+    tail_level_ptr = (UF_long *)calloc((size_t)cluster_levels + 1u,
+                                       sizeof(*tail_level_ptr));
+    if (tail_level_ptr == NULL) {
+      goto cleanup;
+    }
+    for (UF_long col = 0u; col < solver->n; ++col) {
+      if (levels[col] < cluster_levels) {
+        const unsigned int component = solver->separator.order_component[col];
+        if ((UF_long)component >= component_count) {
+          goto cleanup;
+        }
+        if (component_thread[component] < 0) {
+          tail_level_ptr[levels[col] + 1u]++;
+        }
+      }
+    }
+    for (UF_long level = 0u; level < cluster_levels; ++level) {
+      tail_level_ptr[level + 1u] += tail_level_ptr[level];
+    }
+    if (tail_level_ptr[cluster_levels] != tail_column_count) {
+      goto cleanup;
+    }
+    tail_next = (UF_long *)malloc((size_t)cluster_levels * sizeof(*tail_next));
+    if (tail_next == NULL) {
+      goto cleanup;
+    }
+    memcpy(tail_next, tail_level_ptr,
+           (size_t)cluster_levels * sizeof(*tail_next));
+  }
   for (UF_long col = 0u; col < solver->n; ++col) {
     if (levels[col] >= cluster_levels) {
       continue;
@@ -130476,14 +130648,62 @@ static int kls_build_refactor_separator_private_plan(
       }
       private_cols[dst] = col;
     } else {
-      if (tail_pos >= tail_column_count) {
+      const UF_long dst = tail_next != NULL ? tail_next[levels[col]] : 0u;
+      if (tail_next == NULL || dst >= tail_column_count) {
+        free(tail_next);
+        tail_next = NULL;
         goto cleanup;
       }
-      tail_cols[tail_pos++] = col;
+      tail_cols[dst] = col;
+      tail_next[levels[col]]++;
     }
   }
-  if (tail_pos != tail_column_count) {
-    goto cleanup;
+  for (UF_long level = 0u; level < cluster_levels; ++level) {
+    if (tail_next != NULL && tail_next[level] != tail_level_ptr[level + 1u]) {
+      free(tail_next);
+      tail_next = NULL;
+      goto cleanup;
+    }
+  }
+  free(tail_next);
+  tail_next = NULL;
+  if (tail_column_count > 0u) {
+    if (cluster_levels >
+          (UF_long)(SIZE_MAX / (size_t)(thread_count + 1)) ||
+        (size_t)cluster_levels * (size_t)(thread_count + 1) >
+          SIZE_MAX / sizeof(*tail_level_thread_ptr)) {
+      goto cleanup;
+    }
+    const size_t tail_part_count =
+      (size_t)cluster_levels * (size_t)(thread_count + 1);
+    tail_level_thread_ptr =
+      (UF_long *)malloc(tail_part_count * sizeof(*tail_level_thread_ptr));
+    if (tail_level_thread_ptr == NULL) {
+      goto cleanup;
+    }
+    for (UF_long level = 0u; level < cluster_levels; ++level) {
+      const UF_long begin = tail_level_ptr[level];
+      const UF_long end = tail_level_ptr[level + 1u];
+      UF_long *parts = tail_level_thread_ptr +
+        level * (UF_long)(thread_count + 1);
+      parts[0] = begin;
+      parts[thread_count] = end;
+      double total_level_work = 0.0;
+      for (UF_long pos = begin; pos < end; ++pos) {
+        total_level_work += column_work[tail_cols[pos]];
+      }
+      UF_long pos = begin;
+      double prefix_work = 0.0;
+      for (int tid = 1; tid < thread_count; ++tid) {
+        const double target = total_level_work * (double)tid /
+                              (double)thread_count;
+        while (pos < end && prefix_work < target) {
+          prefix_work += column_work[tail_cols[pos]];
+          pos++;
+        }
+        parts[tid] = pos;
+      }
+    }
   }
   for (int tid = 0; tid < thread_count; ++tid) {
     if (thread_counts[tid] != thread_ptr[tid + 1]) {
@@ -130516,6 +130736,8 @@ static int kls_build_refactor_separator_private_plan(
   *private_cols_out = private_cols;
   *thread_ptr_out = thread_ptr;
   *tail_cols_out = tail_cols;
+  *tail_level_ptr_out = tail_level_ptr;
+  *tail_level_thread_ptr_out = tail_level_thread_ptr;
   *private_column_count_out = private_column_count;
   *tail_column_count_out = tail_column_count;
   *private_component_count_out = private_component_count;
@@ -130523,9 +130745,12 @@ static int kls_build_refactor_separator_private_plan(
   private_cols = NULL;
   thread_ptr = NULL;
   tail_cols = NULL;
+  tail_level_ptr = NULL;
+  tail_level_thread_ptr = NULL;
   ok = 1;
 
 cleanup:
+  free(tail_next);
   free(unsafe);
   free(component_columns);
   free(component_work);
@@ -130536,6 +130761,8 @@ cleanup:
   free(thread_ptr);
   free(private_cols);
   free(tail_cols);
+  free(tail_level_ptr);
+  free(tail_level_thread_ptr);
   return ok;
 }
 
@@ -130825,6 +131052,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *separator_private_cols = NULL;
   UF_long *separator_private_thread_ptr = NULL;
   UF_long *separator_cluster_tail_cols = NULL;
+  UF_long *separator_cluster_tail_level_ptr = NULL;
+  UF_long *separator_cluster_tail_level_thread_ptr = NULL;
   UF_long separator_private_column_count = 0u;
   UF_long separator_cluster_tail_column_count = 0u;
   UF_long separator_private_component_count = 0u;
@@ -130862,6 +131091,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(separator_private_cols); \
     free(separator_private_thread_ptr); \
     free(separator_cluster_tail_cols); \
+    free(separator_cluster_tail_level_ptr); \
+    free(separator_cluster_tail_level_thread_ptr); \
     free(pipeline_successor_ptr); \
     free(pipeline_successors); \
     free(pipeline_pred_count); \
@@ -131199,7 +131430,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (void)kls_build_refactor_separator_private_plan(
       solver, levels, cluster_levels, column_work, thread_count,
       &separator_private_cols, &separator_private_thread_ptr,
-      &separator_cluster_tail_cols, &separator_private_column_count,
+      &separator_cluster_tail_cols, &separator_cluster_tail_level_ptr,
+      &separator_cluster_tail_level_thread_ptr,
+      &separator_private_column_count,
       &separator_cluster_tail_column_count,
       &separator_private_component_count,
       &separator_private_unsafe_component_count);
@@ -131376,6 +131609,10 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     separator_private_thread_ptr;
   solver->refactor_separator_cluster_tail_cols =
     separator_cluster_tail_cols;
+  solver->refactor_separator_cluster_tail_level_ptr =
+    separator_cluster_tail_level_ptr;
+  solver->refactor_separator_cluster_tail_level_thread_ptr =
+    separator_cluster_tail_level_thread_ptr;
   solver->refactor_pipeline_successor_ptr = pipeline_successor_ptr;
   solver->refactor_pipeline_successors = pipeline_successors;
   solver->refactor_pipeline_pred_count = pipeline_pred_count;
@@ -131423,6 +131660,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   separator_private_cols = NULL;
   separator_private_thread_ptr = NULL;
   separator_cluster_tail_cols = NULL;
+  separator_cluster_tail_level_ptr = NULL;
+  separator_cluster_tail_level_thread_ptr = NULL;
   pipeline_successor_ptr = NULL;
   pipeline_successors = NULL;
   pipeline_pred_count = NULL;
@@ -166890,8 +167129,22 @@ int kls_factor(kls_solver *solver, const double *values) {
         !block_order_candidate &&
 #endif
         !solver->large_bounded_no_btf_amf_path) {
-      maybe_select_pre_static_row_match(solver, &elapsed, numeric_values,
-                                        0);
+      if (!legacy_shape_policies && solver->generic_nd_portfolio_selected &&
+          getenv("KLS_FORCE_STATIC_MATCH") == NULL) {
+        /* The ND portfolio has already compared admissible orderings from
+           the same public pattern and selected a bounded candidate.  Static
+           matching would now re-analyze and trial a second representation
+           before the selected numeric has even established whether its
+           pivoting is problematic.  Factor the selected representation
+           first; its ordinary numeric failure path remains able to invoke
+           matching, while an explicit request retains the eager portfolio.
+           This is a representation/lifecycle ordering, not a matrix-shape
+           exception. */
+        solver->prestatic_deferred = 1;
+      } else {
+        maybe_select_pre_static_row_match(solver, &elapsed, numeric_values,
+                                          0);
+      }
     }
     if (prestatic_prewarm_active) {
       pthread_join(prestatic_prewarm_thread, NULL);
@@ -168820,9 +169073,19 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->row_scale == NULL &&
     solver->col_scale == NULL &&
     getenv("KLS_DISABLE_COMPACT_MATCH_DIRECT_VALUES") == NULL &&
+    /* A position map proves only that each stored value has an inverse
+       address.  It does not prove that every consumer of the matched row
+       frame interprets that address in the caller's coordinate system.  The
+       generic map was previously admitted from this representation fact
+       alone and could silently refactor a different matrix after a changed
+       value generation.  Keep the established legacy contract available,
+       but make the generic fast path an explicit experiment until its
+       complete changed-value contract is certified.  Ordinary preparation
+       remains representation-independent and is the safe default. */
     ((legacy_shape_policies &&
       kls_compact_missing_diagonal_matched_factor_profile(solver)) ||
      (!legacy_shape_policies &&
+      getenv("KLS_ENABLE_GENERIC_COMPACT_MATCH_DIRECT_VALUES") != NULL &&
       kls_direct_user_value_maps_capable(solver)));
   const int deferred_lean_value_prep =
     !compact_match_direct_values && solver->lean_choice > 0 &&
