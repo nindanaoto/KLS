@@ -99,6 +99,18 @@ static int kls_repeated_update_workload(const kls_options *options) {
   return options != NULL && options->expected_refactorizations >= 16;
 }
 
+static double *kls_aligned_double_values(UF_long count) {
+  if (count == 0u ||
+      (uintmax_t)count > (uintmax_t)(SIZE_MAX / sizeof(double))) {
+    return NULL;
+  }
+  void *values = NULL;
+  if (posix_memalign(&values, 64u, (size_t)count * sizeof(double)) != 0) {
+    return NULL;
+  }
+  return (double *)values;
+}
+
 #if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
 __attribute__((target_clones("default", "arch=x86-64-v4"),
                optimize("fast-math", "fp-contract=fast"), noinline))
@@ -69274,8 +69286,7 @@ static int kls_build_row_solve_pattern(kls_solver *solver) {
     ? (UF_long *)malloc((size_t)u_nnz * sizeof(*u_cols)) : NULL;
   u_values = u_nnz > 0u
     ? (double **)malloc((size_t)u_nnz * sizeof(*u_values)) : NULL;
-  u_row_values = u_nnz > 0u
-    ? (double *)malloc((size_t)u_nnz * sizeof(*u_row_values)) : NULL;
+  u_row_values = kls_aligned_double_values(u_nnz);
   if ((l_nnz > 0u &&
        (l_cols == NULL || l_values == NULL || l_row_values == NULL)) ||
       (u_nnz > 0u &&
@@ -73453,8 +73464,7 @@ static int kls_build_lean_row_refactor_pattern_parallel(
   if (ok && u_nnz > 0u) {
     u_cols = (UF_long *)malloc((size_t)u_nnz * sizeof(*u_cols));
     u_values = (double **)malloc((size_t)u_nnz * sizeof(*u_values));
-    u_row_values =
-      (double *)malloc((size_t)u_nnz * sizeof(*u_row_values));
+    u_row_values = kls_aligned_double_values(u_nnz);
     ok = u_cols != NULL && u_values != NULL && u_row_values != NULL;
   }
   job.cols = u_cols;
@@ -73878,8 +73888,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
     ? (UF_long *)malloc((size_t)u_nnz * sizeof(*u_cols)) : NULL;
   double **u_values = u_nnz > 0u
     ? (double **)malloc((size_t)u_nnz * sizeof(*u_values)) : NULL;
-  double *u_row_values = u_nnz > 0u
-    ? (double *)malloc((size_t)u_nnz * sizeof(*u_row_values)) : NULL;
+  double *u_row_values = kls_aligned_double_values(u_nnz);
   UF_long *input_cols = input_nnz > 0u
     ? (UF_long *)malloc((size_t)input_nnz * sizeof(*input_cols)) : NULL;
   UF_long *input_pos = input_nnz > 0u
@@ -152309,8 +152318,7 @@ static int kls_row_first_refactor_seed_install(
     ? (UF_long *)malloc((size_t)u_nnz * sizeof(*u_cols)) : NULL;
   double **u_values = u_nnz > 0u
     ? (double **)malloc((size_t)u_nnz * sizeof(*u_values)) : NULL;
-  double *u_row_values = u_nnz > 0u
-    ? (double *)malloc((size_t)u_nnz * sizeof(*u_row_values)) : NULL;
+  double *u_row_values = kls_aligned_double_values(u_nnz);
   UF_long *input_cols = input_nnz > 0u
     ? (UF_long *)malloc((size_t)input_nnz * sizeof(*input_cols)) : NULL;
   UF_long *input_pos = input_nnz > 0u
