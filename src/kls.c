@@ -77551,7 +77551,15 @@ static int kls_row_refactor_tail_has_large_partial_supernodes(
   if (tail_begin >= solver->row_refactor_group_count) {
     return 0;
   }
-  const UF_long min_width = (UF_long)(2 * thread_count);
+  double tail_work = 0.0;
+  for (UF_long pos = tail_begin; pos < solver->row_refactor_group_count;
+       ++pos) {
+    const UF_long group = solver->row_refactor_level_groups[pos];
+    if (group >= solver->row_refactor_group_count) {
+      return 0;
+    }
+    tail_work += kls_row_refactor_group_work(solver, group);
+  }
   UF_long groups = 0;
   UF_long rows = 0;
   for (UF_long pos = tail_begin; pos < solver->row_refactor_group_count;
@@ -77575,7 +77583,13 @@ static int kls_row_refactor_tail_has_large_partial_supernodes(
         solver->row_refactor_group_successor_ptr[group + 1u]) {
       continue;
     }
-    if (width < min_width) {
+    /* Row-prefix publication replaces one group-level handoff with a row-edge
+       graph.  Pay that cost only for a producer containing at least one
+       worker's fair share of the tail work.  Unlike the former 2P-row rule,
+       this remains meaningful when rows have very different update costs. */
+    const double group_work = kls_row_refactor_group_work(solver, group);
+    if (width < 2u ||
+        group_work * (double)thread_count < tail_work) {
       continue;
     }
     groups++;
@@ -89433,7 +89447,6 @@ static int kls_parallel_row_refactor_process_dense_group_native(
     const UF_long row_u_begin = solver->row_refactor_u_ptr[row];
     double *row_u_values =
       solver->row_refactor_u_row_values + row_u_begin;
-    double *row_trailing_values = row_u_values + row_dense_len;
 
     for (UF_long dep = row_begin; dep < row; ++dep) {
       const UF_long local_dep = dep - row_begin;
@@ -89454,20 +89467,20 @@ static int kls_parallel_row_refactor_process_dense_group_native(
       }
       const double *dep_u_values =
         solver->row_refactor_u_row_values + dep_u_begin;
-      const double *dep_trailing_values = dep_u_values + dep_dense_len;
 
       for (UF_long target = dep + 1u; target < row; ++target) {
         row_l_values[target - row_begin] -=
           lij * dep_u_values[target - dep - 1u];
       }
       udiag[row] -= lij * dep_u_values[row - dep - 1u];
-      for (UF_long target = row + 1u; target < row_end; ++target) {
-        row_u_values[target - row - 1u] -=
-          lij * dep_u_values[target - dep - 1u];
-      }
-      for (UF_long offset = 0; offset < trailing_len; ++offset) {
-        row_trailing_values[offset] -= lij * dep_trailing_values[offset];
-      }
+      /* The current row stores its dense U suffix immediately before its
+         trailing values.  The completed producer has the corresponding
+         suffix in the same order, so both former loops are one contiguous
+         AXPY and need only one target-cloned kernel dispatch. */
+      const UF_long output_len = row_dense_len + trailing_len;
+      const double *dep_output_values = dep_u_values + row - dep;
+      kls_accumulate_scaled_dense(row_u_values, dep_output_values,
+                                  output_len, -lij);
     }
 
     const double pivot = udiag[row];
@@ -97233,13 +97246,13 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   UF_long row_private_external_wait_targets = 0u;
   /* Preserve the retained separator-tree private/pipeline queue when it covers
      the row-group DAG.  When the separator schedule is pipeline-heavy and a
-     large dependent producer is present, wrap its pipeline side in SubtreeLU
-     Algorithm 5's row-prefix release.  Outside the separator-private wrapper,
-     the paper condition is per unfinished supernode, not that those supernodes
-     dominate the tail.  This is prefix-safe for checked runs because each
-     producer row is marked done only after its pivot check and row-value
-     publication complete.  If preparation fails, keep the older cluster/tail
-     schedule as a conservative fallback. */
+     work-significant dependent producer is present, wrap its pipeline side in
+     SubtreeLU Algorithm 5's row-prefix release.  The work-share selector keeps
+     the paper mechanism but avoids building a row-edge graph for producers too
+     small to occupy one worker for their fair share of the tail.  This is
+     prefix-safe for checked runs because each producer row is marked done only
+     after its pivot check and row-value publication complete.  If preparation
+     fails, keep the older cluster/tail schedule as a conservative fallback. */
   int use_row_ready_queue = 0;
   int prepared_separator_flop_queue = 0;
   int prepared_separator_row_dep_queue = 0;
