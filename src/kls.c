@@ -41893,6 +41893,45 @@ static int matching_equilibration_is_better(
   return materially_cheaper;
 }
 
+static int matching_equilibration_has_threshold_gain(
+  UF_long n,
+  const UF_long *col_ptr,
+  const UF_long *row_idx,
+  const double *base_values,
+  const double *scaled_values,
+  double pivot_tolerance) {
+  if (n <= 0u || col_ptr == NULL || row_idx == NULL ||
+      base_values == NULL || scaled_values == NULL ||
+      !(pivot_tolerance > 0.0)) {
+    return 0;
+  }
+  UF_long improved = 0u;
+  UF_long harmed = 0u;
+  for (UF_long col = 0u; col < n; ++col) {
+    double base_max = 0.0;
+    double scaled_max = 0.0;
+    double base_diag = 0.0;
+    double scaled_diag = 0.0;
+    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const double base = fabs(base_values[p]);
+      const double scaled = fabs(scaled_values[p]);
+      base_max = base > base_max ? base : base_max;
+      scaled_max = scaled > scaled_max ? scaled : scaled_max;
+      if (row_idx[p] == col) {
+        base_diag = base > base_diag ? base : base_diag;
+        scaled_diag = scaled > scaled_diag ? scaled : scaled_diag;
+      }
+    }
+    const int base_weak =
+      !(base_diag >= pivot_tolerance * base_max);
+    const int scaled_weak =
+      !(scaled_diag >= pivot_tolerance * scaled_max);
+    improved += (UF_long)(base_weak && !scaled_weak);
+    harmed += (UF_long)(!base_weak && scaled_weak);
+  }
+  return improved > harmed;
+}
+
 static void maybe_use_matching_equilibration(
   UF_long n,
   UF_long nnz,
@@ -41923,6 +41962,28 @@ static void maybe_use_matching_equilibration(
   memcpy(scaled_values, *values_io, (size_t)nnz * sizeof(*scaled_values));
   apply_value_scaling(n, col_ptr, row_idx, *row_scale_io, *col_scale_io,
                       scaled_values);
+
+  const int safe_recurring_unscaled =
+    common_io->scale <= 0 && common_io->rcond >= sqrt(DBL_EPSILON) &&
+    kls_repeated_update_workload(options);
+  if (safe_recurring_unscaled &&
+      getenv("KLS_DISABLE_GENERIC_MATCHING_EQUILIBRATION_PREFILTER") ==
+        NULL &&
+      !matching_equilibration_has_threshold_gain(
+        n, col_ptr, row_idx, *values_io, scaled_values,
+        options->pivot_tolerance)) {
+    /* A safely conditioned matched factor whose explicit equilibration does
+       not rescue any threshold-weak diagonal has no numerical reason to pay
+       for a second factorization.  Preserve the unscaled recurring route;
+       the complete numeric comparison remains available whenever scaling
+       changes the pivot-pressure signal or rcond needs rescue. */
+    free(scaled_values);
+    free(*row_scale_io);
+    free(*col_scale_io);
+    *row_scale_io = NULL;
+    *col_scale_io = NULL;
+    return;
+  }
 
   kls_options scaled_options = *options;
   scaled_options.scale = -1;
@@ -56021,8 +56082,13 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
   if (solver->values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  const int generic_fused_value_prep =
+    !kls_legacy_shape_policies_enabled() &&
+    kls_repeated_update_workload(&solver->options) &&
+    getenv("KLS_DISABLE_GENERIC_FUSED_VALUE_PREP") == NULL;
   if ((getenv("KLS_ENABLE_FUSED_VALUE_PREP") != NULL ||
-       kls_medium_partial_static_metis_adopted(solver)) &&
+       kls_medium_partial_static_metis_adopted(solver) ||
+       generic_fused_value_prep) &&
       (solver->row_scale != NULL || solver->col_scale != NULL) &&
       kls_build_prepared_value_scale(solver)) {
     const double *restrict scale = solver->prepared_value_scale;
@@ -56032,7 +56098,8 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
         prepared[p] = values[p] * scale[p];
       }
     } else if ((getenv("KLS_ENABLE_GATHER_FUSED_VALUE_PREP") != NULL ||
-                kls_medium_partial_static_metis_adopted(solver)) &&
+                kls_medium_partial_static_metis_adopted(solver) ||
+                generic_fused_value_prep) &&
                kls_build_prepared_value_input_pos(solver)) {
       const UF_long *restrict input_pos =
         solver->prepared_value_input_pos;
@@ -163156,7 +163223,7 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
     }
   }
   if (getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
-      solver->row_perm != NULL && solver->row_scale == NULL) {
+      solver->row_perm != NULL) {
     uint16_t *row_inverse = (uint16_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
     rhs_perm = (uint16_t *)malloc(
@@ -163671,8 +163738,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   const int generic_fused_matched_solve_candidate =
     !kls_legacy_shape_policies_enabled() &&
     kls_repeated_update_workload(&solver->options) &&
-    solver->row_perm != NULL && solver->row_scale == NULL &&
-    solver->col_scale == NULL && solver->numeric != NULL &&
+    solver->row_perm != NULL && solver->numeric != NULL &&
     solver->numeric->Rs == NULL;
   if (!(kls_legacy_shape_policies_enabled() &&
         kls_low_work_symmetric_partial_diagonal_pts_cycle(solver)) &&
@@ -163973,7 +164039,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
   }
   if (solver->i16solve_rhs_perm == NULL && solver->row_perm != NULL &&
-      solver->row_scale == NULL && n <= (UF_long)UINT16_MAX &&
+      n <= (UF_long)UINT16_MAX &&
       getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL) {
     uint16_t *row_inverse = (uint16_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
@@ -164531,6 +164597,10 @@ static UF_long kls_i32_solve(kls_solver *solver,
       X[k] = rhs[(UF_long)fused_perm[k]];
     }
   } else if (i16_ready && rs == NULL) {
+    /* A matched rhs_perm addresses the caller's row frame, while an explicit
+       matching row scale remains indexed by the permuted internal row.  The
+       numeric pivot row therefore selects the scale even though rhs_perm
+       selects the source value. */
     const uint16_t *restrict p16 =
       rhs_perm != NULL ? rhs_perm : solver->i16solve_pnum;
     UF_long k = rhs_perm == NULL ? solver->i16solve_p_identity_prefix : 0u;
@@ -164546,14 +164616,25 @@ static UF_long kls_i32_solve(kls_solver *solver,
       const UF_long p1 = (UF_long)p16[k + 1u];
       const UF_long p2 = (UF_long)p16[k + 2u];
       const UF_long p3 = (UF_long)p16[k + 3u];
-      X[k] = rhs[p0] * (rhs_scale != NULL ? rhs_scale[p0] : 1.0);
-      X[k + 1u] = rhs[p1] * (rhs_scale != NULL ? rhs_scale[p1] : 1.0);
-      X[k + 2u] = rhs[p2] * (rhs_scale != NULL ? rhs_scale[p2] : 1.0);
-      X[k + 3u] = rhs[p3] * (rhs_scale != NULL ? rhs_scale[p3] : 1.0);
+      const UF_long s0 = rhs_perm != NULL
+        ? (UF_long)solver->i16solve_pnum[k] : p0;
+      const UF_long s1 = rhs_perm != NULL
+        ? (UF_long)solver->i16solve_pnum[k + 1u] : p1;
+      const UF_long s2 = rhs_perm != NULL
+        ? (UF_long)solver->i16solve_pnum[k + 2u] : p2;
+      const UF_long s3 = rhs_perm != NULL
+        ? (UF_long)solver->i16solve_pnum[k + 3u] : p3;
+      X[k] = rhs[p0] * (rhs_scale != NULL ? rhs_scale[s0] : 1.0);
+      X[k + 1u] = rhs[p1] * (rhs_scale != NULL ? rhs_scale[s1] : 1.0);
+      X[k + 2u] = rhs[p2] * (rhs_scale != NULL ? rhs_scale[s2] : 1.0);
+      X[k + 3u] = rhs[p3] * (rhs_scale != NULL ? rhs_scale[s3] : 1.0);
     }
     for (; k < n; ++k) {
       const UF_long p = (UF_long)p16[k];
-      X[k] = rhs[p] * (rhs_scale != NULL ? rhs_scale[p] : 1.0);
+      const UF_long scale_row = rhs_perm != NULL
+        ? (UF_long)solver->i16solve_pnum[k] : p;
+      X[k] = rhs[p] *
+        (rhs_scale != NULL ? rhs_scale[scale_row] : 1.0);
     }
   } else if (i16_ready) {
     const uint16_t *restrict p16 = solver->i16solve_pnum;
@@ -172125,7 +172206,7 @@ static int solve_impl(kls_solver *solver,
   const int fused_matched_i32_rhs =
     getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL &&
     !solver->diagonal_equiv_active && solver->row_perm != NULL &&
-    !kernel_transpose && nrhs == 1 && !has_row_scale &&
+    !kernel_transpose && nrhs == 1 &&
     solver->numeric->Rs == NULL && b != x &&
     !solver->row_refactor_values_ready &&
     !solver->row_refactor_values_dirty &&
@@ -172215,6 +172296,7 @@ static int solve_impl(kls_solver *solver,
 
   UF_long ok = 0;
   int diagonal_equiv_post_applied = 0;
+  int fixed_col_scale_post_applied = 0;
   const int trace_solve_path = getenv("KLS_TRACE_SOLVE_PATH") != NULL;
   const int trace_x = solver->n <= 8 && getenv("KLS_TRACE_X") != NULL;
   if (getenv("KLS_TRACK_NUMERIC_FREE") != NULL && solver->numeric != NULL) {
@@ -172418,13 +172500,19 @@ static int solve_impl(kls_solver *solver,
                            x,
                            fused_matched_i32_rhs
                              ? solver->i16solve_rhs_perm : NULL,
-                           fused_general_i32_rhs
-                             ? diagonal_equiv_pre_scale : NULL,
-                           diagonal_equiv_post_scale,
+                           fused_matched_i32_rhs && has_row_scale
+                             ? solver->row_scale
+                             : fused_general_i32_rhs
+                               ? diagonal_equiv_pre_scale : NULL,
+                           fused_matched_i32_rhs && has_col_scale
+                             ? solver->col_scale
+                             : diagonal_equiv_post_scale,
                            fused_htc4438_i32_rhs ? 2 : 0);
       }
       diagonal_equiv_post_applied =
         diagonal_equiv_post_scale != NULL;
+      fixed_col_scale_post_applied =
+        fused_matched_i32_rhs && has_col_scale;
       if (trace_x) {
         fprintf(stderr, "TX i32 ok=%ld: %.17g %.17g %.17g\n", ok,
                 x[0], x[1], solver->n > 2 ? x[2] : 0.0);
@@ -172457,7 +172545,8 @@ static int solve_impl(kls_solver *solver,
       }
     }
   }
-  if (ok && !kernel_transpose && has_col_scale) {
+  if (ok && !kernel_transpose && has_col_scale &&
+      !fixed_col_scale_post_applied) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       double *dst = x + rhs * ldx;
       for (UF_long row = 0; row < solver->n; ++row) {
