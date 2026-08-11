@@ -41839,6 +41839,7 @@ static void apply_value_scaling(UF_long n,
 }
 
 static int matching_equilibration_is_better(
+  const kls_options *options,
   const trilinos_klu_l_common *base_common,
   const trilinos_klu_l_numeric *base_numeric,
   const trilinos_klu_l_common *scaled_common,
@@ -41847,25 +41848,49 @@ static int matching_equilibration_is_better(
   const double scaled_fill = (double)(scaled_numeric->lnz + scaled_numeric->unz);
   const double base_flops = base_common->flops;
   const double scaled_flops = scaled_common->flops;
+  const int materially_cheaper =
+    scaled_fill < 0.98 * base_fill ||
+    scaled_common->noffdiag < base_common->noffdiag ||
+    (base_flops > 0.0 && scaled_flops > 0.0 &&
+     scaled_flops < 0.98 * base_flops);
 
   if (scaled_common->noffdiag > base_common->noffdiag ||
       scaled_fill > 1.02 * base_fill ||
-      (base_flops > 0.0 && scaled_flops > 1.05 * base_flops)) {
+      (base_flops > 0.0 && scaled_flops > 1.05 * base_flops) ||
+      (!(scaled_common->rcond > 0.0)) ||
+      scaled_common->rcond < 32.0 * DBL_EPSILON ||
+      (base_common->rcond > 0.0 &&
+       scaled_common->rcond < 1.0e-4 * base_common->rcond)) {
+    /* Matching equilibration is optional.  A marginal fill or pivot win
+       cannot justify publishing a representation whose condition estimate
+       collapses into roundoff, or by over four orders of magnitude relative
+       to the already-valid matched factor. */
     return 0;
   }
   if (base_common->rcond <= 0.0 && scaled_common->rcond > 0.0) {
     return 1;
   }
-  if (base_common->rcond > 0.0 && scaled_common->rcond > 10.0 * base_common->rcond) {
-    return 1;
+  if (base_common->rcond > 0.0 &&
+      scaled_common->rcond > 10.0 * base_common->rcond) {
+    const int recurring_unscaled_route =
+      base_common->scale <= 0 && kls_repeated_update_workload(options) &&
+      options->expected_solves > 0;
+    if (!recurring_unscaled_route ||
+        base_common->rcond < sqrt(DBL_EPSILON) || materially_cheaper) {
+      return 1;
+    }
+    /* Explicit scaling costs a value transform on every update and prevents
+       the unscaled matched factor from folding its row permutation into the
+       triangular solve.  Above the conventional sqrt(epsilon) conditioning
+       floor, do not pay those recurring passes for an rcond-only improvement;
+       require the scaled numeric to reduce realized factor work as well. */
   }
   if (base_common->scale > 0 &&
       (base_common->rcond <= 0.0 ||
        scaled_common->rcond >= 0.10 * base_common->rcond)) {
     return 1;
   }
-  return scaled_fill < 0.98 * base_fill ||
-         scaled_common->noffdiag < base_common->noffdiag;
+  return materially_cheaper;
 }
 
 static void maybe_use_matching_equilibration(
@@ -41929,7 +41954,19 @@ static void maybe_use_matching_equilibration(
 
   (void)trilinos_klu_l_flops(symbolic, scaled_numeric, &scaled_common);
   (void)trilinos_klu_l_rcond(symbolic, scaled_numeric, &scaled_common);
-  if (!matching_equilibration_is_better(common_io, *numeric_io,
+  if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
+    fprintf(stderr,
+            "KLS pre-static: matching scale numeric base fill=%ld "
+            "work=%.3e pivots=%ld rcond=%.3e scaled fill=%ld "
+            "work=%.3e pivots=%ld rcond=%.3e\n",
+            (long)((*numeric_io)->lnz + (*numeric_io)->unz),
+            common_io->flops, (long)common_io->noffdiag,
+            common_io->rcond,
+            (long)(scaled_numeric->lnz + scaled_numeric->unz),
+            scaled_common.flops, (long)scaled_common.noffdiag,
+            scaled_common.rcond);
+  }
+  if (!matching_equilibration_is_better(options, common_io, *numeric_io,
                                         &scaled_common, scaled_numeric)) {
     trilinos_klu_l_free_numeric(&scaled_numeric, &scaled_common);
     free(scaled_values);
@@ -44362,15 +44399,26 @@ matching_attempt:;
                         trial_row_scale, trial_col_scale, trial_values);
     trial_common.scale = -1;
   }
-  if (fabs(trial_options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-      trial_options.orientation == KLS_ORIENTATION_AUTO &&
-      trial_options.ordering == KLS_ORDERING_AUTO &&
-      trial_options.scale == KLS_SCALE_AUTO && trial_common.scale == -1 &&
-      compact_missing_diagonal_match && trial_symbolic != NULL &&
-      trial_symbolic->nblocks >= 64u) {
-    /* This compact matched class retains its low-work factor pattern at a
-       1e-5 threshold while avoiding loose-pivot detours.  Numeric acceptance
-       and the solve residual contract remain authoritative. */
+  const int generic_recurring_matched_tolerance =
+    !legacy_shape_policies &&
+    kls_repeated_update_workload(&trial_options) &&
+    fabs(trial_options.pivot_tolerance - 0.001) <= 1.0e-12 &&
+    getenv("KLS_DISABLE_GENERIC_MATCHED_TIGHT_TOLERANCE") == NULL;
+  const int compact_matched_tolerance =
+    fabs(trial_options.pivot_tolerance - 0.001) <= 1.0e-12 &&
+    trial_options.orientation == KLS_ORIENTATION_AUTO &&
+    trial_options.ordering == KLS_ORDERING_AUTO &&
+    trial_options.scale == KLS_SCALE_AUTO && trial_common.scale == -1 &&
+    compact_missing_diagonal_match && trial_symbolic != NULL &&
+    trial_symbolic->nblocks >= 64u;
+  if (generic_recurring_matched_tolerance || compact_matched_tolerance) {
+    /* A statically matched repeated lifecycle commits to a fixed pivot
+       representation, so retain near-diagonal pivots before loose threshold
+       detours can define every later row walk.  This applies uniformly to
+       generic matched candidates; numeric acceptance and the solve residual
+       contract remain authoritative.  Keep trial_options synchronized so
+       the optional matching-equilibration arm compares the same tolerance. */
+    trial_options.pivot_tolerance = 1.0e-5;
     trial_common.tol = 1.0e-5;
   }
 
@@ -44745,6 +44793,43 @@ matching_attempt:;
     (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric,
                                &trial_common);
   }
+  if (trial_numeric_ok && generic_recurring_matched_tolerance &&
+      (!(trial_common.rcond > 0.0) ||
+       trial_common.rcond < 32.0 * DBL_EPSILON)) {
+    /* A tighter matched pivot layout is a performance candidate, not a
+       license to retain a factor whose reciprocal condition estimate has
+       fallen into the rounding-noise band.  Restore the caller's threshold
+       before the optional matching-equilibration comparison, so that arm
+       also evaluates the same robust tolerance and can reconstruct its
+       ordinary scaled representation. */
+    trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
+    trial_options.pivot_tolerance = solver->options.pivot_tolerance;
+    trial_common.tol = solver->options.pivot_tolerance;
+    trial_common.status = TRILINOS_KLU_OK;
+    trial_common.numerical_rank = KLS_KLU_EMPTY;
+    trial_common.singular_col = KLS_KLU_EMPTY;
+    const double robust_start = kls_now_seconds();
+    trial_numeric = trilinos_klu_l_factor(
+      trial_col_ptr, trial_row_idx, trial_values,
+      trial_symbolic, &trial_common);
+    trial_factor_seconds += kls_now_seconds() - robust_start;
+    trial_numeric_ok = trial_numeric != NULL &&
+      trial_common.status >= TRILINOS_KLU_OK &&
+      trial_common.status != TRILINOS_KLU_SINGULAR;
+    if (trial_numeric_ok) {
+      (void)trilinos_klu_l_flops(trial_symbolic, trial_numeric,
+                                 &trial_common);
+      (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric,
+                                 &trial_common);
+    }
+    if (kls_trace_pre_static_enabled()) {
+      fprintf(stderr,
+              "KLS pre-static: tight matched rcond fallback tol=%.3g "
+              "valid=%d rcond=%.3e\n",
+              trial_common.tol, trial_numeric_ok,
+              trial_numeric_ok ? trial_common.rcond : -1.0);
+    }
+  }
   if (alternate_symbolic != NULL) {
     alternate_common.scale = trial_common.scale;
     alternate_common.tol = trial_common.tol;
@@ -45006,7 +45091,7 @@ matching_attempt:;
   } else if (!preapplied_matching_equilibration &&
              !selected_unmatched_colamd) {
     maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
-                                     trial_row_idx, &solver->options,
+                                     trial_row_idx, &trial_options,
                                      trial_symbolic, &trial_values,
                                      &trial_row_scale, &trial_col_scale,
                                      &trial_numeric, &trial_common);
