@@ -41898,26 +41898,32 @@ static int matching_equilibration_has_threshold_gain(
   const UF_long *col_ptr,
   const UF_long *row_idx,
   const double *base_values,
-  const double *scaled_values,
+  const double *row_scale,
+  const double *col_scale,
   double pivot_tolerance) {
   if (n <= 0u || col_ptr == NULL || row_idx == NULL ||
-      base_values == NULL || scaled_values == NULL ||
+      base_values == NULL || row_scale == NULL || col_scale == NULL ||
       !(pivot_tolerance > 0.0)) {
     return 0;
   }
   UF_long improved = 0u;
   UF_long harmed = 0u;
   for (UF_long col = 0u; col < n; ++col) {
+    const double cs = col_scale[col];
     double base_max = 0.0;
     double scaled_max = 0.0;
     double base_diag = 0.0;
     double scaled_diag = 0.0;
     for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
+      const UF_long row = row_idx[p];
+      if (row >= n) {
+        return 1;
+      }
       const double base = fabs(base_values[p]);
-      const double scaled = fabs(scaled_values[p]);
+      const double scaled = base * fabs(row_scale[row] * cs);
       base_max = base > base_max ? base : base_max;
       scaled_max = scaled > scaled_max ? scaled : scaled_max;
-      if (row_idx[p] == col) {
+      if (row == col) {
         base_diag = base > base_diag ? base : base_diag;
         scaled_diag = scaled > scaled_diag ? scaled : scaled_diag;
       }
@@ -41951,7 +41957,29 @@ static void maybe_use_matching_equilibration(
       *col_scale_io == NULL || *numeric_io == NULL) {
     return;
   }
-  double *scaled_values = (double *)malloc((size_t)nnz * sizeof(*scaled_values));
+  const int safe_recurring_unscaled =
+    common_io->scale <= 0 && common_io->rcond >= sqrt(DBL_EPSILON) &&
+    kls_repeated_update_workload(options);
+  if (safe_recurring_unscaled &&
+      getenv("KLS_DISABLE_GENERIC_MATCHING_EQUILIBRATION_PREFILTER") ==
+        NULL &&
+      !matching_equilibration_has_threshold_gain(
+        n, col_ptr, row_idx, *values_io, *row_scale_io, *col_scale_io,
+        options->pivot_tolerance)) {
+    /* A safely conditioned matched factor whose explicit equilibration does
+       not rescue any threshold-weak diagonal has no numerical reason to pay
+       for a second factorization.  Preserve the unscaled recurring route;
+       the complete numeric comparison remains available whenever scaling
+       changes the pivot-pressure signal or rcond needs rescue. */
+    free(*row_scale_io);
+    free(*col_scale_io);
+    *row_scale_io = NULL;
+    *col_scale_io = NULL;
+    return;
+  }
+
+  double *scaled_values =
+    (double *)malloc((size_t)nnz * sizeof(*scaled_values));
   if (scaled_values == NULL) {
     free(*row_scale_io);
     free(*col_scale_io);
@@ -41962,28 +41990,6 @@ static void maybe_use_matching_equilibration(
   memcpy(scaled_values, *values_io, (size_t)nnz * sizeof(*scaled_values));
   apply_value_scaling(n, col_ptr, row_idx, *row_scale_io, *col_scale_io,
                       scaled_values);
-
-  const int safe_recurring_unscaled =
-    common_io->scale <= 0 && common_io->rcond >= sqrt(DBL_EPSILON) &&
-    kls_repeated_update_workload(options);
-  if (safe_recurring_unscaled &&
-      getenv("KLS_DISABLE_GENERIC_MATCHING_EQUILIBRATION_PREFILTER") ==
-        NULL &&
-      !matching_equilibration_has_threshold_gain(
-        n, col_ptr, row_idx, *values_io, scaled_values,
-        options->pivot_tolerance)) {
-    /* A safely conditioned matched factor whose explicit equilibration does
-       not rescue any threshold-weak diagonal has no numerical reason to pay
-       for a second factorization.  Preserve the unscaled recurring route;
-       the complete numeric comparison remains available whenever scaling
-       changes the pivot-pressure signal or rcond needs rescue. */
-    free(scaled_values);
-    free(*row_scale_io);
-    free(*col_scale_io);
-    *row_scale_io = NULL;
-    *col_scale_io = NULL;
-    return;
-  }
 
   kls_options scaled_options = *options;
   scaled_options.scale = -1;
@@ -164074,7 +164080,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   if (solver->i32solve_rhs_perm32 == NULL &&
       solver->row_perm != NULL &&
-      solver->row_scale == NULL && solver->col_scale == NULL &&
       numeric->Rs == NULL && n <= (UF_long)UINT32_MAX &&
       getenv("KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS") == NULL) {
     uint32_t *row_inverse = (uint32_t *)malloc(
@@ -164592,9 +164597,15 @@ static UF_long kls_i32_solve(kls_solver *solver,
     memcpy(X, rhs, (size_t)n * sizeof(*X));
   } else if (rhs_prepared == 2 &&
              solver->i32solve_rhs_perm32 != NULL && rs == NULL) {
+    /* The 32-bit matched permutation selects a public-frame source, while
+       an optional fixed row scale is still indexed by the numeric pivot
+       row, exactly as in the compact 16-bit path below. */
     const uint32_t *restrict fused_perm = solver->i32solve_rhs_perm32;
     for (UF_long k = 0u; k < n; ++k) {
-      X[k] = rhs[(UF_long)fused_perm[k]];
+      const UF_long numeric_row = pnum32 != NULL
+        ? (UF_long)pnum32[k] : pnum[k];
+      X[k] = rhs[(UF_long)fused_perm[k]] *
+        (rhs_scale != NULL ? rhs_scale[numeric_row] : 1.0);
     }
   } else if (i16_ready && rs == NULL) {
     /* A matched rhs_perm addresses the caller's row frame, while an explicit
@@ -172212,18 +172223,18 @@ static int solve_impl(kls_solver *solver,
     !solver->row_refactor_values_dirty &&
     !serial_mapped_vendor_solve && kls_i32_solve_ready(solver) &&
     solver->i16solve_rhs_perm != NULL;
-  const int fused_htc4438_i32_rhs =
+  const int fused_matched_i32_rhs32 =
     !kernel_transpose && nrhs == 1 && b != x &&
-    solver->row_perm != NULL && !has_row_scale &&
+    solver->row_perm != NULL &&
     solver->numeric->Rs == NULL && !solver->row_refactor_values_ready &&
     !solver->row_refactor_values_dirty && !serial_mapped_vendor_solve &&
     kls_i32_solve_ready(solver) && solver->i32solve_rhs_perm32 != NULL;
   double *perm_workspace = solver->row_perm != NULL &&
-      !fused_matched_i32_rhs && !fused_htc4438_i32_rhs
+      !fused_matched_i32_rhs && !fused_matched_i32_rhs32
     ? ensure_solve_perm_workspace(solver)
     : NULL;
   if (solver->row_perm != NULL && !fused_matched_i32_rhs &&
-      !fused_htc4438_i32_rhs &&
+      !fused_matched_i32_rhs32 &&
       perm_workspace == NULL) {
     return KLS_ERR_OUT_OF_MEMORY;
   }
@@ -172248,7 +172259,7 @@ static int solve_impl(kls_solver *solver,
   }
   if (solver->row_perm != NULL && !kernel_transpose &&
       !fused_compact_match_rhs &&
-      !fused_matched_i32_rhs && !fused_htc4438_i32_rhs) {
+      !fused_matched_i32_rhs && !fused_matched_i32_rhs32) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       const double *src = b + rhs * ldb;
       double *dst = x + rhs * ldx;
@@ -172276,7 +172287,7 @@ static int solve_impl(kls_solver *solver,
       }
     }
   } else if (!fused_compact_match_rhs && !fused_general_i32_rhs &&
-             !fused_htc4438_i32_rhs &&
+             !fused_matched_i32_rhs32 &&
              (b != x || ldb != ldx)) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
       memmove(x + rhs * ldx, b + rhs * ldb, (size_t)solver->n * sizeof(double));
@@ -172417,7 +172428,7 @@ static int solve_impl(kls_solver *solver,
       return KLS_ERR_SOLVE_FAILED;
     }
     if (lean_compact_match_direct_solve || fused_general_i32_rhs ||
-        fused_matched_i32_rhs || fused_htc4438_i32_rhs ||
+        fused_matched_i32_rhs || fused_matched_i32_rhs32 ||
         (!kernel_transpose && nrhs == 1 &&
          solver->plain_solve_choice >= 0 &&
          !serial_mapped_vendor_solve &&
@@ -172495,24 +172506,27 @@ static int solve_impl(kls_solver *solver,
         solver->common.status = TRILINOS_KLU_OK;
         ok = kls_i32_solve(solver,
                            (fused_general_i32_rhs || fused_matched_i32_rhs)
-                             || fused_htc4438_i32_rhs
+                             || fused_matched_i32_rhs32
                              ? b : x,
                            x,
                            fused_matched_i32_rhs
                              ? solver->i16solve_rhs_perm : NULL,
-                           fused_matched_i32_rhs && has_row_scale
+                           (fused_matched_i32_rhs ||
+                            fused_matched_i32_rhs32) && has_row_scale
                              ? solver->row_scale
                              : fused_general_i32_rhs
                                ? diagonal_equiv_pre_scale : NULL,
-                           fused_matched_i32_rhs && has_col_scale
+                           (fused_matched_i32_rhs ||
+                            fused_matched_i32_rhs32) && has_col_scale
                              ? solver->col_scale
                              : diagonal_equiv_post_scale,
-                           fused_htc4438_i32_rhs ? 2 : 0);
+                           fused_matched_i32_rhs32 ? 2 : 0);
       }
       diagonal_equiv_post_applied =
         diagonal_equiv_post_scale != NULL;
       fixed_col_scale_post_applied =
-        fused_matched_i32_rhs && has_col_scale;
+        (fused_matched_i32_rhs || fused_matched_i32_rhs32) &&
+        has_col_scale;
       if (trace_x) {
         fprintf(stderr, "TX i32 ok=%ld: %.17g %.17g %.17g\n", ok,
                 x[0], x[1], solver->n > 2 ? x[2] : 0.0);
