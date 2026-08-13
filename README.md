@@ -436,8 +436,38 @@ JSON includes `initial_factor_path` and `last_factor_path`; values such as
 KLU-derived pivoting kernel, while `kls_fast_refactor` means KLS reused the
 retained pattern through the checked fast path. Repeated refactor diagnostics
 are reported separately as `last_refactor_path`, distinguishing row-refactor,
-EGraph, mapped, pool, and serial KLU refactor branches. Unset
-`KLS_ENABLE_KLS_FIRST_FACTOR` keeps the production cold first factor on the
+EGraph, mapped, pool, and serial KLU refactor branches.
+
+For a repeated, unscaled, direct-CSC numeric whose retained factor is one
+structurally full-rank block below the generic 100,000-flop work floor, AUTO
+settles directly on the compact map32 fixed-pivot walk. This walk performs the
+same arithmetic as the native KLU refactor while using predecoded 32-bit input
+positions and one pivot reciprocal. Selecting it from this existing
+capability/work contract avoids spending six microsecond-scale updates on the
+otherwise generic alternating representation tournament; the ordinary
+first-update solve contract still validates the numeric before direct reuse.
+`KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_COMPACT_MAP32_POLICY=1` restores the timed
+representation tournament for A/B runs, while
+`KLS_DISABLE_COMPACT_MAP32_TOURNAMENT=1` disables compact selection entirely.
+The two current paper-suite members of this structural class both improved in
+31-pass rank-preserving H100 measurements: `add32` from 7.181 ms to 6.850 ms
+and `1138_bus` from 1.997 ms to 1.963 ms.
+
+The parallel lean-row executor treats deferred public-to-internal value
+gathering and grouped completion tokens as alternative optimizations. Deferred
+gathering adds a producer phase before the row dependency stream, whereas the
+compact grouped-token proof describes an already-prepared stream; composing
+the two could publish an incomplete numeric generation while still returning
+success. AUTO therefore retains deferred gathering but uses the ordinary
+per-row completion records for that call. This is an executor-representation
+contract, independent of matrix dimensions, ordering, or identity. A
+24-matrix changed-value audit verified every refactor below the `1e-8` residual
+limit and kept KLS ahead of CKTSO on all 24 mutually valid comparisons. In
+particular, `gemat11` moved from a `4.44e-5` failing residual to a
+`5.02e-16` worst-refactor residual and a 31-pass median H100 of 11.944 ms,
+versus CKTSO's saved 17.883 ms.
+
+Unset `KLS_ENABLE_KLS_FIRST_FACTOR` keeps the production cold first factor on the
 KLU/static path for broad large cases. `KLS_ENABLE_KLS_FIRST_FACTOR=1` forces
 the KLS-owned row-up-looking scaffold when possible, and
 `KLS_ENABLE_KLS_FIRST_FACTOR=0` keeps the hard KLU-first behavior. Automatic
@@ -4783,13 +4813,31 @@ existing checked refinement paths.  The controls are
 `KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT=1` and
 `KLS_DISABLE_GMRES_SOLVE_RECOVERY=1`.
 
+Plain AUTO factors whose current KLU diagonal-ratio estimate is below
+`sqrt(DBL_EPSILON)` now receive one measured raw-solve certificate as well.
+A clean first result settles that retained pivot family, so later changed
+refactors do not inherit a residual-pass tax from a pessimistic `rcond` scalar.
+If the raw solve and both LU-based correction methods fail, KLS uses a cold,
+work-bounded LSQR recovery against the actual public CSC matrix. Twelve
+two-sided norm-equilibration rounds precede the Krylov iteration, and every
+accepted result is checked at the same `5e-9` relative-L2 margin. This is a
+numeric outcome policy rather than a dimension, sparsity, ordering, or matrix
+identity detector. `KLS_DISABLE_RCOND_SOLVE_CONTRACT=1` restores the old
+uncertified plain solve, and `KLS_DISABLE_LSQR_SOLVE_RECOVERY=1` retains the
+certificate but rejects after the cheaper recoveries fail. On
+`fpga_dcop_01`, whose old full-precision LU answer had a `2.55e-2` residual,
+all 20 rank-preserving generations now validate; the worst residual is
+`4.99e-9`. The median five-pass H100 is 1.840 s. Both saved competitor runs
+remain invalid on this numerically near-rank-deficient case (`3.48e-3` for CKTSO
+and `2.43e-2` for SubtreeLU).
+
 Focused eight-core entrywise-H100 measurements on the current machine give
 the following development results.  They are one-pass engineering evidence,
 not a replacement for the paper's counterbalanced 110-matrix campaign.
 
 | case | prior generalized build | current build | accuracy / path result |
 | --- | ---: | ---: | --- |
-| `pre2` initial factor | 386.225 s | 9.730 s | relative residual `1.78e-16` |
+| `pre2` initial factor | 386.225 s | 9.005 s | relative residual `1.94e-16` |
 | `mc2depi` H100 | 22.166 s | 17.861 s | worst generation `4.15e-13`; normal METIS + PTS |
 | `FullChip` H100 | 237.224 s | 219.475 s | worst generation `3.23e-9`; stalled generation recovered in two GMRES directions |
 
@@ -4802,6 +4850,67 @@ current/prior H100 ratios are `0.982` on `ASIC_100ks`, `1.007` on `Raj1`,
 All remain below `2.35e-14` worst relative-L2 residual.  A seven-generation
 ASan/UBSan `FullChip` replay exercised the two-direction GMRES path with no
 sanitizer finding and the same `3.23e-9` externally audited maximum.
+
+The large matched factor now applies the same resource argument to pivot and
+scale speculation.  Tight matched pivots remain available when the estimated
+numeric fits the workers' aggregate 32 MiB cache allowance, or when at least
+five percent of the realized matched diagonals lie between the two pivot
+thresholds.  Otherwise the ordinary `1e-3` factor is retained.  If that
+native numeric is larger than aggregate cache but beats its symbolic storage
+bound, an independent deterministic backward-residual probe can certify it
+and avoid a second full matching-equilibration factor.  This uses realized
+threshold pressure, factor storage, lifecycle length, and numerical evidence;
+it does not use matrix dimensions or provenance.  The A/B controls are
+`KLS_DISABLE_GENERIC_RESOURCE_SCALED_MATCHED_TOLERANCE=1` and
+`KLS_DISABLE_GENERIC_RESOURCE_SCALED_NATIVE_MATCH_CERTIFICATE=1`.
+
+Separator width is also part of the realized matched-ordering portfolio.  A
+wide nested-dissection splitter remains the latency candidate.  When its
+symbolic storage exceeds aggregate cache over a repeated lifecycle, KLS also
+builds a two-leaf candidate and retains it only for a 0.5% symbolic-fill win
+whose projected recurring saving repays a complete graph comparison.  The
+normal numeric fill, pivot, conditioning, and residual gates still arbitrate
+the selected ordering.  Set
+`KLS_DISABLE_GENERIC_MATCHED_ND_WIDTH_PORTFOLIO=1` to retain only the wide
+candidate.
+
+On `pre2`, the default wide candidate has a `91.38M` symbolic score and
+produces `75.45M` factor entries with `112.88B` factor flops.  The measured
+two-leaf candidate scores `90.23M` and produces `72.81M` entries with
+`101.29B` flops.  The final 20-update, verify-every-generation
+rank-preserving run reports a `9.005s` initial factor, `0.991s` average
+refactor, `0.0618s` solve, and `111.09s` modeled H100; its worst relative-L2
+residual is `2.02e-16`.  The same-host saved CKTSO paper run is `296.52s`
+H100, while SubtreeLU reports `251.32s` but fails the residual limit.  On the
+more disruptive entrywise protocol, KLS is `111.87s` versus a fresh CKTSO
+`122.54s`, with a `7.23e-13` worst checked residual.  Disabling the width
+portfolio restores the `75.45M`-entry factor; disabling the native certificate
+does not complete within 55 seconds because it rebuilds the very large scaled
+candidate.  The retained rules therefore close the last valid paper-suite
+performance gap while preserving the generic portfolio contract.
+
+The broad recurring AMMF/AMF3 symbolic portfolio is now bounded by its actual
+immutable ordering-pattern footprint rather than separate row and nonzero
+ceilings. AUTO may overlap the three quotient-graph variants when that
+footprint is at most 128 MiB, the caller supplies at least four workers, and
+the existing column-pair-work/lifecycle test proves the analyses can repay.
+This admits large sparse graphs without identifying their dimensions or
+provenance and keeps denser graphs under the same memory budget.
+
+`Hamrle3` is the new large positive: its 53.1 MiB pattern had previously been
+excluded from the broad portfolio, leaving AUTO on a normal-AMF estimate of
+141.1M factor entries and 500B operations and timing out beyond 300 seconds.
+The resource-bounded portfolio selects the transpose side from independently
+realized lifecycle scores, starts from a 126.1M-entry/358B-operation AMMF
+symbolic, and ultimately installs a numerically validated METIS factor. A
+strict 20-update rank-preserving run now completes within the same 300-second
+process cap: 41.82 s analysis, 37.79 s initial factor, 5.996 s steady
+refactor, 0.207 s changed solve, and a 775.10 s modeled H100. Every generation
+was checked; the worst relative-L2 residual is `4.32e-10`. CKTSO and SubtreeLU
+both still time out on this input. The four other paper matrices newly exposed
+to the resource form (`TSOPF_RS_b2383`, its `_c1` variant, `G3_circuit`, and
+`memchip`) preserve their prior METIS orientation and remain within 0.9% of
+their preceding modeled cycles, with all residuals below `1.17e-12`.
 
 ## Generic matched-lifecycle portfolio completion
 

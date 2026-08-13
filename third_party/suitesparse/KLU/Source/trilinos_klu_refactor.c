@@ -19,8 +19,20 @@
  * scalar consumption are skipped.  Snapshot these thread-local controls
  * once per call and split each affected block into scalar and tail ranges;
  * checking TLS in every ordinary column materially slows stock KLU refactors. */
+#ifdef DLONG
 _Thread_local long kls_klu_refactor_tail_skip = 0 ;
 _Thread_local long kls_klu_refactor_tail_block = -1 ;
+#define KLS_KLU_REFACTOR_TAIL_SKIP kls_klu_refactor_tail_skip
+#define KLS_KLU_REFACTOR_TAIL_BLOCK kls_klu_refactor_tail_block
+#else
+/* The dual-width diagnostic links both variants into one executable.  The
+ * production controls belong to the long-index variant; keep private,
+ * inactive controls in the diagnostic's int-index translation unit. */
+static _Thread_local long kls_klu32_refactor_tail_skip = 0 ;
+static _Thread_local long kls_klu32_refactor_tail_block = -1 ;
+#define KLS_KLU_REFACTOR_TAIL_SKIP kls_klu32_refactor_tail_skip
+#define KLS_KLU_REFACTOR_TAIL_BLOCK kls_klu32_refactor_tail_block
+#endif
 
 
 /* ========================================================================== */
@@ -40,7 +52,7 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
     TRILINOS_KLU_common  *Common
 )
 {
-    Entry ukk, ujk, s ;
+    Entry ukk, ukk_recip, ujk, s ;
     Entry *Offx, *Lx, *Ux, *X, *Az, *Udiag ;
     double *Rs ;
     Int *P, *Q, *R, *Pnum, *Offp, *Offi, *Ui, *Li, *Pinv, *Lip, *Uip, *Llen,
@@ -49,7 +61,7 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
     Unit *LU ;
     Int k1, k2, nk, scalar_nk, k, block, oldcol, pend, oldrow, n, p,
 	newrow, scale, nblocks, poff, i, j, up, ulen, llen, maxblock, nzoff,
-	dense_tail_skip, dense_tail_block ;
+	dense_tail_skip, dense_tail_block, reciprocal_scale, reciprocal_pivot ;
 
     /* ---------------------------------------------------------------------- */
     /* check inputs */
@@ -122,8 +134,8 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
     Common->nrealloc = 0 ;
     Udiag = (double*) Numeric->Udiag ;
     nzoff = Symbolic->nzoff ;
-    dense_tail_skip = (Int) kls_klu_refactor_tail_skip ;
-    dense_tail_block = (Int) kls_klu_refactor_tail_block ;
+    dense_tail_skip = (Int) KLS_KLU_REFACTOR_TAIL_SKIP ;
+    dense_tail_block = (Int) KLS_KLU_REFACTOR_TAIL_BLOCK ;
 
     /* ---------------------------------------------------------------------- */
     /* check the input matrix compute the row scale factors, Rs */
@@ -136,6 +148,24 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 	if (!TRILINOS_KLU_scale (scale, n, Ap, Ai, Ax, Rs, NULL, Common))
 	{
 	    return (FALSE) ;
+	}
+    }
+
+    /* A scaled refactor used to divide every input entry by its row scale.
+     * The scale vector is private to this numeric until the final Pnum
+     * permutation, so retain its reciprocals during the scatter and restore
+     * the ordinary KLU representation at exit.  This changes O(nnz) divides
+     * into O(n) divides without changing factor storage or solve semantics.
+     * Keep an A/B control for numerical audits of reciprocal rounding. */
+    reciprocal_scale = scale > 0 &&
+	getenv ("KLS_DISABLE_KLU_SCALE_RECIPROCAL") == NULL ;
+    reciprocal_pivot =
+	getenv ("KLS_DISABLE_KLU_PIVOT_RECIPROCAL") == NULL ;
+    if (reciprocal_scale)
+    {
+	for (k = 0 ; k < n ; k++)
+	{
+	    Rs [k] = 1.0 / Rs [k] ;
 	}
     }
 
@@ -285,11 +315,25 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 		    Udiag [k+k1] = ukk ;
 		    /* gather and divide by pivot to get kth column of L */
 		    GET_POINTER (LU, Lip, Llen, Li, Lx, k, llen) ;
-		    for (p = 0 ; p < llen ; p++)
+		    if (reciprocal_pivot && llen > 1)
 		    {
-			i = Li [p] ;
-			DIV (Lx [p], X [i], ukk) ;
-			CLEAR (X [i]) ;
+			ukk_recip = ukk ;
+			RECIPROCAL (ukk_recip) ;
+			for (p = 0 ; p < llen ; p++)
+			{
+			    i = Li [p] ;
+			    MULT (Lx [p], X [i], ukk_recip) ;
+			    CLEAR (X [i]) ;
+			}
+		    }
+		    else
+		    {
+			for (p = 0 ; p < llen ; p++)
+			{
+			    i = Li [p] ;
+			    DIV (Lx [p], X [i], ukk) ;
+			    CLEAR (X [i]) ;
+			}
 		    }
 
 		}
@@ -349,14 +393,28 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 		    {
 			/* entry in off-diagonal block */
 			/* Offx [poff] = Az [p] / Rs [oldrow] */
-			SCALE_DIV_ASSIGN (Offx [poff], Az [p], Rs [oldrow]) ;
+			if (reciprocal_scale)
+			{
+			    MULT (Offx [poff], Az [p], Rs [oldrow]) ;
+			}
+			else
+			{
+			    SCALE_DIV_ASSIGN (Offx [poff], Az [p], Rs [oldrow]) ;
+			}
 			poff++ ;
 		    }
 		    else
 		    {
 			/* singleton */
 			/* s = Az [p] / Rs [oldrow] */
-			SCALE_DIV_ASSIGN (s, Az [p], Rs [oldrow]) ;
+			if (reciprocal_scale)
+			{
+			    MULT (s, Az [p], Rs [oldrow]) ;
+			}
+			else
+			{
+			    SCALE_DIV_ASSIGN (s, Az [p], Rs [oldrow]) ;
+			}
 		    }
 		}
 		Udiag [k1] = s ;
@@ -396,14 +454,28 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 			{
 			    /* entry in off-diagonal part */
 			    /* Offx [poff] = Az [p] / Rs [oldrow] */
-			    SCALE_DIV_ASSIGN (Offx [poff], Az [p], Rs [oldrow]);
+			    if (reciprocal_scale)
+			    {
+				MULT (Offx [poff], Az [p], Rs [oldrow]) ;
+			    }
+			    else
+			    {
+				SCALE_DIV_ASSIGN (Offx [poff], Az [p], Rs [oldrow]);
+			    }
 			    poff++ ;
 			}
 			else
 			{
 			    /* (newrow,k) is an entry in the block */
 			    /* X [newrow] = Az [p] / Rs [oldrow] */
-			    SCALE_DIV_ASSIGN (X [newrow], Az [p], Rs [oldrow]) ;
+			    if (reciprocal_scale)
+			    {
+				MULT (X [newrow], Az [p], Rs [oldrow]) ;
+			    }
+			    else
+			    {
+				SCALE_DIV_ASSIGN (X [newrow], Az [p], Rs [oldrow]) ;
+			    }
 			}
 		    }
 
@@ -449,11 +521,25 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 		    Udiag [k+k1] = ukk ;
 		    /* gather and divide by pivot to get kth column of L */
 		    GET_POINTER (LU, Lip, Llen, Li, Lx, k, llen) ;
-		    for (p = 0 ; p < llen ; p++)
+		    if (reciprocal_pivot && llen > 1)
 		    {
-			i = Li [p] ;
-			DIV (Lx [p], X [i], ukk) ;
-			CLEAR (X [i]) ;
+			ukk_recip = ukk ;
+			RECIPROCAL (ukk_recip) ;
+			for (p = 0 ; p < llen ; p++)
+			{
+			    i = Li [p] ;
+			    MULT (Lx [p], X [i], ukk_recip) ;
+			    CLEAR (X [i]) ;
+			}
+		    }
+		    else
+		    {
+			for (p = 0 ; p < llen ; p++)
+			{
+			    i = Li [p] ;
+			    DIV (Lx [p], X [i], ukk) ;
+			    CLEAR (X [i]) ;
+			}
 		    }
 		}
 		for ( ; k < nk ; k++)
@@ -468,7 +554,14 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
 			newrow = Pinv [oldrow] - k1 ;
 			if (newrow < 0 && poff < nzoff)
 			{
-			    SCALE_DIV_ASSIGN (Offx [poff], Az [p], Rs [oldrow]) ;
+			    if (reciprocal_scale)
+			    {
+				MULT (Offx [poff], Az [p], Rs [oldrow]) ;
+			    }
+			    else
+			    {
+				SCALE_DIV_ASSIGN (Offx [poff], Az [p], Rs [oldrow]) ;
+			    }
 			    poff++ ;
 			}
 		    }
@@ -485,7 +578,8 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
     {
 	for (k = 0 ; k < n ; k++)
 	{
-	    REAL (X [k]) = Rs [Pnum [k]] ;
+	    REAL (X [k]) = reciprocal_scale
+		? 1.0 / Rs [Pnum [k]] : Rs [Pnum [k]] ;
 	}
 	for (k = 0 ; k < n ; k++)
 	{
