@@ -123,7 +123,12 @@ while [ "$p" -lt "$PASSES" ]; do
   p=$((p + 1))
 done
 selected_index=0
-while IFS= read -r name; do
+while IFS= read -r manifest_line; do
+  # Generated validation manifests carry provenance after an inline '#'.
+  # Keep the runner compatible with both those and historical bare-name lists.
+  name=${manifest_line%%#*}
+  set -- $name
+  name=${1:-}
   case "$name" in ''|'#'*) continue;; esac
   if [ "$selected_index" -lt "$SKIP" ]; then
     selected_index=$((selected_index + 1))

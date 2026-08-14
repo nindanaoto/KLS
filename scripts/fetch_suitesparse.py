@@ -35,9 +35,12 @@ def read_manifest(path: pathlib.Path) -> list[str]:
     return names
 
 
-def load_index() -> dict[str, MatrixInfo]:
-    with urllib.request.urlopen(SSTATS_URL, timeout=60) as response:
-        text = response.read().decode("utf-8", errors="replace")
+def load_index(path: pathlib.Path | None = None) -> dict[str, MatrixInfo]:
+    if path is None:
+        with urllib.request.urlopen(SSTATS_URL, timeout=60) as response:
+            text = response.read().decode("utf-8", errors="replace")
+    else:
+        text = path.read_text(encoding="utf-8", errors="replace")
     result: dict[str, MatrixInfo] = {}
     reader = csv.reader(io.StringIO("\n".join(text.splitlines()[2:])))
     for row in reader:
@@ -99,6 +102,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=pathlib.Path, required=True)
     parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--index",
+        type=pathlib.Path,
+        help="pinned local sstats.csv snapshot; default downloads the live index",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-rows", type=int)
     parser.add_argument("--max-cols", type=int)
@@ -108,7 +116,7 @@ def main() -> int:
     args = parser.parse_args()
 
     wanted = read_manifest(args.manifest)
-    index = load_index()
+    index = load_index(args.index)
     missing: list[str] = []
     skipped: list[tuple[MatrixInfo, str]] = []
     selected: list[MatrixInfo] = []

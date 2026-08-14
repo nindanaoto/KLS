@@ -2578,6 +2578,14 @@ metadata snapshot. Generated manifests record the index timestamp and SHA-256;
 `python3 scripts/build_generalization_manifests.py --check` verifies that the
 committed files still match the selected metadata and seed.
 
+For a one-use, source-frozen test outside every previously committed manifest,
+use `bench/suitesparse_external_validation_v1_manifest.txt` and follow
+`docs/external_validation.md`.  That protocol excludes the complete
+SuiteSparse group of all earlier manifest entries, runs rank-preserving,
+entrywise, and localized updates at 1/4/8 threads in counterbalanced solver
+order, reports H10/H100/H1000 sensitivity without dropping failures, and keeps
+post-reveal route ablations separate from the confirmatory score.
+
 Two additional frozen manifests target the remaining large-policy evidence
 gaps rather than the general suite score:
 `bench/suitesparse_remaining_policy_natural_probe_manifest.txt` and the

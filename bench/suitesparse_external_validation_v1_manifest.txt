@@ -1,0 +1,38 @@
+# One-use KLS external validation manifest. Do not tune after reveal.
+# Protocol: kls-external-validation-v1
+# Seed: kls-external-validation-2026-08-v1
+# SuiteSparse index timestamp: 31-Oct-2023 18:12:37
+# SuiteSparse index SHA256: 9bc797ab989331afbc9e0e51236d9145c2ac7f76c0913e9677ae07c4913a2aad
+# Exclusion-set SHA256: 63c98f3517d7c49f9b8f38a870a828c35aa32203807599879b4a70c8f7bf3783
+# Excluded manifest entries: 667
+# Excluded SuiteSparse groups: 101
+# Frozen KLS commit: ce959450b1b2a1affe60ab2813863b3c1124dad7
+# Frozen solver-tree SHA256: fc9e9bb967e42eb60c59d7c4367b0d6051d094811d2f01e15dcb742bdbd9474d
+# Filters: real square, unique basename, one matrix per unused group; rows=10000..1000000; nnz=30000..12000000.
+# Selection: all available circuit-like unused groups, then balanced metadata strata.
+# Strata: large/dense/symmetric=2, large/moderate/symmetric=1, medium/dense/symmetric=7, medium/dense/unsymmetric=2, medium/moderate/symmetric=8, medium/sparse/symmetric=3, medium/sparse/unsymmetric=1
+
+PGPgiantcompo  # group=Arenas rows=10680 nnz=48632 stratum=medium/sparse/symmetric circuit_like=0 kind=undirected multigraph
+ted_A_unscaled  # group=Bindel rows=10605 nnz=424587 stratum=medium/dense/unsymmetric circuit_like=0 kind=thermal problem
+rma10  # group=Bova rows=46835 nnz=2329092 stratum=medium/dense/symmetric circuit_like=0 kind=computational fluid dynamics problem
+denormal  # group=Castrillon rows=89400 nnz=1156224 stratum=medium/moderate/symmetric circuit_like=0 kind=counter-example problem
+k3plates  # group=Cunningham rows=11107 nnz=378927 stratum=medium/dense/symmetric circuit_like=0 kind=acoustics problem
+ship_003  # group=DNVS rows=121728 nnz=3777036 stratum=large/dense/symmetric circuit_like=0 kind=structural problem
+ifiss_mat  # group=Embree rows=96307 nnz=3599932 stratum=medium/dense/symmetric circuit_like=0 kind=computational fluid dynamics
+airfoil_2d  # group=Engwirda rows=14214 nnz=259688 stratum=medium/moderate/symmetric circuit_like=0 kind=computational fluid dynamics problem
+pesa  # group=Gaertner rows=11738 nnz=79566 stratum=medium/moderate/symmetric circuit_like=0 kind=directed weighted graph
+G67  # group=Gset rows=10000 nnz=40000 stratum=medium/sparse/symmetric circuit_like=0 kind=undirected weighted random graph
+gupta1  # group=Gupta rows=31802 nnz=2164210 stratum=medium/dense/symmetric circuit_like=0 kind=optimization problem
+fd18  # group=Hohn rows=16428 nnz=63406 stratum=medium/sparse/unsymmetric circuit_like=0 kind=materials problem
+pli  # group=Li rows=22695 nnz=1350309 stratum=medium/dense/symmetric circuit_like=1 kind=duplicate electromagnetics problem
+viscorocks  # group=Mancktelow rows=37762 nnz=1133641 stratum=medium/dense/symmetric circuit_like=0 kind=materials problem
+usps_norm_5NN  # group=ML_Graph rows=11000 nnz=81112 stratum=medium/moderate/symmetric circuit_like=0 kind=undirected weighted graph
+mycielskian14  # group=Mycielski rows=12287 nnz=3695512 stratum=medium/dense/symmetric circuit_like=0 kind=undirected graph
+astro-ph  # group=Newman rows=16706 nnz=242502 stratum=medium/moderate/symmetric circuit_like=0 kind=undirected weighted graph
+dictionary28  # group=Pajek rows=52652 nnz=178076 stratum=medium/sparse/symmetric circuit_like=0 kind=undirected graph
+Ga19As19H42  # group=PARSEC rows=133123 nnz=8884839 stratum=large/dense/symmetric circuit_like=0 kind=theoretical/quantum chemistry problem
+ABACUS_shell_ud  # group=Puri rows=23412 nnz=218484 stratum=medium/moderate/symmetric circuit_like=0 kind=model reduction problem
+ecl32  # group=Sanghavi rows=51993 nnz=380415 stratum=medium/moderate/symmetric circuit_like=1 kind=semiconductor device problem
+cage12  # group=vanHeukelum rows=130228 nnz=2032536 stratum=large/moderate/symmetric circuit_like=0 kind=directed weighted graph
+av41092  # group=Vavasis rows=41092 nnz=1683902 stratum=medium/dense/unsymmetric circuit_like=0 kind=2D/3D problem
+wang3  # group=Wang rows=26064 nnz=177168 stratum=medium/moderate/symmetric circuit_like=1 kind=semiconductor device problem
