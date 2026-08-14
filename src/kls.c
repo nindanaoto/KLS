@@ -38871,7 +38871,9 @@ static void kls_maybe_promote_selected_generic_nd(
       candidate->selected_ordering == KLS_ORDERING_METIS ||
       candidate->block_order_perm != NULL ||
       !kls_repeated_update_workload(options) || options->threads < 2 ||
-      candidate->n < 30000u || candidate->n > (UF_long)INT32_MAX ||
+      (candidate->n < 30000u &&
+       getenv("KLS_DISABLE_SUB_30K_GENERIC_ND") != NULL) ||
+      candidate->n > (UF_long)INT32_MAX ||
       candidate->nnz > (UF_long)INT32_MAX ||
       getenv("KLS_DISABLE_GENERIC_ND_PORTFOLIO") != NULL) {
     return;
@@ -39181,9 +39183,22 @@ static void kls_maybe_promote_selected_generic_nd(
     trial_symbolic->structural_rank == candidate->n;
   const double incumbent_lifecycle_work =
     incumbent_flops * numeric_horizon;
+  /* Below the portfolio's historically validated 30k-row scale, separator
+     structure alone is not yet evidence of a recurring kernel win: on a
+     compact factor, a near-tie tree can lose locality even when it removes a
+     fraction of the entries.  Still admit these graphs when the realized
+     symbolic stream removes at least five percent of retained storage.  The
+     ordinary large-graph near-tie policy remains unchanged, where separator
+     parallelism is itself a measured benefit, and the decisive 10% Pareto
+     arm below continues to cover still stronger proposals. */
+  const int sub_30k_nd_has_storage_margin =
+    candidate->n >= 30000u ||
+    (isfinite(trial_fill) && trial_fill > 0.0 &&
+     trial_fill <= 0.95 * incumbent_fill);
   const int lifecycle_near_tie =
     isfinite(trial_fill) && trial_fill > 0.0 &&
     trial_fill <= 1.02 * incumbent_fill &&
+    sub_30k_nd_has_storage_margin &&
     (trial_symbolic->structural_rank == candidate->n ||
      trial_symbolic->structural_rank == KLS_KLU_EMPTY) &&
     isfinite(incumbent_lifecycle_work) &&
@@ -47229,6 +47244,24 @@ static int should_try_auto_scale(const kls_solver *solver) {
     /* A predicted-pattern numeric already proved a machine-precision
        residual without scaling, and the serial scaled trial factorization
        costs minutes at this size. */
+    return 0;
+  }
+  if (!legacy_shape_policies &&
+      getenv("KLS_DISABLE_STABLE_UNSCALED_SCALE_GUARD") == NULL &&
+      solver->common.scale <= 0 &&
+      solver->common.noffdiag == 0 &&
+      solver->pivot_nudge_count == 0u &&
+      solver->common.kls_perturb_count == 0u &&
+      isfinite(solver->common.rcond) && solver->common.rcond >= 1.0e-6) {
+    /* The requested diagonal pivot sequence was accepted exactly and exposes
+       no structural defect for row scaling to repair.  Any fill change would
+       require scaling to replace that stable pivot sequence, while the
+       retained numeric is already comfortably above the accuracy floor
+       without a nudge or perturbation.  Do not build up to three complete
+       factors merely because a pessimistic symbolic flop estimate makes the
+       realized diagonal-pivot numeric look inflated.  Failed/singular,
+       pivoted, nudged, perturbed, and genuinely ill-conditioned numerics
+       remain eligible for the ordinary trials. */
     return 0;
   }
   if (legacy_shape_policies && solver->common.scale <= 0 &&
