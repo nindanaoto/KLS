@@ -74392,7 +74392,7 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, hot))
 #endif
-static UF_long kls_lean_row_refactor_snode_step_balanced(
+static UF_long kls_lean_row_refactor_snode_step_width_specialized(
   UF_long p,
   UF_long run,
   UF_long dep0,
@@ -74403,8 +74403,23 @@ static UF_long kls_lean_row_refactor_snode_step_balanced(
   const UF_long *restrict u_cols,
   const double *restrict u_values,
   const double *restrict udiag) {
-  return kls_lean_row_refactor_snode_step_impl(
-    p, run, dep0, x, l_values, l_lu, u_ptr, u_cols, u_values, udiag, 1);
+#define KLS_LEAN_SNODE_WIDTH_CASE(width)                                    \
+    case (width):                                                           \
+      return kls_lean_row_refactor_snode_step_impl(                         \
+        p, (width), dep0, x, l_values, l_lu, u_ptr, u_cols, u_values,       \
+        udiag, 1)
+  switch (run) {
+    KLS_LEAN_SNODE_WIDTH_CASE(2u);
+    KLS_LEAN_SNODE_WIDTH_CASE(3u);
+    KLS_LEAN_SNODE_WIDTH_CASE(4u);
+    KLS_LEAN_SNODE_WIDTH_CASE(5u);
+    KLS_LEAN_SNODE_WIDTH_CASE(6u);
+    KLS_LEAN_SNODE_WIDTH_CASE(7u);
+    KLS_LEAN_SNODE_WIDTH_CASE(8u);
+    default:
+      return 0u;
+  }
+#undef KLS_LEAN_SNODE_WIDTH_CASE
 }
 
 typedef struct {
@@ -75554,7 +75569,7 @@ static void kls_symmetric_scalar_fringe_hoisted_worker_run(
             }
           }
         }
-        if (kls_lean_row_refactor_snode_step_balanced(
+        if (kls_lean_row_refactor_snode_step_width_specialized(
               p, run, l_cols[p], x, NULL, l_lu,
               u_ptr, u_cols, u_val, udiag) != run) {
           kls_egraph_refactor_record_invalid(shared);

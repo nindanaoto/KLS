@@ -180,3 +180,48 @@ ASan/UBSan CTest passed, and sanitized 10-percent update loops covered all
 twelve natural positives without a finding.  The rejected compact-scoreboard
 prototype is not retained: despite identical residuals, it slowed `cell2`
 from about 0.172 to 0.649 ms by increasing synchronization contention.
+
+## Compile-time fused-width specialization (2026-08-16)
+
+Profiles after wait compression still put recurring samples in the fused
+short-supernode arithmetic.  Although the executor accepts only widths two
+through eight, its single implementation received the width at run time.
+That kept maximum-width local arrays and dynamic triangular loops in the hot
+body.  The retained implementation dispatches once and instantiates the same
+always-inlined arithmetic for each constant width from two through eight.
+It changes neither the accepted factors nor their operation and reduction
+order, and has no matrix policy, tuning threshold, environment selector, or
+fallback implementation.  Every specialized width occurs in the natural
+positive corpus.  The emitted hot body grows by about 1.7 KiB.
+
+Five counterbalanced 300-update pairs over the twelve natural positives put
+the specialized/dynamic steady-refactor geometric ratio at 0.986 on CCD 0.
+The second CCD reproduced the gain at 0.992 over its eleven timing-stable
+factors.  Two- and four-thread checks on `thermal`, `sts4098`, and `cell2`
+gave steady-refactor ratios of 0.990 and 0.990.  A narrower width-two/eight
+prototype was also a small win, but its 0.993 twelve-factor ratio left about
+half of the full specialization's improvement unused even though widths
+three through seven occur naturally.  Direct comparison of the final
+executable with parent `e45bc5c` gave a 0.982 steady-refactor ratio over the
+ten stable, non-tiny factors.  The fourteen-matrix remaining-gap control
+suite completed 14/14 with identical routes and a neutral-to-positive 0.996
+steady-refactor ratio; those factors do not select this executor.
+
+The eleven numerically valid positives each completed 100 independently
+verified entrywise updates at amplitudes 0.001, 0.01, and 0.1, for 3,300
+checked updates.  Every run retained the row-refactor route.  The largest
+per-update relative residual was 1.15e-10 and the largest terminal relative
+residual was 3.79e-13.  Release and ASan/UBSan CTest passed.  Sanitized
+10-percent entrywise loops added 220 independently checked updates over the
+eleven valid positives and 20 memory-safety-only updates on the pre-existing
+inaccurate `shyy41` route, without a finding.
+
+Three adjacent redesigns were measured and removed.  An unrestricted
+dependency/list schedule was two to five times slower and could change the
+generic route selected by the cost model.  A dependency-level-constrained
+schedule preserved the route but remained roughly 25--40 percent slower on
+`sts4098` and `thermal`; reducing modeled waits did not compensate for lost
+critical-path overlap.  Replacing the balanced triangular reduction with a
+chain was also consistently slower, with representative steady-refactor
+ratios of 1.004--1.021.  These results keep the optimization local to code
+generation and preserve the established schedule and numerical ordering.
