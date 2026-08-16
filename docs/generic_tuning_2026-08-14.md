@@ -187,8 +187,10 @@ Profiles after wait compression still put recurring samples in the fused
 short-supernode arithmetic.  Although the executor accepts only widths two
 through eight, its single implementation received the width at run time.
 That kept maximum-width local arrays and dynamic triangular loops in the hot
-body.  The retained implementation dispatches once and instantiates the same
-always-inlined arithmetic for each constant width from two through eight.
+body.  The retained implementation dispatches once and presents each width
+from two through eight as a constant to the same always-inlined arithmetic.
+This specialized the trailing target loops, although a later assembly audit
+found that GCC still merged the triangular prefix back into a dynamic loop.
 It changes neither the accepted factors nor their operation and reduction
 order, and has no matrix policy, tuning threshold, environment selector, or
 fallback implementation.  Every specialized width occurs in the natural
@@ -225,3 +227,43 @@ critical-path overlap.  Replacing the balanced triangular reduction with a
 chain was also consistently slower, with representative steady-refactor
 ratios of 1.004--1.021.  These results keep the optimization local to code
 generation and preserve the established schedule and numerical ordering.
+
+## Dedicated fused-prefix unrolling (2026-08-16)
+
+A fresh fine-grained profile and disassembly of `aad53a8` showed that GCC had
+tail-merged the supposedly constant short triangular solves into one
+runtime-bound loop.  The retained change emits one function for each natural
+width two through eight and explicitly unrolls only the bounded triangular
+prefix.  The potentially long trailing update stays looped and keeps its
+balanced reduction tree.  The width switch is inlined into the worker, so
+each run still pays one dispatch and one call.  There are no new selectors,
+shape gates, matrix rules, or numerical operations.  The seven hot functions
+total 3,533 bytes versus 3,620 bytes for the merged body; total executable
+text grows by 560 bytes because of the inlined dispatch and alignment.
+
+Five counterbalanced 300-update pairs over all twelve natural positives on
+CCD 0 improved every steady-refactor median.  The dedicated/merged geometric
+ratios were 0.948 for steady refactor and 0.973 for complete H100.  The other
+CCD reproduced 0.946 and 0.971 over the eleven timing-stable factors.  On
+`thermal`, `sts4098`, and `cell2`, two-thread ratios were 0.935 and 0.952,
+and four-thread ratios were 0.929 and 0.956.  A simpler single-function
+unrolled implementation was measured and removed: it was about 1.010 for
+both steady refactor and H100 against the dedicated functions on all three
+representatives, consistent with shared-prologue and register-pressure cost.
+
+The fourteen-matrix remaining-gap control completed 14/14 with identical
+route choices.  Its ratios were 1.001 for steady refactor and 1.002 for H100,
+which is neutral short-run noise on executors that do not call these
+functions.  The eleven numerically valid positives then completed 100
+independently verified entrywise updates at amplitudes 0.001, 0.01, and 0.1:
+3,300 checks, all on the row route, with a 1.15e-10 largest per-update and
+3.79e-13 largest terminal relative residual.  These exactly match the prior
+implementation's maxima.
+
+Release and ASan/UBSan CTest passed.  Forcing the lean executor under the
+sanitizers covered 220 checked 10-percent updates over the eleven valid
+positives and 20 memory-safety-only updates on `shyy41`, without a finding.
+A separate forced-cooperative-row run exposed a dense-help stack-context
+lifetime race; the unmodified `aad53a8` parent reproduced it, so it is a
+pre-existing defect outside this fused executor and is not attributed to the
+unrolling change.

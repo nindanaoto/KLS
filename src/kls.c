@@ -74216,9 +74216,18 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
 
   double multipliers[8];
   const double *trailing_values[8];
+  /* The dedicated callers make run constant, but GCC otherwise merges this
+     bounded prefix back into a dynamic loop.  Unroll only the 2--8-wide
+     triangular solve; the potentially long trailing update remains looped. */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
   for (UF_long local = 0u; local < run; ++local) {
     const UF_long dep = dep0 + local;
     double candidate = x[dep];
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
     for (UF_long previous = 0u; previous < local; ++previous) {
       candidate -= multipliers[previous] *
         u_values[u_ptr[dep0 + previous] + local - previous - 1u];
@@ -74390,24 +74399,51 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
 }
 
 #if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline, hot))
+#define KLS_LEAN_SNODE_WIDTH_ATTR __attribute__((noinline, hot))
+#else
+#define KLS_LEAN_SNODE_WIDTH_ATTR
 #endif
-static UF_long kls_lean_row_refactor_snode_step_width_specialized(
+#define KLS_DEFINE_LEAN_SNODE_WIDTH(width)                                \
+  KLS_LEAN_SNODE_WIDTH_ATTR                                               \
+  static UF_long kls_lean_row_refactor_snode_step_width_##width(          \
+    UF_long p,                                                            \
+    UF_long dep0,                                                         \
+    double *restrict x,                                                   \
+    double **restrict l_lu,                                               \
+    const UF_long *restrict u_ptr,                                        \
+    const UF_long *restrict u_cols,                                       \
+    const double *restrict u_values,                                      \
+    const double *restrict udiag) {                                       \
+    return kls_lean_row_refactor_snode_step_impl(                         \
+      p, (width), dep0, x, NULL, l_lu, u_ptr, u_cols, u_values, udiag, 1); \
+  }
+
+KLS_DEFINE_LEAN_SNODE_WIDTH(2u)
+KLS_DEFINE_LEAN_SNODE_WIDTH(3u)
+KLS_DEFINE_LEAN_SNODE_WIDTH(4u)
+KLS_DEFINE_LEAN_SNODE_WIDTH(5u)
+KLS_DEFINE_LEAN_SNODE_WIDTH(6u)
+KLS_DEFINE_LEAN_SNODE_WIDTH(7u)
+KLS_DEFINE_LEAN_SNODE_WIDTH(8u)
+
+#undef KLS_DEFINE_LEAN_SNODE_WIDTH
+#undef KLS_LEAN_SNODE_WIDTH_ATTR
+
+static KLS_ALWAYS_INLINE UF_long
+kls_lean_row_refactor_snode_step_width_specialized(
   UF_long p,
   UF_long run,
   UF_long dep0,
   double *restrict x,
-  double *restrict l_values,
   double **restrict l_lu,
   const UF_long *restrict u_ptr,
   const UF_long *restrict u_cols,
   const double *restrict u_values,
   const double *restrict udiag) {
-#define KLS_LEAN_SNODE_WIDTH_CASE(width)                                    \
-    case (width):                                                           \
-      return kls_lean_row_refactor_snode_step_impl(                         \
-        p, (width), dep0, x, l_values, l_lu, u_ptr, u_cols, u_values,       \
-        udiag, 1)
+#define KLS_LEAN_SNODE_WIDTH_CASE(width)                                  \
+    case (width):                                                         \
+      return kls_lean_row_refactor_snode_step_width_##width(              \
+        p, dep0, x, l_lu, u_ptr, u_cols, u_values, udiag)
   switch (run) {
     KLS_LEAN_SNODE_WIDTH_CASE(2u);
     KLS_LEAN_SNODE_WIDTH_CASE(3u);
@@ -75570,7 +75606,7 @@ static void kls_symmetric_scalar_fringe_hoisted_worker_run(
           }
         }
         if (kls_lean_row_refactor_snode_step_width_specialized(
-              p, run, l_cols[p], x, NULL, l_lu,
+              p, run, l_cols[p], x, l_lu,
               u_ptr, u_cols, u_val, udiag) != run) {
           kls_egraph_refactor_record_invalid(shared);
           return;
