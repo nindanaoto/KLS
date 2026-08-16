@@ -325,3 +325,55 @@ the row route, the largest relative residual was 1.30e-11, and no sanitizer
 finding occurred.  The emitted AVX section contains the intended
 `vgatherqpd` and `vscatterqpd` instructions; non-AVX and non-x86 builds retain
 the scalar implementation.
+
+## Compact-index fused row worker (2026-08-16)
+
+The next representation audit found that the fused worker still read every L
+dependency and U target from 64-bit column streams even though the row engine
+already had a checked 16-bit mirror builder.  The retained specialization
+consumes those compact column streams throughout the fused worker.  Scalar
+dependency waits, ordinary sparse updates, fused trailing updates, and U-row
+publication all widen the stored `uint16_t` value only when it is used.  The
+width-eight AVX-512 kernel widens eight targets from one 16-byte load with
+`vpmovzxwd`, then uses `vgatherdpd` and `vscatterdpd`; the arithmetic and
+balanced reduction tree are unchanged.
+
+Admission is representation- and lifecycle-based.  The existing fused worker
+must be structurally capable, the installed factor must have at most 65,536
+rows, the caller must request more than one thread, and it must advertise at
+least 64 expected refactorizations.  The last condition is deliberately more
+conservative than the ordinary recurring-workload floor: building both compact
+column streams is one O(L+U) pass.  Measured H16/H24/H32 geometric ratios were
+1.005/1.002/0.999 when that setup was charged only to the candidate, while H64
+and H100 were 0.992 and 0.989.  One-thread measurements were neutral apart from
+the same setup cost, so automatic construction is confined to parallel
+lifecycles.  Allocation or range-check failure retains the established 64-bit
+worker, and `KLS_DISABLE_LEAN_I16_INDICES=1` remains the existing diagnostic
+fallback.
+
+The decisive comparison used one final executable on both sides, with compact
+indices enabled normally versus disabled by that diagnostic control.  Ten
+counterbalanced 100-update pairs over all twelve natural fused positives gave
+a 0.975 steady-refactor and 0.990 complete-H100 geometric ratio over the eleven
+numerically valid factors.  No valid matrix regressed by two percent in H100.
+An independent parent/current comparison that charged compact construction
+only to current gave 0.966 and 0.989.  Two- and four-thread parent/current
+checks gave 0.953/0.976 and 0.962/0.982 for steady refactor/H100.  Disabling
+AVX-512 still gave a 0.974 steady-refactor ratio and a neutral 0.998 H100,
+showing that compact scalar stream traffic is independently useful.
+
+The fourteen-matrix remaining-gap control retained identical executor routes
+and completed 14/14; its same-binary compact-enabled/disabled ratios were 1.000
+for steady refactor and 0.993 for H100.  Existing scalar fused functions and
+the ordinary fused worker retain their parent addresses and exact code sizes;
+the existing AVX-512 functions retain exact sizes.  New compact scalar and
+vector functions live in `.text.kls_i16_snode`, so unrelated hot code is not
+displaced.
+
+Release and ASan/UBSan CTest passed all four tests.  Forced compact execution
+under the sanitizers completed 440 independently checked 10-percent entrywise
+updates over the eleven valid natural factors, all on the row-refactor route,
+with a largest per-update relative residual of `1.29423314e-11` and no finding.
+GCC `-march=x86-64` and Clang syntax builds also pass (apart from the existing
+Clang uninitialized-thread warning), so the translation unit does not require
+the build host's vector ISA.

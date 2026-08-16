@@ -74263,6 +74263,58 @@ kls_lean_snode_target_width8_avx512(
   }
   return vector_length;
 }
+
+/* The compact row mirror stores the same checked target stream in 16 bits.
+   Widening eight targets from one 16-byte load cuts the index traffic of the
+   irregular update without changing the gather/scatter arithmetic. */
+__attribute__((target("avx512f,avx2"), noinline,
+               section(".text.kls_i16_snode"))) static UF_long
+kls_lean_snode_target_width8_i16_avx512(
+  UF_long run,
+  double *restrict x,
+  const uint16_t *restrict targets,
+  const double *const *restrict trailing_values,
+  const double *restrict multipliers,
+  UF_long length) {
+  if (run != 8u) {
+    return 0u;
+  }
+  const UF_long vector_length = length & ~(UF_long)7u;
+  const __m512d m0 = _mm512_set1_pd(multipliers[0]);
+  const __m512d mn1 = _mm512_set1_pd(-multipliers[1]);
+  const __m512d mn2 = _mm512_set1_pd(-multipliers[2]);
+  const __m512d mn3 = _mm512_set1_pd(-multipliers[3]);
+  const __m512d m4 = _mm512_set1_pd(multipliers[4]);
+  const __m512d m5 = _mm512_set1_pd(multipliers[5]);
+  const __m512d m6 = _mm512_set1_pd(multipliers[6]);
+  const __m512d m7 = _mm512_set1_pd(multipliers[7]);
+  for (UF_long offset = 0u; offset < vector_length; offset += 8u) {
+    const __m128i packed = _mm_loadu_si128(
+      (const __m128i *)(const void *)(targets + offset));
+    const __m256i indices = _mm256_cvtepu16_epi32(packed);
+    __m512d value = _mm512_i32gather_pd(indices, x, 8);
+    __m512d sum0 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[0] + offset), m0, value);
+    __m512d sum1 = _mm512_mul_pd(
+      _mm512_loadu_pd(trailing_values[1] + offset), mn1);
+    __m512d sum2 = _mm512_mul_pd(
+      _mm512_loadu_pd(trailing_values[2] + offset), mn2);
+    __m512d sum3 = _mm512_mul_pd(
+      _mm512_loadu_pd(trailing_values[3] + offset), mn3);
+    sum0 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[4] + offset), m4, sum0);
+    sum1 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[5] + offset), m5, sum1);
+    sum2 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[6] + offset), m6, sum2);
+    sum3 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[7] + offset), m7, sum3);
+    value = _mm512_add_pd(_mm512_add_pd(sum0, sum1),
+                          _mm512_add_pd(sum2, sum3));
+    _mm512_i32scatter_pd(x, indices, value, 8);
+  }
+  return vector_length;
+}
 #endif
 
 static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
@@ -74274,10 +74326,12 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   double **restrict l_lu,
   const UF_long *restrict u_ptr,
   const UF_long *restrict u_cols,
+  const uint16_t *restrict u_cols16,
   const double *restrict u_values,
   const double *restrict udiag,
   int balanced_target_sum,
-  int avx512_target) {
+  int avx512_target,
+  int compact_targets) {
   if (run < 2u || run > 8u) {
     return 0u;
   }
@@ -74317,9 +74371,15 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   UF_long target_offset_begin = 0u;
 #if KLS_HAVE_AVX512_KERNELS
   if (avx512_target && balanced_target_sum && run == 8u) {
-    target_offset_begin = kls_lean_snode_target_width8_avx512(
-      run, x, u_cols + trailing_begin, trailing_values,
-      multipliers, trailing_len);
+    if (compact_targets) {
+      target_offset_begin = kls_lean_snode_target_width8_i16_avx512(
+        run, x, u_cols16 + trailing_begin, trailing_values,
+        multipliers, trailing_len);
+    } else {
+      target_offset_begin = kls_lean_snode_target_width8_avx512(
+        run, x, u_cols + trailing_begin, trailing_values,
+        multipliers, trailing_len);
+    }
   }
 #else
   (void)avx512_target;
@@ -74328,7 +74388,9 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   do {                                                                    \
     for (UF_long offset = target_offset_begin;                            \
          offset < trailing_len; ++offset) {                               \
-      const UF_long target = u_cols[trailing_begin + offset];             \
+      const UF_long target = compact_targets                              \
+        ? (UF_long)u_cols16[trailing_begin + offset]                      \
+        : u_cols[trailing_begin + offset];                                \
       double value = x[target];                                           \
       __VA_ARGS__                                                         \
       x[target] = value;                                                  \
@@ -74495,8 +74557,8 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
     const double *restrict u_values,                                      \
     const double *restrict udiag) {                                       \
     return kls_lean_row_refactor_snode_step_impl(                         \
-      p, (width), dep0, x, NULL, l_lu, u_ptr, u_cols, u_values, udiag,     \
-      1, 0);                                                              \
+      p, (width), dep0, x, NULL, l_lu, u_ptr, u_cols, NULL, u_values,      \
+      udiag, 1, 0, 0);                                                    \
   }
 
 KLS_DEFINE_LEAN_SNODE_WIDTH(2u)
@@ -74519,9 +74581,60 @@ kls_lean_row_refactor_snode_step_width_8u_avx512(
   const double *restrict u_values,
   const double *restrict udiag) {
   return kls_lean_row_refactor_snode_step_impl(
-    p, 8u, dep0, x, NULL, l_lu, u_ptr, u_cols, u_values, udiag, 1, 1);
+    p, 8u, dep0, x, NULL, l_lu, u_ptr, u_cols, NULL, u_values, udiag,
+    1, 1, 0);
 }
 #endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define KLS_LEAN_SNODE_I16_WIDTH_ATTR                                    \
+  __attribute__((noinline, hot, section(".text.kls_i16_snode")))
+#else
+#define KLS_LEAN_SNODE_I16_WIDTH_ATTR
+#endif
+#define KLS_DEFINE_LEAN_SNODE_I16_WIDTH(width)                            \
+  KLS_LEAN_SNODE_I16_WIDTH_ATTR                                           \
+  static UF_long kls_lean_row_refactor_snode_step_i16_width_##width(      \
+    UF_long p,                                                            \
+    UF_long dep0,                                                         \
+    double *restrict x,                                                   \
+    double **restrict l_lu,                                               \
+    const UF_long *restrict u_ptr,                                        \
+    const uint16_t *restrict u_cols16,                                    \
+    const double *restrict u_values,                                      \
+    const double *restrict udiag) {                                       \
+    return kls_lean_row_refactor_snode_step_impl(                         \
+      p, (width), dep0, x, NULL, l_lu, u_ptr, NULL, u_cols16, u_values,   \
+      udiag, 1, 0, 1);                                                    \
+  }
+
+KLS_DEFINE_LEAN_SNODE_I16_WIDTH(2u)
+KLS_DEFINE_LEAN_SNODE_I16_WIDTH(3u)
+KLS_DEFINE_LEAN_SNODE_I16_WIDTH(4u)
+KLS_DEFINE_LEAN_SNODE_I16_WIDTH(5u)
+KLS_DEFINE_LEAN_SNODE_I16_WIDTH(6u)
+KLS_DEFINE_LEAN_SNODE_I16_WIDTH(7u)
+KLS_DEFINE_LEAN_SNODE_I16_WIDTH(8u)
+
+#if KLS_HAVE_AVX512_KERNELS
+__attribute__((noinline, section(".text.kls_i16_snode"))) static UF_long
+kls_lean_row_refactor_snode_step_i16_width_8u_avx512(
+  UF_long p,
+  UF_long dep0,
+  double *restrict x,
+  double **restrict l_lu,
+  const UF_long *restrict u_ptr,
+  const uint16_t *restrict u_cols16,
+  const double *restrict u_values,
+  const double *restrict udiag) {
+  return kls_lean_row_refactor_snode_step_impl(
+    p, 8u, dep0, x, NULL, l_lu, u_ptr, NULL, u_cols16, u_values, udiag,
+    1, 1, 1);
+}
+#endif
+
+#undef KLS_DEFINE_LEAN_SNODE_I16_WIDTH
+#undef KLS_LEAN_SNODE_I16_WIDTH_ATTR
 
 #undef KLS_DEFINE_LEAN_SNODE_WIDTH
 #undef KLS_LEAN_SNODE_WIDTH_ATTR
@@ -74571,6 +74684,49 @@ kls_lean_row_refactor_snode_step_width_specialized(
       return 0u;
   }
 #undef KLS_LEAN_SNODE_WIDTH_CASE
+}
+
+static KLS_ALWAYS_INLINE UF_long
+kls_lean_row_refactor_snode_step_i16_width_specialized(
+  UF_long p,
+  UF_long run,
+  UF_long dep0,
+  double *restrict x,
+  double **restrict l_lu,
+  const UF_long *restrict u_ptr,
+  const uint16_t *restrict u_cols16,
+  const double *restrict u_values,
+  const double *restrict udiag,
+  int avx512_target) {
+#if !KLS_HAVE_AVX512_KERNELS
+  (void)avx512_target;
+#endif
+#define KLS_LEAN_SNODE_I16_WIDTH_CASE(width)                              \
+    case (width):                                                         \
+      return kls_lean_row_refactor_snode_step_i16_width_##width(          \
+        p, dep0, x, l_lu, u_ptr, u_cols16, u_values, udiag)
+  switch (run) {
+    KLS_LEAN_SNODE_I16_WIDTH_CASE(2u);
+    KLS_LEAN_SNODE_I16_WIDTH_CASE(3u);
+    KLS_LEAN_SNODE_I16_WIDTH_CASE(4u);
+    KLS_LEAN_SNODE_I16_WIDTH_CASE(5u);
+    KLS_LEAN_SNODE_I16_WIDTH_CASE(6u);
+    KLS_LEAN_SNODE_I16_WIDTH_CASE(7u);
+    case 8u:
+#if KLS_HAVE_AVX512_KERNELS
+      if (avx512_target &&
+          u_ptr[dep0 + 8u] - u_ptr[dep0 + 7u] >=
+            KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
+        return kls_lean_row_refactor_snode_step_i16_width_8u_avx512(
+          p, dep0, x, l_lu, u_ptr, u_cols16, u_values, udiag);
+      }
+#endif
+      return kls_lean_row_refactor_snode_step_i16_width_8u(
+        p, dep0, x, l_lu, u_ptr, u_cols16, u_values, udiag);
+    default:
+      return 0u;
+  }
+#undef KLS_LEAN_SNODE_I16_WIDTH_CASE
 }
 
 typedef struct {
@@ -75637,7 +75793,8 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
   unsigned int generation,
   const UF_long *restrict rows,
   UF_long stride,
-  int avx512_target) {
+  int avx512_target,
+  int compact_cols) {
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
   const UF_long n = solver->n;
@@ -75651,9 +75808,11 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     solver->row_refactor_input_col_user32;
   const UF_long *restrict l_ptr = solver->row_refactor_l_ptr;
   const UF_long *restrict l_cols = solver->row_refactor_l_cols;
+  const uint16_t *restrict l_cols16 = solver->row_refactor_l_cols16;
   double **restrict l_lu = solver->row_refactor_l_values;
   const UF_long *restrict u_ptr = solver->row_refactor_u_ptr;
   const UF_long *restrict u_cols = solver->row_refactor_u_cols;
+  const uint16_t *restrict u_cols16 = solver->row_refactor_u_cols16;
   double *restrict u_val = solver->row_refactor_u_row_values;
   double **restrict u_lu = solver->row_refactor_u_values;
   double *restrict udiag = (double *)solver->numeric->Udiag;
@@ -75689,7 +75848,8 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
             }
 #endif
             mask &= mask - 1u;
-            const UF_long dep = l_cols[p + local];
+            const UF_long dep = compact_cols
+              ? (UF_long)l_cols16[p + local] : l_cols[p + local];
             unsigned spin = 0u;
             while (atomic_load_explicit(&done[dep].generation,
                                         memory_order_acquire) != generation) {
@@ -75703,7 +75863,8 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
           }
         } else {
           for (UF_long local = 0u; local < run; ++local) {
-            const UF_long dep = l_cols[p + local];
+            const UF_long dep = compact_cols
+              ? (UF_long)l_cols16[p + local] : l_cols[p + local];
             if (done[dep].owner != tid) {
               unsigned spin = 0u;
               while (atomic_load_explicit(&done[dep].generation,
@@ -75719,16 +75880,24 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
             }
           }
         }
-        if (kls_lean_row_refactor_snode_step_width_specialized(
-              p, run, l_cols[p], x, l_lu,
-              u_ptr, u_cols, u_val, udiag, avx512_target) != run) {
+        const UF_long dep0 = compact_cols
+          ? (UF_long)l_cols16[p] : l_cols[p];
+        const UF_long completed = compact_cols
+          ? kls_lean_row_refactor_snode_step_i16_width_specialized(
+              p, run, dep0, x, l_lu,
+              u_ptr, u_cols16, u_val, udiag, avx512_target)
+          : kls_lean_row_refactor_snode_step_width_specialized(
+              p, run, dep0, x, l_lu,
+              u_ptr, u_cols, u_val, udiag, avx512_target);
+        if (completed != run) {
           kls_egraph_refactor_record_invalid(shared);
           return;
         }
         p += run;
         continue;
       }
-      const UF_long dep = l_cols[p];
+      const UF_long dep = compact_cols
+        ? (UF_long)l_cols16[p] : l_cols[p];
       if (done[dep].owner != tid) {
         unsigned spin = 0u;
         while (atomic_load_explicit(&done[dep].generation,
@@ -75746,7 +75915,8 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
       *l_lu[p] = lik;
       if (lik != 0.0) {
         for (UF_long q = u_ptr[dep]; q < u_ptr[dep + 1u]; ++q) {
-          const UF_long col = u_cols[q];
+          const UF_long col = compact_cols
+            ? (UF_long)u_cols16[q] : u_cols[q];
           x[col] = fma(-lik, u_val[q], x[col]);
         }
       }
@@ -75756,7 +75926,8 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     x[row] = 0.0;
     udiag[row] = pivot;
     for (UF_long q = u_ptr[row]; q < u_ptr[row + 1u]; ++q) {
-      const UF_long col = u_cols[q];
+      const UF_long col = compact_cols
+        ? (UF_long)u_cols16[q] : u_cols[q];
       const double value = x[col];
       u_val[q] = value;
       *u_lu[q] = value;
@@ -75786,7 +75957,7 @@ kls_symmetric_scalar_fringe_hoisted_worker_run(
   const UF_long *restrict rows,
   UF_long stride) {
   kls_symmetric_scalar_fringe_hoisted_worker_core(
-    worker, generation, rows, stride, 0);
+    worker, generation, rows, stride, 0, 0);
 }
 
 #if KLS_HAVE_AVX512_KERNELS
@@ -75797,7 +75968,31 @@ kls_symmetric_scalar_fringe_hoisted_worker_run_avx512(
   const UF_long *restrict rows,
   UF_long stride) {
   kls_symmetric_scalar_fringe_hoisted_worker_core(
-    worker, generation, rows, stride, 1);
+    worker, generation, rows, stride, 1, 0);
+}
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, section(".text.kls_i16_snode")))
+#endif
+static void kls_symmetric_scalar_fringe_hoisted_worker_run_i16(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_symmetric_scalar_fringe_hoisted_worker_core(
+    worker, generation, rows, stride, 0, 1);
+}
+
+#if KLS_HAVE_AVX512_KERNELS
+__attribute__((noinline, section(".text.kls_i16_snode"))) static void
+kls_symmetric_scalar_fringe_hoisted_worker_run_i16_avx512(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_symmetric_scalar_fringe_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 1);
 }
 #endif
 
@@ -77162,8 +77357,18 @@ static void kls_lean_parallel_worker_run(
     solver->row_refactor_u_row_values != NULL &&
     solver->numeric != NULL && solver->numeric->Udiag != NULL;
   if (symmetric_scalar_fringe_hoisted_worker) {
+    const int compact_snode_cols =
+      solver->row_refactor_l_cols16 != NULL &&
+      solver->row_refactor_u_cols16 != NULL;
 #if KLS_HAVE_AVX512_KERNELS
-    if (shared->lean_snode_avx512_enabled) {
+    if (compact_snode_cols && shared->lean_snode_avx512_enabled &&
+        __builtin_cpu_supports("avx2")) {
+      kls_symmetric_scalar_fringe_hoisted_worker_run_i16_avx512(
+        worker, generation, rows, stride);
+    } else if (compact_snode_cols) {
+      kls_symmetric_scalar_fringe_hoisted_worker_run_i16(
+        worker, generation, rows, stride);
+    } else if (shared->lean_snode_avx512_enabled) {
       kls_symmetric_scalar_fringe_hoisted_worker_run_avx512(
         worker, generation, rows, stride);
     } else {
@@ -77171,8 +77376,13 @@ static void kls_lean_parallel_worker_run(
         worker, generation, rows, stride);
     }
 #else
-    kls_symmetric_scalar_fringe_hoisted_worker_run(
-      worker, generation, rows, stride);
+    if (compact_snode_cols) {
+      kls_symmetric_scalar_fringe_hoisted_worker_run_i16(
+        worker, generation, rows, stride);
+    } else {
+      kls_symmetric_scalar_fringe_hoisted_worker_run(
+        worker, generation, rows, stride);
+    }
 #endif
     if (!kls_lean_parallel_refresh_offdiag_worker(worker, stride)) {
       kls_egraph_refactor_record_invalid(shared);
@@ -77840,6 +78050,14 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     solver->numeric->lnz <= (UF_long)UINT16_MAX &&
     solver->numeric->unz <= (UF_long)UINT16_MAX &&
     !generic_supernode_values;
+  const int generic_snode_i16_capable =
+    generic_supernode_values &&
+    /* Building both compact column streams is a one-time O(L+U) pass.  The
+       measured crossover is above the generic recurring-workload floor, so
+       require a lifecycle long enough to amortize that representation. */
+    solver->options.expected_refactorizations >= 64 &&
+    solver->options.threads > 1 &&
+    solver->n <= (UF_long)UINT16_MAX + 1u;
   const int scaled_hoisted_i16_capable =
     scaled && !generic_supernode_values &&
     kls_repeated_update_workload(&solver->options) &&
@@ -77847,7 +78065,8 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL &&
     getenv("KLS_DISABLE_SCALED_LEAN_I16_INDICES") == NULL;
   if (getenv("KLS_DISABLE_LEAN_I16_INDICES") == NULL &&
-      (generic_i16_capable || scaled_hoisted_i16_capable ||
+      (generic_i16_capable || generic_snode_i16_capable ||
+       scaled_hoisted_i16_capable ||
        getenv("KLS_ENABLE_LEAN_I16_INDICES") != NULL)) {
     (void)kls_build_lean_row_i16_indices(solver);
   }
