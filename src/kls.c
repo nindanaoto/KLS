@@ -50,6 +50,8 @@
 #define KLS_ALWAYS_INLINE inline
 #endif
 
+enum { KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES = 4 };
+
 /* Pause hint for atomic spin waits: keeps a blocked worker from hammering
    the shared cache line at full speed and starving the producing thread of
    memory bandwidth. */
@@ -836,9 +838,10 @@ struct kls_solver {
   int lean_pair_active;
   double lean_probe_min[3];
   int lean_reaudit_state; /* generic timed lean verdict: 0 collect selected,
-                             1/3 arm incumbent, 2/4 record it, 5 settled;
+                             1/3 arm incumbent, 2/4 record it, 6 await its
+                             final solve, 5 settled;
                              10 collect incumbent, 11/13 arm declined row,
-                             12/14 record it */
+                             12/14 record it, 15 await its final solve */
   int lean_reaudit_samples;
   double lean_reaudit_seconds;
   int lean_reaudit_column_samples;
@@ -847,8 +850,8 @@ struct kls_solver {
   double lean_reaudit_row_min;
   int lean_reaudit_row_samples;
   double lean_reaudit_candidate_row_seconds;
-  int lean_reaudit_pending_side; /* 0 none, 1 column, 2 declined-row arm:
-                                    refactor awaits its following solve */
+  int lean_reaudit_pending_side; /* 0 none, 1 column, 2 row arm:
+                                    sampled refactor awaits its solve */
   int lean_reaudit_column_solve_samples;
   double lean_reaudit_column_solve_min;
   int lean_reaudit_row_solve_samples;
@@ -897,6 +900,7 @@ struct kls_solver {
   double *solve_refine_values;
   double *retained_preconditioner_reference_values;
   int retained_preconditioner_active;
+  int retained_preconditioner_numeric_current;
   int bounded_degree_retained_preconditioner_candidate;
   double *verified_rhs;
   double *verified_factor_rhs;
@@ -27780,9 +27784,12 @@ static void free_solve_refine_workspace(kls_solver *solver) {
 }
 
 static void kls_clear_retained_preconditioner(kls_solver *solver) {
-  if (solver == NULL ||
-      (solver->retained_preconditioner_reference_values == NULL &&
-       !solver->retained_preconditioner_active)) {
+  if (solver == NULL) {
+    return;
+  }
+  solver->retained_preconditioner_numeric_current = 0;
+  if (solver->retained_preconditioner_reference_values == NULL &&
+      !solver->retained_preconditioner_active) {
     return;
   }
   free(solver->retained_preconditioner_reference_values);
@@ -28369,6 +28376,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->promoted_tolerance_l2_recovery_count = 0u;
   solver->retained_preconditioner_reference_values = NULL;
   solver->retained_preconditioner_active = 0;
+  solver->retained_preconditioner_numeric_current = 0;
   solver->solve_refine_csc_ptr16 = NULL;
   solver->solve_refine_csc_row16 = NULL;
   solver->solve_refine_csc_state = 0;
@@ -32142,6 +32150,8 @@ static int kls_bounded_degree_retained_preconditioner_factor_profile(
 static int kls_bounded_degree_retained_preconditioner_factor_cycle(
   const kls_solver *solver);
 static int kls_bounded_degree_retained_preconditioner_enabled(
+  const kls_solver *solver);
+static int kls_retained_preconditioner_requires_correction(
   const kls_solver *solver);
 static void kls_bounded_degree_arm_retained_preconditioner(
   kls_solver *solver, const double *numeric_values);
@@ -53426,7 +53436,10 @@ static int maybe_factor_generic_btf_value_alternative(
       return 0;
     }
     solver->lean_choice = 1;
-    solver->lean_reaudit_state = 5;
+    /* The replacement factor proves row-executor capability and recurring
+       work economics, not the solve cost of its row representation.  Keep
+       the choice provisional until the ordinary 4+4 lifecycle audit. */
+    solver->lean_reaudit_state = 0;
   }
   kls_metis_race_abandon(solver);
   kls_separator_analysis_clear(&old_separator);
@@ -61690,9 +61703,43 @@ static int kls_try_fast_reject_kls_first_rebuild(kls_solver *solver,
   return 1;
 }
 
+typedef enum {
+  KLS_FAST_REJECT_REPAIR_DEFAULT = 0,
+  KLS_FAST_REJECT_REPAIR_ETREE = 1,
+  KLS_FAST_REJECT_REPAIR_SERIAL = 2,
+  KLS_FAST_REJECT_REPAIR_BLOCK = 3,
+  KLS_FAST_REJECT_REPAIR_FULL = 4
+} kls_fast_reject_repair_mode;
+
+/* Diagnostic control consulted only after a checked factor has rejected a
+   pivot.  It isolates the bounded ETree row pipeline from the serial exact
+   tail, whole rejected-block KLU, and whole-numeric KLU fallbacks without
+   putting an environment lookup on the successful fixed-pattern path. */
+static kls_fast_reject_repair_mode kls_fast_reject_repair_mode_from_env(void) {
+  const char *value = getenv("KLS_FAST_REJECT_REPAIR_MODE");
+  if (value == NULL || value[0] == '\0') {
+    return KLS_FAST_REJECT_REPAIR_DEFAULT;
+  }
+  if (strcmp(value, "etree") == 0) {
+    return KLS_FAST_REJECT_REPAIR_ETREE;
+  }
+  if (strcmp(value, "serial") == 0) {
+    return KLS_FAST_REJECT_REPAIR_SERIAL;
+  }
+  if (strcmp(value, "block") == 0) {
+    return KLS_FAST_REJECT_REPAIR_BLOCK;
+  }
+  if (strcmp(value, "full") == 0) {
+    return KLS_FAST_REJECT_REPAIR_FULL;
+  }
+  return KLS_FAST_REJECT_REPAIR_DEFAULT;
+}
+
 static int kls_pivot_restart_rejected_block(kls_solver *solver,
                                             double *numeric_values,
-                                            UF_long rejected_pivot) {
+                                            UF_long rejected_pivot,
+                                            kls_fast_reject_repair_mode
+                                              repair_mode) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || rejected_pivot == KLS_KLU_EMPTY ||
       solver->symbolic->R == NULL || solver->symbolic->P == NULL ||
@@ -61824,8 +61871,23 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   }
   int kls_block_restart_used = 0;
   int kls_row_first_block_rebuild_tried = 0;
+  const int allow_partial_repair =
+    repair_mode != KLS_FAST_REJECT_REPAIR_BLOCK;
+  const int allow_row_pipeline =
+    repair_mode != KLS_FAST_REJECT_REPAIR_SERIAL;
+  const int allow_kls_first_rebuild =
+    repair_mode != KLS_FAST_REJECT_REPAIR_SERIAL;
   const int prefer_row_pipeline_block_repair =
+    allow_partial_repair && allow_row_pipeline &&
     solver->options.threads > 1 && nk > 1u;
+  if (getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
+    fprintf(stderr,
+            "KLS rejected-block repair dispatch: mode=%d threads=%d nk=%ld"
+            " row_pipeline=%d masked_tail=%d restart_end=%ld\n",
+            (int)repair_mode, solver->options.threads, (long)nk,
+            prefer_row_pipeline_block_repair, can_try_masked_tail,
+            (long)preferred_restart_end);
+  }
   if (prefer_row_pipeline_block_repair) {
     kls_row_first_block_rebuild_tried = 1;
     if (kls_try_row_first_rebuild_rejected_block(
@@ -61835,7 +61897,8 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       return 1;
     }
   }
-  if (preferred_restart_end < nk || can_try_masked_tail) {
+  if (allow_partial_repair &&
+      (preferred_restart_end < nk || can_try_masked_tail)) {
     unsigned char *tail_mask = NULL;
     UF_long *saved_ptrs = NULL;
     Entry *saved_udiag = NULL;
@@ -61918,7 +61981,8 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     free(saved_ptrs);
     free(saved_udiag);
   }
-  if (!kls_block_restart_used && can_try_masked_tail &&
+  if (allow_partial_repair && !kls_block_restart_used &&
+      allow_row_pipeline && can_try_masked_tail &&
       solver->stats.fast_rejected_pivoting_tail_topological) {
     kls_row_first_block_rebuild_tried = 1;
     if (kls_try_row_first_rebuild_rejected_block(
@@ -61928,13 +61992,14 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       return 1;
     }
   }
-  if (!kls_block_restart_used && can_try_masked_tail &&
+  if (allow_partial_repair && !kls_block_restart_used &&
+      allow_kls_first_rebuild && can_try_masked_tail &&
       solver->stats.fast_rejected_pivoting_tail_topological &&
       kls_try_fast_reject_kls_first_rebuild(solver, numeric_values)) {
     free(old_pblock);
     return 1;
   }
-  if (!kls_block_restart_used) {
+  if (allow_partial_repair && !kls_block_restart_used) {
     UF_long *saved_ptrs = NULL;
     Entry *saved_udiag = NULL;
     const size_t nk_size = (size_t)nk;
@@ -61995,7 +62060,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
              (size_t)nk * sizeof(*saved_ulen));
       memcpy(((Entry *)solver->numeric->Udiag) + k1, saved_udiag,
              (size_t)nk * sizeof(*saved_udiag));
-      if (!kls_row_first_block_rebuild_tried) {
+      if (allow_row_pipeline && !kls_row_first_block_rebuild_tried) {
         kls_row_first_block_rebuild_tried = 1;
         if (kls_try_row_first_rebuild_rejected_block(
               solver, numeric_values, block, k1, nk, rejected_pivot,
@@ -62006,7 +62071,8 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
           return 1;
         }
       }
-      if (kls_try_fast_reject_kls_first_rebuild(solver, numeric_values)) {
+      if (allow_kls_first_rebuild &&
+          kls_try_fast_reject_kls_first_rebuild(solver, numeric_values)) {
         free(saved_ptrs);
         free(saved_udiag);
         free(old_pblock);
@@ -80366,25 +80432,120 @@ static void kls_row_refactor_acceptance_record_solve(kls_solver *solver,
   kls_row_refactor_acceptance_try_decide(solver);
 }
 
-/* Pair the close declined-lean re-audit with the solve that immediately
-   follows each sampled numeric.  A row representation can be neutral in
+static void kls_selected_lean_reaudit_finish(kls_solver *solver) {
+  const int solve_pair_ready =
+    solver->lean_reaudit_column_solve_samples >=
+      solver->lean_reaudit_column_samples &&
+    solver->lean_reaudit_row_solve_samples >=
+      solver->lean_reaudit_row_samples &&
+    solver->lean_reaudit_column_solve_min > 0.0 &&
+    solver->lean_reaudit_row_solve_min > 0.0;
+  const double row_ref = solver->lean_reaudit_row_min > 0.0
+    ? solver->lean_reaudit_row_min
+    : (solver->lean_reaudit_samples > 0
+         ? solver->lean_reaudit_seconds /
+             (double)solver->lean_reaudit_samples
+         : 0.0);
+  const double row_cycle = row_ref +
+    (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
+  const double column_cycle = solver->lean_reaudit_column_min +
+    (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
+  const double margin = solve_pair_ready ? 0.98 : 0.95;
+  const int64_t measured_refactors =
+    (int64_t)solver->lean_reaudit_samples +
+    (int64_t)solver->lean_reaudit_column_samples;
+  const double remaining =
+    solver->options.expected_refactorizations > measured_refactors
+      ? (double)(solver->options.expected_refactorizations -
+                 measured_refactors)
+      : 0.0;
+  const double remaining_saving =
+    remaining * (row_cycle - column_cycle);
+  const double column_sample_work =
+    (double)solver->lean_reaudit_column_samples * column_cycle;
+  if (row_cycle > 0.0 && column_cycle > 0.0 &&
+      column_cycle < margin * row_cycle) {
+    /* The challenger cycles replaced ordinary recurring work; they are not
+       an extra setup bill that the remaining lifecycle must repay.  Once
+       four complete cycles establish a guarded win, retaining the slower
+       provisional row arm would only compound the mistake. */
+    solver->lean_choice = -1;
+    solver->lean_probe_arm = 0;
+    solver->lean_pair_active = 0;
+  }
+  solver->lean_reaudit_pending_side = 0;
+  solver->lean_reaudit_state = 5;
+  if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
+    fprintf(stderr,
+            "KLS selected lean lifecycle re-audit: ref %.3f/%.3f ms "
+            "solve %.3f/%.3f ms remaining %.3f/column-samples "
+            "%.3f ms -> %s\n",
+            1e3 * row_ref, 1e3 * solver->lean_reaudit_column_min,
+            1e3 * solver->lean_reaudit_row_solve_min,
+            1e3 * solver->lean_reaudit_column_solve_min,
+            1e3 * remaining_saving, 1e3 * column_sample_work,
+            solver->lean_choice < 0 ? "COLUMN" : "LEAN");
+  }
+}
+
+static void kls_declined_lean_reaudit_finish(kls_solver *solver) {
+  const int solve_pair_ready =
+    solver->lean_reaudit_column_solve_samples >=
+      solver->lean_reaudit_column_samples &&
+    solver->lean_reaudit_row_solve_samples >=
+      solver->lean_reaudit_row_samples &&
+    solver->lean_reaudit_column_solve_min > 0.0 &&
+    solver->lean_reaudit_row_solve_min > 0.0;
+  const double column_cycle = solver->lean_reaudit_column_min +
+    (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
+  const double row_cycle = solver->lean_reaudit_row_min +
+    (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
+  const double adoption_margin = solve_pair_ready ? 0.98 : 0.95;
+  if (solver->lean_reaudit_column_samples >=
+        KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES &&
+      solver->lean_reaudit_row_samples >=
+        KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES &&
+      solver->lean_reaudit_column_min > 0.0 &&
+      solver->lean_reaudit_row_min > 0.0 &&
+      row_cycle < adoption_margin * column_cycle) {
+    solver->lean_choice = solver->lean_reaudit_row_arm;
+    solver->lean_pair_active = solver->lean_choice == 2;
+  }
+  solver->lean_reaudit_pending_side = 0;
+  solver->lean_reaudit_state = 5;
+  if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
+    fprintf(stderr,
+            "KLS declined lean lifecycle re-audit: ref %.3f/%.3f ms "
+            "solve %.3f/%.3f ms over %d row samples -> %s\n",
+            1e3 * solver->lean_reaudit_column_min,
+            1e3 * solver->lean_reaudit_row_min,
+            1e3 * solver->lean_reaudit_column_solve_min,
+            1e3 * solver->lean_reaudit_row_solve_min,
+            solver->lean_reaudit_row_samples,
+            solver->lean_choice > 0 ? "LEAN" : "COLUMN");
+  }
+}
+
+/* Pair a lean lifecycle re-audit with the solve that immediately follows
+   each sampled numeric.  A row representation can be neutral in
    refactor time yet materially cheaper to solve, while another row engine
    with identical factor work can be much worse.  Recording the realized
    public lifecycle lets the later verdict distinguish those cases without
    inferring anything from matrix dimensions or sparsity shape. */
-static void kls_declined_lean_reaudit_record_solve(kls_solver *solver,
-                                                   double seconds) {
+static void kls_lean_reaudit_record_solve(kls_solver *solver,
+                                          double seconds) {
   if (solver == NULL || solver->lean_reaudit_pending_side == 0 ||
       !(seconds > 0.0) || !isfinite(seconds)) {
     return;
   }
-  if (solver->lean_reaudit_pending_side == 1) {
+  const int side = solver->lean_reaudit_pending_side;
+  if (side == 1) {
     if (solver->lean_reaudit_column_solve_samples == 0 ||
         seconds < solver->lean_reaudit_column_solve_min) {
       solver->lean_reaudit_column_solve_min = seconds;
     }
     solver->lean_reaudit_column_solve_samples++;
-  } else if (solver->lean_reaudit_pending_side == 2) {
+  } else if (side == 2) {
     if (solver->lean_reaudit_row_solve_samples == 0 ||
         seconds < solver->lean_reaudit_row_solve_min) {
       solver->lean_reaudit_row_solve_min = seconds;
@@ -80392,6 +80553,11 @@ static void kls_declined_lean_reaudit_record_solve(kls_solver *solver,
     solver->lean_reaudit_row_solve_samples++;
   }
   solver->lean_reaudit_pending_side = 0;
+  if (solver->lean_reaudit_state == 6 && side == 1) {
+    kls_selected_lean_reaudit_finish(solver);
+  } else if (solver->lean_reaudit_state == 15 && side == 2) {
+    kls_declined_lean_reaudit_finish(solver);
+  }
 }
 
 /* Post-adoption audit of the row-value solve. The pair verdict is two
@@ -134186,8 +134352,12 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
       return 0;
     }
     const UF_long rejected_pivot = (UF_long)solver->stats.fast_rejected_pivot;
-    if (kls_measured_full_factor_beats_repair(
-          solver, rejected_pivot, checked_seconds)) {
+    const kls_fast_reject_repair_mode repair_mode =
+      kls_fast_reject_repair_mode_from_env();
+    if (repair_mode == KLS_FAST_REJECT_REPAIR_FULL ||
+        (repair_mode == KLS_FAST_REJECT_REPAIR_DEFAULT &&
+         kls_measured_full_factor_beats_repair(
+           solver, rejected_pivot, checked_seconds))) {
       solver->full_factor_preferred = 1;
       return 0;
     }
@@ -134203,7 +134373,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     const int kls_rebuild_restarts_before =
       solver->fast_kls_rebuild_restarts;
     if (!kls_pivot_restart_rejected_block(
-          solver, numeric_values, rejected_pivot)) {
+          solver, numeric_values, rejected_pivot, repair_mode)) {
       return 0;
     }
     /* The restart re-pivoted and reallocated block storage (the
@@ -154514,7 +154684,8 @@ static int kls_row_first_parallel_seed_preserved_rows(
       row_done == NULL || worker->udiag_values == NULL ||
       worker->shared->psinv == NULL || active_begin > active_end ||
       active_end > nk ||
-      block >= worker->shared->numeric->nblocks) {
+      block >= worker->shared->numeric->nblocks ||
+      nk > (UF_long)(KLS_MAX_ALLOCATION / sizeof(UF_long))) {
     return 0;
   }
   if (active_begin == 0u && active_end == nk) {
@@ -154584,6 +154755,95 @@ static int kls_row_first_parallel_seed_preserved_rows(
     }
   }
 
+  /* Transpose preserved strict-U entries in two linear passes.  The older
+     row-at-a-time seed rescanned every later U column for every preserved
+     row, making a small late ETree tail more expensive than a whole-block
+     factor.  Count row buckets once, reserve once, then fill the same
+     contiguous row representation while maintaining the column links used
+     by dynamic pivot updates. */
+  const size_t nk_size = (size_t)nk;
+  UF_long *preserved_u_count =
+    (UF_long *)malloc(nk_size * sizeof(*preserved_u_count));
+  UF_long *preserved_u_offset =
+    (UF_long *)malloc(nk_size * sizeof(*preserved_u_offset));
+  if ((nk > 0u && preserved_u_count == NULL) ||
+      (nk > 0u && preserved_u_offset == NULL)) {
+    free(preserved_u_count);
+    free(preserved_u_offset);
+    return 0;
+  }
+  if (nk_size > 0u) {
+    memset(preserved_u_count, 0,
+           nk_size * sizeof(*preserved_u_count));
+  }
+  int preserved_u_ok = 1;
+  for (UF_long col = 0; col < nk && preserved_u_ok; ++col) {
+    UF_long *ui = NULL;
+    Entry *ux = NULL;
+    UF_long u_len = 0;
+    kls_klu_get_pointer((double *)lu, uip, ulen, col, &ui, &ux, &u_len);
+    for (UF_long p = 0; p < u_len; ++p) {
+      const UF_long row = ui[p];
+      if (row >= nk || row >= col) {
+        preserved_u_ok = 0;
+        break;
+      }
+      const int row_active = active_mask != NULL
+        ? active_mask[row] != 0u
+        : (row >= active_begin && row < active_end);
+      if (!row_active) {
+        if (preserved_u_count[row] == UF_long_max) {
+          preserved_u_ok = 0;
+          break;
+        }
+        preserved_u_count[row]++;
+      }
+    }
+  }
+  UF_long preserved_u_total = 0u;
+  for (UF_long row = 0; row < nk && preserved_u_ok; ++row) {
+    preserved_u_offset[row] = preserved_u_total;
+    if (preserved_u_count[row] > UF_long_max - preserved_u_total) {
+      preserved_u_ok = 0;
+      break;
+    }
+    preserved_u_total += preserved_u_count[row];
+  }
+  const UF_long preserved_u_base = u_entries->count;
+  if (!preserved_u_ok ||
+      !kls_row_first_entries_reserve_append(u_entries,
+                                            preserved_u_total)) {
+    free(preserved_u_count);
+    free(preserved_u_offset);
+    return 0;
+  }
+  for (UF_long col = 0; col < nk; ++col) {
+    UF_long *ui = NULL;
+    Entry *ux = NULL;
+    UF_long u_len = 0;
+    kls_klu_get_pointer((double *)lu, uip, ulen, col, &ui, &ux, &u_len);
+    for (UF_long p = 0; p < u_len; ++p) {
+      const UF_long row = ui[p];
+      const int row_active = active_mask != NULL
+        ? active_mask[row] != 0u
+        : (row >= active_begin && row < active_end);
+      if (row_active) {
+        continue;
+      }
+      const UF_long pos = preserved_u_base + preserved_u_offset[row]++;
+      u_entries->row[pos] = row;
+      u_entries->col[pos] = col;
+      u_entries->value[pos] = ux[p];
+      if (u_entries->col_count != NULL) {
+        u_entries->col_count[col]++;
+      }
+      if (u_entries->col_head != NULL) {
+        u_entries->next[pos] = u_entries->col_head[col];
+        u_entries->col_head[col] = pos;
+      }
+    }
+  }
+  u_entries->count = preserved_u_base + preserved_u_total;
   for (UF_long row = 0; row < nk; ++row) {
     const int row_active = active_mask != NULL
       ? active_mask[row] != 0u
@@ -154591,20 +154851,9 @@ static int kls_row_first_parallel_seed_preserved_rows(
     if (row_active) {
       continue;
     }
-    workspace->u_row_ptr[row] = u_entries->count;
-    for (UF_long col = row + 1u; col < nk; ++col) {
-      UF_long *ui = NULL;
-      Entry *ux = NULL;
-      UF_long u_len = 0;
-      kls_klu_get_pointer((double *)lu, uip, ulen, col, &ui, &ux, &u_len);
-      for (UF_long p = 0; p < u_len; ++p) {
-        if (ui[p] == row &&
-            !kls_row_first_entries_append(u_entries, row, col, ux[p])) {
-          return 0;
-        }
-      }
-    }
-    workspace->u_row_end[row] = u_entries->count;
+    const UF_long row_end = preserved_u_base + preserved_u_offset[row];
+    workspace->u_row_ptr[row] = row_end - preserved_u_count[row];
+    workspace->u_row_end[row] = row_end;
     worker->udiag_values[row] = udiag[row];
     row_done[row] = 1u;
     kls_row_first_supernode_panel_cache_publish_completed(
@@ -154613,6 +154862,8 @@ static int kls_row_first_parallel_seed_preserved_rows(
       worker->udiag_values, nk, NULL, open_panel_start_io,
       open_panel_end_io, row);
   }
+  free(preserved_u_count);
+  free(preserved_u_offset);
   return 1;
 }
 
@@ -154972,6 +155223,12 @@ static int kls_row_first_parallel_factor_block(
   UF_long row_pipeline_etree_prefactor_wait_deps = 0;
   UF_long open_panel_start = KLS_KLU_EMPTY;
   UF_long open_panel_end = KLS_KLU_EMPTY;
+  UF_long trace_active_rows = 0;
+  int trace_etree_attempted = 0;
+  int trace_etree_succeeded = 0;
+  int trace_seed_succeeded = 0;
+  int trace_pipeline_succeeded = 0;
+  int trace_commit_attempted = 0;
   kls_row_first_supernode_panel_cache row_supernode_panel_cache;
   memset(&row_supernode_panel_cache, 0, sizeof(row_supernode_panel_cache));
   kls_row_first_workspace row_workspace;
@@ -155401,6 +155658,7 @@ static int kls_row_first_parallel_factor_block(
           active_rows > pipeline_end - pipeline_begin) {
         goto cleanup;
       }
+      trace_active_rows = active_rows;
       if (use_separator_for_block) {
         UF_long scoped_rows = 0;
         if (!kls_row_first_validate_tail_separator_scope(
@@ -155528,24 +155786,27 @@ static int kls_row_first_parallel_factor_block(
     UF_long pipeline_etree_prefactor_rows = 0;
     UF_long pipeline_etree_prefactor_wait_rows = 0;
     UF_long pipeline_etree_prefactor_wait_deps = 0;
-    if (use_active_mask &&
-        active_rows > 1u &&
-        shared->block_pipeline_etree_tail_order &&
-        kls_try_row_first_etree_ready_tail_repair(
-          worker, block, k1, nk, &row_ctx, row_order, active_mask,
-          active_rows, shared->block_pipeline_begin,
-          shared->block_pipeline_end, reserve_entries, &l_entries,
-          &u_entries, &row_stats, &pipeline_etree_ready_rows,
-          &row_pipeline_etree_ready_threads,
-          &pipeline_etree_prefactor_rows,
-          &pipeline_etree_prefactor_wait_rows,
-          &pipeline_etree_prefactor_wait_deps,
-          &pipeline_supernode_update_groups,
-          &pipeline_supernode_update_rows,
-          &pipeline_supernode_panel_update_groups,
-          &pipeline_supernode_panel_update_rows,
-          &row_pipeline_pivot_tail_rows,
-          &row_pipeline_pivot_restarts)) {
+    trace_etree_attempted =
+      use_active_mask && active_rows > 1u &&
+      shared->block_pipeline_etree_tail_order;
+    if (trace_etree_attempted) {
+      trace_etree_succeeded = kls_try_row_first_etree_ready_tail_repair(
+        worker, block, k1, nk, &row_ctx, row_order, active_mask,
+        active_rows, shared->block_pipeline_begin,
+        shared->block_pipeline_end, reserve_entries, &l_entries,
+        &u_entries, &row_stats, &pipeline_etree_ready_rows,
+        &row_pipeline_etree_ready_threads,
+        &pipeline_etree_prefactor_rows,
+        &pipeline_etree_prefactor_wait_rows,
+        &pipeline_etree_prefactor_wait_deps,
+        &pipeline_supernode_update_groups,
+        &pipeline_supernode_update_rows,
+        &pipeline_supernode_panel_update_groups,
+        &pipeline_supernode_panel_update_rows,
+        &row_pipeline_pivot_tail_rows,
+        &row_pipeline_pivot_restarts);
+    }
+    if (trace_etree_succeeded) {
       row_pipeline_rows = active_rows;
       row_pipeline_threads = row_pipeline_etree_ready_threads;
       row_pipeline_etree_ready_rows = pipeline_etree_ready_rows;
@@ -155561,18 +155822,19 @@ static int kls_row_first_parallel_factor_block(
         &row_supernode_panel_cache, &row_workspace, nk, &open_panel_start,
         &open_panel_end);
       if (!separator_private_executed) {
-        if (!kls_row_first_parallel_seed_preserved_rows(
+        trace_seed_succeeded = kls_row_first_parallel_seed_preserved_rows(
               worker, block, k1, nk,
               use_active_mask ? shared->block_pipeline_begin : pipeline_begin,
               use_active_mask ? shared->block_pipeline_end : pipeline_end,
               active_mask,
               &l_entries, &u_entries,
               &row_workspace, row_done, &row_supernode_panel_cache,
-              &open_panel_start, &open_panel_end)) {
+              &open_panel_start, &open_panel_end);
+        if (!trace_seed_succeeded) {
           goto cleanup;
         }
       }
-      if (!kls_row_first_run_restartable_pipeline_suffix(
+      trace_pipeline_succeeded = kls_row_first_run_restartable_pipeline_suffix(
             &row_ctx, row_order, active_rank, pipeline_begin, pipeline_end,
             shared->block_pipeline_thread_count,
             &row_workspace, &l_entries, &u_entries, worker->udiag_values,
@@ -155586,7 +155848,8 @@ static int kls_row_first_parallel_factor_block(
             &row_pipeline_pivot_restarts, &pipeline_pivot_serial_rows,
             row_workspace.supernode_panel_cache != NULL
               ? &row_supernode_panel_cache : NULL,
-            &open_panel_start, &open_panel_end)) {
+            &open_panel_start, &open_panel_end);
+      if (!trace_pipeline_succeeded) {
         goto cleanup;
       }
       if (separator_private_executed) {
@@ -155675,6 +155938,7 @@ static int kls_row_first_parallel_factor_block(
   kls_row_first_stats_add(&active_rank_pivot_panel_rebuild_rows,
                           row_stats.active_rank_pivot_panel_rebuild_rows);
 
+  trace_commit_attempted = 1;
   ok = kls_row_first_parallel_commit_block(
     worker, block, k1, nk, worker->row_ptr, row_cols, row_input_pos,
     local_row_order, &l_entries, &u_entries, dynamic_column_pivots,
@@ -155704,6 +155968,17 @@ static int kls_row_first_parallel_factor_block(
     row_pipeline_separator_split_components);
 
 cleanup:
+  if (!ok && getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
+    fprintf(stderr,
+            "KLS row repair block stage: block=%ld active=%ld"
+            " etree=%d/%d seed=%d pipeline=%d commit=%d"
+            " L=%ld U=%ld pivots=%ld\n",
+            (long)block, (long)trace_active_rows, trace_etree_attempted,
+            trace_etree_succeeded, trace_seed_succeeded,
+            trace_pipeline_succeeded, trace_commit_attempted,
+            (long)l_entries.count, (long)u_entries.count,
+            (long)row_stats.dynamic_column_pivots);
+  }
   kls_row_first_supernode_panel_cache_free(&row_supernode_panel_cache);
   worker->supernode_workspace = row_workspace.supernode_workspace;
   worker->supernode_workspace_capacity =
@@ -155781,6 +156056,27 @@ static int kls_try_row_first_rebuild_rejected_block(
       (solver->common.scale <= 0 && solver->numeric->Rs != NULL) ||
       solver->numeric->lnz < old_lnz_block ||
       solver->numeric->unz < old_unz_block) {
+    if (getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
+      fprintf(stderr,
+              "KLS rejected-block row repair ineligible: block=%ld k1=%ld"
+              " nk=%ld reject=%ld n=%ld nblocks=%ld maxblock=%ld"
+              " scale=%ld Rs=%d lnz=%ld/%ld unz=%ld/%ld\n",
+              (long)block, (long)k1, (long)nk, (long)rejected_pivot,
+              (long)(solver != NULL ? solver->n : 0u),
+              (long)(solver != NULL && solver->symbolic != NULL
+                       ? solver->symbolic->nblocks : 0u),
+              (long)(solver != NULL && solver->symbolic != NULL
+                       ? solver->symbolic->maxblock : 0u),
+              (long)(solver != NULL ? solver->common.scale : 0L),
+              solver != NULL && solver->numeric != NULL &&
+                solver->numeric->Rs != NULL,
+              (long)(solver != NULL && solver->numeric != NULL
+                       ? solver->numeric->lnz : 0u),
+              (long)old_lnz_block,
+              (long)(solver != NULL && solver->numeric != NULL
+                       ? solver->numeric->unz : 0u),
+              (long)old_unz_block);
+    }
     return 0;
   }
 
@@ -156271,6 +156567,22 @@ static int kls_try_row_first_rebuild_rejected_block(
   return 1;
 
 fail:
+  if (getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
+    fprintf(stderr,
+            "KLS rejected-block row repair failed: block=%ld k1=%ld nk=%ld"
+            " reject=%ld status=%ld shared_failed=%d committed=%ld"
+            " lnz=%ld unz=%ld etree_mask=%d active_rows=%ld"
+            " pipeline_runs=%ld pivot_restarts=%ld\n",
+            (long)block, (long)k1, (long)nk, (long)rejected_pivot,
+            (long)(solver != NULL ? solver->common.status : -999L),
+            atomic_load_explicit(&shared.failed, memory_order_acquire),
+            (long)shared.committed_blocks, (long)shared.total_lnz,
+            (long)shared.total_unz,
+            shared.block_pipeline_active_mask != NULL,
+            (long)shared.block_pipeline_active_rows,
+            (long)shared.row_pipeline_runs,
+            (long)shared.row_pipeline_pivot_restarts);
+  }
   if (snapshot_ready) {
     Unit *current_lu = solver != NULL && solver->numeric != NULL &&
         solver->numeric->LUbx != NULL && block < solver->symbolic->nblocks
@@ -170559,7 +170871,8 @@ factor_preps_deferred_exit:;
     kls_update_structured_references(solver, numeric_values);
     elapsed += kls_now_seconds() - structured_start;
   }
-  if (solver->bounded_degree_retained_preconditioner_symbolic_eligible) {
+  if (solver->bounded_degree_retained_preconditioner_symbolic_eligible ||
+      getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
     const double retained_start = kls_now_seconds();
     kls_bounded_degree_arm_retained_preconditioner(solver, numeric_values);
     elapsed += kls_now_seconds() - retained_start;
@@ -171035,6 +171348,16 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const int generic_declined_lean_reaudit =
     generic_lean_reaudit &&
     getenv("KLS_DISABLE_DECLINED_LEAN_STEADY_REAUDIT") == NULL;
+  /* Normally the following solve completes the final sampled cycle and
+     settles the verdict immediately.  A refactor-only caller supplies no
+     solve term, so settle from the guarded four-refactor comparison before
+     starting another numeric instead of leaving the audit half-armed. */
+  if (generic_lean_reaudit && solver->lean_reaudit_state == 6) {
+    kls_selected_lean_reaudit_finish(solver);
+  } else if (generic_declined_lean_reaudit &&
+             solver->lean_reaudit_state == 15) {
+    kls_declined_lean_reaudit_finish(solver);
+  }
   const int direct_low_work_btf_map32 =
     kls_low_work_btf_map32_policy_enabled(solver);
   if (getenv(
@@ -171085,11 +171408,18 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->stats.refactor_seconds = solver->adaptive_refactor_seconds;
     if (generic_lean_reaudit && solver->lean_reaudit_state == 0) {
       /* The retained direct worker is the row arm we ultimately care about,
-         so collect its representative window without routing those calls
-         back through the adaptive dispatcher.  Only the two incumbent
-         refreshes below are charged as alternate numerics. */
+         so collect its representative lifecycle window without routing
+         those calls back through the adaptive dispatcher. */
       solver->lean_reaudit_seconds += solver->adaptive_refactor_seconds;
-      if (++solver->lean_reaudit_samples >= 8) {
+      if (solver->lean_reaudit_row_min <= 0.0 ||
+          solver->adaptive_refactor_seconds <
+            solver->lean_reaudit_row_min) {
+        solver->lean_reaudit_row_min = solver->adaptive_refactor_seconds;
+      }
+      solver->lean_reaudit_row_samples++;
+      solver->lean_reaudit_pending_side = 2;
+      if (++solver->lean_reaudit_samples >=
+          KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 1;
       }
     }
@@ -171399,6 +171729,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->numeric_needs_refinement = 0;
       solver->solve_refine_single_shot = 0;
       solver->row_solve_self_check = 1;
+      solver->retained_preconditioner_numeric_current = 0;
       (void)kls_i32_solve_ready(solver);
       kls_set_last_refactor_path(
         solver, KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER);
@@ -171558,7 +171889,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
       kls_lean_row_refactor_ensure_snode_runs(solver);
       if (kls_generic_hoisted_snode_worker_capable(solver)) {
         solver->lean_choice = 1;
-        solver->lean_reaudit_state = 5;
+        /* Structural intensity chooses the first executor, not the final
+           lifecycle.  A complete warm row/column audit remains authoritative
+           because solve representation cost is absent from this model. */
+        solver->lean_reaudit_state = 0;
         generic_hoisted_snode_lean_predicted = 1;
       }
     }
@@ -171614,7 +171948,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
         isfinite(projected_savings) &&
         projected_savings >= 2.0 * construction_work) {
       solver->lean_choice = 1;
-      solver->lean_reaudit_state = 5;
+      /* A modeled row-work win is admission evidence.  The complete
+         refactor-plus-solve audit remains the generic final authority. */
+      solver->lean_reaudit_state = 0;
     } else if (modeled_row_work > 0.0 &&
                3.0 * modeled_row_work >= solver->common.flops &&
                getenv("KLS_DISABLE_GENERIC_SCALED_LEAN_DECLINE") == NULL) {
@@ -171719,7 +172055,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
         isfinite(projected_savings) &&
         projected_savings >= 2.0 * construction_work) {
       solver->lean_choice = 1;
-      solver->lean_reaudit_state = 5;
+      /* Packed traffic bounds the factor kernel only; leave the selected
+         representation provisional until solve traffic is measured too. */
+      solver->lean_reaudit_state = 0;
     }
     if (getenv("KLS_TRACE_GENERIC_PACKED_LEAN_PRESELECTION") != NULL) {
       fprintf(stderr,
@@ -171754,11 +172092,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
        measured fragmented BTF. */
     solver->lean_choice = 1;
     if (!legacy_shape_policies) {
-      /* The retained factor has already satisfied the work/fill contract
-         that replaces the multi-arm timing consultation.  Mark this choice
-         settled so later steady re-audits do not reintroduce discarded
-         column numerics into an otherwise fixed H100 lifecycle. */
-      solver->lean_reaudit_state = 5;
+      /* Work/fill is sufficient to enter row without a cold multi-arm
+         consultation, but not to settle its complete refactor-plus-solve
+         lifecycle.  The bounded warm re-audit below remains authoritative. */
+      solver->lean_reaudit_state = 0;
     }
   }
   if (legacy_shape_policies && solver->lean_choice == 0 &&
@@ -171986,7 +172323,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       (solver->lean_reaudit_state == 1 ||
        solver->lean_reaudit_state == 3)) {
     /* Refresh the incumbent only after the selected row walk has reached a
-       representative steady window.  Two consecutive samples let the
+       representative steady window.  Four consecutive samples let the
        incumbent's retained streams warm before its verdict; both arms
        recompute the same full numeric and remain residual-checked by the
        public harness. */
@@ -171997,7 +172334,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
              solver->lean_reaudit_row_arm > 0 &&
              (solver->lean_reaudit_state == 11 ||
               solver->lean_reaudit_state == 13)) {
-    /* A declined row arm gets the same warm, two-sample protection as a
+    /* A declined row arm gets the same warm, four-sample protection as a
        selected one.  Its pattern/workspace were already built by the timed
        consultation, so these calls compare numeric workers rather than
        setup cost. */
@@ -172210,7 +172547,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
     if (solver->lean_reaudit_state == 0 &&
         solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) {
       solver->lean_reaudit_seconds += elapsed;
-      if (++solver->lean_reaudit_samples >= 8) {
+      if (solver->lean_reaudit_row_min <= 0.0 ||
+          elapsed < solver->lean_reaudit_row_min) {
+        solver->lean_reaudit_row_min = elapsed;
+      }
+      solver->lean_reaudit_row_samples++;
+      solver->lean_reaudit_pending_side = 2;
+      if (++solver->lean_reaudit_samples >=
+          KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 1;
       }
     } else if ((solver->lean_reaudit_state == 2 ||
@@ -172221,37 +172565,30 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->lean_reaudit_column_min = elapsed;
       }
       solver->lean_reaudit_column_samples++;
-      if (solver->lean_reaudit_state == 2) {
+      solver->lean_reaudit_pending_side = 1;
+      if (solver->lean_reaudit_state == 2 ||
+          solver->lean_reaudit_column_samples <
+            KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 3;
       } else {
-        const double row_mean = solver->lean_reaudit_samples > 0
-          ? solver->lean_reaudit_seconds /
-              (double)solver->lean_reaudit_samples
-          : 0.0;
-        if (solver->lean_reaudit_column_samples >= 2 && row_mean > 0.0 &&
-            solver->lean_reaudit_column_min < 0.98 * row_mean) {
-          solver->lean_choice = -1;
-          solver->lean_probe_arm = 0;
-          solver->lean_pair_active = 0;
-        }
-        solver->lean_reaudit_state = 5;
-        if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-          fprintf(stderr,
-                  "KLS lean steady re-audit: row mean %.3f ms column "
-                  "min %.3f ms -> %s\n",
-                  1e3 * row_mean,
-                  1e3 * solver->lean_reaudit_column_min,
-                  solver->lean_choice < 0 ? "COLUMN" : "LEAN");
-        }
+        /* Let the immediately following solve complete the fourth column
+           cycle before deciding.  Refactor-only callers settle at the start
+           of their next update using the stricter refactor-only margin. */
+        solver->lean_reaudit_state = 6;
       }
     } else if (solver->lean_reaudit_state == 2 ||
                solver->lean_reaudit_state == 4) {
-      /* The incumbent could not own this factor (for example a durable row
-         route intercepted it).  Preserve the already-verified choice and
-         stop spending probes. */
+      /* The incumbent could not own this factor.  Preserve the verified row
+         choice and stop spending probes rather than comparing unlike paths. */
+      solver->lean_reaudit_pending_side = 0;
       solver->lean_reaudit_state = 5;
     }
   }
+
+  /* Four complete cycles per installed representation are enough to move
+     beyond first-touch noise while keeping the audit repayable for a modest
+     H100 row win.  Cold admission and the final measured-cycle margin remain
+     deliberately stricter safeguards against publishing a noisy row arm. */
   if (generic_declined_lean_reaudit && solver->lean_choice < 0 && ok &&
       solver->common.status >= 0 && solver->lean_reaudit_row_arm > 0) {
     if (solver->lean_reaudit_state == 10 &&
@@ -172262,7 +172599,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
       solver->lean_reaudit_column_samples++;
       solver->lean_reaudit_pending_side = 1;
-      if (++solver->lean_reaudit_samples >= 8) {
+      if (++solver->lean_reaudit_samples >=
+          KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 11;
       }
     } else if ((solver->lean_reaudit_state == 12 ||
@@ -172274,38 +172612,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
       solver->lean_reaudit_row_samples++;
       solver->lean_reaudit_pending_side = 2;
-      if (solver->lean_reaudit_row_samples < 8) {
+      if (solver->lean_reaudit_row_samples <
+          KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 13;
       } else {
-        const int solve_pair_ready =
-          solver->lean_reaudit_column_solve_samples > 0 &&
-          solver->lean_reaudit_row_solve_samples > 0 &&
-          solver->lean_reaudit_column_solve_min > 0.0 &&
-          solver->lean_reaudit_row_solve_min > 0.0;
-        const double column_cycle = solver->lean_reaudit_column_min +
-          (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
-        const double row_cycle = solver->lean_reaudit_row_min +
-          (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
-        const double adoption_margin = solve_pair_ready ? 0.98 : 0.95;
-        if (solver->lean_reaudit_column_samples >= 8 &&
-            solver->lean_reaudit_column_min > 0.0 &&
-            solver->lean_reaudit_row_min > 0.0 &&
-            row_cycle < adoption_margin * column_cycle) {
-          solver->lean_choice = solver->lean_reaudit_row_arm;
-          solver->lean_pair_active = solver->lean_choice == 2;
-        }
-        solver->lean_reaudit_state = 5;
-        if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-          fprintf(stderr,
-                  "KLS declined lean steady re-audit: ref %.3f/%.3f ms "
-                  "solve %.3f/%.3f ms over %d row samples -> %s\n",
-                  1e3 * solver->lean_reaudit_column_min,
-                  1e3 * solver->lean_reaudit_row_min,
-                  1e3 * solver->lean_reaudit_column_solve_min,
-                  1e3 * solver->lean_reaudit_row_solve_min,
-                  solver->lean_reaudit_row_samples,
-                  solver->lean_choice > 0 ? "LEAN" : "COLUMN");
-        }
+        /* Defer until the public solve has completed this final row cycle;
+           the symmetric refactor-only fallback runs on the next update. */
+        solver->lean_reaudit_state = 15;
       }
     } else if (solver->lean_reaudit_state == 10 &&
                solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) {
@@ -172563,7 +172876,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
             t_lean > 0.0 && t_inc > 0.0 &&
             t_lean < 0.80 * t_inc) {
           /* A large measured separation on one exact immutable executor does
-             not need the later eight-row/two-column warm-up audit.  Close
+             not need the later four-row/four-column lifecycle audit.  Close
              outcomes retain that audit unchanged. */
           solver->lean_reaudit_state = 5;
         }
@@ -174069,21 +174382,27 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
                                         const double *b,
                                         double *x,
                                         double bnorm2,
-                                        double *residual) {
+                                        double *residual,
+                                        double relative_l2_limit,
+                                        int max_steps,
+                                        int orthogonalization_passes) {
   enum { KLS_GMRES_RESTART = 4, KLS_GMRES_CYCLES = 2 };
   if (solver == NULL || a == NULL || b == NULL || x == NULL ||
       residual == NULL || !isfinite(bnorm2) || bnorm2 < 0.0 ||
+      !(relative_l2_limit > 0.0) || !isfinite(relative_l2_limit) ||
+      max_steps < 1 || max_steps > KLS_GMRES_RESTART ||
+      orthogonalization_passes < 1 || orthogonalization_passes > 2 ||
       getenv("KLS_DISABLE_GMRES_SOLVE_RECOVERY") != NULL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->row_perm != NULL || solver->user_col_perm != NULL ||
       solver->row_scale != NULL || solver->col_scale != NULL ||
       solver->col_ptr == NULL || solver->row_idx == NULL ||
       solver->n > (UF_long)(SIZE_MAX /
-        ((2u * KLS_GMRES_RESTART + 1u) * sizeof(double)))) {
+        ((2u * (size_t)max_steps + 1u) * sizeof(double)))) {
     return 0;
   }
   const UF_long n = solver->n;
-  const size_t vector_count = 2u * KLS_GMRES_RESTART + 1u;
+  const size_t vector_count = 2u * (size_t)max_steps + 1u;
   double *vectors = (double *)malloc(
     vector_count * (size_t)(n > 0u ? n : 1u) * sizeof(*vectors));
   if (vectors == NULL) {
@@ -174091,31 +174410,37 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
   }
   double *v[KLS_GMRES_RESTART + 1u];
   double *z[KLS_GMRES_RESTART];
-  for (size_t j = 0u; j <= KLS_GMRES_RESTART; ++j) {
+  for (size_t j = 0u; j <= (size_t)max_steps; ++j) {
     v[j] = vectors + j * (size_t)n;
   }
-  for (size_t j = 0u; j < KLS_GMRES_RESTART; ++j) {
-    z[j] = vectors + (KLS_GMRES_RESTART + 1u + j) * (size_t)n;
+  for (size_t j = 0u; j < (size_t)max_steps; ++j) {
+    z[j] = vectors + ((size_t)max_steps + 1u + j) * (size_t)n;
   }
   const double l2_scale = bnorm2 > 0.0 ? bnorm2 : 1.0;
-  const double limit2 = 25.0e-18 * l2_scale;
+  const double limit2 =
+    relative_l2_limit * relative_l2_limit * l2_scale;
   int verified = 0;
+  double carried_residual_norm2 = -1.0;
 
   for (int cycle = 0; cycle < KLS_GMRES_CYCLES && !verified; ++cycle) {
-    memcpy(residual, b, (size_t)n * sizeof(*residual));
-    for (UF_long col = 0u; col < n; ++col) {
-      const double xv = x[col];
-      for (UF_long p = solver->col_ptr[col];
-           p < solver->col_ptr[col + 1u]; ++p) {
-        const UF_long row = solver->row_idx[p];
-        residual[row] = fma(-a[p], xv, residual[row]);
+    double beta2 = carried_residual_norm2;
+    if (!(beta2 >= 0.0)) {
+      memcpy(residual, b, (size_t)n * sizeof(*residual));
+      for (UF_long col = 0u; col < n; ++col) {
+        const double xv = x[col];
+        for (UF_long p = solver->col_ptr[col];
+             p < solver->col_ptr[col + 1u]; ++p) {
+          const UF_long row = solver->row_idx[p];
+          residual[row] = fma(-a[p], xv, residual[row]);
+        }
       }
+      long double beta2_ld = 0.0L;
+      for (UF_long i = 0u; i < n; ++i) {
+        beta2_ld += (long double)residual[i] * residual[i];
+      }
+      beta2 = (double)beta2_ld;
     }
-    long double beta2_ld = 0.0L;
-    for (UF_long i = 0u; i < n; ++i) {
-      beta2_ld += (long double)residual[i] * residual[i];
-    }
-    const double beta2 = (double)beta2_ld;
+    carried_residual_norm2 = -1.0;
     if (isfinite(beta2) && beta2 <= limit2) {
       verified = 1;
       break;
@@ -174138,7 +174463,7 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
     memset(g, 0, sizeof(g));
     g[0] = beta;
     int steps = 0;
-    for (int j = 0; j < KLS_GMRES_RESTART; ++j) {
+    for (int j = 0; j < max_steps; ++j) {
       solver->in_solve_refinement = 1;
       const int precondition_status =
         solve_impl(solver, 0, 1, v[j], n, z[j], n);
@@ -174155,9 +174480,10 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
           v[j + 1][row] = fma(a[p], zv, v[j + 1][row]);
         }
       }
-      /* Twice-modified Gram-Schmidt keeps the short Krylov basis reliable on
-         the same ill-conditioned numerics that reached this cold path. */
-      for (int pass = 0; pass < 2; ++pass) {
+      /* Ordinary recovery uses twice-modified Gram-Schmidt for difficult
+         factors.  The separately certified retained-factor experiment can
+         probe one pass because its final true residual remains authoritative. */
+      for (int pass = 0; pass < orthogonalization_passes; ++pass) {
         for (int i = 0; i <= j; ++i) {
           long double dot = 0.0L;
           for (UF_long k = 0u; k < n; ++k) {
@@ -174249,6 +174575,12 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
     }
     const double rnorm2 = (double)rnorm2_ld;
     verified = isfinite(rnorm2) && rnorm2 <= limit2;
+    if (!verified && isfinite(rnorm2) && rnorm2 >= 0.0) {
+      /* The true residual terminating this restart is exactly the initial
+         residual of the next one.  Carry both vector and norm instead of
+         paying for an identical sparse matrix product twice. */
+      carried_residual_norm2 = rnorm2;
+    }
     if (getenv("KLS_TRACE_REFINE") != NULL) {
       fprintf(stderr,
               "KLS GMRES recovery cycle=%d steps=%d rel2=%.3e l2ok=%d\n",
@@ -175261,7 +175593,7 @@ static int solve_impl(kls_solver *solver,
       residual != NULL ? residual + 3u * (size_t)solver->n : NULL;
     const UF_long nloc = solver->n;
     const int retained_preconditioner_contract =
-      kls_bounded_degree_retained_preconditioner_enabled(solver);
+      kls_retained_preconditioner_requires_correction(solver);
     for (int64_t rhs = 0; residual != NULL && rhs < nrhs; ++rhs) {
       const double *brhs = b + rhs * ldb;
       double *xrhs = x + rhs * ldx;
@@ -175302,7 +175634,9 @@ static int solve_impl(kls_solver *solver,
         /* compatibility spelling from the row-only prototype */
         getenv("KLS_DISABLE_ROW_SELF_CHECK_L2_CONTRACT") == NULL;
       const int generic_parallel_contract_residual =
-        ordinary_self_check_l2_contract &&
+        (ordinary_self_check_l2_contract ||
+         (retained_preconditioner_contract &&
+          getenv("KLS_ENABLE_GENERIC_RETAINED_GMRES") == NULL)) &&
         kls_generic_contract_residual_parallel_dispatch(solver);
       const double contract_residual_probe_start =
         solver->contract_residual_pending != 0
@@ -175399,9 +175733,33 @@ static int solve_impl(kls_solver *solver,
       int retained_preconditioner_verified =
         !retained_preconditioner_contract;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
-      const int refinement_limit = solver->solve_recovery_active
+      const int retained_gmres_plain_frame =
+        retained_preconditioner_contract && !kernel_transpose && nrhs == 1 &&
+        b != x && solver->orientation == KLS_ORIENTATION_NORMAL &&
+        solver->row_perm == NULL && solver->user_col_perm == NULL &&
+        solver->row_scale == NULL && solver->col_scale == NULL &&
+        getenv("KLS_DISABLE_GENERIC_RETAINED_GMRES") == NULL &&
+        getenv("KLS_DISABLE_GMRES_SOLVE_RECOVERY") == NULL;
+      const int retained_gmres_forced = retained_gmres_plain_frame &&
+        getenv("KLS_ENABLE_GENERIC_RETAINED_GMRES") != NULL;
+      const int retained_gmres_selected = retained_gmres_plain_frame &&
+        retained_gmres_forced;
+      int refinement_limit = solver->solve_recovery_active
         ? 16
         : (retained_preconditioner_contract || self_check_only ? 8 : 3);
+      if (retained_gmres_selected) {
+        /* xrhs already contains M^-1 b, so a selected Krylov recovery starts
+           directly from that preconditioned estimate. */
+        refinement_limit = 0;
+        const char *steps_env =
+          getenv("KLS_GENERIC_RETAINED_GMRES_RICHARDSON_STEPS");
+        if (steps_env != NULL && steps_env[0] != '\0') {
+          const long parsed = strtol(steps_env, NULL, 10);
+          if (parsed >= 0 && parsed <= 7) {
+            refinement_limit = (int)parsed;
+          }
+        }
+      }
       for (int iter = 0; iter < refinement_limit; ++iter) {
         double rmax = 0.0;
         double rnorm2 = 0.0;
@@ -175418,7 +175776,8 @@ static int solve_impl(kls_solver *solver,
         const int generic_parallel_residual =
           !legacy_shape_policies && !kernel_transpose && nrhs == 1 &&
           b != x && kls_repeated_update_workload(&solver->options) &&
-          (!ordinary_self_check_l2_contract ||
+          ((!ordinary_self_check_l2_contract &&
+            !retained_preconditioner_contract) ||
            generic_parallel_contract_residual) &&
           !compact_amf_two_block_parallel_residual &&
           !balanced_hub_parallel_residual &&
@@ -175562,7 +175921,9 @@ static int solve_impl(kls_solver *solver,
             }
           }
         }
-        if (iter == 0 && ordinary_self_check_l2_contract &&
+        if (iter == 0 &&
+            (ordinary_self_check_l2_contract ||
+             retained_preconditioner_contract) &&
             solver->contract_residual_pending != 0) {
           kls_generic_contract_residual_record(
             solver, kls_now_seconds() - contract_residual_probe_start);
@@ -175759,7 +176120,8 @@ static int solve_impl(kls_solver *solver,
           }
         }
         if ((!promoted_tolerance_l2_contract &&
-             !ordinary_self_check_l2_contract && rmax <= target) ||
+             !ordinary_self_check_l2_contract &&
+             !retained_preconditioner_contract && rmax <= target) ||
             raw_l2_ok || retained_preconditioner_l2_ok ||
             ordinary_self_check_l2_ok ||
             promoted_tolerance_l2_ok ||
@@ -176078,7 +176440,8 @@ static int solve_impl(kls_solver *solver,
           !ordinary_self_check_l2_verified && !kernel_transpose &&
           nrhs == 1 && b != x &&
           kls_try_gmres_solve_recovery(
-            solver, refine_a, brhs, xrhs, bnorm2, residual)) {
+            solver, refine_a, brhs, xrhs, bnorm2, residual, 5.0e-9,
+            4, 2)) {
         ordinary_self_check_l2_verified = 1;
         solver->low_rcond_solve_contract_state = 2;
         solver->fp32_decision = -1;
@@ -176099,10 +176462,81 @@ static int solve_impl(kls_solver *solver,
           solver->solve_contract_probe = 2;
         }
       }
+      if (retained_preconditioner_contract &&
+          !retained_preconditioner_verified &&
+          retained_gmres_selected) {
+        int retained_gmres_steps = 2;
+        int retained_gmres_orthogonalization_passes = 1;
+        const char *steps_env =
+          getenv("KLS_GENERIC_RETAINED_GMRES_STEPS");
+        const char *orthogonalization_env =
+          getenv("KLS_GENERIC_RETAINED_GMRES_ORTHOGONALIZATION_PASSES");
+        if (steps_env != NULL && steps_env[0] != '\0') {
+          const long parsed = strtol(steps_env, NULL, 10);
+          if (parsed >= 1 && parsed <= 4) {
+            retained_gmres_steps = (int)parsed;
+          }
+        }
+        if (orthogonalization_env != NULL &&
+            orthogonalization_env[0] != '\0') {
+          const long parsed = strtol(orthogonalization_env, NULL, 10);
+          if (parsed >= 1 && parsed <= 2) {
+            retained_gmres_orthogonalization_passes = (int)parsed;
+          }
+        }
+        if (kls_try_gmres_solve_recovery(
+              solver, refine_a, brhs, xrhs, bnorm2, residual, 1.0e-9,
+              retained_gmres_steps,
+              retained_gmres_orthogonalization_passes)) {
+          retained_preconditioner_verified = 1;
+        }
+      }
       if (!retained_preconditioner_verified) {
         /* This path deliberately retained an older factor.  Never return a
            merely plausible correction if the true current-matrix residual
            failed the public 1e-9 relative-L2 contract. */
+        if (getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL &&
+            !solver->solve_recovery_active && b != x &&
+            solver->orientation == KLS_ORIENTATION_NORMAL &&
+            solver->row_perm == NULL && solver->row_scale == NULL &&
+            solver->col_scale == NULL && solver->nnz > 0u &&
+            solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double))) {
+          /* Generic admission is a performance speculation.  If stationary
+             refinement cannot certify this RHS, rebuild the exact current
+             numeric and retry rather than exposing a solve failure.  The
+             retained generic envelope excludes row/scaling transforms;
+             input_to_csc is therefore the only frame conversion required. */
+          double *recovery_values = (double *)malloc(
+            (size_t)solver->nnz * sizeof(*recovery_values));
+          if (recovery_values != NULL) {
+            if (solver->input_to_csc == NULL) {
+              memcpy(recovery_values, refine_a,
+                     (size_t)solver->nnz * sizeof(*recovery_values));
+            } else {
+              for (UF_long p = 0u; p < solver->nnz; ++p) {
+                recovery_values[p] = refine_a[solver->input_to_csc[p]];
+              }
+            }
+            if (getenv("KLS_TRACE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
+              fprintf(stderr,
+                      "KLS generic retained recovery: exact current refactor\n");
+            }
+            /* Retire reuse before recursively entering the ordinary update
+               dispatcher.  That preserves the installed symbolic/factor
+               epoch and pays an exact changed-numeric refactor, rather than
+               the much costlier cold full-factor recovery. */
+            kls_clear_retained_preconditioner(solver);
+            const int refactor_status =
+              kls_refactor(solver, recovery_values);
+            const int recovery_status = refactor_status == KLS_OK
+              ? solve_impl(solver, transpose, nrhs, b, ldb, x, ldx)
+              : refactor_status;
+            free(recovery_values);
+            solver->base_solve_seconds = kls_now_seconds() - start;
+            solver->stats.solve_seconds = solver->base_solve_seconds;
+            return recovery_status;
+          }
+        }
         ok = 0;
       }
       if (!ordinary_self_check_l2_verified) {
@@ -176133,7 +176567,7 @@ refine_skip:;
        the orientation in which AUTO stored the matrix.  A normal solve on a
        transposed internal factor still belongs to the normal repeated-solve
        workload and must participate in the row/column timing verdict. */
-    kls_declined_lean_reaudit_record_solve(
+    kls_lean_reaudit_record_solve(
       solver, solver->stats.solve_seconds);
     kls_row_refactor_acceptance_record_solve(solver,
                                              solver->stats.solve_seconds);
@@ -176322,7 +176756,7 @@ int kls_solve(kls_solver *solver,
     return kls_solve_diagonal_equiv(solver, 0, nrhs, b, ldb, x, ldx);
   }
   if (solver != NULL &&
-      kls_bounded_degree_retained_preconditioner_enabled(solver) && b == x) {
+      kls_retained_preconditioner_requires_correction(solver) && b == x) {
     return kls_solve_retained_preconditioner(
       solver, 0, nrhs, b, ldb, x, ldx);
   }
@@ -176339,7 +176773,7 @@ int kls_solve_transpose(kls_solver *solver,
     return kls_solve_diagonal_equiv(solver, 1, nrhs, b, ldb, x, ldx);
   }
   if (solver != NULL &&
-      kls_bounded_degree_retained_preconditioner_enabled(solver) && b == x) {
+      kls_retained_preconditioner_requires_correction(solver) && b == x) {
     return kls_solve_retained_preconditioner(
       solver, 1, nrhs, b, ldb, x, ldx);
   }
@@ -176355,6 +176789,8 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
     ? requested_size
     : sizeof(kls_stats);
   const int legacy_shape_policies = kls_legacy_shape_policies_enabled();
+  const int retained_preconditioner_stats = legacy_shape_policies ||
+    getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL;
 #define KLS_LEGACY_SHAPE_STAT(expr) \
   (legacy_shape_policies ? (expr) : 0)
   memcpy(stats, &solver->stats, copy_size);
@@ -176681,20 +177117,21 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
                bounded_degree_retained_preconditioner_factor_eligible) +
         sizeof(stats->bounded_degree_retained_preconditioner_factor_eligible)) {
     stats->bounded_degree_retained_preconditioner_factor_eligible =
-      KLS_LEGACY_SHAPE_STAT(
-        kls_bounded_degree_retained_preconditioner_factor_cycle(solver));
+      retained_preconditioner_stats
+        ? kls_bounded_degree_retained_preconditioner_factor_cycle(solver) : 0;
   }
   if (copy_size >=
       offsetof(kls_stats,
                bounded_degree_retained_preconditioner_reuse_count) +
         sizeof(stats->bounded_degree_retained_preconditioner_reuse_count)) {
     stats->bounded_degree_retained_preconditioner_reuse_count =
-      KLS_LEGACY_SHAPE_STAT(
-        solver->bounded_degree_retained_preconditioner_reuse_count >
+      retained_preconditioner_stats
+        ? (solver->bounded_degree_retained_preconditioner_reuse_count >
             (uint64_t)INT64_MAX
           ? INT64_MAX
           : (int64_t)
-              solver->bounded_degree_retained_preconditioner_reuse_count);
+              solver->bounded_degree_retained_preconditioner_reuse_count)
+        : 0;
   }
   if (copy_size >=
       offsetof(kls_stats,
@@ -177012,26 +177449,69 @@ static int kls_bounded_degree_retained_preconditioner_factor_profile(
     solver->common.flops >= 8192.0 * n;
 }
 
+/* Experimental, representation-based admission for measuring whether a
+   retained exact factor is useful outside the bounded-degree proposal. */
+__attribute__((noinline))
+static int kls_generic_retained_preconditioner_factor_profile(
+  const kls_solver *solver) {
+  if (getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") == NULL ||
+      solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->solve_recovery_active ||
+      !kls_repeated_update_workload(&solver->options) ||
+      solver->orientation != KLS_ORIENTATION_NORMAL ||
+      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
+      solver->row_perm != NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL ||
+      (solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
+       solver->symbolic->structural_rank != solver->n) ||
+      solver->common.status < TRILINOS_KLU_OK ||
+      solver->common.status == TRILINOS_KLU_SINGULAR ||
+      (solver->common.numerical_rank != KLS_KLU_EMPTY &&
+       solver->common.numerical_rank != solver->n) ||
+      solver->pivot_nudge_count != 0u ||
+      solver->common.kls_perturb_count != 0u ||
+      !(solver->common.rcond >= 1.0e-8) ||
+      !(solver->common.flops >= 4096.0 * (double)solver->n)) {
+    return 0;
+  }
+  return 1;
+}
+
 __attribute__((noinline))
 static int kls_bounded_degree_retained_preconditioner_factor_cycle(
   const kls_solver *solver) {
-  if (!kls_legacy_shape_policies_enabled() || solver == NULL ||
-      getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") !=
-        NULL) {
+  if (solver == NULL) {
+    return 0;
+  }
+  const int generic_requested =
+    getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL;
+  if (!generic_requested &&
+      (!kls_legacy_shape_policies_enabled() ||
+       getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") !=
+         NULL)) {
     return 0;
   }
   return solver->bounded_degree_retained_preconditioner_numeric_eligible != 0
     ? solver->bounded_degree_retained_preconditioner_numeric_eligible > 0
-    : kls_bounded_degree_retained_preconditioner_factor_profile(solver);
+    : ((kls_legacy_shape_policies_enabled() &&
+        getenv("KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY") ==
+          NULL &&
+        kls_bounded_degree_retained_preconditioner_factor_profile(solver)) ||
+       kls_generic_retained_preconditioner_factor_profile(solver));
 }
 
 __attribute__((noinline))
 static int kls_bounded_degree_retained_preconditioner_enabled(
   const kls_solver *solver) {
-  return kls_legacy_shape_policies_enabled() &&
-    kls_bounded_degree_retained_preconditioner_factor_cycle(solver) &&
+  return kls_bounded_degree_retained_preconditioner_factor_cycle(solver) &&
     solver->retained_preconditioner_active &&
     solver->retained_preconditioner_reference_values != NULL;
+}
+
+static int kls_retained_preconditioner_requires_correction(
+  const kls_solver *solver) {
+  return kls_bounded_degree_retained_preconditioner_enabled(solver) &&
+    !solver->retained_preconditioner_numeric_current;
 }
 
 __attribute__((noinline))
@@ -177040,8 +177520,33 @@ static void kls_bounded_degree_arm_retained_preconditioner(
   const double *numeric_values) {
   if (solver != NULL) {
     solver->bounded_degree_retained_preconditioner_numeric_eligible =
-      kls_bounded_degree_retained_preconditioner_factor_profile(solver)
+      ((kls_legacy_shape_policies_enabled() &&
+        kls_bounded_degree_retained_preconditioner_factor_profile(solver)) ||
+       kls_generic_retained_preconditioner_factor_profile(solver))
         ? 1 : -1;
+    if (getenv("KLS_TRACE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
+      fprintf(stderr,
+              "KLS generic retained gate: eligible=%d recovery=%d repeated=%d"
+              " orientation=%d scale=%ld Rs=%d row_perm=%d row_scale=%d"
+              " col_scale=%d predicted=%d srank=%ld nrank=%ld status=%ld"
+              " nudges=%ld perturb=%ld rcond=%.3e flops_per_n=%.3e\n",
+              solver->bounded_degree_retained_preconditioner_numeric_eligible,
+              solver->solve_recovery_active,
+              kls_repeated_update_workload(&solver->options),
+              (int)solver->orientation, (long)solver->common.scale,
+              solver->numeric != NULL && solver->numeric->Rs != NULL,
+              solver->row_perm != NULL, solver->row_scale != NULL,
+              solver->col_scale != NULL, solver->numeric_is_predicted,
+              solver->symbolic != NULL
+                ? (long)solver->symbolic->structural_rank : -2L,
+              (long)solver->common.numerical_rank,
+              (long)solver->common.status,
+              (long)solver->pivot_nudge_count,
+              (long)solver->common.kls_perturb_count,
+              solver->common.rcond,
+              solver->n > 0u
+                ? solver->common.flops / (double)solver->n : 0.0);
+    }
   }
   if (!kls_bounded_degree_retained_preconditioner_factor_cycle(solver) ||
       numeric_values == NULL ||
@@ -177060,6 +177565,7 @@ static void kls_bounded_degree_arm_retained_preconditioner(
   kls_clear_retained_preconditioner(solver);
   solver->retained_preconditioner_reference_values = reference;
   solver->retained_preconditioner_active = 1;
+  solver->retained_preconditioner_numeric_current = 1;
 }
 
 __attribute__((noinline))
@@ -177072,14 +177578,42 @@ static int kls_bounded_degree_update_is_preconditioner_safe(
   }
   const double *reference =
     solver->retained_preconditioner_reference_values;
+  double relative_limit = 1.01e-3;
+  const char *relative_limit_env =
+    getenv("KLS_GENERIC_RETAINED_PRECONDITIONER_RELATIVE_LIMIT");
+  if (getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL &&
+      relative_limit_env != NULL && relative_limit_env[0] != '\0') {
+    const double parsed = atof(relative_limit_env);
+    if (isfinite(parsed) && parsed >= 1.01e-3 && parsed <= 0.1) {
+      relative_limit = parsed;
+    }
+  }
   int invalid = 0;
 #pragma omp simd reduction(|:invalid)
   for (UF_long p = 0u; p < solver->nnz; ++p) {
     const double old_value = reference[p];
     const double new_value = numeric_values[p];
-    const double allowed = 1.01e-3 * fabs(old_value) + 64.0 * DBL_MIN;
+    const double allowed = relative_limit * fabs(old_value) + 64.0 * DBL_MIN;
     invalid |= !isfinite(old_value) || !isfinite(new_value) ||
       fabs(new_value - old_value) > allowed;
+  }
+  if (getenv("KLS_TRACE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
+    UF_long violations = 0u;
+    double worst_fraction = 0.0;
+    for (UF_long p = 0u; p < solver->nnz; ++p) {
+      const double old_value = reference[p];
+      const double new_value = numeric_values[p];
+      const double allowed = relative_limit * fabs(old_value) + 64.0 * DBL_MIN;
+      const double fraction = allowed > 0.0
+        ? fabs(new_value - old_value) / allowed : HUGE_VAL;
+      violations += !isfinite(fraction) || fraction > 1.0;
+      worst_fraction = isfinite(fraction) && fraction > worst_fraction
+        ? fraction : worst_fraction;
+    }
+    fprintf(stderr,
+            "KLS generic retained update: safe=%d violations=%ld"
+            " worst_fraction=%.6g\n",
+            !invalid, (long)violations, worst_fraction);
   }
   return !invalid;
 }

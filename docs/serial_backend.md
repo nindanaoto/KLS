@@ -113,6 +113,15 @@ indices may still be 32-bit through the public API, but the production numeric
 kernel remains the established 64-bit implementation until a broader result
 justifies another backend.
 
+The broader paired recheck now fingerprints symbolic permutations and numeric
+shape and excludes width-dependent AMD factors. Across 24 comparable hard-gap
+and cross-family holdout matrices, KLU32/KLU64 steady refactor measured
+`0.9918x` geomean; only 6 matrices won by more than 2%. The stricter six-row
+identical-numeric-shape subset measured `1.0053x`. This misses the predeclared
+10% implementation gate, so an authoritative 32-bit backend remains rejected.
+Use `scripts/run_klu_width_suite.py` with the excluded dual-width target to
+repeat the gate on another CPU.
+
 ## Reproduction
 
 Build and run the serial policy with:

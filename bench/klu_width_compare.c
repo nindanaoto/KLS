@@ -88,7 +88,83 @@ typedef struct run_stats {
   int nblocks;
   int64_t nnz_l;
   int64_t nnz_u;
+  uint64_t symbolic_fingerprint;
+  uint64_t numeric_fingerprint;
 } run_stats;
+
+static uint64_t fingerprint_word(uint64_t hash, uint64_t value) {
+  hash ^= value;
+  hash *= UINT64_C(1099511628211);
+  return hash;
+}
+
+static uint64_t symbolic64_fingerprint(const klu_l_symbolic *symbolic) {
+  if (symbolic == NULL) return 0u;
+  uint64_t hash = UINT64_C(1469598103934665603);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->n);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->nz);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->nblocks);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->nzoff);
+  for (int64_t i = 0; i < (int64_t)symbolic->n; ++i) {
+    hash = fingerprint_word(hash, (uint64_t)symbolic->P[i]);
+    hash = fingerprint_word(hash, (uint64_t)symbolic->Q[i]);
+  }
+  for (int64_t block = 0; block <= (int64_t)symbolic->nblocks; ++block) {
+    hash = fingerprint_word(hash, (uint64_t)symbolic->R[block]);
+  }
+  return hash;
+}
+
+static uint64_t numeric64_fingerprint(const klu_l_numeric *numeric) {
+  if (numeric == NULL) return 0u;
+  uint64_t hash = UINT64_C(1469598103934665603);
+  hash = fingerprint_word(hash, (uint64_t)numeric->n);
+  hash = fingerprint_word(hash, (uint64_t)numeric->nblocks);
+  hash = fingerprint_word(hash, (uint64_t)numeric->lnz);
+  hash = fingerprint_word(hash, (uint64_t)numeric->unz);
+  hash = fingerprint_word(hash, (uint64_t)numeric->nzoff);
+  for (int64_t i = 0; i < (int64_t)numeric->n; ++i) {
+    hash = fingerprint_word(hash, (uint64_t)numeric->Pnum[i]);
+    hash = fingerprint_word(hash, (uint64_t)numeric->Llen[i]);
+    hash = fingerprint_word(hash, (uint64_t)numeric->Ulen[i]);
+  }
+  return hash;
+}
+
+#ifndef KLS_VENDORED_KLU_ONLY
+static uint64_t symbolic32_fingerprint(const klu_symbolic *symbolic) {
+  if (symbolic == NULL) return 0u;
+  uint64_t hash = UINT64_C(1469598103934665603);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->n);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->nz);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->nblocks);
+  hash = fingerprint_word(hash, (uint64_t)symbolic->nzoff);
+  for (int i = 0; i < symbolic->n; ++i) {
+    hash = fingerprint_word(hash, (uint64_t)symbolic->P[i]);
+    hash = fingerprint_word(hash, (uint64_t)symbolic->Q[i]);
+  }
+  for (int block = 0; block <= symbolic->nblocks; ++block) {
+    hash = fingerprint_word(hash, (uint64_t)symbolic->R[block]);
+  }
+  return hash;
+}
+
+static uint64_t numeric32_fingerprint(const klu_numeric *numeric) {
+  if (numeric == NULL) return 0u;
+  uint64_t hash = UINT64_C(1469598103934665603);
+  hash = fingerprint_word(hash, (uint64_t)numeric->n);
+  hash = fingerprint_word(hash, (uint64_t)numeric->nblocks);
+  hash = fingerprint_word(hash, (uint64_t)numeric->lnz);
+  hash = fingerprint_word(hash, (uint64_t)numeric->unz);
+  hash = fingerprint_word(hash, (uint64_t)numeric->nzoff);
+  for (int i = 0; i < numeric->n; ++i) {
+    hash = fingerprint_word(hash, (uint64_t)numeric->Pnum[i]);
+    hash = fingerprint_word(hash, (uint64_t)numeric->Llen[i]);
+    hash = fingerprint_word(hash, (uint64_t)numeric->Ulen[i]);
+  }
+  return hash;
+}
+#endif
 
 static double now_seconds(void) {
   struct timespec ts;
@@ -408,6 +484,7 @@ static int run_klu32(matrix *a, const double *base_values,
     return 0;
   }
   out->nblocks = symbolic->nblocks;
+  out->symbolic_fingerprint = symbolic32_fingerprint(symbolic);
 
   const double factor_start = now_seconds();
   klu_numeric *numeric =
@@ -420,6 +497,7 @@ static int run_klu32(matrix *a, const double *base_values,
     free(ai);
     return 0;
   }
+  out->numeric_fingerprint = numeric32_fingerprint(numeric);
   out->nnz_l = numeric->lnz;
   out->nnz_u = numeric->unz;
 
@@ -570,6 +648,7 @@ static int run_klu64(matrix *a, const double *base_values,
     return 0;
   }
   out->nblocks = (int)symbolic->nblocks;
+  out->symbolic_fingerprint = symbolic64_fingerprint(symbolic);
 
   const double factor_start = now_seconds();
   klu_l_numeric *numeric =
@@ -582,6 +661,7 @@ static int run_klu64(matrix *a, const double *base_values,
     free(ai);
     return 0;
   }
+  out->numeric_fingerprint = numeric64_fingerprint(numeric);
   out->nnz_l = (int64_t)numeric->lnz;
   out->nnz_u = (int64_t)numeric->unz;
 
@@ -719,7 +799,9 @@ static void print_stats_json(const char *name, const run_stats *s) {
          "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
          "\"verify_each_refactor\":%s,"
          "\"refactor_max_relative_residual\":%.9g,"
-         "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}",
+         "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 ","
+         "\"symbolic_fingerprint\":\"%016" PRIx64 "\","
+         "\"numeric_fingerprint\":\"%016" PRIx64 "\"}",
          name, s->status, s->analysis_seconds, s->initial_factor_seconds,
          s->factor_seconds_avg, s->refactor_first_seconds,
          s->refactor_steady_seconds_avg, s->refactor_seconds_avg,
@@ -729,7 +811,8 @@ static void print_stats_json(const char *name, const run_stats *s) {
          s->solve_seconds_avg, s->spice_cycle_seconds, s->nblocks,
          s->residual_l2, s->relative_residual_l2,
          s->verify_each_refactor ? "true" : "false",
-         s->refactor_max_relative_residual, s->nnz_l, s->nnz_u);
+         s->refactor_max_relative_residual, s->nnz_l, s->nnz_u,
+         s->symbolic_fingerprint, s->numeric_fingerprint);
 }
 #endif
 
@@ -930,13 +1013,23 @@ int main(int argc, char **argv) {
     printf(",");
     print_stats_json("klu64", &s64);
     if (ok32 && ok64) {
-      printf(",\"ratio32_over_64\":{\"analysis\":%.9g,"
+      const int same_symbolic =
+        s32.symbolic_fingerprint == s64.symbolic_fingerprint;
+      const int same_numeric = same_symbolic &&
+        s32.numeric_fingerprint == s64.numeric_fingerprint;
+      printf(",\"same_symbolic\":%s,\"same_numeric_shape\":%s,"
+             "\"ratio32_over_64\":{\"analysis\":%.9g,"
              "\"initial_factor\":%.9g,\"factor\":%.9g,"
-             "\"refactor\":%.9g,\"solve\":%.9g,\"spice_cycle\":%.9g}",
+             "\"refactor\":%.9g,\"refactor_steady\":%.9g,"
+             "\"solve\":%.9g,\"spice_cycle\":%.9g}",
+             same_symbolic ? "true" : "false",
+             same_numeric ? "true" : "false",
              s32.analysis_seconds / s64.analysis_seconds,
              s32.initial_factor_seconds / s64.initial_factor_seconds,
              s32.factor_seconds_avg / s64.factor_seconds_avg,
              s32.refactor_seconds_avg / s64.refactor_seconds_avg,
+             s32.refactor_steady_seconds_avg /
+               s64.refactor_steady_seconds_avg,
              s32.solve_seconds_avg / s64.solve_seconds_avg,
              s32.spice_cycle_seconds / s64.spice_cycle_seconds);
     }

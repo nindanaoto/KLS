@@ -31,6 +31,518 @@ runs into single pipeline tasks; two-thread EGraph refactor still measures
 slower than serial on ASIC_320ks from per-column sync), the checked
 fast-factor kernels, and the `pre2` first-factor/analysis costs.
 
+### External `wang3` persistent-owner probe (2026-08-14)
+
+The frozen external-validation `Wang/wang3` factor exposes substantially more
+producer reuse than its small order suggests. With generic AUTO selecting
+METIS, no scaling, and the EGraph refactor, the retained consumer-plan
+diagnostic in `build/wang3-persistent-plan-diagnostic.json` records `91,741`
+consumer runs over `4,115,231` rows. Exact retained L groups cover `83,360`
+runs, `3,074,427` rows, and about `1.876B` candidate update entries. Advancing
+all of those currents would cost about `10.446B` modeled work, however; only
+32 groups, 4,785 runs, and `180.2M` update entries pass the current payoff
+test against `124.4M` advance work. The existing group-batch experiment
+therefore applies that subset during its first calibration refactor, covers
+less than 10% of eligible rows, and auto-disables. Five verified enabled and
+disabled steady samples then remain effectively identical around 37.3 ms.
+
+Two deeper producer-sharing variants were tested and rejected before commit.
+First, the existing cooperative two- and four-current decks were forced on
+the same factor. Five interleaved medians were 37.23 ms for normal dispatch,
+39.90 ms for pairs (`+7.2%`), and 38.15 ms for quads (`+2.5%`). A prototype
+then shared an aligned scalar producer's L stream across all deck SPAs after
+the strict-supernode kernel declined. It improved one pair comparison by about
+2.2% relative to the old pair implementation but remained slower than normal
+dispatch; the quad form was slower. Only about 1,237 scalar producers per
+refactor reached the two-current shared kernel. Restricting decks to matching
+first producers was much worse (about 97 ms): leased columns can be
+transitively related, so declining their cooperative walk makes one wait
+behind work already owned by the same worker. Letting both pair sides advance
+on every polling round likewise produced large 38--56 ms variability. All of
+this prototype code was removed.
+
+The retained scalar/supernode implementation bundle was also decomposed before
+changing its policy. In seven longer verified comparisons, AUTO's measured
+bundle had a 37.33 ms median versus 38.80 ms for the 128-entry tail alone;
+144-entry-only and masked-remainder-only probes were also slower. Adding
+software look-ahead to the selected compact-index scalar scatter was neutral
+to slightly negative over seven pairs (36.50 versus 36.39 ms median), so that
+prototype was removed too. These results reject arbitrary ready-column decks,
+single-current retained-panel replay, and another scatter/tile threshold as
+the next `wang3` closer. The remaining paper-aligned redesign is a persistent
+group owner that keeps compatible current states live and schedules producer
+updates to that owner without allocating several full `n`-entry SPAs or
+replaying each current's prefix independently.
+
+A deeper compact-front prototype tested whether scheduler-local antichains
+could supply that owner without replacing the EGraph dependency engine. The
+strict form searched the 5,057-column `wang3` pipeline for columns with an
+identical complete U-dependency signature. It found zero groups in 8-, 32-,
+and 128-column windows. The existing exact ready queue did not expose a useful
+fallback surface: one residual-clean refactor took about 215--219 ms instead
+of about 37 ms, a ten-update run failed in the queue scaffold, and no strict
+front tile formed.
+
+The prototype was then moved to the dependency-level barrier prefix, where all
+members are a proved antichain and different U patterns can be merged safely.
+It built a masked compact union-row front, proved every input and update target
+against the retained fixed pattern before mutation, and streamed producers in
+multiway U order. Across the two EGraph passes of a one-update probe it ran
+6,048 tiles covering 41,880 column executions and 2,411,194 union rows, with a
+clean relative residual around `1.55e-15`. The decisive counter was negative:
+the tiles performed `63,861,868` update entries and streamed exactly
+`63,861,868` producer-L entries. The barrier-local antichains contained zero
+producer-stream reuse. Full proof measured 49.80 ms and trusting the already
+validated fixed pattern still measured 47.61 ms, versus a 37.12 ms control.
+The source prototype was removed.
+
+This rules out the bounded antichain/front proof as the next kernel. A useful
+front must cross the ready boundary: it has to be producer-owned and retain
+non-ready current state across several producer publications. That is a native
+numeric-engine replacement, not a different EGraph deck size or transient
+union map; the retained Algorithm-5 owner experiments below remain the closest
+scaffold for staging it.
+
+The two existing candidates for staging that replacement were checked on the
+same matrix. Forcing the row-refactor engine for three updates still reported
+`last_refactor_path=egraph`, all native-row-panel last-run markers remained
+zero, and time rose from 35.74 ms to 113.11 ms, with clean residuals. The row
+scaffold therefore rejects before entering its native numeric kernel and is
+not a usable shadow engine for `wang3`. Enabling the safe Algorithm-5
+direct-prefix current-state scaffold was even more conclusive. With both arms
+pinned to the same no-BTF, METIS, eight-thread route, its retained group and
+current counts were zero; it diverted to the mapped fallback at 1.410 s per
+update versus 32.23 ms for EGraph (`43.7x` slower), again with a clean
+`2.06e-15` residual. Extending either dormant scaffold would first require a
+new single-block owner plan, so it is not a shortcut around the native-engine
+redesign.
+
+A native row-factor shadow then isolated whether KLU-compatible value
+publication was the hidden cost in that redesign. The opt-in lean-row
+prototype made its flat row-major L/U values authoritative, removed every
+per-entry store through the KLU value-pointer mirrors, and solved directly from
+the row factor. Three one-update serial pairs improved from a 812.12 ms median
+with dual stores to 764.48 ms without them (`5.9%`), but the native shadow was
+still `23.7x` slower than the pinned 32.23 ms EGraph control; its row solve also
+rose from about 6.94 ms to 11.55 ms. Independently verified changed updates
+remained residual-clean. In the more relevant eight-thread strict-supernode
+worker, removing the random KLU stores changed the measured numeric phase only
+from 45.64 ms to 45.13 ms and left complete refactor time near 75 ms. The
+prototype was removed: KLU publication is not the missing order-of-magnitude
+cost, and a second flat representation is not a native-engine shortcut.
+
+The same run bounds relaxed-supernode upside before construction. Existing
+strict 2--8-row supernodes already cover 3,573,826 of `wang3`'s 3,849,872 L
+entries (`92.8%`). Forcing their serial kernel reduced the row walk to 377.85
+ms, while the eight-thread form measured 75.70 ms with a clean
+`1.84e-15` residual. Relaxing the remaining `7.2%` cannot supply the required
+`2.35x` improvement over that parallel row walk, even under a zero-cost
+matcher, so no relaxed-pattern implementation was retained. Any future native
+engine has to change the update direction and share a producer panel across
+multiple live targets; changing storage or widening exact runs is insufficient.
+
+That producer-panel redesign was then tested directly rather than left as an
+architectural conjecture. An offline census partitioned each BTF block into
+2-, 4-, 8-, and 16-row target panels, grouped external producers only when
+they had the same target mask inside one strict U-row supernode, and charged
+both rectangular compute padding and union-pattern storage. The four-row point
+cleared every structural gate: external producers represented `99.76%` of the
+`2.295B` update entries, target fanout of at least two covered `91.42%` of all
+work, true multi-producer common tails covered `90.24%`, and the ideal plan
+eliminated `64.89%` of producer-row reads. Fixed-lane compute padding was
+`1.168x`, union-pattern storage padding was `1.417x`, and the largest live
+panel was only 0.14 MiB. Eight rows raised batching/common-tail coverage to
+`96.46%`/`95.13%` and producer-read elimination to `80.07%`, but storage
+padding rose to `1.705x`.
+
+The first numeric gate was negative. A retained four-row replay plan contained
+325,291 producer events, 3,807,580 packed L coefficients, and `2.290B`
+external update entries. Its one-owner kernel took 547.67 ms. An eight-thread,
+work-balanced replay with private target workspaces reduced that to 57.18 ms
+(80.1 GF/s), still slower than a complete same-route EGraph refactor at
+34.73 ms even though the replay omitted input scatter, internal panel
+factorization, dependency scheduling, pivot checks/publication, and
+solve-state maintenance. Producer-major four- and eight-row variants were
+slower.
+
+The SIMD upper bound was subsequently rebuilt because the discarded compact
+prototype was not a valid AVX2 test: it retained a hard-coded
+`l_positions[dep*4+lane]` address in the generalized width plan, and the AVX2
+arm was reachable only for a full four-row mask. Correct active-mask compact
+kernels, with assembly checked for 256-bit `ymm` FMA and 512-bit `zmm` FMA,
+gave these seven-sample medians: four rows 18.59 ms AVX2 versus 15.87 ms
+AVX-512, eight rows 16.81 ms versus 13.46 ms, and sixteen rows 12.07 ms with
+AVX-512. Checksums agreed exactly at each width. This compact layout discards
+the real sparse output-row addresses, however, so it is an arithmetic ceiling
+rather than an implementable factor kernel.
+
+An exact-row AVX-512 replay therefore wrote every update to its actual target
+row while retaining padded active masks and transposed panel coefficients.
+Four rows regressed to 63.45 ms, while eight and sixteen rows measured 32.54
+and 25.90 ms. Charging every worker for its per-generation private-workspace
+clear and coefficient repack raised the sixteen-row result to 27.70 ms. The
+same-session complete EGraph control was 33.59 ms with a `1.63e-15` residual.
+That 5.89 ms margin is only 17.5%, yet the replay still does not compute new L
+multipliers or internal-panel factors and omits dependency readiness, pivot
+checks, publication, and solve-state maintenance. The prototype was removed.
+AVX-512 is useful for the panel arithmetic, but it does not leave enough
+end-to-end headroom to justify a new transactional numeric engine.
+
+### Native row-major kernel and lifecycle follow-up (2026-08-15)
+
+The full native row engine was first tested as the proposed replacement for
+the `wang3` EGraph kernel.  On the pinned eight-thread METIS/no-scale route,
+steady EGraph refactor/solve measured about 30.6/5.1 ms, while forcing the
+complete row engine measured about 48/18.8 ms.  Its critical 889-row dense
+sink spent roughly 16 ms assembling external producers and 8 ms factoring and
+publishing its internal panel, after about 21 ms of predecessor work.  Thus
+the row engine is not presently a competitive replacement for the large
+producer-oriented EGraph factorization.
+
+Two direct redesigns were implemented and removed.  A sixteen-consumer
+AVX-512 owner streamed each completed producer once and maintained exact
+row-major target state.  Compact union indexing and retained producer panels
+recovered the scalar assembly rate but did not beat it; physical lane
+utilization was only about 50%, and scalar/vector hybrids were slower.  An
+eager sink-panel assembler then claimed rows as soon as every external
+producer published.  The selected sink remained clean, but its owner still
+waited about 15.75 ms at root entry: the expensive rows depend on the late
+frontier, so there was no useful assembly/predecessor overlap.  The offline
+exact-row AVX-512 result above therefore remains an arithmetic ceiling rather
+than evidence for another production engine.
+
+The small-factor lean row kernel is a different result.  It is already an
+authoritative exact direct factorization and its complete H100 lifecycle wins
+on unrelated factors.  Three final entrywise-update pairs put median AUTO-row
+versus forced-column modeled cycles at 25.93 versus 28.43 ms on `powersim`
+and 29.85 versus 36.56 ms on `mimo46x46_system`.  Five `memplus` pairs put
+the medians at 66.40 versus 68.41 ms; four of five pairs favored row, and the
+row solve was consistently about 0.063--0.069 ms versus 0.089--0.096 ms for
+the column representation.  Relative-L2 residuals stayed between
+`4.84e-17` and `2.56e-15`.  A later same-core check corrected an apparent
+`rajat03` counterexample that had been measured under host scheduling noise:
+seven pinned pairs put row refactor near 0.143--0.145 ms and column near
+0.226--0.229 ms, with both solves near 0.084--0.085 ms.  The full `wang3` row
+engine remains a genuine large-factor loss by a wide margin.
+
+The useful retained change is therefore lifecycle arbitration, not a new
+matrix classifier.  Both sides of a provisional generic verdict now audit the
+complete recurring lifecycle.  A provisional row selection records four row
+refactor-plus-following-solve cycles, then four column cycles; a provisional
+decline records four column cycles followed by four row cycles.  The selected
+side changes only when the challenger wins by 2% on the complete measured
+cycle (5% when no paired solve is available).  The challenger cycles replace
+ordinary recurring updates and therefore are not charged again as setup cost.
+Exact executor outcomes, residual checks, and fallback remain unchanged.
+`memplus` selected row in
+every final run after four samples per arm.  Three-run controls on `qh1484`,
+`Hamrle2`, and `hcircuit` all retained column; `hcircuit` either proved the
+lifecycle lower bound early or rejected row after the four-sample audit.  A
+final pinned eight-worker audit measured row/column refactors at 0.689/0.492
+ms and their following solves at 0.205/0.190 ms, then restored column.  The
+opposite `rajat03` control measured 0.278/0.583 ms refactors and 0.092/0.089 ms
+solves under four workers and retained row.  Both terminal residuals were
+about `3.2e-15`.
+
+A component-granular hybrid was also implemented and removed.  Its EGraph
+schedule remained authoritative: the first scheduled column of each selected
+BTF component executed that complete component through the lean row mirrors,
+later visits became completion-only, and every unselected component retained
+the ordinary EGraph column kernel including pair/quad fusion.  Selection used
+only realized block rows, retained entries, and exact row-update work; sweeps
+covered tiny cache-resident components through a 4,766-row component.  On
+`ckt11752_tr_0`, the best filtered split moved two components (223 rows,
+2,775 entries, 13,748 modeled operations) to row order but raised the pinned
+median steady refactor from about 1.85 ms to 1.98 ms, roughly 7%.  On
+`TSOPF_RS_b2383`, moving one 4,766-row component plus the tiny components
+raised the median from about 211.1 ms to 214.1 ms.  Residuals remained near
+`1.3e-15` and `1.3e-12`, respectively.  This rejects component size/work as a
+sufficient row-versus-column discriminator and avoids leaving a hot per-column
+branch or a second component scheduler in production.
+
+A stricter supernode-owned replacement kernel was then implemented and
+removed.  This was not additive work around the scalar kernel: one EGraph
+worker atomically owned an exact consecutive successor-pattern group of two
+to four columns, the existing multi-current numeric walk streamed common
+producer data once into the live SPAs, and ordinary dispatch skipped those
+columns.  The fixed factor pattern, per-column publication, pivot/fallback
+contract, and residual checks remained authoritative.  The safe version used
+nonblocking prefix claims and admitted a group only after every dependency
+outside it had been published.  Earlier attempts demonstrated why those
+conditions are necessary: waiting while extending a claimed group can
+deadlock with a worker that already owns its suffix, and a symbolic
+supernode can contain a column whose external dependency belongs to a future
+scheduler level.  Eager owners can then occupy the whole team while the
+needed predecessor remains undispatched.  A real compact-front engine would
+therefore need a front-level dependency DAG rather than merely coarsening the
+current column cursor.
+
+The bounded replacement did not establish a numeric payoff.  Three pinned
+eight-worker `wang3` pairs measured 33.91--34.32 ms for ordinary EGraph and
+33.94--34.44 ms with width-four ownership, but only 120--136 columns were
+eligible.  In a controlled four-worker all-pipeline G2 schedule, ordinary
+EGraph measured 93.39--95.55 ms and width four measured 96.40--96.67 ms while
+owning about 19,230 columns; width two also had no repeatable win.  (That
+all-pipeline control is itself much slower than the roughly 49 ms production
+separator schedule and was used only to isolate ownership.)  On ASIC_320k,
+the same control measured 27.82--28.16 ms ordinary versus 34.92--35.16 ms at
+width four while owning about 10,000 columns.  Reducing live SPA pressure to
+width two still measured 34.58--34.73 ms versus 27.99--30.64 ms ordinary.
+Relative-L2 residuals remained about `1.4e-15`, `3.0e-16`, and `1.12e-15`.
+Thus even true scalar-column replacement, rather than an extra panel pass,
+loses where coverage is high and is neutral where coverage is low.  No
+runtime branch remains.  Compact storage and a front-native DAG would be a
+ground-up solver object, not a justified incremental kernel change on this
+evidence.
+
+The proposed authoritative 32-bit numeric backend was next subjected to a
+stop/go gate before implementation.  The exact-source vendored KLU32/KLU64
+diagnostic now fingerprints the complete symbolic permutation/block layout
+and the numeric pivot/column-length shape, and a paired pinned suite alternates
+which width runs first.  Samples are scored only when both widths retain the
+same symbolic fingerprint, BTF block count, and L/U entry counts; independent
+AMD tie-breaking that changes the factor is reported but excluded.  Every
+refactor uses the same deterministic 0.1% entrywise value sequence and checks
+the resulting solve.
+
+On the leading twelve CKTSO-gap rows, seven factors were comparable.  Their
+two-pass steady-refactor KLU32/KLU64 geomean was `0.9971x`; only `gemat12` and
+`transient` cleared a 2% improvement, while both ASIC_320 variants,
+`ASIC_100ks`, `rajat03`, and G2 were neutral or slightly slower.  Five rows
+produced different AMD symbolics across widths and were not treated as storage
+evidence.  A disjoint 22-matrix cross-family holdout supplied 17 comparable
+factors and measured `0.9896x`, with four wins and one loss beyond 2%.  Across
+all 24 comparable factors the steady-refactor geomean was `0.9918x` with six
+wins and one loss beyond 2%.  The stricter six-factor subset whose numeric
+fingerprints also agreed measured `1.0053x`.  Comparable-width residuals
+agreed; one ill-conditioned stock-KLU case missed the absolute residual gate
+equally in both variants.
+
+The combined solve geomean improved by about 5.2%, but solve is not the
+dominant hard-row cost and this remains below the predeclared 10% backend
+threshold.  KLS already feeds compact 32-bit L/U alias streams to much of the
+hot EGraph refactor, explaining why replacing the complete KLU index type has
+little remaining numeric upside.  The earlier two-row system-KLU observation
+did not survive exact-source pairing and had not controlled symbolic/numeric
+identity.  The authoritative compact backend was therefore not implemented.
+The reusable suite runner and fingerprints remain so a genuinely different
+CPU can repeat the architecture gate without reopening the solver hot path.
+
+A looser cold admission rule was explicitly rejected.  Moving the unscaled
+first-sample threshold from the existing 40% required advantage to 20--25%
+occasionally false-selected row on `hcircuit`; its later safety audit repaired
+the decision, but the short lifecycle regressed by about 24%.  The original
+strict cold threshold is unchanged.  Likewise, making the serial pair walk a
+real challenger to the parallel lean worker measured about 0.80 ms versus
+0.49 ms on `memplus`, and restoring the older level-order pair kernel measured
+about 0.52 ms; both prototypes were removed.  The evidence supports a
+beneficial lean row-major direct kernel with faster evidence collection, not
+replacing the large EGraph engine or weakening the negative guard.
+
+### Generic retained-factor preconditioner probe (2026-08-15)
+
+The remaining algorithmic alternative reuses the preceding exact factor as a
+preconditioner instead of recomputing it. The opt-in
+`KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER=1` arm is representation-based:
+the caller must declare at least sixteen expected updates, and the installed
+factor must be normal-orientation, unscaled, untransformed, full-rank,
+unperturbed, free of pivot nudges, have measured `rcond >= 1e-8`, and report at
+least 4,096 factor operations per row. Accepted predicted-pattern first
+factors are allowed only after their ordinary pivot checks and diagnostics
+satisfy the same numeric contract. No dimension, sparsity, ordering, family,
+or benchmark identity participates in admission.
+
+Each changed generation is compared with the retained reference in the
+factor's numeric frame. The default bound is 0.101% per stored entry. A
+diagnostic `KLS_GENERIC_RETAINED_PRECONDITIONER_RELATIVE_LIMIT` may raise it
+up to 10% for radius experiments. The current matrix values are retained for
+honest residual products; every solve performs at most eight stationary
+corrections and returns success only below `1e-9` relative L2. This experiment
+exposed and fixed a pre-existing controller error: the generic max-norm exit
+could terminate a retained solve just outside its stricter L2 certificate.
+The retained contract now owns its exit condition. If it still fails, generic
+reuse is retired, the current numeric is refactored through the ordinary exact
+dispatcher, and the complete solve (including transpose and multiple RHS) is
+retried. Thus the opt-in changes performance speculation, not the public
+correctness behavior.
+
+On a real one-factor/99-update lifecycle (`factor_repeat=0`), pinned to CPUs
+0--7 with eight workers and independently checked 0.1% entrywise updates,
+three stable alternating `wang3` pairs reduced the median normal
+refactor-plus-solve pair from 42.23 ms (35.90 + 6.31) to 33.48 ms
+(0.13 + 33.35), a 20.7% reduction. (A fourth pair crossed a large host clock
+state change and is not mixed into those medians.) All 99 changed refactors
+reported retained reuse. The worst changed-generation residual was
+`9.97e-10`; a later solve-side miss at this tight boundary exercised exact
+recovery. The unrelated `poisson3Da` reduced the corresponding 99-update pair
+from 23.72 ms (19.12 + 4.60) to 21.05 ms (0.30 + 20.75), an 11.3% reduction,
+with a `5.55e-10` worst residual.
+`crystk02` was rejected by its factor-time `rcond` gate, and transformed or
+low-work sample factors remained on their existing exact paths.
+
+The radius probe confirms that this is a small-update method, not a general
+replacement for numeric factorization. On the checked `wang3` exact factor,
+0.2% entrywise updates still retained the factor and measured about 37.96 ms
+per pair. At 0.3%, normal solves consumed all eight corrections and the final
+transpose needed exact recovery. At 0.5% and 1%, the first failed certificate
+retired reuse and subsequent generations used EGraph; their amortized pairs
+were about 7--8% slower than selecting EGraph immediately. The conservative
+0.101% default is therefore retained, and the generic arm remains opt-in
+pending broader workload/RHS evidence.
+
+### Retained Krylov and partial-update follow-up (2026-08-15)
+
+The remaining retained-factor Krylov idea was implemented by parameterizing
+the existing cold right-preconditioned GMRES recovery. The explicit
+`KLS_ENABLE_GENERIC_RETAINED_GMRES=1` experiment starts from the old-factor
+solution, defaults to two Arnoldi steps per restart and one modified
+Gram--Schmidt pass, and still accepts only a true current-matrix relative-L2
+residual below `1e-9`. A failed certificate takes the same exact-refactor
+recovery as stationary refinement. The kernel now allocates only the vectors
+needed by the selected restart width and carries the true residual between
+restarts, avoiding one duplicate sparse matrix product. Ordinary difficult-
+factor recovery retains its four-step, two-pass configuration.
+
+Three pinned, independently checked 99-update `wang3` pairs put stationary
+changed solves at 33.18, 33.22, and 31.76 ms, versus 29.85, 30.21, and
+30.00 ms for GMRES(2). The median complete modeled cycle fell from 3.819 to
+3.475 seconds (9.0%). Every generation retained reuse; the worst/final Krylov
+residuals were `6.65e-10`/`3.97e-10`. Four-step GMRES extended successful
+reuse to some 0.2--0.5% probes, but the extra solves made the benefit small or
+negative near exact-refactor cost.
+
+This is not enabled automatically. On `poisson3Da`, GMRES(2) raised the
+99-update changed solve from 20.64 to 21.72 ms, and on the unrelated natural
+`VLSI/ss1` factor it raised a ten-update sample from 58.09 to 60.80 ms.
+`ss1` has 66 factor entries per input nonzero, an even stronger apparent
+factor-traffic ratio than `wang3`, so that ratio cannot safely classify the
+winner. G2 left retained mode after its first generation in both arms. The
+NICSLU paper likewise treats preconditioned GMRES as problem-dependent rather
+than universal. With only one natural positive and two natural negatives,
+automatic selection would be another benchmark-shaped policy; the certified
+opt-in remains available for further workload/RHS evidence.
+
+The probe exposed one generic refinement omission that was retained. The
+existing live serial-CSC versus parallel-CSR residual tournament formerly ran
+only for ordinary solve contracts, while retained refinement unconditionally
+woke the parallel engine. Retained stationary solves now participate in the
+same four-sample timing decision. On `wang3` it measured about 128 us for CSC
+and 70 us for eight-worker CSR and selected CSR; the complete changed solve
+was effectively neutral (32.20 versus 32.08 ms). `poisson3Da` also remained
+at parity. This is a measured machine/kernel choice, not a matrix classifier.
+
+Low-rank and exact-partial alternatives were then bounded with actual update
+support. One localized generation changed 26 input columns on `wang3`, 14 on
+`poisson3Da`, 147 on G2, and 83 on `epb3`. A Woodbury correction therefore
+needs up to `k+1` old-factor solves per one-RHS generation for ranks bounded by
+those column counts; even the best 14-column case costs far more triangular
+traffic than its exact refactor. The short Krylov method is the matrix-free
+way to exploit any favorable low-dimensional correction without explicitly
+forming that dense update system.
+
+An exact fixed-pivot partial-column prototype tested the more favorable G2
+case. Changed columns seeded a topological U-dependency closure covering only
+3,876 of 150,102 columns but 58.1% of estimated column work. On a no-fast-
+factor control, the existing full parallel EGraph refactor took 43.09 ms and
+solved in 5.26 ms. The serial subset prototype took 358.80 ms and its solve
+rose to 36.07 ms; more decisively, relative residual degraded from
+`3.08e-16` to `3.20e-8`. The experiment disproved the closure: changed L
+values propagate outside a closure derived only from U dependencies. A sound
+two-sided reach would be larger and would still surrender EGraph parallelism.
+The partial path and its public enum were removed.
+
+Re-reading the SubtreeLU/CKTSO algorithms does not expose a smaller omitted
+patch behind this result. Their gain comes from an authoritative row-major
+up-looking numeric, separator-subtree ownership, and supernodes in every
+scheduling phase—not from selectively rerunning KLU columns. KLS already
+tested that architectural direction directly above: removing KLU mirror
+stores saved only 5.9%, and the implementable exact-row AVX-512 producer-panel
+ceiling left 17.5% headroom before multiplier computation, internal panels,
+dependencies, pivots, and publication. Thus no second numeric engine is
+retained from this pass. Such an engine remains a ground-up replacement with
+insufficient measured end-to-end margin, not an untried SIMD toggle.
+
+Ordering co-design was bounded separately against the kernels that actually
+remain. On the same pinned eight-thread, no-BTF, unscaled route with three
+entrywise updates, METIS produced 3,849,872 L entries, `4.594B` factor flops,
+and a 33.16 ms EGraph refactor average. SCOTCH was the nearest independent
+structure at 5,013,089 entries, `5.645B` flops, and 47.24 ms. AMD measured
+102.39 ms, while AMF/AMMF shared a 5,103,724-entry, `7.838B` factor and took
+98.24/97.24 ms. Natural ordering expanded to 22,670,849 entries and a 6.20 s
+mapped refactor. All residuals remained clean. Thus the current METIS choice
+already dominates every available generic ordering for recurring work; adding
+a panel-reuse term cannot rescue the rejected panel engine without first
+accepting substantially more fill and a slower incumbent kernel.
+
+### Pivot-aware ETree affected-tail restart (2026-08-16)
+
+The remaining CKTSO-style pivot-recovery direction was tested as a real
+checked-factor transition rather than inferred from synthetic smoke. KLS
+already contained most of the mechanism: a rejected fixed-pattern pivot can
+build a row/column affected mask from the factor ETree, preserve unaffected
+rows, dynamically pivot the affected row-major tail, and commit a replacement
+KLU block. What was missing was a controlled way to isolate that mechanism
+from the measured full-factor budget and the serial/block fallbacks. The
+rejection-only diagnostic `KLS_FAST_REJECT_REPAIR_MODE` now selects `etree`,
+`serial`, `block`, or `full`; it is read only after an actual checked-pivot
+rejection, so successful fixed-pattern factors add neither an environment
+lookup nor a new hot-path branch. `KLS_TRACE_FAST_REJECT_REPAIR=1` exposes the
+repair dispatch and ETree/seed/pipeline/commit stages.
+
+The diagonal-stress benchmark now models the documented transition exactly:
+it first factors the original values, then applies the stressed values to the
+timed factor calls. On `add20`, a `1e-12` scale of columns 1300, 800, and 1700
+creates deterministic early, middle, and late rejection cases. They reject at
+pivots 199, 1016, and 2248 and produce affected tails of 1,670, 1,064, and 140
+columns. Every isolated repair mode solved below `3.5e-16` relative L2.
+
+The first real-kernel defect was in unaffected-U seeding. For each preserved
+row, the old code rescanned every later packed U column and all its entries,
+making the seed proportional to preserved rows times factor entries. It is now
+a two-pass sparse transpose: one packed-U pass counts entries per preserved
+row, one allocation/prefix step reserves the exact row buckets, and a second
+pass fills those buckets while constructing the dynamic-pivot column links.
+This preserves the row representation and pivot-update semantics while making
+the seed linear in the block factor entries. Against the pre-change repeated
+medians, the middle case improved from 7.381 to 5.348 ms and the small late
+tail from 7.536 to 1.998 ms (`1.38x` and `3.77x`). The early case remained
+around 6--7 ms because most of the block is genuinely active rather than
+preserved.
+
+The end-to-end gate still fails decisively. Twenty-one alternating samples per
+mode gave ETree/block medians of 7.166/0.615 ms for the early tail,
+5.348/0.635 ms for the middle tail, and 1.998/0.660 ms for the late tail.
+Thus even after removing the quadratic seed, affected-tail repair is `11.7x`,
+`8.4x`, and `3.0x` slower than directly refactoring the rejected block. Real
+cross-family rejection probes agree: ETree/block/full measured
+251.5/53.3/45.5 ms on `bcircuit`, 306.1/85.8/72.6 ms on `hcircuit`, and
+31.6/7.9/4.4 ms on `rajat03`, with residuals from `8.0e-17` to `3.3e-15`.
+An all-diagonal `coupled` transition is the worst regime: ETree spent 19.4 s
+building a large dynamic repair that the post-pivot check rejected, then fell
+back, versus about 0.76 s for serial/block repair and 0.36 s for a full factor.
+The production measured full-factor budget correctly prevents that attempt.
+
+The negative result is not caused by successful-path overhead. Thirty-one
+paired no-rejection samples at three `add20` columns put the opt-in environment
+at -0.4%, -0.1%, and +0.6% versus default, all inside the 2% noise gate. It is
+also not safe to rebase only the preserved-row seed onto the incumbent numeric
+permutation: that prototype passed farther into the ETree pipeline but mixed
+symbolic and numeric row coordinates, produced an invalid `coupled` solve,
+and was removed. A fully pivot-aware native row engine would have to carry the
+incumbent numeric row frame through input assembly, separator ownership,
+affected-tail construction, and publication; changing one seed map is not a
+valid shortcut.
+
+The generic linear U transpose is retained because it removes a genuine
+quadratic kernel and scales correctly with preserved-tail size. Automatic
+ETree repair is not widened: the existing measured repair-versus-full budget
+and direct block fallback remain authoritative. The diagnostic modes stay as
+a reproducible architecture gate for another machine or a future native-row
+engine. The all-diagonal `add20` full-factor comparator was not scored: it
+exposes a separate repeated-`kls_factor` low-rcond solve-contract issue (raw
+relative residual about 794), whereas the three single-column controls and
+all cross-family controls above are residual-clean.
+
 The `pre2` CKTSO gap is now decomposed and the first-factor half is fixed.
 Uncapped runs showed that KLS's production first factor on `pre2` does not
 merely time out: it fails outright (`KLS_ERR_FACTOR_FAILED` after ~13 minutes

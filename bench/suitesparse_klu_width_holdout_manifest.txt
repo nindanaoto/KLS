@@ -1,0 +1,27 @@
+# Cross-family holdout for the native KLU32/KLU64 storage-width diagnostic.
+# These rows are outside the leading twelve CKTSO-gap screen and cover small
+# circuit, power, device, and synthetic sparse factors.  Width results are
+# scored only when both variants produce the same symbolic fingerprint and
+# factor counts.
+add20
+add32
+ckt11752_dc_1
+circuit_1
+circuit_2
+circuit_3
+circuit_4
+hcircuit
+bcircuit
+scircuit
+rajat15
+rajat16
+rajat17
+rajat18
+rajat21
+rajat22
+rajat23
+memplus
+powersim
+qh1484
+mimo46x46_system
+OPF_3754

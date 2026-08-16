@@ -1288,7 +1288,10 @@ int main(int argc, char **argv) {
                              &options);
   }
   if (status == KLS_OK) {
-    status = kls_factor(solver, run_values);
+    /* Diagonal stress is a transition probe: retain the factor of the
+       original values, then time checked factor/refactor recovery on the
+       stressed generation below. */
+    status = kls_factor(solver, stress_requested ? a.values : run_values);
   }
   if (status != KLS_OK) {
     fprintf(stderr, "KLS setup failed: %s (%d)\n", kls_status_string(status), status);

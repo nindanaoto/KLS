@@ -87,7 +87,8 @@ typedef enum kls_refactor_path {
   KLS_REFACTOR_PATH_PARTIAL_BTF = 9,
   /* A bounded small update retained the preceding numeric as a
      preconditioner; solves are certified against the new values by
-     residual-driven iterative refinement. */
+     residual-driven iterative refinement.  This includes the optional
+     representation-gated generic retained-preconditioner experiment. */
   KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER = 10
 } kls_refactor_path;
 
