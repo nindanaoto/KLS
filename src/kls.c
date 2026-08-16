@@ -26184,20 +26184,21 @@ static int kls_lean_btf_map32_refactor(kls_solver *solver,
 static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
                                         UF_long block) {
   kls_parallel_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
   const UF_long *ap = shared->col_ptr;
   const UF_long *ai = shared->row_idx;
   const UF_long *map_col_ptr = shared->map_col_ptr;
   const UF_long *map_row_idx = shared->map_row_idx;
   const UF_long *map_input_pos = shared->map_input_pos;
   const UF_long *map_block_start = shared->map_block_start;
-  const int32_t *map_row_idx32 = shared->solver->refactor_row_idx32;
+  const int32_t *map_row_idx32 = solver->refactor_row_idx32;
   const int32_t *map_input_pos32 = shared->direct_user_values
-    ? shared->solver->refactor_input_user_pos32
-    : shared->solver->refactor_input_pos32;
+    ? solver->refactor_input_user_pos32
+    : solver->refactor_input_pos32;
   const int32_t *map_internal_pos32 =
-    shared->solver->refactor_input_pos32;
-  const double *prepared_scale = shared->solver->prepared_value_scale;
-  double *owned_values = shared->solver->values;
+    solver->refactor_input_pos32;
+  const double *prepared_scale = solver->prepared_value_scale;
+  double *owned_values = solver->values;
   const int fast_direct_scaled_map32 = shared->direct_user_values &&
     prepared_scale != NULL && map_row_idx32 != NULL &&
     map_input_pos32 != NULL && map_internal_pos32 != NULL &&
@@ -26215,6 +26216,17 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
   double *offx = (double *)numeric->Offx;
   double *udiag = (double *)numeric->Udiag;
   double *x = worker->x;
+
+  /* Short sparse L columns are latency-bound rather than bandwidth-bound.
+     Their duplicate i32 scatter pays sign-extension/address-generation
+     overhead without moving enough indices to repay it.  Retain the compact
+     stream for longer factors and use the packed native rows for this
+     representation-defined short-L regime. */
+  const int native_short_l =
+    solver->refactor_l_indices32 != NULL &&
+    solver->n <= UF_long_max / 4u &&
+    solver->refactor_l_indices32_count <= 4u * solver->n &&
+    getenv("KLS_DISABLE_MAPPED_NATIVE_SHORT_L") == NULL;
 
   const UF_long k1 = r[block];
   const UF_long k2 = r[block + 1u];
@@ -26435,12 +26447,17 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
       ux[up] = ujk;
 
       if (ujk != 0.0) {
+        const UF_long dep_global = k1 + j;
         UF_long *li = NULL;
         double *lx = NULL;
         UF_long lcol_len = 0;
         kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
-        kls_scatter_subtract_refactor_l(shared->solver, x, k1 + j, li, lx,
-                                        lcol_len, ujk);
+        if (native_short_l || solver->refactor_l_indices32 == NULL) {
+          kls_scatter_subtract(x, li, lx, lcol_len, ujk);
+        } else {
+          kls_scatter_subtract_refactor_l(solver, x, dep_global, li, lx,
+                                          lcol_len, ujk);
+        }
       }
       up++;
     }
@@ -26516,22 +26533,23 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
                                         const int32_t *cols,
                                         int64_t ncols) {
   kls_parallel_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
   const UF_long *ap = shared->col_ptr;
   const UF_long *ai = shared->row_idx;
   const UF_long *map_col_ptr = shared->map_col_ptr;
   const UF_long *map_row_idx = shared->map_row_idx;
   const UF_long *map_input_pos = shared->map_input_pos;
   const UF_long *map_block_start = shared->map_block_start;
-  const int32_t *map_row_idx32 = shared->solver->refactor_row_idx32;
+  const int32_t *map_row_idx32 = solver->refactor_row_idx32;
   const int32_t *map_input_pos32 = shared->direct_user_values
-    ? shared->solver->refactor_input_user_pos32
-    : shared->solver->refactor_input_pos32;
+    ? solver->refactor_input_user_pos32
+    : solver->refactor_input_pos32;
   const int32_t *map_internal_pos32 =
-    shared->solver->refactor_input_pos32;
+    solver->refactor_input_pos32;
   const int fused_direct_values = shared->direct_user_values &&
-    shared->solver->refactor_input_user_pos32 != NULL &&
-    shared->solver->refactor_input_pos32 != NULL &&
-    shared->solver->values != NULL;
+    solver->refactor_input_user_pos32 != NULL &&
+    solver->refactor_input_pos32 != NULL &&
+    solver->values != NULL;
   const int fast_unscaled_map32 = shared->scale <= 0 &&
     !fused_direct_values &&
     map_row_idx32 != NULL && map_input_pos32 != NULL;
@@ -26545,6 +26563,11 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
   double *offx = (double *)numeric->Offx;
   double *udiag = (double *)numeric->Udiag;
   double *x = worker->x;
+  const int native_short_l =
+    solver->refactor_l_indices32 != NULL &&
+    solver->n <= UF_long_max / 4u &&
+    solver->refactor_l_indices32_count <= 4u * solver->n &&
+    getenv("KLS_DISABLE_MAPPED_NATIVE_SHORT_L") == NULL;
 
   const UF_long k1 = r[block];
   const UF_long k2 = r[block + 1u];
@@ -26554,17 +26577,17 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
     k1 == 0u && k2 == shared->n;
   const int fast_direct_map32 = fused_direct_values &&
     map_row_idx32 != NULL && map_input_pos32 != NULL &&
-    map_internal_pos32 != NULL && shared->solver->values != NULL;
+    map_internal_pos32 != NULL && solver->values != NULL;
   /* The first changed-value solve certifies this full-precision matched
      factor before direct input consumption begins.  Once certified, the
      solver-owned prepared-value mirror has no residual/refinement consumer;
      avoid a second random write for every input entry while the PTS scatter
      already writes the factor workspace. */
   const int skip_certified_value_mirror =
-    fast_direct_map32 && shared->solver->solve_contract_probe == 1 &&
+    fast_direct_map32 && solver->solve_contract_probe == 1 &&
     getenv("KLS_DISABLE_LARGE_WEAK_PTS_VALUE_MIRROR_ELISION") == NULL;
-  const double *prepared_scale = shared->solver->prepared_value_scale;
-  double *owned_values = shared->solver->values;
+  const double *prepared_scale = solver->prepared_value_scale;
+  double *owned_values = solver->values;
 
   UF_long *lip = numeric->Lip + k1;
   UF_long *llen = numeric->Llen + k1;
@@ -26662,7 +26685,7 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
           value_ok = kls_parallel_refactor_mapped_value(shared, p, &value);
         } else {
           const UF_long value_pos = shared->direct_user_values
-            ? shared->solver->prepared_value_input_pos[p] : p;
+            ? solver->prepared_value_input_pos[p] : p;
           value_ok = kls_parallel_refactor_value(
             shared, oldrow, ax[value_pos], &value);
         }
@@ -26719,8 +26742,12 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
         double *lx = NULL;
         UF_long lcol_len = 0;
         kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
-        kls_scatter_subtract_refactor_l(shared->solver, x, k1 + j, li, lx,
-                                        lcol_len, ujk);
+        if (native_short_l || solver->refactor_l_indices32 == NULL) {
+          kls_scatter_subtract(x, li, lx, lcol_len, ujk);
+        } else {
+          kls_scatter_subtract_refactor_l(solver, x, k1 + j, li, lx,
+                                          lcol_len, ujk);
+        }
       }
       up++;
     }
