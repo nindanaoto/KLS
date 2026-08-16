@@ -584,6 +584,81 @@ static int test_csc(void) {
   return ok;
 }
 
+static int test_repeated_factor_low_rcond_contract(void) {
+  enum { N = 512 };
+  int32_t *ap = (int32_t *)malloc((N + 1u) * sizeof(*ap));
+  int32_t *ai = (int32_t *)malloc(N * sizeof(*ai));
+  double *ax0 = (double *)malloc(N * sizeof(*ax0));
+  double *ax1 = (double *)malloc(N * sizeof(*ax1));
+  double *b = (double *)malloc(N * sizeof(*b));
+  double *x = (double *)calloc(N, sizeof(*x));
+  int ok = ap != NULL && ai != NULL && ax0 != NULL && ax1 != NULL &&
+    b != NULL && x != NULL;
+  for (int32_t col = 0; ok && col < N; ++col) {
+    ap[col] = col;
+    ai[col] = col;
+    ax0[col] = 1.0;
+    ax1[col] = 1.0;
+    b[col] = 1.0;
+  }
+  if (ok) {
+    ap[N] = N;
+    ax1[0] = 1.0e-12;
+    b[0] = ax1[0];
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.use_btf = 0;
+  options.fast_factor = 0;
+  options.static_pivoting = 0;
+
+  kls_solver *solver = NULL;
+  if (ok && !require_ok(kls_create(&solver),
+                        "create repeated-factor low-rcond")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
+                        "analyze repeated-factor low-rcond")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "initial repeated-factor low-rcond")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax1),
+                        "changed repeated-factor low-rcond")) ok = 0;
+  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
+                        "solve repeated-factor low-rcond")) ok = 0;
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok && !require_ok(kls_get_stats(solver, &stats),
+                        "stats repeated-factor low-rcond")) ok = 0;
+  if (ok && !(stats.rcond > 0.0 && stats.rcond < sqrt(2.2204460492503131e-16))) {
+    fprintf(stderr, "repeated factor did not retain low-rcond numeric: %.17g\n",
+            stats.rcond);
+    ok = 0;
+  }
+  for (int32_t i = 0; ok && i < N; ++i) {
+    if (fabs(x[i] - 1.0) > 1.0e-8) {
+      fprintf(stderr,
+              "stale repeated-factor contract at %d: %.17g != 1\n",
+              (int)i, x[i]);
+      ok = 0;
+    }
+  }
+
+  kls_destroy(solver);
+  free(ap);
+  free(ai);
+  free(ax0);
+  free(ax1);
+  free(b);
+  free(x);
+  return ok;
+}
+
 static int test_csr_and_refactor(void) {
   const int64_t rp[] = {0, 2, 5, 7};
   const int64_t ci[] = {0, 1, 0, 1, 2, 1, 2};
@@ -4331,10 +4406,11 @@ static int test_fast_factor_etree_ready_descendant_pivot_restart(void) {
              stats.fast_kls_block_restart_last_row_pipeline_etree_ready != 1 ||
              stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor !=
                1 ||
-             stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows <=
+             stats.fast_kls_block_restart_last_row_pipeline_threads != 1 ||
+             stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows !=
                0 ||
              stats
-                 .fast_kls_block_restart_last_row_pipeline_pivot_restarts <=
+                 .fast_kls_block_restart_last_row_pipeline_pivot_restarts !=
                0)) {
     fprintf(stderr,
             "unexpected ETree descendant pivot stats: pivot=%" PRId64
@@ -4342,7 +4418,8 @@ static int test_fast_factor_etree_ready_descendant_pivot_restart(void) {
             ", contiguous=%d, gaps=%" PRId64
             ", block_restarts=%d, tail_restarts=%d"
             ", pipeline=%d, etree_tail=%d, etree_ready=%d"
-            ", etree_prefactor=%d, pivot_tail_rows=%" PRId64
+            ", etree_prefactor=%d, threads=%" PRId64
+            ", pivot_tail_rows=%" PRId64
             ", pivot_restarts=%" PRId64
             ", repaired_cols=%" PRId64
             ", exact_mask=%d, etree_mask=%d\n",
@@ -4356,6 +4433,7 @@ static int test_fast_factor_etree_ready_descendant_pivot_restart(void) {
             stats.fast_kls_block_restart_last_row_pipeline_etree_tail,
             stats.fast_kls_block_restart_last_row_pipeline_etree_ready,
             stats.fast_kls_block_restart_last_row_pipeline_etree_prefactor,
+            stats.fast_kls_block_restart_last_row_pipeline_threads,
             stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows,
             stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts,
             stats.fast_repaired_tail_restart_columns,
@@ -26562,6 +26640,9 @@ int main(void) {
   }
 
   if (!test_exact_unchanged_refactor_reuse()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_repeated_factor_low_rcond_contract()) {
     return EXIT_FAILURE;
   }
   if (!test_partial_btf_refactor()) {

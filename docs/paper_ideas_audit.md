@@ -543,6 +543,78 @@ exposes a separate repeated-`kls_factor` low-rcond solve-contract issue (raw
 relative residual about 794), whereas the three single-column controls and
 all cross-family controls above are residual-clean.
 
+### Rejection-kernel follow-up: solve epoch, chain tails, and front gate (2026-08-16)
+
+The deferred all-diagonal correctness issue was a real numeric-lifecycle bug,
+not a row-repair accuracy difference. A second public `kls_factor` could
+classify an almost-singular replacement while retaining the preceding
+numeric's `solve_refine_values`; the first solve then refined an accurate raw
+solution against the old matrix and diverged. Public factor entry now starts a
+new solve-contract epoch, and every successful non-serial factor exit
+classifies the retained numeric and captures the current plain-frame values
+when low-rcond verification is armed. The original `add20` all-diagonal
+transition changed from about `794` relative L2 on the full route to
+`2.08e-13`, matching block, serial, and ETree repair. A 512-row repeated-factor
+low-rcond smoke test fixes that contract independently of the benchmark.
+
+Stage timing rejected the proposed persistent/zero-copy prefix descriptor as
+the next optimization. `KLS_TRACE_FAST_REJECT_REPAIR_TIMING=1` separates
+allocation, preserved-row seed, boundary pivot, active ready phase, publish,
+and cleanup. On the 1,670-row `add20` tail, preserved-prefix seeding took only
+`0.057--0.063 ms` while the active kernel took `5.87--6.68 ms`; on the 140-row
+late tail they were `0.092--0.131 ms` and `1.05--1.19 ms`. KLS's retained row
+mirrors already contain the stable packed-value descriptors a cache would
+need, but eliminating even the entire measured seed cannot materially close
+the gap. No duplicate descriptor storage was added.
+
+The active graph supplied a narrower general win. When the actual
+post-boundary affected graph is exactly one parent chain, it has no row
+parallelism; launching ready queues, condition variables, speculative states,
+and a worker team is pure overhead. The ETree repair now proves that chain
+from its live `row_order`, `active_mask`, and parent relation, then executes a
+direct topological row walk while preserving the same dynamic-pivot and panel
+publication rules. Seven paired `add20` medians for direct-chain versus the
+disabled queued control were `1.224/7.328 ms` (early), `1.172/5.946 ms`
+(middle), and `1.110/1.851 ms` (late), or `6.0x`, `5.1x`, and `1.67x` faster,
+with relative residuals below `3.6e-16`. The exact live-graph proof matters:
+`bcircuit` reports a width-one outer tail statistic, but an internal pivot
+restart creates a branched active graph, so the automatic gate correctly keeps
+that attempt on the general executor. Force/disable controls remain available
+as `KLS_ENABLE_FAST_REJECT_SERIAL_ETREE_TAIL` and
+`KLS_DISABLE_FAST_REJECT_SERIAL_ETREE_TAIL` for architecture checks.
+
+This does not justify widening ETree repair in production. Same-session block
+medians on the three `add20` transitions were `0.581`, `0.614`, and `0.640 ms`,
+still `1.7--2.1x` faster than the complete chain-repair factor calls. The
+measured repair-versus-full budget therefore remains authoritative; the chain
+kernel only removes a genuine scheduler loss when ETree repair is otherwise
+selected or explicitly diagnosed.
+
+Per-block instability memory was tested by temporarily disabling the existing
+`full_factor_preferred` verdict and alternating original/stressed generations.
+`add20` and `hcircuit` rejected once, then their repaired pivot order accepted
+both generations, leaving no recurring event to learn. `bcircuit` and
+`rajat03` did re-reject, but on those single dominant blocks the measured full
+factor was already faster than the block repair; the existing persistent
+whole-factor verdict both avoids the next checked rejection and chooses the
+better engine. A new block-history table would either remember a one-use
+event or weaken that decision, so the prototype controls and state were
+removed.
+
+Finally, the front-native feasibility check was repeated against the actual
+production incumbent rather than only the standalone serial-column
+comparator. The standalone dense-panel SNB still showed arithmetic potential
+on large factors (four-thread minima were `0.846/1.489 s` versus its landed
+column kernel on `G2_circuit`, `0.267/0.313 s` on `rajat25`, and
+`0.176/0.198 s` on `ASIC_100ks`), but it also needed `1.62--2.05x` true-LU
+panel storage and lost on small or narrow-supernode controls. More
+importantly, forced trials of the already-integrated SNB compared against the
+selected EGraph engine and rejected decisively: `200.1/48.6 ms` on
+`G2_circuit`, `50.8/16.3 ms` on `rajat25`, and `82.2/13.7 ms` on
+`ASIC_100ks`. Changed-generation residuals remained clean. Thus the apparent
+standalone front wins are wins over the wrong incumbent; no SNB policy or new
+front backend is retained from this pass.
+
 The `pre2` CKTSO gap is now decomposed and the first-factor half is fixed.
 Uncapped runs showed that KLS's production first factor on `pre2` does not
 merely time out: it fails outright (`KLS_ERR_FACTOR_FAILED` after ~13 minutes

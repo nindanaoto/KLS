@@ -153739,6 +153739,7 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
     }
     active_rank[row] = pos;
   }
+  int active_tail_is_chain = 1;
   for (UF_long pos = 0; pos < active_rows; ++pos) {
     const UF_long row = row_order[pos];
     const UF_long parent = tail_parent[row];
@@ -153752,7 +153753,60 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
         free(active_rank);
         return 0;
       }
+      if (parent_rank != pos + 1u) {
+        active_tail_is_chain = 0;
+      }
+    } else if (pos + 1u < active_rows) {
+      active_tail_is_chain = 0;
     }
+  }
+
+  /* A width-one affected subtree has no exploitable row concurrency.  The
+     direct topological walk avoids ready-queue, worker, and speculative-state
+     machinery; the force switch is useful for new-architecture experiments,
+     while the default gate is the exact structural certificate. */
+  const int serial_etree_tail =
+    getenv("KLS_ENABLE_FAST_REJECT_SERIAL_ETREE_TAIL") != NULL ||
+    (getenv("KLS_DISABLE_FAST_REJECT_SERIAL_ETREE_TAIL") == NULL &&
+     active_tail_is_chain);
+  if (serial_etree_tail) {
+    UF_long open_panel_start = KLS_KLU_EMPTY;
+    UF_long open_panel_end = KLS_KLU_EMPTY;
+    for (UF_long pos = 0; pos < active_rows; ++pos) {
+      const UF_long row = row_order[pos];
+      const UF_long pivots_before =
+        stats != NULL ? stats->dynamic_column_pivots : 0u;
+      if (row >= ctx->nk ||
+          !kls_row_first_factor_one_row(
+            ctx, workspace, l_entries, u_entries, udiag_values, row,
+            NULL, -1, row_done, stats, NULL)) {
+        free(active_rank);
+        return 0;
+      }
+      if (stats != NULL && stats->dynamic_column_pivots != pivots_before) {
+        const UF_long floor = row >= ctx->nk ? ctx->nk : row + 1u;
+        if (floor > supernode_valid_begin) {
+          supernode_valid_begin = floor;
+        }
+        if (workspace->supernode_panel_cache != NULL) {
+          kls_row_first_supernode_panel_cache_reset_active(
+            workspace->supernode_panel_cache, workspace, ctx->nk,
+            &open_panel_start, &open_panel_end);
+        }
+      }
+      kls_row_first_supernode_panel_cache_publish_completed(
+        workspace->supernode_panel_cache, u_entries,
+        workspace->u_row_ptr, workspace->u_row_end, udiag_values,
+        ctx->nk, stats, &open_panel_start, &open_panel_end, row);
+    }
+    if (thread_rows_out != NULL) {
+      *thread_rows_out = 1u;
+    }
+    if (prefactor_rows_out != NULL) {
+      *prefactor_rows_out = active_rows;
+    }
+    free(active_rank);
+    return 1;
   }
 
   UF_long cursor = 0;
@@ -154893,6 +154947,14 @@ static int kls_try_row_first_etree_ready_tail_repair(
   UF_long *supernode_panel_update_rows_out,
   UF_long *pivot_tail_rows_out,
   UF_long *pivot_restarts_out) {
+  const int trace_timing =
+    getenv("KLS_TRACE_FAST_REJECT_REPAIR_TIMING") != NULL;
+  const double trace_begin = trace_timing ? kls_now_seconds() : 0.0;
+  double trace_alloc_done = trace_begin;
+  double trace_seed_done = trace_begin;
+  double trace_boundary_done = trace_begin;
+  double trace_ready_done = trace_begin;
+  double trace_publish_done = trace_begin;
   if (row_pipeline_ready_rows_out != NULL) {
     *row_pipeline_ready_rows_out = 0;
   }
@@ -154982,6 +155044,9 @@ static int kls_try_row_first_etree_ready_tail_repair(
         &trial_panel_cache, nk)) {
     trial_workspace.supernode_panel_cache = &trial_panel_cache;
   }
+  if (trace_timing) {
+    trace_alloc_done = kls_now_seconds();
+  }
 
   double *saved_udiag = worker->udiag_values;
   worker->udiag_values = trial_udiag;
@@ -154992,6 +155057,9 @@ static int kls_try_row_first_etree_ready_tail_repair(
   worker->udiag_values = saved_udiag;
   if (!seed_ok) {
     goto cleanup;
+  }
+  if (trace_timing) {
+    trace_seed_done = kls_now_seconds();
   }
 
   unsigned char *ready_mask =
@@ -155027,6 +155095,9 @@ static int kls_try_row_first_etree_ready_tail_repair(
       trial_workspace.supernode_panel_cache = NULL;
     }
   }
+  if (trace_timing) {
+    trace_boundary_done = kls_now_seconds();
+  }
 
   UF_long ready_threads = 0;
   UF_long ready_rows = active_rows - 1u;
@@ -155055,6 +155126,9 @@ static int kls_try_row_first_etree_ready_tail_repair(
     goto cleanup;
   }
   free(ready_mask);
+  if (trace_timing) {
+    trace_ready_done = kls_now_seconds();
+  }
 
   memcpy(worker->u_row_ptr, trial_workspace.u_row_ptr,
          ((size_t)nk + 1u) * sizeof(*worker->u_row_ptr));
@@ -155102,6 +155176,9 @@ static int kls_try_row_first_etree_ready_tail_repair(
     *pivot_restarts_out = pivot_restarts;
   }
   ok = 1;
+  if (trace_timing) {
+    trace_publish_done = kls_now_seconds();
+  }
 
 cleanup:
   kls_row_first_entries_free(&trial_l_entries);
@@ -155112,6 +155189,22 @@ cleanup:
   kls_row_first_workspace_free(&trial_workspace);
   free(trial_udiag);
   free(trial_row_done);
+  if (trace_timing) {
+    const double trace_end = kls_now_seconds();
+    fprintf(stderr,
+            "KLS ETree repair timing: block=%" PRIu64
+            " active=%" PRIu64 " ok=%d alloc=%.3fms seed=%.3fms"
+            " boundary=%.3fms ready=%.3fms publish=%.3fms"
+            " cleanup=%.3fms total=%.3fms\n",
+            (uint64_t)block, (uint64_t)active_rows, ok,
+            1e3 * (trace_alloc_done - trace_begin),
+            1e3 * (trace_seed_done - trace_alloc_done),
+            1e3 * (trace_boundary_done - trace_seed_done),
+            1e3 * (trace_ready_done - trace_boundary_done),
+            1e3 * (trace_publish_done - trace_ready_done),
+            1e3 * (trace_end - trace_publish_done),
+            1e3 * (trace_end - trace_begin));
+  }
   return ok;
 }
 
@@ -167423,6 +167516,37 @@ static void kls_solve_contract_classify(kls_solver *solver,
   }
 }
 
+/* A public factor call starts a new numeric epoch just as a public refactor
+   does, but it may reach that epoch through an in-place checked update or a
+   complete replacement.  Classify every successful plain-frame factor and
+   retain the values needed by an armed first solve.  Without this factor-side
+   capture, a low-rcond replacement either refined against the preceding
+   numeric's matrix or had no current matrix with which to verify the solve. */
+static void kls_factor_solve_contract_classify(
+  kls_solver *solver,
+  const double *numeric_values) {
+  if (solver == NULL || numeric_values == NULL ||
+      solver->options.backend == KLS_BACKEND_SERIAL) {
+    return;
+  }
+  kls_solve_contract_classify(solver, numeric_values);
+  if (solver->solve_contract_probe != 2 || solver->nnz == 0u ||
+      solver->nnz > (UF_long)(KLS_MAX_ALLOCATION / sizeof(double)) ||
+      solver->row_perm != NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL) {
+    return;
+  }
+  if (solver->solve_refine_values == NULL) {
+    solver->solve_refine_values = (double *)malloc(
+      (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
+  }
+  if (solver->solve_refine_values != NULL &&
+      solver->solve_refine_values != numeric_values) {
+    memcpy(solver->solve_refine_values, numeric_values,
+           (size_t)solver->nnz * sizeof(*numeric_values));
+  }
+}
+
 static void *kls_lean_prewarm_main(void *arg) {
   kls_lean_prewarm_job *job = (kls_lean_prewarm_job *)arg;
   if (job == NULL || job->solver == NULL || job->thread_count < 2) {
@@ -169255,6 +169379,17 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (status != KLS_OK) {
     return status;
   }
+  /* A matrix snapshot and its solve verdict certify exactly one numeric.
+     Drop them only after value preparation, so an internal recovery caller
+     could safely supply the old snapshot itself, then rebuild the contract
+     from the successful factor below. */
+  if (solver->solve_refine_values != numeric_values) {
+    free(solver->solve_refine_values);
+    solver->solve_refine_values = NULL;
+  }
+  solver->solve_contract_probe = 0;
+  solver->solve_contract_verified = 0;
+  solver->low_rcond_solve_contract_state = 0;
 #ifdef KLS_HAVE_METIS
   solver->dense_spiked_original_pivot_path =
     kls_legacy_shape_policies_enabled() &&
@@ -169593,6 +169728,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         elapsed += kls_now_seconds() - structured_start;
       }
       solver->stats.factor_seconds = elapsed;
+      kls_factor_solve_contract_classify(solver, numeric_values);
       fill_numeric_stats(solver);
       return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR
                                                             : KLS_OK;
@@ -169639,6 +169775,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       solver->stats.factor_seconds = elapsed;
       kls_update_numeric_diagnostics(solver, 1);
+      kls_factor_solve_contract_classify(solver, numeric_values);
       fill_numeric_stats(solver);
       return KLS_OK;
     }
@@ -169679,6 +169816,7 @@ int kls_factor(kls_solver *solver, const double *values) {
           elapsed += kls_now_seconds() - structured_start;
         }
         solver->stats.factor_seconds = elapsed;
+        kls_factor_solve_contract_classify(solver, numeric_values);
         fill_numeric_stats(solver);
         return KLS_OK;
       }
@@ -170877,6 +171015,7 @@ factor_preps_deferred_exit:;
     kls_bounded_degree_arm_retained_preconditioner(solver, numeric_values);
     elapsed += kls_now_seconds() - retained_start;
   }
+  kls_factor_solve_contract_classify(solver, numeric_values);
   solver->stats.factor_seconds = elapsed;
   fill_numeric_stats(solver);
   return KLS_OK;
