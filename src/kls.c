@@ -50,7 +50,10 @@
 #define KLS_ALWAYS_INLINE inline
 #endif
 
-enum { KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES = 4 };
+enum {
+  KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES = 4,
+  KLS_LEAN_SNODE_AVX512_MIN_TARGETS = 32
+};
 
 /* Pause hint for atomic spin waits: keeps a blocked worker from hammering
    the shared cache line at full speed and starving the producing thread of
@@ -1096,6 +1099,8 @@ struct kls_solver {
   int lean_snode_wait_thread_count;
   int lean_snode_worker_eligible; /* -1 rejected, 0 unbuilt, 1 enough of
                                      the retained L stream is fused */
+  int lean_snode_avx512_candidate; /* has a width-eight run long enough to
+                                      amortize four gather/scatter vectors */
   atomic_ullong row_light_snode_runs;     /* light-run consume telemetry */
   atomic_ullong row_light_snode_entries;
   atomic_ullong row_scalar_dep_entries;   /* scalar-fallback U entries */
@@ -3045,6 +3050,7 @@ typedef struct kls_egraph_refactor_shared {
   int lean_refactor_mode;
   int lean_compact_match_mode;
   int lean_symmetric_scalar_fringe_mode;
+  int lean_snode_avx512_enabled;
   int lean_parallel_offdiag_mode;
   int lean_grouped_done_mode;
   int lean_row_values_mode;
@@ -20011,6 +20017,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->lean_snode_wait_rows = NULL;
   solver->lean_snode_wait_thread_count = 0;
   solver->lean_snode_worker_eligible = 0;
+  solver->lean_snode_avx512_candidate = 0;
   solver->row_refactor_input_ptr = NULL;
   solver->row_refactor_input_ptr32 = NULL;
   solver->row_refactor_input_ptr16 = NULL;
@@ -67270,6 +67277,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
     return;
   }
   solver->lean_snode_worker_eligible = -1;
+  solver->lean_snode_avx512_candidate = 0;
   kls_row_refactor_ensure_sn_end(solver);
   if (solver->row_refactor_sn_end == NULL) {
     solver->lean_snode_worker_eligible = 0;
@@ -67311,9 +67319,14 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
         run_count[run]++;
         covered_entries += run;
         fused_runs++;
-        run_targets[run] +=
+        const UF_long target_length =
           solver->row_refactor_u_ptr[dep_end + 1u] -
           solver->row_refactor_u_ptr[dep_end];
+        run_targets[run] += target_length;
+        if (run == 8u &&
+            target_length >= KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
+          solver->lean_snode_avx512_candidate = 1;
+        }
         p += run;
       } else {
         p++;
@@ -74197,6 +74210,61 @@ static UF_long kls_lean_row_refactor_snode_step_chain(
   return run;
 }
 
+#if KLS_HAVE_AVX512_KERNELS
+/* A fused width-eight run shares one sorted target stream across all producer
+   rows.  Unlike a conventional indexed sparse update, this kernel therefore
+   pays one gather and one scatter for several contiguous coefficient loads.
+   It evaluates the same balanced tree as the scalar target loop below, lane
+   by lane, and leaves the short remainder to that loop. */
+__attribute__((target("avx512f"), noinline,
+               section(".text.kls_avx512"))) static UF_long
+kls_lean_snode_target_width8_avx512(
+  UF_long run,
+  double *restrict x,
+  const UF_long *restrict targets,
+  const double *const *restrict trailing_values,
+  const double *restrict multipliers,
+  UF_long length) {
+  if (run != 8u) {
+    return 0u;
+  }
+  const UF_long vector_length = length & ~(UF_long)7u;
+  const __m512d m0 = _mm512_set1_pd(multipliers[0]);
+  const __m512d mn1 = _mm512_set1_pd(-multipliers[1]);
+  const __m512d mn2 = _mm512_set1_pd(-multipliers[2]);
+  const __m512d mn3 = _mm512_set1_pd(-multipliers[3]);
+  const __m512d m4 = _mm512_set1_pd(multipliers[4]);
+  const __m512d m5 = _mm512_set1_pd(multipliers[5]);
+  const __m512d m6 = _mm512_set1_pd(multipliers[6]);
+  const __m512d m7 = _mm512_set1_pd(multipliers[7]);
+  for (UF_long offset = 0u; offset < vector_length; offset += 8u) {
+    const __m512i indices = _mm512_loadu_si512(
+      (const void *)(targets + offset));
+    __m512d value = _mm512_i64gather_pd(indices, x, 8);
+    __m512d sum0 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[0] + offset), m0, value);
+    __m512d sum1 = _mm512_mul_pd(
+      _mm512_loadu_pd(trailing_values[1] + offset), mn1);
+    __m512d sum2 = _mm512_mul_pd(
+      _mm512_loadu_pd(trailing_values[2] + offset), mn2);
+    __m512d sum3 = _mm512_mul_pd(
+      _mm512_loadu_pd(trailing_values[3] + offset), mn3);
+    sum0 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[4] + offset), m4, sum0);
+    sum1 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[5] + offset), m5, sum1);
+    sum2 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[6] + offset), m6, sum2);
+    sum3 = _mm512_fnmadd_pd(
+      _mm512_loadu_pd(trailing_values[7] + offset), m7, sum3);
+    value = _mm512_add_pd(_mm512_add_pd(sum0, sum1),
+                          _mm512_add_pd(sum2, sum3));
+    _mm512_i64scatter_pd(x, indices, value, 8);
+  }
+  return vector_length;
+}
+#endif
+
 static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   UF_long p,
   UF_long run,
@@ -74208,7 +74276,8 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   const UF_long *restrict u_cols,
   const double *restrict u_values,
   const double *restrict udiag,
-  int balanced_target_sum) {
+  int balanced_target_sum,
+  int avx512_target) {
   if (run < 2u || run > 8u) {
     return 0u;
   }
@@ -74245,9 +74314,20 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
 
   const UF_long trailing_begin = u_ptr[dep_end];
   const UF_long trailing_len = u_ptr[dep_end + 1u] - trailing_begin;
+  UF_long target_offset_begin = 0u;
+#if KLS_HAVE_AVX512_KERNELS
+  if (avx512_target && balanced_target_sum && run == 8u) {
+    target_offset_begin = kls_lean_snode_target_width8_avx512(
+      run, x, u_cols + trailing_begin, trailing_values,
+      multipliers, trailing_len);
+  }
+#else
+  (void)avx512_target;
+#endif
 #define KLS_LEAN_SNODE_TARGET_LOOP(...)                                   \
   do {                                                                    \
-    for (UF_long offset = 0u; offset < trailing_len; ++offset) {          \
+    for (UF_long offset = target_offset_begin;                            \
+         offset < trailing_len; ++offset) {                               \
       const UF_long target = u_cols[trailing_begin + offset];             \
       double value = x[target];                                           \
       __VA_ARGS__                                                         \
@@ -74415,7 +74495,8 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
     const double *restrict u_values,                                      \
     const double *restrict udiag) {                                       \
     return kls_lean_row_refactor_snode_step_impl(                         \
-      p, (width), dep0, x, NULL, l_lu, u_ptr, u_cols, u_values, udiag, 1); \
+      p, (width), dep0, x, NULL, l_lu, u_ptr, u_cols, u_values, udiag,     \
+      1, 0);                                                              \
   }
 
 KLS_DEFINE_LEAN_SNODE_WIDTH(2u)
@@ -74425,6 +74506,22 @@ KLS_DEFINE_LEAN_SNODE_WIDTH(5u)
 KLS_DEFINE_LEAN_SNODE_WIDTH(6u)
 KLS_DEFINE_LEAN_SNODE_WIDTH(7u)
 KLS_DEFINE_LEAN_SNODE_WIDTH(8u)
+
+#if KLS_HAVE_AVX512_KERNELS
+__attribute__((noinline, section(".text.kls_avx512"))) static UF_long
+kls_lean_row_refactor_snode_step_width_8u_avx512(
+  UF_long p,
+  UF_long dep0,
+  double *restrict x,
+  double **restrict l_lu,
+  const UF_long *restrict u_ptr,
+  const UF_long *restrict u_cols,
+  const double *restrict u_values,
+  const double *restrict udiag) {
+  return kls_lean_row_refactor_snode_step_impl(
+    p, 8u, dep0, x, NULL, l_lu, u_ptr, u_cols, u_values, udiag, 1, 1);
+}
+#endif
 
 #undef KLS_DEFINE_LEAN_SNODE_WIDTH
 #undef KLS_LEAN_SNODE_WIDTH_ATTR
@@ -74439,7 +74536,11 @@ kls_lean_row_refactor_snode_step_width_specialized(
   const UF_long *restrict u_ptr,
   const UF_long *restrict u_cols,
   const double *restrict u_values,
-  const double *restrict udiag) {
+  const double *restrict udiag,
+  int avx512_target) {
+#if !KLS_HAVE_AVX512_KERNELS
+  (void)avx512_target;
+#endif
 #define KLS_LEAN_SNODE_WIDTH_CASE(width)                                  \
     case (width):                                                         \
       return kls_lean_row_refactor_snode_step_width_##width(              \
@@ -74451,7 +74552,21 @@ kls_lean_row_refactor_snode_step_width_specialized(
     KLS_LEAN_SNODE_WIDTH_CASE(5u);
     KLS_LEAN_SNODE_WIDTH_CASE(6u);
     KLS_LEAN_SNODE_WIDTH_CASE(7u);
-    KLS_LEAN_SNODE_WIDTH_CASE(8u);
+    case 8u:
+#if KLS_HAVE_AVX512_KERNELS
+      /* Eight producer streams amortize one irregular gather/scatter pair
+         after four vectors.  Decide before entering the dedicated function,
+         leaving short runs and every other width on byte-identical scalar
+         kernels. */
+      if (avx512_target &&
+          u_ptr[dep0 + 8u] - u_ptr[dep0 + 7u] >=
+            KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
+        return kls_lean_row_refactor_snode_step_width_8u_avx512(
+          p, dep0, x, l_lu, u_ptr, u_cols, u_values, udiag);
+      }
+#endif
+      return kls_lean_row_refactor_snode_step_width_8u(
+        p, dep0, x, l_lu, u_ptr, u_cols, u_values, udiag);
     default:
       return 0u;
   }
@@ -75516,14 +75631,13 @@ static void kls_compact_match_hoisted_worker_run(
   }
 }
 
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline, hot))
-#endif
-static void kls_symmetric_scalar_fringe_hoisted_worker_run(
+static KLS_ALWAYS_INLINE void
+kls_symmetric_scalar_fringe_hoisted_worker_core(
   kls_egraph_refactor_worker *worker,
   unsigned int generation,
   const UF_long *restrict rows,
-  UF_long stride) {
+  UF_long stride,
+  int avx512_target) {
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
   const UF_long n = solver->n;
@@ -75607,7 +75721,7 @@ static void kls_symmetric_scalar_fringe_hoisted_worker_run(
         }
         if (kls_lean_row_refactor_snode_step_width_specialized(
               p, run, l_cols[p], x, l_lu,
-              u_ptr, u_cols, u_val, udiag) != run) {
+              u_ptr, u_cols, u_val, udiag, avx512_target) != run) {
           kls_egraph_refactor_record_invalid(shared);
           return;
         }
@@ -75658,6 +75772,36 @@ static void kls_symmetric_scalar_fringe_hoisted_worker_run(
     }
   }
 }
+
+#if defined(__GNUC__) || defined(__clang__)
+#define KLS_SYMMETRIC_SNODE_WORKER_ATTR __attribute__((noinline, hot))
+#else
+#define KLS_SYMMETRIC_SNODE_WORKER_ATTR
+#endif
+
+KLS_SYMMETRIC_SNODE_WORKER_ATTR static void
+kls_symmetric_scalar_fringe_hoisted_worker_run(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_symmetric_scalar_fringe_hoisted_worker_core(
+    worker, generation, rows, stride, 0);
+}
+
+#if KLS_HAVE_AVX512_KERNELS
+__attribute__((noinline, section(".text.kls_avx512"))) static void
+kls_symmetric_scalar_fringe_hoisted_worker_run_avx512(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_symmetric_scalar_fringe_hoisted_worker_core(
+    worker, generation, rows, stride, 1);
+}
+#endif
+
+#undef KLS_SYMMETRIC_SNODE_WORKER_ATTR
 
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, hot))
@@ -77018,8 +77162,18 @@ static void kls_lean_parallel_worker_run(
     solver->row_refactor_u_row_values != NULL &&
     solver->numeric != NULL && solver->numeric->Udiag != NULL;
   if (symmetric_scalar_fringe_hoisted_worker) {
+#if KLS_HAVE_AVX512_KERNELS
+    if (shared->lean_snode_avx512_enabled) {
+      kls_symmetric_scalar_fringe_hoisted_worker_run_avx512(
+        worker, generation, rows, stride);
+    } else {
+      kls_symmetric_scalar_fringe_hoisted_worker_run(
+        worker, generation, rows, stride);
+    }
+#else
     kls_symmetric_scalar_fringe_hoisted_worker_run(
       worker, generation, rows, stride);
+#endif
     if (!kls_lean_parallel_refresh_offdiag_worker(worker, stride)) {
       kls_egraph_refactor_record_invalid(shared);
     }
@@ -77358,6 +77512,16 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     ((kls_generic_hoisted_snode_worker_capable(solver)));
   shared->lean_symmetric_scalar_fringe_mode =
     symmetric_scalar_fringe_lean_mode;
+  shared->lean_snode_avx512_enabled = 0;
+#if KLS_HAVE_AVX512_KERNELS
+  if (symmetric_scalar_fringe_lean_mode &&
+      solver->lean_snode_avx512_candidate) {
+    /* Resolve the ISA once on the dispatching thread.  Workers then read an
+       immutable mode bit instead of consulting the runtime feature cache in
+       every fused run. */
+    shared->lean_snode_avx512_enabled = kls_avx512_scatter_enabled();
+  }
+#endif
   /* Grouped completion tokens are valid only for workers that consume that
      scoreboard.  The ordinary dependency walk (selected when supernode runs
      are retained) waits on lean_done[] instead; publishing grouped tokens in
@@ -77594,6 +77758,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_refactor_mode = 0;
   shared->lean_compact_match_mode = 0;
   shared->lean_symmetric_scalar_fringe_mode = 0;
+  shared->lean_snode_avx512_enabled = 0;
   shared->lean_parallel_offdiag_mode = 0;
   shared->lean_grouped_done_mode = 0;
   shared->lean_row_values_mode = 0;

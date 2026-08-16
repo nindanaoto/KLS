@@ -267,3 +267,61 @@ A separate forced-cooperative-row run exposed a dense-help stack-context
 lifetime race; the unmodified `aad53a8` parent reproduced it, so it is a
 pre-existing defect outside this fused executor and is not attributed to the
 unrolling change.
+
+## Fused width-eight AVX-512 target update (2026-08-16)
+
+The post-unrolling profile left the fused producer arithmetic and genuine
+producer waits as the recurring costs.  Polling the dependency generation
+less often was rejected: batches of eight polls measured 1.003 for steady
+refactor and 0.999 for H100, while batches of four measured 1.005 and 1.002.
+Those neutral-to-negative results indicate that the samples were observing
+producer latency rather than excessive polling bookkeeping.
+
+The retained change vectorizes the long trailing update of a width-eight
+fused run.  This case is materially different from the previously rejected
+per-dependency gather/scatter experiment: eight producer rows share one
+sorted target stream, so one indexed gather and scatter are amortized over
+eight contiguous coefficient streams.  Each vector lane uses the same FMA
+placement and balanced reduction tree as the scalar width-eight kernel, and
+the scalar kernel handles the remainder.
+
+Activation depends only on the representation already built by the generic
+fused executor: the producer width must be exactly eight and the common tail
+must contain at least 32 targets, or four AVX-512 vectors.  The run census
+records whether any such work exists, and the dispatching thread resolves the
+existing AVX-512 feature gate once per refactor.  There is no matrix, size,
+corpus, ordering, or policy rule and no new environment selector.
+`KLS_AVX512_SCATTER=0` retains the existing diagnostic way to force the
+scalar fallback.
+
+The AVX-512 width-eight step and its worker copy live in a separate
+`.text.kls_avx512` section.  This matters for generality as well as code
+organization: the scalar width-two through width-eight functions retain the
+same addresses and sizes as parent `10d167c`, and unrelated generic workers
+retain their layout.  A baseline `-march=x86-64` GCC syntax build also passes,
+so compilation does not depend on the build host exposing AVX-512.
+
+Five counterbalanced 300-update pairs over all twelve natural positives gave
+a 0.958 steady-refactor geometric ratio and 0.977 H100 ratio over the eleven
+timing-stable factors.  Ten of eleven steady medians improved; the sole small
+loss, `ACTIVSg10K` at 1.001, disappeared in a longer same-executable
+AVX-on/off run (0.9997 steady and 0.992 H100 over fifteen pairs).  Two-thread
+and four-thread checks on `thermal`, `sts4098`, and `cell2` gave geometric
+ratios of 0.942/0.955 and 0.941/0.959 respectively.  The inaccurate `shyy41`
+route remains excluded from aggregate claims.
+
+The fourteen-matrix remaining-gap control completed 14/14 with identical
+routes and ratios of 0.991 for both steady refactor and H100.  Disabling
+AVX-512 over six representatives gave 0.994 and 0.997 against the parent,
+showing that the scalar/non-feature path did not inherit a layout regression.
+Broader all-width and 64-target-cutoff variants were measured and removed:
+the former regressed `ACTIVSg10K`, while the latter was slower over the stable
+corpus than the four-vector crossover.
+
+The final release and ASan/UBSan CTest suites passed all four tests.  Forced
+sanitized execution added 220 independently checked 10-percent entrywise
+updates over the eleven numerically valid positives; every factor retained
+the row route, the largest relative residual was 1.30e-11, and no sanitizer
+finding occurred.  The emitted AVX section contains the intended
+`vgatherqpd` and `vscatterqpd` instructions; non-AVX and non-x86 builds retain
+the scalar implementation.
