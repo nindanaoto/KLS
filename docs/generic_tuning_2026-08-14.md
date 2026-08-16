@@ -106,3 +106,35 @@ segment storage, supernode/panel update batching, and separator-aware task
 granularity.  Work-reducing ordering remains important, but another matrix
 shape classifier would be weaker evidence than improving those shared
 kernels.
+
+## Short-supernode executor selection (2026-08-16)
+
+A later row-kernel profile found a representation-selection error rather than
+a missing arithmetic specialization.  The short-supernode descriptor builder
+published its run array even when its capability check rejected the fused
+worker.  A non-null array then disabled the ordinary hoisted row worker, and
+the fallback consumed the rejected descriptors.  Thus a capability rejection
+could itself select a slower executor.
+
+Rejected descriptors are now discarded, so those factors retain the ordinary
+hoisted worker.  Accepted descriptors still use the dedicated fused worker.
+The established broad contract accepts at least two-thirds coverage.  A
+second, representation-based tier accepts at least one-third coverage only
+when reported factor work is at least 16 times the numeric L+U entry count.
+This is a reusable arithmetic-intensity condition rather than a matrix name,
+dimension, or benchmark-family rule.  Allocation failures remain retryable,
+whereas structural accept/reject decisions are cached.
+
+Five counterbalanced entrywise-H100 pairs on each CCD put the new/old median
+ratio at 0.869 and 0.855 for `add20`, 0.860 and 0.869 for `memplus`, and 0.970
+and 0.966 for `cell2`.  Four- and two-thread checks retained the improvement
+where the affected executor was selected.  `ACTIVSg70K` was the crossover
+control: its 39.6-percent run coverage but only 14.9 work units per factor
+entry fails the dense tier and preserves EGraph.  A 14-matrix remaining-gap
+sweep completed 14/14 and had a 0.997 paired median geometric ratio, so the
+targeted gains did not trade away aggregate performance.
+
+Six boundary matrices completed 100 independently verified 0.1-percent
+entrywise updates each.  The largest relative residual was 2.56e-13.  The
+release and ASan/UBSan suites passed, as did explicit sanitized changed-value
+loops for the rejected, accepted, and dense-tier row paths.

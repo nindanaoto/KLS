@@ -67255,6 +67255,8 @@ static int kls_generic_hoisted_snode_worker_capable(
 
 static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
   if (solver == NULL || solver->lean_snode_run != NULL ||
+      solver->lean_snode_worker_eligible != 0 ||
+      solver->numeric == NULL ||
       solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_cols == NULL) {
     return;
@@ -67262,6 +67264,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
   solver->lean_snode_worker_eligible = -1;
   kls_row_refactor_ensure_sn_end(solver);
   if (solver->row_refactor_sn_end == NULL) {
+    solver->lean_snode_worker_eligible = 0;
     return;
   }
   const UF_long l_nnz = solver->row_refactor_l_ptr[solver->n];
@@ -67271,6 +67274,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
   unsigned char *runs = (unsigned char *)calloc((size_t)l_nnz,
                                                  sizeof(*runs));
   if (runs == NULL) {
+    solver->lean_snode_worker_eligible = 0;
     return;
   }
   const UF_long *l_ptr = solver->row_refactor_l_ptr;
@@ -67308,27 +67312,41 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
       }
     }
   }
-  solver->lean_snode_run = runs;
-  /* At two-thirds coverage the branch and pointer reduction is material
-     enough to repay the one-time descriptor build.  Close or sparse run
-     sets stay on the ordinary hoisted worker and its existing timed engine
-     consultation.  Written without multiplication so the test cannot
-     overflow even for a maximum-width retained stream. */
-  const UF_long required_coverage = l_nnz - l_nnz / 3u;
-  solver->lean_snode_worker_eligible =
+  /* The accepted path has its own hoisted worker.  The established broad
+     contract still requires two-thirds coverage; compute-dense factors can
+     amortize the run checks from one-third coverage.  Sparser run sets
+     discard the descriptors and stay on the ordinary hoisted worker. */
+  const UF_long broad_coverage = l_nnz - l_nnz / 3u;
+  const UF_long dense_coverage =
+    l_nnz / 3u + (l_nnz % 3u != 0u);
+  const double factor_entries =
+    (double)solver->numeric->lnz + (double)solver->numeric->unz;
+  const int dense_work = factor_entries > 0.0 &&
+    solver->common.flops >= 16.0 * factor_entries;
+  const int eligible =
     fused_runs >= (UF_long)solver->options.threads &&
-    covered_entries >= required_coverage ? 1 : -1;
+    (covered_entries >= broad_coverage ||
+     (dense_work && covered_entries >= dense_coverage)) ? 1 : -1;
+  solver->lean_snode_worker_eligible = eligible;
+  if (eligible < 0 && getenv("KLS_ENABLE_LEAN_SNODE") == NULL) {
+    free(runs);
+    runs = NULL;
+  }
+  solver->lean_snode_run = runs;
   if (getenv("KLS_TRACE_LEAN_SNODE") != NULL) {
     fprintf(stderr,
             "KLS lean snode runs: 2=%ld/%ld 3=%ld/%ld 4=%ld/%ld"
-            " 5=%ld/%ld 6=%ld/%ld 7=%ld/%ld 8=%ld/%ld\n",
+            " 5=%ld/%ld 6=%ld/%ld 7=%ld/%ld 8=%ld/%ld"
+            " coverage=%ld/%ld work=%.0f/%.0f dense=%d eligible=%d\n",
             (long)run_count[2], (long)run_targets[2],
             (long)run_count[3], (long)run_targets[3],
             (long)run_count[4], (long)run_targets[4],
             (long)run_count[5], (long)run_targets[5],
             (long)run_count[6], (long)run_targets[6],
             (long)run_count[7], (long)run_targets[7],
-            (long)run_count[8], (long)run_targets[8]);
+            (long)run_count[8], (long)run_targets[8],
+            (long)covered_entries, (long)l_nnz,
+            solver->common.flops, factor_entries, dense_work, eligible);
   }
 }
 
