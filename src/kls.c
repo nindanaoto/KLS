@@ -1093,7 +1093,7 @@ struct kls_solver {
                                     patterns); row itself if height 1 */
   unsigned char *lean_snode_run; /* at each L-row position: complete
                                     short-supernode suffix length, else 0 */
-  unsigned char *lean_snode_wait_mask; /* terminal remote wait per owner
+  unsigned char *lean_snode_wait_mask; /* advancing producer frontiers
                                           within each fused run */
   const UF_long *lean_snode_wait_rows;
   int lean_snode_wait_thread_count;
@@ -2641,6 +2641,9 @@ struct kls_solver {
   int bounded_degree_retained_preconditioner_symbolic_eligible;
   int bounded_degree_retained_preconditioner_numeric_eligible; /* -1/0/1 */
   uint64_t bounded_degree_retained_preconditioner_reuse_count;
+  /* Keep the optional frontier stream at the cold tail so established hot
+     solver fields retain their offsets. */
+  uint32_t *lean_snode_wait_slot;
 };
 
 struct kls_generic_nd_trial;
@@ -19931,6 +19934,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_sn_end);
   free(solver->lean_snode_run);
   free(solver->lean_snode_wait_mask);
+  free(solver->lean_snode_wait_slot);
   free(solver->row_refactor_input_ptr);
   free(solver->row_refactor_input_ptr32);
   free(solver->row_refactor_input_ptr16);
@@ -20014,6 +20018,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_sn_end = NULL;
   solver->lean_snode_run = NULL;
   solver->lean_snode_wait_mask = NULL;
+  solver->lean_snode_wait_slot = NULL;
   solver->lean_snode_wait_rows = NULL;
   solver->lean_snode_wait_thread_count = 0;
   solver->lean_snode_worker_eligible = 0;
@@ -67372,11 +67377,11 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
 }
 
 /* Rows owned by one pool worker are executed in increasing schedule-slot
-   order.  Within a fused dependency run, acquiring the last slot used by
-   each remote owner therefore covers every earlier dependency from that
-   owner.  Precompute the minimal wait mask once per retained schedule so the
-   numeric loop does not repeatedly decode owners or touch redundant padded
-   completion lines. */
+   order.  Acquiring one producer slot therefore covers every earlier row
+   from that producer for the rest of the consumer stream.  Predecode the
+   advancing producer frontier once per retained schedule: the numeric loop
+   consumes only compact grouped slots and producers publish only frontiers
+   that a remote worker will actually acquire. */
 static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
                                              int thread_count,
                                              const UF_long *rows) {
@@ -67384,12 +67389,15 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
     return 0;
   }
   if (solver->lean_snode_wait_mask != NULL &&
+      solver->lean_snode_wait_slot != NULL &&
       solver->lean_snode_wait_rows == rows &&
       solver->lean_snode_wait_thread_count == thread_count) {
     return 1;
   }
   free(solver->lean_snode_wait_mask);
+  free(solver->lean_snode_wait_slot);
   solver->lean_snode_wait_mask = NULL;
+  solver->lean_snode_wait_slot = NULL;
   solver->lean_snode_wait_rows = NULL;
   solver->lean_snode_wait_thread_count = 0;
   if (rows == NULL || thread_count < 2 || thread_count > 8 ||
@@ -67401,15 +67409,28 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
   }
   const UF_long l_count = solver->row_refactor_l_ptr[solver->n];
   if (l_count == 0u ||
-      (uintmax_t)l_count > (uintmax_t)PTRDIFF_MAX) {
+      (uintmax_t)l_count > (uintmax_t)PTRDIFF_MAX ||
+      (uintmax_t)l_count >
+        (uintmax_t)(SIZE_MAX / sizeof(uint32_t))) {
     return 0;
   }
   unsigned char *masks =
     (unsigned char *)calloc((size_t)l_count, sizeof(*masks));
-  if (masks == NULL) {
+  uint32_t *wait_slots =
+    (uint32_t *)calloc((size_t)l_count, sizeof(*wait_slots));
+  if (masks == NULL || wait_slots == NULL) {
+    free(masks);
+    free(wait_slots);
     return 0;
   }
+  uint32_t acquired_slot[8][8] = {{0u}};
+  for (UF_long row = 0u; row < solver->n; ++row) {
+    solver->lean_parallel_grouped_token[row] &=
+      ~KLS_LEAN_GROUPED_PUBLISH_FLAG;
+  }
   int valid = 1;
+  UF_long wait_count = 0u;
+  UF_long publish_count = 0u;
   for (UF_long pos = 0u; pos < solver->n && valid; ++pos) {
     const UF_long row = rows[pos];
     if (row >= solver->n) {
@@ -67429,12 +67450,38 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
     while (p < p_end) {
       const UF_long run = (UF_long)solver->lean_snode_run[p];
       if (run < 2u || run > 8u || p + run > p_end) {
+        const UF_long dep = solver->row_refactor_l_cols[p];
+        if (dep >= solver->n) {
+          valid = 0;
+          break;
+        }
+        const uint32_t token = solver->lean_parallel_grouped_token[dep];
+        const unsigned int owner =
+          token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
+        if (owner >= (unsigned int)thread_count) {
+          valid = 0;
+          break;
+        }
+        if (owner != consumer) {
+          const uint32_t encoded_slot =
+            (token & KLS_LEAN_GROUPED_SLOT_MASK) + 1u;
+          if (encoded_slot > acquired_slot[consumer][owner]) {
+            wait_slots[p] = encoded_slot;
+            acquired_slot[consumer][owner] = encoded_slot;
+            if ((solver->lean_parallel_grouped_token[dep] &
+                 KLS_LEAN_GROUPED_PUBLISH_FLAG) == 0u) {
+              publish_count++;
+            }
+            solver->lean_parallel_grouped_token[dep] |=
+              KLS_LEAN_GROUPED_PUBLISH_FLAG;
+            wait_count++;
+          }
+        }
         p++;
         continue;
       }
       uint32_t owner_slots[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
       unsigned char owner_locals[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
-      unsigned int owner_seen = 0u;
       for (UF_long local = 0u; local < run; ++local) {
         const UF_long dep = solver->row_refactor_l_cols[p + local];
         if (dep >= solver->n) {
@@ -67451,19 +67498,30 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
         if (owner == consumer) {
           continue;
         }
-        const uint32_t slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
-        const unsigned int bit = 1u << owner;
-        if ((owner_seen & bit) == 0u || slot > owner_slots[owner]) {
-          owner_seen |= bit;
-          owner_slots[owner] = slot;
+        const uint32_t encoded_slot =
+          (token & KLS_LEAN_GROUPED_SLOT_MASK) + 1u;
+        if (encoded_slot > owner_slots[owner]) {
+          owner_slots[owner] = encoded_slot;
           owner_locals[owner] = (unsigned char)local;
         }
       }
       unsigned char mask = 0u;
       for (unsigned int owner = 0u;
            owner < (unsigned int)thread_count; ++owner) {
-        if ((owner_seen & (1u << owner)) != 0u) {
-          mask |= (unsigned char)(1u << owner_locals[owner]);
+        const uint32_t encoded_slot = owner_slots[owner];
+        if (encoded_slot > acquired_slot[consumer][owner]) {
+          const UF_long local = (UF_long)owner_locals[owner];
+          const UF_long dep = solver->row_refactor_l_cols[p + local];
+          mask |= (unsigned char)(1u << local);
+          wait_slots[p + local] = encoded_slot;
+          acquired_slot[consumer][owner] = encoded_slot;
+          if ((solver->lean_parallel_grouped_token[dep] &
+               KLS_LEAN_GROUPED_PUBLISH_FLAG) == 0u) {
+            publish_count++;
+          }
+          solver->lean_parallel_grouped_token[dep] |=
+            KLS_LEAN_GROUPED_PUBLISH_FLAG;
+          wait_count++;
         }
       }
       masks[p] = mask;
@@ -67472,11 +67530,22 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
   }
   if (!valid) {
     free(masks);
+    free(wait_slots);
+    for (UF_long row = 0u; row < solver->n; ++row) {
+      solver->lean_parallel_grouped_token[row] |=
+        KLS_LEAN_GROUPED_PUBLISH_FLAG;
+    }
     return 0;
   }
   solver->lean_snode_wait_mask = masks;
+  solver->lean_snode_wait_slot = wait_slots;
   solver->lean_snode_wait_rows = rows;
   solver->lean_snode_wait_thread_count = thread_count;
+  if (getenv("KLS_TRACE_LEAN_SNODE") != NULL) {
+    fprintf(stderr,
+            "KLS lean snode synchronization: waits=%ld publishes=%ld/%ld\n",
+            (long)wait_count, (long)publish_count, (long)solver->n);
+  }
   return 1;
 }
 
@@ -75798,7 +75867,6 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
   const UF_long n = solver->n;
-  const unsigned int tid = (unsigned int)worker->tid;
   double *restrict x = worker->x;
   const double *restrict values = shared->values;
   const UF_long *restrict in_ptr = solver->row_refactor_input_ptr;
@@ -75819,7 +75887,12 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
   const unsigned char *restrict snode_run = solver->lean_snode_run;
   const unsigned char *restrict snode_wait_mask =
     solver->lean_snode_wait_mask;
-  kls_lean_done_slot *restrict done = shared->lean_done;
+  const uint32_t *restrict snode_wait_slot =
+    solver->lean_snode_wait_slot;
+  const uint32_t *restrict done_token =
+    solver->lean_parallel_grouped_token;
+  atomic_uint *restrict grouped_done =
+    solver->lean_parallel_grouped_done;
 
   for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
     const UF_long row = rows[pos];
@@ -75836,48 +75909,27 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     for (UF_long p = l_ptr[row]; p < l_ptr[row + 1u];) {
       const UF_long run = snode_run != NULL ? (UF_long)snode_run[p] : 0u;
       if (run >= 2u && run <= 8u && p + run <= l_ptr[row + 1u]) {
-        if (snode_wait_mask != NULL) {
-          unsigned int mask = (unsigned int)snode_wait_mask[p];
-          while (mask != 0u) {
+        unsigned int mask = (unsigned int)snode_wait_mask[p];
+        while (mask != 0u) {
 #if defined(__GNUC__) || defined(__clang__)
-            const unsigned int local = (unsigned int)__builtin_ctz(mask);
+          const unsigned int local = (unsigned int)__builtin_ctz(mask);
 #else
-            unsigned int local = 0u;
-            while ((mask & (1u << local)) == 0u) {
-              local++;
-            }
-#endif
-            mask &= mask - 1u;
-            const UF_long dep = compact_cols
-              ? (UF_long)l_cols16[p + local] : l_cols[p + local];
-            unsigned spin = 0u;
-            while (atomic_load_explicit(&done[dep].generation,
-                                        memory_order_acquire) != generation) {
-              if ((++spin & 255u) == 0u &&
-                  atomic_load_explicit(&shared->stop,
-                                       memory_order_acquire) != 0) {
-                return;
-              }
-              kls_cpu_relax();
-            }
+          unsigned int local = 0u;
+          while ((mask & (1u << local)) == 0u) {
+            local++;
           }
-        } else {
-          for (UF_long local = 0u; local < run; ++local) {
-            const UF_long dep = compact_cols
-              ? (UF_long)l_cols16[p + local] : l_cols[p + local];
-            if (done[dep].owner != tid) {
-              unsigned spin = 0u;
-              while (atomic_load_explicit(&done[dep].generation,
-                                          memory_order_acquire) !=
-                     generation) {
-                if ((++spin & 255u) == 0u &&
-                    atomic_load_explicit(&shared->stop,
-                                         memory_order_acquire) != 0) {
-                  return;
-                }
-                kls_cpu_relax();
-              }
+#endif
+          mask &= mask - 1u;
+          const uint32_t slot = snode_wait_slot[p + local] - 1u;
+          unsigned spin = 0u;
+          while (atomic_load_explicit(&grouped_done[slot],
+                                      memory_order_acquire) != generation) {
+            if ((++spin & 255u) == 0u &&
+                atomic_load_explicit(&shared->stop,
+                                     memory_order_acquire) != 0) {
+              return;
             }
+            kls_cpu_relax();
           }
         }
         const UF_long dep0 = compact_cols
@@ -75898,9 +75950,11 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
       }
       const UF_long dep = compact_cols
         ? (UF_long)l_cols16[p] : l_cols[p];
-      if (done[dep].owner != tid) {
+      const uint32_t encoded_slot = snode_wait_slot[p];
+      if (encoded_slot != 0u) {
+        const uint32_t slot = encoded_slot - 1u;
         unsigned spin = 0u;
-        while (atomic_load_explicit(&done[dep].generation,
+        while (atomic_load_explicit(&grouped_done[slot],
                                     memory_order_acquire) != generation) {
           if ((++spin & 255u) == 0u &&
               atomic_load_explicit(&shared->stop,
@@ -75936,8 +75990,12 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row, row);
     }
-    atomic_store_explicit(&done[row].generation, generation,
-                          memory_order_release);
+    const uint32_t row_token = done_token[row];
+    if ((row_token & KLS_LEAN_GROUPED_PUBLISH_FLAG) != 0u) {
+      const uint32_t row_slot = row_token & KLS_LEAN_GROUPED_SLOT_MASK;
+      atomic_store_explicit(&grouped_done[row_slot], generation,
+                            memory_order_release);
+    }
     if (atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
       return;
     }
@@ -77718,7 +77776,9 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     deferred_value_prep ? solver->prepared_value_input_pos : NULL;
   shared->value_prep_nnz = deferred_value_prep ? solver->nnz : 0u;
   const int symmetric_scalar_fringe_lean_mode =
-    !shared->lean_compact_match_mode &&
+    !shared->lean_compact_match_mode && grouped_done_ready &&
+    solver->lean_snode_wait_mask != NULL &&
+    solver->lean_snode_wait_slot != NULL &&
     ((kls_generic_hoisted_snode_worker_capable(solver)));
   shared->lean_symmetric_scalar_fringe_mode =
     symmetric_scalar_fringe_lean_mode;
@@ -77733,12 +77793,10 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   }
 #endif
   /* Grouped completion tokens are valid only for workers that consume that
-     scoreboard.  The ordinary dependency walk (selected when supernode runs
-     are retained) waits on lean_done[] instead; publishing grouped tokens in
-     that configuration leaves every cross-owner dependency waiting forever.
-     Compact-match workers have their own grouped-token consumer, while the
-     generic hoisted worker requires the same no-supernode representation as
-     its dispatch gate below. */
+     scoreboard.  The fused supernode worker consumes them independently of
+     this generic-mode flag.  Compact-match workers have their own grouped
+     consumer, while the generic hoisted worker requires the same
+     no-supernode representation as its dispatch gate below. */
   const int generic_grouped_done_consumer =
     shared->lean_compact_match_mode ||
     (!symmetric_scalar_fringe_lean_mode &&

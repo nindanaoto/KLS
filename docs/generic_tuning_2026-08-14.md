@@ -377,3 +377,61 @@ with a largest per-update relative residual of `1.29423314e-11` and no finding.
 GCC `-march=x86-64` and Clang syntax builds also pass (apart from the existing
 Clang uninitialized-thread warning), so the translation unit does not require
 the build host's vector ISA.
+
+## Frontier-predecoded fused synchronization (2026-08-16)
+
+Sampling the compact fused worker after the column-stream change put its
+largest remaining bucket in dependency polling.  The fused executor still
+read one 64-byte padded completion record for each remote dependency even
+though the retained static schedule already had a cache-line-partitioned
+grouped scoreboard.  A direct substitution was measured and rejected: the
+extra row-to-token lookup made H100 0.6 percent slower.  The retained design
+instead predecodes the complete synchronization frontier once.
+
+Each consumer worker executes its interleaved row subsequence in topological
+order, and each producer executes its own subsequence in the same order.  An
+acquire of producer slot `s` therefore covers all earlier slots from that
+producer for every later row of the consumer.  Pattern setup records a grouped
+slot only when a dependency advances that per-consumer/per-producer frontier.
+Within a fused run it retains only the latest advancing slot per producer.
+The same pass marks exactly the producer rows that some consumer will acquire;
+the numeric worker omits every other completion publication.  Release/acquire
+ordering and the numeric arithmetic are unchanged.  For example, `thermal`
+needs 6,257 frontier acquires and 2,033 publications for 145,251 L entries and
+3,456 rows.
+
+This is a schedule-representation capability, not an input classifier.  It
+uses the existing generic short-supernode eligibility and repeated-update
+contract, supports two through eight workers, validates every row, owner, and
+slot before publishing the stream, and falls back to the established generic
+row worker if grouped-scoreboard or frontier allocation fails.  The new stream
+costs four bytes per L entry.  It is stored at the cold tail of the private
+solver object so existing hot-field offsets remain fixed, and there is no new
+environment selector or matrix/size/corpus rule.
+
+Fifteen counterbalanced 500-update parent/current pairs on the five higher-work
+fused factors gave geometric ratios of 0.980 for steady refactor and 0.989 for
+complete H100.  Four of five steady medians improved; `utm3060` was neutral at
+1.001 H100.  A five-pass twelve-factor screen gave 0.991 H100 over the eleven
+numerically valid factors with no two-percent regression.  With every tuning
+environment variable removed, the ordinary public auto policy gave 0.993
+H100 over the same eleven factors, with unchanged routes and no regression
+above one percent.
+
+The one-time frontier construction is already amortized at the generic
+recurring-workload floor: fifteen H16 pairs on the five focus factors gave
+0.968 steady-refactor and 0.992 complete-H16 ratios.  Two- and four-worker
+checks on `cell2`, `sts4098`, and `thermal` gave H100 ratios of 0.969 and 0.987.
+Disabling AVX-512 over the five focus factors still gave 0.989 H100.  The
+fourteen-matrix remaining-gap control gave 0.997 H100 over its eleven valid
+rows; a thirty-pair adjudication of its apparent small-factor outlier,
+`circuit204`, was neutral at 1.004 H100 and 1.004 steady refactor.
+
+The ordinary compact-match and generic row workers retain their parent
+addresses and exact code sizes; only the four intended fused worker copies
+change.  Release and ASan/UBSan CTest pass all four tests.  Forced sanitized
+execution completed 440 independently checked 10-percent entrywise updates
+over all eleven valid natural factors, all on `row_refactor`, with a largest
+per-update relative residual of `1.15056277e-10` and no finding.  GCC
+`-march=x86-64` and Clang syntax checks pass, apart from the existing Clang
+uninitialized-thread warning.
