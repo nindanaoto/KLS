@@ -138,3 +138,45 @@ Six boundary matrices completed 100 independently verified 0.1-percent
 entrywise updates each.  The largest relative residual was 2.56e-13.  The
 release and ASan/UBSan suites passed, as did explicit sanitized changed-value
 loops for the rejected, accepted, and dense-tier row paths.
+
+## Fused-run synchronization compression (2026-08-16)
+
+Sampling the accepted short-supernode executor on `cell2`, `sts4098`, and
+`thermal` put the padded per-row dependency scoreboard ahead of the fused
+arithmetic in recurring samples.  Each worker executes its assigned schedule
+slots in increasing order.  Consequently, when one fused run contains
+several dependencies owned by the same remote worker, acquiring that owner's
+latest required slot also makes every earlier slot from that owner visible.
+The retained implementation precomputes one byte of wait bits per L-stream
+position and polls only the last required dependency from each remote owner.
+It preserves the padded, no-false-sharing scoreboard and changes neither the
+factor arithmetic nor row publication order.  Allocation or representation
+failure simply retains the complete wait sequence.
+
+A complete scan of the 241 locally installed natural matrices found twelve
+fused-run positives from eleven SuiteSparse groups.  Five counterbalanced
+300-update pairs on CCD 0 put the compressed/full steady-refactor geometric
+ratio at 0.985 and the complete H100 ratio at 0.991.  Eleven of twelve
+per-matrix steady medians improved; `rajat03` was neutral at 1.001.  The
+second CCD reproduced the result on eleven stable factors with ratios 0.983
+and 0.991.  The pre-existing inaccurate `shyy41` route was noisy in both
+arms, so a longer fifteen-pair run was used only for timing; its paired
+medians were 0.979 for refactor and 0.986 for H100.  Two- and four-thread
+tests on the original three factors improved steady refactor by 0.8--4.0
+percent and H100 by 0.6--3.0 percent.
+
+As a layout guard, the fourteen-matrix remaining-gap corpus also completed
+three passes on both this revision and its parent with identical route
+choices and no failures.  None accepted the fused-run executor (the sole
+short-run candidate failed its generic coverage gate), so the optimization
+does not add work to those unrelated paths.
+
+The eleven numerically valid natural positives each completed 100 checked
+entrywise updates at amplitudes 0.001, 0.01, and 0.1.  Another 600 checked
+10-percent updates covered two- and four-thread schedules.  At amplitude 0.1
+the compressed and complete-wait implementations produced exactly the same
+maximum residual on every factor; the worst was 1.16e-10.  Release and
+ASan/UBSan CTest passed, and sanitized 10-percent update loops covered all
+twelve natural positives without a finding.  The rejected compact-scoreboard
+prototype is not retained: despite identical residuals, it slowed `cell2`
+from about 0.172 to 0.649 ms by increasing synchronization contention.
