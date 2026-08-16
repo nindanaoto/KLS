@@ -37,6 +37,10 @@ use resource-based amortization floors so candidate setup cannot dominate the
 numeric work. Fixed-width index limits and storage prerequisites remain hard
 capability gates.
 
+The former shape-policy compatibility switch and its archived selectors have
+been removed. Their existing `kls_stats` fields remain in the public structure
+for ABI compatibility and report zero.
+
 In particular, a retained row-matched factor can compare both minimum-degree
 orderings and switch only on numeric Pareto evidence (fill, work, pivot detours,
 and conditioning). A rejected checked-factor suffix compares its measured
@@ -62,13 +66,6 @@ the acceptance authority. Bounded candidates retain their predicted-fill
 validation. These are lifecycle, representation, and measured-factor contracts
 rather than dimension or matrix-family selectors. Set
 `KLS_DISABLE_GENERIC_ND_PORTFOLIO=1` for A/B runs.
-
-When that repeated lifecycle has already selected nested dissection, a
-value-aware static row-match candidate is allowed to settle before the initial
-factor instead of waiting for the first changed numeric. It must still pass the
-ordinary weak-diagonal admission and measured match/factor quality gates; the
-ordering choice and caller lifecycle are the only extra evidence. Set
-`KLS_DISABLE_REPEATED_ND_STATIC_SETTLEMENT=1` for a deferred A/B run.
 
 The recurring numeric router is measurement-based as well. A timed lean-row
 winner uses compact 16-bit streams whenever every retained index and pointer
@@ -97,13 +94,6 @@ with two warmed column refactor/solve cycles. All of these decisions use
 realized lifecycle time and representation validity, not matrix dimensions or
 sparsity fingerprints.
 
-The older profile selectors are retained only for reproducible A/B work. Set
-`KLS_ENABLE_LEGACY_SHAPE_POLICIES=1` to enable them; they are off by default.
-This compatibility switch covers the historical dimension/degree/BTF windows,
-direct family routes, family-specific EGraph layouts, and residual-check
-bypasses. Explicit API choices and explicit experiment environment variables
-continue to take effect in either mode.
-
 Callers that know their numeric lifecycle can set
 `expected_refactorizations` and `expected_solves` in `kls_options`. These are
 performance hints only; they do not weaken factor or solve correctness checks.
@@ -121,10 +111,10 @@ values, an already-active numeric worker pool also copies disjoint value
 slices while completing the refactor. Set
 `KLS_DISABLE_PARALLEL_REFINE_COPY=1` for a serial-copy A/B comparison.
 
-Many later sections in this README document the development history of those
-profile selectors. Unless a section explicitly describes a capability- or
-measurement-based default, treat its named AUTO policy as compatibility-mode
-documentation rather than the current production router.
+Many later sections in this README document the development history of the
+removed profile selectors. Unless a section explicitly describes a capability-
+or measurement-based default, treat its named AUTO policy as historical
+documentation, not as an available production router.
 
 ## Build
 
@@ -197,18 +187,6 @@ have to pass KLS's normal numeric checks and a value gate that requires the
 matching to remove substantial pivoting pressure or materially reduce factor
 work/fill.
 
-For a compact normal-AMD one-block symbolic with at least 31/32 of rows both
-weak and structurally missing on the diagonal, KLS can run that guarded match
-before the first numeric rather than deferring it to the first changed-value
-refactor.  The timing policy is bounded to 4,096--16,384 rows, 3--8 input
-entries per row, 16--64 estimated factor entries per row, balanced L/U, and
-128--4,096 estimated flops per row inside a 1M--64M resource band.  Matching
-coverage, candidate factorization, and the ordinary numeric acceptance gates
-still decide whether the transformed candidate is retained.  Benchmark JSON
-reports `nearly_missing_diagonal_early_match_selected`; set
-`KLS_DISABLE_NEARLY_MISSING_DIAGONAL_EARLY_MATCH_POLICY=1` to restore deferred
-evaluation.  The former Hamrle2-specific input check is removed.
-
 AUTO inputs that can carry the complete compact matching lifecycle now use a
 second staged policy instead of a `gemat11`/`gemat12` dimension and nonzero
 fingerprint.  The input proposal requires 4,001--65,535 rows and at most
@@ -226,11 +204,8 @@ flops per row, at most `n/64 + 16` off-diagonal pivots, and no scaling,
 nudging, perturbation, or predicted numeric.  This separates matching
 economics from recurring-engine eligibility.
 
-`kls_stats` and benchmark JSON expose
-`compact_missing_diagonal_match_candidate`,
-`compact_missing_diagonal_match_selected`, and
-`compact_missing_diagonal_factor_eligible`.  Set
-`KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH=1` to disable the complete policy;
+Set `KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH=1` to disable the complete
+policy;
 the former matrix-named `KLS_*GEMAT*` switches are no longer recognized.
 `Hamrle2` is included in the extended SuiteSparse manifest as a
 cross-family one-block holdout.  The exact Gemat selector and Gemat-named
@@ -256,46 +231,7 @@ values only after the first solve contract succeeds, and both PTS and the
 serial one-block fallback apply the inverse input map and paired match scales.
 Set `KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY=1` to disable the
 whole policy or `KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES=1` to
-retain matching while disabling fused direct input.  `kls_stats` and benchmark
-JSON expose `symmetric_partial_diagonal_match_candidate`,
-`symmetric_partial_diagonal_match_selected`,
-`symmetric_partial_diagonal_factor_eligible`, and
-`symmetric_partial_diagonal_low_work_eligible`.
-
-For an AUTO/8-thread normal-AMD symbolic whose full-rank BTF consists of many
-genuinely tiny components, KLS avoids global block-ordering work that costs
-more than the complete factor.  The structural contract covers
-16,384--131,072 rows, 6--12 input entries per row, one BTF block per 2--8
-rows, a largest block no wider than 256 or 1/128 of the matrix, 4--12
-estimated factor entries per row, and 4--64 estimated flops per row below an
-8M-work ceiling.  Recurring matching, tolerance, solve, and accuracy choices
-use a stricter factor contract: no coordinate transform, no nudging or
-perturbation, at most one off-diagonal pivot per 16 rows, 3--12 factor entries
-and 3--64 flops per row.  A high-pivot value set therefore keeps the useful
-matching trial even when its pattern shares the structural class.  Benchmark
-JSON reports `low_work_tiny_block_btf_symbolic_eligible` and
-`low_work_tiny_block_btf_policy_eligible`; set
-`KLS_DISABLE_LOW_WORK_TINY_BLOCK_BTF_POLICY=1` to restore all generic trials.
-The former Sandia operating-point input box is removed.
-
-For an AUTO/8-thread normal-AMD, max-row-scaled factor with one moderate BTF
-core and a fragmented fringe, KLS selects its compact paired-row lifecycle
-only when the complete representation and measured work fit.  The contract
-covers 8,192--65,535 rows, 3--8 input entries per row, `n/8`--`n/3` BTF
-blocks, a largest block spanning one half to three quarters of the matrix,
-8--20 estimated factor entries and 32--256 estimated flops per row, and
-16-bit L/U index streams.  The retained factor must have 5--10 entries and
-16--64 flops per row, no transforms, nudges, perturbations, or predicted
-numeric, and at most one off-diagonal pivot per 32 rows.  Passing factors can
-avoid redundant tolerance, value-publication, reciprocal, and residual work;
-nearby scaled factors that exceed the representation or pivot bounds retain
-the generic lifecycle.  Benchmark JSON and `kls_stats` report
-`scaled_fragmented_compact_row_policy_eligible`; set
-`KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_POLICY=1` to restore the generic
-trials, or
-`KLS_DISABLE_SCALED_FRAGMENTED_COMPACT_ROW_DEFER_VALUE_SCATTER=1` to retain
-the policy while disabling only deferred publication.  The former rajat27-
-specific input box is removed.
+retain matching while disabling fused direct input.
 
 Compact 16-bit triangular solves now cache consecutive singleton BTF runs
 from the selected block structure instead of recognizing two Rommes input
@@ -1830,8 +1766,7 @@ slice. The production generic policy leaves this scalar experiment disabled:
 enabling it globally excludes the narrower fused BTF dispatch even when no
 profitable speculative dependency is found. Set
 `KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` to force it or
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=0` to disable it for A/B runs; legacy
-compatibility mode retains its historical work-threshold selection. When a
+`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=0` to disable it for A/B runs. When a
 pipeline column is
 blocked on its current U predecessor, the kernel scans later U predecessors that
 are already published, applies only those whose workspace entry cannot be
@@ -1941,24 +1876,6 @@ fill and work fall in the same moderate band. Set
 `KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE=1`, or
 `KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS=1` for independent A/B diagnosis.
 
-A separate retained-numeric profile supplies lifecycle defaults for stable,
-moderate-work members of that fragmented dominant-BTF class. It requires
-3--8 input entries per row, a BTF block count between 1/12 and 1/5 of the
-order, an 80--95% dominant core, at most `n/128` off-diagonal pivots, no nudges
-or perturbations, 12--40 retained factor entries per row, and 1,000--8,192
-factor flops per row within a 100M--1B total-work band. The selected factor
-must be normal AMD, full-rank, unscaled, and have no retained numeric `Rs`
-array; explicit normal/AMD/unscaled requests are eligible after selecting the
-same numeric state. Consumers that already admit EGraph can then reuse the
-full worker crew, scalar scatter,
-wide subtree/PTS setup, compact solve offsets where representable, and
-overlapped preparations without an input-size fingerprint. The pre-static
-factor-worker counterpart uses the trial symbolic's normalized SCC shape,
-fill, and estimated work because no accepted numeric exists yet. Benchmark
-JSON exposes `moderate_fragmented_policy_eligible`. Set
-`KLS_DISABLE_MODERATE_FRAGMENTED_EGRAPH_POLICY=1` to disable the bundle.
-The former `KLS_*ONETONE2*` environment spellings are no longer recognized.
-
 A compact AMF two-block policy is selected from computed symbolic and numeric
 state rather than an input fingerprint. The symbolic proposal requires
 512--4096 rows, 8--16 input entries per row, full structural rank, exactly two
@@ -1973,101 +1890,12 @@ row, and 200--512 factor flops per row, with both triangular streams still
 pointer, index, schedule, and solve representation before dispatch. AUTO uses
 the ordinary orientation/ordering selector, while explicit
 normal/AMF/scale-0 requests are eligible after reaching the same state. Every
-changed numeric retains the strict relative-L2 residual guard. Benchmark JSON
-exposes `compact_amf_two_block_policy_eligible`. Set
+changed numeric retains the strict relative-L2 residual guard. Set
 `KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_POLICY=1` to disable the whole policy or
 `KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_SPECIALIZED_WORKER=1` to retain the policy
 without its specialized worker. The former `KLS_*TSOPF_B9*` controls are no
 longer recognized.
 
-A dense reciprocal-hub METIS policy replaces the former dense-ASIC size
-window. Normal AUTO input with at least 65,536 rows only proposes the route
-when it has 8--12 entries per row, at least a 99.5% structural diagonal, and a
-vertex covering at least seven eighths of the graph in both row and column
-directions. The actual NodeNDP symbolic must then be full-rank, have both its
-BTF fringe and block count between `n/512` and `n/64`, and expose a complete
-separator forest with useful private and pipeline components. Rejection
-resumes ordinary AUTO orientation and ordering selection. Recurring kernel
-defaults additionally require the measured unscaled factor to have no
-off-diagonal pivots or numeric `Rs`, 24--48 factor entries per row, and
-4,096--8,192 factor flops per row. Benchmark JSON exposes
-`dense_reciprocal_hub_policy_eligible`; set
-`KLS_DISABLE_DENSE_RECIPROCAL_HUB_METIS_POLICY=1` for an A/B fallback.
-
-A symmetric scalar-fringe AMD policy replaces the former `rajat03` size and
-nonzero window. Under the standard AUTO/8-thread BTF/static-pivoting contract,
-it proposes transpose AMD only for bounded-degree, exactly structurally
-symmetric inputs with 3--6 entries per row and a material but small surface of
-missing-diagonal degree-one columns. The selected symbolic must be full-rank,
-place a 1/256--1/28 fringe outside a dominant core, expose nearly all of that
-surface as scalar BTF blocks, and stay within normalized fill/work and L/U
-balance bounds. Recurring lean kernels additionally require an unscaled
-numeric with no off-diagonal pivots, nudges, perturbations, or numeric `Rs`
-array and the same measured factor bounds. Benchmark JSON exposes
-`symmetric_scalar_fringe_policy_eligible`; set
-`KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_AMD_LEAN_POLICY=1` for an A/B fallback.
-
-A pivoted high-work single-block policy replaces the former `rajat15` order
-and nonzero window. Under the standard AUTO/8-thread BTF/static-pivoting
-contract, only a retained normal-AMD single block can qualify. The symbolic
-state must have 6--16 input entries per row, balanced L/U estimates, 32--96
-estimated factor entries per row, and 2,048--8,192 estimated flops per row
-inside broad order and total-work resource bounds. Recurring kernels are
-enabled only after the no-scale/no-recheck numeric has no `Rs`, nudges, or
-perturbations; between `n/64` and `n/8` off-diagonal pivots; balanced L/U
-storage; and normalized measured fill and work. Symbolic admission does not
-suppress AUTO's ordinary ordering race because identical patterns can produce
-different pivot behavior. Benchmark JSON exposes
-`pivoted_high_work_single_block_policy_eligible`; set
-`KLS_DISABLE_PIVOTED_HIGH_WORK_SINGLE_BLOCK_POLICY=1` for an A/B fallback.
-
-A low-work many-fringe BTF/PTS policy replaces the former `rajat21` order,
-nonzero, block-count, and core-size box. Under the standard AUTO/8-thread
-BTF/static-pivoting contract, a retained normal-AMD factor may qualify from
-131,072--1,048,576 rows and 3--8 input entries per row. It must be full-rank,
-put between `n/64` and `n/16` vertices outside one dominant BTF core, expose
-between half and all of that fringe as separate blocks, keep its symbolic L/U
-estimates within 2:1, and meet normalized symbolic fill and work bounds.
-Recurring PTS choices additionally require an unscaled numeric with no `Rs`,
-nudges, or perturbations; at most `n/512` off-diagonal pivots; balanced L/U
-storage; 4--16 retained factor entries per row; and 8--128 measured flops per
-row inside a 2M--64M resource band. Benchmark JSON exposes
-`low_work_many_fringe_btf_pts_policy_eligible`; set
-`KLS_DISABLE_LOW_WORK_MANY_FRINGE_BTF_PTS_POLICY=1` for an A/B fallback.
-
-A hubbed scalar-fringe subtype replaces the former `rajat29` order and
-nonzero window.  A cheap input proposal requires the same broad order and
-density range as the low-work many-fringe family, at least 31/32 of columns
-to contain their diagonal, between `n/64` and `n/16` scalar columns, and one
-column whose degree is between `n/8` and `7n/8`.  AUTO retains the proposed
-normal-AMD symbolic only when it is full-rank, leaves an `n/64`--`n/16`
-fringe around one dominant BTF core, represents at least seven eighths of
-that fringe as separate blocks, and passes normalized fill, work, and L/U
-balance bounds.  The measured numeric then inherits the low-work PTS guards;
-this more specific topology admits a 192-flop-per-row symbolic floor and at
-most `n/256` off-diagonal pivots.  Explicit orientation,
-ordering, scale, backend, BTF, pivot, or thread choices remain authoritative.
-Benchmark JSON exposes
-`low_work_hubbed_scalar_fringe_pts_policy_eligible`.  Set
-`KLS_DISABLE_LOW_WORK_HUBBED_SCALAR_FRINGE_PTS_POLICY=1` to disable only this
-subtype, or use the many-fringe master switch above to disable the whole
-family.
-
-A high-work tiny scalar-fringe AMD policy replaces the former `Raj1` order,
-nonzero, block-count, and core-size box. Under the standard AUTO/8-thread
-BTF/static-pivoting contract, a retained normal-AMD symbolic from
-131,072--1,048,576 rows and 3--12 input entries per row may qualify. It must
-be full-rank, leave between `n/4096` and `n/256` vertices outside one dominant
-core, represent at least three quarters of that fringe as separate BTF blocks,
-keep estimated L/U within 2:1, and meet normalized symbolic fill and work
-bounds. The compact-fill half may use probe-first predicted construction;
-denser members retain the ordinary nudge sequence. Recurring EGraph choices
-additionally require an unscaled numeric with no `Rs`, nudges, or
-perturbations; either a verified predicted no-pivot factor or at most `n/512`
-off-diagonal pivots; balanced L/U storage; and normalized measured fill and
-work. Benchmark JSON exposes
-`high_work_tiny_scalar_fringe_policy_eligible`; set
-`KLS_DISABLE_HIGH_WORK_TINY_SCALAR_FRINGE_POLICY=1` for an A/B fallback.
 
 The metamorphic holdout utility can produce deterministic simultaneous
 row/column relabelings without checking generated matrices into the tree. For
@@ -2087,16 +1915,6 @@ adds weak reciprocal diagonal nodes, as separate transformation modes. These
 transformations are useful for detecting classifiers or separator policies
 that accidentally depend on the original vertex numbers, an exact matrix
 order, or an exact component count.
-
-For the corresponding AUTO analysis problem, a 40--60% structural diagonal
-and three-to-five input entries per row only propose a direct AMD/BTF
-candidate. KLS retains that candidate when the computed symbolic has full
-structural rank, a 10--20% block fringe, an 80--95% dominant core, estimated
-fill of 32--64 entries per row, and estimated work of 1,000--8,192 flops per
-row. The accepted state stays unscaled and does not pay later row-matching,
-scale, or METIS replacement trials. A rejected proposal resumes ordinary AUTO
-ordering and orientation selection. Set
-`KLS_DISABLE_SPARSE_PARTIAL_DIAGONAL_DIRECT_AMD=1` to disable the policy.
 
 When row refactor has retained exact compact dense groups, normal and transpose
 row solves consume complete groups as row-major triangular panels for one RHS
@@ -3982,271 +3800,6 @@ entrywise generations. Fresh CKTSO, KLU, and SubtreeLU controls each timed out
 at 180 seconds. A 1% update correctly declined retention, used EGraph in
 `9.54s`, and returned a `1.36e-15` relative residual.
 
-## Sparse symmetric fragmented METIS policy
-
-The former `ASIC_100ks` H100 route no longer recognizes a 99,000--99,500-row,
-570,000--590,000-entry benchmark box. Under the same standard eight-thread
-AUTO contract, it now proposes the tuned NodeNDP ordering only for a bounded
-sparse topology: a full structural diagonal, exact multiplicity-aware
-symmetry, four--eight entries per row overall, a small scalar fringe, and a
-moderate graph hub. Sorted and unsorted CSC are both proved exactly, and the
-same normalized policy works through the CSC and CSR APIs.
-
-The input is only a proposal. The real METIS symbolic must independently prove
-full rank, a nearly spanning BTF core, a represented scalar fringe, balanced
-bounded fill, and a complete separator decomposition with enough private work
-for the worker team. Only an unscaled numeric with no off-diagonal pivots,
-nudges, or perturbations and measured balanced fill/work suppresses the later
-scale trial. A rejection at either measured stage resumes ordinary AUTO.
-
-`KLS_DISABLE_SPARSE_SYMMETRIC_FRAGMENTED_METIS_POLICY=1` provides a generic
-same-binary control. The leaf-count override is
-`KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES`.
-`sparse_symmetric_fragmented_metis_symbolic_eligible` and
-`sparse_symmetric_fragmented_metis_policy_eligible` expose the accepted
-symbolic and numeric stages through `kls_stats` and benchmark JSON.
-
-The independent smoke fixture has 65,696 rows, outside the old window, and
-selects the policy through both public sparse formats; a one-edge reciprocity
-break and the disable switch reject it. An appended-scalar `ASIC_100ks`
-metamorph at 99,702 rows and simultaneous relabelings also select, while a
-larger 101,238-row fringe crosses the normalized boundary and falls back.
-Across the target and three metamorphs, 1,200 independently checked entrywise
-generations through 10% amplitude had worst relative-L2 error `5.91e-15`.
-Twenty alternating parent/current target pairs put the modeled-cycle ratio at
-`0.9926` geometrically (`0.9932` by the means); twelve extension pairs measured
-`0.8525`. Release and ASan/UBSan/LSan CTest pass all four tests, including
-leak-enabled target, positive-extension, and boundary-rejection runs.
-
-## Sparse-spike predicted lifecycle
-
-The former `nxp1` H100 route no longer recognizes a 414,000--415,000-row,
-2.64--2.67-million-entry benchmark box. Under the standard eight-thread AUTO
-contract, it now starts from a bounded topology proposal: a 200,000--750,000-
-row nearly diagonal graph with six--eight entries per row and a moderate row
-or column spike. The proposal reuses the topology census already required by
-AUTO rather than adding another full sparse-matrix pass.
-
-Later capabilities have independent measured gates. The accepted factor must
-be a matched, unscaled, one-block predicted METIS numeric with complete
-separator coverage, no pivot repair, and normalized fill/work bounds before
-KLS skips the scale trial and selects direct EGraph updates. Retaining the
-cluster forest, full worker width, and lower relaxed-consume floors additionally
-requires a nearly all-private, low-pipeline separator and tighter fill/work
-bounds. A topology or factor that fails either measured stage follows the
-ordinary AUTO schedule.
-
-`KLS_DISABLE_SPARSE_SPIKED_PREDICTED_POLICY=1` is the generic same-binary
-control. The candidate, factor, and clustered decisions are exposed through `kls_stats`
-and benchmark JSON as `sparse_spiked_predicted_candidate`,
-`sparse_spiked_predicted_factor_eligible`, and
-`sparse_spiked_predicted_clustered_eligible`.
-
-Validation includes an independent 200,000-row sparse-spike fixture and its
-same-size, same-density unspiked control, a 1,024-row `nxp1` extension beyond
-the old order window, and a simultaneous relabeling that proposes the topology
-but is rejected by the measured factor gate. Nine hundred positive entrywise
-generations through 10% amplitude had worst relative-L2 residual
-`5.33e-11`; the measured rejection remained accurate through another 32
-generations. Six alternating quiet-core target pairs put the complete modeled-
-cycle ratio at `1.0074` versus the former exact policy, while the extension and
-independent fixture measured `0.7016` and `0.6100`. Release and
-ASan/UBSan/LSan CTest pass all four tests, including leak-enabled positive and
-measured-rejection runs.
-
-## Dense fragmented scaled-row lifecycle
-
-The former `TSOPF_RS_b2383` row-update route no longer recognizes exactly
-38,120 rows and 16,171,169 entries. It now makes no input-name, dimension,
-orientation, or ordering decision. After the ordinary AUTO factor completes,
-KLS admits direct cooperative-row updates only for a real scaled, full-rank BTF
-numeric whose component count, largest component, pivot count, balanced fill,
-work, and dense-input ratio all fall inside normalized bounds. A failed factor
-gate retains the generic update engine.
-
-`KLS_DISABLE_DENSE_FRAGMENTED_SCALED_ROW_POLICY=1` provides a generic
-same-binary control. `dense_fragmented_scaled_row_factor_eligible` exposes the
-measured decision through `kls_stats` and benchmark JSON.
-
-The smoke test supplies an independent 4,096-row family with 16 dense
-256-row components. It selects normal AMD rather than the target's transposed
-METIS factor, works through both CSC and CSR, refactors changed values through
-the row engine, and recovers an independently constructed solution. A
-same-order, same-entry-count control merges the pattern into four 1,024-row
-components and rejects. A 512-component TSOPF extension at 38,632 rows also
-selects outside the old exact identity.
-
-Across both real value sets, the extension, and the independent family, 1,200
-independently checked entrywise generations through 10% amplitude had worst
-relative-L2 residual `2.04e-11`. Six alternating target pairs put the modeled-
-cycle ratio at `1.0021` versus the former exact policy. Four extension pairs
-measured `0.4892`, and six independent-family pairs measured `0.1756`.
-Release and ASan/UBSan/LSan CTest pass all four tests; leak-enabled target,
-extension, and independent runs are clean.
-
-## Sparse full-diagonal METIS row lifecycle
-
-The former `mc2depi` row route and `G3_circuit` route no longer recognize,
-respectively, a narrow benchmark box and one exact `(n, nnz)` pair. Under the
-standard eight-thread AUTO contract, both now begin with one reusable topology
-proposal: 100,000--4,194,304 rows, three--five stored entries per row, a full
-structural diagonal, no empty row, and maximum row and column degree eight.
-The existing AUTO topology scan supplies the verdict, so the larger class adds
-no second full sparse-matrix pass.
-
-Ordering resources and later capabilities are staged. Fine sparse candidates
-retain an `n/608` constrained-AMD window. Candidates above 1,048,576 rows and
-4.25 entries per row use about 37 windows per worker, rounded and bounded by
-generic resource limits. The retained no-BTF METIS symbolic must then prove
-full rank, balanced normalized and absolute fill, and a complete, almost
-entirely private separator. The fine symbolic selects the measured `1e-6`
-pivot tolerance; the high-resource symbolic retains the requested `1e-3`.
-
-The actual fixed-pivot numeric must independently remain unscaled and
-balanced, avoid pivot repair, and satisfy its class's normalized fill and work
-bounds before KLS enables predicted-row preparation and recurring cooperative-
-row updates. The final proof applies to a predicted bootstrap or a later KLU
-replacement. A rejection at any stage resumes ordinary AUTO behavior.
-
-`KLS_DISABLE_SPARSE_FULL_DIAGONAL_METIS_ROW_POLICY=1` provides a generic
-same-binary control. The candidate, symbolic, and factor decisions are exposed through `kls_stats` and
-benchmark JSON as
-`sparse_full_diagonal_metis_row_candidate`,
-`sparse_full_diagonal_metis_row_symbolic_eligible`, and
-`sparse_full_diagonal_metis_row_factor_eligible`.
-
-The smoke test now has independent 100,000-row cubic and quintic circulants.
-Both propose the topology while deliberately failing the absolute symbolic
-economics; CSC and CSR cover the cubic family, and the quintic family exercises
-the newly admitted five-entry density. Removing one diagonal or setting the
-generic or either legacy disable rejects the proposal. Screening all 110 local
-SuiteSparse inputs finds only four complete topology proposals: `mc2depi` and
-`G3_circuit` reach all measured stages, while `G2_circuit` is below the
-absolute setup floor and `ss1` exceeds normalized fill.
-
-The earlier `mc2depi` extensions remain positive, including a measured
-`1/1/0` relabeling with a real pivot nudge. A new 4,096-row `G3_circuit`
-extension outside the exact identity and an adjacent relabeling both report
-`1/1/1`. Across the three high-resource matrices, 180 independently checked
-entrywise generations through 10% amplitude had worst relative-L2 residual
-`5.94e-13`; combined with the fine class, 1,080 positive generations remain
-below `2.04e-12`.
-
-Four alternating `G3_circuit` target pairs preserve predicted-first/row
-execution and put the complete modeled-cycle ratio at `0.9816` versus the
-former exact selector. Three extension pairs change the parent's EGraph
-fallback to measured row updates and reduce the cycle to `0.5293`; final
-residual improves from as high as `4.86e-13` to `4.21e-16`. Release and
-ASan/UBSan/LSan CTest pass all four tests, and leak-enabled target, extension,
-and relabeling runs are clean.
-
-## Giant symmetric scalar-fringe METIS row lifecycle
-
-The former `rajat31` AUTO/eight-thread exception no longer recognizes a narrow
-4.68--4.70 million-row and 20.2--20.4 million-entry box. Its proposal is now
-an exact topology proof: 1,048,576--8,388,608 rows, three--six entries per
-row, exact multiplicity-aware structural symmetry, an almost-full diagonal,
-a missing-diagonal scalar fringe between `n/8192` and `n/1024`, at most
-`n/128` scalar columns overall, and one to sixteen bounded hubs. Sorted CSC
-uses allocation-free reciprocal searches; unsorted input uses an exact
-transpose comparison. CSC and CSR therefore receive the same verdict.
-
-Topology may start an overlapped seven-leaf NodeNDP proposal and select scale
-`-1`, pipelined first-factor routing, and narrow-panel suppression. It does not
-authorize recurring row machinery. The retained METIS/BTF symbolic must
-independently prove full structural rank, one giant block with a mostly scalar
-normalized fringe, 32--80 estimated factor entries per row with an absolute
-128--512 million-entry setup floor, balanced L/U, and a complete separator
-with at least 99% private rows. Unknown predicted-symbolic flop estimates are
-allowed because the numeric stage measures work directly.
-
-The actual fixed-pivot numeric must then remain unscaled at the requested
-`1e-3` tolerance, have no row permutation, scale vector, off-diagonal pivot,
-nudge, or perturbation, retain balanced 40--64-entry-per-row fill, and perform
-16,384--32,768 operations per row. Only this cached factor verdict enables
-predicted-row preparation, direct cooperative row updates, large dense-group
-priority, and packed-solve publication. Numeric replacement invalidates and
-recomputes the verdict.
-
-Set
-`KLS_DISABLE_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_ROW_POLICY=1` for a generic
-same-binary control. Candidate, symbolic, and numeric decisions are exposed in `kls_stats`
-and benchmark JSON as
-`giant_symmetric_scalar_fringe_metis_row_candidate`,
-`giant_symmetric_scalar_fringe_metis_row_symbolic_eligible`, and
-`giant_symmetric_scalar_fringe_metis_row_factor_eligible`.
-
-The independent smoke family has a 1,048,576-row symmetric quintic core, one
-517-entry hub, and 512 missing-diagonal scalar leaves. It reports `1/0/0` in
-CSC, CSR, and deliberately unsorted CSC. Breaking one reciprocal edge while
-preserving dimensions, density, degree counts, diagonal coverage, triangular
-counts, and sorted storage rejects the proposal; the generic and legacy
-controls reject it as well. Screening every local SuiteSparse input capable of
-meeting the coarse resource bounds leaves only `rajat31` as a proposal.
-
-Appending 10,240 independent diagonal blocks produces a 4,700,242-row holdout
-outside the old dimension box. It reports `1/1/1`, grows the measured BTF
-fringe from 2,502 to 12,742 rows, retains predicted-first/row execution, and
-returns a worst `6.91e-12` relative-L2 residual across ten independently
-checked 10%-amplitude updates. A 65,536-adjacent-swap relabeling also reports
-`1/1/1`; its measured row update plus packed solve is faster than the parent's
-factor-rejected EGraph update plus solve despite the relabeling's much slower
-cold layout.
-
-Three alternating target pairs preserve identical `1.81e-14` residuals and
-have geometric current/parent ratios of `1.0244` for analysis, `0.9968` for
-initial factor, `0.9921` for first refactor, `0.9152` for steady refactor,
-`1.0005` for packed solve, and `0.9387` for the complete modeled cycle. Two
-extension pairs reduce the modeled-cycle ratio to `0.5803`. Release and
-ASan/UBSan/LSan CTest pass all four tests; leak-enabled target and extension
-factor/refactor/solve runs are clean.
-
-## Hybrid huge-single EGraph lifecycle
-
-The former `G2_circuit` recurring scheduler no longer recognizes a
-150,000--150,200-row, 726,000--727,500-entry identity followed by absolute
-fill and work boxes. The replacement is a cached factor capability. It accepts
-normal METIS factors with 32,768--524,288 rows, three--eight input entries per
-row, one full-matrix component, no scaling transform or pivot repair, balanced
-L/U streams totaling 40--128 entries per row, and 3,072--32,768 measured
-operations per row. A no-BTF or predicted symbolic may retain the unknown
-structural-rank sentinel; an observed rank must be full.
-
-The separator is independently checked before the capability is admitted. It
-must cover every row and component, expose at least one private component per
-worker, place at least 31/32 of rows in private components, keep total pipeline
-rows below 1/32, and bound the largest private and pipeline components by
-`n/4` and `n/48`. Only this settled representation receives the hybrid
-clustered-prefix/dependency-pipeline schedule, full-width EGraph dispatch, and
-the associated settled floor/panel decisions. Numeric replacement invalidates
-and recomputes the verdict.
-
-`KLS_DISABLE_HYBRID_HUGE_SINGLE_EGRAPH_POLICY=1` provides a same-binary
-control. `hybrid_huge_single_egraph_factor_eligible` exposes the accepted
-factor through `kls_stats` and benchmark JSON. The old G2-only solve-contract
-bypass is removed: predicted factors now run the ordinary first-solve residual
-probe. On the target, that probe measured a `6.48e-11` maximum residual,
-certified the numeric, and allowed later solves to use the normal clean-factor
-fast path.
-
-The smoke test constructs an independent 32,768-row five-point grid under
-explicit METIS/no-BTF analysis, refactors changed values through EGraph, and
-checks its solution entrywise. A same-order, same-density narrow strip has
-lower measured fill/work and rejects; the master-disable control also rejects.
-A 4,096-node reciprocally coupled extension of `G2_circuit` has 154,198 rows,
-outside the former identity, and reports eligible with a 36-level prefix and
-18,665-column dependency pipeline. Adjacent and full simultaneous relabelings
-also retain the capability from their measured factors.
-
-Six hundred independently verified entrywise generations across the target
-and coupled extension at 0.1%, 1%, and 10% amplitude had worst relative-L2
-residual `8.37e-13`. Eight alternating target pairs put the median paired
-current/parent modeled-cycle ratio at `1.0035`; six extension pairs put the
-median at `0.9462`, with first and steady-refactor medians of `0.9369` and
-`0.9325`. Six same-binary grid pairs put the enabled/disabled modeled-cycle
-ratio at `0.7951` geometrically (`0.7749` median) and the steady solve ratio at
-`0.3252`. Release and ASan/UBSan/LSan tests pass, and leak-enabled target,
-extension, and shuffled-relabeling runs are clean.
 
 ## Promoted-tolerance relative-L2 recovery
 
@@ -4286,270 +3839,6 @@ relative-L2 residuals `7.43e-10` and `9.38e-10`; none required a recovery
 rebuild. Leak-enabled ASan/UBSan/LSan factor/refactor/solve runs cover both
 matrices.
 
-## Bounded-degree retained-preconditioner lifecycle
-
-The former `Hamrle3` lifecycle no longer recognizes a narrow order and entry-
-count window or requires exactly eight workers. Under the ordinary parallel
-AUTO/BTF/static-pivoting contract, a proposal now comes from sparse topology:
-32,768--4,194,304 rows, two--six stored entries per row on average, no empty
-row or column, maximum row and column degree 16, at most `n/32` scalar rows or
-columns, and at most `n/128` columns with a structural diagonal. The proposal
-uses transpose AMD with scale 1 and a `1e-4` pivot threshold, but cannot force
-that representation by itself.
-
-The measured BTF symbolic must prove full structural rank, at most `n/128+1`
-blocks, a dominant block containing at least 31/32 of the matrix, 48--512
-estimated factor entries per row, and at least 8,192 estimated operations per
-row. A rejected proposal is discarded and ordinary two-sided AUTO analysis
-resumes. The installed numeric must independently preserve the representation
-and rank, avoid nudges and perturbations, keep L and U within 4x balance, retain
-48--1,536 measured factor entries per row, and perform at least 8,192 measured
-operations per row.
-
-Only a numeric that passes all three stages captures its factor-time values.
-A changed-value update may reuse that factor when every entry changes by no
-more than `1.01e-3*abs(old)+64*DBL_MIN`. Every resulting solve checks the true
-current-matrix relative-L2 residual and must reach `1e-9`; larger updates or a
-reference allocation failure permanently return that numeric epoch to an
-ordinary refactor. This makes retained-factor accuracy a measured contract,
-not an inference from matrix identity.
-
-Set
-`KLS_DISABLE_BOUNDED_DEGREE_RETAINED_PRECONDITIONER_POLICY=1` for a generic
-same-binary control. `kls_stats` and benchmark JSON expose
-`bounded_degree_retained_preconditioner_candidate`,
-`bounded_degree_retained_preconditioner_symbolic_eligible`,
-`bounded_degree_retained_preconditioner_factor_eligible`, and
-`bounded_degree_retained_preconditioner_reuse_count`.
-
-The independent smoke fixture is a 32,768-row six-neighbor toroidal graph with
-no diagonal and generated values. It qualifies at candidate, symbolic, and
-factor stages under four workers, reuses the numeric for changed values, and
-checks an independently formed solution. A same-order six-neighbor narrow-band
-ring passes the input proposal, fails the symbolic economics, and completes
-ordinary AUTO fallback. A scan of all 110 local SuiteSparse matrices leaves
-only `Hamrle3` inside the coarse topology bounds; that is compatibility
-evidence, while the independent fixture and extensions establish the
-capability's generality.
-
-Appending 1,000 independent diagonal blocks produces a 1,448,360-row holdout
-outside the former order window. It reports `1/1/1`, retains a 1,447,360-row
-dominant block, and completes 20 checked updates with worst relative-L2
-residual `1.90e-10`. A 1% update rejects reuse, selects EGraph, and returns
-`1.36e-15` with reuse count zero. Three pinned alternating target pairs keep
-the same representation and residual while measuring geometric current/parent
-ratios of `1.0093` for analysis, `1.0008` for steady update, `0.9997` for its
-solve, and `1.0120` for the complete modeled cycle. The recurring path is
-therefore effectively unchanged; the remaining cycle variation comes from the
-layout-sensitive one-time factor. Release and leak-enabled
-ASan/UBSan/LSan CTest pass all four tests; an explicit sanitized target
-factor/update/solve also reports `1/1/1`, one retained reuse, and no findings.
-
-## Asymmetric bounded-degree direct-METIS lifecycle
-
-The direct NodeNDP selectors for Freescale1 and memchip no longer compare an
-input with either matrix's exact order or entry count. Under the standard
-AUTO/8-thread/BTF/static-pivoting contract, a proposal now comes from directed
-topology: 131,072--8,388,608 rows, four--six stored entries per row on average,
-no empty row or column, maximum in/out degree 32, an almost-full structural
-diagonal, a bounded scalar population, either unequal strict-triangle counts as
-a fast asymmetry proof or an exact bounded-degree reciprocity test, and a raw
-strongly connected component covering at least 127/128 of the graph. There may
-be at most `n/1024+1` raw SCCs.
-
-Raw SCC fragmentation chooses tuning rather than matrix identity. At most
-`n/8192+1` SCCs is thin-fringe class 2, which uses fourteen deterministic
-NodeNDP leaves and 3,072-column constrained-AMD windows. A coarser fringe is
-class 1, which uses eight leaves and the ordinary giant-window rule. The SCC
-pass is invariant under transpose and simultaneous relabeling.
-
-Topology only proposes direct METIS. The resulting symbolic must have at least
-1,048,576 rows, full structural rank, BTF enabled, a 127/128 dominant block,
-the same SCC-fragmentation class, a complete separator covering every row,
-at least 127/128 private rows, bounded private/pipeline components, and—when
-estimates exist—8--64 factor entries and 256--65,536 operations per row. A
-rejected proposal is freed and the complete AUTO tournament resumes. The
-installed numeric independently requires an unscaled, untransformed,
-unperturbed fixed-pivot factor with balanced L/U streams, 8--64 measured
-factor entries per row, and 256--16,384 operations per row.
-
-Only the numeric-accepted capability receives the recurring giant-chain row
-updates and setup suppressions. Thin-fringe numerics still use the deterministic
-pipeline for first-pattern discovery, but their changed-value row factor is
-published to the packed column solve through the existing factor-level
-preference. This replaces the former hard-coded no-publish solve shortcut;
-the coupled holdout showed that shortcut was not a generic SCC property.
-
-Set
-`KLS_DISABLE_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_POLICY=1` for a generic
-same-binary control. The NodeNDP leaf-count override is
-`KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES`. `kls_stats`
-and benchmark JSON expose
-`asymmetric_bounded_degree_direct_metis_candidate`,
-`asymmetric_bounded_degree_direct_metis_tuning_class`,
-`asymmetric_bounded_degree_direct_metis_symbolic_eligible`, and
-`asymmetric_bounded_degree_direct_metis_factor_eligible`.
-
-Independent smoke fixtures use directed circulant cores at 131,072, 133,120,
-and 135,168 rows. They cover both tuning classes, a nearby-size coupled
-extension, equivalent CSR/transposed topology, symmetric and degree controls,
-symbolic rejection with ordinary AUTO fallback, and both disable switches.
-Freescale2 rejects on fragmentation/degree and structurally symmetric
-`circuit5M_dc` rejects at the exact asymmetry stage.
-
-Real coupled holdouts also move both targets outside their former identities.
-Freescale1 plus 1,024 reciprocal diagonal nodes reports `1/1/1`, preserves the
-class-1 dominant core, and measures a 33.64-second modeled cycle versus 35.87
-seconds for the frozen exact parent. Memchip plus 512 nodes reports class 2 and
-`1/1/1`, measuring 39.43 versus 42.58 seconds. On the original matrices, a
-pinned parent/current pair is 31.08 versus 30.94 seconds for Freescale1. Two
-alternating memchip pairs give a geometric current/parent cycle ratio of
-`0.8246`: publishing raises steady row-update time by about 20% but cuts the
-steady solve to `0.2325x`, improving the complete workload. All verified
-target and holdout residuals are below `4.13e-16`. Release and leak-enabled
-ASan/UBSan/LSan CTest pass all four tests.
-
-## Near-symmetric mega-hub AMD lifecycle
-
-The former `circuit5M` selector no longer compares the input order and entry
-count with a SuiteSparse coordinate. Under the standard AUTO, eight-worker,
-BTF, static-pivoting contract, a topology proposal accepts 131,072--8,388,608
-rows and eight--sixteen stored entries per row. Every row and column must be
-nonempty, almost every column must contain its diagonal, scalar rows and
-columns are bounded, and the maximum in- and out-degree must each lie between
-`n/8` and `n/2`. A nonzero but bounded set of in/out-degree mismatches proves
-directed asymmetry without depending on CSC order, transpose, or vertex
-labels. A column-pointer pass rejects inputs with no plausible hub before the
-classifier allocates row degrees or scans all nonzeros.
-
-Topology only proposes normal AMD/BTF. The resulting symbolic must have at
-least 1,048,576 rows, full structural rank, two through `n/1024+1` blocks, a
-proper dominant core covering at least 1023/1024 of the matrix, and a fringe
-between `n/4096` and `n/512+8` rows. Balanced symbolic L/U fill must total
-32--64 entries per row and estimated work must be 512--4,096 operations per
-row. If any measurement fails, KLS discards the trial and resumes the complete
-AUTO tournament.
-
-The installed numeric independently preserves the accepted symbolic identity,
-normal AMD/BTF representation, caller pivot threshold, and max-row scaling.
-It must remain nonsingular and have no row permutation, nudge, or perturbation,
-few off-diagonal pivots, balanced L/U streams totaling 8--24 entries per row,
-and measured work of 64--512 operations per row. Only that accepted numeric
-suppresses redundant scale, METIS, predicted-pattern, and diagonal-equivalent
-trials and retains the row-scale vector across changed-value EGraph refactors.
-
-Set `KLS_DISABLE_NEAR_SYMMETRIC_MEGA_HUB_AMD_POLICY=1` for a generic
-same-binary control. `kls_stats` and benchmark JSON expose
-`near_symmetric_mega_hub_amd_candidate`,
-`near_symmetric_mega_hub_amd_symbolic_eligible`, and
-`near_symmetric_mega_hub_amd_factor_eligible`.
-
-The independent smoke family uses generated 131,072- and 135,168-row
-circulant cores, a quarter-order reciprocal hub, one unmatched directed edge,
-and disconnected two-node fringe components. It covers equivalent CSR,
-unsorted storage, a nearby size, exact-symmetric and oversized-hub negatives,
-a connected proposal that fails the symbolic stage, and both disable
-switches. These compact fixtures deliberately lie below the production
-symbolic floor, so they prove invariant proposal and fallback behavior rather
-than serving as a second large factor-positive family.
-
-The development manifest adds `FullChip`, `Freescale2`, and `circuit5M_dc` as
-near-family controls. The cross-family holdout manifest adds `kkt_power`,
-`CurlCurl_3`, `StocF-1465`, `Transport`, and `wikipedia-20051105`; all reject
-at the input stage for independent diagonal, hub, degree-balance, or density
-reasons. `FullChip` also retains its existing METIS/no-BTF symbolic exactly;
-a final frozen/current pair measured 7.107 versus 7.066 seconds of analysis,
-showing that the early hub rejection removes material classifier overhead.
-
-Appending 512 generated coupled nodes to the positive creates a 5,558,838-row
-holdout outside the old identity. It reports `1/1/1`, retains a 5,556,264-row
-dominant BTF core, and preserves identical 33,760,986/33,760,248 L/U counts.
-With two factors and three independently checked refactors, its modeled cycle
-falls from 53.59 seconds in the frozen exact parent to 42.01 seconds; the
-worst relative-L2 residual is `1.26e-14`. On the original input, two pinned
-alternating pairs keep identical factors and residuals, analysis within 0.3%,
-and a geometric current/parent modeled-cycle ratio of about 1.03, within the
-observed cold-factor/first-refactor variation. Thus the exact identity is gone
-without materially changing the established workload, while the moved-size
-positive demonstrates useful behavior outside the benchmark coordinate.
-
-## Giant dominant-hub METIS dense-tail lifecycle
-
-The former `FullChip` route no longer compares the input order and entry count
-with a SuiteSparse coordinate. Under the standard AUTO, eight-worker, BTF,
-static-pivoting contract, a topology proposal accepts 131,072--8,388,608 rows
-and eight--twelve stored entries per row. Every row and column must be nonempty,
-almost every column must contain its diagonal, and scalar rows and columns are
-bounded. The maximum in- and out-degree must each lie between `2n/3` and
-`7n/8`; a nonzero but bounded set of degree mismatches supplies a directed-
-asymmetry proof. The predicates are invariant under transpose, simultaneous
-relabeling, and stored entry order. A column-only pass rejects unrelated
-matrices before allocating row degrees or scanning all entries.
-
-Topology is only the first stage. The selected symbolic must contain at least
-1,048,576 rows, use normal METIS without BTF, and consist of one full-size
-block. Its balanced L/U estimate must total 32--96 entries per row. The
-separator analysis must cover every row with at least two workers, at most four
-components per worker, at least one pipeline component, at least 255/256 of
-the rows in private components, and bounded private and pipeline maxima. An
-unknown structural rank is accepted because no-BTF KLU does not compute one;
-when rank or work estimates are available they must satisfy the contract.
-
-The installed numeric supplies the final evidence. It must preserve that
-symbolic identity, normal METIS/no-BTF representation, scale `-1`, and the
-caller threshold; come from the pipelined KLU path with a 1,024--16,384-column
-dense tail; have full numerical rank, bounded off-diagonal pivots and nudges,
-no perturbation, balanced measured fill of 32--96 entries per row, and measured
-work of 4,096--131,072 operations per row. Only the accepted numeric suppresses
-the redundant automatic scale retry. Its verdict is cached across in-place
-EGraph refactors and invalidated whenever the numeric or symbolic is replaced.
-
-Rank completion is deliberately outside this automatic policy. `FullChip` is
-exactly singular, and `KLS_ENABLE_SINGULAR_COMPLETION=1` still must be supplied
-by the caller before KLS may constrain its zero-pivot degrees of freedom. The
-general capability only routes that explicitly requested operation through
-the pipelined dense-tail factor and reuses its checked zero-pivot discovery; it
-does not silently change any ordinary singular problem.
-
-Set
-`KLS_DISABLE_GIANT_DOMINANT_HUB_METIS_DENSE_TAIL_POLICY=1` for a generic
-same-binary control. Route controls are
-`KLS_DISABLE_GIANT_DOMINANT_HUB_ROUTED_FACTOR`,
-`KLS_DISABLE_GIANT_DOMINANT_HUB_ZERO_DISCOVERY`, and
-`KLS_DISABLE_GIANT_DOMINANT_HUB_COMPLETION_PIPE`; the dense-tail override is
-`KLS_GIANT_DOMINANT_HUB_DENSE_TAIL`. `kls_stats` and analyze/full benchmark JSON
-expose `giant_dominant_hub_metis_dense_tail_candidate`,
-`giant_dominant_hub_metis_dense_tail_symbolic_eligible`, and
-`giant_dominant_hub_metis_dense_tail_factor_eligible`.
-
-The independent smoke family uses 131,072- and 135,168-row reciprocal
-nine-point circulants, a three-quarter-order reciprocal hub, and one unmatched
-directed edge. Equivalent CSR, unsorted CSC, and nearby-size fixtures pass the
-input stage; exact symmetry, half-order and nine-tenths-order hubs, and both
-disable variables reject. These fixtures deliberately remain below the
-million-row symbolic floor and therefore test invariant proposal and ordinary
-fallback behavior rather than claiming an independent large numeric positive.
-
-Separate development and cross-family holdout manifests add `circuit5M`,
-`Freescale2`, `G3_circuit`, `rajat30`, `kkt_power`, `CurlCurl_3`, `StocF-1465`,
-`Transport`, and `wikipedia-20051105` as controls. In live checks,
-`G3_circuit`, `circuit5M`, and independently sourced `CurlCurl_3` all report
-`0/0/0`, despite collectively covering large one-block METIS, similar density,
-and dominant-hub shapes.
-
-Appending 512 coupled nodes to the motivating matrix produces a
-2,987,524-row, 26,623,519-entry holdout outside the old exact coordinate. It
-reports `1/1/1`, retains normal METIS/no-BTF, factors in 14.74 seconds, and
-solves with `1.97e-14` relative-L2 residual. The frozen exact parent did not
-finish that factor within 180 seconds. On the original matrix, two alternating
-pinned parent/current pairs retain identical 82,748,400/84,816,974 L/U counts
-and residuals below `1.15e-14`; the generalized input proof adds roughly
-0.1 second of analysis, while initial factors remain in the same 10--12-second
-band. Refactor samples on the shared host remain more variable than the policy
-change, so they are treated as dispersion rather than evidence for a new
-kernel speedup. The limitation is explicit: the only full-lifecycle positive
-outside the original coordinate is a coupled metamorphic extension; the
-cross-family matrices are rejection controls, not natural positives.
 
 ## Fragmented-chain one-update selector retired
 
@@ -4598,87 +3887,6 @@ residuals (`4.12e-16` and `7.37e-17`). No SuiteSparse coordinate replaces the
 deleted box. Release and leak-enabled ASan/UBSan/LSan CTest pass all four
 tests.
 
-## High-work tiny-fringe BTF/PTS factor lifecycle
-
-The former `ASIC_320k` post-factor selector is now a normalized resource
-capability.  The old selector required scale 0, but the current AUTO factor of
-the motivating matrix selects scale `-1`; instrumenting all 24 calls across
-three changed-value updates showed that the old policy was dormant.  The new
-gate therefore does more than rename an active benchmark exception.
-
-Under the standard AUTO, eight-worker, BTF, static-pivoting contract, the
-installed numeric must use normal AMD or AMF with no scale vector, cover
-131,072--1,048,576 rows at five--seven stored entries per row, and have full
-structural rank.  Its dominant BTF block must leave a fringe between `n/512`
-and `n/256`; the remaining block count must be between one per sixteen fringe
-rows and one per fringe row.  Both symbolic and measured L+U fill must be
-balanced within 2x and total 10--16 entries per row.  Estimated and measured
-work must each lie between 2,048 and 4,096 operations per row, with no pivot
-nudge or perturbation and at most `n/512` known off-diagonal pivots.  A
-predicted first factor may defer the last pivot count until it is installed.
-
-That factor evidence authorizes only the retained decisions supported by the
-component controls: skip redundant scale/METIS consultations, decline the
-Algorithm-5 prefactor update, settle the EGraph width/floor probes, admit the
-wider PTS forest and its 1.5 cut, select a validated PTS solve directly, and
-store the solve permutations in 32-bit form.  The PTS builder still verifies
-the actual elimination forest, shared top, and worker balance before the solve
-can be selected.  ASIC-specific reciprocal and compact-stream metadata choices
-were removed because isolated measurements showed no benefit.
-
-Set `KLS_DISABLE_HIGH_WORK_TINY_FRINGE_BTF_PTS_POLICY=1` to disable this factor
-lifecycle.  Because a valid large PTS solve plan is now an independent generic
-capability, also set `KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY=1` when the
-comparison must restore its solve consultation.  Other component controls are
-`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_SETTLED_PROBES`,
-`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_PTS_CUT`, and
-`KLS_DISABLE_HIGH_WORK_TINY_FRINGE_COMPACT_PERM`. `kls_stats` and both
-benchmark JSON modes expose
-`high_work_tiny_fringe_btf_pts_factor_eligible`.
-
-The Sandia development family demonstrates independent rejections:
-`ASIC_100k` and `ASIC_100ks` fall below the order floor and select METIS;
-`ASIC_320ks` has one block; and the `ASIC_680k` variants have a much larger
-fringe or select METIS.  Cross-family controls `scircuit`, `Raj1`, `transient`,
-`rajat24`, `nxp1`, and `mac_econ_fwd500` all report zero for independent work,
-fringe, block-count, fill, or scale reasons.  The corresponding development
-and holdout manifests live under `bench/`.
-
-Two generated positives remove the original coordinate.  A complete
-simultaneous relabeling keeps 321,821 rows but changes AUTO from AMF to AMD and
-changes measured fill/work to 2,120,493 L and U entries and 924.6 million
-operations; it remains eligible and completes 100 checked updates with a
-`3.71e-15` worst relative-L2 residual.  Appending 32,768 weakly coupled nodes
-produces a 354,589-row, 2,030,132-entry matrix outside the old row ceiling.  It
-selects AMD, has 105 blocks with a 353,691-row core, measures 2,290,549 L and U
-entries and 1.152 billion operations, and also remains eligible.  In contrast,
-appending the same number of independent diagonal blocks creates a 33,663-row
-fringe and reports zero.  Appending 131,072 coupled nodes changes the selected
-factor to a scale-2 single block and likewise rejects, showing that extension
-alone is not sufficient.
-
-Final pinned same-binary measurements use 100 deterministic entrywise 0.1%
-updates and independently verify every generation.  Because refactor times on
-the shared host have occasional multi-fold outliers in both arms, the table
-reports medians rather than selected runs:
-
-| matrix / policy | samples | steady refactor | steady changed solve | modeled 100-state cycle |
-| --- | ---: | ---: | ---: | ---: |
-| `ASIC_320k`, enabled | 7 | 13.88 ms | 3.65 ms | 2.99 s |
-| `ASIC_320k`, disabled | 5 | 24.67 ms | 6.04 ms | 4.28 s |
-| coupled +32,768, enabled | 6 | 16.29 ms | 4.20 ms | 2.90 s |
-| coupled +32,768, disabled | 5 | 21.32 ms | 6.56 ms | 3.82 s |
-
-Factor geometry is identical between enabled and disabled arms.  All six
-enabled moved-size sweeps stay below `2.97e-15`; six of seven enabled target
-sweeps stay below `2.80e-15`.  One target sweep reached `2.85e-9`, matching a
-rare EGraph/refactor residual excursion also observed in frozen and disabled
-controls, so it is recorded as shared variability rather than hidden from the
-result.  The factor envelope remains deliberately narrow: the positives
-outside the original coordinate are metamorphic, while the natural
-SuiteSparse matrices reject that full factor lifecycle.  The solve-level
-generalization below does not widen these factor thresholds; it starts from
-the independently verified PTS plan that any installed numeric can build.
 
 ## Verified large-PTS solve adoption
 
