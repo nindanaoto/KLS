@@ -75979,22 +75979,42 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     const double pivot = x[row];
     x[row] = 0.0;
     udiag[row] = pivot;
-    for (UF_long q = u_ptr[row]; q < u_ptr[row + 1u]; ++q) {
-      const UF_long col = compact_cols
-        ? (UF_long)u_cols16[q] : u_cols[q];
-      const double value = x[col];
-      u_val[q] = value;
-      *u_lu[q] = value;
-      x[col] = 0.0;
+    const UF_long u_begin = u_ptr[row];
+    const UF_long u_end = u_ptr[row + 1u];
+    const uint32_t row_token = done_token[row];
+    const int publishes =
+      (row_token & KLS_LEAN_GROUPED_PUBLISH_FLAG) != 0u;
+    if (publishes) {
+      /* Remote consumers read the contiguous row mirror and Udiag, never the
+         packed-column destination.  Publish that dependency frontier as soon
+         as its required values are ready, then hide the solve-format scatter
+         behind consumers' numeric work. */
+      for (UF_long q = u_begin; q < u_end; ++q) {
+        const UF_long col = compact_cols
+          ? (UF_long)u_cols16[q] : u_cols[q];
+        u_val[q] = x[col];
+        x[col] = 0.0;
+      }
+    } else {
+      for (UF_long q = u_begin; q < u_end; ++q) {
+        const UF_long col = compact_cols
+          ? (UF_long)u_cols16[q] : u_cols[q];
+        const double value = x[col];
+        u_val[q] = value;
+        *u_lu[q] = value;
+        x[col] = 0.0;
+      }
     }
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row, row);
     }
-    const uint32_t row_token = done_token[row];
-    if ((row_token & KLS_LEAN_GROUPED_PUBLISH_FLAG) != 0u) {
+    if (publishes) {
       const uint32_t row_slot = row_token & KLS_LEAN_GROUPED_SLOT_MASK;
       atomic_store_explicit(&grouped_done[row_slot], generation,
                             memory_order_release);
+      for (UF_long q = u_begin; q < u_end; ++q) {
+        *u_lu[q] = u_val[q];
+      }
     }
     if (atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
       return;
