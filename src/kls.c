@@ -1099,8 +1099,8 @@ struct kls_solver {
   int lean_snode_wait_thread_count;
   int lean_snode_worker_eligible; /* -1 rejected, 0 unbuilt, 1 enough of
                                      the retained L stream is fused */
-  int lean_snode_avx512_candidate; /* has a width-eight run long enough to
-                                      amortize four gather/scatter vectors */
+  int lean_snode_avx512_candidate; /* 0 none, 1 profitable width eight,
+                                      2 includes isolated width sixteen */
   atomic_ullong row_light_snode_runs;     /* light-run consume telemetry */
   atomic_ullong row_light_snode_entries;
   atomic_ullong row_scalar_dep_entries;   /* scalar-fallback U entries */
@@ -67321,21 +67321,31 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
   const UF_long *l_cols = solver->row_refactor_l_cols;
   const UF_long *sn_end = solver->row_refactor_sn_end;
   const int only_width2 = getenv("KLS_LEAN_SNODE2_ONLY") != NULL;
-  UF_long run_count[9] = {0};
-  UF_long run_targets[9] = {0};
+  UF_long run_count[17] = {0};
+  UF_long run_targets[17] = {0};
   UF_long covered_entries = 0u;
   UF_long fused_runs = 0u;
+#if KLS_HAVE_AVX512_KERNELS
+  const int width16_enabled = !only_width2 && kls_avx512_scatter_enabled();
+#else
+  const int width16_enabled = 0;
+#endif
   for (UF_long row = 0u; row < solver->n; ++row) {
     UF_long p = l_ptr[row];
     const UF_long p_end = l_ptr[row + 1u];
     while (p < p_end) {
       const UF_long dep0 = l_cols[p];
-      UF_long run = 1u;
-      while (run < 8u && run < p_end - p &&
-             dep0 + run <= sn_end[dep0] &&
-             l_cols[p + run] == dep0 + run) {
-        run++;
+      UF_long span = 1u;
+      const UF_long span_limit = width16_enabled ? 16u : 8u;
+      while (span < span_limit && span < p_end - p &&
+             dep0 + span <= sn_end[dep0] &&
+             l_cols[p + span] == dep0 + span) {
+        span++;
       }
+      /* A full width-16 tile can keep the common trailing workspace values
+         live across two width-eight arithmetic groups.  Partial tiles retain
+         the established 2--8 kernels, avoiding a dynamic-width hot loop. */
+      const UF_long run = span == 16u ? 16u : (span < 8u ? span : 8u);
       const int complete = run >= 2u && (!only_width2 || run == 2u);
       if (complete) {
         const UF_long dep_end = dep0 + run - 1u;
@@ -67347,7 +67357,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
           solver->row_refactor_u_ptr[dep_end + 1u] -
           solver->row_refactor_u_ptr[dep_end];
         run_targets[run] += target_length;
-        if (run == 8u &&
+        if ((run == 8u || run == 16u) &&
             target_length >= KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
           solver->lean_snode_avx512_candidate = 1;
         }
@@ -67356,6 +67366,9 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
         p++;
       }
     }
+  }
+  if (run_count[16] != 0u) {
+    solver->lean_snode_avx512_candidate = 2;
   }
   /* The accepted path has its own hoisted worker.  The established broad
      contract still requires two-thirds coverage; compute-dense factors can
@@ -67382,7 +67395,8 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
     fprintf(stderr,
             "KLS lean snode runs: 2=%ld/%ld 3=%ld/%ld 4=%ld/%ld"
             " 5=%ld/%ld 6=%ld/%ld 7=%ld/%ld 8=%ld/%ld"
-            " coverage=%ld/%ld work=%.0f/%.0f dense=%d eligible=%d\n",
+            " 16=%ld/%ld coverage=%ld/%ld"
+            " work=%.0f/%.0f dense=%d eligible=%d\n",
             (long)run_count[2], (long)run_targets[2],
             (long)run_count[3], (long)run_targets[3],
             (long)run_count[4], (long)run_targets[4],
@@ -67390,6 +67404,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
             (long)run_count[6], (long)run_targets[6],
             (long)run_count[7], (long)run_targets[7],
             (long)run_count[8], (long)run_targets[8],
+            (long)run_count[16], (long)run_targets[16],
             (long)covered_entries, (long)l_nnz,
             solver->common.flops, factor_entries, dense_work, eligible);
   }
@@ -67468,7 +67483,7 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
     const UF_long p_end = solver->row_refactor_l_ptr[row + 1u];
     while (p < p_end) {
       const UF_long run = (UF_long)solver->lean_snode_run[p];
-      if (run < 2u || run > 8u || p + run > p_end) {
+      if (run < 2u || (run > 8u && run != 16u) || p + run > p_end) {
         const UF_long dep = solver->row_refactor_l_cols[p];
         if (dep >= solver->n) {
           valid = 0;
@@ -67499,51 +67514,64 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
         p++;
         continue;
       }
-      uint32_t owner_slots[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
-      unsigned char owner_locals[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
-      for (UF_long local = 0u; local < run; ++local) {
-        const UF_long dep = solver->row_refactor_l_cols[p + local];
-        if (dep >= solver->n) {
-          valid = 0;
-          break;
-        }
-        const uint32_t token = solver->lean_parallel_grouped_token[dep];
-        const unsigned int owner =
-          token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
-        if (owner >= (unsigned int)thread_count) {
-          valid = 0;
-          break;
-        }
-        if (owner == consumer) {
-          continue;
-        }
-        const uint32_t encoded_slot =
-          (token & KLS_LEAN_GROUPED_SLOT_MASK) + 1u;
-        if (encoded_slot > owner_slots[owner]) {
-          owner_slots[owner] = encoded_slot;
-          owner_locals[owner] = (unsigned char)local;
-        }
-      }
-      unsigned char mask = 0u;
-      for (unsigned int owner = 0u;
-           owner < (unsigned int)thread_count; ++owner) {
-        const uint32_t encoded_slot = owner_slots[owner];
-        if (encoded_slot > acquired_slot[consumer][owner]) {
-          const UF_long local = (UF_long)owner_locals[owner];
-          const UF_long dep = solver->row_refactor_l_cols[p + local];
-          mask |= (unsigned char)(1u << local);
-          wait_slots[p + local] = encoded_slot;
-          acquired_slot[consumer][owner] = encoded_slot;
-          if ((solver->lean_parallel_grouped_token[dep] &
-               KLS_LEAN_GROUPED_PUBLISH_FLAG) == 0u) {
-            publish_count++;
+      /* Preserve the established dependency timing for a width-16 tile:
+         acquire its first eight producers, form the intermediate values,
+         then acquire the second eight.  This avoids extending a worker's
+         blocking frontier and therefore cannot introduce a new static-owner
+         rendezvous cycle. */
+      const UF_long chunks = run == 16u ? 2u : 1u;
+      for (UF_long chunk = 0u; chunk < chunks && valid; ++chunk) {
+        const UF_long chunk_p = p + 8u * chunk;
+        const UF_long chunk_run = run == 16u ? 8u : run;
+        uint32_t owner_slots[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
+        unsigned char owner_locals[8] =
+          {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
+        for (UF_long local = 0u; local < chunk_run; ++local) {
+          const UF_long dep =
+            solver->row_refactor_l_cols[chunk_p + local];
+          if (dep >= solver->n) {
+            valid = 0;
+            break;
           }
-          solver->lean_parallel_grouped_token[dep] |=
-            KLS_LEAN_GROUPED_PUBLISH_FLAG;
-          wait_count++;
+          const uint32_t token = solver->lean_parallel_grouped_token[dep];
+          const unsigned int owner =
+            token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
+          if (owner >= (unsigned int)thread_count) {
+            valid = 0;
+            break;
+          }
+          if (owner == consumer) {
+            continue;
+          }
+          const uint32_t encoded_slot =
+            (token & KLS_LEAN_GROUPED_SLOT_MASK) + 1u;
+          if (encoded_slot > owner_slots[owner]) {
+            owner_slots[owner] = encoded_slot;
+            owner_locals[owner] = (unsigned char)local;
+          }
         }
+        unsigned char mask = 0u;
+        for (unsigned int owner = 0u;
+             owner < (unsigned int)thread_count; ++owner) {
+          const uint32_t encoded_slot = owner_slots[owner];
+          if (encoded_slot > acquired_slot[consumer][owner]) {
+            const UF_long local = (UF_long)owner_locals[owner];
+            const UF_long dep =
+              solver->row_refactor_l_cols[chunk_p + local];
+            mask |= (unsigned char)(1u << local);
+            wait_slots[chunk_p + local] = encoded_slot;
+            acquired_slot[consumer][owner] = encoded_slot;
+            if ((solver->lean_parallel_grouped_token[dep] &
+                 KLS_LEAN_GROUPED_PUBLISH_FLAG) == 0u) {
+              publish_count++;
+            }
+            solver->lean_parallel_grouped_token[dep] |=
+              KLS_LEAN_GROUPED_PUBLISH_FLAG;
+            wait_count++;
+          }
+        }
+        masks[chunk_p] = mask;
       }
-      masks[p] = mask;
       p += run;
     }
   }
@@ -74404,7 +74432,290 @@ kls_lean_snode_target_width8_i16_avx512(
   }
   return vector_length;
 }
+
+/* Keep a common target vector live while applying two width-eight producer
+   groups.  The arithmetic inside each group is identical to the established
+   width-eight kernel, and the second group consumes the first group's result
+   exactly as it did when the natural supernode was split into two calls. */
+__attribute__((target("avx512f"), noinline,
+               section(".kls_width16"))) static UF_long
+kls_lean_snode_target_width16_avx512(
+  double *restrict x,
+  const UF_long *restrict targets,
+  const double *const *restrict trailing_values,
+  const double *restrict multipliers,
+  UF_long length) {
+  const UF_long vector_length = length & ~(UF_long)7u;
+  __m512d m[16];
+  for (UF_long local = 0u; local < 16u; ++local) {
+    m[local] = _mm512_set1_pd(multipliers[local]);
+  }
+  for (UF_long offset = 0u; offset < vector_length; offset += 8u) {
+    const __m512i indices = _mm512_loadu_si512(
+      (const void *)(targets + offset));
+    __m512d value = _mm512_i64gather_pd(indices, x, 8);
+    for (UF_long group = 0u; group < 2u; ++group) {
+      const UF_long base = 8u * group;
+      __m512d sum0 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base] + offset), m[base], value);
+      __m512d sum1 = _mm512_mul_pd(
+        _mm512_loadu_pd(trailing_values[base + 1u] + offset),
+        _mm512_sub_pd(_mm512_setzero_pd(), m[base + 1u]));
+      __m512d sum2 = _mm512_mul_pd(
+        _mm512_loadu_pd(trailing_values[base + 2u] + offset),
+        _mm512_sub_pd(_mm512_setzero_pd(), m[base + 2u]));
+      __m512d sum3 = _mm512_mul_pd(
+        _mm512_loadu_pd(trailing_values[base + 3u] + offset),
+        _mm512_sub_pd(_mm512_setzero_pd(), m[base + 3u]));
+      sum0 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 4u] + offset),
+        m[base + 4u], sum0);
+      sum1 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 5u] + offset),
+        m[base + 5u], sum1);
+      sum2 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 6u] + offset),
+        m[base + 6u], sum2);
+      sum3 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 7u] + offset),
+        m[base + 7u], sum3);
+      value = _mm512_add_pd(_mm512_add_pd(sum0, sum1),
+                            _mm512_add_pd(sum2, sum3));
+    }
+    _mm512_i64scatter_pd(x, indices, value, 8);
+  }
+  return vector_length;
+}
+
+__attribute__((target("avx512f,avx2"), noinline,
+               section(".kls_width16"))) static UF_long
+kls_lean_snode_target_width16_i16_avx512(
+  double *restrict x,
+  const uint16_t *restrict targets,
+  const double *const *restrict trailing_values,
+  const double *restrict multipliers,
+  UF_long length) {
+  const UF_long vector_length = length & ~(UF_long)7u;
+  __m512d m[16];
+  for (UF_long local = 0u; local < 16u; ++local) {
+    m[local] = _mm512_set1_pd(multipliers[local]);
+  }
+  for (UF_long offset = 0u; offset < vector_length; offset += 8u) {
+    const __m128i packed = _mm_loadu_si128(
+      (const __m128i *)(const void *)(targets + offset));
+    const __m256i indices = _mm256_cvtepu16_epi32(packed);
+    __m512d value = _mm512_i32gather_pd(indices, x, 8);
+    for (UF_long group = 0u; group < 2u; ++group) {
+      const UF_long base = 8u * group;
+      __m512d sum0 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base] + offset), m[base], value);
+      __m512d sum1 = _mm512_mul_pd(
+        _mm512_loadu_pd(trailing_values[base + 1u] + offset),
+        _mm512_sub_pd(_mm512_setzero_pd(), m[base + 1u]));
+      __m512d sum2 = _mm512_mul_pd(
+        _mm512_loadu_pd(trailing_values[base + 2u] + offset),
+        _mm512_sub_pd(_mm512_setzero_pd(), m[base + 2u]));
+      __m512d sum3 = _mm512_mul_pd(
+        _mm512_loadu_pd(trailing_values[base + 3u] + offset),
+        _mm512_sub_pd(_mm512_setzero_pd(), m[base + 3u]));
+      sum0 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 4u] + offset),
+        m[base + 4u], sum0);
+      sum1 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 5u] + offset),
+        m[base + 5u], sum1);
+      sum2 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 6u] + offset),
+        m[base + 6u], sum2);
+      sum3 = _mm512_fnmadd_pd(
+        _mm512_loadu_pd(trailing_values[base + 7u] + offset),
+        m[base + 7u], sum3);
+      value = _mm512_add_pd(_mm512_add_pd(sum0, sum1),
+                            _mm512_add_pd(sum2, sum3));
+    }
+    _mm512_i32scatter_pd(x, indices, value, 8);
+  }
+  return vector_length;
+}
 #endif
+
+static KLS_ALWAYS_INLINE double kls_lean_snode_apply_width8_scalar(
+  double value,
+  const double *const *restrict trailing_values,
+  const double *restrict multipliers,
+  UF_long offset) {
+  double sum0 = fma(-multipliers[0], trailing_values[0][offset], value);
+  double sum1 = -multipliers[1] * trailing_values[1][offset];
+  double sum2 = -multipliers[2] * trailing_values[2][offset];
+  double sum3 = -multipliers[3] * trailing_values[3][offset];
+  sum0 = fma(-multipliers[4], trailing_values[4][offset], sum0);
+  sum1 = fma(-multipliers[5], trailing_values[5][offset], sum1);
+  sum2 = fma(-multipliers[6], trailing_values[6][offset], sum2);
+  sum3 = fma(-multipliers[7], trailing_values[7][offset], sum3);
+  return (sum0 + sum1) + (sum2 + sum3);
+}
+
+static KLS_ALWAYS_INLINE int kls_lean_snode_wait_mask_ready(
+  kls_egraph_refactor_shared *shared,
+  atomic_uint *restrict grouped_done,
+  unsigned int generation,
+  unsigned int mask,
+  const uint32_t *restrict wait_slots) {
+  while (mask != 0u) {
+#if defined(__GNUC__) || defined(__clang__)
+    const unsigned int local = (unsigned int)__builtin_ctz(mask);
+#else
+    unsigned int local = 0u;
+    while ((mask & (1u << local)) == 0u) {
+      local++;
+    }
+#endif
+    mask &= mask - 1u;
+    const uint32_t slot = wait_slots[local] - 1u;
+    unsigned spin = 0u;
+    while (atomic_load_explicit(&grouped_done[slot],
+                                memory_order_acquire) != generation) {
+      if ((++spin & 255u) == 0u &&
+          atomic_load_explicit(&shared->stop,
+                               memory_order_acquire) != 0) {
+        return 0;
+      }
+      kls_cpu_relax();
+    }
+  }
+  return 1;
+}
+
+/* Consume a true width-16 producer supernode as two numerically identical
+   width-eight groups while traversing the shared trailing workspace once.
+   The second dependency frontier is acquired only after the first group has
+   produced the same eight intermediate values as the former first call. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot, section(".kls_width16")))
+#endif
+static UF_long kls_lean_row_refactor_snode_step_width16(
+  UF_long p,
+  UF_long dep0,
+  double *restrict x,
+  double *restrict l_values,
+  double **restrict l_lu,
+  const UF_long *restrict u_ptr,
+  const UF_long *restrict u_cols,
+  const uint16_t *restrict u_cols16,
+  const double *restrict u_values,
+  const double *restrict udiag,
+  int compact_targets,
+  int avx512_target,
+  kls_egraph_refactor_shared *shared,
+  atomic_uint *restrict grouped_done,
+  unsigned int generation,
+  unsigned int second_wait_mask,
+  const uint32_t *restrict second_wait_slots) {
+  double multipliers[16];
+  const double *trailing_values[16];
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
+  for (UF_long local = 0u; local < 8u; ++local) {
+    const UF_long dep = dep0 + local;
+    double candidate = x[dep];
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
+    for (UF_long previous = 0u; previous < local; ++previous) {
+      candidate -= multipliers[previous] *
+        u_values[u_ptr[dep0 + previous] + local - previous - 1u];
+    }
+    const double multiplier = candidate / udiag[dep];
+    multipliers[local] = multiplier;
+    if (l_values != NULL) {
+      l_values[p + local] = multiplier;
+    } else {
+      *l_lu[p + local] = multiplier;
+    }
+    x[dep] = 0.0;
+    trailing_values[local] =
+      u_values + u_ptr[dep] + 7u - local;
+  }
+
+  /* These are the dense triangular entries between the two tiles. */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
+  for (UF_long local = 0u; local < 8u; ++local) {
+    const UF_long dep = dep0 + 8u + local;
+    x[dep] = kls_lean_snode_apply_width8_scalar(
+      x[dep], trailing_values, multipliers, local);
+  }
+  if (!kls_lean_snode_wait_mask_ready(
+        shared, grouped_done, generation, second_wait_mask,
+        second_wait_slots)) {
+    return 0u;
+  }
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
+  for (UF_long local = 0u; local < 8u; ++local) {
+    const UF_long dep = dep0 + 8u + local;
+    double candidate = x[dep];
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
+    for (UF_long previous = 0u; previous < local; ++previous) {
+      candidate -= multipliers[8u + previous] *
+        u_values[u_ptr[dep0 + 8u + previous] +
+                 local - previous - 1u];
+    }
+    const double multiplier = candidate / udiag[dep];
+    multipliers[8u + local] = multiplier;
+    if (l_values != NULL) {
+      l_values[p + 8u + local] = multiplier;
+    } else {
+      *l_lu[p + 8u + local] = multiplier;
+    }
+    x[dep] = 0.0;
+    trailing_values[8u + local] =
+      u_values + u_ptr[dep] + 7u - local;
+  }
+
+  const UF_long trailing_begin = u_ptr[dep0 + 15u];
+  const UF_long trailing_len = u_ptr[dep0 + 16u] - trailing_begin;
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC unroll 8
+#endif
+  for (UF_long local = 0u; local < 8u; ++local) {
+    trailing_values[local] += 8u;
+  }
+  UF_long target_offset_begin = 0u;
+#if KLS_HAVE_AVX512_KERNELS
+  if (avx512_target &&
+      trailing_len >= KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
+    target_offset_begin = compact_targets
+      ? kls_lean_snode_target_width16_i16_avx512(
+          x, u_cols16 + trailing_begin, trailing_values,
+          multipliers, trailing_len)
+      : kls_lean_snode_target_width16_avx512(
+          x, u_cols + trailing_begin, trailing_values,
+          multipliers, trailing_len);
+  }
+#else
+  (void)avx512_target;
+#endif
+  for (UF_long offset = target_offset_begin;
+       offset < trailing_len; ++offset) {
+    const UF_long target = compact_targets
+      ? (UF_long)u_cols16[trailing_begin + offset]
+      : u_cols[trailing_begin + offset];
+    double value = kls_lean_snode_apply_width8_scalar(
+      x[target], trailing_values, multipliers, offset);
+    value = kls_lean_snode_apply_width8_scalar(
+      value, trailing_values + 8u, multipliers + 8u, offset);
+    x[target] = value;
+  }
+  return 16u;
+}
 
 static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   UF_long p,
@@ -75890,7 +76201,8 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
   const UF_long *restrict rows,
   UF_long stride,
   int avx512_target,
-  int compact_cols) {
+  int compact_cols,
+  int wide_snodes) {
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
   const UF_long n = solver->n;
@@ -75941,6 +76253,40 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     }
     for (UF_long p = l_ptr[row]; p < l_ptr[row + 1u];) {
       const UF_long run = snode_run != NULL ? (UF_long)snode_run[p] : 0u;
+#if defined(__GNUC__) || defined(__clang__)
+      if (wide_snodes && __builtin_expect(run == 16u, 0) &&
+          p + 16u <= l_ptr[row + 1u]) {
+#else
+      if (wide_snodes && run == 16u && p + 16u <= l_ptr[row + 1u]) {
+#endif
+        if (!kls_lean_snode_wait_mask_ready(
+              shared, grouped_done, generation,
+              (unsigned int)snode_wait_mask[p], snode_wait_slot + p)) {
+          return;
+        }
+        const UF_long dep0 = compact_cols
+          ? (UF_long)l_cols16[p] : l_cols[p];
+        const UF_long completed = kls_lean_row_refactor_snode_step_width16(
+          p, dep0, x, row_values_mode ? l_val : NULL, l_lu,
+          u_ptr, u_cols, u_cols16, u_val, udiag, compact_cols,
+          avx512_target, shared, grouped_done, generation,
+          (unsigned int)snode_wait_mask[p + 8u],
+          snode_wait_slot + p + 8u);
+        if (completed != 16u) {
+          kls_egraph_refactor_record_invalid(shared);
+          return;
+        }
+        if (forward_row) {
+          for (UF_long local = 0u; local < 16u; ++local) {
+            const double lij = row_values_mode
+              ? l_val[p + local] : *l_lu[p + local];
+            forward_value = fma(
+              -lij, forward_work[dep0 + local], forward_value);
+          }
+        }
+        p += 16u;
+        continue;
+      }
       if (run >= 2u && run <= 8u && p + run <= l_ptr[row + 1u]) {
         unsigned int mask = (unsigned int)snode_wait_mask[p];
         while (mask != 0u) {
@@ -76088,7 +76434,7 @@ kls_symmetric_scalar_fringe_hoisted_worker_run(
   const UF_long *restrict rows,
   UF_long stride) {
   kls_symmetric_scalar_fringe_hoisted_worker_core(
-    worker, generation, rows, stride, 0, 0);
+    worker, generation, rows, stride, 0, 0, 0);
 }
 
 #if KLS_HAVE_AVX512_KERNELS
@@ -76099,7 +76445,7 @@ kls_symmetric_scalar_fringe_hoisted_worker_run_avx512(
   const UF_long *restrict rows,
   UF_long stride) {
   kls_symmetric_scalar_fringe_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 0);
+    worker, generation, rows, stride, 1, 0, 0);
 }
 #endif
 
@@ -76112,7 +76458,7 @@ static void kls_symmetric_scalar_fringe_hoisted_worker_run_i16(
   const UF_long *restrict rows,
   UF_long stride) {
   kls_symmetric_scalar_fringe_hoisted_worker_core(
-    worker, generation, rows, stride, 0, 1);
+    worker, generation, rows, stride, 0, 1, 0);
 }
 
 #if KLS_HAVE_AVX512_KERNELS
@@ -76123,7 +76469,30 @@ kls_symmetric_scalar_fringe_hoisted_worker_run_i16_avx512(
   const UF_long *restrict rows,
   UF_long stride) {
   kls_symmetric_scalar_fringe_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 1);
+    worker, generation, rows, stride, 1, 1, 0);
+}
+
+/* Wide descriptors are selected structurally at setup and use dedicated
+   workers.  Duplicating these two AVX-512 variants keeps the established
+   workers' instruction layout independent of whether wide support is built. */
+__attribute__((noinline, section(".kls_width16"))) static void
+kls_symmetric_scalar_fringe_hoisted_worker_run_width16_avx512(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_symmetric_scalar_fringe_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 0, 1);
+}
+
+__attribute__((noinline, section(".kls_width16"))) static void
+kls_symmetric_scalar_fringe_hoisted_worker_run_i16_width16_avx512(
+  kls_egraph_refactor_worker *worker,
+  unsigned int generation,
+  const UF_long *restrict rows,
+  UF_long stride) {
+  kls_symmetric_scalar_fringe_hoisted_worker_core(
+    worker, generation, rows, stride, 1, 1, 1);
 }
 #endif
 
@@ -77494,14 +77863,24 @@ static void kls_lean_parallel_worker_run(
 #if KLS_HAVE_AVX512_KERNELS
     if (compact_snode_cols && shared->lean_snode_avx512_enabled &&
         __builtin_cpu_supports("avx2")) {
-      kls_symmetric_scalar_fringe_hoisted_worker_run_i16_avx512(
-        worker, generation, rows, stride);
+      if (solver->lean_snode_avx512_candidate > 1) {
+        kls_symmetric_scalar_fringe_hoisted_worker_run_i16_width16_avx512(
+          worker, generation, rows, stride);
+      } else {
+        kls_symmetric_scalar_fringe_hoisted_worker_run_i16_avx512(
+          worker, generation, rows, stride);
+      }
     } else if (compact_snode_cols) {
       kls_symmetric_scalar_fringe_hoisted_worker_run_i16(
         worker, generation, rows, stride);
     } else if (shared->lean_snode_avx512_enabled) {
-      kls_symmetric_scalar_fringe_hoisted_worker_run_avx512(
-        worker, generation, rows, stride);
+      if (solver->lean_snode_avx512_candidate > 1) {
+        kls_symmetric_scalar_fringe_hoisted_worker_run_width16_avx512(
+          worker, generation, rows, stride);
+      } else {
+        kls_symmetric_scalar_fringe_hoisted_worker_run_avx512(
+          worker, generation, rows, stride);
+      }
     } else {
       kls_symmetric_scalar_fringe_hoisted_worker_run(
         worker, generation, rows, stride);

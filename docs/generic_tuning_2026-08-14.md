@@ -435,3 +435,50 @@ over all eleven valid natural factors, all on `row_refactor`, with a largest
 per-update relative residual of `1.15056277e-10` and no finding.  GCC
 `-march=x86-64` and Clang syntax checks pass, apart from the existing Clang
 uninitialized-thread warning.
+
+## Tiled width-sixteen producer supernodes (2026-08-17)
+
+The remaining fused-row profile showed many true producer runs longer than
+the retained width-eight tile.  The new kernel recognizes only a complete
+width-sixteen structural run.  It forms two width-eight triangular groups in
+the established arithmetic order, preserves the original dependency acquire
+between those groups, and then traverses their common trailing target stream
+once.  The AVX-512 target kernels therefore pay one gather and one scatter for
+sixteen contiguous coefficient streams while retaining the same balanced
+width-eight reduction twice.  Short and partial runs still use the existing
+width-two through width-eight kernels.
+
+Admission is deliberately narrow and generic.  Width sixteen is emitted only
+when the existing runtime AVX-512 scatter gate succeeds; otherwise descriptor
+generation is the old width-two through width-eight partition.  There is no
+matrix, size, ordering, corpus, target-count tuning rule, or new environment
+selector.  A setup census over the twelve natural fused factors found useful
+width-sixteen work ranging from four runs on the near-zero `LeGresley_2508`
+control to 6,061 runs and 602,044 common targets on `utm3060`.
+
+The wide numeric bodies and two width-aware AVX-512 worker copies live in the
+orphan executable `.kls_width16` section.  Dispatch selects a wide worker once
+from the structural census; ordinary scalar, compact, and width-eight-only
+workers never enter a per-tile helper and do not carry the large unrolled
+body.  This isolation was necessary: an earlier inline-worker layout moved
+unrelated solve code enough to produce a repeatable lifecycle loss even though
+the mapped refactor itself was unchanged.
+
+Seven counterbalanced 300-update pairs pinned to the same eight physical cores
+gave a 0.985 steady-refactor and 0.992 H100 geometric ratio over six
+higher-work representatives.  Median steady ratios were 0.972 on `Alemdar`,
+1.005 on `thermal`, 1.001 on `sts4098`, 0.986 on `coupled`, 0.993 on
+`ACTIVSg10K`, and 0.953 on `utm3060`.  The corresponding H100 ratios were
+0.994, 0.984, 1.002, 1.000, 0.999, and 0.971.  `LeGresley_2508`, whose census
+contains only four wide runs and sixteen common targets, remained neutral.
+The pinning controls measurement variance on this dual-CCD/SMT host; it is not
+a solver policy or implementation dependency.
+
+The complete 3,300-update correctness audit over eleven valid factors, three
+update amplitudes, and 100 generations retained the row-refactor route and its
+established residual envelope.  Final release and ASan/UBSan/LSan suites pass
+all four tests, and sanitized changed-value runs exercise both high-coverage
+wide factors without a finding.  GCC `-march=x86-64` syntax compilation also
+passes.  Disassembly of the isolated target kernels contains the intended
+64-bit `vgatherqpd`/`vscatterqpd` pair and compact-index
+`vpmovzxwd`/`vgatherdpd`/`vscatterdpd` sequence.
