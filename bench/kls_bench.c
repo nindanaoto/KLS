@@ -1373,7 +1373,7 @@ int main(int argc, char **argv) {
       current_values = generated_values;
       matvec_values(&a, current_values, x_true, b);
     }
-    status = kls_refactor(solver, current_values);
+    status = kls_refactor_solve(solver, current_values, 1, b, 0, x, 0);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
@@ -1389,7 +1389,6 @@ int main(int argc, char **argv) {
        actual changed-numeric pairs, including any solve-side recovery,
        while the repeated final-state loop below supplies the initial-state
        solve sample. */
-    status = kls_solve(solver, 1, b, 0, x, 0);
     if (status == KLS_OK) {
       kls_get_stats(solver, &stats);
       refactor_solve_total += stats.solve_seconds;

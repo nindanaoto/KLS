@@ -694,6 +694,69 @@ static int test_csr_and_refactor(void) {
   return ok;
 }
 
+static int test_refactor_solve_api(void) {
+  const int32_t ap[] = {0, 2, 5, 7};
+  const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
+  const double ax0[] = {4.0, 1.0, 1.0, 3.0, 1.0, 1.0, 2.0};
+  const double ax1[] = {5.0, 1.0, 1.0, 4.0, 1.0, 1.0, 3.0};
+  const double b1[] = {7.0, 12.0, 11.0};
+  const double b2[] = {
+    6.0, 10.0, 8.0, -1.0,
+    12.0, 20.0, 16.0, -1.0
+  };
+  double x1[3] = {0.0, 0.0, 0.0};
+  double x2[8] = {0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0};
+
+  kls_options options;
+  kls_default_options(&options);
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.use_btf = 0;
+  options.scale = -1;
+
+  kls_solver *solver = NULL;
+  int ok = require_ok(kls_create(&solver), "create refactor-solve");
+  if (ok && !require_ok(kls_analyze_csc(
+                          solver, KLS_INDEX_INT32, 3, ap, ai, 0, &options),
+                        "analyze refactor-solve")) ok = 0;
+  if (ok && !require_ok(kls_factor(solver, ax0),
+                        "factor refactor-solve")) ok = 0;
+  if (ok && !require_ok(kls_refactor_solve(
+                          solver, ax1, 1, b1, 0, x1, 0),
+                        "one-rhs refactor-solve")) ok = 0;
+  if (ok && !(close_enough(x1[0], 1.0) &&
+              close_enough(x1[1], 2.0) &&
+              close_enough(x1[2], 3.0))) {
+    fprintf(stderr, "unexpected refactor-solve solution: %.17g %.17g %.17g\n",
+            x1[0], x1[1], x1[2]);
+    ok = 0;
+  }
+
+  /* Multi-RHS and strided frames deliberately take the compatibility path;
+     the combined API must remain exactly a refactor followed by a solve. */
+  if (ok && !require_ok(kls_refactor_solve(
+                          solver, ax0, 2, b2, 4, x2, 4),
+                        "strided multi-rhs refactor-solve")) ok = 0;
+  const double expected[] = {1.0, 2.0, 3.0, 2.0, 4.0, 6.0};
+  for (int rhs = 0; ok && rhs < 2; ++rhs) {
+    for (int row = 0; row < 3; ++row) {
+      const double got = x2[4 * rhs + row];
+      const double want = expected[3 * rhs + row];
+      if (!close_enough(got, want)) {
+        fprintf(stderr,
+                "unexpected strided refactor-solve solution[%d,%d]: "
+                "%.17g != %.17g\n", rhs, row, got, want);
+        ok = 0;
+        break;
+      }
+    }
+  }
+
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_serial_backend(void) {
   const int32_t ap[] = {0, 2, 5, 7};
   const int32_t ai[] = {0, 1, 0, 1, 2, 1, 2};
@@ -18167,6 +18230,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_large_sparse_low_degree_retained_tolerance()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_refactor_solve_api()) {
     return EXIT_FAILURE;
   }
   /* The remaining smoke cases deliberately assert individual refactor-engine

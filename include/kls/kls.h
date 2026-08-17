@@ -1547,6 +1547,17 @@ int kls_analyze_csr(kls_solver *solver,
 int kls_factor(kls_solver *solver, const double *values);
 int kls_refactor(kls_solver *solver, const double *values);
 
+/* Refactor and immediately solve the changed numeric.  Unsupported fusion
+   cases retain exactly the same semantics by falling back to kls_refactor
+   followed by kls_solve. */
+int kls_refactor_solve(kls_solver *solver,
+                       const double *values,
+                       int64_t nrhs,
+                       const double *b,
+                       int64_t ldb,
+                       double *x,
+                       int64_t ldx);
+
 int kls_solve(kls_solver *solver,
               int64_t nrhs,
               const double *b,

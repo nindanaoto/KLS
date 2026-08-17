@@ -14,7 +14,8 @@ This repository currently contains the first working KLS implementation:
   SCOTCH, AMF, AMMF, and AMF3 controls
 - SPICE-cycle-oriented normal-vs-transpose internal orientation selection, with
   explicit orientation controls
-- Factor, refactor, solve, transpose-solve, and statistics APIs
+- Factor, refactor, combined refactor-solve, solve, transpose-solve, and
+  statistics APIs
 - Fast repeated factorization that reuses the existing numeric pattern, checks
   pivot quality, and can repair unscaled rejected BTF blocks before falling
   back to full pivoting factorization
@@ -293,6 +294,10 @@ decisions without running numeric factorization. Use `--structure-only` to stop
 after MatrixMarket cleanup/deduplication and report exact CSC diagonal coverage,
 empty/scalar row and column counts, maximum row and column degrees, and total
 row/column-degree mismatch. The two diagnostic modes are mutually exclusive.
+Changed-numeric benchmark cycles use `kls_refactor_solve`; unsupported frames
+transparently retain the ordinary refactor-then-solve implementation, while
+dense single-block row factors can form the forward solution as new L rows are
+published and execute only the upper sweep afterward.
 JSON fields
 `compact_solve_index_bytes` and `compact_solve_fused_rhs` report whether a
 2- or 4-byte triangular-solve mirror was prepared and whether its public-RHS

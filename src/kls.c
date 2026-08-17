@@ -2300,6 +2300,16 @@ struct kls_solver {
   int egraph_worker_scratch_dirty;
   int lean_parallel_scratch_clean;
   int lean_parallel_last_used;
+  /* Optional one-RHS lifecycle fusion.  A public refactor+solve call owns
+     the request; the retained row executor fills this internal-order vector
+     while publishing each new L row.  The ordinary solve dispatcher then
+     consumes it only after the refactor has returned successfully. */
+  double *fused_refactor_solve_work;
+  UF_long fused_refactor_solve_work_n;
+  int fused_refactor_solve_requested;
+  int fused_refactor_solve_computed;
+  int fused_refactor_solve_ready;
+  int fused_refactor_solve_row_values;
   int lean_parallel_offdiag_decision; /* -1 serial, 0 unknown, 1 parallel */
   int lean_compact_match_row_factor_active;
   atomic_uint *egraph_pipeline_done;
@@ -3058,6 +3068,8 @@ typedef struct kls_egraph_refactor_shared {
   int lean_grouped_done_mode;
   int lean_row_values_mode;
   int lean_fused_scale_mode;
+  double *lean_forward_solve_work;
+  UF_long lean_forward_solve_begin;
   const UF_long *lean_rows;
   int row_refactor_mode;
   int row_refactor_scale_hoist;
@@ -28157,6 +28169,7 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->lean_scale_input_snapshot);
   free(solver->lean_scale_rs_snapshot);
   free(solver->solve_perm_workspace);
+  free(solver->fused_refactor_solve_work);
   free_solve_refine_workspace(solver);   /* incl. solve_refine_rinv:
      it was only ever freed here-ish; a reused solver otherwise kept a
      STALE row-perm inverse sized to the previous matrix */
@@ -28177,6 +28190,12 @@ static void clear_matrix(kls_solver *solver) {
   solver->verified_rhs = NULL;
   solver->verified_factor_rhs = NULL;
   solver->verified_rhs_valid = 0;
+  solver->fused_refactor_solve_work = NULL;
+  solver->fused_refactor_solve_work_n = 0u;
+  solver->fused_refactor_solve_requested = 0;
+  solver->fused_refactor_solve_computed = 0;
+  solver->fused_refactor_solve_ready = 0;
+  solver->fused_refactor_solve_row_values = 0;
   solver->prepared_value_scale = NULL;
   solver->prepared_value_input_pos = NULL;
   solver->refactor_input_snapshot = NULL;
@@ -75903,9 +75922,13 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
   atomic_uint *restrict grouped_done =
     solver->lean_parallel_grouped_done;
   const int row_values_mode = shared->lean_row_values_mode;
+  double *restrict forward_work = shared->lean_forward_solve_work;
+  const UF_long forward_begin = shared->lean_forward_solve_begin;
 
   for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
     const UF_long row = rows[pos];
+    const int forward_row = forward_work != NULL && row >= forward_begin;
+    double forward_value = forward_row ? forward_work[row] : 0.0;
     if (in_packed != NULL) {
       for (UF_long p = in_ptr[row]; p < in_ptr[row + 1u]; ++p) {
         const uint32_t packed = in_packed[p];
@@ -75955,6 +75978,14 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
           kls_egraph_refactor_record_invalid(shared);
           return;
         }
+        if (forward_row) {
+          for (UF_long local = 0u; local < run; ++local) {
+            const UF_long dep = dep0 + local;
+            const double lij = row_values_mode
+              ? l_val[p + local] : *l_lu[p + local];
+            forward_value = fma(-lij, forward_work[dep], forward_value);
+          }
+        }
         p += run;
         continue;
       }
@@ -75981,6 +76012,9 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
       } else {
         *l_lu[p] = lik;
       }
+      if (forward_row) {
+        forward_value = fma(-lik, forward_work[dep], forward_value);
+      }
       if (lik != 0.0) {
         for (UF_long q = u_ptr[dep]; q < u_ptr[dep + 1u]; ++q) {
           const UF_long col = compact_cols
@@ -75989,6 +76023,9 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
         }
       }
       p++;
+    }
+    if (forward_row) {
+      forward_work[row] = forward_value;
     }
     const double pivot = x[row];
     x[row] = 0.0;
@@ -77872,6 +77909,17 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       solver->i16solve_loff != NULL && solver->i16solve_uoff != NULL &&
       getenv("KLS_DISABLE_GENERIC_LEAN_ROW_FACTOR") == NULL)) &&
     getenv("KLS_DISABLE_COMPACT_MATCH_ROW_FACTOR") == NULL;
+  shared->lean_forward_solve_work =
+    symmetric_scalar_fringe_lean_mode &&
+      solver->fused_refactor_solve_requested &&
+      solver->symbolic != NULL && solver->symbolic->nblocks == 1u &&
+      solver->symbolic->R != NULL &&
+      solver->common.scale <= 0 && solver->numeric->Rs == NULL
+    ? solver->fused_refactor_solve_work : NULL;
+  shared->lean_forward_solve_begin =
+    shared->lean_forward_solve_work != NULL
+      ? 0u
+      : solver->n;
   if (symmetric_scalar_fringe_lean_mode &&
       shared->lean_row_values_mode &&
       getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
@@ -78054,6 +78102,10 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   const UF_long numerical_rank = shared->numerical_rank;
   const UF_long singular_col = shared->singular_col;
   const int row_values_mode = shared->lean_row_values_mode;
+  solver->fused_refactor_solve_computed =
+    !invalid && !singular && shared->lean_forward_solve_work != NULL;
+  solver->fused_refactor_solve_row_values =
+    solver->fused_refactor_solve_computed && row_values_mode;
   solver->compact_amf_two_block_exact_recip_fresh =
     !invalid && !singular && compact_amf_two_block_exact_worker;
   if (!invalid && !singular && generic_i16ptr_grouped_recip_worker) {
@@ -78077,6 +78129,8 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_grouped_done_mode = 0;
   shared->lean_row_values_mode = 0;
   shared->lean_fused_scale_mode = 0;
+  shared->lean_forward_solve_work = NULL;
+  shared->lean_forward_solve_begin = 0u;
   shared->udiag_recip = NULL;
   shared->row_refactor_defer_value_scatter = 0;
   shared->value_prep_input = NULL;
@@ -116743,6 +116797,199 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   }
   return l_slice_runs > 0u || u_slice_runs > 0u ||
          l_sparse_level_runs > 0u || u_sparse_level_runs > 0u;
+}
+
+static KLS_ALWAYS_INLINE int kls_packed_factor_column_scatter(
+  double *restrict work,
+  const UF_long *restrict indices,
+  const double *restrict values,
+  UF_long length,
+  UF_long bound,
+  double alpha) {
+  UF_long p = 0u;
+  for (; p + 3u < length; p += 4u) {
+    if (indices[p] >= bound || indices[p + 1u] >= bound ||
+        indices[p + 2u] >= bound || indices[p + 3u] >= bound) {
+      return 0;
+    }
+    work[indices[p]] = fma(-values[p], alpha, work[indices[p]]);
+    work[indices[p + 1u]] =
+      fma(-values[p + 1u], alpha, work[indices[p + 1u]]);
+    work[indices[p + 2u]] =
+      fma(-values[p + 2u], alpha, work[indices[p + 2u]]);
+    work[indices[p + 3u]] =
+      fma(-values[p + 3u], alpha, work[indices[p + 3u]]);
+  }
+  for (; p < length; ++p) {
+    if (indices[p] >= bound) {
+      return 0;
+    }
+    work[indices[p]] = fma(-values[p], alpha, work[indices[p]]);
+  }
+  return 1;
+}
+
+/* The fused refactor already formed the unit-lower result.  Finish the one
+   admitted block directly from KLU's authoritative packed U columns. */
+static int kls_fused_packed_upper_solve(kls_solver *solver,
+                                         double *work) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || work == NULL ||
+      solver->symbolic->nblocks != 1u ||
+      solver->numeric->Uip == NULL || solver->numeric->Ulen == NULL ||
+      solver->numeric->LUbx == NULL ||
+      solver->numeric->LUbx[0] == NULL ||
+      solver->numeric->Udiag == NULL) {
+    return 0;
+  }
+  const UF_long n = solver->n;
+  const UF_long *restrict uip = solver->numeric->Uip;
+  const UF_long *restrict ulen = solver->numeric->Ulen;
+  const double *restrict udiag =
+    (const double *)solver->numeric->Udiag;
+  double *restrict lu = (double *)solver->numeric->LUbx[0];
+
+  for (UF_long remaining = n; remaining > 0u; --remaining) {
+    const UF_long row = remaining - 1u;
+    if (udiag[row] == 0.0 || !isfinite(udiag[row])) {
+      return 0;
+    }
+    const double xk = work[row] / udiag[row];
+    work[row] = xk;
+    if (xk == 0.0) {
+      continue;
+    }
+    UF_long *indices = NULL;
+    double *column_values = NULL;
+    UF_long length = 0u;
+    kls_klu_get_pointer(lu, uip, ulen, row,
+                        &indices, &column_values, &length);
+    if (!kls_packed_factor_column_scatter(
+          work, indices, column_values, length, row, xk)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static KLS_ALWAYS_INLINE double kls_fused_i16_row_dot(
+  const double *restrict values,
+  const uint16_t *restrict cols,
+  const double *restrict work,
+  UF_long begin,
+  UF_long end,
+  double value) {
+  const UF_long len = end - begin;
+  switch (len) {
+    case 0u:
+      return value;
+    case 1u:
+      return fma(-values[begin], work[cols[begin]], value);
+    case 2u:
+      value = fma(-values[begin], work[cols[begin]], value);
+      return fma(-values[begin + 1u], work[cols[begin + 1u]], value);
+    case 3u:
+      value = fma(-values[begin], work[cols[begin]], value);
+      value = fma(-values[begin + 1u], work[cols[begin + 1u]], value);
+      return fma(-values[begin + 2u], work[cols[begin + 2u]], value);
+    default:
+      break;
+  }
+  UF_long p = begin;
+  if (len >= 4u) {
+    double sum0 = value;
+    double sum1 = 0.0;
+    double sum2 = 0.0;
+    double sum3 = 0.0;
+    for (; p + 3u < end; p += 4u) {
+      sum0 = fma(-values[p], work[cols[p]], sum0);
+      sum1 = fma(-values[p + 1u], work[cols[p + 1u]], sum1);
+      sum2 = fma(-values[p + 2u], work[cols[p + 2u]], sum2);
+      sum3 = fma(-values[p + 3u], work[cols[p + 3u]], sum3);
+    }
+    value = (sum0 + sum1) + (sum2 + sum3);
+  }
+  for (; p < end; ++p) {
+    value = fma(-values[p], work[cols[p]], value);
+  }
+  return value;
+}
+
+static int kls_fused_row_values_upper_solve(kls_solver *solver,
+                                             double *work) {
+  if (solver == NULL || solver->symbolic == NULL ||
+      solver->numeric == NULL || work == NULL ||
+      solver->symbolic->nblocks != 1u ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols16 == NULL ||
+      solver->row_refactor_u_row_values == NULL ||
+      solver->numeric->Udiag == NULL) {
+    return 0;
+  }
+  const UF_long *restrict uptr = solver->row_refactor_u_ptr;
+  const uint16_t *restrict ucols = solver->row_refactor_u_cols16;
+  const double *restrict uvalues = solver->row_refactor_u_row_values;
+  const double *restrict udiag =
+    (const double *)solver->numeric->Udiag;
+  for (UF_long remaining = solver->n; remaining > 0u; --remaining) {
+    const UF_long row = remaining - 1u;
+    if (udiag[row] == 0.0 || !isfinite(udiag[row])) {
+      return 0;
+    }
+    const double value = kls_fused_i16_row_dot(
+      uvalues, ucols, work, uptr[row], uptr[row + 1u], work[row]);
+    work[row] = value / udiag[row];
+  }
+  return 1;
+}
+
+/* Finish a normal solve whose terminal-block unit-lower sweep was formed while
+   the changed L rows were published.  This helper deliberately enters the
+   ordinary solve dispatcher (rather than being a separate unchecked solve):
+   refinement and residual contracts after the raw kernel remain unchanged. */
+static int kls_try_fused_refactor_upper_solve(kls_solver *solver,
+                                               double *out) {
+  if (solver == NULL || out == NULL ||
+      !solver->fused_refactor_solve_ready ||
+      solver->fused_refactor_solve_work == NULL ||
+      solver->fused_refactor_solve_work_n != solver->n ||
+      solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->symbolic->nblocks != 1u || solver->symbolic->R == NULL ||
+      solver->symbolic->Q == NULL ||
+      solver->numeric->Udiag == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols == NULL ||
+      solver->row_refactor_u_values == NULL ||
+      (solver->fused_refactor_solve_row_values &&
+       solver->row_refactor_u_row_values == NULL)) {
+    return 0;
+  }
+
+  /* A prepared generation is single-use even if a defensive metadata check
+     below fails; a later unrelated solve must never consume an older RHS. */
+  solver->fused_refactor_solve_ready = 0;
+  const UF_long n = solver->n;
+  const UF_long *restrict r = solver->symbolic->R;
+  if (r[0] != 0u || r[1] != n) {
+    return 0;
+  }
+  const int use_row_values = solver->fused_refactor_solve_row_values;
+  const UF_long *restrict q = solver->symbolic->Q;
+  double *restrict work = solver->fused_refactor_solve_work;
+
+  const int upper_ok = use_row_values
+    ? kls_fused_row_values_upper_solve(solver, work)
+    : kls_fused_packed_upper_solve(solver, work);
+  if (!upper_ok) {
+    return 0;
+  }
+  for (UF_long row = 0u; row < n; ++row) {
+    if (q[row] >= n) {
+      return 0;
+    }
+    out[q[row]] = work[row];
+  }
+  return 1;
 }
 
 static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
@@ -167955,6 +168202,12 @@ static int solve_impl(kls_solver *solver,
     if (trace_solve_path) {
       fprintf(stderr, "KLS solve path: fused compact-match rhs\n");
     }
+  } else if (!kernel_transpose && nrhs == 1 &&
+             kls_try_fused_refactor_upper_solve(solver, x)) {
+    ok = 1;
+    if (trace_solve_path) {
+      fprintf(stderr, "KLS solve path: fused refactor forward + upper\n");
+    }
   } else if (kernel_transpose && nrhs == 1 &&
              kls_try_dirty_row_transpose_plan_solve_one_rhs(solver, x)) {
     ok = 1;
@@ -169532,6 +169785,114 @@ int kls_solve_transpose(kls_solver *solver,
       solver, 1, nrhs, b, ldb, x, ldx);
   }
   return solve_impl(solver, 1, nrhs, b, ldb, x, ldx);
+}
+
+int kls_refactor_solve(kls_solver *solver,
+                       const double *values,
+                       int64_t nrhs,
+                       const double *b,
+                       int64_t ldb,
+                       double *x,
+                       int64_t ldx) {
+  if (solver == NULL || values == NULL || b == NULL || x == NULL ||
+      solver->symbolic == NULL || solver->numeric == NULL || nrhs <= 0) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+  const int64_t effective_ldb = ldb == 0 ? (int64_t)solver->n : ldb;
+  const int64_t effective_ldx = ldx == 0 ? (int64_t)solver->n : ldx;
+  if (effective_ldb < (int64_t)solver->n ||
+      effective_ldx < (int64_t)solver->n) {
+    return KLS_ERR_INVALID_ARGUMENT;
+  }
+
+  /* The dependency equivalence is exact for one normal, untransformed
+     block: factor-row dependencies are precisely the unit-lower solve
+     dependencies.  Require the retained executor capability up front so a
+     caller never pays an RHS copy for a refactor path that cannot consume it.
+     The density floor is a conservative machine-independent work bound: the
+     fused dependency stream must eliminate at least fifteen off-diagonal L
+     updates per row on average before it is allowed to extend the parallel
+     refactor critical path.  Other cases use the established two-call
+     implementation. */
+  const int fusion_candidate =
+    nrhs == 1 && solver->orientation == KLS_ORIENTATION_NORMAL &&
+    solver->n > 0u && solver->symbolic->nblocks == 1u &&
+    solver->symbolic->R != NULL &&
+    solver->symbolic->Q != NULL &&
+    solver->numeric->Pnum != NULL && solver->numeric->Rs == NULL &&
+    solver->numeric->lnz / solver->n >= 16u &&
+    solver->common.scale <= 0 && solver->row_perm == NULL &&
+    solver->user_col_perm == NULL && solver->row_scale == NULL &&
+    solver->col_scale == NULL && !solver->diagonal_equiv_active &&
+    kls_generic_hoisted_snode_worker_capable(solver) &&
+    solver->n <= (UF_long)(SIZE_MAX / sizeof(double));
+  if (!fusion_candidate) {
+    const int refactor_status = kls_refactor(solver, values);
+    return refactor_status == KLS_OK
+      ? kls_solve(solver, nrhs, b, effective_ldb, x, effective_ldx)
+      : refactor_status;
+  }
+
+  const double fusion_prepare_start = kls_now_seconds();
+  solver->fused_refactor_solve_requested = 0;
+  solver->fused_refactor_solve_computed = 0;
+  solver->fused_refactor_solve_ready = 0;
+  solver->fused_refactor_solve_row_values = 0;
+  if (solver->fused_refactor_solve_work_n != solver->n) {
+    double *work = (double *)realloc(
+      solver->fused_refactor_solve_work,
+      (size_t)(solver->n > 0u ? solver->n : 1u) * sizeof(*work));
+    if (work != NULL) {
+      solver->fused_refactor_solve_work = work;
+      solver->fused_refactor_solve_work_n = solver->n;
+    }
+  }
+  if (solver->fused_refactor_solve_work != NULL &&
+      solver->fused_refactor_solve_work_n == solver->n) {
+    for (UF_long row = 0u; row < solver->n; ++row) {
+      const UF_long source = solver->numeric->Pnum[row];
+      if (source >= solver->n) {
+        break;
+      }
+      solver->fused_refactor_solve_work[row] = b[source];
+      if (row + 1u == solver->n) {
+        solver->fused_refactor_solve_requested = 1;
+      }
+    }
+  }
+  if (!solver->fused_refactor_solve_requested) {
+    const double refactor_call_start = kls_now_seconds();
+    const int refactor_status = kls_refactor(solver, values);
+    if (refactor_status != KLS_OK) {
+      return refactor_status;
+    }
+    solver->stats.refactor_seconds +=
+      refactor_call_start - fusion_prepare_start;
+    return kls_solve(solver, nrhs, b, effective_ldb, x, effective_ldx);
+  }
+
+  const double refactor_call_start = kls_now_seconds();
+  const int refactor_status = kls_refactor(solver, values);
+  solver->fused_refactor_solve_requested = 0;
+  if (refactor_status != KLS_OK) {
+    solver->fused_refactor_solve_computed = 0;
+    solver->fused_refactor_solve_row_values = 0;
+    return refactor_status;
+  }
+  /* kls_refactor owns the numeric timer.  Charge the combined API's RHS
+     permutation/allocation to that same lifecycle phase so benchmark and
+     caller-visible statistics do not hide fusion setup work. */
+  solver->stats.refactor_seconds +=
+    refactor_call_start - fusion_prepare_start;
+  solver->fused_refactor_solve_ready =
+    solver->fused_refactor_solve_computed &&
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW;
+  const int solve_status = kls_solve(solver, nrhs, b, effective_ldb,
+                                     x, effective_ldx);
+  solver->fused_refactor_solve_ready = 0;
+  solver->fused_refactor_solve_computed = 0;
+  solver->fused_refactor_solve_row_values = 0;
+  return solve_status;
 }
 
 int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
