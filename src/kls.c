@@ -74429,8 +74429,9 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
     multipliers[local] = multiplier;
     if (l_values != NULL) {
       l_values[p + local] = multiplier;
+    } else {
+      *l_lu[p + local] = multiplier;
     }
-    *l_lu[p + local] = multiplier;
     x[dep] = 0.0;
     trailing_values[local] =
       u_values + u_ptr[dep] + dep_end - dep;
