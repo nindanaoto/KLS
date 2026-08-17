@@ -74197,8 +74197,9 @@ static UF_long kls_lean_row_refactor_snode_step_chain(
     multipliers[local] = multiplier;
     if (l_values != NULL) {
       l_values[p + local] = multiplier;
+    } else {
+      *l_lu[p + local] = multiplier;
     }
-    *l_lu[p + local] = multiplier;
     x[dep] = 0.0;
     trailing_values[local] =
       u_values + u_ptr[dep] + dep_end - dep;
@@ -74620,13 +74621,14 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
     UF_long p,                                                            \
     UF_long dep0,                                                         \
     double *restrict x,                                                   \
+    double *restrict l_values,                                            \
     double **restrict l_lu,                                               \
     const UF_long *restrict u_ptr,                                        \
     const UF_long *restrict u_cols,                                       \
     const double *restrict u_values,                                      \
     const double *restrict udiag) {                                       \
     return kls_lean_row_refactor_snode_step_impl(                         \
-      p, (width), dep0, x, NULL, l_lu, u_ptr, u_cols, NULL, u_values,      \
+      p, (width), dep0, x, l_values, l_lu, u_ptr, u_cols, NULL, u_values,  \
       udiag, 1, 0, 0);                                                    \
   }
 
@@ -74644,13 +74646,14 @@ kls_lean_row_refactor_snode_step_width_8u_avx512(
   UF_long p,
   UF_long dep0,
   double *restrict x,
+  double *restrict l_values,
   double **restrict l_lu,
   const UF_long *restrict u_ptr,
   const UF_long *restrict u_cols,
   const double *restrict u_values,
   const double *restrict udiag) {
   return kls_lean_row_refactor_snode_step_impl(
-    p, 8u, dep0, x, NULL, l_lu, u_ptr, u_cols, NULL, u_values, udiag,
+    p, 8u, dep0, x, l_values, l_lu, u_ptr, u_cols, NULL, u_values, udiag,
     1, 1, 0);
 }
 #endif
@@ -74667,13 +74670,14 @@ kls_lean_row_refactor_snode_step_width_8u_avx512(
     UF_long p,                                                            \
     UF_long dep0,                                                         \
     double *restrict x,                                                   \
+    double *restrict l_values,                                            \
     double **restrict l_lu,                                               \
     const UF_long *restrict u_ptr,                                        \
     const uint16_t *restrict u_cols16,                                    \
     const double *restrict u_values,                                      \
     const double *restrict udiag) {                                       \
     return kls_lean_row_refactor_snode_step_impl(                         \
-      p, (width), dep0, x, NULL, l_lu, u_ptr, NULL, u_cols16, u_values,   \
+      p, (width), dep0, x, l_values, l_lu, u_ptr, NULL, u_cols16, u_values,\
       udiag, 1, 0, 1);                                                    \
   }
 
@@ -74691,13 +74695,14 @@ kls_lean_row_refactor_snode_step_i16_width_8u_avx512(
   UF_long p,
   UF_long dep0,
   double *restrict x,
+  double *restrict l_values,
   double **restrict l_lu,
   const UF_long *restrict u_ptr,
   const uint16_t *restrict u_cols16,
   const double *restrict u_values,
   const double *restrict udiag) {
   return kls_lean_row_refactor_snode_step_impl(
-    p, 8u, dep0, x, NULL, l_lu, u_ptr, NULL, u_cols16, u_values, udiag,
+    p, 8u, dep0, x, l_values, l_lu, u_ptr, NULL, u_cols16, u_values, udiag,
     1, 1, 1);
 }
 #endif
@@ -74714,6 +74719,7 @@ kls_lean_row_refactor_snode_step_width_specialized(
   UF_long run,
   UF_long dep0,
   double *restrict x,
+  double *restrict l_values,
   double **restrict l_lu,
   const UF_long *restrict u_ptr,
   const UF_long *restrict u_cols,
@@ -74726,7 +74732,7 @@ kls_lean_row_refactor_snode_step_width_specialized(
 #define KLS_LEAN_SNODE_WIDTH_CASE(width)                                  \
     case (width):                                                         \
       return kls_lean_row_refactor_snode_step_width_##width(              \
-        p, dep0, x, l_lu, u_ptr, u_cols, u_values, udiag)
+        p, dep0, x, l_values, l_lu, u_ptr, u_cols, u_values, udiag)
   switch (run) {
     KLS_LEAN_SNODE_WIDTH_CASE(2u);
     KLS_LEAN_SNODE_WIDTH_CASE(3u);
@@ -74744,11 +74750,11 @@ kls_lean_row_refactor_snode_step_width_specialized(
           u_ptr[dep0 + 8u] - u_ptr[dep0 + 7u] >=
             KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
         return kls_lean_row_refactor_snode_step_width_8u_avx512(
-          p, dep0, x, l_lu, u_ptr, u_cols, u_values, udiag);
+          p, dep0, x, l_values, l_lu, u_ptr, u_cols, u_values, udiag);
       }
 #endif
       return kls_lean_row_refactor_snode_step_width_8u(
-        p, dep0, x, l_lu, u_ptr, u_cols, u_values, udiag);
+        p, dep0, x, l_values, l_lu, u_ptr, u_cols, u_values, udiag);
     default:
       return 0u;
   }
@@ -74761,6 +74767,7 @@ kls_lean_row_refactor_snode_step_i16_width_specialized(
   UF_long run,
   UF_long dep0,
   double *restrict x,
+  double *restrict l_values,
   double **restrict l_lu,
   const UF_long *restrict u_ptr,
   const uint16_t *restrict u_cols16,
@@ -74773,7 +74780,7 @@ kls_lean_row_refactor_snode_step_i16_width_specialized(
 #define KLS_LEAN_SNODE_I16_WIDTH_CASE(width)                              \
     case (width):                                                         \
       return kls_lean_row_refactor_snode_step_i16_width_##width(          \
-        p, dep0, x, l_lu, u_ptr, u_cols16, u_values, udiag)
+        p, dep0, x, l_values, l_lu, u_ptr, u_cols16, u_values, udiag)
   switch (run) {
     KLS_LEAN_SNODE_I16_WIDTH_CASE(2u);
     KLS_LEAN_SNODE_I16_WIDTH_CASE(3u);
@@ -74787,11 +74794,11 @@ kls_lean_row_refactor_snode_step_i16_width_specialized(
           u_ptr[dep0 + 8u] - u_ptr[dep0 + 7u] >=
             KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
         return kls_lean_row_refactor_snode_step_i16_width_8u_avx512(
-          p, dep0, x, l_lu, u_ptr, u_cols16, u_values, udiag);
+          p, dep0, x, l_values, l_lu, u_ptr, u_cols16, u_values, udiag);
       }
 #endif
       return kls_lean_row_refactor_snode_step_i16_width_8u(
-        p, dep0, x, l_lu, u_ptr, u_cols16, u_values, udiag);
+        p, dep0, x, l_values, l_lu, u_ptr, u_cols16, u_values, udiag);
     default:
       return 0u;
   }
@@ -75877,6 +75884,7 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
   const UF_long *restrict l_ptr = solver->row_refactor_l_ptr;
   const UF_long *restrict l_cols = solver->row_refactor_l_cols;
   const uint16_t *restrict l_cols16 = solver->row_refactor_l_cols16;
+  double *restrict l_val = solver->row_refactor_l_row_values;
   double **restrict l_lu = solver->row_refactor_l_values;
   const UF_long *restrict u_ptr = solver->row_refactor_u_ptr;
   const UF_long *restrict u_cols = solver->row_refactor_u_cols;
@@ -75893,6 +75901,7 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     solver->lean_parallel_grouped_token;
   atomic_uint *restrict grouped_done =
     solver->lean_parallel_grouped_done;
+  const int row_values_mode = shared->lean_row_values_mode;
 
   for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
     const UF_long row = rows[pos];
@@ -75936,10 +75945,10 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
           ? (UF_long)l_cols16[p] : l_cols[p];
         const UF_long completed = compact_cols
           ? kls_lean_row_refactor_snode_step_i16_width_specialized(
-              p, run, dep0, x, l_lu,
+              p, run, dep0, x, row_values_mode ? l_val : NULL, l_lu,
               u_ptr, u_cols16, u_val, udiag, avx512_target)
           : kls_lean_row_refactor_snode_step_width_specialized(
-              p, run, dep0, x, l_lu,
+              p, run, dep0, x, row_values_mode ? l_val : NULL, l_lu,
               u_ptr, u_cols, u_val, udiag, avx512_target);
         if (completed != run) {
           kls_egraph_refactor_record_invalid(shared);
@@ -75966,7 +75975,11 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
       }
       const double lik = x[dep] / udiag[dep];
       x[dep] = 0.0;
-      *l_lu[p] = lik;
+      if (row_values_mode) {
+        l_val[p] = lik;
+      } else {
+        *l_lu[p] = lik;
+      }
       if (lik != 0.0) {
         for (UF_long q = u_ptr[dep]; q < u_ptr[dep + 1u]; ++q) {
           const UF_long col = compact_cols
@@ -75984,11 +75997,11 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
     const uint32_t row_token = done_token[row];
     const int publishes =
       (row_token & KLS_LEAN_GROUPED_PUBLISH_FLAG) != 0u;
-    if (publishes) {
-      /* Remote consumers read the contiguous row mirror and Udiag, never the
-         packed-column destination.  Publish that dependency frontier as soon
-         as its required values are ready, then hide the solve-format scatter
-         behind consumers' numeric work. */
+    if (row_values_mode || publishes) {
+      /* Remote consumers and row-native solves read the contiguous mirror,
+         never the packed-column destination.  Publish that dependency
+         frontier as soon as its required values are ready; when the row
+         representation remains authoritative, omit the packed scatter. */
       for (UF_long q = u_begin; q < u_end; ++q) {
         const UF_long col = compact_cols
           ? (UF_long)u_cols16[q] : u_cols[q];
@@ -76012,6 +76025,8 @@ kls_symmetric_scalar_fringe_hoisted_worker_core(
       const uint32_t row_slot = row_token & KLS_LEAN_GROUPED_SLOT_MASK;
       atomic_store_explicit(&grouped_done[row_slot], generation,
                             memory_order_release);
+    }
+    if (publishes && !row_values_mode) {
       for (UF_long q = u_begin; q < u_end; ++q) {
         *u_lu[q] = u_val[q];
       }
@@ -77849,14 +77864,24 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->common.flops >= 4.0 * (double)factor_entries;
   shared->lean_row_values_mode =
     (shared->lean_compact_match_mode ||
-     (!symmetric_scalar_fringe_lean_mode &&
-      (rs == NULL ||
+     ((rs == NULL ||
        generic_scaled_row_values ||
        getenv("KLS_ENABLE_SCALED_LEAN_ROW_FACTOR") != NULL) &&
       solver->i16solve_l != NULL && solver->i16solve_u != NULL &&
       solver->i16solve_loff != NULL && solver->i16solve_uoff != NULL &&
       getenv("KLS_DISABLE_GENERIC_LEAN_ROW_FACTOR") == NULL)) &&
     getenv("KLS_DISABLE_COMPACT_MATCH_ROW_FACTOR") == NULL;
+  if (symmetric_scalar_fringe_lean_mode &&
+      shared->lean_row_values_mode &&
+      getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
+      pool->worker_spin_iters < 400000u) {
+    /* This executor removes the packed-value scatter and follows the
+       numeric with a compact row-mirror solve.  Keep the persistent crew
+       live through that bounded solve/verification gap; otherwise these
+       shorter cycles intermittently cross the futex boundary and turn the
+       next microsecond-scale numeric into a wakeup benchmark. */
+    pool->worker_spin_iters = 400000u;
+  }
   const int generic_i16ptr_grouped_recip_capable =
     rs == NULL &&
     !shared->lean_compact_match_mode &&
