@@ -59688,6 +59688,8 @@ static void kls_sync_authoritative_packed_u_values(kls_solver *solver) {
   }
 }
 
+static uint64_t kls_execution_domain_llc_bytes(void);
+
 static int kls_authoritative_packed_lu_enabled(const kls_solver *solver) {
   if (solver == NULL) {
     return 0;
@@ -59710,8 +59712,8 @@ static int kls_authoritative_packed_lu_enabled(const kls_solver *solver) {
      than recognizing a CPU model or matrix.  Large-cache domains retain the
      already-fast native layout, which also avoids a one-time mirror build. */
 #if defined(_SC_LEVEL3_CACHE_SIZE)
-  const long llc = sysconf(_SC_LEVEL3_CACHE_SIZE);
-  if (llc <= 0 || llc > 64l * 1024l * 1024l) {
+  const uint64_t llc = kls_execution_domain_llc_bytes();
+  if (llc == 0u || llc > UINT64_C(64) * 1024u * 1024u) {
     return 0;
   }
   const UF_long factor_entries =
@@ -115876,6 +115878,46 @@ static void kls_initialize_topology_cache(void) {
 
 static void kls_warm_topology_cache(void) {
   (void)pthread_once(&kls_topology_once, kls_initialize_topology_cache);
+}
+
+/* Return the cache capacity of a caller-constrained execution domain.  libc's
+   LEVEL3_CACHE_SIZE describes the CPU on which the query happens (and on
+   asymmetric-cache systems may instead expose a machine-wide value), so it
+   cannot distinguish a taskset confined to another LLC.  When every allowed
+   CPU belongs to one known LLC, that domain is authoritative.  With a broad
+   or unavailable affinity mask, retain the conservative libc fallback. */
+static uint64_t kls_execution_domain_llc_bytes(void) {
+  kls_warm_topology_cache();
+  cpu_set_t allowed;
+  if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+    int representative = -1;
+    int constrained = 1;
+    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+      if (!CPU_ISSET(cpu, &allowed)) continue;
+      if (!kls_cached_topology.valid[cpu]) {
+        constrained = 0;
+        break;
+      }
+      if (representative < 0) {
+        representative = cpu;
+      } else if (kls_cached_topology.package[cpu] !=
+                   kls_cached_topology.package[representative] ||
+                 kls_cached_topology.llc_id[cpu] !=
+                   kls_cached_topology.llc_id[representative]) {
+        constrained = 0;
+        break;
+      }
+    }
+    if (constrained && representative >= 0) {
+      return kls_cached_topology.llc_bytes[representative];
+    }
+  }
+#if defined(_SC_LEVEL3_CACHE_SIZE)
+  const long llc = sysconf(_SC_LEVEL3_CACHE_SIZE);
+  return llc > 0 ? (uint64_t)llc : 0u;
+#else
+  return 0u;
+#endif
 }
 
 /* Select one logical CPU from each physical core in a single last-level
