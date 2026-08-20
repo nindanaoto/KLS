@@ -95112,6 +95112,22 @@ static inline void kls_egraph_store_l_column_from_workspace(
   kls_padded_refresh_column(solver, column, values, length);
 }
 
+static KLS_ALWAYS_INLINE UF_long kls_egraph_llen_at(
+  const kls_solver *solver,
+  UF_long column) {
+  return solver->i32solve_llen != NULL
+    ? (UF_long)solver->i32solve_llen[column]
+    : solver->numeric->Llen[column];
+}
+
+static KLS_ALWAYS_INLINE UF_long kls_egraph_ulen_at(
+  const kls_solver *solver,
+  UF_long column) {
+  return solver->i32solve_ulen != NULL
+    ? (UF_long)solver->i32solve_ulen[column]
+    : solver->numeric->Ulen[column];
+}
+
 static int kls_egraph_refactor_mark_done_once(
   kls_egraph_refactor_shared *shared,
   UF_long col) {
@@ -101979,7 +101995,7 @@ static int kls_egraph_refactor_single_unscaled_column(
     solver->refactor_u_indices32 != NULL
       ? solver->refactor_u_indices32[k] : NULL;
   double *ux = u_values[k];
-  UF_long ucol_len = numeric->Ulen[k];
+  UF_long ucol_len = kls_egraph_ulen_at(solver, k);
   UF_long up = 0;
   const int supernode_numeric_updates = shared->supernode_numeric_updates;
   const int consumer_plan_group_l_updates =
@@ -102156,7 +102172,7 @@ static int kls_egraph_refactor_single_unscaled_column(
     if (ujk != 0.0) {
       UF_long *li = l_indices[j];
       double *lx = l_values[j];
-      UF_long lcol_len = numeric->Llen[j];
+      UF_long lcol_len = kls_egraph_llen_at(solver, j);
       const int32_t *li32 =
         solver->refactor_l_indices32 != NULL
           ? solver->refactor_l_indices32[j] : NULL;
@@ -102198,7 +102214,7 @@ static int kls_egraph_refactor_single_unscaled_column(
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
-  UF_long lcol_len = numeric->Llen[k];
+  UF_long lcol_len = kls_egraph_llen_at(solver, k);
   UF_long rejected_row = KLS_KLU_EMPTY;
   UF_long rejected_local_row = KLS_KLU_EMPTY;
   double rejected_multiplier_abs = -1.0;
@@ -102264,7 +102280,7 @@ static int kls_egraph_refactor_single_unscaled_plain_column(
     solver->refactor_u_indices32 != NULL
       ? solver->refactor_u_indices32[k] : NULL;
   double *restrict ux = u_values[k];
-  const UF_long ucol_len = numeric->Ulen[k];
+  const UF_long ucol_len = kls_egraph_ulen_at(solver, k);
   UF_long up = 0u;
   while (up < ucol_len) {
     const UF_long consumed = kls_snode_batch_consume_cached(
@@ -102287,7 +102303,7 @@ static int kls_egraph_refactor_single_unscaled_plain_column(
     x[j] = 0.0;
     ux[up] = ujk;
     if (ujk != 0.0) {
-      const UF_long lcol_len = numeric->Llen[j];
+      const UF_long lcol_len = kls_egraph_llen_at(solver, j);
       const int32_t *restrict li32 =
         l_indices32 != NULL ? l_indices32[j] : NULL;
       if (li32 != NULL || lcol_len == 0u) {
@@ -102310,7 +102326,8 @@ static int kls_egraph_refactor_single_unscaled_plain_column(
   }
   kls_egraph_store_udiag(shared, udiag, k, ukk);
   kls_egraph_store_l_column_from_workspace(
-    solver, x, k, l_indices[k], l_values[k], numeric->Llen[k], ukk);
+    solver, x, k, l_indices[k], l_values[k],
+    kls_egraph_llen_at(solver, k), ukk);
   return 1;
 }
 
