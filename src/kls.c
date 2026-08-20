@@ -842,6 +842,13 @@ struct kls_solver {
   double lean_reaudit_column_solve_min;
   int lean_reaudit_row_solve_samples;
   double lean_reaudit_row_solve_min;
+  double lean_reaudit_pending_ref_seconds;
+  int lean_reaudit_column_cycle_samples;
+  double lean_reaudit_column_cycle_min;
+  double lean_reaudit_column_cycle_max;
+  int lean_reaudit_row_cycle_samples;
+  double lean_reaudit_row_cycle_min;
+  double lean_reaudit_row_cycle_max;
   int lean_user_values_active;
   int lean_deferred_value_prep_active;
   int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
@@ -28069,6 +28076,13 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->lean_reaudit_column_solve_min = 0.0;
   solver->lean_reaudit_row_solve_samples = 0;
   solver->lean_reaudit_row_solve_min = 0.0;
+  solver->lean_reaudit_pending_ref_seconds = 0.0;
+  solver->lean_reaudit_column_cycle_samples = 0;
+  solver->lean_reaudit_column_cycle_min = 0.0;
+  solver->lean_reaudit_column_cycle_max = 0.0;
+  solver->lean_reaudit_row_cycle_samples = 0;
+  solver->lean_reaudit_row_cycle_min = 0.0;
+  solver->lean_reaudit_row_cycle_max = 0.0;
   solver->padded_choice = 0;
   solver->padded_pending = 0;
   solver->padded_probe_build = 0;
@@ -73966,10 +73980,16 @@ static void kls_selected_lean_reaudit_finish(kls_solver *solver) {
          ? solver->lean_reaudit_seconds /
              (double)solver->lean_reaudit_samples
          : 0.0);
-  const double row_cycle = row_ref +
-    (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
-  const double column_cycle = solver->lean_reaudit_column_min +
-    (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
+  const double row_cycle = solve_pair_ready &&
+      solver->lean_reaudit_row_cycle_min > 0.0
+    ? solver->lean_reaudit_row_cycle_min
+    : row_ref +
+        (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
+  const double column_cycle = solve_pair_ready &&
+      solver->lean_reaudit_column_cycle_min > 0.0
+    ? solver->lean_reaudit_column_cycle_min
+    : solver->lean_reaudit_column_min +
+        (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
   const double margin = solve_pair_ready ? 0.98 : 0.95;
   const int64_t measured_refactors =
     (int64_t)solver->lean_reaudit_samples +
@@ -74016,10 +74036,16 @@ static void kls_declined_lean_reaudit_finish(kls_solver *solver) {
       solver->lean_reaudit_row_samples &&
     solver->lean_reaudit_column_solve_min > 0.0 &&
     solver->lean_reaudit_row_solve_min > 0.0;
-  const double column_cycle = solver->lean_reaudit_column_min +
-    (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
-  const double row_cycle = solver->lean_reaudit_row_min +
-    (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
+  const double column_cycle = solve_pair_ready &&
+      solver->lean_reaudit_column_cycle_min > 0.0
+    ? solver->lean_reaudit_column_cycle_min
+    : solver->lean_reaudit_column_min +
+        (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
+  const double row_cycle = solve_pair_ready &&
+      solver->lean_reaudit_row_cycle_min > 0.0
+    ? solver->lean_reaudit_row_cycle_min
+    : solver->lean_reaudit_row_min +
+        (solve_pair_ready ? solver->lean_reaudit_row_solve_min : 0.0);
   const double adoption_margin = solve_pair_ready ? 0.98 : 0.95;
   if (solver->lean_reaudit_column_samples >=
         KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES &&
@@ -74046,6 +74072,60 @@ static void kls_declined_lean_reaudit_finish(kls_solver *solver) {
   }
 }
 
+/* Settle only a very wide complete-cycle separation before the ordinary
+   four-by-four audit finishes.  The incumbent arm still receives its full
+   four-sample warm window and the challenger receives two complete cycles;
+   compare their established timing floors only across a 30-percent gap.
+   Close outcomes retain the established audit unchanged. */
+static int kls_lean_reaudit_try_decisive(kls_solver *solver) {
+  if (solver == NULL ||
+      getenv("KLS_DISABLE_DECISIVE_LEAN_LIFECYCLE_AUDIT") != NULL ||
+      solver->lean_reaudit_column_cycle_samples < 2 ||
+      solver->lean_reaudit_row_cycle_samples < 2 ||
+      solver->lean_reaudit_column_cycle_min <= 0.0 ||
+      solver->lean_reaudit_column_cycle_max <= 0.0 ||
+      solver->lean_reaudit_row_cycle_min <= 0.0 ||
+      solver->lean_reaudit_row_cycle_max <= 0.0) {
+    return 0;
+  }
+  const int selected_row = solver->lean_choice > 0;
+  if ((selected_row && solver->lean_reaudit_row_cycle_samples <
+                         KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) ||
+      (!selected_row && solver->lean_reaudit_column_cycle_samples <
+                          KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES)) {
+    return 0;
+  }
+  int choice = 0;
+  if (solver->lean_reaudit_row_cycle_min <=
+      0.70 * solver->lean_reaudit_column_cycle_min) {
+    choice = solver->lean_choice > 0
+      ? solver->lean_choice : solver->lean_reaudit_row_arm;
+  } else if (solver->lean_reaudit_column_cycle_min <=
+             0.70 * solver->lean_reaudit_row_cycle_min) {
+    choice = -1;
+  }
+  if (choice == 0) {
+    return 0;
+  }
+  solver->lean_choice = choice;
+  solver->lean_pair_active = choice == 2;
+  solver->lean_probe_arm = 0;
+  solver->lean_reaudit_pending_side = 0;
+  solver->lean_reaudit_pending_ref_seconds = 0.0;
+  solver->lean_reaudit_state = 5;
+  if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
+    fprintf(stderr,
+            "KLS decisive lean lifecycle audit: row %.3f..%.3f ms "
+            "column %.3f..%.3f ms -> %s\n",
+            1e3 * solver->lean_reaudit_row_cycle_min,
+            1e3 * solver->lean_reaudit_row_cycle_max,
+            1e3 * solver->lean_reaudit_column_cycle_min,
+            1e3 * solver->lean_reaudit_column_cycle_max,
+            choice > 0 ? "LEAN" : "COLUMN");
+  }
+  return 1;
+}
+
 /* Pair a lean lifecycle re-audit with the solve that immediately follows
    each sampled numeric.  A row representation can be neutral in
    refactor time yet materially cheaper to solve, while another row engine
@@ -74059,20 +74139,43 @@ static void kls_lean_reaudit_record_solve(kls_solver *solver,
     return;
   }
   const int side = solver->lean_reaudit_pending_side;
+  const double cycle = solver->lean_reaudit_pending_ref_seconds + seconds;
   if (side == 1) {
     if (solver->lean_reaudit_column_solve_samples == 0 ||
         seconds < solver->lean_reaudit_column_solve_min) {
       solver->lean_reaudit_column_solve_min = seconds;
     }
     solver->lean_reaudit_column_solve_samples++;
+    if (solver->lean_reaudit_column_cycle_samples == 0 ||
+        cycle < solver->lean_reaudit_column_cycle_min) {
+      solver->lean_reaudit_column_cycle_min = cycle;
+    }
+    if (solver->lean_reaudit_column_cycle_samples == 0 ||
+        cycle > solver->lean_reaudit_column_cycle_max) {
+      solver->lean_reaudit_column_cycle_max = cycle;
+    }
+    solver->lean_reaudit_column_cycle_samples++;
   } else if (side == 2) {
     if (solver->lean_reaudit_row_solve_samples == 0 ||
         seconds < solver->lean_reaudit_row_solve_min) {
       solver->lean_reaudit_row_solve_min = seconds;
     }
     solver->lean_reaudit_row_solve_samples++;
+    if (solver->lean_reaudit_row_cycle_samples == 0 ||
+        cycle < solver->lean_reaudit_row_cycle_min) {
+      solver->lean_reaudit_row_cycle_min = cycle;
+    }
+    if (solver->lean_reaudit_row_cycle_samples == 0 ||
+        cycle > solver->lean_reaudit_row_cycle_max) {
+      solver->lean_reaudit_row_cycle_max = cycle;
+    }
+    solver->lean_reaudit_row_cycle_samples++;
   }
   solver->lean_reaudit_pending_side = 0;
+  solver->lean_reaudit_pending_ref_seconds = 0.0;
+  if (kls_lean_reaudit_try_decisive(solver)) {
+    return;
+  }
   if (solver->lean_reaudit_state == 6 && side == 1) {
     kls_selected_lean_reaudit_finish(solver);
   } else if (solver->lean_reaudit_state == 15 && side == 2) {
@@ -165015,6 +165118,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
       solver->lean_reaudit_row_samples++;
       solver->lean_reaudit_pending_side = 2;
+      solver->lean_reaudit_pending_ref_seconds =
+        solver->adaptive_refactor_seconds;
       if (++solver->lean_reaudit_samples >=
           KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 1;
@@ -166045,6 +166150,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
       solver->lean_reaudit_row_samples++;
       solver->lean_reaudit_pending_side = 2;
+      solver->lean_reaudit_pending_ref_seconds = elapsed;
       if (++solver->lean_reaudit_samples >=
           KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 1;
@@ -166058,6 +166164,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
       solver->lean_reaudit_column_samples++;
       solver->lean_reaudit_pending_side = 1;
+      solver->lean_reaudit_pending_ref_seconds = elapsed;
       if (solver->lean_reaudit_state == 2 ||
           solver->lean_reaudit_column_samples <
             KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
@@ -166091,6 +166198,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
       solver->lean_reaudit_column_samples++;
       solver->lean_reaudit_pending_side = 1;
+      solver->lean_reaudit_pending_ref_seconds = elapsed;
       if (++solver->lean_reaudit_samples >=
           KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 11;
@@ -166104,6 +166212,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
       solver->lean_reaudit_row_samples++;
       solver->lean_reaudit_pending_side = 2;
+      solver->lean_reaudit_pending_ref_seconds = elapsed;
       if (solver->lean_reaudit_row_samples <
           KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES) {
         solver->lean_reaudit_state = 13;
@@ -166404,6 +166513,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
           solver->lean_reaudit_column_solve_min = 0.0;
           solver->lean_reaudit_row_solve_samples = 0;
           solver->lean_reaudit_row_solve_min = 0.0;
+          solver->lean_reaudit_pending_ref_seconds = 0.0;
+          solver->lean_reaudit_column_cycle_samples = 0;
+          solver->lean_reaudit_column_cycle_min = 0.0;
+          solver->lean_reaudit_column_cycle_max = 0.0;
+          solver->lean_reaudit_row_cycle_samples = 0;
+          solver->lean_reaudit_row_cycle_min = 0.0;
+          solver->lean_reaudit_row_cycle_max = 0.0;
         }
       }
     }
