@@ -159928,8 +159928,9 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     UF_long expected_l = 0u;
     UF_long expected_u = 0u;
     for (UF_long col = 0u; col < n; ++col) {
-      if (numeric->Llen[col] > UF_long_max - expected_l ||
-          numeric->Ulen[col] > UF_long_max - expected_u) {
+      if (numeric->Llen[col] < 0 || numeric->Ulen[col] < 0 ||
+          expected_l > UF_long_max - numeric->Llen[col] ||
+          expected_u > UF_long_max - numeric->Ulen[col]) {
         alias_refactor_indices = 0;
         break;
       }
