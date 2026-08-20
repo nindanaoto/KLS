@@ -115614,7 +115614,6 @@ typedef struct kls_topology_cache {
   int llc_id[CPU_SETSIZE];
   int core_id[CPU_SETSIZE];
   uint64_t llc_bytes[CPU_SETSIZE];
-  uint64_t smallest_llc_bytes;
   unsigned char valid[CPU_SETSIZE];
 } kls_topology_cache;
 
@@ -115658,12 +115657,6 @@ static void kls_initialize_topology_cache(void) {
       continue;
     }
     kls_cached_topology.valid[cpu] = 1u;
-    if (kls_cached_topology.smallest_llc_bytes == 0u ||
-        kls_cached_topology.llc_bytes[cpu] <
-          kls_cached_topology.smallest_llc_bytes) {
-      kls_cached_topology.smallest_llc_bytes =
-        kls_cached_topology.llc_bytes[cpu];
-    }
   }
 }
 
@@ -115683,30 +115676,15 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
                                          int *cpus_out,
                                          cpu_set_t *allowed_out) {
   if (solver == NULL || cpus_out == NULL || allowed_out == NULL ||
-      solver->numeric == NULL || thread_count < 2 ||
-      thread_count > CPU_SETSIZE) {
+      thread_count < 2 || thread_count > CPU_SETSIZE) {
     return 0;
   }
-  const long double factor_entries =
-    (long double)solver->numeric->lnz +
-    (long double)solver->numeric->unz;
-  const long double retained_hot_bytes =
-    factor_entries *
-      (long double)(sizeof(double) + sizeof(UF_long)) +
-    (long double)solver->nnz *
-      (long double)(sizeof(double) + sizeof(UF_long)) +
-    4.0L * (long double)solver->n * (long double)sizeof(double);
   if (!kls_repeated_update_workload(&solver->options) ||
       getenv("KLS_DISABLE_COMPACT_LLC_AFFINITY") != NULL) {
     return 0;
   }
 
   kls_warm_topology_cache();
-  if (kls_cached_topology.smallest_llc_bytes > 0u &&
-      retained_hot_bytes <=
-        (long double)kls_cached_topology.smallest_llc_bytes) {
-    return 0;
-  }
   if (sched_getaffinity(0, sizeof(*allowed_out), allowed_out) != 0) {
     return 0;
   }
@@ -115721,6 +115699,10 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
       continue;
     }
     allowed_count++;
+  }
+  if (getenv("KLS_TRACE_AFFINITY") != NULL) {
+    fprintf(stderr, "KLS affinity census: allowed=%d requested=%d\n",
+            allowed_count, thread_count);
   }
   if (allowed_count < thread_count) {
     return 0;
@@ -115753,7 +115735,8 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     int core_count = 0;
     int contains_current = 0;
     for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
-      if (!valid[cpu] || package[cpu] != package[representative] ||
+      if (!CPU_ISSET(cpu, allowed_out) || !valid[cpu] ||
+          package[cpu] != package[representative] ||
           llc_id[cpu] != llc_id[representative]) {
         continue;
       }
@@ -115790,18 +115773,21 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
   }
   if (best_cpu < 0 || smallest_eligible_bytes == UINT64_MAX ||
       eligible_group_count < 2 || best_bytes <= smallest_eligible_bytes) {
+    if (getenv("KLS_TRACE_AFFINITY") != NULL) {
+      fprintf(stderr,
+              "KLS affinity declined: best=%d groups=%d bestMiB=%.1f "
+              "smallMiB=%.1f\n",
+              best_cpu, eligible_group_count,
+              (double)best_bytes / (1024.0 * 1024.0),
+              smallest_eligible_bytes == UINT64_MAX ? 0.0 :
+                (double)smallest_eligible_bytes / (1024.0 * 1024.0));
+    }
     return 0;
   }
-  /* Prefer cache capacity only when the retained sparse working set cannot
-     fit in every eligible domain.  A compact factor that fits in the small
-     LLC is normally frequency-bound; forcing it into a fixed domain can bias
-     its measured recurring-kernel choices.  The estimate counts factor
-     values+indices, the current CSC frame, and four dense solve/refactor
-     vectors. */
-  if (!(retained_hot_bytes > (long double)smallest_eligible_bytes)) {
-    return 0;
-  }
-
+  /* A repeated sparse pool exchanges completion words and producer columns
+     on every numeric update.  When the complete requested crew fits in one
+     physical LLC, keep it there rather than letting the scheduler spread a
+     latency-sensitive generation across asymmetric cache domains. */
   int selected_cores[CPU_SETSIZE];
   int selected = 0;
   if (current_cpu >= 0 && current_cpu < CPU_SETSIZE &&
@@ -115811,7 +115797,8 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     cpus_out[selected++] = current_cpu;
   }
   for (int cpu = 0; cpu < CPU_SETSIZE && selected < thread_count; ++cpu) {
-    if (!valid[cpu] || package[cpu] != package[best_cpu] ||
+    if (!CPU_ISSET(cpu, allowed_out) || !valid[cpu] ||
+        package[cpu] != package[best_cpu] ||
         llc_id[cpu] != llc_id[best_cpu]) {
       continue;
     }
