@@ -998,6 +998,9 @@ struct kls_solver {
   int32_t **refactor_l_sorted_pos32;
   int32_t *refactor_l_sorted_pos32_storage;
   double **refactor_l_values;
+  double **refactor_l_packed_values;
+  double *refactor_l_packed_storage;
+  int refactor_l_packed_valid;
   float **refactor_l_values32;
   float *refactor_l_values32_storage;
   double **refactor_l_sorted_values;
@@ -1006,6 +1009,9 @@ struct kls_solver {
   int32_t **refactor_u_indices32;
   int32_t *refactor_u_indices32_storage;
   double **refactor_u_values;
+  double **refactor_u_packed_values;
+  double *refactor_u_packed_storage;
+  int refactor_u_packed_valid;
   UF_long *refactor_btf_scalar_run_group_ptr;
   UF_long *refactor_btf_scalar_run_group_dep0;
   UF_long *refactor_btf_scalar_run_group_max_rows_by_group;
@@ -19640,6 +19646,8 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_l_sorted_pos32);
   free(solver->refactor_l_sorted_pos32_storage);
   free(solver->refactor_l_values);
+  free(solver->refactor_l_packed_values);
+  free(solver->refactor_l_packed_storage);
   free(solver->refactor_l_values32);
   free(solver->refactor_l_values32_storage);
   free(solver->refactor_l_sorted_values);
@@ -19648,6 +19656,8 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_u_indices32);
   free(solver->refactor_u_indices32_storage);
   free(solver->refactor_u_values);
+  free(solver->refactor_u_packed_values);
+  free(solver->refactor_u_packed_storage);
   free(solver->refactor_btf_scalar_run_group_ptr);
   free(solver->refactor_btf_scalar_run_group_dep0);
   free(solver->refactor_btf_scalar_run_group_max_rows_by_group);
@@ -19682,6 +19692,9 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_sorted_pos32 = NULL;
   solver->refactor_l_sorted_pos32_storage = NULL;
   solver->refactor_l_values = NULL;
+  solver->refactor_l_packed_values = NULL;
+  solver->refactor_l_packed_storage = NULL;
+  solver->refactor_l_packed_valid = 0;
   solver->refactor_l_values32 = NULL;
   solver->refactor_l_values32_storage = NULL;
   solver->refactor_l_sorted_values = NULL;
@@ -19690,6 +19703,9 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_u_indices32 = NULL;
   solver->refactor_u_indices32_storage = NULL;
   solver->refactor_u_values = NULL;
+  solver->refactor_u_packed_values = NULL;
+  solver->refactor_u_packed_storage = NULL;
+  solver->refactor_u_packed_valid = 0;
   solver->refactor_btf_scalar_run_group_ptr = NULL;
   solver->refactor_btf_scalar_run_group_dep0 = NULL;
   solver->refactor_btf_scalar_run_group_max_rows_by_group = NULL;
@@ -59537,6 +59553,177 @@ static int kls_refactor_lu_pointer_cache_matches(const kls_solver *solver) {
       }
     }
   }
+  return 1;
+}
+
+static int kls_ensure_authoritative_packed_l_values(kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL || solver->refactor_l_values == NULL) {
+    return 0;
+  }
+  if (solver->refactor_l_packed_values != NULL &&
+      solver->refactor_l_packed_storage != NULL) {
+    return 1;
+  }
+  UF_long entries = 0u;
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    if (solver->refactor_l_values[col] != NULL) {
+      const UF_long len = solver->numeric->Llen[col];
+      if (len > UF_long_max - entries) {
+        return 0;
+      }
+      entries += len;
+    }
+  }
+  if (entries == 0u || entries > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+  double **values =
+    (double **)calloc((size_t)solver->n, sizeof(*values));
+  double *storage =
+    (double *)malloc((size_t)entries * sizeof(*storage));
+  if (values == NULL || storage == NULL) {
+    free(values);
+    free(storage);
+    return 0;
+  }
+  UF_long offset = 0u;
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    const UF_long len = solver->numeric->Llen[col];
+    if (solver->refactor_l_values[col] == NULL || len == 0u) {
+      continue;
+    }
+    values[col] = storage + offset;
+    memcpy(values[col], solver->refactor_l_values[col],
+           (size_t)len * sizeof(*storage));
+    offset += len;
+  }
+  solver->refactor_l_packed_values = values;
+  solver->refactor_l_packed_storage = storage;
+  solver->refactor_l_packed_valid = 0;
+  return 1;
+}
+
+static void kls_sync_authoritative_packed_l_values(kls_solver *solver) {
+  if (solver == NULL || !solver->refactor_l_packed_valid ||
+      solver->refactor_l_packed_values == NULL ||
+      solver->refactor_l_values == NULL || solver->numeric == NULL ||
+      solver->numeric->Llen == NULL) {
+    return;
+  }
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    const UF_long len = solver->numeric->Llen[col];
+    if (solver->refactor_l_values[col] != NULL &&
+        solver->refactor_l_packed_values[col] != NULL && len > 0u) {
+      memcpy(solver->refactor_l_values[col],
+             solver->refactor_l_packed_values[col],
+             (size_t)len * sizeof(double));
+    }
+  }
+}
+
+static int kls_ensure_authoritative_packed_u_values(kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL || solver->refactor_u_values == NULL) {
+    return 0;
+  }
+  if (solver->refactor_u_packed_values != NULL &&
+      solver->refactor_u_packed_storage != NULL) {
+    return 1;
+  }
+  UF_long entries = 0u;
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    if (solver->refactor_u_values[col] != NULL) {
+      const UF_long len = solver->numeric->Ulen[col];
+      if (len > UF_long_max - entries) {
+        return 0;
+      }
+      entries += len;
+    }
+  }
+  if (entries == 0u || entries > (UF_long)(SIZE_MAX / sizeof(double))) {
+    return 0;
+  }
+  double **values =
+    (double **)calloc((size_t)solver->n, sizeof(*values));
+  double *storage =
+    (double *)malloc((size_t)entries * sizeof(*storage));
+  if (values == NULL || storage == NULL) {
+    free(values);
+    free(storage);
+    return 0;
+  }
+  UF_long offset = 0u;
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    const UF_long len = solver->numeric->Ulen[col];
+    if (solver->refactor_u_values[col] == NULL || len == 0u) {
+      continue;
+    }
+    values[col] = storage + offset;
+    memcpy(values[col], solver->refactor_u_values[col],
+           (size_t)len * sizeof(*storage));
+    offset += len;
+  }
+  solver->refactor_u_packed_values = values;
+  solver->refactor_u_packed_storage = storage;
+  solver->refactor_u_packed_valid = 0;
+  return 1;
+}
+
+static void kls_sync_authoritative_packed_u_values(kls_solver *solver) {
+  if (solver == NULL || !solver->refactor_u_packed_valid ||
+      solver->refactor_u_packed_values == NULL ||
+      solver->refactor_u_values == NULL || solver->numeric == NULL ||
+      solver->numeric->Ulen == NULL) {
+    return;
+  }
+  for (UF_long col = 0u; col < solver->n; ++col) {
+    const UF_long len = solver->numeric->Ulen[col];
+    if (solver->refactor_u_values[col] != NULL &&
+        solver->refactor_u_packed_values[col] != NULL && len > 0u) {
+      memcpy(solver->refactor_u_values[col],
+             solver->refactor_u_packed_values[col],
+             (size_t)len * sizeof(double));
+    }
+  }
+}
+
+static int kls_authoritative_packed_lu_enabled(const kls_solver *solver) {
+  if (solver == NULL) {
+    return 0;
+  }
+  if (!kls_repeated_update_workload(&solver->options) ||
+      solver->options.expected_refactorizations < 16 ||
+      solver->i32solve_state <= 0 || solver->numeric == NULL) {
+    return 0;
+  }
+  if (solver->pts != NULL && solver->pts_ref_decision >= 0) {
+    /* Do not make an EGraph trial authoritative while the independently
+       measured subtree refactor tournament is still live or has won. */
+    return 0;
+  }
+  /* This representation removes KLU's interleaved value traffic by keeping
+     compact indices and both value decks resident together.  It wins only
+     when that active deck fits comfortably in the calling core's LLC; once
+     it spills, the duplicate representation increases bandwidth (the
+     measured ASIC/G2 regime).  Query the actual execution domain rather
+     than recognizing a CPU model or matrix.  Large-cache domains retain the
+     already-fast native layout, which also avoids a one-time mirror build. */
+#if defined(_SC_LEVEL3_CACHE_SIZE)
+  const long llc = sysconf(_SC_LEVEL3_CACHE_SIZE);
+  if (llc <= 0 || llc > 64l * 1024l * 1024l) {
+    return 0;
+  }
+  const UF_long factor_entries =
+    solver->numeric->lnz + solver->numeric->unz;
+  if (factor_entries > (UF_long)(SIZE_MAX / sizeof(double)) ||
+      factor_entries * (UF_long)sizeof(double) >
+        (UF_long)llc * 5u / 8u) {
+    return 0;
+  }
+#else
+  return 0;
+#endif
   return 1;
 }
 
@@ -118529,6 +118716,8 @@ static void kls_egraph_select_stream_kernels(kls_solver *solver,
 static int kls_egraph_mapped_refactor(kls_solver *solver,
                                       double *numeric_values,
                                       int check_pivots) {
+  double **native_l_values = NULL;
+  double **native_u_values = NULL;
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->options.threads <= 1 ||
       solver->n < kls_egraph_refactor_size_floor()) {
@@ -120405,6 +120594,15 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     parallel_refine_copy ? solver->solve_refine_values : NULL;
   shared->refine_copy_nnz = parallel_refine_copy ? solver->nnz : 0u;
 
+  if (kls_authoritative_packed_lu_enabled(solver) &&
+      kls_ensure_authoritative_packed_l_values(solver) &&
+      kls_ensure_authoritative_packed_u_values(solver)) {
+    native_l_values = solver->refactor_l_values;
+    native_u_values = solver->refactor_u_values;
+    solver->refactor_l_values = solver->refactor_l_packed_values;
+    solver->refactor_u_values = solver->refactor_u_packed_values;
+  }
+
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = shared;
     pool->workers[i].x = scratch[i];
@@ -120415,6 +120613,18 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
 
   kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
+  if (native_l_values != NULL) {
+    solver->refactor_l_values = native_l_values;
+    solver->refactor_u_values = native_u_values;
+    solver->refactor_l_packed_valid = 1;
+    solver->refactor_u_packed_valid = 1;
+    if (shared->invalid || shared->pivot_rejected || shared->singular) {
+      kls_sync_authoritative_packed_l_values(solver);
+      kls_sync_authoritative_packed_u_values(solver);
+      solver->refactor_l_packed_valid = 0;
+      solver->refactor_u_packed_valid = 0;
+    }
+  }
   if (!shared->invalid && !shared->pivot_rejected && !shared->singular &&
       parallel_refine_copy) {
     solver->parallel_refine_values_copied = 1;
@@ -127821,6 +128031,25 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
   kls_clear_egraph_refactor_last_stats(solver);
   kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_NONE);
+  /* Once EGraph has published the authoritative packed factor, keep values
+     in that representation across recurring updates.  Re-entering the
+     generic engine tournament would require a full synchronization into
+     KLU's interleaved storage before even timing another arm.  Structure and
+     pivot policy are unchanged for a values-only refactor; an EGraph failure
+     synchronizes the partial state before returning to the repair path. */
+  if (!check_pivots && solver->refactor_l_packed_valid &&
+      solver->refactor_u_packed_valid) {
+    const int packed =
+      kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
+    if (packed >= 0) {
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_EGRAPH);
+      return (UF_long)packed;
+    }
+    kls_sync_authoritative_packed_l_values(solver);
+    kls_sync_authoritative_packed_u_values(solver);
+    solver->refactor_l_packed_valid = 0;
+    solver->refactor_u_packed_valid = 0;
+  }
   /* Enter the lean walk early only after the first changed numeric has
      established its accuracy contract.  A direct user-position map or a
      live partial-BTF plan is durable evidence that a more specialized
@@ -157987,6 +158216,12 @@ static void kls_pts_try_build(kls_solver *solver) {
       }
     }
     solver->pts = pts;
+    if (!pts->refactor_ok) {
+      /* A solve-only forest has no refactor challenger to time.  Settle the
+         independent refactor verdict now so later representation choices do
+         not mistake the permanent zero state for a pending tournament. */
+      solver->pts_ref_decision = -1;
+    }
     const int verified_large_pts_solve =
       kls_verified_large_pts_solve_policy_eligible(solver);
     if ((verified_large_pts_solve) &&
@@ -158084,6 +158319,8 @@ typedef struct {
      LUbx stream order; reading them halves the L value traffic and the
      refined solve already polices the f32-accurate numbers */
   float *const *l32;
+  double *const *l64;
+  double *const *u64;
   UF_long gk0;
   pthread_barrier_t *barrier;
   _Atomic int *go;
@@ -158116,8 +158353,9 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
           acc[pts->top_map[li[p]]] += (double)lx32[p] * xk;
         }
       } else {
-        const double *lx =
-          a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+        const double *lx = a->l64 != NULL
+          ? a->l64[a->gk0 + (UF_long)k]
+          : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
         for (UF_long p = 0; p < split; ++p) {
           Xb[li[p]] -= lx[p] * xk;
         }
@@ -158154,8 +158392,9 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
             Xb[li[p]] -= (double)lx32[p] * xk;
           }
         } else {
-          const double *lx =
-            a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+          const double *lx = a->l64 != NULL
+            ? a->l64[a->gk0 + (UF_long)k]
+            : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
           if (pts->top_run_scatter) {
             const uint32_t run_begin = pts->top_l_run_ptr[j];
             const uint32_t run_end = pts->top_l_run_ptr[j + 1u];
@@ -158178,8 +158417,9 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
       if (xk != 0.0) {
         const UF_long len = a->ulen32 != NULL
           ? (UF_long)a->ulen32[k] : a->ulen[k];
-        const double *ux =
-          a->lu + a->uip[k] + kls_klu_units_for_indices(len);
+        const double *ux = a->u64 != NULL
+          ? a->u64[a->gk0 + (UF_long)k]
+          : a->lu + a->uip[k] + kls_klu_units_for_indices(len);
         const int32_t *ui = a->i32u +
           (a->uoff32 != NULL ? (int64_t)a->uoff32[k] : a->uoff[k]);
         if (pts->top_run_scatter) {
@@ -158206,7 +158446,9 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
     if (xk != 0.0) {
       const UF_long len = a->ulen32 != NULL
         ? (UF_long)a->ulen32[k] : a->ulen[k];
-      const double *ux = a->lu + a->uip[k] + kls_klu_units_for_indices(len);
+      const double *ux = a->u64 != NULL
+        ? a->u64[a->gk0 + (UF_long)k]
+        : a->lu + a->uip[k] + kls_klu_units_for_indices(len);
       const int32_t *ui = a->i32u +
         (a->uoff32 != NULL ? (int64_t)a->uoff32[k] : a->uoff[k]);
       for (UF_long p = 0; p < len; ++p) {
@@ -158235,6 +158477,8 @@ typedef struct kls_pts_pool_job {
   const uint32_t *loff32;
   const uint32_t *uoff32;
   float *const *l32;
+  double *const *l64;
+  double *const *u64;
   UF_long gk0;
 } kls_pts_pool_job;
 
@@ -158264,6 +158508,8 @@ static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker) {
   arg.loff32 = job->loff32;
   arg.uoff32 = job->uoff32;
   arg.l32 = job->l32;
+  arg.l64 = job->l64;
+  arg.u64 = job->u64;
   arg.gk0 = job->gk0;
   arg.barrier = &shared->barrier;
   arg.go = NULL;
@@ -158333,6 +158579,10 @@ static int kls_pts_solve_block_pool(kls_solver *solver,
     ? solver->i32solve_uoff32 + pts->k1 : NULL;
   job.l32 = solver->fp32_last_used > 0
     ? (float *const *)solver->refactor_l_values32 : NULL;
+  job.l64 = solver->refactor_l_packed_valid
+    ? (double *const *)solver->refactor_l_packed_values : NULL;
+  job.u64 = solver->refactor_u_packed_valid
+    ? (double *const *)solver->refactor_u_packed_values : NULL;
   job.gk0 = pts->k1;
 
   shared->solver = solver;
@@ -158401,6 +158651,10 @@ static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
       ? solver->i32solve_uoff32 + pts->k1 : NULL;
     args[t].l32 = solver->fp32_last_used > 0
       ? (float *const *)solver->refactor_l_values32 : NULL;
+    args[t].l64 = solver->refactor_l_packed_valid
+      ? (double *const *)solver->refactor_l_packed_values : NULL;
+    args[t].u64 = solver->refactor_u_packed_valid
+      ? (double *const *)solver->refactor_u_packed_values : NULL;
     args[t].gk0 = pts->k1;
     args[t].barrier = &barrier;
     args[t].go = &go;
@@ -161009,8 +161263,11 @@ static UF_long kls_i32_solve(kls_solver *solver,
             if (xk != 0.0) {
               const UF_long len = llen32 != NULL
                 ? (UF_long)llen32[k1 + k] : llen[k];
-              const double *lx =
-                lu + lip[k] + kls_klu_units_for_indices(len);
+              const double *lx = solver->refactor_l_packed_valid &&
+                  solver->refactor_l_packed_values != NULL &&
+                  solver->refactor_l_packed_values[k1 + k] != NULL
+                ? solver->refactor_l_packed_values[k1 + k]
+                : lu + lip[k] + kls_klu_units_for_indices(len);
               const UF_long begin = loff32 != NULL
                 ? (UF_long)loff32[k1 + k]
                 : (UF_long)solver->i32solve_loff[k1 + k];
@@ -161032,8 +161289,11 @@ static UF_long kls_i32_solve(kls_solver *solver,
             if (xk != 0.0) {
               const UF_long len = ulen32 != NULL
                 ? (UF_long)ulen32[k1 + k] : ulen[k];
-              const double *ux =
-                lu + uip[k] + kls_klu_units_for_indices(len);
+              const double *ux = solver->refactor_u_packed_valid &&
+                  solver->refactor_u_packed_values != NULL &&
+                  solver->refactor_u_packed_values[k1 + k] != NULL
+                ? solver->refactor_u_packed_values[k1 + k]
+                : lu + uip[k] + kls_klu_units_for_indices(len);
               const UF_long begin = uoff32 != NULL
                 ? (UF_long)uoff32[k1 + k]
                 : (UF_long)solver->i32solve_uoff[k1 + k];
@@ -170359,6 +170619,10 @@ int kls_solve(kls_solver *solver,
               int64_t ldb,
               double *x,
               int64_t ldx) {
+  if (solver != NULL && nrhs != 1 && solver->refactor_l_packed_valid) {
+    kls_sync_authoritative_packed_l_values(solver);
+    kls_sync_authoritative_packed_u_values(solver);
+  }
   if (solver != NULL && solver->diagonal_equiv_active) {
     return kls_solve_diagonal_equiv(solver, 0, nrhs, b, ldb, x, ldx);
   }
@@ -170376,6 +170640,14 @@ int kls_solve_transpose(kls_solver *solver,
                         int64_t ldb,
                         double *x,
                         int64_t ldx) {
+  if (solver != NULL && solver->refactor_l_packed_valid) {
+    /* Transpose executors still consume KLU's native column payload.  This
+       is a lazy compatibility boundary: ordinary recurring normal solves
+       remain wholly packed, while the less common transpose call pays one
+       exact publication sweep before using the established implementation. */
+    kls_sync_authoritative_packed_l_values(solver);
+    kls_sync_authoritative_packed_u_values(solver);
+  }
   if (solver != NULL && solver->diagonal_equiv_active) {
     return kls_solve_diagonal_equiv(solver, 1, nrhs, b, ldb, x, ldx);
   }
