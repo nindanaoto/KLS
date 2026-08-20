@@ -655,6 +655,7 @@ struct kls_solver {
   UF_long i16solve_p_identity_prefix;
   UF_long i16solve_q_identity_prefix;
   int i32solve_state;       /* 0 unbuilt, 1 ready, -1 declined */
+  int i32solve_indices_alias_refactor;
   int plain_solve_choice;   /* measured plain-CSC solve verdict:
                                0 untried, 1 compact i32, -1 vendor packed */
   struct kls_pts_s *pts;    /* subtree partition for the parallel solve */
@@ -27534,8 +27535,10 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->snb_trial_seconds = 0.0;
   /* a later sort would reorder the packed columns under the i32 solve
      streams; they share the sorted-numeric lifecycle */
-  free(solver->i32solve_l);
-  free(solver->i32solve_u);
+  if (!solver->i32solve_indices_alias_refactor) {
+    free(solver->i32solve_l);
+    free(solver->i32solve_u);
+  }
   free(solver->mixed_i16solve_l);
   free(solver->mixed_i16solve_u);
   free(solver->i32solve_loff);
@@ -27598,6 +27601,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
+  solver->i32solve_indices_alias_refactor = 0;
   solver->plain_solve_choice = 0;
   kls_pts_free(solver);
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
@@ -27704,8 +27708,10 @@ static void free_numeric(kls_solver *solver) {
     kls_clear_retained_preconditioner(solver);
   }
   solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
-  free(solver->i32solve_l);
-  free(solver->i32solve_u);
+  if (!solver->i32solve_indices_alias_refactor) {
+    free(solver->i32solve_l);
+    free(solver->i32solve_u);
+  }
   free(solver->mixed_i16solve_l);
   free(solver->mixed_i16solve_u);
   free(solver->i32solve_loff);
@@ -27768,6 +27774,7 @@ static void free_numeric(kls_solver *solver) {
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
+  solver->i32solve_indices_alias_refactor = 0;
   solver->plain_solve_choice = 0;
   kls_pts_free(solver);
   solver->numeric_needs_refinement = 0;
@@ -27839,8 +27846,10 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
      it or later solves walk the old pattern (noncontiguous-gap
      smoke: restart pivots [4,1,2,3,0,5], solve answered -1.739
      where 1.0 belonged) */
-  free(solver->i32solve_l);
-  free(solver->i32solve_u);
+  if (!solver->i32solve_indices_alias_refactor) {
+    free(solver->i32solve_l);
+    free(solver->i32solve_u);
+  }
   free(solver->mixed_i16solve_l);
   free(solver->mixed_i16solve_u);
   free(solver->i32solve_loff);
@@ -27903,6 +27912,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
+  solver->i32solve_indices_alias_refactor = 0;
   solver->plain_solve_choice = 0;
   /* PTS is built from these streams and retains offsets into them. */
   kls_pts_free(solver);
@@ -159892,22 +159902,50 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     (int64_t *)malloc(((size_t)n + 1u) * sizeof(int64_t));
   solver->i32solve_uoff =
     (int64_t *)malloc(((size_t)n + 1u) * sizeof(int64_t));
-  solver->i32solve_l =
-    (int32_t *)malloc((size_t)(numeric->lnz > 0 ? numeric->lnz : 1) *
-                      sizeof(int32_t));
-  solver->i32solve_u =
-    (int32_t *)malloc((size_t)(numeric->unz > 0 ? numeric->unz : 1) *
-                      sizeof(int32_t));
+  int alias_refactor_indices =
+    solver->refactor_l_indices32_storage != NULL &&
+    solver->refactor_u_indices32_storage != NULL &&
+    solver->refactor_l_indices32_count > 0u &&
+    solver->refactor_u_indices32_count > 0u;
+  if (alias_refactor_indices) {
+    UF_long expected_l = 0u;
+    UF_long expected_u = 0u;
+    for (UF_long col = 0u; col < n; ++col) {
+      if (numeric->Llen[col] > UF_long_max - expected_l ||
+          numeric->Ulen[col] > UF_long_max - expected_u) {
+        alias_refactor_indices = 0;
+        break;
+      }
+      expected_l += numeric->Llen[col];
+      expected_u += numeric->Ulen[col];
+    }
+    if (expected_l != solver->refactor_l_indices32_count ||
+        expected_u != solver->refactor_u_indices32_count) {
+      alias_refactor_indices = 0;
+    }
+  }
+  solver->i32solve_l = alias_refactor_indices
+    ? solver->refactor_l_indices32_storage
+    : (int32_t *)malloc((size_t)(numeric->lnz > 0 ? numeric->lnz : 1) *
+                        sizeof(int32_t));
+  solver->i32solve_u = alias_refactor_indices
+    ? solver->refactor_u_indices32_storage
+    : (int32_t *)malloc((size_t)(numeric->unz > 0 ? numeric->unz : 1) *
+                        sizeof(int32_t));
+  solver->i32solve_indices_alias_refactor = alias_refactor_indices;
   if (solver->i32solve_loff == NULL || solver->i32solve_uoff == NULL ||
       solver->i32solve_l == NULL || solver->i32solve_u == NULL) {
-    free(solver->i32solve_l);
-    free(solver->i32solve_u);
+    if (!solver->i32solve_indices_alias_refactor) {
+      free(solver->i32solve_l);
+      free(solver->i32solve_u);
+    }
     free(solver->i32solve_loff);
     free(solver->i32solve_uoff);
     solver->i32solve_l = NULL;
     solver->i32solve_u = NULL;
     solver->i32solve_loff = NULL;
     solver->i32solve_uoff = NULL;
+    solver->i32solve_indices_alias_refactor = 0;
     solver->i32solve_state = -1;
     return 0;
   }
@@ -159948,7 +159986,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   if (trace_i32_prep) {
     i32_layout_done = kls_now_seconds();
   }
-  if (ok) {
+  if (ok && !solver->i32solve_indices_alias_refactor) {
     atomic_int copy_valid;
     atomic_init(&copy_valid, 1);
     const int copy_threads =
@@ -159992,14 +160030,17 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     i32_copy_done = kls_now_seconds();
   }
   if (!ok) {
-    free(solver->i32solve_l);
-    free(solver->i32solve_u);
+    if (!solver->i32solve_indices_alias_refactor) {
+      free(solver->i32solve_l);
+      free(solver->i32solve_u);
+    }
     free(solver->i32solve_loff);
     free(solver->i32solve_uoff);
     solver->i32solve_l = NULL;
     solver->i32solve_u = NULL;
     solver->i32solve_loff = NULL;
     solver->i32solve_uoff = NULL;
+    solver->i32solve_indices_alias_refactor = 0;
     solver->i32solve_state = -1;
     return 0;
   }
