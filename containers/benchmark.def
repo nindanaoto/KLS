@@ -1,0 +1,24 @@
+Bootstrap: docker
+From: ubuntu:26.04
+
+%labels
+    org.opencontainers.image.title KLS comparison build environment
+    org.opencontainers.image.description "Ubuntu 26.04 toolchain for host-bound KLS and solver checkouts"
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        ca-certificates cmake gcc g++ gfortran git make python3 \
+        findutils libgomp1 procps util-linux
+    rm -rf /var/lib/apt/lists/*
+
+%environment
+    export LD_LIBRARY_PATH=/opt/cktso/rocky8_x64_gcc850:/opt/subtreelu/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+    export OPENBLAS_NUM_THREADS=1
+    export OMP_NUM_THREADS=1
+
+%test
+    cmake --version
+    gcc --version
+    gfortran --version

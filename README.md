@@ -2666,6 +2666,45 @@ CKTSO must be licensed correctly according to its own distribution
 requirements, usually by colocating the license file with the selected shared
 library.
 
+### Reproducible cache-domain comparison
+
+The repository includes an Apptainer/Singularity recipe for an Ubuntu 26.04
+toolchain and pins the CKTSO and SubtreeLU revisions used by the comparison
+harnesses while building KLS directly from the current host checkout.  To
+respect the third-party licenses, their distributions are kept as separate,
+ignored host checkouts and bind-mounted read-only into the container; they are
+not repackaged in the SIF.  Follow each solver's license terms.
+
+Build the image and prepare the pinned local solver checkouts after cloning
+KLS:
+
+```sh
+scripts/build_benchmark_container.sh
+```
+
+Inspect the host's visible last-level-cache domains.  The helper selects one
+logical CPU from each physical core, avoiding SMT siblings:
+
+```sh
+python3 scripts/cache_domain_cpus.py
+```
+
+Run the full circuit manifest on the smallest LLC domain (the ordinary 32 MiB
+CCD on an asymmetric Ryzen X3D processor):
+
+```sh
+scripts/run_cache_domain_benchmark.sh --domain smallest --threads 8
+```
+
+Use `--domain largest` for the matching V-Cache run.  Every solver inherits the
+same outer `taskset`, and KLS's internal affinity policy cannot escape it.  The
+wrapper bind-mounts the current KLS checkout, matrices, manifest, and output
+directory; it builds KLS and both comparison harnesses inside the pinned
+environment, verifies every refactor, and writes JSONL plus an H100 summary
+under `build/cache-domain-smallest` by default.  Pass `--manifest`,
+`--matrix-dir`, `--passes`, or `--output-dir` to run another reproducible
+campaign.
+
 An optional Trilinos KLU2 comparison tool can be built against a local Trilinos
 checkout. It calls the Amesos2 KLU2 headers directly and emits the same
 SPICE-cycle JSON metric:
