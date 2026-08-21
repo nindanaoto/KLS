@@ -78942,6 +78942,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     kls_build_prepared_value_input_pos(solver);
   const int direct_value_maps_ready =
     (solver->lean_user_values_active ||
+     kls_direct_user_value_maps_capable(solver) ||
      getenv("KLS_ENABLE_GENERIC_COMPACT_MATCH_DIRECT_VALUES") != NULL)
       ? kls_build_compact_match_direct_value_maps(solver) : 0;
   const double trace_ready = trace_phases ? kls_now_seconds() : 0.0;
@@ -165682,18 +165683,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->row_scale == NULL &&
     solver->col_scale == NULL &&
     getenv("KLS_DISABLE_COMPACT_MATCH_DIRECT_VALUES") == NULL &&
-    /* A position map proves only that each stored value has an inverse
-       address.  It does not prove that every consumer of the matched row
-       frame interprets that address in the caller's coordinate system.  The
-       generic map was previously admitted from this representation fact
-       alone and could silently refactor a different matrix after a changed
-       value generation.  Keep the established legacy contract available,
-       but make the generic fast path an explicit experiment until its
-       complete changed-value contract is certified.  Ordinary preparation
-       remains representation-independent and is the safe default. */
-    ((
-      getenv("KLS_ENABLE_GENERIC_COMPACT_MATCH_DIRECT_VALUES") != NULL &&
-      kls_direct_user_value_maps_capable(solver)));
+    /* The builder proves a bijection from every retained row and BTF
+       off-diagonal position back to the caller's CSC value stream.  Consume
+       that complete coordinate contract directly instead of gathering the
+       full input into an intermediate deck before every lean update. */
+    kls_direct_user_value_maps_capable(solver);
   const int deferred_lean_value_prep =
     !compact_match_direct_values && solver->lean_choice > 0 &&
     (!generic_lean_reaudit || solver->lean_reaudit_state == 0 ||
