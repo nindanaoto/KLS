@@ -15,7 +15,16 @@ fi
 
 mkdir -p "$(dirname "$IMAGE")" "$VENDOR_DIR"
 echo "Building the Ubuntu 26.04 benchmark toolchain image." >&2
-"$ENGINE" build --fakeroot --force "$IMAGE" "$ROOT/containers/benchmark.def"
+if ! "$ENGINE" build --fakeroot --force "$IMAGE" "$ROOT/containers/benchmark.def"; then
+  # Some container hosts permit execution with a privileged Apptainer engine
+  # but prohibit the unprivileged mount namespace that --fakeroot requires.
+  # Keep the normal rootless route first, then use explicitly available sudo
+  # rather than making the reproducible build depend on manual retry steps.
+  if ! sudo -n "$ENGINE" build --force "$IMAGE" "$ROOT/containers/benchmark.def"; then
+    echo "Container build failed with --fakeroot and passwordless sudo." >&2
+    exit 1
+  fi
+fi
 
 if [ ! -d "$VENDOR_DIR/cktso/.git" ]; then
   git clone https://github.com/chenxm1986/cktso.git "$VENDOR_DIR/cktso"

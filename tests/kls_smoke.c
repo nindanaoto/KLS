@@ -17597,6 +17597,112 @@ static int test_partial_btf_refactor(void) {
   return ok;
 }
 
+/* Checker-mode coverage for the experimental partial-BTF path.  The fast
+   solver and a second solver forced through the ordinary refactor see each
+   generated numeric and RHS; their complete solutions must agree. */
+static int test_partial_btf_shadow_checker(void) {
+  const int32_t n = 6;
+  const int32_t ap[7] = {0, 2, 4, 7, 9, 12, 15};
+  const int32_t ai[15] = {
+    0, 1, 0, 1, 0, 2, 3, 2, 3, 1, 4, 5, 3, 4, 5
+  };
+  double ax[15] = {
+    4.0, 1.0, 1.0, 3.0, 0.5, 5.0, 1.0, 1.0, 4.0,
+    -0.25, 6.0, 1.0, 0.75, 1.0, 5.0
+  };
+  const double expected[6] = {1.0, -2.0, 0.5, 3.0, -1.0, 2.0};
+  const int32_t changed_positions[] = {4, 5, 10, 0, 12, 8};
+  const char *saved_value = getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR");
+  char *saved = saved_value != NULL ? strdup(saved_value) : NULL;
+  const int had_saved = saved_value != NULL;
+  kls_solver *partial = NULL;
+  kls_solver *full = NULL;
+  kls_options options;
+  double b[6];
+  double xp[6];
+  double xf[6];
+  int ok = 1;
+
+  if (had_saved && saved == NULL) return 0;
+  if (setenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR", "1", 1) != 0) {
+    perror("setenv partial BTF shadow checker");
+    free(saved);
+    return 0;
+  }
+  kls_default_options(&options);
+  options.backend = KLS_BACKEND_SERIAL;
+  options.threads = 1;
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_NORMAL;
+  options.scale = -1;
+  options.use_btf = 1;
+  options.static_pivoting = 0;
+  if (!require_ok(kls_create(&partial), "create partial BTF shadow")) ok = 0;
+  if (ok && !require_ok(kls_create(&full), "create full BTF shadow")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(partial, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze partial BTF shadow")) ok = 0;
+  if (ok && !require_ok(kls_analyze_csc(full, KLS_INDEX_INT32, n, ap, ai,
+                                        0, &options),
+                        "analyze full BTF shadow")) ok = 0;
+  if (ok && !require_ok(kls_factor(partial, ax),
+                        "factor partial BTF shadow")) ok = 0;
+  if (ok && !require_ok(kls_factor(full, ax), "factor full BTF shadow")) ok = 0;
+
+  for (size_t update = 0; ok && update < sizeof(changed_positions) /
+                                      sizeof(changed_positions[0]); ++update) {
+    ax[changed_positions[update]] *= 1.0 + 0.002 * (double)(update + 1u);
+    memset(b, 0, sizeof(b));
+    for (int col = 0; col < n; ++col) {
+      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
+        b[ai[p]] += ax[p] * expected[col];
+      }
+    }
+    if (!require_ok(kls_refactor(partial, ax),
+                    "partial BTF shadow refresh")) {
+      ok = 0;
+      break;
+    }
+    kls_stats stats;
+    stats.struct_size = sizeof(stats);
+    if (!require_ok(kls_get_stats(partial, &stats),
+                    "partial BTF shadow stats") ||
+        stats.last_refactor_path != KLS_REFACTOR_PATH_PARTIAL_BTF) {
+      fprintf(stderr, "partial BTF shadow did not select partial path\n");
+      ok = 0;
+      break;
+    }
+    if (unsetenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") != 0 ||
+        !require_ok(kls_refactor(full, ax), "full BTF shadow refresh") ||
+        setenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR", "1", 1) != 0) {
+      perror("toggle partial BTF shadow checker");
+      ok = 0;
+      break;
+    }
+    if (!require_ok(kls_solve(partial, 1, b, 0, xp, 0),
+                    "solve partial BTF shadow") ||
+        !require_ok(kls_solve(full, 1, b, 0, xf, 0),
+                    "solve full BTF shadow")) {
+      ok = 0;
+      break;
+    }
+    for (int i = 0; i < n; ++i) {
+      if (!close_enough(xp[i], xf[i]) || !close_enough(xp[i], expected[i])) {
+        fprintf(stderr, "partial BTF shadow mismatch update %zu row %d\n",
+                update, i);
+        ok = 0;
+        break;
+      }
+    }
+  }
+  kls_destroy(partial);
+  kls_destroy(full);
+  if (!restore_env_value("KLS_ENABLE_PARTIAL_BTF_REFACTOR", had_saved,
+                         saved != NULL ? saved : "")) ok = 0;
+  free(saved);
+  return ok;
+}
+
 static int test_diagonal_equivalent_refactor(void) {
   const int32_t n = 3;
   const int32_t ap[4] = {0, 3, 6, 9};
@@ -18224,6 +18330,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_partial_btf_refactor()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_partial_btf_shadow_checker()) {
     return EXIT_FAILURE;
   }
   if (!test_diagonal_equivalent_refactor()) {

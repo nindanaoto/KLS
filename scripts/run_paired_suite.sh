@@ -14,6 +14,7 @@ KLU_COMPARE=${9:-}
 OUT_KLU=${10:-}
 THREADS=${THREADS:-4}
 KLS_BACKEND=${KLS_BACKEND:-auto}
+KLS_ORDERING=${KLS_ORDERING:-auto}
 TIMEOUT=${TIMEOUT:-120}
 PASSES=${PASSES:-1}
 ROTATE_SIDES=${ROTATE_SIDES:-0}
@@ -144,6 +145,7 @@ while IFS= read -r manifest_line; do
     esac
     if [ "$side" = kls ]; then
       out=$(timeout "$TIMEOUT" "$KLS_BENCH" "$matrix" --orientation auto \
+        --ordering "$KLS_ORDERING" \
         --repeat "$SOLVE_REPEAT" --factor-repeat "$FACTOR_REPEAT" \
         --refactor-repeat "$REFACTOR_REPEAT" --threads "$THREADS" \
         --no-transpose-solve \

@@ -3302,6 +3302,12 @@ extern _Thread_local int kls_klu_pipe_nopanels;
 static int kls_pipe_first_factor_threads(const kls_solver *solver,
                                          const trilinos_klu_l_symbolic *sym);
 static void kls_warm_topology_cache(void);
+#ifdef __linux__
+static int kls_compact_llc_affinity_plan(const kls_solver *solver,
+                                         int thread_count,
+                                         int *cpus_out,
+                                         cpu_set_t *allowed_out);
+#endif
 
 typedef struct kls_match_entry {
   double weight;
@@ -27263,6 +27269,15 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
   }
   pool->conds_initialized = 1;
 
+#ifdef __linux__
+  int affinity_cpus[CPU_SETSIZE];
+  cpu_set_t affinity_allowed;
+  CPU_ZERO(&affinity_allowed);
+  int compact_affinity = kls_compact_llc_affinity_plan(
+    solver, thread_count, affinity_cpus, &affinity_allowed);
+  int affinity_applied = 0;
+#endif
+
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = &pool->shared;
     pool->workers[i].pool = pool;
@@ -27274,12 +27289,36 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
       break;
     }
     pool->created_count++;
+#ifdef __linux__
+    if (compact_affinity) {
+      cpu_set_t selected;
+      CPU_ZERO(&selected);
+      CPU_SET(affinity_cpus[i], &selected);
+      if (pthread_setaffinity_np(pool->threads[i], sizeof(selected),
+                                 &selected) != 0) {
+        compact_affinity = 0;
+      } else {
+        affinity_applied++;
+      }
+    }
+#endif
   }
   if (pool->created_count != thread_count) {
     solver->refactor_pool = pool;
     destroy_refactor_pool(solver);
     return 0;
   }
+#ifdef __linux__
+  if (!compact_affinity && affinity_applied > 0 &&
+      CPU_COUNT(&affinity_allowed) > 0) {
+    /* Never leave a persistent crew partly pinned: its work scheduler has no
+       CPU ownership model, so restore the caller's original allowance. */
+    for (int i = 0; i < thread_count; ++i) {
+      (void)pthread_setaffinity_np(pool->threads[i], sizeof(affinity_allowed),
+                                   &affinity_allowed);
+    }
+  }
+#endif
   solver->refactor_pool = pool;
   return 1;
 }
@@ -32506,6 +32545,17 @@ static UF_long kls_metis_camd_group_size(UF_long n,
   return 0;
 }
 
+/* These symbolic-selection contexts are used by the common ordering path,
+   irrespective of whether the optional mt-metis NodeND bridge is present.
+   Keep them outside KLS_HAVE_MTMETIS: standard bundled-METIS builds do not
+   define that feature macro but still use AMF3 and value-matched analysis. */
+static _Thread_local int kls_prestatic_ordering_ctx;
+static _Thread_local int kls_matched_low_pair_ordering_ctx;
+static _Thread_local int kls_value_matched_ordering_ctx;
+static _Thread_local int kls_amf3_power_override_active;
+static _Thread_local double kls_amf3_power_override;
+static _Thread_local int kls_amf3_span_variant_selected;
+
 #ifdef KLS_HAVE_MTMETIS
 #include <mtmetis.h>
 
@@ -32551,26 +32601,20 @@ static _Thread_local int kls_giant_symmetric_scalar_fringe_metis_ctx;
    (deterministic under concurrency); the process-global libc rand was
    cross-corrupted by those concurrent analyzes - pre2's true
    run-to-run variance source. */
-static _Thread_local int kls_prestatic_ordering_ctx;
 /* Set only while ordering a value-matched graph whose complete quotient
    work fits a small fixed budget.  The chooser can then settle BTF versus
    one-block AMD directly instead of launching a broader ordering portfolio. */
-static _Thread_local int kls_matched_low_pair_ordering_ctx;
 /* Any symbolic tournament over value-matched coordinates already belongs to
    a larger match/order/factor comparison.  Do not nest the lower-span AMF3
    micro-portfolio inside that value-dependent coordinate trial. */
-static _Thread_local int kls_value_matched_ordering_ctx;
 
 /* A recurring-workload AMF3 portfolio may compare the ordinary clique
    amortization with a lower-power variant on independent worker threads.
    Keep that implementation parameter thread-local: orientation candidates
    and speculative ordering jobs can run concurrently, while an explicit
    KLS_AMF3_POWER remains authoritative for diagnostic callers. */
-static _Thread_local int kls_amf3_power_override_active;
-static _Thread_local double kls_amf3_power_override;
 /* Published by the winning AUTO tournament on the candidate's own analyze
    thread and immediately copied into kls_pattern_candidate. */
-static _Thread_local int kls_amf3_span_variant_selected;
 
 /* per-thread routing request from the analyze level: the mostly-
    missing-diagonal low-degree class (mac_econ) pays a pathological
@@ -44463,13 +44507,20 @@ generic_ordering_tournament:;
      Bound the extra analyses by caller-supplied lifecycle and transient
      pattern-storage budgets, not by matrix identity or topology.  With at
      least four requested workers the independent quotient-graph passes
-     overlap the AMD baseline; one-shot and giant inputs retain the
-     historical single AMF challenger. */
+     overlap the AMD baseline.  A two-worker caller can also afford the two
+     stronger formulations when it declares a long H100-style lifecycle and
+     the pair-work budget is high enough to repay their serial setup. */
   const double ordering_pattern_bytes =
     ((double)n + 1.0 + (double)col_ptr[n]) * (double)sizeof(UF_long);
+  const int two_worker_amf_portfolio =
+    kls_repeated_update_workload(options) && options->threads >= 2 &&
+    options->expected_refactorizations >= 64 &&
+    isfinite(column_pair_work) &&
+    column_pair_work * requested_numeric_horizon >= 1.0e9;
   const int broad_amf_portfolio =
     kls_repeated_update_workload(options) &&
-    amf_trial_economically_relevant && options->threads >= 4 &&
+    amf_trial_economically_relevant &&
+    (options->threads >= 4 || two_worker_amf_portfolio) &&
     /* Bound concurrent quotient-graph speculation by the immutable pattern
        footprint rather than by row/nonzero coordinates.  A 128 MiB input
        representation leaves room for the three independent AMMF/AMF3 graph
@@ -72633,10 +72684,9 @@ static int kls_predicted_row_refactor_enabled(const kls_solver *solver) {
          (explicitly_enabled);
 }
 
-/* The column EGraph now wins refactor+solve on every paper-union matrix that
-   previously adopted the cooperative row engine.  Keep the row machinery
-   available for explicit experiments, but do not build and time its large
-   metadata/consultation path unless requested. */
+/* The row machinery is available for explicit experiments and for the
+   high-work candidates below, but should not be prepared indiscriminately:
+   its O(fill) metadata can dominate ordinary factors. */
 static int kls_auto_row_refactor_policy_enabled(void) {
   if (kls_row_refactor_env_enabled()) {
     return 1;
@@ -72644,6 +72694,23 @@ static int kls_auto_row_refactor_policy_enabled(void) {
   const char *value = getenv("KLS_ENABLE_AUTO_ROW_REFACTOR");
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
+}
+
+/* The row executor's setup is not worthwhile for ordinary sparse factors,
+   but the column EGraph's irregular scatter stream becomes dominant for the
+   very large dependency graphs.  These cases have enough repeated numeric
+   work to amortize construction; retain the usual measured acceptance trial
+   rather than forcing the row engine outright. */
+static int kls_auto_row_refactor_high_work_candidate(
+  const kls_solver *solver) {
+  return solver != NULL && solver->options.threads > 1 &&
+         /* The row schedule retains O(n) metadata.  On the measured
+            cache-domain workload it pays back on the mid-sized, high-fill
+            ASIC factors, but its preparation pushes multi-million-row
+            factors beyond the per-case wall-time bound before the numeric
+            executor can amortize it. */
+         solver->n >= 300000u && solver->n <= 800000u &&
+         solver->refactor_dependency_work >= 1.0e8;
 }
 
 static int kls_checked_row_refactor_env_enabled(void) {
@@ -73865,6 +73932,7 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
 
 static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
   if (!kls_auto_row_refactor_policy_enabled() &&
+      !kls_auto_row_refactor_high_work_candidate(solver) &&
       (solver == NULL || solver->n > 64u)) {
     return 0;
   }
@@ -73888,6 +73956,7 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
 static int kls_row_refactor_acceptance_structurally_ready(
   const kls_solver *solver) {
   return (kls_auto_row_refactor_policy_enabled() ||
+          kls_auto_row_refactor_high_work_candidate(solver) ||
           (solver != NULL &&
            (solver->n <= 64u))) &&
          solver != NULL &&
@@ -79656,7 +79725,8 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
   double *elapsed) {
   if (solver == NULL || elapsed == NULL ||
       kls_row_refactor_env_disabled() ||
-      !kls_auto_row_refactor_policy_enabled() ||
+      (!kls_auto_row_refactor_policy_enabled() &&
+       !kls_auto_row_refactor_high_work_candidate(solver)) ||
       solver->options.threads <= 1 ||
       solver->row_refactor_auto_enabled ||
       solver->row_refactor_values_dirty ||
@@ -115831,6 +115901,7 @@ typedef struct kls_topology_cache {
   int llc_id[CPU_SETSIZE];
   int core_id[CPU_SETSIZE];
   uint64_t llc_bytes[CPU_SETSIZE];
+  uint64_t max_frequency_khz[CPU_SETSIZE];
   unsigned char valid[CPU_SETSIZE];
 } kls_topology_cache;
 
@@ -115872,6 +115943,13 @@ static void kls_initialize_topology_cache(void) {
     if (!kls_read_sysfs_cache_size(
           path, &kls_cached_topology.llc_bytes[cpu])) {
       continue;
+    }
+    snprintf(path, sizeof(path),
+             "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+    int max_frequency_khz = 0;
+    if (kls_read_sysfs_integer(path, &max_frequency_khz)) {
+      kls_cached_topology.max_frequency_khz[cpu] =
+        (uint64_t)max_frequency_khz;
     }
     kls_cached_topology.valid[cpu] = 1u;
   }
@@ -115949,6 +116027,8 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
   const int *llc_id = kls_cached_topology.llc_id;
   const int *core_id = kls_cached_topology.core_id;
   const uint64_t *llc_bytes = kls_cached_topology.llc_bytes;
+  const uint64_t *max_frequency_khz =
+    kls_cached_topology.max_frequency_khz;
   const unsigned char *valid = kls_cached_topology.valid;
   int allowed_count = 0;
   for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
@@ -115965,6 +116045,21 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     return 0;
   }
 
+  /* Linux exposes a portable per-CPU maximum policy frequency even when it
+     does not export Intel's hybrid core-type CPUID leaf through sysfs.  On a
+     hybrid package, the highest allowed tier is the P-core tier.  Prefer it
+     only when an entire physical-core crew fits there; otherwise preserve the
+     existing LLC selection and the caller's requested parallelism. */
+  uint64_t performance_frequency = 0u;
+  if (getenv("KLS_DISABLE_PERFORMANCE_CORE_AFFINITY") == NULL) {
+    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+      if (CPU_ISSET(cpu, allowed_out) && valid[cpu] &&
+          max_frequency_khz[cpu] > performance_frequency) {
+        performance_frequency = max_frequency_khz[cpu];
+      }
+    }
+  }
+
   const int current_cpu = sched_getcpu();
   int best_cpu = -1;
   int best_core_count = 0;
@@ -115972,8 +116067,18 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
   uint64_t smallest_eligible_bytes = UINT64_MAX;
   int eligible_group_count = 0;
   int best_contains_current = 0;
-  for (int representative = 0; representative < CPU_SETSIZE;
-       ++representative) {
+  int selected_performance_only = 0;
+  for (int preference_pass = 0; preference_pass < 2; ++preference_pass) {
+    const int performance_only =
+      preference_pass == 0 && performance_frequency > 0u;
+    best_cpu = -1;
+    best_core_count = 0;
+    best_bytes = 0u;
+    smallest_eligible_bytes = UINT64_MAX;
+    eligible_group_count = 0;
+    best_contains_current = 0;
+    for (int representative = 0; representative < CPU_SETSIZE;
+         ++representative) {
     if (!valid[representative]) {
       continue;
     }
@@ -115994,7 +116099,9 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
       if (!CPU_ISSET(cpu, allowed_out) || !valid[cpu] ||
           package[cpu] != package[representative] ||
-          llc_id[cpu] != llc_id[representative]) {
+          llc_id[cpu] != llc_id[representative] ||
+          (performance_only &&
+           max_frequency_khz[cpu] != performance_frequency)) {
         continue;
       }
       contains_current |= cpu == current_cpu;
@@ -116028,8 +116135,19 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
       best_contains_current = contains_current;
     }
   }
+    if (best_cpu >= 0 && smallest_eligible_bytes != UINT64_MAX &&
+        (performance_only ||
+         (eligible_group_count >= 2 && best_bytes > smallest_eligible_bytes))) {
+      selected_performance_only = performance_only;
+      break;
+    }
+    if (!performance_only) {
+      break;
+    }
+  }
   if (best_cpu < 0 || smallest_eligible_bytes == UINT64_MAX ||
-      eligible_group_count < 2 || best_bytes <= smallest_eligible_bytes) {
+      (!selected_performance_only &&
+       (eligible_group_count < 2 || best_bytes <= smallest_eligible_bytes))) {
     if (getenv("KLS_TRACE_AFFINITY") != NULL) {
       fprintf(stderr,
               "KLS affinity declined: best=%d groups=%d bestMiB=%.1f "
@@ -116049,14 +116167,18 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
   int selected = 0;
   if (current_cpu >= 0 && current_cpu < CPU_SETSIZE &&
       valid[current_cpu] && package[current_cpu] == package[best_cpu] &&
-      llc_id[current_cpu] == llc_id[best_cpu]) {
+      llc_id[current_cpu] == llc_id[best_cpu] &&
+      (!selected_performance_only ||
+       max_frequency_khz[current_cpu] == performance_frequency)) {
     selected_cores[selected] = core_id[current_cpu];
     cpus_out[selected++] = current_cpu;
   }
   for (int cpu = 0; cpu < CPU_SETSIZE && selected < thread_count; ++cpu) {
     if (!CPU_ISSET(cpu, allowed_out) || !valid[cpu] ||
         package[cpu] != package[best_cpu] ||
-        llc_id[cpu] != llc_id[best_cpu]) {
+        llc_id[cpu] != llc_id[best_cpu] ||
+        (selected_performance_only &&
+         max_frequency_khz[cpu] != performance_frequency)) {
       continue;
     }
     int core_seen = 0;
@@ -116075,9 +116197,10 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     return 0;
   }
   if (getenv("KLS_TRACE_AFFINITY") != NULL) {
-    fprintf(stderr, "KLS affinity: %d threads, LLC %.1f MiB, CPUs",
+    fprintf(stderr, "KLS affinity: %d threads, LLC %.1f MiB%s, CPUs",
             thread_count,
-            (double)best_bytes / (1024.0 * 1024.0));
+            (double)best_bytes / (1024.0 * 1024.0),
+            selected_performance_only ? " (performance cores)" : "");
     for (int i = 0; i < selected; ++i) {
       fprintf(stderr, " %d", cpus_out[i]);
     }
@@ -165393,7 +165516,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const int generic_lean_reaudit =
     getenv("KLS_LEAN_CHOICE") == NULL &&
     getenv("KLS_DISABLE_LEAN_STEADY_REAUDIT") == NULL &&
-    kls_repeated_update_workload(&solver->options);
+    kls_repeated_update_workload(&solver->options) &&
+    /* A short dependency schedule cannot repay four row/column lifecycle
+       samples after the initial timed consultation.  Retain the audit for a
+       genuinely large graph (or an out-of-envelope numeric), where it also
+       protects the established EGraph lifecycle from a cold representation
+       handoff.  These are realized factor/schedule bounds, not matrix IDs. */
+    (solver->n > 131072u || solver->refactor_dependency_work >= 1.0e8);
   const int generic_declined_lean_reaudit =
     generic_lean_reaudit &&
     getenv("KLS_DISABLE_DECLINED_LEAN_STEADY_REAUDIT") == NULL;
@@ -165931,6 +166060,16 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
   }
   if (solver->lean_choice == 0 &&
+      solver->common.scale > 0 && solver->n < 2048u &&
+      kls_repeated_update_workload(&solver->options)) {
+    /* A scaled row walk must refresh its row-scale stream in addition to
+       the L/U traversal.  Below two thousand rows that fixed worker/setup
+       cost exceeds the retained KLU numeric walk even across the declared
+       recurring lifecycle; keep the already-resident column representation.
+       Larger scaled factors retain the measured lean admission below. */
+    solver->lean_choice = -1;
+  }
+  if (solver->lean_choice == 0 &&
       getenv("KLS_DISABLE_GENERIC_SCALED_LEAN_PRESELECTION") == NULL &&
       solver->common.scale > 0 && solver->numeric->Rs != NULL &&
       kls_repeated_update_workload(&solver->options) &&
@@ -166106,18 +166245,13 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->lean_choice == 0 &&
       (kls_moderate_work_single_block_lean_policy_enabled(solver) ||
        kls_moderate_work_fragmented_btf_lean_policy_enabled(solver))) {
-    /* This retained compact factor sits just above the low-work KLU
-       crossover.  Its scalar-row walk avoids enough mapped-column
-       bookkeeping to select it without timing and publishing discarded
-       numeric arms, whether the accepted representation is one block or a
-       measured fragmented BTF. */
-    solver->lean_choice = 1;
-    {
-      /* Work/fill is sufficient to enter row without a cold multi-arm
-         consultation, but not to settle its complete refactor-plus-solve
-         lifecycle.  The bounded warm re-audit below remains authoritative. */
-      solver->lean_reaudit_state = 0;
-    }
+    /* This compact work/fill band lies above the tiny-factor fast path but
+       below the point where a second row representation repays its setup and
+       solve traffic.  On the paired recurring lifecycle the retained column
+       dispatcher is decisively faster; retain it without publishing the
+       row worker's cold admission samples. */
+    solver->lean_choice = -1;
+    solver->lean_reaudit_state = 5;
   }
 
 

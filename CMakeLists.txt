@@ -14,6 +14,8 @@ if(KLS_NATIVE_ARCH)
   endif()
 endif()
 
+option(KLS_ENABLE_HOSTED_SIMD "Enable compiler SIMD pragmas and FMA contraction in KLS kernels" ON)
+
 option(KLS_BUILD_TESTS "Build KLS tests" ON)
 option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
 option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
@@ -511,6 +513,10 @@ endif()
 
 target_compile_options(kls PRIVATE
   $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+if(KLS_ENABLE_HOSTED_SIMD)
+  target_compile_options(kls PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-fopenmp-simd -ffp-contract=fast>)
+endif()
 
 if(KLS_BUILD_BENCHMARKS)
   add_executable(kls_bench
