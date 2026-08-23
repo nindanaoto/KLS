@@ -26339,7 +26339,17 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
         double *lx = NULL;
         UF_long lcol_len = 0;
         kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
-        if (native_short_l || solver->refactor_l_indices32 == NULL) {
+        if (lcol_len <= 3u) {
+          if (lcol_len > 0u) {
+            x[li[0]] -= lx[0] * ujk;
+          }
+          if (lcol_len > 1u) {
+            x[li[1]] -= lx[1] * ujk;
+          }
+          if (lcol_len > 2u) {
+            x[li[2]] -= lx[2] * ujk;
+          }
+        } else if (native_short_l || solver->refactor_l_indices32 == NULL) {
           kls_scatter_subtract(x, li, lx, lcol_len, ujk);
         } else {
           kls_scatter_subtract_refactor_l(solver, x, dep_global, li, lx,
@@ -55785,9 +55795,16 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
   if (solver != NULL && !solver->compact_map32_probe_active &&
       getenv("KLS_ENABLE_SETTLED_COMPACT_MAP32_REFACTOR") == NULL &&
       (kls_moderate_work_single_block_lean_policy_enabled(solver) ||
-       kls_moderate_work_fragmented_btf_lean_policy_enabled(solver))) {
-    /* The selected lean engine consumes the row-ordered 64-bit map directly;
-       neither its fused updates nor the native column solve reads this copy. */
+       ((solver->lean_choice > 0 || solver->lean_probe_arm > 0) &&
+        kls_moderate_work_fragmented_btf_lean_policy_enabled(solver)))) {
+    /* A selected (or currently probed) lean engine consumes the row-ordered
+       64-bit map directly; neither its fused updates nor the native column
+       solve reads this copy.  The moderate single-block compact walk showed
+       no recurring benefit over its native stream, so it also keeps avoiding
+       the duplicate.  For fragmented BTF, however, structural eligibility
+       alone is insufficient: once the timed lean trial rejects that engine,
+       the ordinary mapped incumbent benefits from this compact stream on
+       every later update. */
     return 1;
   }
   if (solver == NULL || solver->refactor_row_idx == NULL ||
