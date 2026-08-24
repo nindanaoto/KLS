@@ -770,9 +770,11 @@ struct kls_solver {
   int eg_pair_pending;  /* probe refactor out: 1 pair arm, 2 quad arm */
   double eg_fuse_min[2];  /* probe minima: [0] pair, [1] quad */
   int eg_stream_choice;  /* indexed-stream kernel trial: 0 undecided,
-                            1 scalar/wide-tail bundle, -1 standard */
-  int eg_stream_pending; /* probe refactor out: 1 standard, 2 stream bundle */
-  double eg_stream_min[2]; /* probe times: [0] standard, [1] stream bundle */
+                            1 scalar/wide-tail, 2 vector/wide-tail,
+                            -1 vector/standard-tail */
+  int eg_stream_pending; /* probe refactor out: 1 standard, 2 scalar/wide,
+                            3 vector/wide */
+  double eg_stream_min[3]; /* probe times in the order above */
   int eg_separator_choice;  /* separator-private dispatch trial: 0 undecided,
                                1 private domains, -1 ordinary level slices */
   int eg_separator_pending; /* probe out: 1 ordinary, 2 private domains */
@@ -118686,7 +118688,8 @@ static int kls_egraph_cluster_premark_dispatch(
      new arm before it can be adopted. */
   if (solver->eg_premark_samples[0] == 0 &&
       solver->eg_premark_samples[1] == 0) {
-    const int stream_side = solver->eg_stream_choice > 0 ? 1 : 0;
+    const int stream_side = solver->eg_stream_choice < 0
+      ? 0 : solver->eg_stream_choice;
     const double ordinary = solver->eg_stream_min[stream_side];
     if (ordinary > 0.0) {
       solver->eg_premark_samples[0] = 2;
@@ -118812,25 +118815,46 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
     if (solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
       return;
     }
+    if (probe < 1 || probe > 3) {
+      return;
+    }
     solver->eg_stream_min[probe - 1] = seconds;
     if (probe == 1) {
       return;
     }
+    if (probe == 2 && solver->refactor_l_index32_enabled == 0) {
+      /* Without a compact indexed stream the two wide-tail arms are the
+         same implementation; do not spend a numeric generation measuring
+         an exact duplicate. */
+      solver->eg_stream_min[2] = seconds;
+    } else if (probe < 3) {
+      return;
+    }
     const double standard = solver->eg_stream_min[0];
-    const double stream = solver->eg_stream_min[1];
-    /* Both arms implement the same retained-numeric update and already pay
-       one full refactor sample apiece.  Keep a small guard for timer noise,
-       but do not discard repeatable low-single-digit wins from an equivalent
-       kernel merely because they miss the coarse 5% policy used for changes
-       in representation. */
-    solver->eg_stream_choice =
-      standard > 0.0 && stream > 0.0 && stream < 0.99 * standard ? 1 : -1;
+    const double scalar_wide = solver->eg_stream_min[1];
+    const double vector_wide = solver->eg_stream_min[2];
+    /* These equivalent arms isolate tail tiling from indexed scatter.  The
+       old bundled comparison could not retain wide producer tiles on a
+       factor whose irregular destination stream favors vector scatter. */
+    solver->eg_stream_choice = -1;
+    double best = standard;
+    if (standard > 0.0 && scalar_wide > 0.0 &&
+        scalar_wide < 0.99 * standard) {
+      solver->eg_stream_choice = 1;
+      best = scalar_wide;
+    }
+    if (standard > 0.0 && vector_wide > 0.0 &&
+        vector_wide < 0.99 * standard &&
+        (solver->eg_stream_choice < 0 || vector_wide < best)) {
+      solver->eg_stream_choice = 2;
+    }
     if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
       fprintf(stderr,
               "KLS egraph stream-kernel probe: %s (standard %.3f,"
-              " scalar/wide-tail %.3f ms)\n",
-              solver->eg_stream_choice > 0 ? "SCALAR/WIDE" : "standard",
-              1e3 * standard, 1e3 * stream);
+              " scalar/wide-tail %.3f, vector/wide-tail %.3f ms)\n",
+              solver->eg_stream_choice == 1 ? "SCALAR/WIDE" :
+              solver->eg_stream_choice == 2 ? "VECTOR/WIDE" : "standard",
+              1e3 * standard, 1e3 * scalar_wide, 1e3 * vector_wide);
     }
     return;
   }
@@ -119016,14 +119040,18 @@ static void kls_egraph_select_stream_kernels(kls_solver *solver,
     return;
   }
 
-  int use_stream_bundle = solver->eg_stream_choice > 0;
+  int use_scalar_scatter = solver->eg_stream_choice == 1;
+  int use_wide_tail = solver->eg_stream_choice > 0;
   if (solver->eg_stream_choice == 0) {
-    const int probe = solver->eg_stream_min[0] > 0.0 ? 2 : 1;
+    const int probe = solver->eg_stream_min[0] <= 0.0 ? 1
+      : solver->eg_stream_min[1] <= 0.0 ? 2 : 3;
     solver->eg_stream_pending = probe;
-    use_stream_bundle = probe == 2;
+    use_scalar_scatter = probe == 2;
+    use_wide_tail = probe >= 2;
   }
-  if (use_stream_bundle) {
-    solver->scalar_refactor_scatter = indexed_scatter_applicable;
+  if (use_wide_tail) {
+    solver->scalar_refactor_scatter =
+      use_scalar_scatter && indexed_scatter_applicable;
     solver->snode_tail_chunk128 = wide_tail_applicable;
     solver->snode_tail_chunk144 = wide_tail_applicable;
     solver->snode_tail_masked_remainder = wide_tail_applicable;
