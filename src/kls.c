@@ -158114,10 +158114,19 @@ static void kls_pts_try_build(kls_solver *solver) {
      min-parent shortcut cannot always embed.  Streams must still be
      strictly ascending block-local indices. */
   int32_t *aroot = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+  const int64_t lnz_total = loff[nk] - loff[0];
+  int64_t *lrow_ptr = (int64_t *)malloc(
+    ((size_t)nk + 1u) * sizeof(*lrow_ptr));
+  int32_t *lrow_col = (int32_t *)malloc(
+    (size_t)(lnz_total > 0 ? lnz_total : 1) * sizeof(*lrow_col));
   int streams_ordered = 1;
-  ok = ok && aroot != NULL;
+  ok = ok && aroot != NULL && lrow_ptr != NULL && lrow_col != NULL;
   if (ok) {
-    /* validate stream order and count L rows for the row grouping */
+    /* Validate the streams while collecting the two statistics needed by
+       the forest.  Folding the L row histogram and per-column refactor work
+       into this compulsory pass avoids two more complete factor-stream
+       walks before the first numeric update. */
+    memset(lrow_ptr, 0, ((size_t)nk + 1u) * sizeof(*lrow_ptr));
     for (UF_long k = 0; ok && k < nk; ++k) {
       const int32_t *li = i32l + loff[k];
       const UF_long ll = llen[k];
@@ -158131,9 +158140,11 @@ static void kls_pts_try_build(kls_solver *solver) {
         }
         if (i <= prev) streams_ordered = 0;
         prev = i;
+        lrow_ptr[(UF_long)i + 1u]++;
       }
       const int32_t *ui = i32u + uoff[k];
       const UF_long ul = ulen[k];
+      double flops = 0.0;
       prev = -1;
       for (UF_long p = 0; ok && p < ul; ++p) {
         const int32_t i = ui[p];
@@ -158144,40 +158155,15 @@ static void kls_pts_try_build(kls_solver *solver) {
         }
         if (i <= prev) streams_ordered = 0;
         prev = i;
-      }
-    }
-  }
-  if (ok) {
-    /* Refactor work belongs to the retained factor, not to a candidate cut.
-       Compute it once; the lifecycle portfolio and final certificate can
-       then compare partitions with O(n) passes instead of rescanning every
-       U stream for each equivalent cut. */
-    for (UF_long k = 0u; k < nk; ++k) {
-      const int32_t *ui = i32u + uoff[k];
-      double flops = 0.0;
-      for (UF_long pos = 0u; pos < ulen[k]; ++pos) {
-        flops += (double)llen[(UF_long)ui[pos]];
+        flops += (double)llen[(UF_long)i];
       }
       column_flops[k] = flops;
     }
   }
+  KLS_PTS_BUILD_PHASE("validate/flop");
   if (ok) {
     /* group L entries by row via counting sort, storing source columns */
-    const int64_t lnz_total = loff[nk] - loff[0];
-    int64_t *lrow_ptr = (int64_t *)malloc(((size_t)nk + 1u) *
-                                          sizeof(int64_t));
-    int32_t *lrow_col = (int32_t *)malloc(
-      (size_t)(lnz_total > 0 ? lnz_total : 1) * sizeof(int32_t));
-    ok = lrow_ptr != NULL && lrow_col != NULL;
     if (ok) {
-      memset(lrow_ptr, 0, ((size_t)nk + 1u) * sizeof(int64_t));
-      for (UF_long k = 0; k < nk; ++k) {
-        const int32_t *li = i32l + loff[k];
-        const UF_long ll = llen[k];
-        for (UF_long p = 0; p < ll; ++p) {
-          lrow_ptr[li[p] + 1]++;
-        }
-      }
       for (UF_long t = 0; t < nk; ++t) {
         lrow_ptr[t + 1] += lrow_ptr[t];
       }
@@ -158227,9 +158213,9 @@ static void kls_pts_try_build(kls_solver *solver) {
         }
       }
     }
-    free(lrow_ptr);
-    free(lrow_col);
   }
+  free(lrow_ptr);
+  free(lrow_col);
 
   KLS_PTS_BUILD_PHASE("forest");
   /* children lists, then iterative DFS: Euler intervals + subtree work */
