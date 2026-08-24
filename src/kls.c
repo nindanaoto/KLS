@@ -79893,13 +79893,24 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
     return;
   }
 
+  /* A predicted numeric is not eligible for the automatic row-engine
+     tournament unless the caller explicitly enables that experiment (see
+     kls_row_refactor_acceptance_structurally_ready).  Building its complete
+     row mirror here anyway used to strand the numeric in an undecided state:
+     no row refactor could ever be sampled, while every solve consumed the
+     unmeasured mirror and every column refactor paid to keep it coherent.
+     Require the same eligibility at preparation time so an optional
+     representation cannot become the default merely as a setup side effect. */
+  if (solver->numeric_is_predicted &&
+      !kls_predicted_row_refactor_enabled(solver)) {
+    return;
+  }
+
   /* Row preparation consumes the retained numeric's validated L/U index and
-     value streams, not the algorithm that originally allocated them.  A
-     predicted numeric publishes the same KLU-compatible representation, so
-     excluding it by provenance stranded precisely the high-work factors
-     whose repeated lifecycle can repay a row mirror.  Let the ordinary work
-     model, lower-bound comparison, complete pattern builder, timed engine
-     tournament, and numeric residual checks arbitrate both origins. */
+     value streams, not the algorithm that originally allocated them.  Once
+     an origin is eligible, let the ordinary work model, lower-bound
+     comparison, complete pattern builder, timed engine tournament, and
+     numeric residual checks arbitrate it. */
 
   int recommends_parallel = 0;
   kls_compute_parallel_model(solver, 1, NULL, NULL, &recommends_parallel);
