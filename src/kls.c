@@ -3100,7 +3100,9 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_compact_supernode_trsv;
   int row_refactor_blocked_trailing_update;
   UF_long row_refactor_blocked_trailing_min_work;
+  int row_refactor_native_row_panel_state;
   int row_refactor_native_row_panel_active;
+  int row_refactor_multi_producer_supernode;
   int row_refactor_trace_snode;
   int row_refactor_shared_telemetry;
   int row_refactor_trace_dense_help;
@@ -72887,7 +72889,12 @@ static int kls_compact_supernode_trsv_env_state(void) {
 
 static int kls_blocked_trailing_update_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_BLOCKED_TRAILING_UPDATE");
-  return value != NULL && value[0] != '\0' &&
+  /* The target-major kernel has a structural amortization gate at the call
+     site (at least eight producer rows and sixteen trailing columns).  It
+     wins across the retained row-factor families once that gate is met, so
+     make it the ordinary implementation and retain =0 as a diagnostic
+     fallback to the dependency-major loop. */
+  return value == NULL || value[0] == '\0' ||
          !(value[0] == '0' && value[1] == '\0');
 }
 
@@ -82711,6 +82718,9 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   shared.scale = (int)common->scale;
   shared.kernel = KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
   shared.thread_count = 1;
+  shared.row_refactor_native_row_panel_state = native_row_panel_state;
+  shared.row_refactor_multi_producer_supernode =
+    kls_multi_producer_supernode_env_enabled();
   atomic_init(&shared.stop, 0);
   shared.rejected_pivot = KLS_KLU_EMPTY;
   shared.rejected_pivot_col = KLS_KLU_EMPTY;
@@ -88616,7 +88626,8 @@ static int kls_compact_dense_group_try_fragmented_supernode_update(
   if (batch_end_out != NULL) {
     *batch_end_out = batch_begin;
   }
-  if (!kls_multi_producer_supernode_env_enabled()) {
+  if (worker == NULL || worker->shared == NULL ||
+      !worker->shared->row_refactor_multi_producer_supernode) {
     return 0;
   }
   if (worker == NULL || worker->shared == NULL ||
@@ -90037,7 +90048,9 @@ static int kls_parallel_row_refactor_process_dense_group(
   kls_egraph_refactor_shared *shared =
     worker != NULL ? worker->shared : NULL;
   kls_solver *solver = shared != NULL ? shared->solver : NULL;
-  const int native_env_state = kls_native_row_panel_effective_state(solver);
+  const int native_env_state = shared != NULL
+    ? shared->row_refactor_native_row_panel_state
+    : KLS_NATIVE_ROW_PANEL_ENV_OFF;
   const int native_row_panel =
     shared != NULL &&
     kls_native_row_panel_should_try_for_solver(
@@ -90970,7 +90983,8 @@ static int kls_independent_row_try_fragmented_supernode_update(
   if (batch_end_out != NULL) {
     *batch_end_out = batch_begin;
   }
-  if (!kls_multi_producer_supernode_env_enabled()) {
+  if (worker == NULL || worker->shared == NULL ||
+      !worker->shared->row_refactor_multi_producer_supernode) {
     return 0;
   }
   if (worker == NULL || worker->shared == NULL ||
@@ -91631,7 +91645,8 @@ static int kls_independent_row_try_multi_supernode_update(
   if (batch_end_out != NULL) {
     *batch_end_out = batch_begin;
   }
-  if (!kls_multi_producer_supernode_env_enabled()) {
+  if (worker == NULL || worker->shared == NULL ||
+      !worker->shared->row_refactor_multi_producer_supernode) {
     return 0;
   }
   if (worker == NULL || worker->shared == NULL ||
@@ -94111,7 +94126,10 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     kls_blocked_trailing_update_env_enabled();
   shared->row_refactor_blocked_trailing_min_work =
     kls_blocked_trailing_update_env_min_work();
+  shared->row_refactor_native_row_panel_state = native_row_panel_state;
   shared->row_refactor_native_row_panel_active = 0;
+  shared->row_refactor_multi_producer_supernode =
+    kls_multi_producer_supernode_env_enabled();
   shared->row_refactor_trace_snode =
     getenv("KLS_TRACE_ROW_SNODE") != NULL;
   shared->row_refactor_shared_telemetry =
