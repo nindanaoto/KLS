@@ -157790,18 +157790,15 @@ static double kls_pts_cut_lifecycle_score(
   const int32_t *parent,
   const int32_t *tin,
   const int32_t *tout,
-  const int32_t *dfs_order,
   const double *swork,
-  const UF_long *llen,
-  const UF_long *ulen,
-  const double *column_flops,
-  int32_t *owner,
+  const double *subtree_flops,
+  double total_flops,
   const kls_options *options,
   int trace) {
   if (nk == 0u || nthreads < 2 || !(total > 0.0) ||
       !(cut_multiplier > 0.0) || parent == NULL || tin == NULL ||
-      tout == NULL || dfs_order == NULL || swork == NULL || llen == NULL ||
-      ulen == NULL || column_flops == NULL || owner == NULL || options == NULL) {
+      tout == NULL || swork == NULL || subtree_flops == NULL ||
+      options == NULL) {
     return DBL_MAX;
   }
   const double cut_max = total / (cut_multiplier * (double)nthreads);
@@ -157828,7 +157825,6 @@ static double kls_pts_cut_lifecycle_score(
       trial_chunks[chunk].root = (int32_t)k;
       chunk++;
     }
-    owner[k] = -1;
   }
   qsort(trial_chunks, (size_t)nchunks, sizeof(*trial_chunks),
         kls_pts_chunk_cmp);
@@ -157839,6 +157835,9 @@ static double kls_pts_cut_lifecycle_score(
     bin_work[t] = 0.0;
     bin_flops[t] = 0.0;
   }
+  int64_t private_nodes = 0;
+  double private_work = 0.0;
+  double private_flops = 0.0;
   for (int64_t c = 0; c < nchunks; ++c) {
     int lightest = 0;
     for (int t = 1; t < nthreads; ++t) {
@@ -157848,9 +157847,11 @@ static double kls_pts_cut_lifecycle_score(
     }
     bin_work[lightest] += trial_chunks[c].work;
     const int32_t root = trial_chunks[c].root;
-    for (int32_t pos = tin[root]; pos < tout[root]; ++pos) {
-      owner[(UF_long)dfs_order[pos]] = lightest;
-    }
+    const double chunk_flops = subtree_flops[(UF_long)root];
+    bin_flops[lightest] += chunk_flops;
+    private_nodes += (int64_t)tout[root] - (int64_t)tin[root];
+    private_work += trial_chunks[c].work;
+    private_flops += chunk_flops;
   }
   free(trial_chunks);
 
@@ -157860,23 +157861,9 @@ static double kls_pts_cut_lifecycle_score(
       max_bin = bin_work[t];
     }
   }
-  int64_t ntop = 0;
-  double top_work = 0.0;
-  double top_flops = 0.0;
-  double total_flops = 0.0;
-  for (UF_long k = 0u; k < nk; ++k) {
-    if (owner[k] < 0) {
-      ntop++;
-      top_work += (double)(llen[k] + ulen[k] + 4u);
-    }
-    const double flops = column_flops[k];
-    total_flops += flops;
-    if (owner[k] < 0) {
-      top_flops += flops;
-    } else {
-      bin_flops[owner[k]] += flops;
-    }
-  }
+  const int64_t ntop = (int64_t)nk - private_nodes;
+  const double top_work = total - private_work;
+  const double top_flops = total_flops - private_flops;
   double max_bin_flops = 0.0;
   for (int t = 0; t < nthreads; ++t) {
     if (bin_flops[t] > max_bin_flops) {
@@ -158098,6 +158085,8 @@ static void kls_pts_try_build(kls_solver *solver) {
   double *swork = (double *)malloc((size_t)nk * sizeof(double));
   double *column_flops =
     (double *)malloc((size_t)nk * sizeof(*column_flops));
+  double *subtree_flops =
+    (double *)malloc((size_t)nk * sizeof(*subtree_flops));
   int32_t *owner = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
   int32_t *croot = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
   kls_pts_chunk *chunks = NULL;
@@ -158105,7 +158094,7 @@ static void kls_pts_try_build(kls_solver *solver) {
   int ok = parent != NULL && head != NULL && next != NULL && tin != NULL &&
            tout != NULL && dfs_order != NULL && cursor != NULL &&
            stack != NULL && swork != NULL && column_flops != NULL &&
-           owner != NULL && croot != NULL;
+           subtree_flops != NULL && owner != NULL && croot != NULL;
 
   /* Liu-style forest over the ancestor constraints (L(i,k): i must be
      an ancestor of k; U(i,k): k must be an ancestor of i), processed in
@@ -158234,6 +158223,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       tin[root] = counter;
       dfs_order[counter++] = root;
       swork[root] = (double)(llen[root] + ulen[root] + 4u);
+      subtree_flops[root] = column_flops[root];
       cursor[root] = head[root];
       while (sp > 0) {
         const int32_t v = stack[sp - 1];
@@ -158244,12 +158234,14 @@ static void kls_pts_try_build(kls_solver *solver) {
           tin[c] = counter;
           dfs_order[counter++] = c;
           swork[c] = (double)(llen[c] + ulen[c] + 4u);
+          subtree_flops[c] = column_flops[c];
           cursor[c] = head[c];
         } else {
           tout[v] = counter;
           sp--;
           if (sp > 0) {
             swork[stack[sp - 1]] += swork[v];
+            subtree_flops[stack[sp - 1]] += subtree_flops[v];
           }
         }
       }
@@ -158258,6 +158250,12 @@ static void kls_pts_try_build(kls_solver *solver) {
   }
 
   KLS_PTS_BUILD_PHASE("dfs");
+  double total_refactor_flops = 0.0;
+  if (ok) {
+    for (int32_t root = head[nk]; root != -1; root = next[root]) {
+      total_refactor_flops += subtree_flops[root];
+    }
+  }
   /* verify every stream entry against the tree */
   if (ok) {
     for (UF_long k = 0; ok && k < nk; ++k) {
@@ -158331,8 +158329,8 @@ static void kls_pts_try_build(kls_solver *solver) {
            ++candidate) {
         const double candidate_score = kls_pts_cut_lifecycle_score(
           nk, nthreads, total, candidates[candidate], parent, tin, tout,
-          dfs_order, swork, llen, ulen, column_flops, owner,
-          &solver->options, trace);
+          swork, subtree_flops, total_refactor_flops, &solver->options,
+          trace);
         if (candidate_score < best_cut_score) {
           best_cut_score = candidate_score;
           best_cut = candidates[candidate];
@@ -158673,6 +158671,7 @@ static void kls_pts_try_build(kls_solver *solver) {
   free(stack);
   free(swork);
   free(column_flops);
+  free(subtree_flops);
   free(owner);
   free(croot);
   free(chunks);
