@@ -21437,3 +21437,53 @@ Final release CTest passed all four tests in 17.99 seconds. The leak-enabled
 ASan/UBSan/LSan build passed all four in 57.68 seconds; a separate sanitized
 `flickr` analyze replay reported 3.56 seconds of analysis, retained its
 AMF/rank-deficient symbolic, and produced no sanitizer finding.
+
+ALTERNATE SEPARATOR CUT MEASURED (2026-08-24).  The remaining `rajat30`
+EGraph gap was not a thread-saturation or row-engine problem: its refactor
+scaled 1.89x from four to eight workers, while the forced row-major engine
+measured 76.1 ms against the 64--68 ms column EGraph range.  A wider
+construction-time cut sweep instead found 62.86 ms at the generic
+`alpha=4` width threshold, versus 64.68 ms at `alpha=2` and 64.04 ms at
+`alpha=3`.  Applying alpha=4 unconditionally was rejected because it regressed
+`memchip`, `G2_circuit`, and `rajat25`.
+
+KLS now retains a second separator-private plan at the alpha=4 cut only for a
+repeated-update lifecycle of at least sixteen expected refactors.  After the
+ordinary separator, stream-kernel, and publication choices settle, it measures
+both cuts once.  A candidate that is not already 2% faster is rejected; a
+promising candidate receives a second sample per cut and is adopted only with
+a 1% mean margin.  A rejected alternate plan is freed immediately.  This is a
+factor-graph timing verdict, not a matrix or dimension classifier, and
+short-lived solvers never build the extra plan.
+
+Three rotated strict competitor passes in
+`build/alpha4-competitor-20260824/summary-final.txt` put `rajat30` at H100
+0.888 against CKTSO and 0.887 against SubtreeLU, with roughly 1e-15 residuals.
+The complete
+former seven-row EGraph-loss set in
+`build/alpha4-egraph-losses-20260824/summary.txt` now has H100 geometric means
+0.957 versus CKTSO and 0.705 versus SubtreeLU; `rajat30`, `rajat24`, and
+`ASIC_320ks` are individual wins.  A 22-matrix, two-pass EGraph cohort in
+`build/alpha4-broad-ab-20260824/compare-early-final.txt` improved modeled-cycle
+geomean by 1.14%, with three wins beyond 2%, no loss beyond 2%, and a 0.9978
+median ratio.
+
+The strict per-refactor verifier also exposed an outer-tournament lifecycle
+hazard.  PTS can execute after an EGraph arm has prepared a separator or cut
+sample; the common timing recorder then observes a non-EGraph final path.  It
+formerly converted that unrelated elapsed time into a permanent rejection of
+the pending EGraph plan.  The recorder now discards such a sample and leaves
+the equivalent EGraph verdict open.  On `rajat30`, this changes the trace from
+an untested alpha-4 arm to a measured private-plan win (65.3 versus 83.7 ms)
+and then a measured alpha-4 win (62.5 versus 69.7 ms).  A five-pass rotated
+strict rerun in `build/egraph-lifecycle-fix-20260824/summary.txt` reduced its
+remaining H100 ratios from 1.13 to 1.03 versus CKTSO and from 1.12 to 1.02
+versus SubtreeLU.  The matching 22-matrix verified cohort was aggregate-neutral
+against the immediately preceding full verified campaign (1.0004 geomean,
+1.0010 median), while `rajat30` improved 8.7%; no matrix-specific identity or
+dimension gate is involved.
+
+Release CTest, smoke, per-refactor verification, and leak-enabled ASan/UBSan
+smoke passed.  The finite EGraph losses left by the strict rerun are
+`dc1`--`dc3`, `rajat24`, and the small residual `rajat30` gap against CKTSO,
+plus `memchip` and `rajat30` against SubtreeLU.

@@ -785,11 +785,11 @@ struct kls_solver {
   int eg_premark_pending; /* probe out: 1 per-column, 2 premarked */
   int eg_premark_samples[2];
   double eg_premark_min[2];
-  int eg_cluster_choice; /* dependency cut: 0 undecided, 1 alpha-3 cut,
-                            -1 retain the alpha-2 cut */
-  int eg_cluster_pending; /* probe out: 1 alpha-2, 2 alpha-3 */
-  int eg_cluster_samples[2];
-  double eg_cluster_sum[2];
+  int eg_cluster_choice; /* dependency cut: 0 undecided, 1 alpha-3,
+                            2 alpha-4, -1 retain the alpha-2 cut */
+  int eg_cluster_pending; /* probe out: 1 alpha-2, 2 alpha-3, 3 alpha-4 */
+  int eg_cluster_samples[3];
+  double eg_cluster_sum[3];
   int scalar_refactor_scatter; /* retained numeric prefers scalar indexed
                                   updates over AVX-512 gather/scatter */
   int snode_tail_chunk128; /* 128-entry fused-tail accumulator */
@@ -1478,14 +1478,22 @@ struct kls_solver {
   UF_long *refactor_separator_cluster_tail_cols;
   UF_long *refactor_separator_cluster_tail_level_ptr;
   UF_long *refactor_separator_cluster_tail_level_thread_ptr;
+  UF_long *refactor_separator_private_cols_alpha4;
+  UF_long *refactor_separator_private_thread_ptr_alpha4;
+  UF_long *refactor_separator_cluster_tail_cols_alpha4;
+  UF_long *refactor_separator_cluster_tail_level_ptr_alpha4;
+  UF_long *refactor_separator_cluster_tail_level_thread_ptr_alpha4;
   int refactor_level_thread_count;
   int refactor_separator_private_thread_count;
   int refactor_separator_private_plan_attempted;
   UF_long refactor_level_count;
   UF_long refactor_cluster_level_count_alpha3;
+  UF_long refactor_cluster_level_count_alpha4;
   UF_long refactor_separator_private_cluster_level_count;
   UF_long refactor_separator_private_column_count;
   UF_long refactor_separator_cluster_tail_column_count;
+  UF_long refactor_separator_private_column_count_alpha4;
+  UF_long refactor_separator_cluster_tail_column_count_alpha4;
   UF_long refactor_separator_private_component_count;
   UF_long refactor_separator_private_unsafe_component_count;
   UF_long refactor_level_max_width;
@@ -21398,6 +21406,11 @@ static void free_refactor_schedule(kls_solver *solver) {
   free(solver->refactor_separator_cluster_tail_cols);
   free(solver->refactor_separator_cluster_tail_level_ptr);
   free(solver->refactor_separator_cluster_tail_level_thread_ptr);
+  free(solver->refactor_separator_private_cols_alpha4);
+  free(solver->refactor_separator_private_thread_ptr_alpha4);
+  free(solver->refactor_separator_cluster_tail_cols_alpha4);
+  free(solver->refactor_separator_cluster_tail_level_ptr_alpha4);
+  free(solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4);
   free(solver->refactor_pipeline_successor_ptr);
   free(solver->refactor_pipeline_successors);
   free(solver->refactor_pipeline_pred_count);
@@ -21417,6 +21430,11 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_separator_cluster_tail_cols = NULL;
   solver->refactor_separator_cluster_tail_level_ptr = NULL;
   solver->refactor_separator_cluster_tail_level_thread_ptr = NULL;
+  solver->refactor_separator_private_cols_alpha4 = NULL;
+  solver->refactor_separator_private_thread_ptr_alpha4 = NULL;
+  solver->refactor_separator_cluster_tail_cols_alpha4 = NULL;
+  solver->refactor_separator_cluster_tail_level_ptr_alpha4 = NULL;
+  solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4 = NULL;
   solver->refactor_pipeline_successor_ptr = NULL;
   solver->refactor_pipeline_successors = NULL;
   solver->refactor_pipeline_pred_count = NULL;
@@ -21432,6 +21450,8 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_separator_private_cluster_level_count = 0;
   solver->refactor_separator_private_column_count = 0;
   solver->refactor_separator_cluster_tail_column_count = 0;
+  solver->refactor_separator_private_column_count_alpha4 = 0;
+  solver->refactor_separator_cluster_tail_column_count_alpha4 = 0;
   solver->refactor_separator_private_component_count = 0;
   solver->refactor_separator_private_unsafe_component_count = 0;
   solver->refactor_level_max_width = 0;
@@ -21531,6 +21551,7 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_ready_queue_run_count = 0;
   solver->refactor_cluster_level_count = 0;
   solver->refactor_cluster_level_count_alpha3 = 0;
+  solver->refactor_cluster_level_count_alpha4 = 0;
   solver->refactor_pipeline_column_count = 0;
   solver->refactor_dependency_work = 0.0;
   solver->refactor_pipeline_work = 0.0;
@@ -21538,6 +21559,24 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_stream_dependency_entries = 0.0;
   solver->refactor_stream_pivot_entries = 0.0;
   solver->refactor_stream_output_entries = 0.0;
+}
+
+static void kls_free_refactor_separator_alpha4_plan(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->refactor_separator_private_cols_alpha4);
+  free(solver->refactor_separator_private_thread_ptr_alpha4);
+  free(solver->refactor_separator_cluster_tail_cols_alpha4);
+  free(solver->refactor_separator_cluster_tail_level_ptr_alpha4);
+  free(solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4);
+  solver->refactor_separator_private_cols_alpha4 = NULL;
+  solver->refactor_separator_private_thread_ptr_alpha4 = NULL;
+  solver->refactor_separator_cluster_tail_cols_alpha4 = NULL;
+  solver->refactor_separator_cluster_tail_level_ptr_alpha4 = NULL;
+  solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4 = NULL;
+  solver->refactor_separator_private_column_count_alpha4 = 0u;
+  solver->refactor_separator_cluster_tail_column_count_alpha4 = 0u;
 }
 
 static void free_egraph_worker_scratch(kls_solver *solver) {
@@ -114606,26 +114645,54 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         !shared->btf_scalar_run_group_state_step_advance
       ? shared->pipeline_done : NULL;
   const unsigned int direct_cluster_generation = shared->pipeline_generation;
+  const int use_alpha4_separator =
+    shared->separator_private &&
+    cluster_levels == solver->refactor_cluster_level_count_alpha4 &&
+    solver->refactor_separator_private_cols_alpha4 != NULL &&
+    solver->refactor_separator_private_thread_ptr_alpha4 != NULL;
+  const UF_long *separator_private_cols = use_alpha4_separator
+    ? solver->refactor_separator_private_cols_alpha4
+    : solver->refactor_separator_private_cols;
+  const UF_long *separator_private_thread_ptr = use_alpha4_separator
+    ? solver->refactor_separator_private_thread_ptr_alpha4
+    : solver->refactor_separator_private_thread_ptr;
+  const UF_long *separator_cluster_tail_cols = use_alpha4_separator
+    ? solver->refactor_separator_cluster_tail_cols_alpha4
+    : solver->refactor_separator_cluster_tail_cols;
+  const UF_long *separator_cluster_tail_level_ptr = use_alpha4_separator
+    ? solver->refactor_separator_cluster_tail_level_ptr_alpha4
+    : solver->refactor_separator_cluster_tail_level_ptr;
+  const UF_long *separator_cluster_tail_level_thread_ptr =
+    use_alpha4_separator
+      ? solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4
+      : solver->refactor_separator_cluster_tail_level_thread_ptr;
+  const UF_long separator_private_column_count = use_alpha4_separator
+    ? solver->refactor_separator_private_column_count_alpha4
+    : solver->refactor_separator_private_column_count;
+  const UF_long separator_cluster_tail_column_count = use_alpha4_separator
+    ? solver->refactor_separator_cluster_tail_column_count_alpha4
+    : solver->refactor_separator_cluster_tail_column_count;
   const int use_separator_private =
     shared->separator_private &&
     direct_cluster_done != NULL &&
-    solver->refactor_separator_private_cols != NULL &&
-    solver->refactor_separator_private_thread_ptr != NULL &&
+    separator_private_cols != NULL &&
+    separator_private_thread_ptr != NULL &&
     solver->refactor_separator_private_thread_count == shared->thread_count &&
-    solver->refactor_separator_private_cluster_level_count == cluster_levels &&
-    (solver->refactor_separator_cluster_tail_column_count == 0u ||
-     solver->refactor_separator_cluster_tail_cols != NULL);
+    (use_alpha4_separator ||
+     solver->refactor_separator_private_cluster_level_count == cluster_levels) &&
+    (separator_cluster_tail_column_count == 0u ||
+     separator_cluster_tail_cols != NULL);
 
   if (use_separator_private) {
     const UF_long begin =
-      solver->refactor_separator_private_thread_ptr[worker->tid];
+      separator_private_thread_ptr[worker->tid];
     const UF_long end =
-      solver->refactor_separator_private_thread_ptr[worker->tid + 1];
+      separator_private_thread_ptr[worker->tid + 1];
     if (begin <= end &&
-        end <= solver->refactor_separator_private_column_count &&
+        end <= separator_private_column_count &&
         !kls_egraph_refactor_should_stop(shared)) {
       for (UF_long pos = begin; pos < end; ++pos) {
-        const UF_long col = solver->refactor_separator_private_cols[pos];
+        const UF_long col = separator_private_cols[pos];
         if (col >= solver->n ||
             !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
           if (!kls_egraph_refactor_should_stop(shared)) {
@@ -114640,7 +114707,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         }
       }
     } else if (begin > end ||
-               end > solver->refactor_separator_private_column_count) {
+               end > separator_private_column_count) {
       kls_egraph_refactor_record_invalid(shared);
     }
 
@@ -114652,15 +114719,15 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
        natural-order fallback. */
     kls_egraph_cluster_barrier_wait(shared);
     const UF_long *tail_level_ptr =
-      solver->refactor_separator_cluster_tail_level_ptr;
+      separator_cluster_tail_level_ptr;
     const UF_long *tail_level_thread_ptr =
-      solver->refactor_separator_cluster_tail_level_thread_ptr;
+      separator_cluster_tail_level_thread_ptr;
     if (tail_level_ptr != NULL) {
       for (UF_long level = 0u; level < cluster_levels; ++level) {
         const UF_long begin = tail_level_ptr[level];
         const UF_long end = tail_level_ptr[level + 1u];
         if (begin > end ||
-            end > solver->refactor_separator_cluster_tail_column_count) {
+            end > separator_cluster_tail_column_count) {
           kls_egraph_refactor_record_invalid(shared);
         } else if (!kls_egraph_refactor_should_stop(shared)) {
           UF_long local_begin = begin + (UF_long)worker->tid;
@@ -114679,7 +114746,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           const UF_long stride = tail_level_thread_ptr != NULL
             ? 1u : (UF_long)shared->thread_count;
           for (UF_long pos = local_begin; pos < local_end; pos += stride) {
-            const UF_long col = solver->refactor_separator_cluster_tail_cols[pos];
+            const UF_long col = separator_cluster_tail_cols[pos];
             if (col >= solver->n ||
                 !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
               if (!kls_egraph_refactor_should_stop(shared)) {
@@ -114699,9 +114766,9 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
     } else {
       if (worker->tid == 0 && !kls_egraph_refactor_should_stop(shared)) {
         for (UF_long pos = 0u;
-             pos < solver->refactor_separator_cluster_tail_column_count;
+             pos < separator_cluster_tail_column_count;
              ++pos) {
-          const UF_long col = solver->refactor_separator_cluster_tail_cols[pos];
+          const UF_long col = separator_cluster_tail_cols[pos];
           if (col >= solver->n ||
               !kls_egraph_refactor_dispatch_column(worker, col, 0)) {
             if (!kls_egraph_refactor_should_stop(shared)) {
@@ -118632,21 +118699,32 @@ static UF_long kls_egraph_cluster_level_dispatch(kls_solver *solver,
     return 0u;
   }
   const UF_long incumbent = solver->refactor_cluster_level_count;
-  const UF_long alternate = solver->refactor_cluster_level_count_alpha3;
+  const UF_long alpha3 = solver->refactor_cluster_level_count_alpha3;
+  const UF_long alpha4 = solver->refactor_cluster_level_count_alpha4;
+  const int private_alpha4 =
+    solver->eg_separator_choice > 0 &&
+    solver->refactor_separator_private_cols != NULL &&
+    solver->refactor_separator_private_thread_ptr != NULL &&
+    solver->refactor_separator_private_cols_alpha4 != NULL &&
+    solver->refactor_separator_private_thread_ptr_alpha4 != NULL;
   solver->eg_cluster_pending = 0;
+  if (solver->eg_separator_choice == 0) {
+    return incumbent;
+  }
   if (check_pivots ||
       getenv("KLS_CLUSTER_WIDTH_ALPHA") != NULL ||
       getenv("KLS_DISABLE_EGRAPH_CLUSTER_CUT_TRIAL") != NULL ||
       !kls_repeated_update_workload(&solver->options) ||
       solver->options.expected_refactorizations < 16 ||
-      incumbent == alternate || alternate > incumbent ||
-      solver->eg_separator_choice >= 0 ||
-      solver->refactor_separator_private_cols != NULL) {
+      (incumbent == alpha3 && incumbent == alpha4) ||
+      alpha3 > incumbent || alpha4 > incumbent ||
+      (solver->eg_separator_choice > 0 && !private_alpha4)) {
     solver->eg_cluster_choice = -1;
     return incumbent;
   }
   if (solver->eg_cluster_choice != 0) {
-    return solver->eg_cluster_choice > 0 ? alternate : incumbent;
+    return solver->eg_cluster_choice == 2 ? alpha4
+      : solver->eg_cluster_choice == 1 ? alpha3 : incumbent;
   }
   /* Hold width, fusion, stream, and separator layout fixed so the samples
      differ only in where level barriers give way to dependency waits. */
@@ -118657,10 +118735,18 @@ static UF_long kls_egraph_cluster_level_dispatch(kls_solver *solver,
       solver->eg_premark_pending) {
     return incumbent;
   }
-  const int side =
-    solver->eg_cluster_samples[0] <= solver->eg_cluster_samples[1] ? 0 : 1;
+  int side = 0;
+  const int candidate_begin = private_alpha4 ? 2 : 1;
+  const int candidate_end = private_alpha4 ? 3 : 2;
+  for (int candidate = candidate_begin; candidate < candidate_end;
+       ++candidate) {
+    if (solver->eg_cluster_samples[candidate] <
+        solver->eg_cluster_samples[side]) {
+      side = candidate;
+    }
+  }
   solver->eg_cluster_pending = side + 1;
-  return side == 1 ? alternate : incumbent;
+  return side == 2 ? alpha4 : side == 1 ? alpha3 : incumbent;
 }
 
 static int kls_egraph_cluster_premark_dispatch(
@@ -118743,29 +118829,76 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
   if (solver->eg_cluster_pending) {
     const int side = solver->eg_cluster_pending - 1;
     solver->eg_cluster_pending = 0;
-    if (solver->eg_cluster_choice != 0 || side < 0 || side > 1) {
+    if (solver->eg_cluster_choice != 0 || side < 0 || side > 2) {
       return;
     }
     if (solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
-      solver->eg_cluster_choice = -1;
+      /* An outer path tournament may run PTS after preparing this EGraph
+         arm.  That elapsed time says nothing about either EGraph cut; leave
+         the verdict open so the first retained EGraph update can restart a
+         like-for-like comparison. */
       return;
     }
     solver->eg_cluster_samples[side]++;
     solver->eg_cluster_sum[side] += seconds;
-    if (solver->eg_cluster_samples[0] >= 3 &&
-        solver->eg_cluster_samples[1] >= 3) {
+    const int private_alpha4 =
+      solver->eg_separator_choice > 0 &&
+      solver->refactor_separator_private_cols_alpha4 != NULL &&
+      solver->refactor_separator_private_thread_ptr_alpha4 != NULL;
+    if (private_alpha4 && solver->eg_cluster_samples[0] == 1 &&
+        solver->eg_cluster_samples[2] == 1) {
+      const double alpha2_first = solver->eg_cluster_sum[0];
+      const double alpha4_first = solver->eg_cluster_sum[2];
+      if (alpha2_first > 0.0 && alpha4_first > 0.0 &&
+          alpha4_first >= 0.98 * alpha2_first) {
+        solver->eg_cluster_choice = -1;
+        if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+          fprintf(stderr,
+                  "KLS egraph cluster-cut probe: early alpha-2"
+                  " (alpha2 %.3f, alpha4 %.3f ms)\n",
+                  1e3 * alpha2_first, 1e3 * alpha4_first);
+        }
+        kls_free_refactor_separator_alpha4_plan(solver);
+        return;
+      }
+    }
+    const int enough_samples = private_alpha4
+      ? solver->eg_cluster_samples[0] >= 2 &&
+        solver->eg_cluster_samples[2] >= 2
+      : solver->eg_cluster_samples[0] >= 3 &&
+        solver->eg_cluster_samples[1] >= 3;
+    if (enough_samples) {
       const double alpha2 = solver->eg_cluster_sum[0] /
         (double)solver->eg_cluster_samples[0];
-      const double alpha3 = solver->eg_cluster_sum[1] /
-        (double)solver->eg_cluster_samples[1];
-      solver->eg_cluster_choice =
-        alpha2 > 0.0 && alpha3 > 0.0 && alpha3 < 0.998 * alpha2 ? 1 : -1;
+      const double alpha3 = solver->eg_cluster_samples[1] > 0
+        ? solver->eg_cluster_sum[1] /
+            (double)solver->eg_cluster_samples[1]
+        : 0.0;
+      const double alpha4 = solver->eg_cluster_samples[2] > 0
+        ? solver->eg_cluster_sum[2] /
+            (double)solver->eg_cluster_samples[2]
+        : 0.0;
+      solver->eg_cluster_choice = -1;
+      double best = alpha2;
+      if (!private_alpha4 && alpha2 > 0.0 && alpha3 > 0.0 &&
+          alpha3 < 0.998 * best) {
+        solver->eg_cluster_choice = 1;
+        best = alpha3;
+      }
+      if (private_alpha4 && alpha2 > 0.0 && alpha4 > 0.0 &&
+          alpha4 < 0.99 * best) {
+        solver->eg_cluster_choice = 2;
+      }
       if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
         fprintf(stderr,
                 "KLS egraph cluster-cut probe: alpha-%d"
-                " (alpha2 %.3f, alpha3 %.3f ms)\n",
-                solver->eg_cluster_choice > 0 ? 3 : 2,
-                1e3 * alpha2, 1e3 * alpha3);
+                " (alpha2 %.3f, alpha3 %.3f, alpha4 %.3f ms)\n",
+                solver->eg_cluster_choice == 2 ? 4 :
+                  solver->eg_cluster_choice == 1 ? 3 : 2,
+                1e3 * alpha2, 1e3 * alpha3, 1e3 * alpha4);
+      }
+      if (private_alpha4 && solver->eg_cluster_choice != 2) {
+        kls_free_refactor_separator_alpha4_plan(solver);
       }
     }
     return;
@@ -118810,7 +118943,10 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
       return;
     }
     if (solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
-      solver->eg_separator_choice = -1;
+      /* The EGraph executor can be prepared speculatively before an outer
+         PTS/EGraph path trial chooses which implementation supplied this
+         update.  Do not turn a sample from the other implementation into a
+         permanent rejection of separator-private EGraph execution. */
       return;
     }
     solver->eg_separator_samples[side]++;
@@ -127687,10 +127823,17 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *separator_cluster_tail_cols = NULL;
   UF_long *separator_cluster_tail_level_ptr = NULL;
   UF_long *separator_cluster_tail_level_thread_ptr = NULL;
+  UF_long *separator_private_cols_alpha4 = NULL;
+  UF_long *separator_private_thread_ptr_alpha4 = NULL;
+  UF_long *separator_cluster_tail_cols_alpha4 = NULL;
+  UF_long *separator_cluster_tail_level_ptr_alpha4 = NULL;
+  UF_long *separator_cluster_tail_level_thread_ptr_alpha4 = NULL;
   UF_long separator_private_column_count = 0u;
   UF_long separator_cluster_tail_column_count = 0u;
   UF_long separator_private_component_count = 0u;
   UF_long separator_private_unsafe_component_count = 0u;
+  UF_long separator_private_column_count_alpha4 = 0u;
+  UF_long separator_cluster_tail_column_count_alpha4 = 0u;
   int separator_private_plan_attempted = 0;
   UF_long *pipeline_successor_ptr = NULL;
   UF_long *pipeline_successors = NULL;
@@ -127726,6 +127869,11 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(separator_cluster_tail_cols); \
     free(separator_cluster_tail_level_ptr); \
     free(separator_cluster_tail_level_thread_ptr); \
+    free(separator_private_cols_alpha4); \
+    free(separator_private_thread_ptr_alpha4); \
+    free(separator_cluster_tail_cols_alpha4); \
+    free(separator_cluster_tail_level_ptr_alpha4); \
+    free(separator_cluster_tail_level_thread_ptr_alpha4); \
     free(pipeline_successor_ptr); \
     free(pipeline_successors); \
     free(pipeline_pred_count); \
@@ -127980,6 +128128,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     cluster_levels = 0u;
   }
   UF_long cluster_levels_alpha3 = cluster_levels;
+  UF_long cluster_levels_alpha4 = cluster_levels;
   if (!explicit_cluster_width_alpha &&
       !all_pipeline) {
     cluster_levels_alpha3 = level_count;
@@ -127989,6 +128138,15 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       if (cluster_levels_alpha3 == level_count &&
           (double)width < alpha3_limit) {
         cluster_levels_alpha3 = level;
+      }
+    }
+    cluster_levels_alpha4 = level_count;
+    const double alpha4_limit = 4.0 * (double)solver->options.threads;
+    for (UF_long level = 0u; level < level_count; ++level) {
+      const UF_long width = level_ptr[level + 1u] - level_ptr[level];
+      if (cluster_levels_alpha4 == level_count &&
+          (double)width < alpha4_limit) {
+        cluster_levels_alpha4 = level;
       }
     }
   }
@@ -128077,6 +128235,26 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       &separator_cluster_tail_column_count,
       &separator_private_component_count,
       &separator_private_unsafe_component_count);
+    if (kls_repeated_update_workload(&solver->options) &&
+        solver->options.expected_refactorizations >= 16 &&
+        separator_private_cols != NULL &&
+        separator_private_thread_ptr != NULL &&
+        cluster_levels_alpha4 > 0u &&
+        cluster_levels_alpha4 != cluster_levels) {
+      UF_long alpha4_component_count = 0u;
+      UF_long alpha4_unsafe_component_count = 0u;
+      (void)kls_build_refactor_separator_private_plan(
+        solver, levels, cluster_levels_alpha4, column_work, thread_count,
+        &separator_private_cols_alpha4,
+        &separator_private_thread_ptr_alpha4,
+        &separator_cluster_tail_cols_alpha4,
+        &separator_cluster_tail_level_ptr_alpha4,
+        &separator_cluster_tail_level_thread_ptr_alpha4,
+        &separator_private_column_count_alpha4,
+        &separator_cluster_tail_column_count_alpha4,
+        &alpha4_component_count,
+        &alpha4_unsafe_component_count);
+    }
   }
 
   if (need_pipeline_ready_graph) {
@@ -128254,6 +128432,16 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     separator_cluster_tail_level_ptr;
   solver->refactor_separator_cluster_tail_level_thread_ptr =
     separator_cluster_tail_level_thread_ptr;
+  solver->refactor_separator_private_cols_alpha4 =
+    separator_private_cols_alpha4;
+  solver->refactor_separator_private_thread_ptr_alpha4 =
+    separator_private_thread_ptr_alpha4;
+  solver->refactor_separator_cluster_tail_cols_alpha4 =
+    separator_cluster_tail_cols_alpha4;
+  solver->refactor_separator_cluster_tail_level_ptr_alpha4 =
+    separator_cluster_tail_level_ptr_alpha4;
+  solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4 =
+    separator_cluster_tail_level_thread_ptr_alpha4;
   solver->refactor_pipeline_successor_ptr = pipeline_successor_ptr;
   solver->refactor_pipeline_successors = pipeline_successors;
   solver->refactor_pipeline_pred_count = pipeline_pred_count;
@@ -128269,12 +128457,17 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     separator_private_plan_attempted;
   solver->refactor_level_count = level_count;
   solver->refactor_cluster_level_count_alpha3 = cluster_levels_alpha3;
+  solver->refactor_cluster_level_count_alpha4 = cluster_levels_alpha4;
   solver->refactor_separator_private_cluster_level_count =
     separator_private_cols != NULL ? cluster_levels : 0u;
   solver->refactor_separator_private_column_count =
     separator_private_column_count;
   solver->refactor_separator_cluster_tail_column_count =
     separator_cluster_tail_column_count;
+  solver->refactor_separator_private_column_count_alpha4 =
+    separator_private_column_count_alpha4;
+  solver->refactor_separator_cluster_tail_column_count_alpha4 =
+    separator_cluster_tail_column_count_alpha4;
   solver->refactor_separator_private_component_count =
     separator_private_component_count;
   solver->refactor_separator_private_unsafe_component_count =
@@ -128304,6 +128497,11 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   separator_cluster_tail_cols = NULL;
   separator_cluster_tail_level_ptr = NULL;
   separator_cluster_tail_level_thread_ptr = NULL;
+  separator_private_cols_alpha4 = NULL;
+  separator_private_thread_ptr_alpha4 = NULL;
+  separator_cluster_tail_cols_alpha4 = NULL;
+  separator_cluster_tail_level_ptr_alpha4 = NULL;
+  separator_cluster_tail_level_thread_ptr_alpha4 = NULL;
   pipeline_successor_ptr = NULL;
   pipeline_successors = NULL;
   pipeline_pred_count = NULL;
