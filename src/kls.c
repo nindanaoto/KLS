@@ -160788,14 +160788,21 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     n <= (UF_long)UINT16_MAX &&
     numeric->lnz <= (UF_long)UINT16_MAX &&
     numeric->unz <= (UF_long)UINT16_MAX;
+  const int refactor_forest_candidate =
+    kls_repeated_update_workload(&solver->options) &&
+    solver->options.threads > 1 && symbolic->maxblock >= 2048u;
   if ((generic_direct_i16_solve ||
        kls_low_work_single_block_policy_enabled(solver)) &&
+      !refactor_forest_candidate &&
       getenv("KLS_DISABLE_I16_SOLVE") == NULL &&
       n <= (UF_long)UINT16_MAX &&
       numeric->Llen != NULL && numeric->Ulen != NULL) {
     /* This cohort always selects the compact solve.  Construct its final
        streams straight from KLU's immutable packed factors instead of first
-       allocating/filling four i32 mirrors and then copying them to i16. */
+       allocating/filling four i32 mirrors and then copying them to i16.
+       A refactor forest is excluded: it needs those i32 mirrors anyway, and
+       the concurrent map builder invalidates this preliminary cache before
+       the final i16 cache is derived from them. */
     UF_long lcount = 0u;
     UF_long ucount = 0u;
     int compact = 1;
@@ -160818,9 +160825,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
     if (compact && kls_build_i16_solve_cache(
           solver, (int64_t)lcount, (int64_t)ucount)) {
-      const int refactor_forest_candidate =
-        kls_repeated_update_workload(&solver->options) &&
-        solver->options.threads > 1 && symbolic->maxblock >= 2048u;
       if (!refactor_forest_candidate) {
         solver->i32solve_state = 1;
         (void)kls_refresh_i32_udiag_recip(solver);
