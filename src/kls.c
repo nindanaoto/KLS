@@ -159664,7 +159664,16 @@ static int kls_pts_mapped_refactor_pool(
         sample < pts->two_stage_refactor_min[arm]) {
       pts->two_stage_refactor_min[arm] = sample;
     }
-    if (pts->two_stage_refactor_samples[0] >= 2 &&
+    /* A large first-pair separation is already decisive and avoiding two
+       additional trial refactors matters for short repeated lifecycles.  Keep
+       close results on the existing two-sample-per-arm path: cold-start noise
+       must not select the more synchronization-heavy schedule. */
+    if (pts->two_stage_refactor_samples[0] >= 1 &&
+        pts->two_stage_refactor_samples[1] >= 1 &&
+        pts->two_stage_refactor_min[1] <
+          0.75 * pts->two_stage_refactor_min[0]) {
+      pts->two_stage_refactor_decision = 1;
+    } else if (pts->two_stage_refactor_samples[0] >= 2 &&
         pts->two_stage_refactor_samples[1] >= 2) {
       pts->two_stage_refactor_decision =
         pts->two_stage_refactor_min[1] <
