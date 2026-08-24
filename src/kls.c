@@ -73017,7 +73017,11 @@ static int kls_egraph_ragged_u_supernode_update_allows(
 #ifdef KLS_HAVE_CBLAS
 static int kls_cblas_supernode_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
-  return value != NULL && value[0] != '\0' &&
+  /* Each call site applies the arithmetic-intensity and dimension gates
+     before entering BLAS.  Across the admitted row-supernode families the
+     blocked kernels consistently beat the scalar loops, so use them whenever
+     this build provides CBLAS and retain =0 for diagnostic fallback. */
+  return value == NULL || value[0] == '\0' ||
          !(value[0] == '0' && value[1] == '\0');
 }
 
