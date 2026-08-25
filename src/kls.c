@@ -128356,13 +128356,13 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   level_ptr[level_count] = counts[level_count];
   UF_long max_width = 0;
   UF_long cluster_levels = level_count;
-  /* CKTSO uses a width threshold of alpha * threads with alpha=2.  Compact
-     dominant-BTF schedules around one very large block retain enough tail work
-     to benefit from a slightly earlier pipeline split in KLS's exact EGraph.
-     The hybrid huge-single circuit is the opposite extreme: almost all work
-     sits beyond the cut, and extending the dependency-driven pipeline from
-     about 9K to 18K columns avoids many low-width level barriers. */
-  double cluster_width_alpha = 2.0;
+  /* Stop globally synchronizing before a level narrows to the point where
+     barrier latency rivals its useful parallel work.  A 2.5-worker width
+     leaves enough independent columns for the fixed slices while handing the
+     narrowing wave to the exact dependency pipeline a few levels earlier.
+     This boundary depends only on available parallelism; the retained alpha-3
+     and alpha-4 plans below still cover schedules with a different balance. */
+  double cluster_width_alpha = 2.5;
   int explicit_cluster_width_alpha = 0;
 
   {
