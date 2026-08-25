@@ -82941,37 +82941,6 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   return 1;
 }
 
-static int kls_parallel_row_refactor_process_row(
-  kls_egraph_refactor_worker *worker,
-  UF_long row,
-  int wait_for_dependencies);
-
-/* Cluster groups have no unfinished predecessors.  Pattern construction has
-   already proved singleton bounds and kind, so avoid the full polymorphic
-   group dispatcher for the overwhelmingly common one-row case.  Pipeline
-   groups still use the validating dispatcher because they may wait, preapply,
-   or change execution kind. */
-static KLS_ALWAYS_INLINE int
-kls_parallel_row_refactor_process_cluster_group(
-  kls_egraph_refactor_worker *worker,
-  UF_long group) {
-  kls_egraph_refactor_shared *shared =
-    worker != NULL ? worker->shared : NULL;
-  kls_solver *solver = shared != NULL ? shared->solver : NULL;
-  if (solver != NULL && group < solver->row_refactor_group_count &&
-      solver->row_refactor_group_ptr != NULL &&
-      solver->row_refactor_group_kind != NULL &&
-      solver->row_refactor_group_kind[group] ==
-        KLS_ROW_REFACTOR_GROUP_SINGLE) {
-    const UF_long row = solver->row_refactor_group_ptr[group];
-    if (row < solver->n &&
-        solver->row_refactor_group_ptr[group + 1u] == row + 1u) {
-      return kls_parallel_row_refactor_process_row(worker, row, 0);
-    }
-  }
-  return kls_parallel_row_refactor_process_group(worker, group, 0);
-}
-
 static KLS_ALWAYS_INLINE int kls_parallel_row_refactor_rejects_multiplier(
   kls_egraph_refactor_worker *worker,
   UF_long row,
@@ -93447,8 +93416,7 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           for (UF_long pos = parts[worker->tid];
                pos < parts[worker->tid + 1]; ++pos) {
             const UF_long group = solver->row_refactor_level_groups[pos];
-            if (!kls_parallel_row_refactor_process_cluster_group(worker,
-                                                                  group)) {
+            if (!kls_parallel_row_refactor_process_group(worker, group, 0)) {
               break;
             }
             kls_parallel_row_refactor_mark_group_done(shared, solver, group);
@@ -93457,8 +93425,7 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           for (UF_long pos = begin + (UF_long)worker->tid;
                pos < end; pos += (UF_long)shared->thread_count) {
             const UF_long group = solver->row_refactor_level_groups[pos];
-            if (!kls_parallel_row_refactor_process_cluster_group(worker,
-                                                                  group)) {
+            if (!kls_parallel_row_refactor_process_group(worker, group, 0)) {
               break;
             }
             kls_parallel_row_refactor_mark_group_done(shared, solver, group);
