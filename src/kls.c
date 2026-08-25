@@ -2772,8 +2772,15 @@ typedef enum kls_egraph_refactor_kernel {
   KLS_EGRAPH_REFACTOR_KERNEL_GENERIC = 0,
   KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED = 1,
   KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED = 2,
-  KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_SCALED = 3
+  KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_SCALED = 3,
+  KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED_DEFER_TERMINAL = 4
 } kls_egraph_refactor_kernel;
+
+static KLS_ALWAYS_INLINE int kls_egraph_kernel_is_btf_unscaled(
+  kls_egraph_refactor_kernel kernel) {
+  return kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED ||
+         kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED_DEFER_TERMINAL;
+}
 
 typedef struct kls_egraph_refactor_shared {
   kls_solver *solver;
@@ -3164,6 +3171,9 @@ typedef struct kls_egraph_refactor_shared {
      consumption.  Keep the selected run table in the dispatch state so the
      hot column kernels need only one pointer test. */
   const UF_long *snode_run_end;
+  /* A graph-dominant terminal BTF leaf may be completed by a second,
+     forward-only PTS generation after the ordinary dependency frontier. */
+  UF_long deferred_pts_terminal_col;
   /* Persistent-pool subtree solve job.  Kept at the tail so the established
      refactor hot-state layout above is not perturbed. */
   int pts_solve_mode;
@@ -3376,6 +3386,10 @@ static void kls_pts_refactor_pool_worker_run(
   kls_egraph_refactor_worker *worker);
 static int kls_pts_mapped_refactor(kls_solver *solver,
                                    double *numeric_values);
+static int kls_pts_recompute_egraph_terminal(kls_solver *solver,
+                                              double *numeric_values,
+                                              double *workspace);
+static UF_long kls_pts_egraph_terminal_candidate(kls_solver *solver);
 static int kls_pts_try_refactor_timed(kls_solver *solver,
                                       double *numeric_values,
                                       UF_long *ok_out);
@@ -105116,6 +105130,9 @@ static int kls_egraph_refactor_dispatch_column(
     case KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_SCALED:
       return kls_egraph_refactor_single_scaled_column(
         worker, k, wait_for_dependencies);
+    case KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED_DEFER_TERMINAL:
+      if (k == worker->shared->deferred_pts_terminal_col) return 1;
+      /* fall through */
     case KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED:
       if (worker->shared->btf_unscaled_plain &&
           (!wait_for_dependencies ||
@@ -108274,7 +108291,7 @@ kls_egraph_refactor_try_publish_terminal_btf_scalar_run_group_wake(
   kls_solver *solver = shared->solver;
   if (solver == NULL || !shared->btf_scalar_run_group_state_exec ||
       shared->pipeline_ready_queue || producer_col >= solver->n ||
-      shared->kernel != KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED ||
+      !kls_egraph_kernel_is_btf_unscaled(shared->kernel) ||
       shared->supernode_numeric_updates ||
       shared->supernode_consumer_plan_group_l_exec ||
       shared->u_supernode_ragged_l_updates ||
@@ -112073,7 +112090,7 @@ static int kls_egraph_refactor_try_dispatch_algorithm5_payoff_complete_btf(
   kls_solver *solver = shared->solver;
   if (solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL ||
-      shared->kernel != KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED ||
+      !kls_egraph_kernel_is_btf_unscaled(shared->kernel) ||
       !shared->supernode_algorithm5_payoff_group_complete ||
       !shared->supernode_algorithm5_payoff_direct_prefix_complete ||
       !shared->supernode_algorithm5_payoff_direct_prefix_final_state ||
@@ -112154,7 +112171,7 @@ static int kls_egraph_refactor_try_complete_algorithm5_payoff_group(
   if (solver == NULL ||
       !shared->supernode_algorithm5_payoff_group_complete ||
       shared->pipeline_ready_queue ||
-      shared->kernel != KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED ||
+      !kls_egraph_kernel_is_btf_unscaled(shared->kernel) ||
       trigger_col >= solver->n ||
       group >= solver->refactor_supernode_algorithm5_payoff_group_count ||
       solver->refactor_supernode_algorithm5_payoff_group_prefix_end == NULL ||
@@ -114536,7 +114553,7 @@ static int kls_egraph_pair_dispatch_allowed(
            (shared->solver->eg_pair_choice > 0 ||
             shared->solver->eg_pair_pending))) &&
          (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
-          shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED) &&
+          kls_egraph_kernel_is_btf_unscaled(shared->kernel)) &&
          !shared->check_pivots &&
          !shared->supernode_numeric_updates &&
          !shared->supernode_consumer_plan_group_l_exec &&
@@ -114565,7 +114582,7 @@ static int kls_egraph_refactor_dispatch_pair(
     return kls_egraph_refactor_single_unscaled_column_pair(worker, col,
                                                            col2);
   }
-  if (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED) {
+  if (kls_egraph_kernel_is_btf_unscaled(shared->kernel)) {
     const kls_solver *solver = shared->solver;
     const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
     if (solver->refactor_col_block == NULL ||
@@ -115138,7 +115155,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
       }
       const int quad_allowed = pair_allowed &&
         (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
-         shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED) &&
+         kls_egraph_kernel_is_btf_unscaled(shared->kernel)) &&
         (getenv("KLS_ENABLE_QUAD_DISPATCH") != NULL ||
          solver->eg_pair_choice == 2 || solver->eg_pair_pending == 2);
       if (quad_allowed && worker->fuse_x == NULL) {
@@ -115170,7 +115187,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
              existing timed quad probe remains the authority on whether that
              equivalent schedule is retained for a particular numeric. */
           const int adjacent_btf_deck =
-            shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED;
+            kls_egraph_kernel_is_btf_unscaled(shared->kernel);
           const UF_long qpos = (UF_long)atomic_fetch_add_explicit(
             &shared->next_pipeline_pos, adjacent_btf_deck ? 4ul : 2ul,
             memory_order_relaxed);
@@ -120220,6 +120237,19 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_store_explicit(&shared->cluster_barrier_generation, 0u,
                         memory_order_relaxed);
   shared->snode_run_end = kls_refactor_snode_run_end(solver);
+  shared->deferred_pts_terminal_col = KLS_KLU_EMPTY;
+  if (!check_pivots &&
+      selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+      shared->btf_unscaled_plain &&
+      kls_repeated_update_workload(&solver->options) &&
+      solver->refactor_u_indices != NULL) {
+    shared->deferred_pts_terminal_col =
+      kls_pts_egraph_terminal_candidate(solver);
+    if (shared->deferred_pts_terminal_col != KLS_KLU_EMPTY) {
+      shared->kernel =
+        KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED_DEFER_TERMINAL;
+    }
+  }
   shared->row_refactor_mode = 0;
   shared->row_solve_mode = 0;
   shared->row_solve_view = NULL;
@@ -120271,15 +120301,15 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     cached_supernode_updates_only ? 1 : 0;
   shared->btf_scalar_run_stats =
     (btf_scalar_run_stats_requested &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED)
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel))
       ? 1 : 0;
   shared->btf_scalar_run_exec =
     (btf_scalar_run_exec_requested &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED)
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel))
       ? 1 : 0;
   shared->btf_scalar_run_group_wait_stats =
     (btf_scalar_run_group_wait_stats_requested &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel) &&
      btf_scalar_run_group_live != NULL &&
      btf_scalar_run_group_live_count > 0u)
       ? 1 : 0;
@@ -120291,21 +120321,21 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       : 0u;
   shared->btf_scalar_run_group_claims =
     (btf_scalar_run_group_claims_requested &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel) &&
      pipeline_claimed != NULL &&
      solver->refactor_btf_scalar_run_group_built &&
      solver->refactor_btf_scalar_run_group_multi_count > 0u)
       ? 1 : 0;
   shared->btf_scalar_run_group_prefix_stats =
     (btf_scalar_run_group_prefix_stats_requested &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel) &&
      pipeline_done != NULL &&
      solver->refactor_btf_scalar_run_group_built &&
      solver->refactor_btf_scalar_run_group_multi_count > 0u)
       ? 1 : 0;
   shared->btf_scalar_run_group_wake_stats =
     (btf_scalar_run_group_wake_stats_active_requested &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel) &&
      pipeline_done != NULL &&
      btf_scalar_run_group_wake_live != NULL &&
      btf_scalar_run_group_wake_live_count > 0u &&
@@ -120671,14 +120701,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      pipeline_claimed != NULL && pipeline_claim_generation != 0u &&
      pipeline_claim_generation < UINT_MAX &&
      algorithm5_payoff_final_trigger_ptr != NULL &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED)
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel))
       ? 1 : 0;
   shared->supernode_algorithm5_payoff_suffix_advance =
     (algorithm5_payoff_suffix_advance_requested &&
      shared->supernode_algorithm5_payoff_group_complete &&
      algorithm5_payoff_current_up != NULL &&
      algorithm5_payoff_suffix_trigger_ptr != NULL &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED)
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel))
       ? 1 : 0;
   shared->supernode_algorithm5_payoff_suffix_group_advance =
     (algorithm5_payoff_suffix_group_advance_requested &&
@@ -120691,7 +120721,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      solver->refactor_supernode_algorithm5_payoff_group_suffix_run_ptr != NULL &&
      solver->refactor_supernode_algorithm5_payoff_group_suffix_runs != NULL &&
      solver->refactor_supernode_algorithm5_payoff_group_suffix_up != NULL &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED)
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel))
       ? 1 : 0;
   shared->supernode_algorithm5_payoff_suffix_group_window =
     (algorithm5_payoff_suffix_group_window_requested &&
@@ -120707,7 +120737,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      solver->refactor_supernode_algorithm5_payoff_group_suffix_run_ptr != NULL &&
      solver->refactor_supernode_algorithm5_payoff_group_suffix_runs != NULL &&
      solver->refactor_supernode_algorithm5_payoff_group_suffix_up != NULL &&
-     shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED)
+     kls_egraph_kernel_is_btf_unscaled(shared->kernel))
       ? 1 : 0;
   shared->algorithm5_prefactor_updates =
     (algorithm5_prefactor_update_requested &&
@@ -121401,6 +121431,38 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       kls_sync_authoritative_packed_u_values(solver);
       solver->refactor_l_packed_valid = 0;
       solver->refactor_u_packed_valid = 0;
+    }
+  }
+  if (!shared->invalid && !shared->pivot_rejected && !shared->singular &&
+      shared->deferred_pts_terminal_col != KLS_KLU_EMPTY) {
+    const UF_long deferred = shared->deferred_pts_terminal_col;
+    pthread_mutex_unlock(&shared->lock);
+    const int pts_ok = kls_pts_recompute_egraph_terminal(
+      solver, numeric_values, scratch[0]);
+    pthread_mutex_lock(&shared->lock);
+    if (!pts_ok) {
+      /* Eligibility is conservative, but allocation/pool availability is a
+         runtime property.  Preserve exact behavior by executing the original
+         leaf kernel after all of its dependencies have completed. */
+      shared->deferred_pts_terminal_col = KLS_KLU_EMPTY;
+      memset(scratch[0], 0,
+             (size_t)solver->symbolic->maxblock * sizeof(*scratch[0]));
+      double **saved_l_values = solver->refactor_l_values;
+      double **saved_u_values = solver->refactor_u_values;
+      if (solver->refactor_l_packed_valid &&
+          solver->refactor_u_packed_valid) {
+        solver->refactor_l_values = solver->refactor_l_packed_values;
+        solver->refactor_u_values = solver->refactor_u_packed_values;
+      }
+      if (!kls_egraph_refactor_dispatch_column(&pool->workers[0], deferred,
+                                                0)) {
+        shared->invalid = 1;
+      }
+      solver->refactor_l_values = saved_l_values;
+      solver->refactor_u_values = saved_u_values;
+    } else if (shared->udiag_recip != NULL) {
+      const double pivot = ((double *)solver->numeric->Udiag)[deferred];
+      shared->udiag_recip[deferred] = 1.0 / pivot;
     }
   }
   if (!shared->invalid && !shared->pivot_rejected && !shared->singular &&
@@ -158116,6 +158178,8 @@ typedef struct kls_pts_s {
   int solve_decision;               /* 0 trial, 1 PTS, -1 serial i32 */
   int solve_probe_samples[2];       /* [0] serial, [1] PTS */
   double solve_probe_min[2];        /* warm minimum for each solve arm */
+  int egraph_terminal_decision;     /* 0 unknown, 1 eligible, -1 rejected */
+  UF_long egraph_terminal_col;
 } kls_pts;
 
 typedef struct kls_pts_touch_job {
@@ -159257,6 +159321,7 @@ typedef struct {
   UF_long gk0;
   pthread_barrier_t *barrier;
   _Atomic int *go;
+  int forward_only;
   int tid;
 } kls_pts_arg;
 
@@ -159309,7 +159374,7 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
         at[j] = 0.0;
       }
     }
-    /* serial top: ascending L, then descending U */
+    /* serial top: ascending L, then (for a solve) descending U */
     for (int64_t j = 0; j < ntop; ++j) {
       const int32_t k = top_cols[j];
       const double xk = Xb[k];
@@ -159342,7 +159407,7 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
         }
       }
     }
-    for (int64_t j = ntop; j-- > 0;) {
+    for (int64_t j = a->forward_only ? 0 : ntop; j-- > 0;) {
       const int32_t k = top_cols[j];
       const double xk = a->udiag_recip_b != NULL
         ? Xb[k] * a->udiag_recip_b[k] : Xb[k] / a->udiag_b[k];
@@ -159370,6 +159435,7 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
     }
   }
   (void)pthread_barrier_wait(a->barrier);
+  if (a->forward_only) return;
   /* backward U over the own subtrees; targets stay in-chunk */
   for (int64_t q = b1; q-- > b0;) {
     const int32_t k = pts->tcols[q];
@@ -159413,6 +159479,7 @@ typedef struct kls_pts_pool_job {
   double *const *l64;
   double *const *u64;
   UF_long gk0;
+  int forward_only;
 } kls_pts_pool_job;
 
 static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker) {
@@ -159446,6 +159513,7 @@ static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker) {
   arg.gk0 = job->gk0;
   arg.barrier = &shared->barrier;
   arg.go = NULL;
+  arg.forward_only = job->forward_only;
   arg.tid = worker->tid;
   kls_pts_worker_body(&arg);
 }
@@ -159462,15 +159530,16 @@ static void *kls_pts_worker(void *argp) {
   return NULL;
 }
 
-static int kls_pts_solve_block_pool(kls_solver *solver,
-                                    double *Xb,
-                                    double *lu,
-                                    const UF_long *lip,
-                                    const UF_long *llen,
-                                    const UF_long *uip,
-                                    const UF_long *ulen,
-                                    const double *udiag_b,
-                                    const double *udiag_recip_b) {
+static int kls_pts_block_pool(kls_solver *solver,
+                              double *Xb,
+                              double *lu,
+                              const UF_long *lip,
+                              const UF_long *llen,
+                              const UF_long *uip,
+                              const UF_long *ulen,
+                              const double *udiag_b,
+                              const double *udiag_recip_b,
+                              int forward_only) {
   kls_pts *pts = solver != NULL ? solver->pts : NULL;
   if (pts == NULL || pts->nthreads < 2) {
     return 0;
@@ -159510,13 +159579,14 @@ static int kls_pts_solve_block_pool(kls_solver *solver,
     ? solver->i32solve_loff32 + pts->k1 : NULL;
   job.uoff32 = solver->i32solve_uoff32 != NULL
     ? solver->i32solve_uoff32 + pts->k1 : NULL;
-  job.l32 = solver->fp32_last_used > 0
+  job.l32 = !forward_only && solver->fp32_last_used > 0
     ? (float *const *)solver->refactor_l_values32 : NULL;
   job.l64 = solver->refactor_l_packed_valid
     ? (double *const *)solver->refactor_l_packed_values : NULL;
   job.u64 = solver->refactor_u_packed_valid
     ? (double *const *)solver->refactor_u_packed_values : NULL;
   job.gk0 = pts->k1;
+  job.forward_only = forward_only;
 
   shared->solver = solver;
   shared->thread_count = pts->nthreads;
@@ -159539,6 +159609,19 @@ static int kls_pts_solve_block_pool(kls_solver *solver,
   shared->pts_solve_job = NULL;
   pthread_mutex_unlock(&shared->lock);
   return 1;
+}
+
+static int kls_pts_solve_block_pool(kls_solver *solver,
+                                    double *Xb,
+                                    double *lu,
+                                    const UF_long *lip,
+                                    const UF_long *llen,
+                                    const UF_long *uip,
+                                    const UF_long *ulen,
+                                    const double *udiag_b,
+                                    const double *udiag_recip_b) {
+  return kls_pts_block_pool(solver, Xb, lu, lip, llen, uip, ulen,
+                            udiag_b, udiag_recip_b, 0);
 }
 
 static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
@@ -159591,6 +159674,7 @@ static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
     args[t].gk0 = pts->k1;
     args[t].barrier = &barrier;
     args[t].go = &go;
+    args[t].forward_only = 0;
     args[t].tid = t;
   }
   int spawned = 0;
@@ -159614,6 +159698,129 @@ static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
     pthread_join(tids[t], NULL);
   }
   pthread_barrier_destroy(&barrier);
+  return 1;
+}
+
+/* Recompute the structurally terminal column of the PTS block with a
+   parallel unit-lower solve after the ordinary egraph frontier finishes. */
+static UF_long kls_pts_egraph_terminal_candidate(kls_solver *solver) {
+  kls_pts *pts = solver != NULL ? solver->pts : NULL;
+  if (pts != NULL && pts->egraph_terminal_decision != 0) {
+    return pts->egraph_terminal_decision > 0
+      ? pts->egraph_terminal_col : KLS_KLU_EMPTY;
+  }
+  if (pts == NULL || !pts->solve_ok || pts->nk < 16384u ||
+      solver->symbolic == NULL || solver->numeric == NULL ||
+      pts->block >= solver->symbolic->nblocks ||
+      solver->refactor_u_indices == NULL) {
+    if (pts != NULL) pts->egraph_terminal_decision = -1;
+    return KLS_KLU_EMPTY;
+  }
+  const trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long k = pts->k1 + pts->nk - 1u;
+  if (k + 1u != solver->symbolic->R[pts->block + 1u] ||
+      numeric->Llen[k] != 0u || numeric->Ulen[k] < pts->nk / 2u) {
+    pts->egraph_terminal_decision = -1;
+    return KLS_KLU_EMPTY;
+  }
+  double work = 1.0;
+  const UF_long *ui = solver->refactor_u_indices[k];
+  if (ui == NULL) {
+    pts->egraph_terminal_decision = -1;
+    return KLS_KLU_EMPTY;
+  }
+  for (UF_long p = 0u; p < numeric->Ulen[k]; ++p) {
+    if (ui[p] >= pts->nk) {
+      pts->egraph_terminal_decision = -1;
+      return KLS_KLU_EMPTY;
+    }
+    work += 1.0 + (double)numeric->Llen[pts->k1 + ui[p]];
+  }
+  pts->egraph_terminal_decision =
+    work >= 0.99 * solver->refactor_dependency_max_column_work ? 1 : -1;
+  pts->egraph_terminal_col = k;
+  if (getenv("KLS_TRACE_PTS") != NULL) {
+    fprintf(stderr,
+            "KLS pts egraph terminal: %s nk=%" PRIu64
+            " ulen=%" PRIu64 " ntop=%" PRId64
+            " work=%.0f max=%.0f\n",
+            pts->egraph_terminal_decision > 0 ? "adopt" : "reject",
+            (uint64_t)pts->nk, (uint64_t)numeric->Ulen[k], pts->ntop,
+            work, solver->refactor_dependency_max_column_work);
+  }
+  return pts->egraph_terminal_decision > 0 ? k : KLS_KLU_EMPTY;
+}
+
+static int kls_pts_recompute_egraph_terminal(kls_solver *solver,
+                                              double *numeric_values,
+                                              double *workspace) {
+  kls_pts *pts = solver != NULL ? solver->pts : NULL;
+  if (pts == NULL || !pts->solve_ok || solver->symbolic == NULL ||
+      solver->numeric == NULL || numeric_values == NULL || workspace == NULL ||
+      pts->nk < 2u || pts->block >= solver->symbolic->nblocks ||
+      solver->common.scale > 0) {
+    return 0;
+  }
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long block = pts->block;
+  const UF_long k1 = pts->k1;
+  const UF_long nk = pts->nk;
+  const UF_long local_k = nk - 1u;
+  const UF_long k = k1 + local_k;
+  if (solver->symbolic->R[block] != k1 ||
+      solver->symbolic->R[block + 1u] != k1 + nk ||
+      numeric->Llen[k] != 0u || solver->refactor_col_block == NULL ||
+      solver->refactor_col_block[k] != block || numeric->Offp == NULL ||
+      numeric->Offx == NULL || solver->refactor_block_start == NULL) {
+    return 0;
+  }
+
+  memset(workspace, 0, (size_t)nk * sizeof(*workspace));
+  UF_long poff = numeric->Offp[k];
+  if (!kls_egraph_copy_unscaled_offblock_input(
+        solver, numeric_values, (double *)numeric->Offx, &poff,
+        numeric->Offp[k + 1u], solver->refactor_col_ptr[k],
+        solver->refactor_block_start[k])) {
+    return 0;
+  }
+  kls_egraph_scatter_btf_unscaled_input(
+    solver, numeric_values, workspace, k1,
+    solver->refactor_block_start[k], solver->refactor_col_ptr[k + 1u]);
+
+  double *lu = (double *)numeric->LUbx[block];
+  const double trace_begin = getenv("KLS_TRACE_PTS") != NULL
+    ? kls_now_seconds() : 0.0;
+  if (lu == NULL || !kls_pts_block_pool(
+        solver, workspace, lu, numeric->Lip + k1, numeric->Llen + k1,
+        numeric->Uip + k1, numeric->Ulen + k1,
+        (double *)numeric->Udiag + k1,
+        solver->i32solve_udiag_recip_fresh &&
+          solver->i32solve_udiag_recip != NULL
+          ? solver->i32solve_udiag_recip + k1 : NULL,
+        1)) {
+    memset(workspace, 0, (size_t)nk * sizeof(*workspace));
+    return 0;
+  }
+
+  const UF_long ulen = numeric->Ulen[k];
+  const UF_long *ui = solver->refactor_u_indices[k];
+  double *ux = solver->refactor_u_packed_valid &&
+      solver->refactor_u_packed_values != NULL &&
+      solver->refactor_u_packed_values[k] != NULL
+    ? solver->refactor_u_packed_values[k] : solver->refactor_u_values[k];
+  for (UF_long p = 0u; p < ulen; ++p) {
+    const double candidate = workspace[ui[p]];
+    ux[p] = candidate;
+    workspace[ui[p]] = 0.0;
+  }
+  const double pivot = workspace[local_k];
+  workspace[local_k] = 0.0;
+  if (pivot == 0.0 || !isfinite(pivot)) return 0;
+  ((double *)numeric->Udiag)[k] = pivot;
+  if (trace_begin != 0.0) {
+    fprintf(stderr, "KLS pts egraph terminal run: %.3f ms\n",
+            1e3 * (kls_now_seconds() - trace_begin));
+  }
   return 1;
 }
 
