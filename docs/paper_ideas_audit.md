@@ -21526,3 +21526,28 @@ barrier.
 Release CTest passed all four tests, the leak-enabled ASan/UBSan/LSan smoke
 test passed, and every focused and full-campaign EGraph result satisfied the
 strict per-refactor residual check.
+
+PARTIAL-ALIGNMENT QUAD FUSION (2026-08-25).  Fresh CPU sampling on the
+remaining large EGraph losses put the strict-supernode consumer at 80.4% of
+all CPU time on `G3_circuit` and 36.4% on `memchip`.  The retained quad
+dispatcher already shares an L-panel stream across four consumers, but did so
+only while all four U cursors named the same producer.  One divergent cursor
+therefore sent every consumer through an independent panel walk.
+
+The multi-consumer scheduler can now partition its four-column deck by current
+producer and fuse every aligned subset of at least two consumers.  Dependency
+tests, U order, and the per-consumer reduction order are unchanged.  Applying
+the policy unconditionally was rejected: a two-pass 22-case EGraph cohort
+regressed modeled-cycle and steady-refactor geomeans by 0.15% and 0.28%.
+Instead, factors that have already selected quad fusion reuse its measured
+sample as the incumbent, time the subset schedule, reject it after one losing
+sample, and require two winning samples plus a 0.5% margin before adoption.
+This verdict depends only on the realized numeric schedule and machine timing.
+
+`G3_circuit` adopted the new schedule at 1.365 seconds versus 1.459 seconds
+for all-four-only fusion.  A separate two-pass parent/current run improved its
+modeled H100 cycle by 0.95% and steady refactor by about 1.1%.  The complete
+22-case adaptive cohort improved modeled-cycle geomean by 0.26% (12/22 wins)
+and steady-refactor geomean by 0.60% (14/22 wins).  Strict verification across
+twelve perturbed `G3_circuit` refactors kept maximum relative residual below
+`5.5e-16`, and release CTest passed all four tests.

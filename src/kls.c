@@ -769,6 +769,11 @@ struct kls_solver {
                            width verdict), 1 pair, 2 quad, -1 off */
   int eg_pair_pending;  /* probe refactor out: 1 pair arm, 2 quad arm */
   double eg_fuse_min[2];  /* probe minima: [0] pair, [1] quad */
+  int eg_subset_choice; /* quad partial-alignment fusion: 0 undecided,
+                           1 aligned subsets, -1 all-four only */
+  int eg_subset_pending; /* probe out: 2 aligned-subset arm */
+  int eg_subset_samples[2];
+  double eg_subset_min[2]; /* [0] ordinary quad, [1] subset fusion */
   int eg_stream_choice;  /* indexed-stream kernel trial: 0 undecided,
                             1 scalar/wide-tail, 2 vector/wide-tail,
                             -1 vector/standard-tail */
@@ -28238,6 +28243,10 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->eg_pair_choice = 0;
   solver->eg_pair_pending = 0;
   memset(solver->eg_fuse_min, 0, sizeof(solver->eg_fuse_min));
+  solver->eg_subset_choice = 0;
+  solver->eg_subset_pending = 0;
+  memset(solver->eg_subset_samples, 0, sizeof(solver->eg_subset_samples));
+  memset(solver->eg_subset_min, 0, sizeof(solver->eg_subset_min));
   solver->eg_stream_choice = 0;
   solver->eg_stream_pending = 0;
   memset(solver->eg_stream_min, 0, sizeof(solver->eg_stream_min));
@@ -103025,7 +103034,6 @@ static int kls_egraph_refactor_single_unscaled_column_multi(
   UF_long ulen[KLS_SNODE_MAX_FUSE];
   UF_long up[KLS_SNODE_MAX_FUSE];
   int done[KLS_SNODE_MAX_FUSE];
-  UF_long producer_limit = solver->n;
   for (int c = 0; c < nc; ++c) {
     const UF_long k = cols[c];
     kls_egraph_scatter_unscaled_input(solver, shared->values, xv[c],
@@ -103038,9 +103046,6 @@ static int kls_egraph_refactor_single_unscaled_column_multi(
     ulen[c] = numeric->Ulen[k];
     up[c] = 0;
     done[c] = 0;
-    if (k < producer_limit) {
-      producer_limit = k;
-    }
   }
   int remaining = nc;
   unsigned spin = 0;
@@ -103049,36 +103054,98 @@ static int kls_egraph_refactor_single_unscaled_column_multi(
       return 0;
     }
     int progress = 0;
-    /* fused: consume a run shared by every side still at the same
-       producer (checked cheaply via equal current indices) */
-    int all_alive = 1;
-    for (int c = 0; c < nc; ++c) {
-      if (done[c] || up[c] >= ulen[c]) {
-        all_alive = 0;
-        break;
-      }
-    }
-    if (all_alive) {
-      const UF_long j0 = ui32[0] != NULL
-        ? (UF_long)ui32[0][up[0]] : ui[0][up[0]];
-      int aligned = 1;
-      for (int c = 1; c < nc; ++c) {
+    const int subset_fusion = solver->eg_subset_choice > 0 ||
+      solver->eg_subset_pending == 2;
+    if (subset_fusion) {
+      /* Fuse every aligned subset in the deck.  Requiring all four consumers
+         to share the same current producer made one divergent U stream force
+         four independent reads of an otherwise common L panel. */
+      unsigned int grouped = 0u;
+      for (int seed = 0; seed < nc; ++seed) {
+        if ((grouped & (1u << seed)) != 0u || done[seed] ||
+            up[seed] >= ulen[seed]) {
+          continue;
+        }
+      const UF_long j0 = ui32[seed] != NULL
+        ? (UF_long)ui32[seed][up[seed]] : ui[seed][up[seed]];
+      const UF_long *group_ui[KLS_SNODE_MAX_FUSE];
+      const int32_t *group_ui32[KLS_SNODE_MAX_FUSE];
+      double *group_ux[KLS_SNODE_MAX_FUSE];
+      double *group_xv[KLS_SNODE_MAX_FUSE];
+      UF_long group_ulen[KLS_SNODE_MAX_FUSE];
+      UF_long group_up[KLS_SNODE_MAX_FUSE];
+      int members[KLS_SNODE_MAX_FUSE];
+      int group_count = 0;
+      UF_long group_producer_limit = solver->n;
+      for (int c = seed; c < nc; ++c) {
+        if ((grouped & (1u << c)) != 0u || done[c] || up[c] >= ulen[c]) {
+          continue;
+        }
         const UF_long jc = ui32[c] != NULL
           ? (UF_long)ui32[c][up[c]] : ui[c][up[c]];
         if (jc != j0) {
-          aligned = 0;
-          break;
+          continue;
         }
+        members[group_count] = c;
+        group_ui[group_count] = ui[c];
+        group_ui32[group_count] = ui32[c];
+        group_ux[group_count] = ux[c];
+        group_xv[group_count] = xv[c];
+        group_ulen[group_count] = ulen[c];
+        group_up[group_count] = up[c];
+        if (cols[c] < group_producer_limit) {
+          group_producer_limit = cols[c];
+        }
+        grouped |= 1u << c;
+        group_count++;
       }
-      if (aligned) {
+      if (group_count >= 2) {
         const UF_long consumed = kls_snode_batch_consume_cached_multi(
-          l_indices, l_values, numeric->Llen, nc, ui, ui32, ux, ulen,
-          up, xv, 0u, producer_limit, shared->snode_run_end, shared, 1);
+          l_indices, l_values, numeric->Llen, group_count, group_ui,
+          group_ui32, group_ux, group_ulen, group_up, group_xv, 0u,
+          group_producer_limit, shared->snode_run_end, shared, 1);
         if (consumed != 0u) {
-          for (int c = 0; c < nc; ++c) {
-            up[c] += consumed;
+          for (int g = 0; g < group_count; ++g) {
+            up[members[g]] += consumed;
           }
           progress = 1;
+        }
+      }
+    }
+    } else {
+      int all_alive = 1;
+      UF_long all_producer_limit = solver->n;
+      for (int c = 0; c < nc; ++c) {
+        if (done[c] || up[c] >= ulen[c]) {
+          all_alive = 0;
+          break;
+        }
+        if (cols[c] < all_producer_limit) {
+          all_producer_limit = cols[c];
+        }
+      }
+      if (all_alive) {
+        const UF_long j0 = ui32[0] != NULL
+          ? (UF_long)ui32[0][up[0]] : ui[0][up[0]];
+        int aligned = 1;
+        for (int c = 1; c < nc; ++c) {
+          const UF_long jc = ui32[c] != NULL
+            ? (UF_long)ui32[c][up[c]] : ui[c][up[c]];
+          if (jc != j0) {
+            aligned = 0;
+            break;
+          }
+        }
+        if (aligned) {
+          const UF_long consumed = kls_snode_batch_consume_cached_multi(
+            l_indices, l_values, numeric->Llen, nc, ui, ui32, ux, ulen,
+            up, xv, 0u, all_producer_limit, shared->snode_run_end, shared, 1);
+          if (consumed != 0u) {
+            for (int c = 0; c < nc; ++c) {
+              up[c] += consumed;
+            }
+            progress = 1;
+          }
         }
       }
     }
@@ -118761,6 +118828,7 @@ static UF_long kls_egraph_cluster_level_dispatch(kls_solver *solver,
   /* Hold width, fusion, stream, and separator layout fixed so the samples
      differ only in where level barriers give way to dependency waits. */
   if (solver->eg_tt_choice <= 0 || solver->eg_pair_choice == 0 ||
+      solver->eg_subset_choice == 0 || solver->eg_subset_pending ||
       solver->eg_stream_choice == 0 || solver->eg_premark_choice != 0 ||
       solver->eg_tt_pending || solver->eg_pair_pending ||
       solver->eg_stream_pending || solver->eg_separator_pending ||
@@ -118812,6 +118880,7 @@ static int kls_egraph_cluster_premark_dispatch(
      or separator changes would be charged to the completion bitmap. */
   if (solver->eg_separator_choice == 0 || solver->eg_tt_choice <= 0 ||
       solver->eg_pair_choice == 0 || solver->eg_stream_choice == 0 ||
+      solver->eg_subset_choice == 0 || solver->eg_subset_pending ||
       solver->eg_cluster_choice == 0 ||
       solver->eg_separator_pending || solver->eg_tt_pending ||
       solver->eg_pair_pending || solver->eg_stream_pending ||
@@ -119003,6 +119072,47 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
                 " private %.3f ms)\n",
                 solver->eg_separator_choice > 0 ? "PRIVATE" : "ordinary",
                 1e3 * ordinary, 1e3 * private_domains);
+      }
+    }
+    return;
+  }
+  if (solver->eg_subset_pending) {
+    const int side = solver->eg_subset_pending - 1;
+    solver->eg_subset_pending = 0;
+    if (solver->eg_subset_choice != 0 || side != 1 ||
+        solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
+      return;
+    }
+    solver->eg_subset_samples[side]++;
+    if (solver->eg_subset_min[side] <= 0.0 ||
+        seconds < solver->eg_subset_min[side]) {
+      solver->eg_subset_min[side] = seconds;
+    }
+    if (solver->eg_subset_samples[side] == 1 &&
+        solver->eg_subset_min[0] > 0.0 &&
+        solver->eg_subset_min[1] >= 0.995 * solver->eg_subset_min[0]) {
+      solver->eg_subset_choice = -1;
+      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+        fprintf(stderr,
+                "KLS egraph quad-subset probe: early all-four"
+                " (all %.3f, subsets %.3f ms)\n",
+                1e3 * solver->eg_subset_min[0],
+                1e3 * solver->eg_subset_min[1]);
+      }
+      return;
+    }
+    if (solver->eg_subset_samples[side] >= 2) {
+      const double ordinary = solver->eg_subset_min[0];
+      const double subsets = solver->eg_subset_min[1];
+      solver->eg_subset_choice =
+        ordinary > 0.0 && subsets > 0.0 && subsets < 0.995 * ordinary
+          ? 1 : -1;
+      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+        fprintf(stderr,
+                "KLS egraph quad-subset probe: %s"
+                " (all %.3f, subsets %.3f ms)\n",
+                solver->eg_subset_choice > 0 ? "SUBSETS" : "all-four",
+                1e3 * ordinary, 1e3 * subsets);
       }
     }
     return;
@@ -119237,6 +119347,7 @@ static void kls_egraph_select_stream_kernels(kls_solver *solver,
      or fusion arm. */
   if (solver->eg_separator_choice == 0 || solver->eg_tt_choice <= 0 ||
       solver->eg_pair_choice == 0 ||
+      solver->eg_subset_choice == 0 || solver->eg_subset_pending ||
       solver->eg_tt_pending || solver->eg_pair_pending) {
     return;
   }
@@ -119256,6 +119367,29 @@ static void kls_egraph_select_stream_kernels(kls_solver *solver,
     solver->snode_tail_chunk128 = wide_tail_applicable;
     solver->snode_tail_chunk144 = wide_tail_applicable;
     solver->snode_tail_masked_remainder = wide_tail_applicable;
+  }
+}
+
+static void kls_egraph_select_subset_fusion(kls_solver *solver,
+                                             int check_pivots) {
+  solver->eg_subset_pending = 0;
+  if (check_pivots || !kls_repeated_update_workload(&solver->options) ||
+      solver->eg_pair_choice != 2) {
+    if (solver->eg_pair_choice != 0) {
+      solver->eg_subset_choice = -1;
+    }
+    return;
+  }
+  if (solver->eg_subset_choice != 0 || solver->eg_pair_pending ||
+      solver->eg_tt_pending || solver->eg_separator_pending) {
+    return;
+  }
+  if (solver->eg_subset_samples[0] == 0 && solver->eg_fuse_min[1] > 0.0) {
+    solver->eg_subset_samples[0] = 1;
+    solver->eg_subset_min[0] = solver->eg_fuse_min[1];
+  }
+  if (solver->eg_subset_samples[1] < 2) {
+    solver->eg_subset_pending = 2;
   }
 }
 
@@ -119300,6 +119434,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_egraph_separator_private_dispatch(solver, check_pivots);
   thread_count =
     kls_egraph_steady_thread_count(solver, thread_count, check_pivots);
+  kls_egraph_select_subset_fusion(solver, check_pivots);
   kls_egraph_select_stream_kernels(solver, check_pivots);
   const int supernode_numeric_update_mode =
     kls_egraph_supernode_numeric_updates_env_mode();
@@ -160240,6 +160375,12 @@ static void kls_reset_unsettled_egraph_trials_after_pts(
   if (solver->eg_pair_choice == 0) {
     solver->eg_pair_pending = 0;
     memset(solver->eg_fuse_min, 0, sizeof(solver->eg_fuse_min));
+  }
+  if (solver->eg_subset_choice == 0) {
+    solver->eg_subset_pending = 0;
+    memset(solver->eg_subset_samples, 0,
+           sizeof(solver->eg_subset_samples));
+    memset(solver->eg_subset_min, 0, sizeof(solver->eg_subset_min));
   }
   if (solver->eg_stream_choice == 0) {
     solver->eg_stream_pending = 0;
