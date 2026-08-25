@@ -154505,11 +154505,18 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       return 0;
     }
   }
-  const int generic_nd_fill_only =
+  const int generic_nd_unscored_bounded =
     solver->generic_nd_portfolio_selected &&
     solver->generic_nd_bounded_symmetric_union &&
-    !(symbolic->lnz + symbolic->unz > 0.0) &&
-    solver->options.scale == KLS_SCALE_AUTO && solver->common.scale > 0;
+    !(symbolic->lnz + symbolic->unz > 0.0);
+  const int generic_nd_static_values_capable =
+    generic_nd_unscored_bounded
+      ? kls_generic_predicted_diagonal_values_capable(solver, numeric_values)
+      : 1;
+  const int generic_nd_fill_only =
+    generic_nd_unscored_bounded &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    (solver->common.scale > 0 || !generic_nd_static_values_capable);
   const int generic_scaled_auto_prediction_census =
     solver->options.scale == KLS_SCALE_AUTO &&
     solver->common.scale > 0 &&
