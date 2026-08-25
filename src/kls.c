@@ -32719,6 +32719,7 @@ static _Thread_local int kls_compact_missing_match_ordering_ctx;
 static _Thread_local int kls_value_matched_ordering_ctx;
 static _Thread_local int kls_amf3_power_override_active;
 static _Thread_local double kls_amf3_power_override;
+static _Thread_local int kls_amf3_exact_clique_bound;
 static _Thread_local int kls_amf3_span_variant_selected;
 
 #ifdef KLS_HAVE_MTMETIS
@@ -34502,7 +34503,7 @@ static int analyze_with_ordering(UF_long n,
           }
         }
       } else if (ordering == KLS_ORDERING_AMF3) {
-        trilinos_amd_l2_amf = 3;
+        trilinos_amd_l2_amf = kls_amf3_exact_clique_bound ? 4 : 3;
         trilinos_amd_l2_amf_power = 0.445;
         if (kls_amf3_power_override_active &&
             isfinite(kls_amf3_power_override) &&
@@ -44078,6 +44079,7 @@ struct kls_amf_spec_job {
   atomic_int *representation_verdict; /* 0 pending, 1 BTF, 2 no-BTF */
   int has_amf3_power_override;
   double amf3_power_override;
+  int amf3_exact_clique_bound;
   int measure_etree_levels;
   int amf3_span_variant;
   double score;
@@ -44090,8 +44092,10 @@ static void *kls_amf_spec_main(void *arg) {
   struct kls_amf_spec_job *job = (struct kls_amf_spec_job *)arg;
   const int saved_power_override_active = kls_amf3_power_override_active;
   const double saved_power_override = kls_amf3_power_override;
+  const int saved_exact_clique_bound = kls_amf3_exact_clique_bound;
   kls_amf3_power_override_active = job->has_amf3_power_override;
   kls_amf3_power_override = job->amf3_power_override;
+  kls_amf3_exact_clique_bound = job->amf3_exact_clique_bound;
   memset(&job->separator, 0, sizeof(job->separator));
   job->symbolic = NULL;
   job->status = analyze_with_ordering(job->n, job->col_ptr, job->row_idx,
@@ -44155,6 +44159,7 @@ static void *kls_amf_spec_main(void *arg) {
   }
   kls_amf3_power_override_active = saved_power_override_active;
   kls_amf3_power_override = saved_power_override;
+  kls_amf3_exact_clique_bound = saved_exact_clique_bound;
   return NULL;
 }
 
@@ -44737,11 +44742,11 @@ generic_ordering_tournament:;
     column_pair_work * requested_numeric_horizon >= 2.0e8 &&
     getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
     getenv("KLS_DISABLE_PARALLEL_NO_BTF_TRIAL") == NULL;
-  /* Eight available workers can also overlap a second AMF3 scoring power.
-     Its selector below is based on estimated work and actual elimination-
-     tree depth, not on dimensions or a matrix-family label.  An explicit
-     power request is an experiment and therefore suppresses this internal
-     comparison. */
+  /* Eight available workers can also overlap the literal AMF3 clique bound
+     with the historically useful relaxed bound.  Published results show
+     that a tighter local bound is not universally a better greedy order, so
+     retain this as a measured symbolic portfolio rather than replacing the
+     incumbent.  An explicit power request suppresses the comparison. */
   const int amf3_span_portfolio =
     broad_amf_portfolio && options->threads >= 8 &&
     !kls_prestatic_ordering_ctx &&
@@ -44793,12 +44798,15 @@ generic_ordering_tournament:;
          portfolio so a later candidate can be compared with the current
          minimum-fill winner on the same representation. */
       amf_spec[i].measure_etree_levels = amf3_span_portfolio;
-      amf_spec[i].amf3_span_variant =
-        amf3_span_portfolio && i == 2;
-      amf_spec[i].has_amf3_power_override =
-        amf_spec[i].amf3_span_variant;
+      /* The third arm varies the clique bound, not the scoring power.  It
+         therefore must not inherit the lower-power variant's numeric census
+         and restoration policy. */
+      amf_spec[i].amf3_span_variant = 0;
+      amf_spec[i].has_amf3_power_override = 0;
       amf_spec[i].amf3_power_override =
-        amf_spec[i].amf3_span_variant ? 0.300 : 0.445;
+        0.445;
+      amf_spec[i].amf3_exact_clique_bound =
+        amf3_span_portfolio && i == 2;
       amf_spec[i].representation_verdict = &generic_representation_verdict;
       if (!stage_cache_ordering_portfolio &&
           pthread_create(&amf_spec_tid[i], NULL, kls_amf_spec_main,

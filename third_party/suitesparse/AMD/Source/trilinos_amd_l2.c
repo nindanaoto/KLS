@@ -1144,9 +1144,16 @@ GLOBAL void TRILINOS_AMD_2
 			if (dext > 0)
 			{
 			    deg += dext ;
-			    if (trilinos_amd_l2_amf == 3)
+			    if (trilinos_amd_l2_amf == 3 ||
+				trilinos_amd_l2_amf == 4)
 			    {
-				const Int q = MAX (dext, Degree [e]) ;
+				/* Mode 4 is the literal AMF3 bound: Degree[e] is
+				 * |Le| and includes i, whereas kappa(i) \ {i} does
+				 * not.  Keep mode 3 as an independent, historically
+				 * useful relaxed bound for the ordering portfolio. */
+				const Int q = trilinos_amd_l2_amf == 4
+				    ? MAX (dext, Degree [e] - nvi)
+				    : MAX (dext, Degree [e]) ;
 				amf_cliq_i += (dext * (2 * q - dext)) / 2 ;
 			    }
 			    else
@@ -1182,9 +1189,12 @@ GLOBAL void TRILINOS_AMD_2
 			dext = we - wflg ;
 			ASSERT (dext >= 0) ;
 			deg += dext ;
-			if (trilinos_amd_l2_amf == 3)
+			if (trilinos_amd_l2_amf == 3 ||
+			    trilinos_amd_l2_amf == 4)
 			{
-			    const Int q = MAX (dext, Degree [e]) ;
+			    const Int q = trilinos_amd_l2_amf == 4
+				? MAX (dext, Degree [e] - nvi)
+				: MAX (dext, Degree [e]) ;
 			    amf_cliq_i += (dext * (2 * q - dext)) / 2 ;
 			}
 			else
@@ -1531,7 +1541,8 @@ GLOBAL void TRILINOS_AMD_2
 			Int dme = degme - nvi ;
 			double def ;
 			if (dme < 0) dme = 0 ;
-			if (trilinos_amd_l2_amf == 3)
+			if (trilinos_amd_l2_amf == 3 ||
+			    trilinos_amd_l2_amf == 4)
 			{
 			    def = 0.5 * (double) deg * (double) deg
 				- (double) amf_cliq [i]
