@@ -3158,6 +3158,7 @@ typedef struct kls_egraph_refactor_shared {
      short spin barrier avoids entering the pthread barrier futex path
      between small cluster levels. */
   atomic_uint cluster_barrier_arrived;
+  unsigned char cluster_barrier_padding[64];
   atomic_uint cluster_barrier_generation;
   int use_spin_cluster_barrier;
   /* The low-work single-block cohort is faster with scalar dependency
