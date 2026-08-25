@@ -66680,7 +66680,9 @@ static int kls_finish_row_refactor_pattern_from_arrays(
        work of the row executor that is already proven by these transposed
        streams.  Each scheduled group necessarily performs a ready/claim,
        completion publication and successor consultation in addition to its
-       arithmetic; charge one cache-line-equivalent 64 work units for that
+       arithmetic; charge 96 work units for the claim/completion cache line
+       plus the successor metadata that every independently scheduled group
+       must touch
        irreducible task traffic.  If even this optimistic floor lies outside
        the same five-percent uncertainty band used by the completed row-work
        model, the measured column/EGraph challenger cannot be displaced.
@@ -66697,14 +66699,14 @@ static int kls_finish_row_refactor_pattern_from_arrays(
         }
       }
     }
-    row_task_floor += 64.0 * (double)group_count;
+    row_task_floor += 96.0 * (double)group_count;
     const int reject =
       row_task_floor > 1.05 * solver->refactor_dependency_work;
     if (getenv("KLS_TRACE_ROW_TASK_FLOOR") != NULL) {
       fprintf(stderr,
               "KLS row task floor: work=%.6g groups=%ld floor=%.6g "
               "column=%.6g -> %s\n",
-              row_task_floor - 64.0 * (double)group_count,
+              row_task_floor - 96.0 * (double)group_count,
               (long)group_count, row_task_floor,
               solver->refactor_dependency_work,
               reject ? "reject" : "continue");
