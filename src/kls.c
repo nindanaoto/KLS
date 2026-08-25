@@ -159106,7 +159106,9 @@ static void kls_pts_try_build(kls_solver *solver) {
          so a forced trial cannot silently become the steady-state route. */
       pts->refactor_ok =
         getenv("KLS_ENABLE_PTS_REFACTOR") != NULL ||
-        (total_flops <= 0.0 || top_flops <= 0.45 * total_flops);
+        (total_flops <= 0.0 ||
+         (top_flops <= 0.45 * total_flops &&
+          critical_refactor_flops <= 0.50 * total_flops));
       pts->refactor_top_flops = top_flops;
       pts->refactor_total_flops = total_flops;
       if (trace) {
