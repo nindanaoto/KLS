@@ -66673,6 +66673,52 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   free(levels);
   KLS_ROW_FINISH_MARK("group formation");
 
+  if (solver->refactor_level_ptr != NULL &&
+      solver->refactor_dependency_work > 0.0 && group_count > 0u &&
+      getenv("KLS_DISABLE_ROW_TASK_FLOOR") == NULL) {
+    /* Before constructing the remaining group DAG, account for the minimum
+       work of the row executor that is already proven by these transposed
+       streams.  Each scheduled group necessarily performs a ready/claim,
+       completion publication and successor consultation in addition to its
+       arithmetic; charge a deliberately small 32 work units for that
+       irreducible task traffic.  If even this optimistic floor lies outside
+       the same five-percent uncertainty band used by the completed row-work
+       model, the measured column/EGraph challenger cannot be displaced.
+       Aborting here avoids building all downstream schedules and solve
+       partitions while preserving row candidates with sufficiently coarse
+       work. */
+    double row_task_floor = (double)input_nnz + (double)u_nnz;
+    for (UF_long row_i = 0u; row_i < n; ++row_i) {
+      for (UF_long p = l_ptr[row_i]; p < l_ptr[row_i + 1u]; ++p) {
+        const UF_long dep = l_cols[p];
+        if (dep < n) {
+          row_task_floor += 1.0 +
+            (double)(u_ptr[dep + 1u] - u_ptr[dep]);
+        }
+      }
+    }
+    row_task_floor += 32.0 * (double)group_count;
+    const int reject =
+      row_task_floor > 1.05 * solver->refactor_dependency_work;
+    if (getenv("KLS_TRACE_ROW_TASK_FLOOR") != NULL) {
+      fprintf(stderr,
+              "KLS row task floor: work=%.6g groups=%ld floor=%.6g "
+              "column=%.6g -> %s\n",
+              row_task_floor - 32.0 * (double)group_count,
+              (long)group_count, row_task_floor,
+              solver->refactor_dependency_work,
+              reject ? "reject" : "continue");
+    }
+    if (reject) {
+      free(row_group);
+      free(group_ptr);
+      free_row_refactor_pattern(solver);
+      solver->row_refactor_auto_lower_bound_work = row_task_floor;
+      solver->row_refactor_auto_lower_bound_rejected = 1;
+      return 0;
+    }
+  }
+
   UF_long *l_internal_ptr = n > 0u
     ? (UF_long *)calloc((size_t)n, sizeof(*l_internal_ptr)) : NULL;
   UF_long *group_trailing_len = group_count > 0u
@@ -68974,6 +69020,13 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
     }
     return 1;
   }
+  if (!lean_only && solver->row_refactor_auto_lower_bound_rejected) {
+    /* The parallel builder can decline a completed minimal pattern because
+       its proven task floor cannot challenge EGraph.  That is an economic
+       verdict, not a construction failure: do not rebuild the same streams
+       serially only to reach the identical verdict. */
+    return 0;
+  }
   if (!kls_build_refactor_map(solver)) {
     return 0;
   }
@@ -69002,6 +69055,9 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
               1e3 * (trace_end - trace_begin));
     }
     return 1;
+  }
+  if (!lean_only && solver->row_refactor_auto_lower_bound_rejected) {
+    return 0;
   }
 
   const UF_long factor_entries = solver->numeric->lnz + solver->numeric->unz;
