@@ -101235,6 +101235,63 @@ static UF_long kls_snode_batch_consume_cached_apply(
       _mm512_storeu_pd(acc + 40u, a5);
       _mm512_storeu_pd(acc + 48u, a6);
       _mm512_storeu_pd(acc + 56u, a7);
+    } else if (pc >= 24u && pc < KLS_SNODE_TAIL_CHUNK) {
+      const __mmask8 tail_mask =
+        (__mmask8)((1u << (unsigned)(pc - 24u)) - 1u);
+      __m512d u = _mm512_set1_pd(xs[t - 1u]);
+      __m512d a0 = _mm512_mul_pd(_mm512_loadu_pd(tlx + p0), u);
+      __m512d a1 = _mm512_mul_pd(_mm512_loadu_pd(tlx + p0 + 8u), u);
+      __m512d a2 = _mm512_mul_pd(_mm512_loadu_pd(tlx + p0 + 16u), u);
+      __m512d a3 = _mm512_mul_pd(
+        _mm512_maskz_loadu_pd(tail_mask, tlx + p0 + 24u), u);
+      for (UF_long i = 0; i + 1u < t; ++i) {
+        const double *src = lx_arr[i] + (t - 1u - i) + p0;
+        u = _mm512_set1_pd(xs[i]);
+        a0 = _mm512_fmadd_pd(_mm512_loadu_pd(src), u, a0);
+        a1 = _mm512_fmadd_pd(_mm512_loadu_pd(src + 8u), u, a1);
+        a2 = _mm512_fmadd_pd(_mm512_loadu_pd(src + 16u), u, a2);
+        a3 = _mm512_fmadd_pd(
+          _mm512_maskz_loadu_pd(tail_mask, src + 24u), u, a3);
+      }
+      _mm512_storeu_pd(acc, a0);
+      _mm512_storeu_pd(acc + 8u, a1);
+      _mm512_storeu_pd(acc + 16u, a2);
+      _mm512_mask_storeu_pd(acc + 24u, tail_mask, a3);
+    } else if (pc >= 16u && pc < 24u) {
+      const __mmask8 tail_mask =
+        (__mmask8)((1u << (unsigned)(pc - 16u)) - 1u);
+      __m512d u = _mm512_set1_pd(xs[t - 1u]);
+      __m512d a0 = _mm512_mul_pd(_mm512_loadu_pd(tlx + p0), u);
+      __m512d a1 = _mm512_mul_pd(_mm512_loadu_pd(tlx + p0 + 8u), u);
+      __m512d a2 = _mm512_mul_pd(
+        _mm512_maskz_loadu_pd(tail_mask, tlx + p0 + 16u), u);
+      for (UF_long i = 0; i + 1u < t; ++i) {
+        const double *src = lx_arr[i] + (t - 1u - i) + p0;
+        u = _mm512_set1_pd(xs[i]);
+        a0 = _mm512_fmadd_pd(_mm512_loadu_pd(src), u, a0);
+        a1 = _mm512_fmadd_pd(_mm512_loadu_pd(src + 8u), u, a1);
+        a2 = _mm512_fmadd_pd(
+          _mm512_maskz_loadu_pd(tail_mask, src + 16u), u, a2);
+      }
+      _mm512_storeu_pd(acc, a0);
+      _mm512_storeu_pd(acc + 8u, a1);
+      _mm512_mask_storeu_pd(acc + 16u, tail_mask, a2);
+    } else if (pc >= 8u && pc < 16u) {
+      const __mmask8 tail_mask =
+        (__mmask8)((1u << (unsigned)(pc - 8u)) - 1u);
+      __m512d u = _mm512_set1_pd(xs[t - 1u]);
+      __m512d a0 = _mm512_mul_pd(_mm512_loadu_pd(tlx + p0), u);
+      __m512d a1 = _mm512_mul_pd(
+        _mm512_maskz_loadu_pd(tail_mask, tlx + p0 + 8u), u);
+      for (UF_long i = 0; i + 1u < t; ++i) {
+        const double *src = lx_arr[i] + (t - 1u - i) + p0;
+        u = _mm512_set1_pd(xs[i]);
+        a0 = _mm512_fmadd_pd(_mm512_loadu_pd(src), u, a0);
+        a1 = _mm512_fmadd_pd(
+          _mm512_maskz_loadu_pd(tail_mask, src + 8u), u, a1);
+      }
+      _mm512_storeu_pd(acc, a0);
+      _mm512_mask_storeu_pd(acc + 8u, tail_mask, a1);
     } else if (pc > KLS_SNODE_TAIL_CHUNK && pc <= 40u) {
       /* A 144-entry main tile commonly leaves only 33--40 entries.  Keep
          that remainder in five zmm accumulators and mask the final vector,
