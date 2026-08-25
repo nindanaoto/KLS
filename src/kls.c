@@ -3153,11 +3153,10 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong row_pipeline_ready_tail;
   atomic_ulong row_pipeline_completed_groups;
   pthread_barrier_t barrier;
-  /* Generation barrier for synchronization-dense EGraph schedules.  The
-     persistent worker crew is already resident on dedicated cores, so a
-     short spin barrier avoids entering the pthread barrier futex path
-     between small cluster levels. */
-  atomic_uint cluster_barrier_arrived;
+  /* Generation barrier for synchronization-dense EGraph schedules.  Each
+     resident worker publishes into its own slot; worker zero then releases
+     the generation.  This avoids a contended read-modify-write cache line
+     between small cluster levels while retaining the pthread fallback. */
   unsigned char cluster_barrier_padding[64];
   atomic_uint cluster_barrier_generation;
   int use_spin_cluster_barrier;
@@ -3232,6 +3231,7 @@ typedef struct kls_egraph_refactor_worker {
   kls_egraph_refactor_shared *shared;
   kls_egraph_refactor_pool *pool;
   atomic_ulong completed_generation;
+  atomic_uint cluster_barrier_arrival;
   int tid;
   double *x;
   double *help_x;
@@ -114683,18 +114683,30 @@ static void kls_egraph_refactor_worker_run_ready_pipeline(
 }
 
 static KLS_ALWAYS_INLINE void kls_egraph_cluster_barrier_wait(
-  kls_egraph_refactor_shared *shared) {
+  kls_egraph_refactor_worker *worker) {
+  kls_egraph_refactor_shared *shared = worker != NULL ? worker->shared : NULL;
   if (shared != NULL) {
     if (shared->use_spin_cluster_barrier) {
       const unsigned int generation = atomic_load_explicit(
         &shared->cluster_barrier_generation, memory_order_acquire);
-      const unsigned int arrived = atomic_fetch_add_explicit(
-        &shared->cluster_barrier_arrived, 1u, memory_order_acq_rel);
-      if (arrived + 1u == (unsigned int)shared->thread_count) {
-        atomic_store_explicit(&shared->cluster_barrier_arrived, 0u,
-                              memory_order_relaxed);
+      const unsigned int target = generation + 1u;
+      atomic_store_explicit(&worker->cluster_barrier_arrival, target,
+                            memory_order_release);
+      if (worker->tid == 0) {
+        unsigned int spins = 0u;
+        for (int tid = 1; tid < shared->thread_count; ++tid) {
+          while (atomic_load_explicit(
+                   &worker->pool->workers[tid].cluster_barrier_arrival,
+                   memory_order_acquire) != target) {
+            kls_cpu_relax();
+            if (++spins == 4096u) {
+              sched_yield();
+              spins = 0u;
+            }
+          }
+        }
         atomic_store_explicit(&shared->cluster_barrier_generation,
-                              generation + 1u, memory_order_release);
+                              target, memory_order_release);
         return;
       }
       unsigned int spins = 0u;
@@ -114761,7 +114773,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
       if (worker->tid == 0) {
         kls_egraph_refactor_record_invalid(shared);
       }
-      kls_egraph_cluster_barrier_wait(shared);
+      kls_egraph_cluster_barrier_wait(worker);
       return;
     }
     const UF_long row_begin = kls_egraph_scale_row_boundary(
@@ -114788,7 +114800,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         rs[row] = maximum != 0.0 ? maximum : 1.0;
       }
     }
-    kls_egraph_cluster_barrier_wait(shared);
+    kls_egraph_cluster_barrier_wait(worker);
   }
 
   UF_long cluster_levels = shared->cluster_level_count;
@@ -114880,7 +114892,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
        parallel while the level barriers preserve every dependency.  Older
        schedules without the level index retain the conservative serial
        natural-order fallback. */
-    kls_egraph_cluster_barrier_wait(shared);
+    kls_egraph_cluster_barrier_wait(worker);
     const UF_long *tail_level_ptr =
       separator_cluster_tail_level_ptr;
     const UF_long *tail_level_thread_ptr =
@@ -114924,7 +114936,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
             }
           }
         }
-        kls_egraph_cluster_barrier_wait(shared);
+        kls_egraph_cluster_barrier_wait(worker);
       }
     } else {
       if (worker->tid == 0 && !kls_egraph_refactor_should_stop(shared)) {
@@ -114946,7 +114958,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           }
         }
       }
-      kls_egraph_cluster_barrier_wait(shared);
+      kls_egraph_cluster_barrier_wait(worker);
     }
   } else {
     for (UF_long level = 0; level < cluster_levels; ++level) {
@@ -115024,7 +115036,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
         }
       }
 
-      kls_egraph_cluster_barrier_wait(shared);
+      kls_egraph_cluster_barrier_wait(worker);
     }
   }
 
@@ -116909,7 +116921,6 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     pool->worker_spin_iters = initial_spin;
   }
   atomic_init(&pool->shared.stop, 0);
-  atomic_init(&pool->shared.cluster_barrier_arrived, 0u);
   atomic_init(&pool->shared.cluster_barrier_generation, 0u);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
   atomic_init(&pool->shared.supernode_pipeline_tasks, 0ul);
@@ -117172,6 +117183,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     pool->workers[i].shared = &pool->shared;
     pool->workers[i].pool = pool;
     atomic_init(&pool->workers[i].completed_generation, 0ul);
+    atomic_init(&pool->workers[i].cluster_barrier_arrival, 0u);
     pool->workers[i].tid = i;
   }
   for (int i = 1; i < thread_count; ++i) {
@@ -120198,8 +120210,13 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     cluster_level_count > 0u &&
     solver->refactor_pipeline_work <=
       1500000.0 * (double)cluster_level_count;
-  atomic_store_explicit(&shared->cluster_barrier_arrived, 0u,
-                        memory_order_relaxed);
+  /* Generations are local to one numeric dispatch.  The crew is idle while
+     shared->lock is held here, so clear every private arrival before worker
+     zero starts comparing the new generation against those slots. */
+  for (int tid = 0; tid < thread_count; ++tid) {
+    atomic_store_explicit(&pool->workers[tid].cluster_barrier_arrival, 0u,
+                          memory_order_relaxed);
+  }
   atomic_store_explicit(&shared->cluster_barrier_generation, 0u,
                         memory_order_relaxed);
   shared->snode_run_end = kls_refactor_snode_run_end(solver);
