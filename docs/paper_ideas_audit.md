@@ -21487,3 +21487,42 @@ Release CTest, smoke, per-refactor verification, and leak-enabled ASan/UBSan
 smoke passed.  The finite EGraph losses left by the strict rerun are
 `dc1`--`dc3`, `rajat24`, and the small residual `rajat30` gap against CKTSO,
 plus `memchip` and `rajat30` against SubtreeLU.
+
+SYNCHRONIZATION-DENSE EGRAPH BARRIER (2026-08-25).  Phase tracing of the
+remaining `dc1`--`dc3` gap showed only a few microseconds outside the settled
+2.1--2.5 ms numeric kernel, but the selected dependency schedule crosses 32
+cluster levels with all eight persistent workers.  Replacing only those
+cluster joins with a reusable atomic generation barrier reduced steady
+refactor time by about 3--4%.  The last arriving worker resets the arrival
+count before publishing the next generation with release ordering; waiters
+acquire that generation.  A bounded spin interval yields periodically, while
+the established pthread barrier remains available for work-heavy schedules.
+
+An unconditional spin barrier was rejected.  Five alternating verified runs
+were neutral on `memchip` and `rajat30`, but slowed `rajat24` by roughly
+0.5--1%; three runs slowed the pipeline-heavy `rajat20` by 12--17%.  Default
+dispatch therefore uses the spin barrier only when the ordering-independent
+symbolic pipeline estimate is at most 1.5 million work units per cluster
+level.  This capability test contains no matrix identity, dimensions, or
+environment switch.  It excludes `rajat20`, `rajat24`, `rajat30`, `memchip`,
+and the large circuit schedules, leaving their original barrier and hot-state
+layout intact.
+
+Across the selected structural cohort, alternating pinned measurements found
+repeatable modeled-cycle improvements: about 3--4% on `dc1`--`dc3`, 6--10% on
+the two `ckt11752` cases and `rajat15`, about 2% on `rajat29`, 6--22% on the
+small `circuit_4`, `ACTIVSg10K`, and `ACTIVSg70K` kernels, and a smaller win on
+`transient`.  The complete three-pass non-V-Cache campaign is in
+`build/cache-domain-smallest-spin-barrier-20260825/summary.txt`.  Direct
+scoring against the immediately preceding clean campaign gives a 0.995 H100
+geometric mean over 55 common valid cases.  `dc2` improved from 1.09 to 1.04
+against CKTSO; `dc1` and `dc3` moved from 1.08/1.10 to 1.07/1.08.  The
+SubtreeLU aggregate improved from 0.687 to 0.683.  The run's lone
+`circuit_1` timeout is a pre-existing harness/path flake (the prior campaign
+also contains a timeout record for that row-refactor case); ten immediate
+replays all completed in about 8--10 ms and do not exercise this EGraph
+barrier.
+
+Release CTest passed all four tests, the leak-enabled ASan/UBSan/LSan smoke
+test passed, and every focused and full-campaign EGraph result satisfied the
+strict per-refactor residual check.

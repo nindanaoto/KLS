@@ -3148,6 +3148,13 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong row_pipeline_ready_tail;
   atomic_ulong row_pipeline_completed_groups;
   pthread_barrier_t barrier;
+  /* Generation barrier for synchronization-dense EGraph schedules.  The
+     persistent worker crew is already resident on dedicated cores, so a
+     short spin barrier avoids entering the pthread barrier futex path
+     between small cluster levels. */
+  atomic_uint cluster_barrier_arrived;
+  atomic_uint cluster_barrier_generation;
+  int use_spin_cluster_barrier;
   /* The low-work single-block cohort is faster with scalar dependency
      consumption.  Keep the selected run table in the dispatch state so the
      hot column kernels need only one pointer test. */
@@ -114545,6 +114552,29 @@ static void kls_egraph_refactor_worker_run_ready_pipeline(
 static KLS_ALWAYS_INLINE void kls_egraph_cluster_barrier_wait(
   kls_egraph_refactor_shared *shared) {
   if (shared != NULL) {
+    if (shared->use_spin_cluster_barrier) {
+      const unsigned int generation = atomic_load_explicit(
+        &shared->cluster_barrier_generation, memory_order_acquire);
+      const unsigned int arrived = atomic_fetch_add_explicit(
+        &shared->cluster_barrier_arrived, 1u, memory_order_acq_rel);
+      if (arrived + 1u == (unsigned int)shared->thread_count) {
+        atomic_store_explicit(&shared->cluster_barrier_arrived, 0u,
+                              memory_order_relaxed);
+        atomic_store_explicit(&shared->cluster_barrier_generation,
+                              generation + 1u, memory_order_release);
+        return;
+      }
+      unsigned int spins = 0u;
+      while (atomic_load_explicit(&shared->cluster_barrier_generation,
+                                  memory_order_acquire) == generation) {
+        kls_cpu_relax();
+        if (++spins == 4096u) {
+          sched_yield();
+          spins = 0u;
+        }
+      }
+      return;
+    }
     (void)pthread_barrier_wait(&shared->barrier);
   }
 }
@@ -116746,6 +116776,8 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     pool->worker_spin_iters = initial_spin;
   }
   atomic_init(&pool->shared.stop, 0);
+  atomic_init(&pool->shared.cluster_barrier_arrived, 0u);
+  atomic_init(&pool->shared.cluster_barrier_generation, 0u);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
   atomic_init(&pool->shared.supernode_pipeline_tasks, 0ul);
   atomic_init(&pool->shared.supernode_pipeline_columns, 0ul);
@@ -119955,6 +119987,20 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->parallel_scale_input_values = numeric_values;
   shared->kernel = selected_kernel;
   shared->thread_count = thread_count;
+  /* A resident spin barrier wins when synchronization is frequent relative
+     to the remaining dependency-pipeline work.  On long pipeline tails,
+     allowing pthread_barrier_wait to stagger/sleep early arrivals avoids
+     cache and bandwidth contention.  Work is the ordering-independent
+     symbolic estimate built with the dependency graph, not a matrix- or
+     machine-specific timing sample. */
+  shared->use_spin_cluster_barrier =
+    cluster_level_count > 0u &&
+    solver->refactor_pipeline_work <=
+      1500000.0 * (double)cluster_level_count;
+  atomic_store_explicit(&shared->cluster_barrier_arrived, 0u,
+                        memory_order_relaxed);
+  atomic_store_explicit(&shared->cluster_barrier_generation, 0u,
+                        memory_order_relaxed);
   shared->snode_run_end = kls_refactor_snode_run_end(solver);
   shared->row_refactor_mode = 0;
   shared->row_solve_mode = 0;
