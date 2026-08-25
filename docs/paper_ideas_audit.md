@@ -21551,3 +21551,22 @@ modeled H100 cycle by 0.95% and steady refactor by about 1.1%.  The complete
 and steady-refactor geomean by 0.60% (14/22 wins).  Strict verification across
 twelve perturbed `G3_circuit` refactors kept maximum relative residual below
 `5.5e-16`, and release CTest passed all four tests.
+
+CACHE-BOUNDED SUPERNODE PRODUCER BATCHES (2026-08-25).  The post-subset
+`G3_circuit` profile still assigned 79.4% of CPU time to the strict-supernode
+consumer.  Sweeping its producer dimension showed a cache-capacity wall:
+raising the cap from 128 to 256 regressed the modeled cycle by 2.30%, whereas
+lowering it to 64 improved the modeled cycle by 3.98% and steady refactor by
+about 4.5%.  The arithmetic and factor representation are unchanged; a long
+strict run is simply consumed in smaller dependency-ordered tiles, reducing
+the live producer-pointer/value surface and the per-call stack frame.
+
+The complete two-pass 22-case EGraph cohort improved modeled-cycle geomean by
+0.21% (15/22 wins) and steady-refactor geomean by 0.67% (16/22 wins).  Four
+counterbalanced follow-ups cleared the two apparent broad outliers:
+`rajat28` improved 0.8% overall and 1.7% steady, while `rajat16` has no accepted
+supernode representation and therefore cannot execute this kernel.  The
+related `G2_circuit` improved 0.9% overall and 1.3% steady.  Twelve strictly
+verified perturbed `G3_circuit` refactors stayed below `5.4e-16` maximum
+relative residual; release and leak-enabled ASan/UBSan/LSan CTest both passed
+all four tests.

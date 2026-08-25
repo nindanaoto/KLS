@@ -276,7 +276,7 @@ static void kls_accumulate_scaled_dense_rows8(
 #define KLS_NICSLU_TASK_FLOW_SYNC_COST 1.0
 #define KLS_METIS_NDP_MIN_ROWS 30000u
 #define KLS_SNODE_MIN_BATCH kls_snode_min_batch()
-#define KLS_SNODE_MAX_BATCH 128
+#define KLS_SNODE_MAX_BATCH 64
 #define KLS_SNODE_TAIL_CHUNK 32
 #define KLS_SNODE_MIN_BATCH_WORK kls_snode_min_batch_work()
 
