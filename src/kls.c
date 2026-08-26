@@ -80071,6 +80071,25 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
     return;
   }
 
+  if (solver->refactor_level_ptr != NULL &&
+      kls_egraph_refactor_is_eligible(solver) && solver->n > 0u &&
+      solver->refactor_dependency_work > 0.0 &&
+      solver->refactor_pipeline_work >=
+        0.95 * solver->refactor_dependency_work &&
+      solver->refactor_level_max_width >= solver->n / 3u &&
+      solver->refactor_pipeline_column_count <= solver->n / 64u) {
+    /* The retained column graph already certifies a broad executor whose
+       bounded dependency tail contains nearly all arithmetic but fewer than
+       one column in 64.  A row transpose cannot expose material additional
+       concurrency here: it duplicates the complete factor streams merely
+       to rediscover the same narrow tail.  Skip that O(fill) representation
+       build from realized schedule coverage, width, and work—not from an
+       input family or dimension.  This also protects finite repeated-update
+       lifecycles where a rejected row mirror costs several steady EGraph
+       generations before its first timing sample could repay anything. */
+    return;
+  }
+
   /* Row preparation consumes the retained numeric's validated L/U index and
      value streams, not the algorithm that originally allocated them.  Once
      an origin is eligible, let the ordinary work model, lower-bound
