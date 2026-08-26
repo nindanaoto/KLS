@@ -7061,6 +7061,29 @@ kls_scatter_subtract_i32_f32_avx512(double *restrict x,
   }
 }
 
+__attribute__((target("avx512f"), noinline)) static void
+kls_store_l_i32_avx512(double *restrict x,
+                       const int32_t *restrict rows,
+                       double *restrict values,
+                       UF_long length,
+                       double pivot) {
+  const __m512d vp = _mm512_set1_pd(pivot);
+  const __m512d zero = _mm512_setzero_pd();
+  UF_long p = 0u;
+  for (; p + 8u <= length; p += 8u) {
+    const __m256i idx =
+      _mm256_loadu_si256((const __m256i *)(const void *)(rows + p));
+    const __m512d xv = _mm512_i32gather_pd(idx, x, 8);
+    _mm512_storeu_pd(values + p, _mm512_div_pd(xv, vp));
+    _mm512_i32scatter_pd(x, idx, zero, 8);
+  }
+  for (; p < length; ++p) {
+    const UF_long i = (UF_long)rows[p];
+    values[p] = x[i] / pivot;
+    x[i] = 0.0;
+  }
+}
+
 #else
 #define KLS_HAVE_AVX512_KERNELS 0
 #endif
@@ -95640,11 +95663,25 @@ static inline void kls_egraph_store_l_column_from_workspace(
         x[i] = 0.0;
       }
     } else {
-    for (UF_long p = 0; p < length; ++p) {
-      const UF_long i = (UF_long)rows32[p];
-      values[p] = x[i] / pivot;
-      x[i] = 0.0;
-    }
+#if KLS_HAVE_AVX512_KERNELS
+      /* Extraction has more arithmetic to amortize an indexed vector access
+         than the ordinary sparse RMW kernel: eight scalar divisions become
+         one vector divide while the gathered accumulator lanes are also
+         cleared by one scatter.  Long realized columns therefore cross over
+         well before the update-only scatter's conservative 256-entry gate.
+         Keep short columns scalar and select solely from the available ISA
+         and actual stream length. */
+      if (length >= 64u && kls_avx512_scatter_enabled()) {
+        kls_store_l_i32_avx512(x, rows32, values, length, pivot);
+      } else
+#endif
+      {
+        for (UF_long p = 0; p < length; ++p) {
+          const UF_long i = (UF_long)rows32[p];
+          values[p] = x[i] / pivot;
+          x[i] = 0.0;
+        }
+      }
     }
     if (solver != NULL && solver->refactor_l_sorted_values != NULL &&
         solver->refactor_l_sorted_pos32 != NULL) {
