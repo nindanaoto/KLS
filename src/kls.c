@@ -114426,6 +114426,62 @@ static int kls_egraph_separator_private_dispatch(kls_solver *solver,
       return 1;
     }
   }
+  if (getenv("KLS_DISABLE_COMPLETE_SEPARATOR_PRIVATE_SETTLE") == NULL &&
+      kls_repeated_update_workload(&solver->options) &&
+      solver->refactor_separator_private_thread_ptr != NULL &&
+      solver->refactor_separator_private_thread_count >= 4 &&
+      solver->refactor_separator_private_component_count >=
+        (UF_long)(2 * solver->refactor_separator_private_thread_count) &&
+      solver->refactor_separator_private_unsafe_component_count <=
+        solver->refactor_separator_private_component_count / 16u &&
+      solver->refactor_separator_cluster_tail_column_count <=
+        solver->refactor_separator_private_column_count / 2u) {
+    const int threads = solver->refactor_separator_private_thread_count;
+    const UF_long average =
+      solver->refactor_separator_private_column_count / (UF_long)threads;
+    const UF_long substantial_floor = average / 4u;
+    int substantial_threads = 0;
+    UF_long min_substantial = UF_long_max;
+    UF_long max_substantial = 0u;
+    for (int tid = 0; tid < threads; ++tid) {
+      const UF_long columns =
+        solver->refactor_separator_private_thread_ptr[tid + 1] -
+        solver->refactor_separator_private_thread_ptr[tid];
+      if (columns < substantial_floor) {
+        continue;
+      }
+      substantial_threads++;
+      if (columns < min_substantial) min_substantial = columns;
+      if (columns > max_substantial) max_substantial = columns;
+    }
+    if (substantial_threads >= (3 * threads + 3) / 4 &&
+        min_substantial > 0u &&
+        max_substantial - min_substantial <= min_substantial) {
+      /* A small number of threads may own only tiny separator leaves, while
+         the remaining team owns balanced, dependency-closed domains covering
+         at least two thirds of the cluster prefix.  Level scheduling cannot
+         add useful concurrency inside those whole private components; it
+         merely reintroduces a barrier at every dependency level.  Settle the
+         certified private prefix and retain the ordinary parallel level walk
+         for the bounded tail after its single join.  Coverage, balance, and
+         unsafe-component limits are realized schedule properties rather than
+         matrix identity or dimension thresholds. */
+      solver->eg_separator_choice = 1;
+      solver->eg_separator_pending = 0;
+      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
+        fprintf(stderr,
+                "KLS egraph separator settle: partial-private"
+                " (%d/%d substantial, private=%" PRIu64
+                ", tail=%" PRIu64 ", unsafe=%" PRIu64 ")\n",
+                substantial_threads, threads,
+                (uint64_t)solver->refactor_separator_private_column_count,
+                (uint64_t)solver->refactor_separator_cluster_tail_column_count,
+                (uint64_t)solver
+                  ->refactor_separator_private_unsafe_component_count);
+      }
+      return 1;
+    }
+  }
   if (check_pivots) {
     solver->eg_separator_pending = 0;
     return 0;
