@@ -3183,6 +3183,12 @@ typedef struct kls_egraph_refactor_shared {
   int workspace_touch_mode;
   double *workspace_touch_values;
   size_t workspace_touch_count;
+  int solve_permute_mode;
+  int solve_permute_scatter;
+  const double *solve_permute_input;
+  double *solve_permute_output;
+  const uint32_t *solve_permute_map;
+  UF_long solve_permute_count;
   /* Retained-factor diagonal-equivalence check.  The persistent numeric
      pool also serves this bandwidth-bound scan, avoiding pthread creation
      on every changed matrix. */
@@ -116290,7 +116296,26 @@ static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
   kls_egraph_refactor_worker *worker) {
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_dense_help_self = worker;
-  if (shared->value_prep_mode) {
+  if (shared->solve_permute_mode) {
+    const UF_long begin =
+      (shared->solve_permute_count * (UF_long)worker->tid) /
+      (UF_long)shared->thread_count;
+    const UF_long end =
+      (shared->solve_permute_count * (UF_long)(worker->tid + 1)) /
+      (UF_long)shared->thread_count;
+    const double *restrict input = shared->solve_permute_input;
+    double *restrict output = shared->solve_permute_output;
+    const uint32_t *restrict map = shared->solve_permute_map;
+    if (shared->solve_permute_scatter) {
+      for (UF_long p = begin; p < end; ++p) {
+        output[map[p]] = input[p];
+      }
+    } else {
+      for (UF_long p = begin; p < end; ++p) {
+        output[p] = input[map[p]];
+      }
+    }
+  } else if (shared->value_prep_mode) {
     const UF_long begin =
       (shared->value_prep_nnz * (UF_long)worker->tid) /
       (UF_long)shared->thread_count;
@@ -159721,6 +159746,61 @@ static int kls_pts_solve_block_pool(kls_solver *solver,
                             udiag_b, udiag_recip_b, 0);
 }
 
+static int kls_parallel_i32_permute(kls_solver *solver,
+                                    const double *input,
+                                    double *output,
+                                    const uint32_t *map,
+                                    int scatter) {
+  /* Dispatch only when every resident worker receives enough independent
+     permutation entries to amortize the pool generation and wakeup.  This
+     is a per-worker work floor, so it scales with caller width rather than
+     encoding a matrix family or fixed total dimension.  Requiring an
+     existing pool also keeps one-shot/serial factors from creating threads
+     solely for an O(n) boundary pass. */
+  if (solver == NULL || input == NULL || output == NULL || map == NULL ||
+      solver->options.threads < 2 ||
+      solver->n / (UF_long)solver->options.threads < 32768u ||
+      solver->egraph_pool == NULL) {
+    return 0;
+  }
+  kls_egraph_refactor_pool *pool = solver->egraph_pool;
+  if (pool == NULL || pool->thread_count != solver->options.threads) {
+    return 0;
+  }
+  kls_egraph_refactor_shared *shared = &pool->shared;
+  pthread_mutex_lock(&shared->lock);
+  if (atomic_load_explicit(&pool->active_workers,
+                           memory_order_acquire) != 0) {
+    pthread_mutex_unlock(&shared->lock);
+    return 0;
+  }
+  shared->solver = solver;
+  shared->thread_count = solver->options.threads;
+  shared->solve_permute_scatter = scatter;
+  shared->solve_permute_input = input;
+  shared->solve_permute_output = output;
+  shared->solve_permute_map = map;
+  shared->solve_permute_count = solver->n;
+  shared->solve_permute_mode = 1;
+  if (getenv("KLS_TRACE_PARALLEL_I32_PERMUTE") != NULL) {
+    fprintf(stderr, "KLS parallel i32 %s: n=%" PRIu64 " threads=%d\n",
+            scatter ? "scatter" : "gather", (uint64_t)solver->n,
+            shared->thread_count);
+  }
+  for (int tid = 0; tid < shared->thread_count; ++tid) {
+    pool->workers[tid].shared = shared;
+  }
+  kls_egraph_pool_dispatch_and_spin_wait(
+    pool, shared, shared->thread_count);
+  shared->solve_permute_mode = 0;
+  shared->solve_permute_input = NULL;
+  shared->solve_permute_output = NULL;
+  shared->solve_permute_map = NULL;
+  shared->solve_permute_count = 0u;
+  pthread_mutex_unlock(&shared->lock);
+  return 1;
+}
+
 static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
                                const UF_long *lip, const UF_long *llen,
                                const UF_long *uip, const UF_long *ulen,
@@ -162546,9 +162626,12 @@ static UF_long kls_i32_solve(kls_solver *solver,
       X[k] = rhs[p] * (rhs_scale != NULL ? rhs_scale[p] : 1.0) / rs[k];
     }
   } else if (rs == NULL && pnum32 != NULL && rhs_perm == NULL) {
-    for (UF_long k = 0; k < n; ++k) {
-      const UF_long p = (UF_long)pnum32[k];
-      X[k] = rhs[p] * (rhs_scale != NULL ? rhs_scale[p] : 1.0);
+    if (rhs_scale != NULL ||
+        !kls_parallel_i32_permute(solver, rhs, X, pnum32, 0)) {
+      for (UF_long k = 0; k < n; ++k) {
+        const UF_long p = (UF_long)pnum32[k];
+        X[k] = rhs[p] * (rhs_scale != NULL ? rhs_scale[p] : 1.0);
+      }
     }
   } else if (rs == NULL) {
     for (UF_long k = 0; k < n; ++k) {
@@ -162882,9 +162965,12 @@ static UF_long kls_i32_solve(kls_solver *solver,
       out[q] = X[k] * (out_scale != NULL ? out_scale[q] : 1.0);
     }
   } else if (q32 != NULL) {
-    for (UF_long k = 0; k < n; ++k) {
-      const UF_long q = (UF_long)q32[k];
-      out[q] = X[k] * (out_scale != NULL ? out_scale[q] : 1.0);
+    if (out_scale != NULL ||
+        !kls_parallel_i32_permute(solver, X, out, q32, 1)) {
+      for (UF_long k = 0; k < n; ++k) {
+        const UF_long q = (UF_long)q32[k];
+        out[q] = X[k] * (out_scale != NULL ? out_scale[q] : 1.0);
+      }
     }
   } else {
     for (UF_long k = 0; k < n; ++k) {
