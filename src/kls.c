@@ -41032,61 +41032,70 @@ matching_attempt:;
           getenv("KLS_DISABLE_GENERIC_MATCHED_ND_WIDTH_PORTFOLIO") == NULL) {
         /* Separator width is a representation/resource choice, not merely
            an analysis-time thread count.  A wide splitter minimizes NodeND
-           latency, while a two-leaf splitter can retain less factor traffic
-           over a long numeric lifecycle.  On a matched representation that
-           is already larger than aggregate cache, realize both symbolics and
-           retain the coarse arm only for a material fill win whose projected
-           lifecycle saving repays a full graph comparison.  The eventual
-           numeric fill, pivot, conditioning, and residual gates remain the
-           authority; no input dimensions or graph-family labels enter this
-           decision. */
-        trilinos_klu_l_symbolic *coarse_symbolic = NULL;
-        trilinos_klu_l_common coarse_common;
-        kls_separator_analysis coarse_separator;
-        (void)trilinos_klu_l_defaults(&coarse_common);
-        memset(&coarse_separator, 0, sizeof(coarse_separator));
+           latency, while two- and three-leaf forests can retain less factor
+           traffic over a long numeric lifecycle.  Three leaves is the
+           smallest additional topology not represented by the binary cut or
+           the caller-width forest; it catches graphs where one coarse child
+           contains most of the separator work without turning this into an
+           unbounded width search.  Retain a narrower arm only for a material
+           fill win whose projected lifecycle saving repays its complete graph
+           comparison.  The eventual numeric fill, pivot, conditioning, and
+           residual gates remain the authority; no input dimensions or graph
+           family labels enter this decision. */
         const int saved_npes_override = kls_metis_ndp_npes_override;
-        kls_metis_ndp_npes_override = 2;
-        const int coarse_status = analyze_with_ordering(
-          solver->n, trial_col_ptr, trial_row_idx, &metis_options,
-          KLS_ORDERING_METIS, &coarse_symbolic, &coarse_common,
-          &coarse_separator);
+        const double numeric_horizon =
+          1.0 + (double)solver->options.expected_refactorizations;
+        const double comparison_work =
+          4.0 * ((double)solver->n + (double)solver->nnz);
+        for (int candidate_npes = 2;
+             candidate_npes <= 3 &&
+             candidate_npes < solver->options.threads;
+             ++candidate_npes) {
+          trilinos_klu_l_symbolic *candidate_symbolic = NULL;
+          trilinos_klu_l_common candidate_common;
+          kls_separator_analysis candidate_separator;
+          (void)trilinos_klu_l_defaults(&candidate_common);
+          memset(&candidate_separator, 0, sizeof(candidate_separator));
+          kls_metis_ndp_npes_override = candidate_npes;
+          const int candidate_status = analyze_with_ordering(
+            solver->n, trial_col_ptr, trial_row_idx, &metis_options,
+            KLS_ORDERING_METIS, &candidate_symbolic, &candidate_common,
+            &candidate_separator);
+          if (candidate_status == KLS_OK && candidate_symbolic != NULL) {
+            const double candidate_score =
+              symbolic_score(candidate_symbolic);
+            const double saved_fill = metis_score - candidate_score;
+            const int candidate_wins =
+              isfinite(candidate_score) && candidate_score > 0.0 &&
+              isfinite(metis_score) && metis_score > 0.0 &&
+              candidate_score <= 0.995 * metis_score &&
+              saved_fill > 0.0 &&
+              saved_fill * numeric_horizon >= comparison_work;
+            if (kls_trace_pre_static_enabled()) {
+              fprintf(stderr,
+                      "KLS pre-static: matched ND width portfolio "
+                      "npes=%d score=%.3e incumbent=%.3e -> %s\n",
+                      candidate_npes, candidate_score, metis_score,
+                      candidate_wins ? "candidate" : "incumbent");
+            }
+            if (candidate_wins) {
+              trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+              kls_separator_analysis_clear(&metis_separator);
+              metis_symbolic = candidate_symbolic;
+              candidate_symbolic = NULL;
+              metis_common = candidate_common;
+              metis_score = candidate_score;
+              kls_separator_analysis_move(&metis_separator,
+                                          &candidate_separator);
+            }
+          }
+          if (candidate_symbolic != NULL) {
+            trilinos_klu_l_free_symbolic(&candidate_symbolic,
+                                         &candidate_common);
+          }
+          kls_separator_analysis_clear(&candidate_separator);
+        }
         kls_metis_ndp_npes_override = saved_npes_override;
-        if (coarse_status == KLS_OK && coarse_symbolic != NULL) {
-          const double coarse_score = symbolic_score(coarse_symbolic);
-          const double saved_fill = metis_score - coarse_score;
-          const double numeric_horizon =
-            1.0 + (double)solver->options.expected_refactorizations;
-          const double comparison_work =
-            4.0 * ((double)solver->n + (double)solver->nnz);
-          const int coarse_wins =
-            isfinite(coarse_score) && coarse_score > 0.0 &&
-            isfinite(metis_score) && metis_score > 0.0 &&
-            coarse_score <= 0.995 * metis_score &&
-            saved_fill > 0.0 &&
-            saved_fill * numeric_horizon >= comparison_work;
-          if (kls_trace_pre_static_enabled()) {
-            fprintf(stderr,
-                    "KLS pre-static: matched ND width portfolio "
-                    "coarse=%.3e wide=%.3e -> %s\n",
-                    coarse_score, metis_score,
-                    coarse_wins ? "coarse" : "wide");
-          }
-          if (coarse_wins) {
-            trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
-            kls_separator_analysis_clear(&metis_separator);
-            metis_symbolic = coarse_symbolic;
-            coarse_symbolic = NULL;
-            metis_common = coarse_common;
-            metis_score = coarse_score;
-            kls_separator_analysis_move(&metis_separator,
-                                        &coarse_separator);
-          }
-        }
-        if (coarse_symbolic != NULL) {
-          trilinos_klu_l_free_symbolic(&coarse_symbolic, &coarse_common);
-        }
-        kls_separator_analysis_clear(&coarse_separator);
       }
       if (kls_trace_pre_static_enabled()) {
         fprintf(stderr,
@@ -80171,22 +80180,37 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
     return;
   }
 
-  if (solver->refactor_level_ptr != NULL &&
-      kls_egraph_refactor_is_eligible(solver) && solver->n > 0u &&
+  if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL &&
+      solver->refactor_level_ptr != NULL && solver->n > 0u) {
+    fprintf(stderr,
+            "KLS row-accept egraph gate: eligible=%d dep=%.3e pipe=%.3e "
+            "width=%lld cols=%lld n=%lld\n",
+            kls_egraph_refactor_is_eligible(solver),
+            solver->refactor_dependency_work,
+            solver->refactor_pipeline_work,
+            (long long)solver->refactor_level_max_width,
+            (long long)solver->refactor_pipeline_column_count,
+            (long long)solver->n);
+  }
+
+  if (solver->refactor_level_ptr != NULL && solver->n > 0u &&
       solver->refactor_dependency_work > 0.0 &&
       solver->refactor_pipeline_work >=
         0.95 * solver->refactor_dependency_work &&
-      solver->refactor_level_max_width >= solver->n / 3u &&
-      solver->refactor_pipeline_column_count <= solver->n / 64u) {
+      solver->refactor_level_max_width >= solver->n / 4u &&
+      solver->refactor_pipeline_column_count <= solver->n / 32u) {
     /* The retained column graph already certifies a broad executor whose
        bounded dependency tail contains nearly all arithmetic but fewer than
-       one column in 64.  A row transpose cannot expose material additional
-       concurrency here: it duplicates the complete factor streams merely
-       to rediscover the same narrow tail.  Skip that O(fill) representation
-       build from realized schedule coverage, width, and work—not from an
-       input family or dimension.  This also protects finite repeated-update
-       lifecycles where a rejected row mirror costs several steady EGraph
-       generations before its first timing sample could repay anything. */
+       one column in 32, while an ordinary level already exposes at least a
+       quarter of all columns.  A row transpose cannot expose material
+       additional concurrency here: it duplicates the complete factor
+       streams merely to rediscover the same narrow tail.  This schedule
+       certificate is intentionally independent of final EGraph admission,
+       which is decided after row preparation.  Skip that O(fill)
+       representation build from realized coverage, width, and work—not from
+       an input family or dimension.  This also protects finite repeated-
+       update lifecycles where a rejected row mirror costs several steady
+       EGraph generations before its first timing sample could repay anything. */
     return;
   }
 
