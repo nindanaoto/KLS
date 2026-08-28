@@ -119058,29 +119058,26 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
       (
        getenv("KLS_ENABLE_EGRAPH_THREAD_TRIAL") == NULL)) {
     /* The retained plan already partitions work for the complete caller
-       team.  Default to that full-width, unfused executor: each alternative
-       consultation consumes a complete numerical update and can perturb the
-       short recurring lifecycle even when its eventual verdict is unchanged.
-       Keep the equivalent width/fusion tournament behind an explicit
-       diagnostic request. */
+       team, so keep full width without paying for a narrow consultation.
+       Pipeline fusion is an independent executor choice: once the separator
+       layout has settled, a tail-dominated dependency graph may consult its
+       existing measured pair/quad tournament on either the ordinary or the
+       private schedule. */
     solver->eg_tt_choice = thread_count;
     solver->eg_tt_counts[0] = thread_count;
-    const int complete_private_tail_trial =
-      thread_count >= 4 && solver->eg_separator_choice > 0 &&
-      solver->refactor_separator_private_cols != NULL &&
-      solver->refactor_separator_private_thread_ptr != NULL &&
-      solver->refactor_separator_private_thread_count == thread_count &&
-      solver->refactor_separator_cluster_tail_column_count == 0u &&
-      solver->refactor_separator_private_unsafe_component_count == 0u &&
+    const int separator_settled = solver->eg_separator_choice != 0 &&
+      !solver->eg_separator_pending;
+    const int pipeline_fusion_trial = separator_settled &&
+      thread_count >= 4 &&
       kls_egraph_pipeline_fusion_trial_worthwhile(solver);
-    if (complete_private_tail_trial) {
+    if (pipeline_fusion_trial) {
       if (solver->eg_tt_samples[0] < 2) {
         solver->eg_tt_pending = 1;
       } else if (solver->eg_pair_choice == 0 &&
                  !solver->eg_pair_pending) {
         solver->eg_pair_pending = 1;
       }
-    } else {
+    } else if (separator_settled) {
       solver->eg_pair_choice = -1;
     }
     return thread_count;
