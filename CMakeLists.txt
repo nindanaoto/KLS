@@ -429,7 +429,8 @@ set_target_properties(kls_suitesparse PROPERTIES
 # layout (identical binaries for the kernel TU measured 13.1 vs 15.1s
 # on mac_econ when an unrelated kls.c commit shifted addresses).
 target_compile_options(kls_suitesparse PRIVATE
-  $<$<C_COMPILER_ID:GNU,Clang>:-falign-functions=64 -falign-loops=32>)
+  $<$<C_COMPILER_ID:GNU,Clang>:-falign-functions=64 -falign-loops=32
+    -ffp-contract=fast>)
 
 target_include_directories(kls_suitesparse
   PUBLIC
@@ -445,7 +446,8 @@ add_library(kls_suitesparse32 STATIC EXCLUDE_FROM_ALL
 set_target_properties(kls_suitesparse32 PROPERTIES
   POSITION_INDEPENDENT_CODE ON)
 target_compile_options(kls_suitesparse32 PRIVATE
-  $<$<C_COMPILER_ID:GNU,Clang>:-falign-functions=64 -falign-loops=32>)
+  $<$<C_COMPILER_ID:GNU,Clang>:-falign-functions=64 -falign-loops=32
+    -ffp-contract=fast>)
 target_include_directories(kls_suitesparse32
   PUBLIC
     ${KLS_SUITESPARSE_INCLUDE_DIRS})
