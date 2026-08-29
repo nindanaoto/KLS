@@ -67944,7 +67944,7 @@ static int kls_generic_hoisted_snode_worker_candidate(
       solver->symbolic == NULL || solver->numeric == NULL ||
       !kls_repeated_update_workload(&solver->options) ||
       solver->options.threads < 2 || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || solver->common.noffdiag != 0u ||
+      solver->numeric->Rs != NULL ||
       solver->pivot_nudge_count != 0u ||
       solver->common.kls_perturb_count != 0u ||
       solver->numeric->lnz > UF_long_max - solver->numeric->unz) {
