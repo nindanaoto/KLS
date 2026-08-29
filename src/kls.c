@@ -7019,7 +7019,7 @@ static KLS_ALWAYS_INLINE UF_long kls_avx512_scatter_min_length(void) {
   static UF_long cached = 0u;
   if (cached == 0u) {
     const char *env = getenv("KLS_AVX512_SCATTER_MIN_LENGTH");
-    cached = env != NULL && env[0] != '\0' ? (UF_long)atol(env) : 256u;
+    cached = env != NULL && env[0] != '\0' ? (UF_long)atol(env) : 1024u;
     if (cached < 8u) {
       cached = 8u;
     }
