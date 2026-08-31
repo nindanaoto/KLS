@@ -77710,6 +77710,29 @@ static KLS_ALWAYS_INLINE int kls_compact_amf_two_block_wait_for_dependency(
   return 1;
 }
 
+static KLS_ALWAYS_INLINE void
+kls_compact_amf_two_block_update_sparse_row_pair(
+  double *restrict x,
+  const uint16_t *restrict u_cols,
+  const double *restrict u_val,
+  UF_long begin,
+  UF_long end,
+  double multiplier) {
+  UF_long q = begin;
+  for (; q + 1u < end; q += 2u) {
+    const UF_long col0 = (UF_long)u_cols[q];
+    const UF_long col1 = (UF_long)u_cols[q + 1u];
+    const double value0 = x[col0];
+    const double value1 = x[col1];
+    x[col0] = fma(-multiplier, u_val[q], value0);
+    x[col1] = fma(-multiplier, u_val[q + 1u], value1);
+  }
+  if (q < end) {
+    const UF_long col = (UF_long)u_cols[q];
+    x[col] = fma(-multiplier, u_val[q], x[col]);
+  }
+}
+
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, hot, aligned(64)))
 #endif
@@ -77769,12 +77792,10 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
         const double lik = x[dep] * udiag_inv[dep];
         x[dep] = 0.0;
         l_val[p] = lik;
-        for (UF_long q =
-               (UF_long)((packed >> 32u) & UINT64_C(0xffff));
-             q < (UF_long)(packed >> 48u); ++q) {
-          const UF_long col = (UF_long)u_cols[q];
-          x[col] = fma(-lik, u_val[q], x[col]);
-        }
+        kls_compact_amf_two_block_update_sparse_row_pair(
+          x, u_cols, u_val,
+          (UF_long)((packed >> 32u) & UINT64_C(0xffff)),
+          (UF_long)(packed >> 48u), lik);
         p++;
         continue;
       }
@@ -77931,12 +77952,10 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
       const double lik = x[dep] * udiag_inv[dep];
       x[dep] = 0.0;
       l_val[p] = lik;
-      for (UF_long q =
-             (UF_long)((packed >> 32u) & UINT64_C(0xffff));
-           q < (UF_long)(packed >> 48u); ++q) {
-        const UF_long col = (UF_long)u_cols[q];
-        x[col] = fma(-lik, u_val[q], x[col]);
-      }
+      kls_compact_amf_two_block_update_sparse_row_pair(
+        x, u_cols, u_val,
+        (UF_long)((packed >> 32u) & UINT64_C(0xffff)),
+        (UF_long)(packed >> 48u), lik);
       p++;
     }
     const double pivot = x[row];
