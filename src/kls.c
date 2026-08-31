@@ -459,7 +459,7 @@ typedef struct kls_lean_done_slot {
 
 typedef struct kls_compact_amf_two_block_work_row16 {
   uint16_t row;
-  uint16_t publish_slot;
+  uint16_t publish_mask;
   uint16_t input_begin;
   uint16_t input_end;
   uint16_t dependency_begin;
@@ -2365,6 +2365,10 @@ struct kls_solver {
   UF_long lean_scalar_btf_prefix;
   atomic_uint *lean_parallel_grouped_done;
   uint32_t *lean_parallel_grouped_token;
+  struct kls_lean_done_slot *lean_parallel_owner_frontier;
+  int lean_parallel_owner_frontier_count;
+  unsigned int lean_parallel_owner_frontier_sequence_bits;
+  unsigned int lean_parallel_owner_frontier_sequence_mask;
   uint64_t *lean_parallel_l_dep_work64;
   kls_compact_amf_two_block_work_row16 *lean_parallel_work_rows16;
   double *lean_parallel_udiag_inv;
@@ -21860,11 +21864,16 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
   solver->lean_parallel_affinity_candidate_work = 0.0;
   free(solver->lean_parallel_grouped_done);
   free(solver->lean_parallel_grouped_token);
+  free(solver->lean_parallel_owner_frontier);
   free(solver->lean_parallel_l_dep_work64);
   free(solver->lean_parallel_work_rows16);
   free(solver->lean_parallel_udiag_inv);
   solver->lean_parallel_grouped_done = NULL;
   solver->lean_parallel_grouped_token = NULL;
+  solver->lean_parallel_owner_frontier = NULL;
+  solver->lean_parallel_owner_frontier_count = 0;
+  solver->lean_parallel_owner_frontier_sequence_bits = 0u;
+  solver->lean_parallel_owner_frontier_sequence_mask = 0u;
   solver->lean_parallel_l_dep_work64 = NULL;
   solver->lean_parallel_work_rows16 = NULL;
   solver->lean_parallel_udiag_inv = NULL;
@@ -22269,7 +22278,19 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
     return 0;
   }
   const UF_long slot_count = stride * (UF_long)thread_count;
+  unsigned int frontier_sequence_bits = 1u;
+  while (frontier_sequence_bits < 16u &&
+         per_thread >= ((UF_long)1u << frontier_sequence_bits)) {
+    frontier_sequence_bits++;
+  }
+  const unsigned int frontier_sequence_mask =
+    ((unsigned int)1u << frontier_sequence_bits) - 1u;
+  const unsigned int frontier_mailbox_count =
+    (unsigned int)thread_count * (unsigned int)thread_count;
   if (slot_count > (UF_long)KLS_LEAN_GROUPED_SLOT_MASK ||
+      frontier_sequence_bits >= 16u || frontier_mailbox_count == 0u ||
+      frontier_mailbox_count - 1u >
+        ((unsigned int)UINT16_MAX >> frontier_sequence_bits) ||
       slot_count > (UF_long)(SIZE_MAX / sizeof(atomic_uint)) ||
       solver->n > (UF_long)(SIZE_MAX / sizeof(uint32_t))) {
     return 0;
@@ -22300,6 +22321,36 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
     solver->lean_parallel_grouped_stride = stride;
   }
 
+  /* The packed worker gives every producer/consumer pair a private cache
+     line.  A producer updates only consumers that actually wait for its
+     current frontier, avoiding both per-row scoreboard misses and unrelated
+     consumer invalidations. */
+  if (solver->lean_parallel_owner_frontier == NULL ||
+      solver->lean_parallel_owner_frontier_count != thread_count) {
+    void *raw_frontier = NULL;
+    const size_t frontier_bytes =
+      (size_t)thread_count * (size_t)thread_count *
+      sizeof(kls_lean_done_slot);
+    if (posix_memalign(&raw_frontier, 64u, frontier_bytes) != 0) {
+      return 0;
+    }
+    kls_lean_done_slot *frontier = (kls_lean_done_slot *)raw_frontier;
+    for (int owner = 0; owner < thread_count; ++owner) {
+      for (int consumer = 0; consumer < thread_count; ++consumer) {
+        const int mailbox = owner * thread_count + consumer;
+        atomic_init(&frontier[mailbox].generation, 0u);
+        frontier[mailbox].owner = (unsigned int)owner;
+      }
+    }
+    free(solver->lean_parallel_owner_frontier);
+    solver->lean_parallel_owner_frontier = frontier;
+    solver->lean_parallel_owner_frontier_count = thread_count;
+  }
+  solver->lean_parallel_owner_frontier_sequence_bits =
+    frontier_sequence_bits;
+  solver->lean_parallel_owner_frontier_sequence_mask =
+    frontier_sequence_mask;
+
   for (UF_long pos = 0u; pos < solver->n; ++pos) {
     const UF_long row = rows[pos];
     const unsigned int owner =
@@ -22314,11 +22365,12 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
       KLS_LEAN_GROUPED_PUBLISH_FLAG | (uint32_t)slot;
   }
 
-  /* Preserve the just-in-time dependency order of the compact worker,
-     but predecode each L entry into a sequential dependency descriptor. Once
-     one consumer stream acquires a producer slot, all earlier rows from that
-     producer are visible for the rest of the generation; such covered waits
-     are omitted while building the stream. */
+  /* Preserve the just-in-time dependency order of the compact worker, but
+     predecode each L entry into a sequential dependency descriptor.  The
+     upper sixteen bits contain a packed mailbox index and producer-local
+     sequence.  Once one consumer stream acquires a producer frontier, all
+     earlier rows from that producer are visible for the rest of the
+     generation; such covered waits are omitted while building the stream. */
   free(solver->lean_parallel_l_dep_work64);
   solver->lean_parallel_l_dep_work64 = NULL;
   free(solver->lean_parallel_work_rows16);
@@ -22329,6 +22381,8 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
       ? (uint64_t *)malloc((size_t)l_count * sizeof(*packed_work)) : NULL;
     unsigned char *snode_join = (unsigned char *)calloc(
       (size_t)solver->n, sizeof(*snode_join));
+    unsigned char *frontier_publish_mask = (unsigned char *)calloc(
+      (size_t)solver->n, sizeof(*frontier_publish_mask));
     const uint32_t max_snode_run = 4u;
     if (snode_join != NULL) {
       for (UF_long dep = 0u; dep + 1u < solver->n; ++dep) {
@@ -22353,7 +22407,7 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
         acquired_slot[consumer][producer] = 0u;
       }
     }
-    int packed_valid = packed_work != NULL;
+    int packed_valid = packed_work != NULL && frontier_publish_mask != NULL;
     for (UF_long row = 0u; row < solver->n; ++row) {
       solver->lean_parallel_grouped_token[row] &=
         ~KLS_LEAN_GROUPED_PUBLISH_FLAG;
@@ -22390,10 +22444,14 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
         const unsigned int producer_owner =
           token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
         const uint32_t dep_slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
+        const UF_long owner_begin = (UF_long)producer_owner * stride;
+        const UF_long frontier_sequence =
+          (UF_long)dep_slot - owner_begin + 1u;
         const UF_long update_begin = solver->row_refactor_u_ptr[dep];
         const UF_long update_end = solver->row_refactor_u_ptr[dep + 1u];
         if (producer_owner >= (unsigned int)thread_count ||
-            dep_slot >= UINT32_C(0x0fff) ||
+            (UF_long)dep_slot < owner_begin ||
+            frontier_sequence > frontier_sequence_mask ||
             update_begin > UINT16_MAX ||
             update_end > UINT16_MAX) {
           packed_valid = 0;
@@ -22401,10 +22459,16 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
         }
         uint32_t encoded_slot = 0u;
         if (producer_owner != consumer_owner) {
-          if (dep_slot >= acquired_slot[consumer_owner][producer_owner]) {
-            encoded_slot = dep_slot + 1u;
+          if (frontier_sequence >
+              acquired_slot[consumer_owner][producer_owner]) {
+            encoded_slot =
+              ((producer_owner * (unsigned int)thread_count +
+                consumer_owner) << frontier_sequence_bits) |
+              (uint32_t)frontier_sequence;
             acquired_slot[consumer_owner][producer_owner] =
-              dep_slot + 1u;
+              (uint32_t)frontier_sequence;
+            frontier_publish_mask[dep] |=
+              (unsigned char)(1u << consumer_owner);
             solver->lean_parallel_grouped_token[dep] |=
               KLS_LEAN_GROUPED_PUBLISH_FLAG;
           }
@@ -22434,15 +22498,22 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
         const UF_long row = rows[pos];
         const uint32_t token = solver->lean_parallel_grouped_token[row];
         const uint32_t slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
-        const uint32_t publish_slot =
-          (token & KLS_LEAN_GROUPED_PUBLISH_FLAG) != 0u ? slot + 1u : 0u;
+        const unsigned int owner =
+          token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
+        const UF_long owner_begin = (UF_long)owner * stride;
+        const UF_long frontier_sequence = (UF_long)slot - owner_begin + 1u;
+        const uint32_t publish_mask =
+          (uint32_t)frontier_publish_mask[row];
         const UF_long input_begin = solver->row_refactor_input_ptr[row];
         const UF_long input_end = solver->row_refactor_input_ptr[row + 1u];
         const UF_long dependency_begin = solver->row_refactor_l_ptr[row];
         const UF_long dependency_end = solver->row_refactor_l_ptr[row + 1u];
         const UF_long output_begin = solver->row_refactor_u_ptr[row];
         const UF_long output_end = solver->row_refactor_u_ptr[row + 1u];
-        if (row >= UINT16_MAX || publish_slot > UINT16_MAX ||
+        if (owner >= (unsigned int)thread_count ||
+            (UF_long)slot < owner_begin ||
+            frontier_sequence > frontier_sequence_mask ||
+            row >= UINT16_MAX || publish_mask > UINT16_MAX ||
             input_begin > UINT16_MAX || input_end > UINT16_MAX ||
             dependency_begin > UINT16_MAX || dependency_end > UINT16_MAX ||
             output_begin > UINT16_MAX || output_end > UINT16_MAX) {
@@ -22450,7 +22521,7 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
           break;
         }
         work_rows[pos].row = (uint16_t)row;
-        work_rows[pos].publish_slot = (uint16_t)publish_slot;
+        work_rows[pos].publish_mask = (uint16_t)publish_mask;
         work_rows[pos].input_begin = (uint16_t)input_begin;
         work_rows[pos].input_end = (uint16_t)input_end;
         work_rows[pos].dependency_begin = (uint16_t)dependency_begin;
@@ -22479,7 +22550,7 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
           UF_long updates = 0u;
           for (UF_long pos = 0u; pos < solver->n; ++pos) {
             const kls_compact_amf_two_block_work_row16 *work = &work_rows[pos];
-            publishes += work->publish_slot != 0u;
+            publishes += work->publish_mask != 0u;
             UF_long p = (UF_long)work->dependency_begin;
             const UF_long end = (UF_long)work->dependency_end;
             while (p < end) {
@@ -22518,6 +22589,7 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
       }
       free(packed_work);
     }
+    free(frontier_publish_mask);
   }
   return 1;
 }
@@ -77685,27 +77757,32 @@ static void kls_compact_amf_two_block_i16ptr_worker_run(
    covers the dependency. */
 static KLS_ALWAYS_INLINE int kls_compact_amf_two_block_wait_for_dependency(
   kls_egraph_refactor_shared *shared,
-  atomic_uint *grouped_done,
-  unsigned int generation,
+  const kls_lean_done_slot *owner_frontier,
+  unsigned int frontier_sequence_bits,
+  unsigned int frontier_sequence_mask,
   uint64_t descriptor) {
-  const uint32_t encoded_slot =
+  const uint32_t encoded_frontier =
     (uint32_t)((descriptor >> 16u) & UINT64_C(0xffff));
 #if defined(__GNUC__) || defined(__clang__)
-  const int wait_required = __builtin_expect(encoded_slot != 0u, 0);
+  const int wait_required = __builtin_expect(encoded_frontier != 0u, 0);
 #else
-  const int wait_required = encoded_slot != 0u;
+  const int wait_required = encoded_frontier != 0u;
 #endif
-  if (wait_required) {
-    const uint32_t slot = encoded_slot - 1u;
-    unsigned int spin = 0u;
-    while (atomic_load_explicit(&grouped_done[slot],
-                                memory_order_acquire) != generation) {
-      if ((++spin & 255u) == 0u &&
-          atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
-        return 0;
-      }
-      kls_cpu_relax();
+  if (!wait_required) {
+    return 1;
+  }
+  const unsigned int mailbox =
+    encoded_frontier >> frontier_sequence_bits;
+  const unsigned int sequence =
+    encoded_frontier & frontier_sequence_mask;
+  unsigned int spin = 0u;
+  while (atomic_load_explicit(&owner_frontier[mailbox].generation,
+                              memory_order_acquire) < sequence) {
+    if ((++spin & 255u) == 0u &&
+        atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
+      return 0;
     }
+    kls_cpu_relax();
   }
   return 1;
 }
@@ -77738,7 +77815,6 @@ __attribute__((noinline, hot, aligned(64)))
 #endif
 static void kls_compact_amf_two_block_packed_exact_worker_run(
   kls_egraph_refactor_worker *worker,
-  unsigned int generation,
   UF_long stride) {
   kls_egraph_refactor_shared *shared = worker->shared;
   kls_solver *solver = shared->solver;
@@ -77757,8 +77833,18 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
     ? solver->i32solve_udiag_recip : solver->lean_parallel_udiag_inv;
   const kls_compact_amf_two_block_work_row16 *restrict work_rows =
     solver->lean_parallel_work_rows16;
-  atomic_uint *restrict grouped_done = solver->lean_parallel_grouped_done;
-  for (UF_long pos = (UF_long)worker->tid; pos < n; pos += stride) {
+  kls_lean_done_slot *restrict owner_frontier =
+    solver->lean_parallel_owner_frontier;
+  const unsigned int consumer = (unsigned int)worker->tid;
+  const unsigned int frontier_stride =
+    (unsigned int)solver->lean_parallel_owner_frontier_count;
+  const unsigned int frontier_sequence_bits =
+    solver->lean_parallel_owner_frontier_sequence_bits;
+  const unsigned int frontier_sequence_mask =
+    solver->lean_parallel_owner_frontier_sequence_mask;
+  unsigned int producer_sequence = 1u;
+  for (UF_long pos = (UF_long)worker->tid; pos < n;
+       pos += stride, ++producer_sequence) {
     const kls_compact_amf_two_block_work_row16 *restrict work = &work_rows[pos];
     const UF_long row = (UF_long)work->row;
     UF_long p = (UF_long)work->input_begin;
@@ -77786,7 +77872,8 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
         (uint32_t)((packed >> 12u) & UINT64_C(0x0f));
       if (run < 2u) {
         if (!kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed)) {
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed)) {
           return;
         }
         const double lik = x[dep] * udiag_inv[dep];
@@ -77802,9 +77889,11 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
       if (run == 2u && p + 1u < dependency_end) {
         const uint64_t packed1 = l_dep_work[p + 1u];
         if (!kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed) ||
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed) ||
             !kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed1)) {
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed1)) {
           return;
         }
         const UF_long dep1 =
@@ -77836,11 +77925,14 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
         const uint64_t packed1 = l_dep_work[p + 1u];
         const uint64_t packed2 = l_dep_work[p + 2u];
         if (!kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed) ||
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed) ||
             !kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed1) ||
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed1) ||
             !kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed2)) {
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed2)) {
           return;
         }
         const UF_long dep1 =
@@ -77885,13 +77977,17 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
         const uint64_t packed2 = l_dep_work[p + 2u];
         const uint64_t packed3 = l_dep_work[p + 3u];
         if (!kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed) ||
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed) ||
             !kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed1) ||
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed1) ||
             !kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed2) ||
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed2) ||
             !kls_compact_amf_two_block_wait_for_dependency(
-              shared, grouped_done, generation, packed3)) {
+              shared, owner_frontier, frontier_sequence_bits,
+              frontier_sequence_mask, packed3)) {
           return;
         }
         const UF_long dep1 =
@@ -77946,7 +78042,8 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
         continue;
       }
       if (!kls_compact_amf_two_block_wait_for_dependency(
-            shared, grouped_done, generation, packed)) {
+            shared, owner_frontier, frontier_sequence_bits,
+            frontier_sequence_mask, packed)) {
         return;
       }
       const double lik = x[dep] * udiag_inv[dep];
@@ -77993,10 +78090,25 @@ static void kls_compact_amf_two_block_packed_exact_worker_run(
     } else {
       udiag_inv[row] = 1.0 / pivot;
     }
-    const uint32_t publish_slot = (uint32_t)work->publish_slot;
-    if (publish_slot != 0u) {
-      atomic_store_explicit(&grouped_done[publish_slot - 1u], generation,
-                            memory_order_release);
+    unsigned int publish_mask = (unsigned int)work->publish_mask;
+    if (publish_mask != 0u) {
+      while (publish_mask != 0u) {
+#if defined(__GNUC__) || defined(__clang__)
+        const unsigned int target =
+          (unsigned int)__builtin_ctz(publish_mask);
+#else
+        unsigned int target = 0u;
+        while ((publish_mask & (1u << target)) == 0u) {
+          target++;
+        }
+#endif
+        publish_mask &= publish_mask - 1u;
+        const UF_long mailbox =
+          (UF_long)consumer * (UF_long)frontier_stride +
+          (UF_long)target;
+        atomic_store_explicit(&owner_frontier[mailbox].generation,
+                              producer_sequence, memory_order_release);
+      }
     }
   }
 }
@@ -78845,13 +78957,17 @@ static void kls_lean_parallel_worker_run(
       solver->row_refactor_u_ptr16 != NULL &&
       solver->row_refactor_u_cols16 != NULL &&
       solver->lean_parallel_grouped_token != NULL &&
-      solver->lean_parallel_grouped_done != NULL;
+      solver->lean_parallel_grouped_done != NULL &&
+      solver->lean_parallel_owner_frontier != NULL &&
+      solver->lean_parallel_owner_frontier_count == shared->thread_count &&
+      solver->lean_parallel_owner_frontier_sequence_bits > 0u &&
+      solver->lean_parallel_owner_frontier_sequence_mask > 0u;
     if (compact_amf_two_block_specialized_worker) {
       if (solver->lean_parallel_l_dep_work64 != NULL &&
           solver->lean_parallel_work_rows16 != NULL &&
           solver->lean_parallel_udiag_inv != NULL) {
         kls_compact_amf_two_block_packed_exact_worker_run(
-          worker, generation, stride);
+          worker, stride);
       } else {
         kls_compact_amf_two_block_i16ptr_worker_run(
           worker, generation, rows, stride);
@@ -79289,10 +79405,22 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->row_refactor_u_cols16 != NULL &&
     solver->lean_parallel_grouped_token != NULL &&
     solver->lean_parallel_grouped_done != NULL &&
+    solver->lean_parallel_owner_frontier != NULL &&
+    solver->lean_parallel_owner_frontier_count == thread_count &&
+    solver->lean_parallel_owner_frontier_sequence_bits > 0u &&
+    solver->lean_parallel_owner_frontier_sequence_mask > 0u &&
     solver->lean_parallel_l_dep_work64 != NULL &&
     solver->lean_parallel_work_rows16 != NULL &&
     solver->lean_parallel_udiag_inv != NULL &&
     solver->i32solve_udiag_recip != NULL;
+  if (compact_amf_two_block_exact_worker) {
+    for (int mailbox = 0;
+         mailbox < thread_count * thread_count; ++mailbox) {
+      atomic_store_explicit(
+        &solver->lean_parallel_owner_frontier[mailbox].generation, 0u,
+        memory_order_relaxed);
+    }
+  }
   const int compact_parallel_refine_copy =
     compact_amf_two_block_exact_worker &&
     solver->nnz >= (UF_long)(1024 * thread_count);
