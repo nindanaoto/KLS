@@ -22332,7 +22332,9 @@ static int kls_prepare_generic_packed_row_plan(
       thread_count < 2 || thread_count > 8 || solver->n == 0u ||
       solver->n > UINT32_MAX ||
       solver->row_refactor_input_ptr == NULL ||
-      solver->row_refactor_input_col_user32 == NULL ||
+      (solver->row_refactor_input_col_user32 == NULL &&
+       (solver->row_refactor_input_cols16 == NULL ||
+        solver->row_refactor_input_pos32 == NULL)) ||
       solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_cols == NULL ||
       solver->row_refactor_l_cols16 == NULL ||
@@ -76556,6 +76558,55 @@ static KLS_ALWAYS_INLINE UF_long kls_row_refactor_input_target_pos_at(
     : solver->row_refactor_segment_input_target_pos[pos];
 }
 
+/* Compact input coordinates need not have the same width.  Circuit factors
+   commonly keep row-local columns below 2^16 after their value positions
+   have crossed that boundary, so retain two dense streams instead of
+   inflating both coordinates to UF_long. */
+static int kls_build_lean_mixed_input_indices(kls_solver *solver) {
+  if (solver == NULL || solver->n == 0u ||
+      solver->n > (UF_long)UINT16_MAX + 1u ||
+      solver->row_refactor_input_ptr == NULL ||
+      solver->row_refactor_input_cols == NULL ||
+      solver->row_refactor_input_pos == NULL) {
+    return 0;
+  }
+  if (solver->row_refactor_input_cols16 != NULL &&
+      solver->row_refactor_input_pos32 != NULL) {
+    return 1;
+  }
+  const UF_long count = solver->row_refactor_input_ptr[solver->n];
+  if (count > (UF_long)UINT32_MAX ||
+      count > (UF_long)(SIZE_MAX / sizeof(uint16_t)) ||
+      count > (UF_long)(SIZE_MAX / sizeof(uint32_t))) {
+    return 0;
+  }
+  uint16_t *cols = solver->row_refactor_input_cols16 == NULL
+    ? (uint16_t *)malloc((size_t)(count > 0u ? count : 1u) * sizeof(*cols))
+    : NULL;
+  uint32_t *pos = solver->row_refactor_input_pos32 == NULL
+    ? (uint32_t *)malloc((size_t)(count > 0u ? count : 1u) * sizeof(*pos))
+    : NULL;
+  if ((solver->row_refactor_input_cols16 == NULL && cols == NULL) ||
+      (solver->row_refactor_input_pos32 == NULL && pos == NULL)) {
+    free(cols);
+    free(pos);
+    return 0;
+  }
+  for (UF_long p = 0u; p < count; ++p) {
+    if (solver->row_refactor_input_cols[p] > (UF_long)UINT16_MAX ||
+        solver->row_refactor_input_pos[p] > (UF_long)UINT32_MAX) {
+      free(cols);
+      free(pos);
+      return 0;
+    }
+    if (cols != NULL) cols[p] = (uint16_t)solver->row_refactor_input_cols[p];
+    if (pos != NULL) pos[p] = (uint32_t)solver->row_refactor_input_pos[p];
+  }
+  if (cols != NULL) solver->row_refactor_input_cols16 = cols;
+  if (pos != NULL) solver->row_refactor_input_pos32 = pos;
+  return 1;
+}
+
 static int kls_build_lean_row_i16_indices(kls_solver *solver) {
   if (solver == NULL || solver->n == 0u ||
       solver->n > (UF_long)UINT16_MAX + 1u ||
@@ -76569,7 +76620,7 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
   }
   if (solver->row_refactor_l_cols16 != NULL &&
       solver->row_refactor_u_cols16 != NULL) {
-    return 1;
+    return kls_build_lean_mixed_input_indices(solver);
   }
   const UF_long n = solver->n;
   const UF_long lcount = solver->row_refactor_l_ptr[n];
@@ -76582,7 +76633,6 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
     input_count <= (UF_long)UINT16_MAX;
   const int compact_ptrs32 =
     !compact_ptrs &&
-    solver->common.scale > 0 &&
     kls_repeated_update_workload(&solver->options) &&
     lcount <= (UF_long)UINT32_MAX &&
     ucount <= (UF_long)UINT32_MAX &&
@@ -76742,7 +76792,7 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
             (long)uh[0], (long)uh[1], (long)uh[2], (long)uh[3],
             (long)uh[4], (long)uh[5], (long)uh[6]);
   }
-  return 1;
+  return kls_build_lean_mixed_input_indices(solver);
 }
 
 /* Minimal persistent-pool variant of the lean row walk.  Rows are assigned
@@ -77852,9 +77902,13 @@ static void kls_generic_packed_row_worker_run(
   const double *restrict values = shared->values;
   const uint32_t *restrict in_packed =
     solver->row_refactor_input_col_user32;
+  const uint16_t *restrict in_cols16 = solver->row_refactor_input_cols16;
+  const uint32_t *restrict in_pos32 = solver->row_refactor_input_pos32;
   double *restrict l_val = solver->row_refactor_l_row_values;
+  double **restrict l_lu = solver->row_refactor_l_values;
   const uint16_t *restrict u_cols = solver->row_refactor_u_cols16;
   double *restrict u_val = solver->row_refactor_u_row_values;
+  double **restrict u_lu = solver->row_refactor_u_values;
   double *restrict udiag = (double *)solver->numeric->Udiag;
   const kls_generic_packed_row_work32 *restrict work_rows =
     solver->lean_generic_packed_rows32;
@@ -77862,6 +77916,8 @@ static void kls_generic_packed_row_worker_run(
     solver->lean_generic_packed_dependencies32;
   kls_lean_done_slot *restrict owner_frontier =
     solver->lean_parallel_owner_frontier;
+  atomic_uint *restrict grouped_done = solver->lean_parallel_grouped_done;
+  const uint32_t *restrict grouped_token = solver->lean_parallel_grouped_token;
   const unsigned char *restrict publish_mailbox =
     solver->lean_generic_packed_publish_mailbox;
   const uint32_t *restrict publish_begin =
@@ -77871,6 +77927,9 @@ static void kls_generic_packed_row_worker_run(
     solver->lean_parallel_owner_frontier_sequence_bits;
   const unsigned int sequence_mask =
     solver->lean_parallel_owner_frontier_sequence_mask;
+  const int row_values_mode = shared->lean_row_values_mode;
+  const int mixed_input_mode = in_packed == NULL;
+  const unsigned int generation = shared->pipeline_generation;
   unsigned int producer_sequence = 1u;
   UF_long publish_pos = (UF_long)publish_begin[consumer];
   for (UF_long pos = (UF_long)worker->tid; pos < n;
@@ -77879,19 +77938,29 @@ static void kls_generic_packed_row_worker_run(
     const UF_long row = (UF_long)work->row;
     UF_long p = (UF_long)work->input_begin;
     const UF_long input_end = (UF_long)work->input_end;
-    for (; p + 3u < input_end; p += 4u) {
-      const uint32_t packed0 = in_packed[p];
-      const uint32_t packed1 = in_packed[p + 1u];
-      const uint32_t packed2 = in_packed[p + 2u];
-      const uint32_t packed3 = in_packed[p + 3u];
-      x[packed0 & UINT32_C(0xffff)] = values[packed0 >> 16u];
-      x[packed1 & UINT32_C(0xffff)] = values[packed1 >> 16u];
-      x[packed2 & UINT32_C(0xffff)] = values[packed2 >> 16u];
-      x[packed3 & UINT32_C(0xffff)] = values[packed3 >> 16u];
-    }
-    for (; p < input_end; ++p) {
-      const uint32_t packed = in_packed[p];
-      x[packed & UINT32_C(0xffff)] = values[packed >> 16u];
+    if (in_packed != NULL) {
+      for (; p + 3u < input_end; p += 4u) {
+        const uint32_t packed0 = in_packed[p];
+        const uint32_t packed1 = in_packed[p + 1u];
+        const uint32_t packed2 = in_packed[p + 2u];
+        const uint32_t packed3 = in_packed[p + 3u];
+        x[packed0 & UINT32_C(0xffff)] = values[packed0 >> 16u];
+        x[packed1 & UINT32_C(0xffff)] = values[packed1 >> 16u];
+        x[packed2 & UINT32_C(0xffff)] = values[packed2 >> 16u];
+        x[packed3 & UINT32_C(0xffff)] = values[packed3 >> 16u];
+      }
+      for (; p < input_end; ++p) {
+        const uint32_t packed = in_packed[p];
+        x[packed & UINT32_C(0xffff)] = values[packed >> 16u];
+      }
+    } else {
+      for (; p + 3u < input_end; p += 4u) {
+        x[in_cols16[p]] = values[in_pos32[p]];
+        x[in_cols16[p + 1u]] = values[in_pos32[p + 1u]];
+        x[in_cols16[p + 2u]] = values[in_pos32[p + 2u]];
+        x[in_cols16[p + 3u]] = values[in_pos32[p + 3u]];
+      }
+      for (; p < input_end; ++p) x[in_cols16[p]] = values[in_pos32[p]];
     }
     p = (UF_long)work->dependency_begin;
     const UF_long dependency_end = (UF_long)work->dependency_end;
@@ -77899,7 +77968,16 @@ static void kls_generic_packed_row_worker_run(
       const kls_generic_packed_dependency32 *restrict dependency =
         &dependencies[p];
       const uint32_t wait_frontier = dependency->wait_frontier;
-      if (wait_frontier != 0u) {
+      if (mixed_input_mode) {
+        const uint32_t token = grouped_token[dependency->dep];
+        if ((token >> KLS_LEAN_GROUPED_OWNER_SHIFT) != consumer) {
+          const uint32_t slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
+          while (atomic_load_explicit(&grouped_done[slot],
+                                      memory_order_acquire) != generation) {
+            kls_cpu_relax();
+          }
+        }
+      } else if (wait_frontier != 0u) {
         const unsigned int mailbox = wait_frontier >> sequence_bits;
         const unsigned int sequence = wait_frontier & sequence_mask;
         unsigned int spin = 0u;
@@ -77917,6 +77995,7 @@ static void kls_generic_packed_row_worker_run(
       const double lik = x[dep] / udiag[dep];
       x[dep] = 0.0;
       l_val[p] = lik;
+      if (!row_values_mode) *l_lu[p] = lik;
       if (lik != 0.0) {
         for (UF_long q = (UF_long)dependency->update_begin;
              q < (UF_long)dependency->update_end; ++q) {
@@ -77933,10 +78012,16 @@ static void kls_generic_packed_row_worker_run(
       const UF_long col = (UF_long)u_cols[q];
       const double value = x[col];
       u_val[q] = value;
+      if (!row_values_mode) *u_lu[q] = value;
       x[col] = 0.0;
     }
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row, row);
+    }
+    if (mixed_input_mode) {
+      const uint32_t slot = grouped_token[row] & KLS_LEAN_GROUPED_SLOT_MASK;
+      atomic_store_explicit(&grouped_done[slot], generation,
+                            memory_order_release);
     }
     const UF_long publish_end = (UF_long)work->publish_end;
     for (; publish_pos < publish_end; ++publish_pos) {
@@ -77965,9 +78050,13 @@ static void kls_scaled_generic_packed_row_worker_run(
   const UF_long *restrict pnum = solver->numeric->Pnum;
   const uint32_t *restrict in_packed =
     solver->row_refactor_input_col_user32;
+  const uint16_t *restrict in_cols16 = solver->row_refactor_input_cols16;
+  const uint32_t *restrict in_pos32 = solver->row_refactor_input_pos32;
   double *restrict l_val = solver->row_refactor_l_row_values;
+  double **restrict l_lu = solver->row_refactor_l_values;
   const uint16_t *restrict u_cols = solver->row_refactor_u_cols16;
   double *restrict u_val = solver->row_refactor_u_row_values;
+  double **restrict u_lu = solver->row_refactor_u_values;
   double *restrict udiag = (double *)solver->numeric->Udiag;
   const kls_generic_packed_row_work32 *restrict work_rows =
     solver->lean_generic_packed_rows32;
@@ -77975,6 +78064,8 @@ static void kls_scaled_generic_packed_row_worker_run(
     solver->lean_generic_packed_dependencies32;
   kls_lean_done_slot *restrict owner_frontier =
     solver->lean_parallel_owner_frontier;
+  atomic_uint *restrict grouped_done = solver->lean_parallel_grouped_done;
+  const uint32_t *restrict grouped_token = solver->lean_parallel_grouped_token;
   const unsigned char *restrict publish_mailbox =
     solver->lean_generic_packed_publish_mailbox;
   const uint32_t *restrict publish_begin =
@@ -77986,6 +78077,9 @@ static void kls_scaled_generic_packed_row_worker_run(
     solver->lean_parallel_owner_frontier_sequence_mask;
   const int fused_scale_mode = shared->lean_fused_scale_mode;
   const int sum_scale_mode = solver->common.scale == 1;
+  const int row_values_mode = shared->lean_row_values_mode;
+  const int mixed_input_mode = in_packed == NULL;
+  const unsigned int generation = shared->pipeline_generation;
   unsigned int producer_sequence = 1u;
   UF_long publish_pos = (UF_long)publish_begin[consumer];
   for (UF_long pos = (UF_long)worker->tid; pos < n;
@@ -77997,9 +78091,12 @@ static void kls_scaled_generic_packed_row_worker_run(
     if (fused_scale_mode) {
       double row_scale = 0.0;
       for (UF_long p = input_begin; p < input_end; ++p) {
-        const uint32_t packed = in_packed[p];
-        const double value = values[packed >> 16u];
-        x[packed & UINT32_C(0xffff)] = value;
+        const uint32_t col = in_packed != NULL
+          ? in_packed[p] & UINT32_C(0xffff) : (uint32_t)in_cols16[p];
+        const uint32_t source = in_packed != NULL
+          ? in_packed[p] >> 16u : in_pos32[p];
+        const double value = values[source];
+        x[col] = value;
         const double magnitude = fabs(value);
         if (sum_scale_mode) {
           row_scale += magnitude;
@@ -78017,14 +78114,19 @@ static void kls_scaled_generic_packed_row_worker_run(
       }
       const double row_rs_inv = 1.0 / row_scale;
       for (UF_long p = input_begin; p < input_end; ++p) {
-        x[in_packed[p] & UINT32_C(0xffff)] *= row_rs_inv;
+        const UF_long col = in_packed != NULL
+          ? (UF_long)(in_packed[p] & UINT32_C(0xffff))
+          : (UF_long)in_cols16[p];
+        x[col] *= row_rs_inv;
       }
     } else {
       const double row_rs_inv = 1.0 / rs[pnum[row]];
       for (UF_long p = input_begin; p < input_end; ++p) {
-        const uint32_t packed = in_packed[p];
-        x[packed & UINT32_C(0xffff)] =
-          values[packed >> 16u] * row_rs_inv;
+        const uint32_t col = in_packed != NULL
+          ? in_packed[p] & UINT32_C(0xffff) : (uint32_t)in_cols16[p];
+        const uint32_t source = in_packed != NULL
+          ? in_packed[p] >> 16u : in_pos32[p];
+        x[col] = values[source] * row_rs_inv;
       }
     }
     for (UF_long p = (UF_long)work->dependency_begin;
@@ -78032,7 +78134,16 @@ static void kls_scaled_generic_packed_row_worker_run(
       const kls_generic_packed_dependency32 *restrict dependency =
         &dependencies[p];
       const uint32_t wait_frontier = dependency->wait_frontier;
-      if (wait_frontier != 0u) {
+      if (mixed_input_mode) {
+        const uint32_t token = grouped_token[dependency->dep];
+        if ((token >> KLS_LEAN_GROUPED_OWNER_SHIFT) != consumer) {
+          const uint32_t slot = token & KLS_LEAN_GROUPED_SLOT_MASK;
+          while (atomic_load_explicit(&grouped_done[slot],
+                                      memory_order_acquire) != generation) {
+            kls_cpu_relax();
+          }
+        }
+      } else if (wait_frontier != 0u) {
         const unsigned int mailbox = wait_frontier >> sequence_bits;
         const unsigned int sequence = wait_frontier & sequence_mask;
         unsigned int spin = 0u;
@@ -78050,6 +78161,7 @@ static void kls_scaled_generic_packed_row_worker_run(
       const double lik = x[dep] / udiag[dep];
       x[dep] = 0.0;
       l_val[p] = lik;
+      if (!row_values_mode) *l_lu[p] = lik;
       for (UF_long q = (UF_long)dependency->update_begin;
            q < (UF_long)dependency->update_end; ++q) {
         const UF_long col = (UF_long)u_cols[q];
@@ -78064,10 +78176,16 @@ static void kls_scaled_generic_packed_row_worker_run(
       const UF_long col = (UF_long)u_cols[q];
       const double value = x[col];
       u_val[q] = value;
+      if (!row_values_mode) *u_lu[q] = value;
       x[col] = 0.0;
     }
     if (pivot == 0.0) {
       kls_egraph_refactor_record_singular(shared, row, row);
+    }
+    if (mixed_input_mode) {
+      const uint32_t slot = grouped_token[row] & KLS_LEAN_GROUPED_SLOT_MASK;
+      atomic_store_explicit(&grouped_done[slot], generation,
+                            memory_order_release);
     }
     const UF_long publish_end = (UF_long)work->publish_end;
     for (; publish_pos < publish_end; ++publish_pos) {
@@ -79431,8 +79549,6 @@ static void kls_lean_parallel_worker_run(
   if (generic_hoisted_worker) {
     if (scaled_generic_hoisted_worker) {
       if (shared->lean_generic_packed_mode &&
-          shared->lean_grouped_done_mode &&
-          shared->lean_row_values_mode &&
           solver->lean_scalar_btf_prefix == 0u &&
           solver->lean_generic_packed_rows32 != NULL &&
           solver->lean_generic_packed_dependencies32 != NULL &&
@@ -79440,7 +79556,9 @@ static void kls_lean_parallel_worker_run(
           solver->lean_generic_packed_publish_begin != NULL &&
           solver->lean_parallel_owner_frontier != NULL &&
           solver->row_refactor_u_cols16 != NULL &&
-          solver->row_refactor_input_col_user32 != NULL) {
+          (solver->row_refactor_input_col_user32 != NULL ||
+           (solver->row_refactor_input_cols16 != NULL &&
+            solver->row_refactor_input_pos32 != NULL))) {
         kls_scaled_generic_packed_row_worker_run(worker, stride);
       } else if (solver->row_refactor_l_cols16 != NULL &&
           solver->row_refactor_u_cols16 != NULL &&
@@ -79539,8 +79657,6 @@ static void kls_lean_parallel_worker_run(
           worker, generation, rows, stride);
       }
     } else if (shared->lean_generic_packed_mode &&
-        shared->lean_grouped_done_mode &&
-        shared->lean_row_values_mode &&
         solver->lean_scalar_btf_prefix == 0u &&
         solver->lean_generic_packed_rows32 != NULL &&
         solver->lean_generic_packed_dependencies32 != NULL &&
@@ -79993,7 +80109,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->i32solve_udiag_recip != NULL;
   const int generic_packed_row_worker =
     !compact_amf_two_block_exact_worker &&
-    shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
     solver->lean_scalar_btf_prefix == 0u &&
     solver->lean_generic_packed_rows32 != NULL &&
     solver->lean_generic_packed_dependencies32 != NULL &&
@@ -80001,8 +80116,8 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->lean_generic_packed_publish_begin != NULL &&
     solver->lean_parallel_owner_frontier != NULL;
   const int scaled_generic_packed_row_worker =
-    shared->rs != NULL && shared->lean_grouped_done_mode &&
-    shared->lean_row_values_mode && solver->lean_scalar_btf_prefix == 0u &&
+    shared->rs != NULL &&
+    solver->lean_scalar_btf_prefix == 0u &&
     solver->lean_generic_packed_rows32 != NULL &&
     solver->lean_generic_packed_dependencies32 != NULL &&
     solver->lean_generic_packed_publish_mailbox != NULL &&
