@@ -468,6 +468,24 @@ typedef struct kls_compact_amf_two_block_work_row16 {
   uint16_t output_end;
 } kls_compact_amf_two_block_work_row16;
 
+typedef struct kls_generic_packed_row_work32 {
+  uint32_t row;
+  uint32_t publish_end;
+  uint32_t input_begin;
+  uint32_t input_end;
+  uint32_t dependency_begin;
+  uint32_t dependency_end;
+  uint32_t output_begin;
+  uint32_t output_end;
+} kls_generic_packed_row_work32;
+
+typedef struct kls_generic_packed_dependency32 {
+  uint32_t dep;
+  uint32_t wait_frontier;
+  uint32_t update_begin;
+  uint32_t update_end;
+} kls_generic_packed_dependency32;
+
 #define KLS_LEAN_GROUPED_OWNER_SHIFT 29u
 #define KLS_LEAN_GROUPED_PUBLISH_FLAG UINT32_C(0x10000000)
 #define KLS_LEAN_GROUPED_SLOT_MASK UINT32_C(0x0fffffff)
@@ -2373,6 +2391,14 @@ struct kls_solver {
   kls_compact_amf_two_block_work_row16 *lean_parallel_work_rows16;
   unsigned char *lean_parallel_publish_mailbox;
   uint16_t *lean_parallel_publish_begin;
+  kls_generic_packed_row_work32 *lean_generic_packed_rows32;
+  kls_generic_packed_dependency32 *lean_generic_packed_dependencies32;
+  unsigned char *lean_generic_packed_publish_mailbox;
+  uint32_t *lean_generic_packed_publish_begin;
+  int lean_generic_packed_choice; /* 0 sample, 1 legacy, 2 packed */
+  unsigned int lean_generic_packed_sample_count;
+  double lean_generic_packed_legacy_seconds[8];
+  double lean_generic_packed_candidate_seconds[8];
   double *lean_parallel_udiag_inv;
   UF_long lean_parallel_grouped_done_size;
   UF_long lean_parallel_grouped_stride;
@@ -3118,6 +3144,7 @@ typedef struct kls_egraph_refactor_shared {
   int lean_parallel_offdiag_mode;
   int lean_grouped_done_mode;
   int lean_row_values_mode;
+  int lean_generic_packed_mode;
   int lean_fused_scale_mode;
   double *lean_forward_solve_work;
   UF_long lean_forward_solve_begin;
@@ -21871,6 +21898,10 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
   free(solver->lean_parallel_work_rows16);
   free(solver->lean_parallel_publish_mailbox);
   free(solver->lean_parallel_publish_begin);
+  free(solver->lean_generic_packed_rows32);
+  free(solver->lean_generic_packed_dependencies32);
+  free(solver->lean_generic_packed_publish_mailbox);
+  free(solver->lean_generic_packed_publish_begin);
   free(solver->lean_parallel_udiag_inv);
   solver->lean_parallel_grouped_done = NULL;
   solver->lean_parallel_grouped_token = NULL;
@@ -21882,6 +21913,10 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
   solver->lean_parallel_work_rows16 = NULL;
   solver->lean_parallel_publish_mailbox = NULL;
   solver->lean_parallel_publish_begin = NULL;
+  solver->lean_generic_packed_rows32 = NULL;
+  solver->lean_generic_packed_dependencies32 = NULL;
+  solver->lean_generic_packed_publish_mailbox = NULL;
+  solver->lean_generic_packed_publish_begin = NULL;
   solver->lean_parallel_udiag_inv = NULL;
   solver->lean_parallel_grouped_done_size = 0u;
   solver->lean_parallel_grouped_stride = 0u;
@@ -22261,6 +22296,217 @@ static kls_lean_done_slot *ensure_lean_parallel_done(
   return solver->lean_parallel_done;
 }
 
+static void kls_free_generic_packed_row_plan(kls_solver *solver) {
+  if (solver == NULL) {
+    return;
+  }
+  free(solver->lean_generic_packed_rows32);
+  free(solver->lean_generic_packed_dependencies32);
+  free(solver->lean_generic_packed_publish_mailbox);
+  free(solver->lean_generic_packed_publish_begin);
+  solver->lean_generic_packed_rows32 = NULL;
+  solver->lean_generic_packed_dependencies32 = NULL;
+  solver->lean_generic_packed_publish_mailbox = NULL;
+  solver->lean_generic_packed_publish_begin = NULL;
+  solver->lean_generic_packed_choice = 0;
+  solver->lean_generic_packed_sample_count = 0u;
+  memset(solver->lean_generic_packed_legacy_seconds, 0,
+         sizeof(solver->lean_generic_packed_legacy_seconds));
+  memset(solver->lean_generic_packed_candidate_seconds, 0,
+         sizeof(solver->lean_generic_packed_candidate_seconds));
+}
+
+/* Build a sequential execution stream for the ordinary unscaled compact-row
+   worker.  Unlike the narrower fused worker, this representation uses full
+   32-bit rows and offsets.  It is therefore gated only by the arrays it
+   actually encodes, not by an ordering, block count, or matrix profile. */
+static int kls_prepare_generic_packed_row_plan(
+  kls_solver *solver,
+  int thread_count,
+  const UF_long *rows,
+  UF_long stride,
+  unsigned int frontier_sequence_bits,
+  unsigned int frontier_sequence_mask) {
+  kls_free_generic_packed_row_plan(solver);
+  if (solver == NULL || rows == NULL || solver->numeric == NULL ||
+      thread_count < 2 || thread_count > 8 || solver->n == 0u ||
+      solver->n > UINT32_MAX ||
+      solver->row_refactor_input_ptr == NULL ||
+      solver->row_refactor_input_col_user32 == NULL ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_l_cols16 == NULL ||
+      solver->row_refactor_l_row_values == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_u_cols16 == NULL ||
+      solver->row_refactor_u_row_values == NULL ||
+      solver->lean_parallel_grouped_token == NULL ||
+      frontier_sequence_bits == 0u || frontier_sequence_bits >= 32u) {
+    return 0;
+  }
+  const UF_long input_count = solver->row_refactor_input_ptr[solver->n];
+  const UF_long dependency_count = solver->row_refactor_l_ptr[solver->n];
+  const UF_long output_count = solver->row_refactor_u_ptr[solver->n];
+  if (input_count > UINT32_MAX || dependency_count > UINT32_MAX ||
+      output_count > UINT32_MAX ||
+      solver->n > (UF_long)(SIZE_MAX / sizeof(kls_generic_packed_row_work32)) ||
+      dependency_count >
+        (UF_long)(SIZE_MAX / sizeof(kls_generic_packed_dependency32))) {
+    return 0;
+  }
+  kls_generic_packed_row_work32 *work_rows =
+    (kls_generic_packed_row_work32 *)malloc(
+      (size_t)solver->n * sizeof(*work_rows));
+  kls_generic_packed_dependency32 *dependencies =
+    (kls_generic_packed_dependency32 *)malloc(
+      (size_t)(dependency_count > 0u ? dependency_count : 1u) *
+      sizeof(*dependencies));
+  unsigned char *publish_mask =
+    (unsigned char *)calloc((size_t)solver->n, sizeof(*publish_mask));
+  if (work_rows == NULL || dependencies == NULL || publish_mask == NULL) {
+    free(work_rows);
+    free(dependencies);
+    free(publish_mask);
+    return 0;
+  }
+
+  uint32_t acquired_sequence[8][8] = {{0u}};
+  int valid = 1;
+  for (UF_long pos = 0u; pos < solver->n && valid; ++pos) {
+    const UF_long row = rows[pos];
+    if (row >= solver->n) {
+      valid = 0;
+      break;
+    }
+    const uint32_t row_token = solver->lean_parallel_grouped_token[row];
+    const unsigned int consumer =
+      row_token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
+    if (consumer >= (unsigned int)thread_count) {
+      valid = 0;
+      break;
+    }
+    const UF_long input_begin = solver->row_refactor_input_ptr[row];
+    const UF_long input_end = solver->row_refactor_input_ptr[row + 1u];
+    const UF_long dependency_begin = solver->row_refactor_l_ptr[row];
+    const UF_long dependency_end = solver->row_refactor_l_ptr[row + 1u];
+    const UF_long output_begin = solver->row_refactor_u_ptr[row];
+    const UF_long output_end = solver->row_refactor_u_ptr[row + 1u];
+    work_rows[pos].row = (uint32_t)row;
+    work_rows[pos].publish_end = 0u;
+    work_rows[pos].input_begin = (uint32_t)input_begin;
+    work_rows[pos].input_end = (uint32_t)input_end;
+    work_rows[pos].dependency_begin = (uint32_t)dependency_begin;
+    work_rows[pos].dependency_end = (uint32_t)dependency_end;
+    work_rows[pos].output_begin = (uint32_t)output_begin;
+    work_rows[pos].output_end = (uint32_t)output_end;
+    for (UF_long p = dependency_begin; p < dependency_end; ++p) {
+      const UF_long dep = solver->row_refactor_l_cols[p];
+      if (dep >= solver->n) {
+        valid = 0;
+        break;
+      }
+      const uint32_t dep_token = solver->lean_parallel_grouped_token[dep];
+      const unsigned int producer =
+        dep_token >> KLS_LEAN_GROUPED_OWNER_SHIFT;
+      const uint32_t slot = dep_token & KLS_LEAN_GROUPED_SLOT_MASK;
+      const UF_long owner_begin = (UF_long)producer * stride;
+      if (producer >= (unsigned int)thread_count ||
+          (UF_long)slot < owner_begin) {
+        valid = 0;
+        break;
+      }
+      const UF_long sequence = (UF_long)slot - owner_begin + 1u;
+      const UF_long update_begin = solver->row_refactor_u_ptr[dep];
+      const UF_long update_end = solver->row_refactor_u_ptr[dep + 1u];
+      if (sequence > frontier_sequence_mask ||
+          update_begin > UINT32_MAX || update_end > UINT32_MAX) {
+        valid = 0;
+        break;
+      }
+      uint32_t wait_frontier = 0u;
+      if (producer != consumer &&
+          sequence > acquired_sequence[consumer][producer]) {
+        const uint32_t mailbox =
+          producer * (unsigned int)thread_count + consumer;
+        if (mailbox > (UINT32_MAX >> frontier_sequence_bits)) {
+          valid = 0;
+          break;
+        }
+        wait_frontier =
+          (mailbox << frontier_sequence_bits) | (uint32_t)sequence;
+        acquired_sequence[consumer][producer] = (uint32_t)sequence;
+        publish_mask[dep] |= (unsigned char)(1u << consumer);
+      }
+      dependencies[p].dep = (uint32_t)dep;
+      dependencies[p].wait_frontier = wait_frontier;
+      dependencies[p].update_begin = (uint32_t)update_begin;
+      dependencies[p].update_end = (uint32_t)update_end;
+    }
+  }
+
+  UF_long publish_count = 0u;
+  for (UF_long row = 0u; row < solver->n; ++row) {
+#if defined(__GNUC__) || defined(__clang__)
+    publish_count += (UF_long)__builtin_popcount((unsigned int)publish_mask[row]);
+#else
+    unsigned int mask = publish_mask[row];
+    while (mask != 0u) { publish_count++; mask &= mask - 1u; }
+#endif
+  }
+  unsigned char *publish_mailbox = valid
+    ? (unsigned char *)malloc((size_t)(publish_count > 0u ? publish_count : 1u))
+    : NULL;
+  uint32_t *publish_begin = valid
+    ? (uint32_t *)malloc((size_t)thread_count * sizeof(*publish_begin)) : NULL;
+  if (publish_mailbox == NULL || publish_begin == NULL ||
+      publish_count > UINT32_MAX) {
+    valid = 0;
+  }
+  UF_long publish_pos = 0u;
+  for (int owner = 0; owner < thread_count && valid; ++owner) {
+    publish_begin[owner] = (uint32_t)publish_pos;
+    for (UF_long pos = (UF_long)owner; pos < solver->n;
+         pos += (UF_long)thread_count) {
+      const UF_long row = rows[pos];
+      unsigned int mask = publish_mask[row];
+      while (mask != 0u) {
+#if defined(__GNUC__) || defined(__clang__)
+        const unsigned int consumer = (unsigned int)__builtin_ctz(mask);
+#else
+        unsigned int consumer = 0u;
+        while ((mask & (1u << consumer)) == 0u) { consumer++; }
+#endif
+        mask &= mask - 1u;
+        const unsigned int mailbox =
+          (unsigned int)owner * (unsigned int)thread_count + consumer;
+        if (publish_pos >= publish_count || mailbox > UINT8_MAX) {
+          valid = 0;
+          break;
+        }
+        publish_mailbox[publish_pos++] = (unsigned char)mailbox;
+      }
+      if (!valid || publish_pos > UINT32_MAX) {
+        valid = 0;
+        break;
+      }
+      work_rows[pos].publish_end = (uint32_t)publish_pos;
+    }
+  }
+  free(publish_mask);
+  if (!valid || publish_pos != publish_count) {
+    free(work_rows);
+    free(dependencies);
+    free(publish_mailbox);
+    free(publish_begin);
+    return 0;
+  }
+  solver->lean_generic_packed_rows32 = work_rows;
+  solver->lean_generic_packed_dependencies32 = dependencies;
+  solver->lean_generic_packed_publish_mailbox = publish_mailbox;
+  solver->lean_generic_packed_publish_begin = publish_begin;
+  return 1;
+}
+
 /* Compact completion slots grouped by writer.  The generic scoreboard pads
    each row to a cache line to avoid false sharing, but sparse circuit factors
    then stream through hundreds of KiB merely to test dependencies.  Every
@@ -22285,18 +22531,18 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
   }
   const UF_long slot_count = stride * (UF_long)thread_count;
   unsigned int frontier_sequence_bits = 1u;
-  while (frontier_sequence_bits < 16u &&
+  while (frontier_sequence_bits < 32u &&
          per_thread >= ((UF_long)1u << frontier_sequence_bits)) {
     frontier_sequence_bits++;
   }
-  const unsigned int frontier_sequence_mask =
-    ((unsigned int)1u << frontier_sequence_bits) - 1u;
+  const unsigned int frontier_sequence_mask = frontier_sequence_bits < 32u
+    ? ((unsigned int)1u << frontier_sequence_bits) - 1u : UINT_MAX;
   const unsigned int frontier_mailbox_count =
     (unsigned int)thread_count * (unsigned int)thread_count;
   if (slot_count > (UF_long)KLS_LEAN_GROUPED_SLOT_MASK ||
-      frontier_sequence_bits >= 16u || frontier_mailbox_count == 0u ||
+      frontier_sequence_bits >= 32u || frontier_mailbox_count == 0u ||
       frontier_mailbox_count - 1u >
-        ((unsigned int)UINT16_MAX >> frontier_sequence_bits) ||
+        ((unsigned int)UINT32_MAX >> frontier_sequence_bits) ||
       slot_count > (UF_long)(SIZE_MAX / sizeof(atomic_uint)) ||
       solver->n > (UF_long)(SIZE_MAX / sizeof(uint32_t))) {
     return 0;
@@ -22370,6 +22616,10 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
       ((uint32_t)owner << KLS_LEAN_GROUPED_OWNER_SHIFT) |
       KLS_LEAN_GROUPED_PUBLISH_FLAG | (uint32_t)slot;
   }
+
+  (void)kls_prepare_generic_packed_row_plan(
+    solver, thread_count, rows, stride, frontier_sequence_bits,
+    frontier_sequence_mask);
 
   /* Preserve the just-in-time dependency order of the compact worker, but
      predecode each L entry into a sequential dependency descriptor.  The
@@ -77586,6 +77836,251 @@ static void kls_generic_i16ptr_hoisted_worker_run(
   }
 }
 
+/* Generic unscaled packed-row worker.  Its execution stream removes random
+   owner-token and U-pointer probes while retaining dependency-by-dependency
+   overlap and the original arithmetic order. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot, aligned(64)))
+#endif
+static void kls_generic_packed_row_worker_run(
+  kls_egraph_refactor_worker *worker,
+  UF_long stride) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  const UF_long n = solver->n;
+  double *restrict x = worker->x;
+  const double *restrict values = shared->values;
+  const uint32_t *restrict in_packed =
+    solver->row_refactor_input_col_user32;
+  double *restrict l_val = solver->row_refactor_l_row_values;
+  const uint16_t *restrict u_cols = solver->row_refactor_u_cols16;
+  double *restrict u_val = solver->row_refactor_u_row_values;
+  double *restrict udiag = (double *)solver->numeric->Udiag;
+  const kls_generic_packed_row_work32 *restrict work_rows =
+    solver->lean_generic_packed_rows32;
+  const kls_generic_packed_dependency32 *restrict dependencies =
+    solver->lean_generic_packed_dependencies32;
+  kls_lean_done_slot *restrict owner_frontier =
+    solver->lean_parallel_owner_frontier;
+  const unsigned char *restrict publish_mailbox =
+    solver->lean_generic_packed_publish_mailbox;
+  const uint32_t *restrict publish_begin =
+    solver->lean_generic_packed_publish_begin;
+  const unsigned int consumer = (unsigned int)worker->tid;
+  const unsigned int sequence_bits =
+    solver->lean_parallel_owner_frontier_sequence_bits;
+  const unsigned int sequence_mask =
+    solver->lean_parallel_owner_frontier_sequence_mask;
+  unsigned int producer_sequence = 1u;
+  UF_long publish_pos = (UF_long)publish_begin[consumer];
+  for (UF_long pos = (UF_long)worker->tid; pos < n;
+       pos += stride, ++producer_sequence) {
+    const kls_generic_packed_row_work32 *restrict work = &work_rows[pos];
+    const UF_long row = (UF_long)work->row;
+    UF_long p = (UF_long)work->input_begin;
+    const UF_long input_end = (UF_long)work->input_end;
+    for (; p + 3u < input_end; p += 4u) {
+      const uint32_t packed0 = in_packed[p];
+      const uint32_t packed1 = in_packed[p + 1u];
+      const uint32_t packed2 = in_packed[p + 2u];
+      const uint32_t packed3 = in_packed[p + 3u];
+      x[packed0 & UINT32_C(0xffff)] = values[packed0 >> 16u];
+      x[packed1 & UINT32_C(0xffff)] = values[packed1 >> 16u];
+      x[packed2 & UINT32_C(0xffff)] = values[packed2 >> 16u];
+      x[packed3 & UINT32_C(0xffff)] = values[packed3 >> 16u];
+    }
+    for (; p < input_end; ++p) {
+      const uint32_t packed = in_packed[p];
+      x[packed & UINT32_C(0xffff)] = values[packed >> 16u];
+    }
+    p = (UF_long)work->dependency_begin;
+    const UF_long dependency_end = (UF_long)work->dependency_end;
+    for (; p < dependency_end; ++p) {
+      const kls_generic_packed_dependency32 *restrict dependency =
+        &dependencies[p];
+      const uint32_t wait_frontier = dependency->wait_frontier;
+      if (wait_frontier != 0u) {
+        const unsigned int mailbox = wait_frontier >> sequence_bits;
+        const unsigned int sequence = wait_frontier & sequence_mask;
+        unsigned int spin = 0u;
+        while (atomic_load_explicit(&owner_frontier[mailbox].generation,
+                                    memory_order_acquire) < sequence) {
+          if ((++spin & 255u) == 0u &&
+              atomic_load_explicit(&shared->stop,
+                                   memory_order_acquire) != 0) {
+            return;
+          }
+          kls_cpu_relax();
+        }
+      }
+      const UF_long dep = (UF_long)dependency->dep;
+      const double lik = x[dep] / udiag[dep];
+      x[dep] = 0.0;
+      l_val[p] = lik;
+      if (lik != 0.0) {
+        for (UF_long q = (UF_long)dependency->update_begin;
+             q < (UF_long)dependency->update_end; ++q) {
+          const UF_long col = (UF_long)u_cols[q];
+          x[col] = fma(-lik, u_val[q], x[col]);
+        }
+      }
+    }
+    const double pivot = x[row];
+    x[row] = 0.0;
+    udiag[row] = pivot;
+    for (UF_long q = (UF_long)work->output_begin;
+         q < (UF_long)work->output_end; ++q) {
+      const UF_long col = (UF_long)u_cols[q];
+      const double value = x[col];
+      u_val[q] = value;
+      x[col] = 0.0;
+    }
+    if (pivot == 0.0) {
+      kls_egraph_refactor_record_singular(shared, row, row);
+    }
+    const UF_long publish_end = (UF_long)work->publish_end;
+    for (; publish_pos < publish_end; ++publish_pos) {
+      const UF_long mailbox = (UF_long)publish_mailbox[publish_pos];
+      atomic_store_explicit(&owner_frontier[mailbox].generation,
+                            producer_sequence, memory_order_release);
+    }
+    if (atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
+      return;
+    }
+  }
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot, aligned(64)))
+#endif
+static void kls_scaled_generic_packed_row_worker_run(
+  kls_egraph_refactor_worker *worker,
+  UF_long stride) {
+  kls_egraph_refactor_shared *shared = worker->shared;
+  kls_solver *solver = shared->solver;
+  const UF_long n = solver->n;
+  double *restrict x = worker->x;
+  const double *restrict values = shared->values;
+  double *restrict rs = (double *)(uintptr_t)shared->rs;
+  const UF_long *restrict pnum = solver->numeric->Pnum;
+  const uint32_t *restrict in_packed =
+    solver->row_refactor_input_col_user32;
+  double *restrict l_val = solver->row_refactor_l_row_values;
+  const uint16_t *restrict u_cols = solver->row_refactor_u_cols16;
+  double *restrict u_val = solver->row_refactor_u_row_values;
+  double *restrict udiag = (double *)solver->numeric->Udiag;
+  const kls_generic_packed_row_work32 *restrict work_rows =
+    solver->lean_generic_packed_rows32;
+  const kls_generic_packed_dependency32 *restrict dependencies =
+    solver->lean_generic_packed_dependencies32;
+  kls_lean_done_slot *restrict owner_frontier =
+    solver->lean_parallel_owner_frontier;
+  const unsigned char *restrict publish_mailbox =
+    solver->lean_generic_packed_publish_mailbox;
+  const uint32_t *restrict publish_begin =
+    solver->lean_generic_packed_publish_begin;
+  const unsigned int consumer = (unsigned int)worker->tid;
+  const unsigned int sequence_bits =
+    solver->lean_parallel_owner_frontier_sequence_bits;
+  const unsigned int sequence_mask =
+    solver->lean_parallel_owner_frontier_sequence_mask;
+  const int fused_scale_mode = shared->lean_fused_scale_mode;
+  const int sum_scale_mode = solver->common.scale == 1;
+  unsigned int producer_sequence = 1u;
+  UF_long publish_pos = (UF_long)publish_begin[consumer];
+  for (UF_long pos = (UF_long)worker->tid; pos < n;
+       pos += stride, ++producer_sequence) {
+    const kls_generic_packed_row_work32 *restrict work = &work_rows[pos];
+    const UF_long row = (UF_long)work->row;
+    const UF_long input_begin = (UF_long)work->input_begin;
+    const UF_long input_end = (UF_long)work->input_end;
+    if (fused_scale_mode) {
+      double row_scale = 0.0;
+      for (UF_long p = input_begin; p < input_end; ++p) {
+        const uint32_t packed = in_packed[p];
+        const double value = values[packed >> 16u];
+        x[packed & UINT32_C(0xffff)] = value;
+        const double magnitude = fabs(value);
+        if (sum_scale_mode) {
+          row_scale += magnitude;
+        } else if (magnitude > row_scale) {
+          row_scale = magnitude;
+        }
+      }
+      if (row_scale == 0.0) {
+        row_scale = 1.0;
+      }
+      if (fused_scale_mode > 1) {
+        rs[row] = row_scale;
+      } else {
+        rs[pnum[row]] = row_scale;
+      }
+      const double row_rs_inv = 1.0 / row_scale;
+      for (UF_long p = input_begin; p < input_end; ++p) {
+        x[in_packed[p] & UINT32_C(0xffff)] *= row_rs_inv;
+      }
+    } else {
+      const double row_rs_inv = 1.0 / rs[pnum[row]];
+      for (UF_long p = input_begin; p < input_end; ++p) {
+        const uint32_t packed = in_packed[p];
+        x[packed & UINT32_C(0xffff)] =
+          values[packed >> 16u] * row_rs_inv;
+      }
+    }
+    for (UF_long p = (UF_long)work->dependency_begin;
+         p < (UF_long)work->dependency_end; ++p) {
+      const kls_generic_packed_dependency32 *restrict dependency =
+        &dependencies[p];
+      const uint32_t wait_frontier = dependency->wait_frontier;
+      if (wait_frontier != 0u) {
+        const unsigned int mailbox = wait_frontier >> sequence_bits;
+        const unsigned int sequence = wait_frontier & sequence_mask;
+        unsigned int spin = 0u;
+        while (atomic_load_explicit(&owner_frontier[mailbox].generation,
+                                    memory_order_acquire) < sequence) {
+          if ((++spin & 255u) == 0u &&
+              atomic_load_explicit(&shared->stop,
+                                   memory_order_acquire) != 0) {
+            return;
+          }
+          kls_cpu_relax();
+        }
+      }
+      const UF_long dep = (UF_long)dependency->dep;
+      const double lik = x[dep] / udiag[dep];
+      x[dep] = 0.0;
+      l_val[p] = lik;
+      for (UF_long q = (UF_long)dependency->update_begin;
+           q < (UF_long)dependency->update_end; ++q) {
+        const UF_long col = (UF_long)u_cols[q];
+        x[col] = fma(-lik, u_val[q], x[col]);
+      }
+    }
+    const double pivot = x[row];
+    x[row] = 0.0;
+    udiag[row] = pivot;
+    for (UF_long q = (UF_long)work->output_begin;
+         q < (UF_long)work->output_end; ++q) {
+      const UF_long col = (UF_long)u_cols[q];
+      const double value = x[col];
+      u_val[q] = value;
+      x[col] = 0.0;
+    }
+    if (pivot == 0.0) {
+      kls_egraph_refactor_record_singular(shared, row, row);
+    }
+    const UF_long publish_end = (UF_long)work->publish_end;
+    for (; publish_pos < publish_end; ++publish_pos) {
+      const UF_long mailbox = (UF_long)publish_mailbox[publish_pos];
+      atomic_store_explicit(&owner_frontier[mailbox].generation,
+                            producer_sequence, memory_order_release);
+    }
+    if (atomic_load_explicit(&shared->stop, memory_order_acquire) != 0) {
+      return;
+    }
+  }
+}
+
 /* Exact unscaled compact-row worker for the common grouped/row-value
    representation.  The preceding numeric's diagonal reciprocals are valid
    until their owning rows publish replacements, so consume that dependency
@@ -78935,7 +79430,19 @@ static void kls_lean_parallel_worker_run(
     (shared->rs == NULL || solver->numeric->Pnum != NULL);
   if (generic_hoisted_worker) {
     if (scaled_generic_hoisted_worker) {
-      if (solver->row_refactor_l_cols16 != NULL &&
+      if (shared->lean_generic_packed_mode &&
+          shared->lean_grouped_done_mode &&
+          shared->lean_row_values_mode &&
+          solver->lean_scalar_btf_prefix == 0u &&
+          solver->lean_generic_packed_rows32 != NULL &&
+          solver->lean_generic_packed_dependencies32 != NULL &&
+          solver->lean_generic_packed_publish_mailbox != NULL &&
+          solver->lean_generic_packed_publish_begin != NULL &&
+          solver->lean_parallel_owner_frontier != NULL &&
+          solver->row_refactor_u_cols16 != NULL &&
+          solver->row_refactor_input_col_user32 != NULL) {
+        kls_scaled_generic_packed_row_worker_run(worker, stride);
+      } else if (solver->row_refactor_l_cols16 != NULL &&
           solver->row_refactor_u_cols16 != NULL &&
           solver->row_refactor_l_ptr16 != NULL &&
           solver->row_refactor_u_ptr16 != NULL &&
@@ -79031,6 +79538,16 @@ static void kls_lean_parallel_worker_run(
         kls_compact_amf_two_block_i16ptr_worker_run(
           worker, generation, rows, stride);
       }
+    } else if (shared->lean_generic_packed_mode &&
+        shared->lean_grouped_done_mode &&
+        shared->lean_row_values_mode &&
+        solver->lean_scalar_btf_prefix == 0u &&
+        solver->lean_generic_packed_rows32 != NULL &&
+        solver->lean_generic_packed_dependencies32 != NULL &&
+        solver->lean_generic_packed_publish_mailbox != NULL &&
+        solver->lean_generic_packed_publish_begin != NULL &&
+        solver->lean_parallel_owner_frontier != NULL) {
+      kls_generic_packed_row_worker_run(worker, stride);
     } else if (solver->row_refactor_l_cols16 != NULL &&
         solver->row_refactor_u_cols16 != NULL) {
       if (solver->row_refactor_l_ptr16 != NULL &&
@@ -79474,7 +79991,41 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->lean_parallel_publish_begin != NULL &&
     solver->lean_parallel_udiag_inv != NULL &&
     solver->i32solve_udiag_recip != NULL;
-  if (compact_amf_two_block_exact_worker) {
+  const int generic_packed_row_worker =
+    !compact_amf_two_block_exact_worker &&
+    shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
+    solver->lean_scalar_btf_prefix == 0u &&
+    solver->lean_generic_packed_rows32 != NULL &&
+    solver->lean_generic_packed_dependencies32 != NULL &&
+    solver->lean_generic_packed_publish_mailbox != NULL &&
+    solver->lean_generic_packed_publish_begin != NULL &&
+    solver->lean_parallel_owner_frontier != NULL;
+  const int scaled_generic_packed_row_worker =
+    shared->rs != NULL && shared->lean_grouped_done_mode &&
+    shared->lean_row_values_mode && solver->lean_scalar_btf_prefix == 0u &&
+    solver->lean_generic_packed_rows32 != NULL &&
+    solver->lean_generic_packed_dependencies32 != NULL &&
+    solver->lean_generic_packed_publish_mailbox != NULL &&
+    solver->lean_generic_packed_publish_begin != NULL &&
+    solver->lean_parallel_owner_frontier != NULL;
+  const int generic_packed_capable =
+    generic_packed_row_worker || scaled_generic_packed_row_worker;
+  int generic_packed_sample_candidate = 0;
+  if (generic_packed_capable) {
+    if (solver->lean_generic_packed_choice == 2) {
+      shared->lean_generic_packed_mode = 1;
+    } else if (solver->lean_generic_packed_choice == 0) {
+      /* Interleave the alternatives to cancel warmup and slow drift. */
+      static const unsigned char candidate_sequence[8] = {
+        0u, 1u, 1u, 0u, 1u, 0u, 0u, 1u
+      };
+      const unsigned int sample = solver->lean_generic_packed_sample_count;
+      generic_packed_sample_candidate = candidate_sequence[sample & 7u] != 0u;
+      shared->lean_generic_packed_mode = generic_packed_sample_candidate;
+    }
+  }
+  if (compact_amf_two_block_exact_worker ||
+      (generic_packed_capable && shared->lean_generic_packed_mode)) {
     for (int mailbox = 0;
          mailbox < thread_count * thread_count; ++mailbox) {
       atomic_store_explicit(
@@ -79501,18 +80052,52 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     pool->workers[i].shared = shared;
     pool->workers[i].x = scratch[i];
   }
-  const double trace_dispatch = trace_setup ? kls_now_seconds() : 0.0;
+  const int time_generic_packed_sample =
+    generic_packed_capable && solver->lean_generic_packed_choice == 0;
+  const double trace_dispatch =
+    (trace_setup || time_generic_packed_sample) ? kls_now_seconds() : 0.0;
 
   /* This path targets factors whose entire numeric phase is measured in
      microseconds.  The generic dispatcher puts the caller through a
      condition-variable wait; keep the caller spinning alongside the already
      spinning persistent workers instead. */
   kls_egraph_pool_dispatch_and_spin_wait(pool, shared, thread_count);
-  const double trace_complete = trace_setup ? kls_now_seconds() : 0.0;
+  const double trace_complete =
+    (trace_setup || time_generic_packed_sample) ? kls_now_seconds() : 0.0;
   const int invalid = shared->invalid;
   const int singular = shared->singular;
   const UF_long numerical_rank = shared->numerical_rank;
   const UF_long singular_col = shared->singular_col;
+  if (time_generic_packed_sample && !invalid && !singular) {
+    const unsigned int sample = solver->lean_generic_packed_sample_count;
+    const unsigned int slot = sample >> 1u;
+    double *samples = generic_packed_sample_candidate
+      ? solver->lean_generic_packed_candidate_seconds
+      : solver->lean_generic_packed_legacy_seconds;
+    if (slot < 8u) {
+      samples[slot] = trace_complete - trace_dispatch;
+      solver->lean_generic_packed_sample_count = sample + 1u;
+    }
+    if (solver->lean_generic_packed_sample_count == 16u) {
+      double paired_ratio[8];
+      for (unsigned int i = 0u; i < 8u; ++i) {
+        paired_ratio[i] = solver->lean_generic_packed_candidate_seconds[i] /
+          solver->lean_generic_packed_legacy_seconds[i];
+      }
+      for (unsigned int i = 1u; i < 8u; ++i) {
+        for (unsigned int j = i;
+             j > 0u && paired_ratio[j] < paired_ratio[j - 1u]; --j) {
+          const double tmp = paired_ratio[j];
+          paired_ratio[j] = paired_ratio[j - 1u];
+          paired_ratio[j - 1u] = tmp;
+        }
+      }
+      /* Require a repeatable margin so noise defaults to established code.
+         This is deliberately wider than timer noise on sub-microsecond rows. */
+      solver->lean_generic_packed_choice =
+        0.5 * (paired_ratio[3] + paired_ratio[4]) <= 0.985 ? 2 : 1;
+    }
+  }
   const int row_values_mode = shared->lean_row_values_mode;
   solver->fused_refactor_solve_computed =
     !invalid && !singular && shared->lean_forward_solve_work != NULL;
@@ -79540,6 +80125,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_parallel_offdiag_mode = 0;
   shared->lean_grouped_done_mode = 0;
   shared->lean_row_values_mode = 0;
+  shared->lean_generic_packed_mode = 0;
   shared->lean_fused_scale_mode = 0;
   shared->lean_forward_solve_work = NULL;
   shared->lean_forward_solve_begin = 0u;
@@ -79556,12 +80142,15 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   if (trace_setup) {
     fprintf(stderr,
             "KLS lean parallel setup: resources=%.3f schedule=%.3f "
-            "configure=%.3f numeric=%.3f total=%.3f ms threads=%d\n",
+            "configure=%.3f numeric=%.3f total=%.3f ms threads=%d "
+            "generic_packed_choice=%d samples=%u\n",
             1e3 * (trace_resources - trace_begin),
             1e3 * (trace_schedule - trace_resources),
             1e3 * (trace_dispatch - trace_schedule),
             1e3 * (trace_complete - trace_dispatch),
-            1e3 * (trace_complete - trace_begin), thread_count);
+            1e3 * (trace_complete - trace_begin), thread_count,
+            solver->lean_generic_packed_choice,
+            solver->lean_generic_packed_sample_count);
   }
 
   if (invalid) {
