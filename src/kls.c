@@ -169815,7 +169815,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
           }
         }
         solver->lean_pair_active = 0;
-        const double best_row_seconds =
+        double best_row_seconds =
           lean_ok > 0 && t_lean > 0.0 &&
           (pair_ok <= 0 || !(t_pair > 0.0) || t_lean <= t_pair)
             ? t_lean : t_pair;
@@ -169850,6 +169850,81 @@ int kls_refactor(kls_solver *solver, const double *values) {
           solver->row_refactor_auto_enabled = saved_row_auto_enabled;
           solver->lean_probe_arm = saved_lean_probe_arm;
         }
+        int warm_row_confirmed = 0;
+        int warm_row_failed = 0;
+        double warm_row_trial_seconds = 0.0;
+        const int best_row_arm =
+          lean_ok > 0 && t_lean > 0.0 &&
+          (pair_ok <= 0 || !(t_pair > 0.0) || t_lean <= t_pair) ? 1 : 2;
+        const double preliminary_remaining =
+          solver->options.expected_refactorizations > 3
+            ? (double)(solver->options.expected_refactorizations - 3) : 0.0;
+        const double preliminary_saving =
+          best_row_seconds > 0.0 && t_inc > best_row_seconds
+            ? preliminary_remaining * (t_inc - best_row_seconds) : 0.0;
+        if (parallel_single_arm && !scaled_small_packed_row_model_admitted &&
+            solver->common.scale == -1 && best_row_seconds > 0.0 &&
+            t_inc > 0.0 && best_row_seconds >= 0.60 * t_inc &&
+            best_row_seconds < t_inc &&
+            preliminary_saving > 4.0 * best_row_seconds) {
+          /* A compact parallel row worker can need several consecutive
+             generations to warm its retained descriptor and SPA streams.
+             One post-preparation sample therefore understates durable wins
+             on either side of an LLC-capacity boundary.  Confirm only a
+             promising near miss, using two more executions of the already
+             faster arm.  The median rejects a one-off low sample, while the
+             horizon test below charges every added execution twice before
+             allowing adoption. */
+          double samples[3] = {best_row_seconds, 0.0, 0.0};
+          int warm_ok = 1;
+          for (int sample = 1; sample < 3; ++sample) {
+            solver->lean_pair_active = best_row_arm == 2;
+            solver->common.status = TRILINOS_KLU_OK;
+            solver->common.numerical_rank = KLS_KLU_EMPTY;
+            solver->common.singular_col = KLS_KLU_EMPTY;
+            t0 = kls_now_seconds();
+            const int sample_ok =
+              kls_lean_row_refactor_numeric(solver, numeric_values);
+            samples[sample] = kls_now_seconds() - t0;
+            warm_row_trial_seconds += samples[sample];
+            if (sample_ok <= 0 || solver->common.status < 0) {
+              warm_ok = 0;
+              warm_row_failed = 1;
+              break;
+            }
+          }
+          solver->lean_pair_active = 0;
+          if (warm_ok) {
+            if (samples[0] > samples[1]) {
+              const double swap = samples[0];
+              samples[0] = samples[1];
+              samples[1] = swap;
+            }
+            if (samples[1] > samples[2]) {
+              const double swap = samples[1];
+              samples[1] = samples[2];
+              samples[2] = swap;
+            }
+            if (samples[0] > samples[1]) {
+              const double swap = samples[0];
+              samples[0] = samples[1];
+              samples[1] = swap;
+            }
+            const double median = samples[1];
+            const double projected_saving =
+              preliminary_remaining * (t_inc - median);
+            warm_row_confirmed = median < 0.90 * t_inc &&
+              projected_saving > 2.0 * warm_row_trial_seconds;
+            if (warm_row_confirmed) {
+              best_row_seconds = median;
+              if (best_row_arm == 1) {
+                t_lean = median;
+              } else {
+                t_pair = median;
+              }
+            }
+          }
+        }
         /* Publish only a decisive first-call row win on an unscaled factor.
            Narrower apparent wins are revisited below after the incumbent has
            entered its settled direct path; the pre-solve consultation cannot
@@ -169882,29 +169957,34 @@ int kls_refactor(kls_solver *solver, const double *values) {
           !scaled_small_packed_row_model_admitted;
         if (lean_ok > 0 && t_lean > 0.0 && t_inc > 0.0 &&
             ((ordinary_lean_adopt &&
-              t_lean < initial_row_margin * t_inc) ||
+              (t_lean < initial_row_margin * t_inc ||
+               (warm_row_confirmed && best_row_arm == 1))) ||
              (scaled_small_adopt && t_lean <= scaled_small_best_row)) &&
             (pair_ok <= 0 || t_lean <= t_pair)) {
           solver->lean_choice = 1;
         } else if (pair_ok > 0 && t_pair > 0.0 && t_inc > 0.0 &&
                    ((ordinary_lean_adopt &&
-                     t_pair < initial_row_margin * t_inc) ||
+                     (t_pair < initial_row_margin * t_inc ||
+                      (warm_row_confirmed && best_row_arm == 2))) ||
                     (scaled_small_adopt &&
                      t_pair <= scaled_small_best_row))) {
           solver->lean_choice = 2;
         }
         if (solver->lean_choice > 0 && exact_row_reaudit_skip &&
             t_lean > 0.0 && t_inc > 0.0 &&
-            t_lean < 0.80 * t_inc) {
+            best_row_seconds < 0.80 * t_inc) {
           /* A large measured separation on one exact immutable executor does
              not need the later four-row/four-column lifecycle audit.  Close
              outcomes retain that audit unchanged. */
           solver->lean_reaudit_state = 5;
         }
         if (solver->lean_choice < 0 &&
-            (lean_ok <= 0 || pair_ok <= 0)) {
+            (lean_ok <= 0 || pair_ok <= 0 || warm_row_failed)) {
           /* a failed arm may have left partial values: restore the
              factor with one incumbent pass */
+          solver->common.status = TRILINOS_KLU_OK;
+          solver->common.numerical_rank = KLS_KLU_EMPTY;
+          solver->common.singular_col = KLS_KLU_EMPTY;
           (void)kls_parallel_refactor(solver, numeric_values, 0);
         }
         if (generic_declined_lean_reaudit && solver->lean_choice < 0 &&
