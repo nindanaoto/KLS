@@ -312,6 +312,15 @@ if(KLS_ENABLE_SPRAL_SCALING)
     target_compile_definitions(kls_spral_scaling
       INTERFACE
         KLS_HAVE_SPRAL_SCALING=1)
+    # GCC 15's loop vectorizer changes the resolution of exactly tied
+    # Hungarian/auction updates in the bundled SPRAL matcher.  The resulting
+    # assignment is valid, but its downstream sparse ordering can retain
+    # materially different fill from the same input on different compiler
+    # generations.  Keep the rest of SPRAL optimized while preserving the
+    # scalar update order used by GCC 13 and earlier.  This is target-local;
+    # system SPRAL libraries and every KLS numeric kernel are unaffected.
+    target_compile_options(kls_spral_scaling PRIVATE
+      $<$<COMPILE_LANG_AND_ID:Fortran,GNU>:-fno-tree-loop-vectorize>)
   endif()
 endif()
 
