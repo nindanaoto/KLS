@@ -164064,6 +164064,94 @@ static UF_long kls_compact_amf_two_block_prepared_solve(kls_solver *solver,
   return 1;
 }
 
+/* A settled plain single-block lean refactor has already published dense
+   row-ordered L/U values and compact indices.  Solve that exact
+   representation directly instead of routing through the generic i32
+   column dispatcher (which re-enters block, representation, and sparse
+   scatter branches for every row).  This is the one-block specialization of
+   the verified two-block row solve above; Pnum and Q retain KLU's public
+   solve contract. */
+static int kls_lean_single_block_prepared_solve_ready(
+  const kls_solver *solver) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric != NULL && solver->symbolic->nblocks == 1u &&
+    solver->lean_choice > 0 &&
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW &&
+    solver->common.scale == -1 && solver->numeric->Rs == NULL &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    !solver->diagonal_equiv_active &&
+    solver->numeric->Xwork != NULL &&
+    solver->i32solve_udiag_recip != NULL &&
+    solver->i32solve_udiag_recip_fresh &&
+    solver->i16solve_pnum != NULL && solver->i16solve_q != NULL &&
+    solver->row_refactor_l_ptr16 != NULL &&
+    solver->row_refactor_l_cols16 != NULL &&
+    solver->row_refactor_l_row_values != NULL &&
+    solver->row_refactor_u_ptr16 != NULL &&
+    solver->row_refactor_u_cols16 != NULL &&
+    solver->row_refactor_u_row_values != NULL;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot, aligned(64)))
+#endif
+static UF_long kls_lean_single_block_prepared_solve(
+  kls_solver *solver,
+  const double *restrict rhs,
+  double *restrict out) {
+  const UF_long n = solver->n;
+  double *restrict work = (double *)solver->numeric->Xwork;
+  const uint16_t *restrict pnum = solver->i16solve_pnum;
+  const uint16_t *restrict qperm = solver->i16solve_q;
+  const uint16_t *restrict lptr = solver->row_refactor_l_ptr16;
+  const uint16_t *restrict lcols = solver->row_refactor_l_cols16;
+  const double *restrict lvals = solver->row_refactor_l_row_values;
+  const uint16_t *restrict uptr = solver->row_refactor_u_ptr16;
+  const uint16_t *restrict ucols = solver->row_refactor_u_cols16;
+  const double *restrict uvals = solver->row_refactor_u_row_values;
+  const double *restrict udiag_recip = solver->i32solve_udiag_recip;
+
+  UF_long row = solver->i16solve_p_identity_prefix;
+  if (row > 0u) {
+    memcpy(work, rhs, (size_t)row * sizeof(*work));
+  }
+  for (; row + 3u < n; row += 4u) {
+    work[row] = rhs[(UF_long)pnum[row]];
+    work[row + 1u] = rhs[(UF_long)pnum[row + 1u]];
+    work[row + 2u] = rhs[(UF_long)pnum[row + 2u]];
+    work[row + 3u] = rhs[(UF_long)pnum[row + 3u]];
+  }
+  for (; row < n; ++row) {
+    work[row] = rhs[(UF_long)pnum[row]];
+  }
+  for (row = 0u; row < n; ++row) {
+    work[row] = kls_lean_i16_row_solve_dot(
+      lvals, lcols, work, (UF_long)lptr[row],
+      (UF_long)lptr[row + 1u], work[row]);
+  }
+  for (row = n; row-- > 0u;) {
+    const double value = kls_lean_i16_row_solve_dot(
+      uvals, ucols, work, (UF_long)uptr[row],
+      (UF_long)uptr[row + 1u], work[row]);
+    work[row] = value * udiag_recip[row];
+  }
+  row = solver->i16solve_q_identity_prefix;
+  if (row > 0u) {
+    memcpy(out, work, (size_t)row * sizeof(*out));
+  }
+  for (; row + 3u < n; row += 4u) {
+    out[(UF_long)qperm[row]] = work[row];
+    out[(UF_long)qperm[row + 1u]] = work[row + 1u];
+    out[(UF_long)qperm[row + 2u]] = work[row + 2u];
+    out[(UF_long)qperm[row + 3u]] = work[row + 3u];
+  }
+  for (; row < n; ++row) {
+    out[(UF_long)qperm[row]] = work[row];
+  }
+  return 1u;
+}
+
 /* One-rhs solve with klu_l_solve semantics over the i32 streams. */
 static UF_long kls_i32_solve(kls_solver *solver,
                              const double *rhs,
@@ -168675,6 +168763,20 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   const int direct_low_work_btf_map32 =
     kls_low_work_btf_map32_policy_enabled(solver);
+  if (solver->lean_choice == 0 && getenv("KLS_LEAN_CHOICE") == NULL &&
+      kls_moderate_work_single_block_lean_policy_enabled(solver)) {
+    /* This retained-factor certificate already excludes transformed,
+       scaled, pivot-repaired, high-fill, and one-shot numerics.  It was
+       previously used to build the row representation eagerly, only for the
+       generic selector to spend several complete numerics timing a decision
+       every admitted factor made in favour of the same row worker.  Publish
+       the executor before deferred preparation so the first changed numeric
+       performs useful row work exactly once.  automatic_lean_attempt below
+       still restores the incumbent if the optional worker rejects the new
+       values. */
+    solver->lean_choice = 1;
+    solver->lean_reaudit_state = 5;
+  }
   if (getenv(
         "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR") == NULL &&
       getenv("KLS_DISABLE_SETTLED_LEAN_DIRECT_REFACTOR") == NULL &&
@@ -169283,15 +169385,16 @@ int kls_refactor(kls_solver *solver, const double *values) {
         isfinite(construction_work) && construction_work > 0.0 &&
         isfinite(projected_savings) &&
         projected_savings >= 2.0 * construction_work) {
+      solver->lean_choice = 1;
       if (scaled_small_packed_row_trial) {
-        /* For the compact scaled tier the work model is an admission gate,
-           not the final verdict.  Its complete numeric is short enough to
-           compare against the retained column worker below, so require a
-           warm realized-time and lifecycle-payback win before publishing
-           the row representation. */
-        scaled_small_packed_row_model_admitted = 1;
-      } else {
-        solver->lean_choice = 1;
+        /* The compact representation has passed the same exact dependency,
+           three-stream work, and lifecycle-payback proof used for larger
+           scaled factors.  Its old special case nevertheless ran an
+           incumbent, a preparation numeric, and a warm row numeric merely
+           because the factor was small.  Use the proven representation on
+           the first update; the common automatic-row failure recovery below
+           remains authoritative. */
+        scaled_small_packed_row_model_admitted = 0;
       }
       /* A modeled row-work win is admission evidence.  The complete
          refactor-plus-solve audit remains the generic final authority. */
@@ -169615,6 +169718,18 @@ int kls_refactor(kls_solver *solver, const double *values) {
        row portfolio below.  The latter retains mapped execution and only
        opens the row kernel's own timed, validated tournament. */
     solver->lean_choice = 0;
+  }
+  if (moderate_btf_row_preflight && solver->lean_choice == 0 &&
+      solver->moderate_btf_lean_choice > 0) {
+    /* The compact-BTF preflight has already executed and residual-checked
+       the complete row numeric.  Preserve that measured decision directly;
+       forcing construction of the optional hoisted-supernode schedule here
+       can replace its faster fragmented-row executor on factors whose broad
+       block is not supernode dominated.  Ordinary row preparation remains
+       lazy and retains its existing failure fallback. */
+    solver->lean_choice = 1;
+    solver->lean_probe_arm = 0;
+    solver->lean_reaudit_state = 5;
   }
   if (deferred_lean_value_prep && solver->values != NULL) {
     /* The lean workers completed the deferred user->internal gather before
@@ -172426,6 +172541,16 @@ static int solve_impl(kls_solver *solver,
     (!solver->row_refactor_values_dirty ||
      solver->lean_compact_match_row_factor_active) &&
     !serial_mapped_vendor_solve && kls_i32_solve_ready(solver);
+  const int prepared_single_block_row_solve =
+    !solver->in_solve_refinement &&
+    !solver->certified_unscaled_l2_contract && !kernel_transpose &&
+    solver->orientation == KLS_ORIENTATION_NORMAL && nrhs == 1 && b != x &&
+    ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
+    !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
+    solver->pivot_nudge_count == 0u &&
+    solver->common.kls_perturb_count == 0u && !solver->fp32_last_used &&
+    kls_i32_solve_ready(solver) &&
+    kls_lean_single_block_prepared_solve_ready(solver);
   const int fused_matched_i32_rhs =
     getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL &&
     !solver->diagonal_equiv_active && solver->row_perm != NULL &&
@@ -172499,6 +172624,7 @@ static int solve_impl(kls_solver *solver,
       }
     }
   } else if (!fused_compact_match_rhs && !fused_general_i32_rhs &&
+             !prepared_single_block_row_solve &&
              !fused_matched_i32_rhs32 &&
              (b != x || ldb != ldx)) {
     for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
@@ -172609,6 +172735,15 @@ static int solve_impl(kls_solver *solver,
     ok = 1;
     if (trace_solve_path) {
       fprintf(stderr, "KLS solve path: fused refactor forward + upper\n");
+    }
+  } else if (prepared_single_block_row_solve) {
+    solver->common.status = TRILINOS_KLU_OK;
+    ok = kls_lean_single_block_prepared_solve(solver, b, x);
+    solver->row_refactor_last_row_solve = ok ? 1 : 0;
+    solver->stats.row_refactor_last_row_solve =
+      solver->row_refactor_last_row_solve;
+    if (trace_solve_path) {
+      fprintf(stderr, "KLS solve path: prepared single-block row\n");
     }
   } else if (kernel_transpose && nrhs == 1 &&
              kls_try_dirty_row_transpose_plan_solve_one_rhs(solver, x)) {
