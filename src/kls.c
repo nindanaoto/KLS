@@ -68368,6 +68368,120 @@ static int kls_generic_hoisted_snode_worker_capable(
     solver->lean_snode_worker_eligible > 0;
 }
 
+/* Decide from the retained row executor rather than from an input family.
+   This model is intentionally conservative: it admits only an unscaled
+   mapped/KLU incumbent whose row DAG has a broad frontier, then charges the
+   exact input/L/U streams along both the dependency critical path and the
+   ideal thread-balanced path.  Three modeled row-work units must fit inside
+   the realized column-factor work, matching the existing generic row-model
+   safety factor, and the remaining lifecycle must repay construction twice.
+   The broad-frontier certificate excludes narrow dependency chains where
+   launch and scoreboard latency dominate even when the arithmetic bound is
+   optimistic. */
+static int kls_generic_unscaled_broad_row_model_preselects(
+  const kls_solver *solver) {
+  if (solver == NULL || solver->numeric == NULL || solver->n == 0u ||
+      solver->options.threads < 2 || solver->common.scale != -1 ||
+      solver->numeric->Rs != NULL ||
+      !kls_repeated_update_workload(&solver->options) ||
+      solver->row_refactor_level_rows == NULL ||
+      solver->row_refactor_l_ptr == NULL ||
+      solver->row_refactor_l_cols == NULL ||
+      solver->row_refactor_u_ptr == NULL ||
+      solver->row_refactor_input_ptr == NULL ||
+      solver->row_refactor_level_max_width < (solver->n + 2u) / 3u ||
+      solver->common.flops <= 0.0) {
+    return 0;
+  }
+
+  const UF_long n = solver->n;
+  double *finish = (double *)calloc((size_t)n, sizeof(*finish));
+  if (finish == NULL) {
+    return 0;
+  }
+  double total_work = 0.0;
+  double critical_work = 0.0;
+  int valid = 1;
+  for (UF_long pos = 0u; pos < n; ++pos) {
+    const UF_long row = solver->row_refactor_level_rows[pos];
+    if (row >= n ||
+        solver->row_refactor_l_ptr[row] >
+          solver->row_refactor_l_ptr[row + 1u] ||
+        solver->row_refactor_u_ptr[row] >
+          solver->row_refactor_u_ptr[row + 1u] ||
+        solver->row_refactor_input_ptr[row] >
+          solver->row_refactor_input_ptr[row + 1u]) {
+      valid = 0;
+      break;
+    }
+    double row_work = 1.0 +
+      (double)(solver->row_refactor_input_ptr[row + 1u] -
+               solver->row_refactor_input_ptr[row]) +
+      (double)(solver->row_refactor_u_ptr[row + 1u] -
+               solver->row_refactor_u_ptr[row]);
+    double dependency_ready = 0.0;
+    for (UF_long p = solver->row_refactor_l_ptr[row];
+         p < solver->row_refactor_l_ptr[row + 1u]; ++p) {
+      const UF_long dep = solver->row_refactor_l_cols[p];
+      if (dep >= row) {
+        valid = 0;
+        break;
+      }
+      row_work += 1.0 +
+        (double)(solver->row_refactor_u_ptr[dep + 1u] -
+                 solver->row_refactor_u_ptr[dep]);
+      if (finish[dep] > dependency_ready) {
+        dependency_ready = finish[dep];
+      }
+    }
+    if (!valid || !isfinite(row_work) || row_work <= 0.0) {
+      valid = 0;
+      break;
+    }
+    finish[row] = dependency_ready + row_work;
+    total_work += row_work;
+    if (finish[row] > critical_work) {
+      critical_work = finish[row];
+    }
+  }
+  free(finish);
+  if (!valid || !isfinite(total_work) || !isfinite(critical_work) ||
+      total_work <= 0.0 || critical_work <= 0.0) {
+    return 0;
+  }
+
+  const double balanced_work =
+    total_work / (double)solver->options.threads;
+  const double modeled_row_work =
+    critical_work > balanced_work ? critical_work : balanced_work;
+  const double construction_work =
+    (double)n * (double)solver->options.threads +
+    (double)solver->row_refactor_l_ptr[n] +
+    (double)solver->row_refactor_u_ptr[n] +
+    (double)solver->row_refactor_input_ptr[n];
+  const double modeled_saving =
+    solver->common.flops - 3.0 * modeled_row_work;
+  const double projected_saving =
+    (double)solver->options.expected_refactorizations * modeled_saving;
+  if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
+    fprintf(stderr,
+            "KLS unscaled broad row model: width=%lu/%lu "
+            "total=%.0f critical=%.0f modeled=%.0f column=%.0f "
+            "construction=%.0f projected=%.0f -> %s\n",
+            (unsigned long)solver->row_refactor_level_max_width,
+            (unsigned long)n, total_work, critical_work, modeled_row_work,
+            solver->common.flops, construction_work, projected_saving,
+            isfinite(projected_saving) && construction_work > 0.0 &&
+                modeled_saving > 0.0 &&
+                projected_saving >= 2.0 * construction_work
+              ? "ROW" : "measure");
+  }
+  return isfinite(modeled_row_work) && isfinite(construction_work) &&
+    isfinite(projected_saving) && construction_work > 0.0 &&
+    modeled_saving > 0.0 &&
+    projected_saving >= 2.0 * construction_work;
+}
+
 static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
   if (solver == NULL || solver->lean_snode_run != NULL ||
       solver->lean_snode_worker_eligible != 0 ||
@@ -169659,12 +169773,29 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
       solver->n >= 512u && solver->n <= 131072u &&
-      kls_generic_hoisted_snode_worker_candidate(solver) &&
+      (kls_generic_hoisted_snode_worker_candidate(solver) ||
+       (solver->common.scale == -1 && solver->numeric->Rs == NULL &&
+        solver->pivot_nudge_count == 0u &&
+        solver->common.kls_perturb_count == 0u &&
+        kls_repeated_update_workload(&solver->options) &&
+        solver->common.flops >=
+          2.0 * (double)(solver->numeric->lnz + solver->numeric->unz))) &&
       solver->numeric->lnz + solver->numeric->unz <= 1000000u &&
       kls_build_row_refactor_pattern(solver, 1)) {
     kls_lean_row_refactor_ensure_snode_runs(solver);
     generic_hoisted_snode_lean_viable =
       kls_generic_hoisted_snode_worker_capable(solver);
+  }
+  if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
+      (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED ||
+       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU) &&
+      kls_generic_unscaled_broad_row_model_preselects(solver)) {
+    /* The incumbent has now exposed its actual engine and the retained row
+       graph has proved a broad, repayable executor.  Install that executor
+       directly instead of letting microsecond-scale wakeup noise in a
+       discarded three-arm consultation choose the representation. */
+    solver->lean_choice = 1;
+    solver->lean_reaudit_state = 0;
   }
   if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH &&
