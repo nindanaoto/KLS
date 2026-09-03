@@ -1,0 +1,38 @@
+# One-use KLS external validation manifest. Do not tune after reveal.
+# Protocol: kls-external-validation-v2
+# Seed: kls-external-validation-2026-09-v2
+# SuiteSparse index timestamp: 31-Oct-2023 18:12:37
+# SuiteSparse index SHA256: 9bc797ab989331afbc9e0e51236d9145c2ac7f76c0913e9677ae07c4913a2aad
+# Exclusion-set SHA256: a93f8eb068a747b5cac2c1deabbfe844046c4f36a48fae45ce7e9c6516b1c830
+# Excluded manifest entries: 23218
+# Referenced SuiteSparse groups: 134
+# Frozen KLS commit: b322608dc5413f5de4710eb86880728a94be9198
+# Frozen solver-tree SHA256: f8ab088239fa219fa9cb038b2d505c5c3fe0cfa07a1d38eef77f410d68a5ed9c
+# Filters: real square, unique basename, one matrix per unused group; rows=10000..1000000; nnz=30000..12000000.
+# Selection: one previously unseen matrix per group, circuit-like first, then balanced metadata strata.
+# Strata: large/dense/symmetric=4, large/dense/unsymmetric=1, large/moderate/symmetric=4, large/moderate/unsymmetric=1, large/sparse/symmetric=1, large/sparse/unsymmetric=1, medium/dense/symmetric=3, medium/dense/unsymmetric=2, medium/moderate/symmetric=3, medium/moderate/unsymmetric=1, medium/sparse/symmetric=2, medium/sparse/unsymmetric=1
+
+epb2  # group=Averous rows=25228 nnz=175027 stratum=medium/moderate/unsymmetric circuit_like=0 kind=thermal problem
+af23560  # group=Bai rows=23560 nnz=460598 stratum=medium/moderate/symmetric circuit_like=0 kind=computational fluid dynamics problem
+pkustk08  # group=Chen rows=22209 nnz=3226671 stratum=medium/dense/symmetric circuit_like=0 kind=structural problem
+kron_g500-logn17  # group=DIMACS10 rows=131072 nnz=10228360 stratum=large/dense/symmetric circuit_like=0 kind=undirected multigraph
+uni_chimera_i1  # group=FlowIPM22 rows=100000 nnz=1100592 stratum=large/moderate/symmetric circuit_like=0 kind=undirected weighted graph
+usroads  # group=Gleich rows=129164 nnz=330870 stratum=large/sparse/symmetric circuit_like=0 kind=undirected graph
+bayer04  # group=Grund rows=20545 nnz=85537 stratum=medium/sparse/unsymmetric circuit_like=0 kind=chemical process simulation problem
+TEM152078  # group=Guettel rows=152078 nnz=6459326 stratum=large/dense/symmetric circuit_like=1 kind=electromagnetics problem
+OPF_6000  # group=IPSO rows=29902 nnz=274697 stratum=medium/moderate/symmetric circuit_like=1 kind=power network problem
+Stanford_Berkeley  # group=Kamvar rows=683446 nnz=7583376 stratum=large/moderate/unsymmetric circuit_like=0 kind=directed graph
+li  # group=Li rows=22695 nnz=1215181 stratum=medium/dense/symmetric circuit_like=1 kind=electromagnetics problem
+lhr34  # group=Mallya rows=35152 nnz=746972 stratum=medium/dense/unsymmetric circuit_like=0 kind=chemical process simulation problem
+torso1  # group=Norris rows=116158 nnz=8516500 stratum=large/dense/unsymmetric circuit_like=0 kind=2D/3D problem
+Ga10As10H30  # group=PARSEC rows=113081 nnz=6115633 stratum=large/dense/symmetric circuit_like=0 kind=theoretical/quantum chemistry problem
+case39  # group=QY rows=40216 nnz=1042160 stratum=medium/dense/symmetric circuit_like=1 kind=power network problem sequence
+rajat08  # group=Rajat rows=19362 nnz=83443 stratum=medium/sparse/symmetric circuit_like=1 kind=circuit simulation problem
+matrix_9  # group=Schenk_IBMSDS rows=103430 nnz=1205518 stratum=large/moderate/symmetric circuit_like=1 kind=semiconductor device problem
+para-5  # group=Schenk_ISEI rows=155924 nnz=2094873 stratum=large/moderate/symmetric circuit_like=1 kind=semiconductor device problem sequence
+email-EuAll  # group=SNAP rows=265214 nnz=420045 stratum=large/sparse/unsymmetric circuit_like=0 kind=directed graph
+TSOPF_RS_b300_c1  # group=TSOPF rows=14538 nnz=1474325 stratum=medium/dense/unsymmetric circuit_like=1 kind=power network problem
+2cubes_sphere  # group=Um rows=101492 nnz=1647264 stratum=large/moderate/symmetric circuit_like=1 kind=electromagnetics problem
+test1  # group=VLSI rows=392908 nnz=9447535 stratum=large/dense/symmetric circuit_like=1 kind=semiconductor device problem
+wang4  # group=Wang rows=26068 nnz=177196 stratum=medium/moderate/symmetric circuit_like=1 kind=semiconductor device problem
+Zhao2  # group=Zhao rows=33861 nnz=166453 stratum=medium/sparse/symmetric circuit_like=1 kind=electromagnetics problem
