@@ -857,6 +857,9 @@ struct kls_solver {
   double compact_map32_trial_samples[2][3];
   double compact_map32_trial_overhead;
   int moderate_btf_lean_choice; /* 0 untried, 1 lean, 2 row trial, -1 mapped */
+  double moderate_btf_mapped_seconds;
+  double moderate_btf_compact_seconds;
+  double moderate_btf_trial_seconds;
   int lean_choice;     /* lean-row-walk trial (low-flop cohort):
                           0 undecided, 1 lean, 2 lean-pair, -1 incumbent */
   int lean_pending;    /* alternating three-arm probe refactors left */
@@ -28745,6 +28748,9 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
          sizeof(solver->compact_map32_trial_samples));
   solver->compact_map32_trial_overhead = 0.0;
   solver->moderate_btf_lean_choice = 0;
+  solver->moderate_btf_mapped_seconds = 0.0;
+  solver->moderate_btf_compact_seconds = 0.0;
+  solver->moderate_btf_trial_seconds = 0.0;
   solver->lean_choice = 0;
   solver->lean_pending = 0;
   solver->lean_wait = 0;
@@ -125267,6 +125273,9 @@ static int kls_mapped_refactor(kls_solver *solver,
           ? kls_lean_btf_map32_refactor(solver, numeric_values) : mapped;
         const double lean_seconds = kls_now_seconds() - lean_start;
         const double trial_seconds = kls_now_seconds() - trial_start;
+        solver->moderate_btf_mapped_seconds = mapped_seconds;
+        solver->moderate_btf_compact_seconds = lean_seconds;
+        solver->moderate_btf_trial_seconds = trial_seconds;
         if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
           fprintf(stderr,
                   "KLS moderate BTF block preflight: mapped %.3f ms"
@@ -169721,15 +169730,117 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if (moderate_btf_row_preflight && solver->lean_choice == 0 &&
       solver->moderate_btf_lean_choice > 0) {
-    /* The compact-BTF preflight has already executed and residual-checked
-       the complete row numeric.  Preserve that measured decision directly;
-       forcing construction of the optional hoisted-supernode schedule here
-       can replace its faster fragmented-row executor on factors whose broad
-       block is not supernode dominated.  Ordinary row preparation remains
-       lazy and retains its existing failure fallback. */
-    solver->lean_choice = 1;
-    solver->lean_probe_arm = 0;
-    solver->lean_reaudit_state = 5;
+    /* A close compact-BTF result admits the broader row representation, but
+       its first few pool generations also warm the retained row streams.
+       Leaving that ramp in later public calls makes a genuinely faster
+       steady worker look slow to short recurring workloads.  Execute the
+       complete candidate here, and publish it only when two warm samples
+       conservatively repay every extra numeric over the declared lifecycle.
+       The verdict depends solely on realized engines and retains a valid
+       mapped/compact restoration on every decline. */
+    const double incumbent_seconds =
+      solver->moderate_btf_mapped_seconds > 0.0 &&
+      solver->moderate_btf_compact_seconds > 0.0
+        ? (solver->moderate_btf_mapped_seconds <
+             solver->moderate_btf_compact_seconds
+             ? solver->moderate_btf_mapped_seconds
+             : solver->moderate_btf_compact_seconds)
+        : 0.0;
+    const double remaining =
+      solver->options.expected_refactorizations > 1
+        ? (double)(solver->options.expected_refactorizations - 1) : 0.0;
+    double row_samples[3] = {0.0, 0.0, 0.0};
+    double row_trial_seconds = 0.0;
+    int row_ok = 1;
+    int row_sample_count = 0;
+    for (int sample = 0; sample < 2; ++sample) {
+      solver->common.status = TRILINOS_KLU_OK;
+      solver->common.numerical_rank = KLS_KLU_EMPTY;
+      solver->common.singular_col = KLS_KLU_EMPTY;
+      const double row_start = kls_now_seconds();
+      row_ok = kls_lean_row_refactor_numeric(solver, numeric_values);
+      row_samples[sample] = kls_now_seconds() - row_start;
+      row_trial_seconds += row_samples[sample];
+      row_sample_count++;
+      if (row_ok <= 0 || solver->common.status < 0) {
+        break;
+      }
+    }
+    const double preliminary_saving =
+      row_ok > 0 && row_sample_count == 2 && incumbent_seconds > 0.0 &&
+      row_samples[1] < incumbent_seconds
+        ? remaining * (incumbent_seconds - row_samples[1]) : 0.0;
+    const double preliminary_handoff_cost =
+      solver->moderate_btf_trial_seconds + row_trial_seconds;
+    if (row_ok > 0 && row_sample_count == 2 &&
+        row_samples[1] < 0.90 * incumbent_seconds &&
+        preliminary_saving > 2.0 * preliminary_handoff_cost) {
+      solver->common.status = TRILINOS_KLU_OK;
+      solver->common.numerical_rank = KLS_KLU_EMPTY;
+      solver->common.singular_col = KLS_KLU_EMPTY;
+      const double row_start = kls_now_seconds();
+      row_ok = kls_lean_row_refactor_numeric(solver, numeric_values);
+      row_samples[2] = kls_now_seconds() - row_start;
+      row_trial_seconds += row_samples[2];
+      row_sample_count++;
+    }
+    const double conservative_row_seconds =
+      row_sample_count == 3
+        ? (row_samples[1] > row_samples[2]
+             ? row_samples[1] : row_samples[2])
+        : 0.0;
+    const double projected_saving =
+      conservative_row_seconds > 0.0 && incumbent_seconds >
+        conservative_row_seconds
+        ? remaining * (incumbent_seconds - conservative_row_seconds) : 0.0;
+    const double handoff_cost =
+      solver->moderate_btf_trial_seconds + row_trial_seconds;
+    const int adopt_row =
+      row_ok > 0 && solver->common.status >= 0 && row_sample_count == 3 &&
+      conservative_row_seconds < 0.90 * incumbent_seconds &&
+      projected_saving > 2.0 * handoff_cost;
+    if (adopt_row) {
+      solver->lean_choice = 1;
+      solver->lean_probe_arm = 0;
+      solver->lean_reaudit_state = 5;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
+      ok = 1u;
+    } else {
+      solver->lean_choice = -1;
+      solver->lean_probe_arm = 0;
+      solver->lean_pair_active = 0;
+      solver->lean_reaudit_state = 5;
+      solver->common.status = TRILINOS_KLU_OK;
+      solver->common.numerical_rank = KLS_KLU_EMPTY;
+      solver->common.singular_col = KLS_KLU_EMPTY;
+      int restore_ok = 0;
+      if (solver->moderate_btf_compact_seconds > 0.0 &&
+          (solver->moderate_btf_mapped_seconds <= 0.0 ||
+           solver->moderate_btf_compact_seconds <=
+             solver->moderate_btf_mapped_seconds)) {
+        solver->moderate_btf_lean_choice = 1;
+        restore_ok = kls_lean_btf_map32_refactor(solver, numeric_values);
+      } else {
+        solver->moderate_btf_lean_choice = -1;
+        restore_ok = kls_serial_refactor_tail_from_block(
+          solver, numeric_values, 0u, 0);
+      }
+      ok = restore_ok > 0 ? 1u : 0u;
+      if (ok && solver->common.status >= 0) {
+        kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_MAPPED);
+      }
+    }
+    elapsed = kls_now_seconds() - start;
+    if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
+      fprintf(stderr,
+              "KLS moderate BTF warm row handoff: incumbent %.3f ms "
+              "row %.3f/%.3f/%.3f ms cost %.3f ms projected %.3f ms "
+              "-> %s\n",
+              1e3 * incumbent_seconds, 1e3 * row_samples[0],
+              1e3 * row_samples[1], 1e3 * row_samples[2],
+              1e3 * handoff_cost, 1e3 * projected_saving,
+              adopt_row ? "ROW" : "INCUMBENT");
+    }
   }
   if (deferred_lean_value_prep && solver->values != NULL) {
     /* The lean workers completed the deferred user->internal gather before
