@@ -28,6 +28,10 @@ This repository currently contains the first working KLS implementation:
 - A small correctness smoke test
 - A SuiteSparse Matrix Collection downloader script for public benchmark cases
 
+The end-to-end paper reproduction protocol, including direct H100 timing,
+counterbalanced passes, strict reduction, ablations, scaling, and one-use
+external validation, is documented in `docs/paper_artifact.md`.
+
 ## AUTO policy
 
 The production `AUTO` path is matrix-family agnostic. It compares affordable

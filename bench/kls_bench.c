@@ -742,7 +742,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only|--structure-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only|--structure-only] [--json]\n",
           argv0);
 }
 
@@ -773,6 +773,9 @@ int main(int argc, char **argv) {
   int json = 0;
   int analyze_only = 0;
   int structure_only = 0;
+  int lifecycle_systems = 0;
+  int expected_refactors_explicit = 0;
+  int expected_solves_explicit = 0;
   bench_refactor_value_mode refactor_value_mode =
     BENCH_REFACTOR_VALUES_UNCHANGED;
   double refactor_value_amplitude = 1.0e-3;
@@ -796,6 +799,9 @@ int main(int argc, char **argv) {
       analyze_only = 1;
     } else if (strcmp(argv[i], "--structure-only") == 0) {
       structure_only = 1;
+    } else if (strcmp(argv[i], "--lifecycle-systems") == 0 &&
+               i + 1 < argc) {
+      lifecycle_systems = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
       repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--factor-repeat") == 0 && i + 1 < argc) {
@@ -805,9 +811,11 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--expected-refactors") == 0 &&
                i + 1 < argc) {
       options.expected_refactorizations = atoll(argv[++i]);
+      expected_refactors_explicit = 1;
     } else if (strcmp(argv[i], "--expected-solves") == 0 &&
                i + 1 < argc) {
       options.expected_solves = atoll(argv[++i]);
+      expected_solves_explicit = 1;
     } else if (strcmp(argv[i], "--refactor-values") == 0 &&
                i + 1 < argc) {
       if (!bench_parse_refactor_value_mode(argv[++i], &refactor_value_mode)) {
@@ -891,8 +899,21 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
   }
+  if (lifecycle_systems > 0) {
+    repeat = 1;
+    factor_repeat = 0;
+    refactor_repeat = lifecycle_systems - 1;
+    transpose_solve = 0;
+    if (!expected_refactors_explicit) {
+      options.expected_refactorizations = lifecycle_systems - 1;
+    }
+    if (!expected_solves_explicit) {
+      options.expected_solves = lifecycle_systems;
+    }
+  }
   if (factor_repeat < 0) factor_repeat = repeat;
   if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
+      lifecycle_systems < 0 ||
       options.threads <= 0 || refactor_value_amplitude >= 1.0 ||
       (analyze_only && structure_only) ||
       (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED &&
@@ -1339,6 +1360,22 @@ int main(int argc, char **argv) {
   const int callgrind_refactor =
       bench_env_enabled("KLS_BENCH_CALLGRIND_REFACTOR");
 
+  /* Direct lifecycle mode measures the initial system in its actual place:
+     analyze + factor + solve, followed by changed-value refactor/solve pairs.
+     It does not substitute a final-state solve or project sampled averages. */
+  if (lifecycle_systems > 0) {
+    status = kls_solve(solver, 1, b, 0, x, 0);
+    if (status == KLS_OK) {
+      kls_get_stats(solver, &stats);
+      solve_total = stats.solve_seconds;
+      if (verify_each_refactor) {
+        double relative = 0.0;
+        (void)residual_norm_values(&a, current_values, x, b, &relative);
+        refactor_max_relative_residual = isfinite(relative) ? relative : INFINITY;
+      }
+    }
+  }
+
   {
     const char *prof_env = getenv("KLS_BENCH_PROF");
     if (prof_env != NULL && prof_env[0] == '2') {
@@ -1404,7 +1441,9 @@ int main(int argc, char **argv) {
                 "KLS refactor generation %d relative residual: %.17g\n",
                 i + 1, relative);
       }
-      if (relative > refactor_max_relative_residual) {
+      if (!isfinite(relative)) {
+        refactor_max_relative_residual = INFINITY;
+      } else if (relative > refactor_max_relative_residual) {
         refactor_max_relative_residual = relative;
       }
     }
@@ -1429,7 +1468,8 @@ int main(int argc, char **argv) {
     CALLGRIND_DUMP_STATS;
     CALLGRIND_STOP_INSTRUMENTATION;
   }
-  for (int i = 0; i < repeat && status == KLS_OK; ++i) {
+  const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
+  for (int i = 0; i < standalone_solve_repeats && status == KLS_OK; ++i) {
     status = kls_solve(solver, 1, b, 0, x, 0);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
@@ -1519,12 +1559,18 @@ int main(int argc, char **argv) {
     stats.analysis_seconds + initial_factor_seconds + solve_avg +
     refactor_first + refactor_solve_first_effective +
     98.0 * (refactor_steady_avg + refactor_solve_steady_avg);
+  const double measured_lifecycle_seconds = lifecycle_systems > 0
+    ? stats.analysis_seconds + initial_factor_seconds + solve_total +
+        refactor_total + refactor_solve_total
+    : -1.0;
   const double tsolve_avg = tsolve_total / (double)repeat;
 
   if (json) {
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d"
            ",\"refactor_repeat\":%d"
+           ",\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d"
+           ",\"measured_lifecycle_seconds\":%.9g"
            ",\"refactor_value_mode\":\"%s\""
            ",\"refactor_value_amplitude\":%.9g"
            ",\"backend\":\"%s\""
@@ -1590,7 +1636,8 @@ int main(int argc, char **argv) {
            ",\"kls_first_separator_queue_partitioned_count\":%" PRId64
            ",\"kls_first_last_separator_queue_split_components\":%" PRId64,
            path, a.n, a.nnz, options.threads, repeat, factor_repeat,
-           refactor_repeat,
+           refactor_repeat, lifecycle_systems > 0 ? "direct" : "projected",
+           lifecycle_systems, measured_lifecycle_seconds,
            bench_refactor_value_mode_name(refactor_value_mode),
            refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,

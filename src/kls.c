@@ -120215,6 +120215,7 @@ static int kls_egraph_pipeline_fusion_trial_worthwhile(
 
 static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      getenv("KLS_DISABLE_EGRAPH_REFACTOR") != NULL ||
       solver->options.threads <= 1 ||
       solver->refactor_level_ptr == NULL ||
       solver->refactor_level_count == 0u ||
@@ -171990,13 +171991,19 @@ static void kls_remember_verified_rhs(kls_solver *solver,
    Keep these cold policy accessors out of line and beside solve_impl so they
    cannot perturb the established factor/refactor kernel layout. */
 __attribute__((noinline))
-static int kls_promoted_tolerance_plain_factor(
+static int kls_promoted_tolerance_factor(
   const kls_solver *solver) {
   return solver != NULL && solver->numeric != NULL &&
     solver->stats.selected_pivot_tolerance > 0.0 &&
     solver->stats.selected_pivot_tolerance <
       solver->options.pivot_tolerance &&
-    (!kls_uses_structural_initial_pivot_tolerance(solver)) &&
+    (!kls_uses_structural_initial_pivot_tolerance(solver));
+}
+
+__attribute__((noinline))
+static int kls_promoted_tolerance_plain_factor(
+  const kls_solver *solver) {
+  return kls_promoted_tolerance_factor(solver) &&
     solver->row_perm == NULL && solver->row_scale == NULL &&
     solver->col_scale == NULL;
 }
@@ -173126,11 +173133,12 @@ static int solve_impl(kls_solver *solver,
             solver->values != NULL, b == x,
             solver->solve_contract_probe, contract_probe_wanted);
   }
-  /* Plain frames only, mirroring the per-refactor value capture:
-     matched/scaled classes have no capture here, so admitting them would
-     refine against stale analyze-time values. */
+  /* A selected pivot tolerance below the caller's request is an accuracy
+     risk in every numeric frame.  Transformed frames keep their current
+     prepared values in solver->values, while plain pass-through frames use
+     the per-refactor snapshot maintained by the update path. */
   const int tight_tol_selected =
-    kls_promoted_tolerance_plain_factor(solver);
+    kls_promoted_tolerance_factor(solver);
   const int generic_packed_row_raw_l2_contract =
     kls_repeated_update_workload(&solver->options) &&
     (solver->certified_unscaled_l2_contract ||
@@ -173203,9 +173211,15 @@ static int solve_impl(kls_solver *solver,
          : (!kernel_transpose && b != x)) &&
       (solver->solve_refine_values != NULL || solver->values != NULL) &&
       solver->col_ptr != NULL && solver->row_idx != NULL) {
-    const double *refine_a = solver->solve_refine_values != NULL
-      ? solver->solve_refine_values
-      : solver->values;
+    const int transformed_refine_frame =
+      solver->input_to_csc != NULL || solver->row_perm != NULL ||
+      solver->user_col_perm != NULL || solver->row_scale != NULL ||
+      solver->col_scale != NULL;
+    const double *refine_a =
+      transformed_refine_frame && solver->values != NULL
+        ? solver->values
+        : (solver->solve_refine_values != NULL
+             ? solver->solve_refine_values : solver->values);
     const int compact_amf_two_block_parallel_residual_ready =
       compact_amf_two_block_raw_l2_contract &&
       kls_compact_amf_two_block_parallel_residual_ready(solver);
@@ -173280,8 +173294,7 @@ static int solve_impl(kls_solver *solver,
         (tight_tol_selected || solver->solve_recovery_active ||
          solver->promoted_tolerance_l2_recovery_required) &&
         getenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") == NULL &&
-        solver->row_perm == NULL && solver->row_scale == NULL &&
-        solver->col_scale == NULL && solver->symbolic != NULL;
+        solver->symbolic != NULL;
       /* A row-published numeric or armed solve probe already pays for an
          honest user-frame residual.  Make that existing check match the
          public relative-L2 validity contract too: a max-norm pass alone can
@@ -173437,6 +173450,8 @@ static int solve_impl(kls_solver *solver,
         const int generic_parallel_residual =
           !kernel_transpose && nrhs == 1 &&
           b != x && kls_repeated_update_workload(&solver->options) &&
+          solver->row_perm == NULL && solver->user_col_perm == NULL &&
+          solver->row_scale == NULL && solver->col_scale == NULL &&
           ((!ordinary_self_check_l2_contract &&
             !retained_preconditioner_contract) ||
            generic_parallel_contract_residual) &&
@@ -173963,7 +173978,9 @@ static int solve_impl(kls_solver *solver,
            current numeric through increasingly conservative pivot lines
            until its solve verifies the strict recovery margin.  The first
            successful robust factor remains installed for later solves. */
-        if (!solver->solve_recovery_active && solver->nnz > 0u &&
+        if (!solver->solve_recovery_active &&
+            kls_promoted_tolerance_plain_factor(solver) &&
+            solver->nnz > 0u &&
             solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double))) {
           double *recovery_values = (double *)malloc(
             (size_t)solver->nnz * sizeof(*recovery_values));

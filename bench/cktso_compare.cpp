@@ -178,13 +178,27 @@ static double residual(const Matrix &a,
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat] [unchanged|rank-preserving|entrywise|localized-entrywise] [amplitude]\n", argv[0]);
+    std::fprintf(stderr, "Usage: %s <matrix.mtx> [threads] [repeat] [refactor-repeat] [factor-repeat] [unchanged|rank-preserving|entrywise|localized-entrywise] [amplitude] [--lifecycle-systems N]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const int threads = argc > 2 ? std::atoi(argv[2]) : 16;
-  const int repeat = argc > 3 ? std::atoi(argv[3]) : 5;
-  const int refactor_repeat = argc > 4 ? std::atoi(argv[4]) : repeat;
-  const int factor_repeat = argc > 5 ? std::atoi(argv[5]) : repeat;
+  int repeat = argc > 3 ? std::atoi(argv[3]) : 5;
+  int refactor_repeat = argc > 4 ? std::atoi(argv[4]) : repeat;
+  int factor_repeat = argc > 5 ? std::atoi(argv[5]) : repeat;
+  int lifecycle_systems = 0;
+  for (int i = 8; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--lifecycle-systems") == 0 && i + 1 < argc) {
+      lifecycle_systems = std::atoi(argv[++i]);
+    } else {
+      std::fprintf(stderr, "unknown argument: %s\n", argv[i]);
+      return EXIT_FAILURE;
+    }
+  }
+  if (lifecycle_systems > 0) {
+    repeat = 1;
+    factor_repeat = 0;
+    refactor_repeat = lifecycle_systems - 1;
+  }
   bench_refactor_value_mode refactor_value_mode =
     BENCH_REFACTOR_VALUES_UNCHANGED;
   if (argc > 6 &&
@@ -194,6 +208,7 @@ int main(int argc, char **argv) {
   }
   const double refactor_value_amplitude = argc > 7 ? std::atof(argv[7]) : 1.0e-3;
   if (threads <= 0 || repeat <= 0 || refactor_repeat < 0 ||
+      lifecycle_systems < 0 ||
       factor_repeat < 0 || !std::isfinite(refactor_value_amplitude) ||
       refactor_value_amplitude < 0.0 || refactor_value_amplitude >= 1.0 ||
       (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED &&
@@ -265,6 +280,15 @@ int main(int argc, char **argv) {
     if (ret < 0) break;
     factor_total += oparm[1];
   }
+  if (lifecycle_systems > 0 && ret >= 0) {
+    ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
+    if (ret >= 0) {
+      solve_total = oparm[2];
+      if (verify_each_refactor) {
+        (void)residual(a, x, b, &refactor_max_relative_residual);
+      }
+    }
+  }
   for (int i = 0; i < refactor_repeat && ret >= 0; ++i) {
     if (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED) {
       make_refactor_values(a, base_values, refactor_value_mode,
@@ -296,7 +320,8 @@ int main(int argc, char **argv) {
       }
     }
   }
-  for (int i = 0; i < repeat && ret >= 0; ++i) {
+  const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
+  for (int i = 0; i < standalone_solve_repeats && ret >= 0; ++i) {
     ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
     if (ret < 0) break;
     solve_total += oparm[2];
@@ -334,12 +359,19 @@ int main(int argc, char **argv) {
               refactor_solve_first_us +
               98.0 * (refactor_steady_us_avg +
                       refactor_solve_steady_us_avg));
+  const double measured_lifecycle_seconds = lifecycle_systems > 0
+    ? 1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
+                static_cast<double>(solve_total + refactor_total +
+                                    refactor_solve_total))
+    : -1.0;
   double relative_residual = 0.0;
   const double residual_l2 = residual(a, x, b, &relative_residual);
 
   std::printf("{\"matrix\":\"%s\",\"n\":%d,\"nnz\":%d,"
               "\"threads\":%d,\"repeat\":%d,\"factor_repeat\":%d,"
               "\"refactor_repeat\":%d,"
+              "\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d,"
+              "\"measured_lifecycle_seconds\":%.9g,"
               "\"refactor_value_mode\":\"%s\","
               "\"refactor_value_amplitude\":%.9g,"
               "\"analysis_us\":%lld,\"initial_factor_us\":%lld,"
@@ -365,6 +397,8 @@ int main(int argc, char **argv) {
               "\"memory_bytes\":%lld,\"memory_peak_bytes\":%lld}\n",
               argv[1], a.n, a.col_ptr[static_cast<size_t>(a.n)], threads,
               repeat, factor_repeat, refactor_repeat,
+              lifecycle_systems > 0 ? "direct" : "projected",
+              lifecycle_systems, measured_lifecycle_seconds,
               bench_refactor_value_mode_name(refactor_value_mode),
               refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
                 ? refactor_value_amplitude : 0.0,

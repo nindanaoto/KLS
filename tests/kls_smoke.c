@@ -18004,6 +18004,7 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
   kls_solver *solver = NULL;
   kls_solver *contract_solver = NULL;
   kls_solver *contract_csr_solver = NULL;
+  kls_solver *scaled_contract_solver = NULL;
   kls_options options;
   kls_stats stats;
   int ok = 1;
@@ -18145,6 +18146,58 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
     }
   }
 
+  /* Scaling and matching change the internal numeric frame, but not the
+     public relative-L2 contract.  A promoted pivot tolerance in that frame
+     must run the same measured residual gate; factor-cycle recovery remains
+     deliberately ineligible because its input reconstruction is plain-only. */
+  options.scale = 2;
+  if (ok &&
+      (!require_ok(kls_create(&scaled_contract_solver),
+                   "create scaled promoted-tolerance L2 contract") ||
+       !require_ok(kls_analyze_csc(scaled_contract_solver, KLS_INDEX_INT32, n,
+                                   ap, ai, 0, &options),
+                   "analyze scaled promoted-tolerance L2 contract") ||
+       !require_ok(kls_factor(scaled_contract_solver, ax),
+                   "factor scaled promoted-tolerance L2 contract") ||
+       !require_ok(kls_refactor(scaled_contract_solver, changed),
+                   "refactor scaled promoted-tolerance L2 contract"))) {
+    ok = 0;
+  }
+  if (ok) {
+    memset(x, 0, (size_t)n * sizeof(*x));
+    if (!require_ok(kls_solve(scaled_contract_solver, 1, b, 0, x, 0),
+                    "solve scaled promoted-tolerance L2 contract")) {
+      ok = 0;
+    }
+  }
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok &&
+      (!require_ok(kls_get_stats(scaled_contract_solver, &stats),
+                   "stats scaled promoted-tolerance L2 contract") ||
+       !(stats.selected_pivot_tolerance > 0.0) ||
+       !(stats.selected_pivot_tolerance < options.pivot_tolerance) ||
+       stats.promoted_tolerance_l2_recovery_eligible != 0 ||
+       stats.promoted_tolerance_l2_contract_run_count < 1)) {
+    fprintf(stderr,
+            "unexpected scaled promoted-tolerance L2 contract:"
+            " scale=%d tol=%.17g eligible=%d runs=%" PRId64 "\n",
+            stats.selected_scale, stats.selected_pivot_tolerance,
+            stats.promoted_tolerance_l2_recovery_eligible,
+            stats.promoted_tolerance_l2_contract_run_count);
+    ok = 0;
+  }
+  for (int32_t row = 0; ok && row < n; ++row) {
+    if (!close_enough(x[row], expected[row])) {
+      fprintf(stderr,
+              "scaled promoted-tolerance solve mismatch at %d: %.17g"
+              " vs %.17g\n",
+              row, x[row], expected[row]);
+      ok = 0;
+    }
+  }
+  options.scale = KLS_SCALE_AUTO;
+
   /* The compressed arrays are also CSR(A^T).  AUTO adopts the transpose
      orientation, so a public transpose solve exercises the same internal
      untransposed L2/recovery path through a nonidentity input-to-CSC map. */
@@ -18267,6 +18320,7 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
   }
 
 cleanup:
+  kls_destroy(scaled_contract_solver);
   kls_destroy(contract_csr_solver);
   kls_destroy(contract_solver);
   if (!restore_env_value("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR",

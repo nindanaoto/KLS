@@ -2,9 +2,10 @@
 """Select a one-use validation suite outside every committed KLS manifest.
 
 The selector operates only on a pinned SuiteSparse metadata snapshot.  It
-resolves all matrices already named by KLS manifests, excludes their complete
-SuiteSparse groups, chooses at most one matrix from each remaining group, and
-balances the result across size, density, and structural-symmetry strata.
+resolves all matrices already named by KLS manifests.  Protocol v1 excludes
+their complete SuiteSparse groups; v2 excludes the exact exposed matrices,
+then chooses at most one unseen matrix per group.  Both balance the result
+across size, density, and structural-symmetry strata.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ import collections
 import csv
 from dataclasses import dataclass
 import hashlib
+import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -86,6 +89,15 @@ def load_index(path: pathlib.Path) -> tuple[str, str, list[Matrix]]:
 def manifest_names(path: pathlib.Path) -> list[str]:
     names: list[str] = []
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if raw.lstrip().startswith("{"):
+            try:
+                row = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            matrix = row.get("matrix") if isinstance(row, dict) else None
+            if matrix:
+                names.append(pathlib.Path(str(matrix)).stem)
+            continue
         token = raw.split("#", 1)[0].strip()
         if token:
             names.append(pathlib.Path(token.split()[0]).stem)
@@ -93,23 +105,26 @@ def manifest_names(path: pathlib.Path) -> list[str]:
 
 
 def resolve_excluded_groups(
-    matrices: list[Matrix], manifests: list[pathlib.Path]
-) -> tuple[set[str], int]:
+    matrices: list[Matrix], manifests: list[pathlib.Path], strict: bool = True
+) -> tuple[set[str], set[str], int]:
     by_name: dict[str, list[Matrix]] = collections.defaultdict(list)
     for matrix in matrices:
         by_name[matrix.name.casefold()].append(matrix)
     groups: set[str] = set()
+    canonical: set[str] = set()
     count = 0
     for manifest in manifests:
         for name in manifest_names(manifest):
             matches = by_name.get(name.casefold(), [])
-            if len(matches) != 1:
+            if strict and len(matches) != 1:
                 raise ValueError(
                     f"{manifest}: {name!r} resolves to {len(matches)} index rows"
                 )
-            groups.add(matches[0].group.casefold())
-            count += 1
-    return groups, count
+            for match in matches:
+                groups.add(match.group.casefold())
+                canonical.add(match.canonical.casefold())
+            count += int(bool(matches))
+    return groups, canonical, count
 
 
 def stratum(matrix: Matrix) -> tuple[str, str, str]:
@@ -171,14 +186,37 @@ def git_output(root: pathlib.Path, *args: str) -> str:
     ).strip()
 
 
-def source_freeze(root: pathlib.Path) -> tuple[str, str]:
+def source_freeze(root: pathlib.Path, scientific_stack: bool = False) -> tuple[str, str]:
     source_paths = ("CMakeLists.txt", "include", "src", "third_party")
+    if scientific_stack:
+        source_paths += ("bench", "scripts")
     dirty = subprocess.run(
         ["git", "-C", str(root), "diff", "--quiet", "HEAD", "--", *source_paths],
         check=False,
     )
     if dirty.returncode != 0:
         raise ValueError("solver source is dirty; freeze or revert it before reveal")
+    if scientific_stack:
+        untracked = git_output(
+            root, "ls-files", "--others", "--exclude-standard", "--",
+            "bench", "scripts",
+        ).splitlines()
+        unsafe_untracked = [
+            path for path in untracked
+            if ((path.startswith("bench/") and
+                 pathlib.Path(path).suffix in {".c", ".cc", ".cpp", ".h", ".hpp"})
+                or (path.startswith("scripts/") and
+                    pathlib.Path(path).suffix in {".py", ".sh"})
+                or path in {
+                    "bench/paper_campaign_configs.json",
+                    "bench/paper_scaling_subset_manifest.txt",
+                })
+        ]
+        if unsafe_untracked:
+            raise ValueError(
+                "scientific stack has untracked executable/configuration files; "
+                "commit it before reveal: " + ", ".join(unsafe_untracked)
+            )
     # Benchmark scripts/docs may be committed after reveal.  Record the last
     # commit that actually changed the solver tree, not an unrelated future
     # repository HEAD.
@@ -202,20 +240,25 @@ def render(
     strata = collections.Counter(stratum(matrix) for matrix in selected)
     lines = [
         "# One-use KLS external validation manifest. Do not tune after reveal.",
-        f"# Protocol: {PROTOCOL}",
+        f"# Protocol: {args.protocol}",
         f"# Seed: {args.seed}",
         f"# SuiteSparse index timestamp: {timestamp}",
         f"# SuiteSparse index SHA256: {index_digest}",
         f"# Exclusion-set SHA256: {exclusion_digest}",
         f"# Excluded manifest entries: {excluded_entries}",
-        f"# Excluded SuiteSparse groups: {excluded_groups}",
+        (f"# Referenced SuiteSparse groups: {excluded_groups}"
+         if args.protocol.endswith("v2")
+         else f"# Excluded SuiteSparse groups: {excluded_groups}"),
         f"# Frozen KLS commit: {source_commit}",
         f"# Frozen solver-tree SHA256: {source_digest}",
         (
             "# Filters: real square, unique basename, one matrix per unused group; "
             f"rows={args.min_rows}..{args.max_rows}; nnz={args.min_nnz}..{args.max_nnz}."
         ),
-        "# Selection: all available circuit-like unused groups, then balanced metadata strata.",
+        ("# Selection: one previously unseen matrix per group, circuit-like first, "
+         "then balanced metadata strata."
+         if args.protocol.endswith("v2")
+         else "# Selection: all available circuit-like unused groups, then balanced metadata strata."),
         "# Strata: "
         + ", ".join(
             f"{'/'.join(key)}={value}" for key, value in sorted(strata.items())
@@ -237,13 +280,17 @@ def main() -> int:
     parser.add_argument("--index", type=pathlib.Path, required=True)
     parser.add_argument("--root", type=pathlib.Path, default=pathlib.Path("."))
     parser.add_argument(
-        "--exclude-glob", default="bench/*manifest*.txt",
+        "--protocol", choices=("kls-external-validation-v1", "kls-external-validation-v2"),
+        default="kls-external-validation-v1",
+    )
+    parser.add_argument(
+        "--exclude-glob", action="append", default=[],
         help="glob, relative to --root, containing every previously exposed suite",
     )
     parser.add_argument(
         "--output",
         type=pathlib.Path,
-        default=pathlib.Path("bench/suitesparse_external_validation_v1_manifest.txt"),
+        default=None,
     )
     parser.add_argument("--count", type=int, default=24)
     parser.add_argument("--min-rows", type=int, default=10_000)
@@ -254,25 +301,40 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    global PROTOCOL
+    PROTOCOL = args.protocol
     if args.count <= 0:
         parser.error("--count must be positive")
     if args.check and args.dry_run:
         parser.error("--check and --dry-run are mutually exclusive")
     root = args.root.resolve()
     index = args.index.resolve()
+    if args.output is None:
+        suffix = "v2" if args.protocol.endswith("v2") else "v1"
+        args.output = pathlib.Path(f"bench/suitesparse_external_validation_{suffix}_manifest.txt")
     output = args.output if args.output.is_absolute() else root / args.output
     try:
         timestamp, index_digest, matrices = load_index(index)
-        manifests = sorted(
-            path for path in root.glob(args.exclude_glob)
-            if path.resolve() != output.resolve()
-        )
+        exclusion_globs = args.exclude_glob or ["bench/*manifest*.txt"]
+        manifests = sorted({
+            path.resolve()
+            for pattern in exclusion_globs for path in root.glob(pattern)
+            if path.is_file() and path.resolve() != output.resolve()
+        })
         if not manifests:
-            raise ValueError(f"no exclusion manifests match {args.exclude_glob!r}")
-        excluded_groups, excluded_entries = resolve_excluded_groups(matrices, manifests)
+            raise ValueError(f"no exclusion manifests match {exclusion_globs!r}")
+        excluded_groups, excluded_matrices, excluded_entries = resolve_excluded_groups(
+            matrices, manifests, strict=not args.protocol.endswith("v2")
+        )
         exclusion_payload = b"".join(
-            path.relative_to(root).as_posix().encode() + b"\0" + path.read_bytes() + b"\0"
+            pathlib.PurePath(os.path.relpath(path, root)).as_posix().encode()
+            + b"\0" + path.read_bytes() + b"\0"
             for path in manifests
+        )
+        # Freeze before deriving the selection, not merely before writing it.
+        # Thus a dirty invocation never computes or emits the one-use corpus.
+        source_commit, source_digest = source_freeze(
+            root, scientific_stack=args.protocol.endswith("v2")
         )
         name_counts = collections.Counter(matrix.name.casefold() for matrix in matrices)
         candidates = [
@@ -281,7 +343,9 @@ def main() -> int:
             and matrix.rows == matrix.cols
             and args.min_rows <= matrix.rows <= args.max_rows
             and args.min_nnz <= matrix.nnz <= args.max_nnz
-            and matrix.group.casefold() not in excluded_groups
+            and (matrix.canonical.casefold() not in excluded_matrices
+                 if args.protocol.endswith("v2")
+                 else matrix.group.casefold() not in excluded_groups)
             and name_counts[matrix.name.casefold()] == 1
         ]
         representatives = choose_representatives(candidates, args.seed)
@@ -294,7 +358,6 @@ def main() -> int:
         remaining = [matrix for matrix in representatives if matrix not in circuit]
         selected = circuit + balanced_sample(remaining, args.count - len(circuit), args.seed)
         selected.sort(key=lambda matrix: matrix.canonical.casefold())
-        source_commit, source_digest = source_freeze(root)
         text = render(
             selected,
             timestamp=timestamp,

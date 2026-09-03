@@ -80,6 +80,7 @@ typedef struct run_stats {
   double refactor_solve_seconds_avg;
   double solve_seconds_avg;
   double spice_cycle_seconds;
+  double measured_lifecycle_seconds;
   double residual_l2;
   double relative_residual_l2;
   double refactor_max_relative_residual;
@@ -453,7 +454,8 @@ static double cycle_seconds(const run_stats *s) {
 #ifndef KLS_VENDORED_KLU_ONLY
 static int run_klu32(matrix *a, const double *base_values,
                      const double *x_true, double *rhs, int repeat,
-                     int factor_repeat, int refactor_repeat, int ordering,
+                     int factor_repeat, int refactor_repeat,
+                     int lifecycle_systems, int ordering,
                      int btf, int scale,
                      bench_refactor_value_mode refactor_value_mode,
                      double refactor_value_amplitude,
@@ -528,6 +530,27 @@ static int run_klu32(matrix *a, const double *base_values,
     free(ai);
     return 0;
   }
+  double initial_solve_seconds = 0.0;
+  if (lifecycle_systems > 0) {
+    memcpy(work, rhs, (size_t)a->n * sizeof(*work));
+    const double solve_start = now_seconds();
+    const int solve_ok =
+      klu_solve(symbolic, numeric, (int)a->n, 1, work, &common);
+    initial_solve_seconds = now_seconds() - solve_start;
+    if (!solve_ok || common.status < 0) {
+      out->status = common.status;
+      free(work);
+      klu_free_numeric(&numeric, &common);
+      klu_free_symbolic(&symbolic, &common);
+      free(ap);
+      free(ai);
+      return 0;
+    }
+    if (out->verify_each_refactor) {
+      (void)residual_norm(a, work, rhs,
+                          &out->refactor_max_relative_residual);
+    }
+  }
   total = 0.0;
   double refactor_solve_total = 0.0;
   for (int i = 0; i < refactor_repeat; ++i) {
@@ -587,7 +610,8 @@ static int run_klu32(matrix *a, const double *base_values,
   }
 
   total = 0.0;
-  for (int i = 0; i < repeat; ++i) {
+  const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
+  for (int i = 0; i < standalone_solve_repeats; ++i) {
     memcpy(work, rhs, (size_t)a->n * sizeof(*work));
     const double start = now_seconds();
     const int ok = klu_solve(symbolic, numeric, (int)a->n, 1, work,
@@ -595,7 +619,8 @@ static int run_klu32(matrix *a, const double *base_values,
     total += now_seconds() - start;
     if (!ok || common.status < 0) break;
   }
-  out->solve_seconds_avg = total / (double)repeat;
+  out->solve_seconds_avg = lifecycle_systems > 0
+    ? initial_solve_seconds : total / (double)repeat;
   if (refactor_repeat == 0) {
     out->refactor_solve_first_seconds = out->solve_seconds_avg;
     out->refactor_solve_steady_seconds_avg = out->solve_seconds_avg;
@@ -604,6 +629,12 @@ static int run_klu32(matrix *a, const double *base_values,
   out->residual_l2 = residual_norm(a, work, rhs,
                                    &out->relative_residual_l2);
   out->spice_cycle_seconds = cycle_seconds(out);
+  out->measured_lifecycle_seconds = lifecycle_systems > 0
+    ? out->analysis_seconds + out->initial_factor_seconds +
+        initial_solve_seconds +
+        out->refactor_seconds_avg * (double)refactor_repeat +
+        refactor_solve_total
+    : -1.0;
   out->status = common.status;
 
   free(work);
@@ -617,7 +648,8 @@ static int run_klu32(matrix *a, const double *base_values,
 
 static int run_klu64(matrix *a, const double *base_values,
                      const double *x_true, double *rhs, int repeat,
-                     int factor_repeat, int refactor_repeat, int ordering,
+                     int factor_repeat, int refactor_repeat,
+                     int lifecycle_systems, int ordering,
                      int btf, int scale,
                      bench_refactor_value_mode refactor_value_mode,
                      double refactor_value_amplitude,
@@ -692,6 +724,27 @@ static int run_klu64(matrix *a, const double *base_values,
     free(ai);
     return 0;
   }
+  double initial_solve_seconds = 0.0;
+  if (lifecycle_systems > 0) {
+    memcpy(work, rhs, (size_t)a->n * sizeof(*work));
+    const double solve_start = now_seconds();
+    const int64_t solve_ok =
+      klu_l_solve(symbolic, numeric, (int64_t)a->n, 1u, work, &common);
+    initial_solve_seconds = now_seconds() - solve_start;
+    if (!solve_ok || common.status < 0) {
+      out->status = (int)common.status;
+      free(work);
+      klu_l_free_numeric(&numeric, &common);
+      klu_l_free_symbolic(&symbolic, &common);
+      free(ap);
+      free(ai);
+      return 0;
+    }
+    if (out->verify_each_refactor) {
+      (void)residual_norm(a, work, rhs,
+                          &out->refactor_max_relative_residual);
+    }
+  }
   total = 0.0;
   double refactor_solve_total = 0.0;
   for (int i = 0; i < refactor_repeat; ++i) {
@@ -750,7 +803,8 @@ static int run_klu64(matrix *a, const double *base_values,
   }
 
   total = 0.0;
-  for (int i = 0; i < repeat; ++i) {
+  const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
+  for (int i = 0; i < standalone_solve_repeats; ++i) {
     memcpy(work, rhs, (size_t)a->n * sizeof(*work));
     const double start = now_seconds();
     const int64_t ok =
@@ -759,7 +813,8 @@ static int run_klu64(matrix *a, const double *base_values,
     total += now_seconds() - start;
     if (!ok || common.status < 0) break;
   }
-  out->solve_seconds_avg = total / (double)repeat;
+  out->solve_seconds_avg = lifecycle_systems > 0
+    ? initial_solve_seconds : total / (double)repeat;
   if (refactor_repeat == 0) {
     out->refactor_solve_first_seconds = out->solve_seconds_avg;
     out->refactor_solve_steady_seconds_avg = out->solve_seconds_avg;
@@ -768,6 +823,12 @@ static int run_klu64(matrix *a, const double *base_values,
   out->residual_l2 = residual_norm(a, work, rhs,
                                    &out->relative_residual_l2);
   out->spice_cycle_seconds = cycle_seconds(out);
+  out->measured_lifecycle_seconds = lifecycle_systems > 0
+    ? out->analysis_seconds + out->initial_factor_seconds +
+        initial_solve_seconds +
+        out->refactor_seconds_avg * (double)refactor_repeat +
+        refactor_solve_total
+    : -1.0;
   out->status = (int)common.status;
 
   free(work);
@@ -819,7 +880,7 @@ static void print_stats_json(const char *name, const run_stats *s) {
 int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr,
-            "Usage: %s <matrix.mtx> [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
+            "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
             "[--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] "
             "[--ordering amd|colamd|natural] [--scale -1|0|1|2] "
             "[--no-btf] [--width-order 32-first|64-first] [--json]\n",
@@ -836,12 +897,16 @@ int main(int argc, char **argv) {
   int scale = 2;
   int width32_first = 1;
   int json = 0;
+  int lifecycle_systems = 0;
   bench_refactor_value_mode refactor_value_mode =
     BENCH_REFACTOR_VALUES_UNCHANGED;
   double refactor_value_amplitude = 1.0e-3;
   for (int i = 2; i < argc; ++i) {
     if (strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
       repeat = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--lifecycle-systems") == 0 &&
+               i + 1 < argc) {
+      lifecycle_systems = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--factor-repeat") == 0 && i + 1 < argc) {
       factor_repeat = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--refactor-repeat") == 0 && i + 1 < argc) {
@@ -888,8 +953,14 @@ int main(int argc, char **argv) {
       return EXIT_FAILURE;
     }
   }
+  if (lifecycle_systems > 0) {
+    repeat = 1;
+    factor_repeat = 0;
+    refactor_repeat = lifecycle_systems - 1;
+  }
   if (factor_repeat < 0) factor_repeat = repeat;
   if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
+      lifecycle_systems < 0 ||
       (scale != -1 && scale != 0 && scale != 1 && scale != 2) ||
       refactor_value_amplitude < 0.0 || refactor_value_amplitude >= 1.0 ||
       (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED &&
@@ -937,23 +1008,24 @@ int main(int argc, char **argv) {
   int ok64;
   if (width32_first) {
     ok32 = run_klu32(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale,
+                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
                      refactor_value_mode, refactor_value_amplitude, &s32);
     ok64 = run_klu64(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale,
+                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
                      refactor_value_mode, refactor_value_amplitude, &s64);
   } else {
     ok64 = run_klu64(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale,
+                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
                      refactor_value_mode, refactor_value_amplitude, &s64);
     ok32 = run_klu32(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, ordering, btf, scale,
+                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
                      refactor_value_mode, refactor_value_amplitude, &s32);
   }
 #else
   const int ok64 = run_klu64(
     &a, base_values, x_true, rhs, repeat, factor_repeat, refactor_repeat,
-    ordering, btf, scale, refactor_value_mode, refactor_value_amplitude,
+    lifecycle_systems, ordering, btf, scale, refactor_value_mode,
+    refactor_value_amplitude,
     &s64);
 #endif
 
@@ -961,6 +1033,8 @@ int main(int argc, char **argv) {
 #ifdef KLS_VENDORED_KLU_ONLY
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
+           "\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d,"
+           "\"measured_lifecycle_seconds\":%.9g,"
            "\"refactor_value_mode\":\"%s\","
            "\"refactor_value_amplitude\":%.9g,"
            "\"ordering\":%d,\"width_order\":\"%s\","
@@ -978,6 +1052,8 @@ int main(int argc, char **argv) {
            "\"refactor_max_relative_residual\":%.9g,\"nblocks\":%d,"
            "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 "}\n",
            path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
+           lifecycle_systems > 0 ? "direct" : "projected",
+           lifecycle_systems, s64.measured_lifecycle_seconds,
            bench_refactor_value_mode_name(refactor_value_mode),
            refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,
@@ -998,11 +1074,14 @@ int main(int argc, char **argv) {
 #else
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
+           "\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d,"
            "\"refactor_value_mode\":\"%s\","
            "\"refactor_value_amplitude\":%.9g,"
            "\"ordering\":%d,\"width_order\":\"%s\","
            "\"btf\":%s,\"scale\":%d,",
            path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
+           lifecycle_systems > 0 ? "direct" : "projected",
+           lifecycle_systems,
            bench_refactor_value_mode_name(refactor_value_mode),
            refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,

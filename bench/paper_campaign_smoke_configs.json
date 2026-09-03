@@ -1,0 +1,25 @@
+[
+  {
+    "id": "smoke_direct_h3",
+    "pair_group": "smoke_pair",
+    "threads": 2,
+    "cpus": "0-1",
+    "lifecycle_systems": 3,
+    "values": "entrywise",
+    "amplitude": 0.001,
+    "matrices": ["1138_bus"]
+  },
+  {
+    "id": "smoke_direct_h3_serial",
+    "pair_group": "smoke_pair",
+    "baseline": "smoke_direct_h3",
+    "threads": 1,
+    "cpus": "0",
+    "lifecycle_systems": 3,
+    "values": "entrywise",
+    "amplitude": 0.001,
+    "solvers": ["kls"],
+    "kls_args": ["--backend", "serial"],
+    "matrices": ["1138_bus"]
+  }
+]

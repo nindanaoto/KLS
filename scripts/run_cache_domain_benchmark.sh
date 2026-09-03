@@ -9,7 +9,7 @@ MANIFEST="$ROOT/bench/suitesparse_circuit_manifest.txt"
 OUTPUT_DIR="$ROOT/build/cache-domain-smallest"
 DOMAIN=smallest
 THREADS=8
-PASSES=3
+PASSES=8
 TIMEOUT=120
 
 usage() {
@@ -36,6 +36,14 @@ case "$DOMAIN" in smallest|largest) ;; *) echo "invalid domain: $DOMAIN" >&2; ex
 case "$THREADS:$PASSES:$TIMEOUT" in
   *[!0-9:]*|0:*|*:0:*|*:0) echo "threads, passes, and timeout must be positive integers" >&2; exit 2;;
 esac
+if [ "$THREADS" -ne 8 ]; then
+  echo "the paper headline configurations are pinned to --threads 8" >&2
+  exit 2
+fi
+if [ $((PASSES % 4)) -ne 0 ]; then
+  echo "passes must be a multiple of four for balanced launch order" >&2
+  exit 2
+fi
 
 ENGINE=${APPTAINER:-}
 if [ -z "$ENGINE" ]; then
@@ -66,6 +74,14 @@ CPUS=$(python3 "$ROOT/scripts/cache_domain_cpus.py" \
 echo "Host LLC domains:" >&2
 python3 "$ROOT/scripts/cache_domain_cpus.py" >&2
 echo "Benchmarking on $DOMAIN LLC physical-core CPUs: $CPUS" >&2
+case "$DOMAIN" in
+  smallest) CONFIG_ID=headline_llc32_t8; EXPECTED_CPUS=8,9,10,11,12,13,14,15 ;;
+  largest) CONFIG_ID=headline_llc96_t8; EXPECTED_CPUS=0,1,2,3,4,5,6,7 ;;
+esac
+if [ "$CPUS" != "$EXPECTED_CPUS" ]; then
+  echo "paper configuration $CONFIG_ID requires CPUs $EXPECTED_CPUS, but topology selection returned $CPUS" >&2
+  exit 1
+fi
 
 BUILD_DIR=/work/KLS/build-container-benchmark
 BIND_PATHS="$ROOT:/work/KLS,$MATRIX_DIR:/work/matrices:ro,$MANIFEST:/work/manifest.txt:ro,$OUTPUT_DIR:/work/output,$OUTPUT_DIR/tmp:/tmp,$VENDOR_DIR/cktso:/opt/cktso:ro,$VENDOR_DIR/subtreelu:/opt/subtreelu:ro"
@@ -84,18 +100,29 @@ fi
 printf '%s\n' "$IMAGE_ID" > "$IMAGE_STAMP"
 "$ENGINE" exec "${EXEC_FLAGS[@]}" "$IMAGE" \
   cmake --build "$BUILD_DIR" -j "$THREADS" \
-    --target kls_bench cktso_compare subtreelu_compare
+    --target kls_bench cktso_compare subtreelu_compare klu_compare
 
-taskset -c "$CPUS" "$ENGINE" exec "${EXEC_FLAGS[@]}" "$IMAGE" \
-  env KLS_BENCH_VERIFY_EACH_REFACTOR=1 \
-    THREADS="$THREADS" PASSES="$PASSES" ROTATE_SIDES=1 TIMEOUT="$TIMEOUT" \
-    SOLVE_REPEAT=2 REFACTOR_REPEAT=20 FACTOR_REPEAT=0 \
-    REFACTOR_VALUES=entrywise REFACTOR_VALUE_AMPLITUDE=.001 \
-    /work/KLS/scripts/run_paired_suite.sh \
-      "$BUILD_DIR/kls_bench" "$BUILD_DIR/cktso_compare" \
-      /work/matrices /work/manifest.txt \
-      /work/output/kls.jsonl /work/output/cktso.jsonl \
-      "$BUILD_DIR/subtreelu_compare" /work/output/subtreelu.jsonl
+"$ENGINE" exec "${EXEC_FLAGS[@]}" "$IMAGE" \
+  python3 /work/KLS/scripts/run_paper_campaign.py \
+    --root /work/KLS \
+    --manifest /work/manifest.txt \
+    --matrix-dir /work/matrices \
+    --configs /work/KLS/bench/paper_campaign_configs.json \
+    --output-dir /work/output/campaign \
+    --kls-bench "$BUILD_DIR/kls_bench" \
+    --ck-bench "$BUILD_DIR/cktso_compare" \
+    --st-bench "$BUILD_DIR/subtreelu_compare" \
+    --klu-bench "$BUILD_DIR/klu_compare" \
+    --passes "$PASSES" --timeout "$TIMEOUT" --only "$CONFIG_ID"
+
+"$ENGINE" exec "${EXEC_FLAGS[@]}" "$IMAGE" \
+  python3 /work/KLS/scripts/reduce_paper_campaign.py \
+    --results /work/output/campaign \
+    --json /work/output/summary.json \
+    --markdown /work/output/summary.md \
+    --csv /work/output/matrix-ratios.csv \
+    --latex /work/output/summary-rows.tex \
+    --only "$CONFIG_ID"
 
 {
   echo "image_sha256=$IMAGE_ID"
@@ -111,6 +138,4 @@ taskset -c "$CPUS" "$ENGINE" exec "${EXEC_FLAGS[@]}" "$IMAGE" \
   echo "subtreelu_commit=9930fd2cadff043f44bd0c9b48a63403f6ed218e"
 } > "$OUTPUT_DIR/run-metadata.txt"
 
-python3 "$ROOT/scripts/score_paper_suite.py" \
-  "$OUTPUT_DIR/kls.jsonl" "$OUTPUT_DIR/cktso.jsonl" \
-  "$OUTPUT_DIR/subtreelu.jsonl" --horizon 100 | tee "$OUTPUT_DIR/summary.txt"
+echo "Strict paired summary: $OUTPUT_DIR/summary.md" >&2
