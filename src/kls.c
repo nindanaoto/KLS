@@ -3618,6 +3618,35 @@ static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
     solver->solve_contract_probe == 1;
 }
 
+static int kls_tiny_singleton_cached_ready(const kls_solver *solver,
+                                            int64_t nrhs) {
+  return solver != NULL && solver->tiny_singleton_solve_state > 0 &&
+    kls_tiny_singleton_runtime_capable(solver, nrhs) &&
+    solver->i32solve_udiag_recip_fresh &&
+    (solver->numeric->Rs == NULL ||
+     solver->tiny_singleton_rs_recip_fresh);
+}
+
+static int kls_tiny_singleton_values_unchanged(const kls_solver *solver,
+                                                const double *values) {
+  return solver != NULL && values != NULL &&
+    solver->unchanged_refactor_state > 0 &&
+    solver->refactor_input_snapshot_valid &&
+    (solver->nnz == 0u ||
+     memcmp(solver->refactor_input_snapshot, values,
+            (size_t)solver->nnz * sizeof(*values)) == 0);
+}
+
+static void kls_tiny_singleton_finish_solve(kls_solver *solver,
+                                             double seconds) {
+  solver->base_solve_seconds = seconds;
+  solver->stats.solve_seconds = seconds;
+  solver->stats.tiny_singleton_solve_count++;
+  solver->stats.last_kernel_status = (int)solver->common.status;
+  solver->stats.memory_bytes = solver->common.memusage;
+  solver->stats.memory_peak_bytes = solver->common.mempeak;
+}
+
 static int solve_impl(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
@@ -68089,9 +68118,9 @@ static int kls_finish_row_refactor_pattern_from_arrays(
      owner-compute solve can dispatch without repeating the O(width) shape
      walk on every RHS.  Allocation failure only disables the fast plan; the
      existing validating kernels remain authoritative. */
-  if (group_count > 0u &&
-      group_count <= (UF_long)(SIZE_MAX /
-                               sizeof(*solver->row_refactor_group_shape_valid))) {
+  /* One byte per group cannot overflow because group_count is already a
+     validated matrix dimension. */
+  if (group_count > 0u) {
     solver->row_refactor_group_shape_valid =
       (unsigned char *)malloc((size_t)group_count *
                               sizeof(*solver->row_refactor_group_shape_valid));
@@ -169090,14 +169119,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  if (solver->tiny_singleton_solve_state > 0 &&
-      kls_tiny_singleton_runtime_capable(solver, 1) &&
-      solver->unchanged_refactor_state > 0 &&
-      solver->refactor_input_snapshot_valid) {
+  if (kls_tiny_singleton_cached_ready(solver, 1)) {
     const double start = kls_now_seconds();
-    if (solver->nnz == 0u ||
-        memcmp(solver->refactor_input_snapshot, values,
-               (size_t)solver->nnz * sizeof(*values)) == 0) {
+    if (kls_tiny_singleton_values_unchanged(solver, values)) {
       /* The public values and the complete numeric are byte-identical.  The
          generic unchanged path prepares large-factor solve representations
          and clears hundreds of adaptive statistics; this compact numeric
@@ -172926,19 +172950,11 @@ static int solve_impl(kls_solver *solver,
 
   const int unmeasured_tiny_singleton =
     !solver->options.record_tiny_solve_timing &&
-    solver->tiny_singleton_solve_state > 0 && nrhs == 1 &&
-    kls_tiny_singleton_runtime_capable(solver, nrhs) &&
-    solver->i32solve_udiag_recip_fresh &&
-    (solver->numeric->Rs == NULL ||
-     solver->tiny_singleton_rs_recip_fresh);
+    kls_tiny_singleton_cached_ready(solver, nrhs);
   const double start = unmeasured_tiny_singleton
     ? 0.0 : kls_now_seconds();
   int tiny_singleton_ready =
-    solver->tiny_singleton_solve_state > 0 && nrhs == 1 &&
-    kls_tiny_singleton_runtime_capable(solver, nrhs) &&
-    solver->i32solve_udiag_recip_fresh &&
-    (solver->numeric->Rs == NULL ||
-     solver->tiny_singleton_rs_recip_fresh);
+    kls_tiny_singleton_cached_ready(solver, nrhs);
   if (!tiny_singleton_ready &&
       kls_tiny_singleton_runtime_capable(solver, nrhs) &&
       kls_tiny_singleton_solve_ready(solver) &&
@@ -172961,14 +172977,9 @@ static int solve_impl(kls_solver *solver,
     solver->common.status = TRILINOS_KLU_OK;
     const UF_long direct_ok = kls_tiny_singleton_solve_one_rhs(
       solver, kernel_transpose, b, x);
-    solver->stats.tiny_singleton_solve_count++;
     const double direct_seconds = unmeasured_tiny_singleton
       ? 0.0 : kls_now_seconds() - start;
-    solver->base_solve_seconds = direct_seconds;
-    solver->stats.solve_seconds = direct_seconds;
-    solver->stats.last_kernel_status = (int)solver->common.status;
-    solver->stats.memory_bytes = solver->common.memusage;
-    solver->stats.memory_peak_bytes = solver->common.mempeak;
+    kls_tiny_singleton_finish_solve(solver, direct_seconds);
     return direct_ok && solver->common.status >= 0
       ? KLS_OK : KLS_ERR_SOLVE_FAILED;
   }
@@ -174953,17 +174964,9 @@ int kls_refactor_solve(kls_solver *solver,
     return KLS_ERR_INVALID_ARGUMENT;
   }
 
-  if (nrhs == 1 && solver->tiny_singleton_solve_state > 0 &&
-      kls_tiny_singleton_runtime_capable(solver, 1) &&
-      solver->i32solve_udiag_recip_fresh &&
-      (solver->numeric->Rs == NULL ||
-       solver->tiny_singleton_rs_recip_fresh) &&
-      solver->unchanged_refactor_state > 0 &&
-      solver->refactor_input_snapshot_valid) {
+  if (kls_tiny_singleton_cached_ready(solver, nrhs)) {
     const double start = kls_now_seconds();
-    if (solver->nnz == 0u ||
-        memcmp(solver->refactor_input_snapshot, values,
-               (size_t)solver->nnz * sizeof(*values)) == 0) {
+    if (kls_tiny_singleton_values_unchanged(solver, values)) {
       const double solve_start = kls_now_seconds();
       solver->solve_contract_verified = 0;
       solver->verified_rhs_valid = 0;
@@ -174976,12 +174979,7 @@ int kls_refactor_solve(kls_solver *solver,
         solver, kernel_transpose, b, x);
       const double end = kls_now_seconds();
       solver->stats.refactor_seconds = solve_start - start;
-      solver->base_solve_seconds = end - solve_start;
-      solver->stats.solve_seconds = solver->base_solve_seconds;
-      solver->stats.tiny_singleton_solve_count++;
-      solver->stats.last_kernel_status = (int)solver->common.status;
-      solver->stats.memory_bytes = solver->common.memusage;
-      solver->stats.memory_peak_bytes = solver->common.mempeak;
+      kls_tiny_singleton_finish_solve(solver, end - solve_start);
       return ok && solver->common.status >= 0
         ? KLS_OK : KLS_ERR_SOLVE_FAILED;
     }
