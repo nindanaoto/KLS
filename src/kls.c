@@ -10,9 +10,7 @@
 #undef DLONG
 #include "trilinos_klu_decl.h"
 #include "trilinos_camd.h"
-#ifdef KLS_HAVE_METIS
 #include "metis.h"
-#endif
 #ifdef KLS_HAVE_SCOTCH
 #include "scotch.h"
 #endif
@@ -29042,11 +29040,7 @@ static void fill_build_stats(kls_stats *stats) {
   stats->refactor_l_index32_entries = 0;
   stats->refactor_u_index32_enabled = 0;
   stats->refactor_u_index32_entries = 0;
-#ifdef KLS_HAVE_METIS
   stats->build_has_metis = 1;
-#else
-  stats->build_has_metis = 0;
-#endif
 #ifdef KLS_HAVE_SCOTCH
   stats->build_has_scotch = 1;
 #else
@@ -29482,7 +29476,6 @@ static int is_medium_dense_diagonal_high_degree_pattern(UF_long n,
          1000.0 * (double)diagonal_count >= 995.0 * (double)n;
 }
 
-#ifdef KLS_HAVE_METIS
 static int is_medium_spiked_low_diagonal_pattern(UF_long n,
                                                  const UF_long *col_ptr,
                                                  const UF_long *row_idx) {
@@ -29594,7 +29587,6 @@ static int is_small_spiked_low_diagonal_pattern(UF_long n,
          10.0 * (double)max_col_degree <= 6.0 * (double)n &&
          10.0 * (double)max_row_degree <= 6.0 * (double)n;
 }
-#endif
 
 static int is_large_diagonal_circuit_like_pattern(UF_long n,
                                                   const UF_long *col_ptr,
@@ -30244,7 +30236,6 @@ static _Thread_local int
 static _Thread_local int kls_near_symmetric_mega_hub_amd_analyze_path;
 static _Thread_local int kls_near_symmetric_mega_hub_amd_analyze_selected;
 
-#ifdef KLS_HAVE_METIS
 static int is_large_very_low_degree_full_diagonal_pattern(UF_long n,
                                                           const UF_long *col_ptr,
                                                           const UF_long *row_idx) {
@@ -30615,7 +30606,6 @@ static int is_medium_bounded_degree_diagonal_pattern(UF_long n,
   return low_degree && max_col_degree <= 128 && max_row_degree <= 128 &&
          1000.0 * (double)diagonal_count >= 990.0 * (double)n;
 }
-#endif
 
 static int symbolic_is_low_work_dominant_btf(
   UF_long n,
@@ -30995,15 +30985,8 @@ static int kls_sparse_full_diagonal_metis_row_input_profile(
   UF_long n,
   const UF_long *col_ptr,
   const UF_long *row_idx) {
-#ifdef KLS_HAVE_METIS
   return kls_sparse_full_diagonal_metis_row_input_economics(n, col_ptr) &&
     is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx);
-#else
-  (void)n;
-  (void)col_ptr;
-  (void)row_idx;
-  return 0;
-#endif
 }
 
 
@@ -31152,14 +31135,12 @@ static int choose_auto_scale_from_pattern_impl(
   }
 
 
-#ifdef KLS_HAVE_METIS
 
 
 
 
 
 
-#endif
 
   double *row_max = (double *)calloc((size_t)n, sizeof(*row_max));
   double *diag_max = (double *)calloc((size_t)n, sizeof(*diag_max));
@@ -32167,7 +32148,6 @@ static double choose_initial_auto_pivot_tolerance(
 
 
 
-#ifdef KLS_HAVE_METIS
   if (solver->options.ordering == KLS_ORDERING_AUTO &&
       solver->stats.selected_ordering == KLS_ORDERING_METIS &&
       is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
@@ -32207,7 +32187,6 @@ static double choose_initial_auto_pivot_tolerance(
     return solver->stats.selected_ordering == KLS_ORDERING_AMF ? 1.0e-8
                                                                : 1.0e-4;
   }
-#endif
 
   return solver->options.pivot_tolerance;
 }
@@ -32287,7 +32266,6 @@ static _Thread_local int kls_low_work_symmetric_partial_diagonal_pts_ctx;
    selected from the workload that the retained numeric factor will execute. */
 static _Thread_local int kls_large_weak_diagonal_static_metis_ctx;
 
-#ifdef KLS_HAVE_METIS
 typedef struct kls_metis_separator_capture {
   UF_long order_call_index;
   kls_separator_analysis separator;
@@ -34954,7 +34932,6 @@ static UF_long kls_metis_order_inner(UF_long n,
   free(metis_ndp_sizes);
   return metis_status == METIS_OK ? order_lnz : 0;
 }
-#endif
 
 #ifdef KLS_HAVE_SCOTCH
 static int compare_scotch_num(const void *a, const void *b) {
@@ -35174,7 +35151,6 @@ static int analyze_with_ordering(UF_long n,
 #ifdef KLS_HAVE_MTMETIS
   kls_metis_order_threads = options != NULL ? options->threads : 1;
 #endif
-#ifdef KLS_HAVE_METIS
   {
     /* the large-spral separator-pipeline class (pre2): its refactor
        engine is structure-sensitive to the exact serial-NodeNDP
@@ -35191,7 +35167,6 @@ static int analyze_with_ordering(UF_long n,
     kls_spiked_ndp_class = 0;
 #endif
   }
-#endif
   const double kls_awo_t0 =
     getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
   trilinos_klu_l_common common;
@@ -35208,18 +35183,15 @@ static int analyze_with_ordering(UF_long n,
     common.kls_btf_structural_rank = kls_btf_stash.rank;
   }
 
-#ifdef KLS_HAVE_METIS
   kls_metis_order_context metis_context;
   memset(&metis_context, 0, sizeof(metis_context));
   int metis_context_active = 0;
-#endif
 
   trilinos_klu_l_symbolic *symbolic = NULL;
   if (ordering == KLS_ORDERING_NATURAL) {
     symbolic = trilinos_klu_l_analyze_given(n, col_ptr, row_idx, NULL, NULL,
                                             &common);
   } else if (ordering == KLS_ORDERING_METIS) {
-#ifdef KLS_HAVE_METIS
     metis_context.n = n;
     metis_context.npes =
       options != NULL
@@ -35239,9 +35211,6 @@ static int analyze_with_ordering(UF_long n,
               kls_now_seconds() - kls_aa_t0);
     }
     common.user_data = NULL;
-#else
-    return KLS_ERR_UNSUPPORTED;
-#endif
   } else if (ordering == KLS_ORDERING_SCOTCH) {
 #ifdef KLS_HAVE_SCOTCH
     common.ordering = 3;
@@ -35324,15 +35293,12 @@ static int analyze_with_ordering(UF_long n,
       trilinos_klu_l_free_symbolic(&symbolic, &common);
     }
     kls_separator_analysis_clear(separator_out);
-#ifdef KLS_HAVE_METIS
     if (metis_context_active) {
       kls_metis_order_context_clear(&metis_context);
     }
-#endif
     return KLS_ERR_ANALYZE_FAILED;
   }
 
-#ifdef KLS_HAVE_METIS
   if (metis_context_active) {
     const double kls_sep_t0 = kls_now_seconds();
     if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
@@ -35351,7 +35317,6 @@ static int analyze_with_ordering(UF_long n,
               kls_now_seconds() - kls_sep_t0);
     }
   } else
-#endif
   {
     kls_finalize_separator_global_range(symbolic, separator_out);
   }
@@ -35759,7 +35724,6 @@ static void maybe_retry_without_btf(UF_long n,
   kls_separator_analysis_clear(&no_btf_separator);
 }
 
-#ifdef KLS_HAVE_METIS
 static int should_start_auto_with_metis(UF_long n,
                                         const UF_long *col_ptr,
                                         const UF_long *row_idx,
@@ -35805,9 +35769,7 @@ static int metis_start_should_skip_no_btf_retry(UF_long n,
                                                               row_idx);
 }
 
-#endif
 
-#if defined(KLS_HAVE_METIS) || defined(KLS_HAVE_SCOTCH)
 /* Set for the duration of the top-level analyze so the pattern-level
    ordering gates can see whether a background METIS race already covers
    the nested-dissection trial. */
@@ -35939,7 +35901,6 @@ static void maybe_promote_symbolic_ordering(
   kls_separator_analysis_clear(&trial_separator);
 }
 
-#ifdef KLS_HAVE_METIS
 /* A generic AUTO ordering proposal can be computed beside the retained
    minimum-degree analysis.  The worker owns only its symbolic result; the
    canonical pattern is immutable until select_candidate returns.  Keeping
@@ -36516,17 +36477,12 @@ static void kls_maybe_promote_selected_generic_nd(
   candidate->generic_nd_fallback_flops = incumbent_flops;
   kls_separator_analysis_move(&candidate->separator, &trial_separator);
 }
-#endif
-#endif
 
 static int should_start_auto_without_btf(UF_long n,
                                          const UF_long *col_ptr,
                                          const UF_long *row_idx,
                                          const kls_options *options,
                                          int large_spiked_metis_no_btf) {
-#ifndef KLS_HAVE_METIS
-  (void)large_spiked_metis_no_btf;
-#endif
   if (options == NULL || !options->use_btf) {
     return 0;
   }
@@ -36538,14 +36494,12 @@ static int should_start_auto_without_btf(UF_long n,
   if (is_medium_sparse_high_degree_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
-#ifdef KLS_HAVE_METIS
   if (large_spiked_metis_no_btf) {
     return 1;
   }
   if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
     return 1;
   }
-#endif
   return 0;
 }
 
@@ -40055,9 +40009,7 @@ static int should_try_spral_hungarian_numeric_trial(
     return 0;
   }
 
-#ifdef KLS_HAVE_METIS
 
-#endif
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   const double offdiag_ratio =
     (double)solver->common.noffdiag / (double)solver->n;
@@ -40239,7 +40191,6 @@ static int reactive_static_match_setup_is_unlikely_to_pay(
   return 0;
 }
 
-#ifdef KLS_HAVE_METIS
 /* the pattern-only half of the refinement gate: everything knowable
    before the trial factor runs (the flops floor is checked at join) */
 
@@ -40298,7 +40249,6 @@ static void kls_psmetis_spec_discard(kls_psmetis_spec *spec) {
 }
 
 
-#endif
 
 static int should_try_auto_row_match(const kls_solver *solver,
                                      const double *numeric_values) {
@@ -40314,9 +40264,7 @@ static int should_try_auto_row_match(const kls_solver *solver,
       numeric_values == NULL) {
     return 0;
   }
-#ifdef KLS_HAVE_METIS
 
-#endif
   UF_long missing_diagonal = 0;
   const UF_long weak_diagonal =
     count_weak_diagonal_rows(solver->n, solver->col_ptr, solver->row_idx,
@@ -40798,9 +40746,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   const int forced_match =
     getenv("KLS_FORCE_STATIC_MATCH") != NULL || force_prestat_spral;
 
-#ifdef KLS_HAVE_METIS
-#else
-#endif
   const int trace_gates =
     deferred && kls_trace_pre_static_enabled();
   if (!solver->options.static_pivoting ||
@@ -40821,10 +40766,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
 
 
-#ifdef KLS_HAVE_METIS
 
 
-#endif
 
   const int small_candidate = solver->n <= 20000u;
   const int medium_weak_candidate =
@@ -40883,7 +40826,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   int matching_equilibration_deferred = 0;
   int accepted = 0;
   int compact_missing_diagonal_matcher = 0;
-#ifdef KLS_HAVE_METIS
   kls_psmetis_spec psmetis_spec;
   memset(&psmetis_spec, 0, sizeof(psmetis_spec));
   psmetis_spec.status = KLS_ERR_FACTOR_FAILED;
@@ -40894,7 +40836,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   kls_psmetis_spec psmetis_est_spec;
   memset(&psmetis_est_spec, 0, sizeof(psmetis_est_spec));
   psmetis_est_spec.status = KLS_ERR_FACTOR_FAILED;
-#endif
 
   if (solver->orientation == KLS_ORIENTATION_TRANSPOSE) {
     if (solver->input_to_csc == NULL) {
@@ -40943,9 +40884,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
   kls_large_weak_diagonal_static_metis_ctx =
     0;
-#ifdef KLS_HAVE_METIS
   kls_prestatic_ordering_ctx = 1;
-#endif
   UF_long missing_diagonal = 0;
   UF_long weak = 0u;
   {
@@ -41115,9 +41054,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          its own changed-value lifecycle, so retain its comparison even when
          exact-input reuse is disabled; the opt-out is deliberately local. */
       solver->prestatic_deferred = 1;
-#ifdef KLS_HAVE_METIS
       kls_prestatic_ordering_ctx = 0;
-#endif
       kls_medium_partial_static_metis_ctx = 0;
       kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
       kls_large_weak_diagonal_static_metis_ctx = 0;
@@ -41158,9 +41095,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          the known-losing unmatched numeric before building the retained
          matched factor on the first update. */
       solver->prestatic_deferred = 1;
-#ifdef KLS_HAVE_METIS
       kls_prestatic_ordering_ctx = 0;
-#endif
       kls_medium_partial_static_metis_ctx = 0;
       kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
       kls_large_weak_diagonal_static_metis_ctx = 0;
@@ -41205,9 +41140,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        unfactored adoption cannot replace an already-live numeric safely.
      */
     solver->prestatic_deferred = 1;
-#ifdef KLS_HAVE_METIS
     kls_prestatic_ordering_ctx = 0;
-#endif
     kls_medium_partial_static_metis_ctx = 0;
     kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
     kls_large_weak_diagonal_static_metis_ctx = 0;
@@ -41422,7 +41355,7 @@ matching_attempt:;
   }
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
-#if defined(KLS_HAVE_METIS) && defined(KLS_HAVE_SPRAL_SCALING)
+#ifdef KLS_HAVE_SPRAL_SCALING
 
 #endif
 
@@ -41501,7 +41434,6 @@ matching_attempt:;
     goto matching_attempt;
   }
   if (!reused_raced_metis_q && !bounded_matched_amd) {
-#ifdef KLS_HAVE_METIS
     /* CKTSO-style dense-spike startup: after weighted matching, run the
        ordinary auto chooser on the matched graph.  Keeping the prestatic
        legacy context here invokes its AMD/AMF competition instead and can
@@ -41516,7 +41448,6 @@ matching_attempt:;
     if (ordinary_matched_ordering_ctx) {
       kls_prestatic_ordering_ctx = 0;
     }
-#endif
     const int saved_matched_low_pair_ctx =
       kls_matched_low_pair_ordering_ctx;
     const double saved_matched_low_pair_work_ctx =
@@ -41547,11 +41478,9 @@ matching_attempt:;
     kls_matched_low_pair_work_ctx = saved_matched_low_pair_work_ctx;
     kls_compact_missing_match_ordering_ctx =
       saved_compact_missing_match_ordering_ctx;
-#ifdef KLS_HAVE_METIS
     if (ordinary_matched_ordering_ctx) {
       kls_prestatic_ordering_ctx = 1;
     }
-#endif
   } else {
     status = KLS_OK;
   }
@@ -41666,7 +41595,7 @@ matching_attempt:;
     fprintf(stderr, "KLS pre-static: choose done %.3fms\n",
             1e3 * (kls_now_seconds() - kls_ps_t0));
   }
-#if defined(KLS_HAVE_METIS) && defined(KLS_HAVE_SPRAL_SCALING)
+#ifdef KLS_HAVE_SPRAL_SCALING
   if (use_large_spral_match && trial_ordering != KLS_ORDERING_METIS &&
       trial_score >= 8.0e7) {
     /* CKTSO-style ordering selection: compare a nested-dissection candidate
@@ -42061,7 +41990,6 @@ matching_attempt:;
                                trial_symbolic != NULL
                                  ? trial_symbolic->est_flops : 0.0);
     }
-#ifdef KLS_HAVE_METIS
     /* Speculative METIS refinement: the refinement's serial
        NodeND+CAMD dominates its cost and depends only on the trial
        pattern and the scale/tol just decided, so start it on a worker
@@ -42072,7 +42000,6 @@ matching_attempt:;
        the gate; a losing speculation is joined and discarded there
        (or at done: on trial rejection). */
 
-#endif
   }
   if (getenv("KLS_STATIC_PERTURB") != NULL) {
     /* hard-static regime: keep the matched diagonal everywhere and
@@ -42462,13 +42389,11 @@ matching_attempt:;
     fprintf(stderr, "KLS pre-static: stage flops+rcond done %.3fms\n",
             1e3 * (kls_now_seconds() - kls_ps_t0));
   }
-#ifdef KLS_HAVE_METIS
 
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr, "KLS pre-static: stage metis_refine done %.3fms\n",
             1e3 * (kls_now_seconds() - kls_ps_t0));
   }
-#endif
   if (matching_equilibration_deferred) {
     const int low_work_safe_unscaled =
       getenv("KLS_DISABLE_LOW_WORK_MATCH_SCALE_DEFER") == NULL &&
@@ -42698,13 +42623,11 @@ done:
   kls_medium_partial_static_metis_ctx = 0;
   kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
   kls_large_weak_diagonal_static_metis_ctx = 0;
-#ifdef KLS_HAVE_METIS
   kls_prestatic_ordering_ctx = 0;
   /* the speculative refinement/estimate analyses read the trial
      pattern arrays freed below: join and discard any pending runs */
   kls_psmetis_spec_discard(&psmetis_spec);
   kls_psmetis_spec_discard(&psmetis_est_spec);
-#endif
   if (!accepted) {
 
     if (trial_numeric != NULL) {
@@ -43389,7 +43312,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   }
 
 
-#ifdef KLS_HAVE_METIS
   if (scale_wanted &&
       is_large_very_low_degree_full_diagonal_pattern(
         solver->n, solver->col_ptr, solver->row_idx)) {
@@ -43400,7 +43322,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
        a join for the first public refactor (G2_circuit: about 0.9 s total). */
     scale_wanted = 0;
   }
-#endif
   if (!scale_wanted) {
     return;
   }
@@ -43745,13 +43666,9 @@ static int should_try_auto_scale(const kls_solver *solver) {
     return 0;
   }
 
-#ifdef KLS_HAVE_METIS
 
-#endif
 
-#ifdef KLS_HAVE_METIS
 
-#endif
 
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
@@ -44138,9 +44055,7 @@ static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
       solver->common.noffdiag < 16) {
     return 0;
   }
-#ifdef KLS_HAVE_METIS
 
-#endif
 
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   return fill >= 1000000;
@@ -44425,7 +44340,6 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
   return 1;
 }
 
-#ifdef KLS_HAVE_METIS
 static int should_try_auto_metis(const kls_solver *solver) {
   if (getenv("KLS_DISABLE_AUTO_METIS_PROMOTION") != NULL) {
     return 0;
@@ -44789,7 +44703,6 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   solver->metis_promotion_validated = 1;
   return 1;
 }
-#endif
 
 /* Maximum elimination-tree depth of the block-diagonal part of
    P*A*Q.  Each original nonzero contributes the undirected A+A' edge
@@ -45071,10 +44984,8 @@ static int kls_choose_symbolic_inner(UF_long n,
     goto generic_ordering_tournament;
   }
   int small_spiked_ordering_class = 0;
-#ifdef KLS_HAVE_METIS
   small_spiked_ordering_class =
     is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx);
-#endif
   if (options->ordering == KLS_ORDERING_AUTO && n < 49152 &&
       col_ptr[n] < 262144 && !small_spiked_ordering_class) {
     /* tiny/sparse systems: the ordering competition (AMF/AMD scoring,
@@ -45124,7 +45035,6 @@ static int kls_choose_symbolic_inner(UF_long n,
     /* Retain the generic AUTO tournament as the allocation-failure path. */
   }
 
-#ifdef KLS_HAVE_METIS
   if (!kls_analyze_defer_nd &&
       kls_asymmetric_bounded_degree_direct_metis_analyze_class !=
         KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE) {
@@ -45144,7 +45054,6 @@ static int kls_choose_symbolic_inner(UF_long n,
     /* Preserve the ordinary AUTO recovery tournament on allocation or
        ordering failure. */
   }
-#endif
 
   if (options->threads == 8 &&
       getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
@@ -45226,7 +45135,6 @@ static int kls_choose_symbolic_inner(UF_long n,
   }
 #endif
 
-#ifdef KLS_HAVE_METIS
   if (!kls_analyze_defer_nd && options->threads == 8 &&
       kls_large_low_degree_fragmented_pattern(n, col_ptr)) {
     /* The fragmented low-degree class has one moderate BTF core surrounded
@@ -45279,24 +45187,19 @@ static int kls_choose_symbolic_inner(UF_long n,
       return KLS_OK;
     }
   }
-#endif
 
   kls_no_btf_retry_hopeless = 0;
-#if defined(KLS_HAVE_MTMETIS) && defined(KLS_HAVE_METIS)
+#ifdef KLS_HAVE_MTMETIS
   kls_mt_nd_class =
     n >= 200000 &&
     is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx);
 #endif
   kls_options auto_options = *options;
   symbolic_options = options;
-#ifdef KLS_HAVE_METIS
   const int large_spiked_metis_no_btf =
     is_large_nearly_diagonal_spiked_metis_pattern(n, col_ptr, row_idx);
   if (large_spiked_metis_no_btf && n <= 750000u && col_ptr[n] < 8u * n) {
   }
-#else
-  const int large_spiked_metis_no_btf = 0;
-#endif
   if (should_start_auto_without_btf(n, col_ptr, row_idx, options,
                                     large_spiked_metis_no_btf)) {
     auto_options.use_btf = 0;
@@ -45305,7 +45208,6 @@ static int kls_choose_symbolic_inner(UF_long n,
 
 
 
-#ifdef KLS_HAVE_METIS
   if (kls_prestatic_ordering_ctx && options->threads >= 3 &&
       n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
       getenv("KLS_DISABLE_PS_CHOOSE_PAR") == NULL &&
@@ -45446,9 +45348,7 @@ static int kls_choose_symbolic_inner(UF_long n,
     }
     /* every candidate failed: fall through to the standard path */
   }
-#endif
 
-#ifdef KLS_HAVE_METIS
   if (n <= 49152u && !kls_analyze_defer_nd &&
       kls_analyze_nd_race_solver != NULL &&
       kls_analyze_nd_race_solver->metis_race != NULL &&
@@ -45540,7 +45440,6 @@ static int kls_choose_symbolic_inner(UF_long n,
       return KLS_OK;
     }
   }
-#endif
 
 generic_ordering_tournament:;
   struct kls_amf_spec_job amf_spec[3];
@@ -45942,7 +45841,6 @@ generic_ordering_tournament:;
                        kls_amf_spec_main,
                        &aligned_btf_ammf_spec) == 0;
     }
-#ifdef KLS_HAVE_METIS
     /* The base AMD comparison has now settled the representation from
        realized symbolic fill/work.  Launch NodeND in that same coordinate
        frame while the independent minimum-fill workers finish.  This keeps
@@ -45982,7 +45880,6 @@ generic_ordering_tournament:;
           best_symbolic->do_btf ? 1 : 0);
       }
     }
-#endif
   }
 
   /* AMF (approximate minimum fill) rides the same quotient graph as AMD
@@ -46300,7 +46197,6 @@ generic_ordering_tournament:;
     kls_separator_analysis_clear(
       &aligned_btf_ammf_spec.separator);
   }
-#ifdef KLS_HAVE_METIS
   /* Generic AUTO defers nested dissection until numeric values are
      available.  kls_maybe_start_metis_race launches it only for a
      high-cost retained factor and the factor-time promotion compares actual
@@ -46308,7 +46204,6 @@ generic_ordering_tournament:;
      multiply it by the orientation candidates and let an optimistic
      symbolic estimate install a pivot-inflated numeric. */
 
-#endif
 #ifdef KLS_HAVE_SCOTCH
 
 #endif
@@ -46340,11 +46235,9 @@ static int is_prestatic_bound_missing_diagonal_pattern(
       col_ptr[n] > 8000000) {
     return 0;
   }
-#ifdef KLS_HAVE_METIS
   if (is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
     return 0;
   }
-#endif
   UF_long missing = 0;
   for (UF_long col = 0; col < n; ++col) {
     int has_diag = 0;
@@ -46548,9 +46441,7 @@ static int choose_symbolic_for_pattern(UF_long n,
 
 
 
-#ifdef KLS_HAVE_METIS
 
-#endif
 
   int generic_match_resource_bound =
     n <= 20000u || (n <= 150000u && col_ptr[n] <= 1500000u);
@@ -47508,7 +47399,6 @@ static int select_candidate(kls_pattern_candidate *normal,
                 "KLS select: identity matching + one SCC; skip BTF\n");
       }
     }
-#ifdef KLS_HAVE_METIS
     const int exact_pattern_symmetry =
       normal != NULL && transpose != NULL &&
       normal->n == transpose->n && normal->nnz == transpose->nnz &&
@@ -47549,10 +47439,8 @@ static int select_candidate(kls_pattern_candidate *normal,
         }
       }
     }
-#endif
     const int status =
       select_candidate_inner(normal, transpose, generic_options, chosen_out);
-#ifdef KLS_HAVE_METIS
     if (overlap_candidate != NULL) {
       overlap_candidate->generic_nd_overlap_target = NULL;
     }
@@ -47637,7 +47525,6 @@ static int select_candidate(kls_pattern_candidate *normal,
     } else {
       kls_generic_nd_trial_clear(&overlapped_nd);
     }
-#endif
     return status;
   }
 
@@ -47742,7 +47629,6 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   }
 }
 
-#ifdef KLS_HAVE_METIS
 /* A pre-numeric ND choice is provisional until the ordinary predicted-factor
    construction verifies that its realized pivot frame stays near the
    symbolic fill.  If that construction rejects, rebuild the exact
@@ -47820,7 +47706,6 @@ static int kls_restore_generic_nd_fallback_symbolic(kls_solver *solver,
   return 1;
 }
 
-#endif
 
 /* A lower-span AMF3 ordering is retained only after the first value set
    proves that its static numeric is usable.  Rebuild the ordinary AMF3
@@ -167181,12 +167066,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
   solver->low_rcond_solve_contract_state = 0;
-#ifdef KLS_HAVE_METIS
   solver->dense_spiked_original_pivot_path =
     0;
-#else
-  solver->dense_spiked_original_pivot_path = 0;
-#endif
   if (solver->dense_spiked_original_pivot_path &&
       solver->options.scale == KLS_SCALE_AUTO) {
     /* Row/column max scaling adds solve traffic and makes this class's
@@ -167781,7 +167662,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           solver->generic_amf3_span_variant_selected) {
         (void)kls_restore_generic_amf3_span_symbolic(solver, &elapsed);
       }
-#ifdef KLS_HAVE_METIS
       if (!had_numeric && solver->numeric == NULL &&
           solver->generic_nd_portfolio_selected) {
         const double provisional_fill = symbolic_score(solver->symbolic);
@@ -167808,7 +167688,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           (void)kls_restore_generic_nd_fallback_symbolic(solver, &elapsed);
         }
       }
-#endif
       const int kls_dense_tail_class =
         !had_numeric && solver->metis_race != NULL &&
         solver->symbolic != NULL && solver->n >= 50000 &&
@@ -168120,7 +167999,6 @@ int kls_factor(kls_solver *solver, const double *values) {
                   (long)solver->common.noffdiag, (long)pivot_cap);
         }
       }
-#ifdef KLS_HAVE_METIS
       if (!had_numeric && solver->generic_nd_portfolio_selected) {
         int candidate_ok =
           solver->numeric != NULL &&
@@ -168202,7 +168080,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           }
         }
       }
-#endif
       if (solver->numeric != NULL &&
           solver->common.status >= TRILINOS_KLU_OK &&
           solver->common.status != TRILINOS_KLU_SINGULAR) {
@@ -168346,7 +168223,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   KLS_ENTRY_PHASE("auto_rowmatch")
   solver->metis_promotion_validated = 0;
   const int kls_oneshot_lean = kls_defer_cycle_trials_enabled();
-#ifdef KLS_HAVE_METIS
   if (solver->generic_nd_numeric_validated) {
     if (solver->metis_race != NULL && solver->metis_race->metis_wanted) {
       kls_metis_race_abandon(solver);
@@ -168387,7 +168263,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
-#endif
   KLS_ENTRY_PHASE("metis_promo")
   const int allow_deferred_generic_tight_pivot =
     kls_oneshot_lean &&
@@ -168438,7 +168313,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
-#ifdef KLS_HAVE_METIS
     /* The promotion verdict predates this scale: give METIS one more
        shot against the rescaled incumbent. */
     if (!solver->generic_nd_numeric_validated) {
@@ -168454,7 +168328,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         diagnostics_have_rcond = 0;
       }
     }
-#endif
   }
   if (kls_trace_entry) {
     fprintf(stderr, "KLS scale now %d (adopted=%d)\n",
@@ -169655,7 +169528,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
 #endif
   }
-#ifdef KLS_HAVE_METIS
   if (solver->metis_race_deferred) {
     /* The factor-exit promotion was deferred so a one-shot factor never
        blocks on the race worker.  A changed-numeric workload has now paid
@@ -169671,7 +169543,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
                                    solver->metis_race_deferred_invalid);
     solver->metis_race_deferred_invalid = 0;
   }
-#endif
   if (solver->auto_scale_deferred) {
     /* Scaling changes no public coordinates, but its numeric verdict is
        valid only for the retained ordering/row frame.  Settle every pending

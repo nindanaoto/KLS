@@ -140,7 +140,7 @@ ctest --test-dir build --output-on-failure
 The main build is reproducible from pinned submodules. KLS vendors the
 SuiteSparse-derived KLU, AMD, COLAMD, and BTF C sources from Trilinos under
 `third_party/suitesparse` as the current in-tree serial engine. METIS ordering
-is enabled by default from pinned submodules under `third_party/metis` and
+is required and built from pinned submodules under `third_party/metis` and
 `third_party/gklib`, SCOTCH ordering is enabled by default from
 `third_party/scotch`, and BSD-licensed SPRAL matching/scaling is enabled by
 default from `third_party/spral`; initialize them with
@@ -152,7 +152,9 @@ cmake -S . -B build -DKLS_USE_SYSTEM_METIS=ON
 ```
 
 KLS builds METIS with 64-bit `idx_t` for compatibility with the 64-bit KLS/KLU
-path. A system METIS install used this way must be ABI-compatible.
+path. A system METIS install used this way must be ABI-compatible. METIS cannot
+be disabled because AUTO ordering and the reported large-circuit performance
+depend on its nested-dissection candidates.
 
 To use a compatible system SCOTCH instead of the pinned submodule, configure
 with:

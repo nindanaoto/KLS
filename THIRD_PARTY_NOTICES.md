@@ -35,13 +35,18 @@ SPRAL is Copyright (c) 2014-2025, The Science and Technology Facilities
 Council (STFC), and is licensed under BSD-3-Clause; see
 `third_party/spral/LICENCE`.
 
-KLS can build METIS nested-dissection ordering from pinned submodules under
+KLS requires METIS nested-dissection ordering and builds it from pinned submodules under
 `third_party/metis` and `third_party/gklib`. METIS is Copyright 1997, Regents
 of the University of Minnesota, and is licensed under Apache-2.0; see
 `third_party/metis/LICENSE`. GKlib is Copyright 1995-2018, Regents of the
 University of Minnesota. Its primary license is Apache-2.0 and it also carries
 LGPL-2.1-or-later and BSD-3-Clause files; see `third_party/gklib/LICENSE.txt`
 and `third_party/gklib/LICENSES.md`.
+
+KLS is distributed under LGPL-2.1-or-later. The bundled distribution includes
+the complete Apache-2.0 METIS and GKlib notices and license texts; downstream
+redistributors remain responsible for complying with the applicable terms of
+both the KLS and third-party components.
 
 KLS can build SCOTCH nested-dissection ordering from the pinned submodule under
 `third_party/scotch`. SCOTCH is Copyright 2004-2021 by the listed SCOTCH

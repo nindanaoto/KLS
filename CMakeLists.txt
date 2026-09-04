@@ -21,7 +21,6 @@ option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
 option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
 option(KLS_BUILD_SUBTREELU_COMPARE "Build optional SubtreeLU comparison tool" OFF)
 option(KLS_BUILD_KLU2_COMPARE "Build optional Trilinos KLU2 comparison tool" OFF)
-option(KLS_ENABLE_METIS "Enable METIS nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled submodule" OFF)
 option(KLS_ENABLE_SCOTCH "Enable SCOTCH nested-dissection ordering support" ON)
 option(KLS_USE_SYSTEM_SCOTCH "Use a system SCOTCH library instead of the bundled submodule" OFF)
@@ -74,8 +73,7 @@ if(KLS_ENABLE_CBLAS_SUPERNODE)
   endif()
 endif()
 
-if(KLS_ENABLE_METIS)
-  if(KLS_USE_SYSTEM_METIS)
+if(KLS_USE_SYSTEM_METIS)
     find_path(KLS_SYSTEM_METIS_INCLUDE_DIR
       NAMES metis.h
       PATHS ${KLS_SYSTEM_METIS_INCLUDE_DIR})
@@ -97,10 +95,9 @@ if(KLS_ENABLE_METIS)
         "${KLS_SYSTEM_METIS_LIBRARY}")
     target_compile_definitions(kls_metis
       INTERFACE
-        KLS_HAVE_METIS=1
         IDXTYPEWIDTH=64
         REALTYPEWIDTH=64)
-  else()
+else()
     set(KLS_METIS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/metis")
     set(KLS_GKLIB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/gklib")
     if(NOT EXISTS "${KLS_METIS_ROOT}/include/metis.h" OR
@@ -157,7 +154,6 @@ if(KLS_ENABLE_METIS)
         "${KLS_METIS_ROOT}/libmetis")
     target_compile_definitions(kls_metis
       PUBLIC
-        KLS_HAVE_METIS=1
         IDXTYPEWIDTH=64
         REALTYPEWIDTH=64
       PRIVATE
@@ -173,7 +169,6 @@ if(KLS_ENABLE_METIS)
     endif()
     target_compile_options(kls_metis PRIVATE
       $<$<C_COMPILER_ID:GNU,Clang>:-Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unknown-pragmas -Wno-unused-label -Wno-pedantic>)
-  endif()
 endif()
 
 if(KLS_ENABLE_SCOTCH)
@@ -480,31 +475,29 @@ target_link_libraries(kls
   PRIVATE
     kls_suitesparse
     Threads::Threads)
-if(KLS_ENABLE_METIS)
+target_link_libraries(kls
+  PRIVATE
+    kls_metis)
+# Optional prebuilt mt-metis (threaded NodeND experiment, env-gated at
+# runtime via KLS_MT_ND); build it once with its own configure/make.
+set(KLS_MTMETIS_LIB
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mtmetis/build/Linux-x86_64/lib/libmtmetis_hidden.o")
+if(EXISTS "${KLS_MTMETIS_LIB}")
+  add_library(kls_mtmetis INTERFACE)
+  target_include_directories(kls_mtmetis
+    INTERFACE
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mtmetis/include")
+  find_package(OpenMP REQUIRED COMPONENTS C)
+  target_link_libraries(kls_mtmetis
+    INTERFACE
+      "${KLS_MTMETIS_LIB}"
+      OpenMP::OpenMP_C)
+  target_compile_definitions(kls_mtmetis
+    INTERFACE
+      KLS_HAVE_MTMETIS=1)
   target_link_libraries(kls
     PRIVATE
-      kls_metis)
-  # optional prebuilt mt-metis (threaded NodeND experiment, env-gated
-  # at runtime via KLS_MT_ND); build it once with its own configure/make
-  set(KLS_MTMETIS_LIB
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mtmetis/build/Linux-x86_64/lib/libmtmetis_hidden.o")
-  if(EXISTS "${KLS_MTMETIS_LIB}")
-    add_library(kls_mtmetis INTERFACE)
-    target_include_directories(kls_mtmetis
-      INTERFACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mtmetis/include")
-    find_package(OpenMP REQUIRED COMPONENTS C)
-    target_link_libraries(kls_mtmetis
-      INTERFACE
-        "${KLS_MTMETIS_LIB}"
-        OpenMP::OpenMP_C)
-    target_compile_definitions(kls_mtmetis
-      INTERFACE
-        KLS_HAVE_MTMETIS=1)
-    target_link_libraries(kls
-      PRIVATE
-        kls_mtmetis)
-  endif()
+      kls_mtmetis)
 endif()
 if(KLS_ENABLE_SCOTCH)
   target_link_libraries(kls
