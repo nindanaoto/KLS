@@ -462,7 +462,16 @@ if(KLS_MATH_LIBRARY)
 endif()
 
 add_library(kls
-  src/kls.c)
+  src/kls.c
+  src/kls_numeric_engines.inc
+  src/kls_ordering_policy.inc)
+
+# These implementation fragments stay in kls.c's translation unit so moving
+# the internal engines does not introduce call boundaries or inhibit inlining.
+set_source_files_properties(
+  src/kls_numeric_engines.inc
+  src/kls_ordering_policy.inc
+  PROPERTIES HEADER_FILE_ONLY ON)
 
 add_library(KLS::kls ALIAS kls)
 
