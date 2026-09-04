@@ -845,9 +845,9 @@ struct kls_solver {
   int floor_min_path;  /* engine the steady floor-min came from */
   double mapped_steady_min;
   double floor_probe_min;
-  int direct_klu_choice; /* measured fixed-pattern engine verdict:
-                            0 untried, 1 enter KLU directly, -1 keep the
-                            adaptive mapped/parallel incumbent */
+  int direct_klu_choice; /* fixed-pattern engine verdict: 0 untried,
+                            1 measured direct KLU, 2 structural low-work BTF
+                            direct KLU, -1 adaptive mapped/parallel incumbent */
   int compact_map32_choice; /* fixed-pattern KLU representation verdict:
                                0 untried, 1 compact mapped stream,
                                -1 vendor KLU */
@@ -29480,6 +29480,23 @@ static int kls_low_work_btf_map32_capable(const kls_solver *solver) {
          solver->symbolic->structural_rank == solver->n;
 }
 
+/* KLU's native fixed-pattern walk also has a useful low-work BTF envelope
+   when KLU itself owns row scaling.  Unlike the map32 kernel, this path does
+   not require an unscaled numeric; it only requires the unchanged public
+   compressed frame certified separately at dispatch. */
+static int kls_low_work_btf_public_klu_capable(const kls_solver *solver) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->n == 0u || solver->n > (UF_long)INT32_MAX ||
+      solver->nnz == 0u || solver->nnz > (UF_long)INT32_MAX ||
+      solver->symbolic->nblocks <= 1u ||
+      !(solver->common.flops > 0.0) ||
+      !(solver->common.flops < 100000.0)) {
+    return 0;
+  }
+  return solver->symbolic->structural_rank == KLS_KLU_EMPTY ||
+         solver->symbolic->structural_rank == solver->n;
+}
+
 /* Admit moderate-work BTF factors only to a measured executor comparison.
    Unlike the settled low-work policy, this predicate never chooses a kernel:
    nearby factors with almost identical dimensions can have opposite packed-
@@ -29635,16 +29652,22 @@ static int kls_highly_fragmented_btf_row_trial_capable(
 static int kls_row_refactor_env_enabled(void);
 
 /* KLU's fixed-pattern refactor can consume the public value array without
-   preparation whenever the public matrix is the retained CSC frame.  The
+   preparation whenever the public compressed matrix is the retained frame.
+   That is normal orientation for CSC input and transpose orientation for CSR
+   input: in both cases the caller arrays are the CSC frame factored by KLU. The
    symbolic P/Q and KLU's own row scaling remain internal to that call; KLS
    coordinate transforms do not.  Keep this as a representation capability
    so a measured engine tournament can reuse it at any work size. */
-static int kls_direct_klu_public_csc_capable(const kls_solver *solver) {
+static int kls_direct_klu_public_frame_capable(const kls_solver *solver) {
   return solver != NULL && solver->symbolic != NULL &&
     solver->numeric != NULL &&
     getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL &&
     !kls_row_refactor_env_enabled() &&
-    solver->input_format == KLS_INPUT_CSC && solver->input_to_csc == NULL &&
+    solver->input_to_csc == NULL &&
+    ((solver->input_format == KLS_INPUT_CSC &&
+      solver->orientation == KLS_ORIENTATION_NORMAL) ||
+     (solver->input_format == KLS_INPUT_CSR &&
+      solver->orientation == KLS_ORIENTATION_TRANSPOSE)) &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
     !solver->diagonal_equiv_active &&
@@ -29721,10 +29744,10 @@ static int kls_direct_klu_numeric_residual_probe(
    lifecycle capability separate from the low-work kernel crossover so CSR,
    permutation, scaling, and diagonal-equivalence users retain their ordinary
    preparation paths. */
-static int kls_low_work_single_block_direct_csc_capable(
+static int kls_low_work_single_block_direct_public_capable(
   const kls_solver *solver) {
   return kls_low_work_single_block_policy_enabled(solver) &&
-    kls_direct_klu_public_csc_capable(solver) &&
+    kls_direct_klu_public_frame_capable(solver) &&
     solver->common.scale == -1 && solver->numeric->Rs == NULL;
 }
 
@@ -43295,6 +43318,33 @@ static int kls_initial_certified_unscaled_lifecycle_candidate(
     getenv("KLS_DISABLE_INITIAL_CERTIFIED_UNSCALED_LIFECYCLE") == NULL;
 }
 
+/* For a cache-resident BTF in the caller's compressed frame, KLU row scaling
+   adds a complete value pass to every numeric and a scale pass to every
+   solve.  Start AUTO with the no-scale/no-check KLU mode when the symbolic
+   work and retained descriptors are bounded.  The first numeric still has
+   the ordinary pivot/fill gate below and retains the value-selected scale as
+   a failure recovery; solve-contract classification remains unchanged. */
+static int kls_initial_low_work_btf_public_unscaled_candidate(
+  const kls_solver *solver, int robust_scale) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric == NULL && robust_scale > 0 &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->input_to_csc == NULL &&
+    ((solver->input_format == KLS_INPUT_CSC &&
+      solver->orientation == KLS_ORIENTATION_NORMAL) ||
+     (solver->input_format == KLS_INPUT_CSR &&
+      solver->orientation == KLS_ORIENTATION_TRANSPOSE)) &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    solver->symbolic->nblocks > 1u && solver->n > 0u &&
+    solver->n <= UINT32_C(0x1000) &&
+    solver->nnz > 0u && solver->nnz <= (UF_long)UINT16_MAX &&
+    solver->symbolic->structural_rank == solver->n &&
+    solver->symbolic->est_flops > 0.0 &&
+    solver->symbolic->est_flops < 100000.0 &&
+    getenv("KLS_DISABLE_INITIAL_LOW_WORK_BTF_PUBLIC_UNSCALED") == NULL;
+}
+
 /* A scaled factor can be numerically condition-sensitive yet structurally
    stable, while scaling also excludes the branch-reduced unscaled EGraph
    kernels on every later update.  For a long caller-declared lifecycle,
@@ -46998,13 +47048,17 @@ generic_orientation_comparison:
      once; its full ordering tournament and later numeric guards remain in
      force.  Exact symmetry is the zero-expansion member of this certificate. */
   if (kls_candidate_symmetric_union_is_bounded(normal, transpose)) {
-    int status = analyze_candidate(normal, options);
+    /* Preserve the caller's compressed frame.  For CSC that candidate is
+       normal; for CSR it is transpose.  Both avoid an update gather map. */
+    kls_pattern_candidate *direct = normal->input_to_csc == NULL
+      ? normal : (transpose->input_to_csc == NULL ? transpose : normal);
+    int status = analyze_candidate(direct, options);
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
       fprintf(stderr,
               "KLS select: bounded symmetric union, single analyze\n");
     }
     if (status == KLS_OK) {
-      *chosen_out = normal;
+      *chosen_out = direct;
       return KLS_OK;
     }
     return status;
@@ -96378,7 +96432,7 @@ static int kls_try_compact_map32_klu_tournament(
       solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
       solver->dense_tail_cols != 0u || solver->n > (UF_long)INT32_MAX ||
       solver->nnz > (UF_long)INT32_MAX ||
-      !kls_direct_klu_public_csc_capable(solver)) {
+      !kls_direct_klu_public_frame_capable(solver)) {
     return 0;
   }
 
@@ -128832,7 +128886,7 @@ static void maybe_prepare_refactor_map(kls_solver *solver,
                                        double *elapsed) {
   const int pool_map = kls_refactor_pool_map_is_worthwhile(solver);
   if (solver == NULL || elapsed == NULL ||
-      kls_low_work_single_block_direct_csc_capable(solver) ||
+      kls_low_work_single_block_direct_public_capable(solver) ||
       solver->refactor_col_ptr != NULL ||
       solver->numeric == NULL ||
       (!pool_map && (solver->common.scale > 0 ||
@@ -130735,7 +130789,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
        crossover down to ~1e6 total flops (re-measured 2026-07).  Prefer
        the serial mapped refactor under it and keep the EGraph for
        shapes it cannot cover. */
-    if (kls_low_work_single_block_direct_csc_capable(solver)) {
+    if (kls_low_work_single_block_direct_public_capable(solver)) {
       UF_long serial_ok = 0u;
       int compact_used = 0;
       if (!kls_try_compact_map32_klu_tournament(
@@ -167251,6 +167305,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   free_numeric(solver);
   int generic_nd_robust_scale = 0;
   int initial_certified_unscaled_recovery_scale = 0;
+  int initial_low_work_btf_public_unscaled = 0;
   if (!had_numeric && !solver->prestatic_adopted_unfactored) {
     int selected_scale =
       (solver->dense_spiked_original_pivot_path ||
@@ -167284,7 +167339,12 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->common.scale = selected_scale;
     solver->common.tol =
       choose_initial_auto_pivot_tolerance(solver, numeric_values);
-    if (kls_initial_certified_unscaled_lifecycle_candidate(
+    if (kls_initial_low_work_btf_public_unscaled_candidate(
+          solver, selected_scale)) {
+      initial_certified_unscaled_recovery_scale = selected_scale;
+      initial_low_work_btf_public_unscaled = 1;
+      solver->common.scale = -1;
+    } else if (kls_initial_certified_unscaled_lifecycle_candidate(
           solver, selected_scale)) {
       initial_certified_unscaled_recovery_scale = selected_scale;
       solver->common.scale = 0;
@@ -167726,9 +167786,11 @@ int kls_factor(kls_solver *solver, const double *values) {
           numeric_factor_seconds += kls_now_seconds() - recovery_start;
           initial_certified_unscaled_recovery_scale = 0;
         } else {
-          solver->certified_unscaled_l2_contract = 1;
-          solver->certified_unscaled_recovery_scale =
-            initial_certified_unscaled_recovery_scale;
+          if (!initial_low_work_btf_public_unscaled) {
+            solver->certified_unscaled_l2_contract = 1;
+            solver->certified_unscaled_recovery_scale =
+              initial_certified_unscaled_recovery_scale;
+          }
           solver->auto_scale_checked = 1;
         }
         if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
@@ -168435,7 +168497,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     solver->factor_preps_deferred = 0;
     if (
         getenv("KLS_DISABLE_LOW_WORK_DIRECT_DEFERRED_PREP_SKIP") == NULL &&
-        kls_low_work_single_block_direct_csc_capable(solver)) {
+        kls_low_work_single_block_direct_public_capable(solver)) {
       /* This factor enters the vendor/compact refactor tournament directly.
          Its vendor-first preflight now rejects before map construction when
          the complete incumbent is below the tournament's absolute saving
@@ -168864,13 +168926,39 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
     return KLS_OK;
   }
+  const int direct_low_work_public_btf =
+    solver->direct_klu_choice == 2 ||
+    (solver->direct_klu_choice == 0 &&
+     getenv("KLS_DISABLE_LOW_WORK_BTF_PUBLIC_DIRECT_REFACTOR") == NULL &&
+     getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") == NULL &&
+     kls_low_work_btf_public_klu_capable(solver) &&
+     solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FIRST &&
+     kls_direct_klu_public_frame_capable(solver));
   const int settled_direct_klu =
-    solver->direct_klu_choice > 0 &&
-    getenv("KLS_DISABLE_SETTLED_DIRECT_KLU_REFACTOR") == NULL &&
-    kls_direct_klu_public_csc_capable(solver);
+    solver->direct_klu_choice == 2 ||
+    (solver->direct_klu_choice > 0 &&
+     getenv("KLS_DISABLE_SETTLED_DIRECT_KLU_REFACTOR") == NULL &&
+     kls_direct_klu_public_frame_capable(solver));
+  if (getenv("KLS_TRACE_PUBLIC_DIRECT_GATE") != NULL) {
+    static _Thread_local int traced_public_direct_gate = 0;
+    if (traced_public_direct_gate++ < 3) {
+      fprintf(stderr,
+              "KLS public-direct gate: btf=%d frame=%d path=%d probe=%d "
+              "unchanged=%d deferred=%d/%d/%d/%d/%d scale=%ld blocks=%lu\n",
+              direct_low_work_public_btf,
+              kls_direct_klu_public_frame_capable(solver),
+              (int)solver->stats.last_factor_path,
+              solver->solve_contract_probe, solver->unchanged_refactor_state,
+              solver->factor_preps_deferred, solver->prestatic_deferred,
+              solver->rowmatch_deferred, solver->metis_race_deferred,
+              solver->auto_scale_deferred, solver->common.scale,
+              (unsigned long)solver->symbolic->nblocks);
+    }
+  }
   if ((settled_direct_klu ||
        (getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_DIRECT_REFACTOR") == NULL &&
-        kls_low_work_single_block_direct_csc_capable(solver))) &&
+        kls_low_work_single_block_direct_public_capable(solver)) ||
+       direct_low_work_public_btf) &&
       solver->solve_contract_probe >= 1 &&
       solver->unchanged_refactor_state < 0 &&
       !solver->factor_preps_deferred && !solver->prestatic_deferred &&
@@ -168891,13 +168979,30 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->compact_amf_two_block_exact_recip_fresh = 0;
     solver->parallel_refine_values_copied = 0;
     solver->i32solve_udiag_recip_fresh = 0;
-    kls_clear_fast_reject_stats(solver);
-    kls_clear_tail_last_stats(solver);
-    kls_clear_row_refactor_last_stats(solver);
+    /* These large diagnostic families are already zero after the first
+       settled vendor update.  Clear them once at the representation handoff,
+       then avoid hundreds of redundant stores on every tiny numeric. */
+    const int first_direct_low_work_public_btf =
+      direct_low_work_public_btf && solver->direct_klu_choice == 0;
+    if (!direct_low_work_public_btf || first_direct_low_work_public_btf) {
+      kls_clear_fast_reject_stats(solver);
+      kls_clear_tail_last_stats(solver);
+      kls_clear_row_refactor_last_stats(solver);
+    }
+    if (first_direct_low_work_public_btf) {
+      /* Value 2 records the stronger low-work public-BTF certificate, so
+         later calls do not repeat environment and representation gates. */
+      solver->direct_klu_choice = 2;
+    }
     solver->common.status = TRILINOS_KLU_OK;
     UF_long ok = 0u;
     int compact_used = 0;
-    if (!kls_try_compact_map32_klu_tournament(
+    if (direct_low_work_public_btf) {
+      ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
+                                   (double *)(uintptr_t)values,
+                                   solver->symbolic, solver->numeric,
+                                   &solver->common);
+    } else if (!kls_try_compact_map32_klu_tournament(
           solver, (double *)(uintptr_t)values, &ok, &compact_used)) {
       ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                                    (double *)(uintptr_t)values,
@@ -168921,12 +169026,18 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_set_last_refactor_path(
       solver, compact_used
         ? KLS_REFACTOR_PATH_MAPPED : KLS_REFACTOR_PATH_KLU);
-    if (ok && solver->common.status >= TRILINOS_KLU_OK) {
+    if (!direct_low_work_public_btf && ok &&
+        solver->common.status >= TRILINOS_KLU_OK) {
       (void)kls_refresh_i32_udiag_recip(solver);
     }
     solver->adaptive_refactor_seconds = kls_now_seconds() - start;
     solver->stats.refactor_seconds = solver->adaptive_refactor_seconds;
-    fill_numeric_stats(solver);
+    if (!direct_low_work_public_btf) {
+      fill_numeric_stats(solver);
+    } else {
+      solver->stats.memory_bytes = solver->common.memusage;
+      solver->stats.memory_peak_bytes = solver->common.mempeak;
+    }
     if (getenv("KLS_TRACE_LOW_WORK_SINGLE_BLOCK_DIRECT_REFACTOR") != NULL ||
         getenv("KLS_TRACE_DIRECT_KLU_TOURNAMENT") != NULL) {
       fprintf(stderr,
@@ -169897,7 +170008,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const int direct_klu_column_challenger =
     solver->lean_choice < 0 &&
     !generic_low_intensity_column_preselected &&
-    !kls_low_work_single_block_direct_csc_capable(solver) &&
+    !kls_low_work_single_block_direct_public_capable(solver) &&
     (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU ||
      solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED);
   if (ok && solver->common.status >= 0 &&
@@ -169906,7 +170017,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->solve_contract_probe == 0 &&
       kls_repeated_update_workload(&solver->options) &&
       solver->options.expected_refactorizations > 2 &&
-      kls_direct_klu_public_csc_capable(solver) &&
+      kls_direct_klu_public_frame_capable(solver) &&
       solver->dense_tail_cols == 0 && !solver->numeric_is_predicted &&
       !solver->fp32_last_used && !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
@@ -172554,9 +172665,11 @@ static int solve_impl(kls_solver *solver,
       !solver->certified_unscaled_l2_contract &&
       !transpose && nrhs == 1 &&
       ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
-      (kls_low_work_btf_prefers_native_solve(solver) ||
-       kls_low_work_single_block_policy_enabled(solver)) &&
-      solver->common.scale == -1 && solver->numeric->Rs == NULL &&
+      (((kls_low_work_btf_prefers_native_solve(solver) ||
+         kls_low_work_single_block_policy_enabled(solver)) &&
+        solver->common.scale == -1 && solver->numeric->Rs == NULL) ||
+       (kls_low_work_btf_public_klu_capable(solver) &&
+        kls_direct_klu_public_frame_capable(solver))) &&
       solver->row_perm == NULL && solver->user_col_perm == NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       !solver->diagonal_equiv_active &&
@@ -172566,11 +172679,11 @@ static int solve_impl(kls_solver *solver,
       solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u && !solver->fp32_last_used &&
       solver->solve_contract_probe == 1) {
-    /* This verified plain-frame factor already selected KLU's native packed
+    /* This verified public-frame factor already selected KLU's native packed
        solve because a second compact mirror cannot repay in its cache-sized
-       work regime.  Dispatch that same kernel directly for the guarded
-       single-RHS contract instead of re-evaluating every transformed and
-       refinement route on each small solve. */
+       work regime.  KLU-owned row scaling is part of that native solve, so it
+       remains direct when Rs is present.  Dispatch the same kernel without
+       re-evaluating transformed and refinement routes on each small solve. */
     if (b != x) {
       memmove(x, b, (size_t)solver->n * sizeof(*x));
     }
