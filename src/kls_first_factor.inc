@@ -24995,11 +24995,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     /* With a METIS race pending this numeric is a bootstrap the
        promotion will replace: the parallel predicted fill is far
        cheaper than a serial KLU first factorization, and a predicted
-       numeric also keeps the unmeasured scale re-trials off.  A retained
-       diagonal-equivalent factor is the opposite case: it removes every
-       later numeric factorization, so a small predicted build has no cycle
-       payoff and must obey this same cold-factor size/fill crossover.
-       Large retained-factor candidates still pass through the n/lnz gate. */
+       numeric also keeps the unmeasured scale re-trials off. */
     if (getenv("KLS_TRACE_PREDICTED") != NULL) {
       fprintf(stderr, "KLS predicted: skipped n=%ld est_lnz=%.3e\n",
               (long)n, symbolic->lnz);

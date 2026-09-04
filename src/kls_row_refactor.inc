@@ -21894,7 +21894,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->singular_col = KLS_KLU_EMPTY;
   shared->pipeline_done = pipeline_done;
   shared->pipeline_generation = pipeline_generation;
-  shared->pipeline_natural_order = 0;
   shared->row_pipeline_ready_queue = use_row_ready_queue;
   shared->row_pipeline_row_dep_ready_queue =
     use_row_ready_queue && row_dep_ready_queue;

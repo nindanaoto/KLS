@@ -197,7 +197,6 @@ static int kls_row_refactor_env_enabled(void);
 static int kls_direct_klu_public_frame_capable(const kls_solver *solver) {
   return solver != NULL && solver->symbolic != NULL &&
     solver->numeric != NULL &&
-    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") == NULL &&
     !kls_row_refactor_env_enabled() &&
     solver->input_to_csc == NULL &&
     ((solver->input_format == KLS_INPUT_CSC &&
@@ -206,7 +205,6 @@ static int kls_direct_klu_public_frame_capable(const kls_solver *solver) {
       solver->orientation == KLS_ORIENTATION_TRANSPOSE)) &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    !solver->diagonal_equiv_active &&
     ((solver->common.scale > 0 && solver->numeric->Rs != NULL) ||
      (solver->common.scale <= 0 && solver->numeric->Rs == NULL));
 }
@@ -278,7 +276,7 @@ static int kls_direct_klu_numeric_residual_probe(
 /* A direct KLU refactor may consume the caller's values only when the public
    matrix is already the retained, untransformed CSC frame.  Keep this
    lifecycle capability separate from the low-work kernel crossover so CSR,
-   permutation, scaling, and diagonal-equivalence users retain their ordinary
+   permutation and scaling users retain their ordinary
    preparation paths. */
 static int kls_low_work_single_block_direct_public_capable(
   const kls_solver *solver) {
@@ -1845,7 +1843,7 @@ static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
     solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    !solver->diagonal_equiv_active && !solver->numeric_is_predicted &&
+    !solver->numeric_is_predicted &&
     !solver->fp32_last_used && !solver->numeric_needs_refinement &&
     !solver->tight_tol_refine && !solver->solve_recovery_active &&
     solver->pivot_nudge_count == 0u &&
@@ -2317,17 +2315,6 @@ static double choose_initial_auto_pivot_tolerance(
       solver->stats.selected_ordering == KLS_ORDERING_METIS &&
       is_large_sparse_diagonal_low_degree_pattern(solver->n, solver->col_ptr,
                                                   solver->row_idx)) {
-    if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL) {
-      /* Retaining one numeric across diagonal-equivalent updates changes the
-         accuracy requirement: a factor that is acceptable for its original
-         right-hand-side direction can lose digits after the boundary
-         diagonals rotate that direction.  Both the old 5e-4 choice and the
-         requested 1e-3 threshold can miss the 1e-8 contract on this
-         ill-conditioned structural class.  A charged one-time factor at
-         2e-3 restores residual margin while remaining far cheaper over a
-         repeated-numeric horizon. */
-      return 2.0e-3;
-    }
     /* Ordinary entrywise updates still need more pivot headroom than 1e-5:
        rare generations exhaust the bounded refinement loop.  The 1e-4
        factor stays residual-valid while retaining enough of the compact
@@ -10036,8 +10023,6 @@ done:
 
 
 
-static int kls_retained_structured_colamd_selected(
-  const kls_solver *solver);
 
 /* A value-aware row match is a performance challenger once a valid numeric
    exists.  If pivoting has already produced a factor inside the symbolic
@@ -10087,13 +10072,6 @@ static int should_try_spral_hungarian_numeric_trial(
        !ignore_pending_portfolio &&
        getenv("KLS_DISABLE_PENDING_MATCH_PORTFOLIO_GUARD") == NULL &&
        (solver->prestatic_deferred || solver->rowmatch_deferred)) ||
-      /* The structured many-BTF selector has already chosen low-work COLAMD
-         for the retained horizon.  Re-matching that pattern and ordering its
-         dominant block with NodeND leaves the incumbent in place after a
-         full symbolic+numeric trial (power197k: 612 ms first refactor versus
-         29 ms without it).  Keep the experiment available explicitly. */
-      (kls_retained_structured_colamd_selected(solver) &&
-       getenv("KLS_ENABLE_STRUCTURED_COLAMD_SPRAL_TRIAL") == NULL) ||
       solver == NULL || !solver->options.static_pivoting ||
       solver->numeric == NULL || solver->symbolic == NULL ||
       kls_live_numeric_declines_matching_portfolio(solver) ||
@@ -10846,9 +10824,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
 
 
-  const int force_prestat_spral = 0;
-  const int forced_match =
-    getenv("KLS_FORCE_STATIC_MATCH") != NULL || force_prestat_spral;
+  const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL;
 
   const int trace_gates =
     deferred && kls_trace_pre_static_enabled();
@@ -11116,7 +11092,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
   }
 #ifdef KLS_HAVE_SPRAL_SCALING
-  int use_large_spral_match = force_prestat_spral;
+  int use_large_spral_match = 0;
   const int force_generic_spral_match =
         getenv("KLS_FORCE_GENERIC_SPRAL_MATCH") != NULL;
   if (
@@ -11180,18 +11156,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
       missing_diagonal * 100u <= 3u * solver->n &&
       weak >= 2000 && weak * 100u >= solver->n;
     if (!deferred &&
-        (kls_defer_cycle_trials_enabled() ||
-         (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
-          !forced_match)) &&
-        solver->n <= 150000u && !majority_weak &&
-        !force_prestat_spral) {
+        kls_defer_cycle_trials_enabled() &&
+        solver->n <= 150000u && !majority_weak) {
       /* A mostly-strong diagonal means the incumbent ordering factors fine
          and the trial is a later-cycle payoff bet (rajat25: 0.53s trial
          versus 0.15s for the AMD factor).  Exact-input reuse defers that bet
-         until the first changed input.  A validated diagonal-equivalent
-         update is stronger: it retains the incumbent numeric for the whole
-         separable-update horizon, so defer the trial until an update fails
-         validation and reaches the ordinary refactor fallback.  The factor
+         until the first changed input.  The factor
          failure rescue below still runs this consult immediately.  Majority-
          weak rows (onetone1/twotone) stay inline because the matched ordering
          is their fast and reliable initial-factor path.  A forced large-weak
@@ -11231,9 +11201,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
   if (!deferred && small_candidate && solver->n <= 16384u &&
       !nearly_missing_diagonal_early_match &&
-      (kls_defer_cycle_trials_enabled() ||
-       (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
-        !forced_match))) {
+      kls_defer_cycle_trials_enabled()) {
     /* In the one-shot tiny class, an optimistic plain factor can be cheaper
        than an inline match and trial.  A singular plain factor is rescued at
        factor exit, and a changed-value cycle gets the deferred consult at its
@@ -11543,8 +11511,7 @@ matching_attempt:;
        legacy context here invokes its AMD/AMF competition instead and can
        select a 20-second pivot-heavy rajat30 trial; the ordinary chooser's
        structural METIS-start route produces the compact ~9M-entry factor. */
-    int ordinary_matched_ordering_ctx =
-      force_prestat_spral;
+    int ordinary_matched_ordering_ctx = 0;
 #ifdef KLS_HAVE_SPRAL_SCALING
     ordinary_matched_ordering_ctx |=
       use_large_spral_match;
@@ -12144,7 +12111,7 @@ matching_attempt:;
     solver->input_to_csc == NULL && solver->values == NULL &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    solver->block_order_perm == NULL && !solver->diagonal_equiv_active &&
+    solver->block_order_perm == NULL &&
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
     solver->options.ordering == KLS_ORDERING_AUTO &&
     solver->options.scale == KLS_SCALE_AUTO && solver->options.use_btf &&
@@ -13329,18 +13296,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->large_bounded_no_btf_amf_path) {
     return;
   }
-  if (getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
-      solver->input_format == KLS_INPUT_CSC &&
-      solver->orientation == KLS_ORIENTATION_NORMAL &&
-      solver->input_to_csc == NULL &&
-      1) {
-    /* The diagonal-equivalent engine retains the incumbent numeric and
-       settles every later changed matrix with boundary maps.  A speculative
-       replacement numeric therefore cannot repay its NodeND/factor work;
-       worse, the worker competes with both the initial factor and the first
-       mapped solves (ASIC_320ks: 0.33 -> 0.60 s foreground factor). */
-    return;
-  }
   if (!generic_compact_scale_race &&
       getenv("KLS_ENABLE_COMPACT_MEDIUM_NUMERIC_TRIALS") == NULL &&
       kls_compact_medium_dominant_btf_symbolic_shape(solver)) {
@@ -13514,8 +13469,8 @@ static int kls_certified_unscaled_lifecycle_trial_capable(
     solver->input_format == KLS_INPUT_CSC &&
     solver->input_to_csc == NULL && solver->row_perm == NULL &&
     solver->user_col_perm == NULL && solver->row_scale == NULL &&
-    solver->col_scale == NULL && !solver->diagonal_equiv_active &&
-    !solver->numeric_is_predicted && solver->pivot_nudge_count == 0u &&
+    solver->col_scale == NULL && !solver->numeric_is_predicted &&
+    solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u &&
     solver->common.scale > 0 && solver->numeric->Rs != NULL &&
     solver->common.tol >= 1.0e-8 && solver->common.tol <= 1.0e-7 &&
@@ -13546,7 +13501,7 @@ static int kls_initial_certified_unscaled_lifecycle_candidate(
       solver->input_format != KLS_INPUT_CSC ||
       solver->input_to_csc != NULL || solver->row_perm != NULL ||
       solver->user_col_perm != NULL || solver->row_scale != NULL ||
-      solver->col_scale != NULL || solver->diagonal_equiv_active ||
+      solver->col_scale != NULL ||
       (solver->stats.selected_ordering != KLS_ORDERING_AMF &&
        solver->stats.selected_ordering != KLS_ORDERING_AMMF) ||
       solver->common.tol < 1.0e-8 || solver->common.tol > 1.0e-7 ||
@@ -13623,8 +13578,8 @@ static int kls_repeated_scaled_egraph_unscaled_trial_enabled(
       solver->input_format != KLS_INPUT_CSC ||
       solver->input_to_csc != NULL || solver->row_perm != NULL ||
       solver->user_col_perm != NULL || solver->row_scale != NULL ||
-      solver->col_scale != NULL || solver->diagonal_equiv_active ||
-      solver->numeric_is_predicted || solver->pivot_nudge_count != 0u ||
+      solver->col_scale != NULL || solver->numeric_is_predicted ||
+      solver->pivot_nudge_count != 0u ||
       solver->common.kls_perturb_count != 0u ||
       solver->common.scale <= 0 || solver->numeric->Rs == NULL ||
       solver->n < 5000u || solver->nnz == 0u ||
@@ -17636,18 +17591,6 @@ static int select_candidate(kls_pattern_candidate *normal,
       !kls_large_low_degree_fragmented_pattern(ref->n, ref->col_ptr) &&
       !is_large_very_low_degree_full_diagonal_pattern(
         ref->n, ref->col_ptr, ref->row_idx) &&
-      /* The usual large-class deferral assumes a later matching or METIS
-         promotion can repay itself across real numeric refactors.  Under a
-         retained diagonal-equivalent horizon, the initial numeric instead
-         survives every validated update.  Do not mask the existing direct-
-         METIS classifier for the general nearly-diagonal spike class: its
-         minimum-degree bootstrap can pass the base RHS yet lose several
-         digits on a boundary-scaled RHS.  The normalized sparse-spike
-         proposal is the measured exception: it still uses METIS, but overlaps
-         NodeND with matching and settles on a verified predicted numeric. */
-      !(getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != NULL &&
-        is_large_nearly_diagonal_spiked_metis_pattern(
-          ref->n, ref->col_ptr, ref->row_idx)) &&
       getenv("KLS_DISABLE_ANA_ND_DEFER") == NULL) {
     defer = 1;
   }
@@ -17981,8 +17924,8 @@ static int maybe_factor_generic_btf_value_alternative(
     solver->input_format == KLS_INPUT_CSC &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    solver->block_order_perm == NULL && !solver->diagonal_equiv_active &&
-    solver->symbolic != NULL && !solver->symbolic->do_btf &&
+    solver->block_order_perm == NULL && solver->symbolic != NULL &&
+    !solver->symbolic->do_btf &&
     candidate_symbolic->do_btf && candidate_symbolic->nblocks > 1u &&
     candidate_symbolic->maxblock < solver->n;
   if (!capable) {
@@ -19834,14 +19777,10 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_u_index32_enabled;
   solver->stats.refactor_u_index32_entries =
     (int64_t)solver->refactor_u_indices32_count;
-  solver->stats.refactor_last_supernode_pipeline_tasks =
-    (int64_t)solver->refactor_last_supernode_pipeline_tasks;
-  solver->stats.refactor_last_supernode_pipeline_columns =
-    (int64_t)solver->refactor_last_supernode_pipeline_columns;
-  solver->stats.refactor_supernode_pipeline_task_count =
-    (int64_t)solver->refactor_supernode_pipeline_task_count;
-  solver->stats.refactor_supernode_pipeline_column_count =
-    (int64_t)solver->refactor_supernode_pipeline_column_count;
+  solver->stats.refactor_last_supernode_pipeline_tasks = 0;
+  solver->stats.refactor_last_supernode_pipeline_columns = 0;
+  solver->stats.refactor_supernode_pipeline_task_count = 0;
+  solver->stats.refactor_supernode_pipeline_column_count = 0;
   solver->stats.refactor_last_supernode_update_runs =
     (int64_t)solver->refactor_last_supernode_update_runs;
   solver->stats.refactor_last_supernode_update_rows =

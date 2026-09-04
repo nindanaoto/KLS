@@ -17476,8 +17476,6 @@ static int test_partial_btf_refactor(void) {
   const char *saved_partial_value =
     getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR");
   const char *saved_unchanged_value = getenv("KLS_DISABLE_UNCHANGED_REFACTOR");
-  const char *saved_diagonal_value =
-    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR");
   const char *saved_gate_value =
     getenv("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE");
   const char *saved_fraction_value =
@@ -17486,15 +17484,12 @@ static int test_partial_btf_refactor(void) {
     ? strdup(saved_partial_value) : NULL;
   char *saved_unchanged = saved_unchanged_value != NULL
     ? strdup(saved_unchanged_value) : NULL;
-  char *saved_diagonal = saved_diagonal_value != NULL
-    ? strdup(saved_diagonal_value) : NULL;
   char *saved_gate = saved_gate_value != NULL
     ? strdup(saved_gate_value) : NULL;
   char *saved_fraction = saved_fraction_value != NULL
     ? strdup(saved_fraction_value) : NULL;
   const int had_partial = saved_partial_value != NULL;
   const int had_unchanged = saved_unchanged_value != NULL;
-  const int had_diagonal = saved_diagonal_value != NULL;
   const int had_gate = saved_gate_value != NULL;
   const int had_fraction = saved_fraction_value != NULL;
   kls_solver *solver = NULL;
@@ -17504,19 +17499,16 @@ static int test_partial_btf_refactor(void) {
 
   if ((had_partial && saved_partial == NULL) ||
       (had_unchanged && saved_unchanged == NULL) ||
-      (had_diagonal && saved_diagonal == NULL) ||
       (had_gate && saved_gate == NULL) ||
       (had_fraction && saved_fraction == NULL)) {
     free(saved_partial);
     free(saved_unchanged);
-    free(saved_diagonal);
     free(saved_gate);
     free(saved_fraction);
     return 0;
   }
   if (setenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR", "1", 1) != 0 ||
       setenv("KLS_DISABLE_UNCHANGED_REFACTOR", "1", 1) != 0 ||
-      unsetenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != 0 ||
       unsetenv("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE") != 0 ||
       unsetenv("KLS_PARTIAL_BTF_MAX_WORK_FRACTION") != 0) {
     perror("configure partial BTF refactor test");
@@ -17675,9 +17667,6 @@ static int test_partial_btf_refactor(void) {
                          saved_partial != NULL ? saved_partial : "") ||
       !restore_env_value("KLS_DISABLE_UNCHANGED_REFACTOR", had_unchanged,
                          saved_unchanged != NULL ? saved_unchanged : "") ||
-      !restore_env_value("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR",
-                         had_diagonal,
-                         saved_diagonal != NULL ? saved_diagonal : "") ||
       !restore_env_value("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE", had_gate,
                          saved_gate != NULL ? saved_gate : "") ||
       !restore_env_value("KLS_PARTIAL_BTF_MAX_WORK_FRACTION", had_fraction,
@@ -17686,7 +17675,6 @@ static int test_partial_btf_refactor(void) {
   }
   free(saved_partial);
   free(saved_unchanged);
-  free(saved_diagonal);
   free(saved_gate);
   free(saved_fraction);
   return ok;
@@ -17798,224 +17786,7 @@ static int test_partial_btf_shadow_checker(void) {
   return ok;
 }
 
-static int test_diagonal_equivalent_refactor(void) {
-  const int32_t n = 3;
-  const int32_t ap[4] = {0, 3, 6, 9};
-  const int32_t ai[9] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
-  const double ax0[9] = {4.0, 2.0, 1.0,
-                         1.0, 5.0, 2.0,
-                         2.0, 1.0, 6.0};
-  const double row_scale[3] = {2.0, 0.5, 1.5};
-  const double col_scale[3] = {0.75, 1.25, 0.8};
-  const double expected[3] = {1.0, -2.0, 0.5};
-  const double expected_transpose[3] = {-1.0, 0.25, 2.0};
-  double ax1[9];
-  double ax2[9];
-  double ax3[9];
-  double b[3] = {0.0, 0.0, 0.0};
-  double bt[3] = {0.0, 0.0, 0.0};
-  double x[3] = {0.0, 0.0, 0.0};
-  const char *saved_enable_value =
-    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR");
-  char *saved_enable =
-    saved_enable_value != NULL ? strdup(saved_enable_value) : NULL;
-  const int had_enable = saved_enable_value != NULL;
-  const char *saved_disable_value = getenv("KLS_DISABLE_UNCHANGED_REFACTOR");
-  char *saved_disable =
-    saved_disable_value != NULL ? strdup(saved_disable_value) : NULL;
-  const int had_disable = saved_disable_value != NULL;
-  kls_solver *solver = NULL;
-  kls_options options;
-  kls_stats stats;
-  int ok = 1;
 
-  if ((had_enable && saved_enable == NULL) ||
-      (had_disable && saved_disable == NULL)) {
-    free(saved_enable);
-    free(saved_disable);
-    return 0;
-  }
-  if (setenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR", "1", 1) != 0 ||
-      setenv("KLS_DISABLE_UNCHANGED_REFACTOR", "1", 1) != 0) {
-    perror("setenv diagonal-equivalent refactor test");
-    ok = 0;
-  }
-
-  for (int col = 0; col < n; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      ax1[p] = ax0[p] * row_scale[ai[p]] * col_scale[col];
-      b[ai[p]] += ax1[p] * expected[col];
-      bt[col] += ax1[p] * expected_transpose[ai[p]];
-    }
-  }
-  memcpy(ax2, ax1, sizeof(ax2));
-
-  kls_default_options(&options);
-  options.threads = 1;
-  options.ordering = KLS_ORDERING_NATURAL;
-  options.orientation = KLS_ORIENTATION_NORMAL;
-  options.scale = -1;
-  options.use_btf = 0;
-  options.static_pivoting = 0;
-  if (ok && !require_ok(kls_create(&solver),
-                        "create diagonal-equivalent refactor")) ok = 0;
-  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
-                                        0, &options),
-                        "analyze diagonal-equivalent refactor")) ok = 0;
-  if (ok && !require_ok(kls_factor(solver, ax0),
-                        "factor diagonal-equivalent reference")) ok = 0;
-  if (ok && !require_ok(kls_refactor(solver, ax1),
-                        "certify diagonal-equivalent update")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats diagonal-equivalent update")) ok = 0;
-  if (ok && stats.last_refactor_path !=
-              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
-    fprintf(stderr, "diagonal-equivalent update used path %s\n",
-            kls_refactor_path_name(stats.last_refactor_path));
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve diagonal-equivalent update")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr, "diagonal-equivalent solve mismatch at %d: %.17g\n",
-              i, x[i]);
-      ok = 0;
-    }
-  }
-
-  memset(x, 0, sizeof(x));
-  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, x, 0),
-                        "transpose solve diagonal-equivalent update")) {
-    ok = 0;
-  }
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected_transpose[i])) {
-      fprintf(stderr,
-              "diagonal-equivalent transpose mismatch at %d: %.17g\n",
-              i, x[i]);
-      ok = 0;
-    }
-  }
-
-  /* Break one fundamental cycle.  Certification must reject the retained
-     factor and the ordinary numeric path must solve the actual matrix. */
-  ax2[8] *= 1.01;
-  memset(b, 0, sizeof(b));
-  memset(x, 0, sizeof(x));
-  for (int col = 0; col < n; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      b[ai[p]] += ax2[p] * expected[col];
-    }
-  }
-  if (ok && !require_ok(kls_refactor(solver, ax2),
-                        "reject nonseparable update")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats nonseparable fallback")) ok = 0;
-  if (ok && stats.last_refactor_path ==
-              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
-    fprintf(stderr, "nonseparable update incorrectly retained factor\n");
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve nonseparable fallback")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr, "nonseparable fallback mismatch at %d: %.17g\n",
-              i, x[i]);
-      ok = 0;
-    }
-  }
-
-  /* The failed chord is now the pre-recovery hint and ax2 is the new
-     numeric reference.  A genuinely separable update must pass that
-     conservative witness and still execute the complete certificate. */
-  memset(b, 0, sizeof(b));
-  memset(x, 0, sizeof(x));
-  for (int col = 0; col < n; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      ax3[p] = ax2[p] * row_scale[ai[p]] * col_scale[col];
-      b[ai[p]] += ax3[p] * expected[col];
-    }
-  }
-  if (ok && !require_ok(kls_refactor(solver, ax3),
-                        "certify after learned rejection hint")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats after learned rejection hint")) ok = 0;
-  if (ok && stats.last_refactor_path !=
-              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
-    fprintf(stderr, "post-rejection separable update used path %s\n",
-            kls_refactor_path_name(stats.last_refactor_path));
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve after learned rejection hint")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr,
-              "post-rejection separable solve mismatch at %d: %.17g\n",
-              i, x[i]);
-      ok = 0;
-    }
-  }
-
-  /* Four sampled failures (with bounded skipped retries between them) gate
-     the opportunistic plan.  A public factor call starts a new reference
-     epoch and must rearm it. */
-  for (int generation = 0; ok && generation < 7; ++generation) {
-    ax3[8] *= 1.001;
-    if (!require_ok(kls_refactor(solver, ax3),
-                    "repeated nonseparable rejection")) {
-      ok = 0;
-    }
-  }
-  if (ok && !require_ok(kls_factor(solver, ax3),
-                        "factor rearms rejection gate")) ok = 0;
-  memset(b, 0, sizeof(b));
-  memset(x, 0, sizeof(x));
-  for (int col = 0; col < n; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      ax1[p] = ax3[p] * row_scale[ai[p]] * col_scale[col];
-      b[ai[p]] += ax1[p] * expected[col];
-    }
-  }
-  if (ok && !require_ok(kls_refactor(solver, ax1),
-                        "certify after rejection-gate rearm")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats after rejection-gate rearm")) ok = 0;
-  if (ok && stats.last_refactor_path !=
-              KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT) {
-    fprintf(stderr, "rearmed separable update used path %s\n",
-            kls_refactor_path_name(stats.last_refactor_path));
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve after rejection-gate rearm")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr, "rearmed separable solve mismatch at %d: %.17g\n",
-              i, x[i]);
-      ok = 0;
-    }
-  }
-
-  kls_destroy(solver);
-  if (!restore_env_value("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR",
-                         had_enable, saved_enable != NULL ? saved_enable : "")) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_DISABLE_UNCHANGED_REFACTOR", had_disable,
-                         saved_disable != NULL ? saved_disable : "")) {
-    ok = 0;
-  }
-  free(saved_enable);
-  free(saved_disable);
-  return ok;
-}
 
 static int removed_shape_stats_are_zero(const kls_stats *stats) {
   return stats != NULL &&
@@ -18074,6 +17845,76 @@ static int removed_shape_stats_are_zero(const kls_stats *stats) {
     stats->bounded_degree_amf_no_btf_symbolic_eligible == 0;
 }
 
+static int test_scaled_update_refactor(void) {
+  const int32_t ap[] = {0, 3, 6, 9};
+  const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
+  const double base[] = {4, 2, 1, 1, 5, 2, 2, 1, 6};
+  const double expected[] = {1, -2, 0.5, -0.5, 1, 3};
+  for (int mode = 0; mode < 4; ++mode) {
+    kls_solver *solver = NULL;
+    kls_options options;
+    kls_default_options(&options);
+    options.backend = mode < 2 ? KLS_BACKEND_SERIAL : KLS_BACKEND_KLS;
+    options.threads = mode < 2 ? 1 : 4;
+    options.orientation = mode % 2 ? KLS_ORIENTATION_TRANSPOSE
+                                   : KLS_ORIENTATION_NORMAL;
+    int ok = require_ok(kls_create(&solver), "create scaled-update solver");
+    if (ok) ok = require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3,
+                                           ap, ai, 0, &options),
+                            "analyze scaled-update solver");
+    if (ok) ok = require_ok(kls_factor(solver, base), "factor scaled-update base");
+    for (int update = 0; ok && update < 4; ++update) {
+      double ax[9];
+      for (int col = 0; col < 3; ++col) {
+        for (int p = ap[col]; p < ap[col + 1]; ++p) {
+          ax[p] = base[p] * (1.0 + 0.25 * (update + ai[p])) *
+                  (1.0 + 0.125 * (update + col));
+        }
+      }
+      /* Alternate separable scaling and ordinary entrywise changes. */
+      if (update % 2) ax[1] += 0.125;
+      ok = require_ok(kls_refactor(solver, ax), "refactor scaled update");
+      for (int transpose = 0; ok && transpose < 2; ++transpose) {
+        double rhs[6] = {0};
+        for (int j = 0; j < 2; ++j) {
+          for (int col = 0; col < 3; ++col) {
+            for (int p = ap[col]; p < ap[col + 1]; ++p) {
+              const int dst = transpose ? col : ai[p];
+              const int src = transpose ? ai[p] : col;
+              rhs[3 * j + dst] += ax[p] * expected[3 * j + src];
+            }
+          }
+        }
+        ok = require_ok(transpose
+                          ? kls_solve_transpose(solver, 2, rhs, 3, rhs, 3)
+                          : kls_solve(solver, 2, rhs, 3, rhs, 3),
+                        "solve scaled update in place");
+        for (int i = 0; ok && i < 6; ++i) {
+          if (!close_enough(rhs[i], expected[i])) {
+            fprintf(stderr, "scaled update mismatch mode=%d update=%d row=%d\n",
+                    mode, update, i);
+            ok = 0;
+          }
+        }
+      }
+      kls_stats stats = {0};
+      stats.struct_size = sizeof(stats);
+      if (ok) ok = require_ok(kls_get_stats(solver, &stats), "scaled-update stats");
+      if (ok && (!removed_shape_stats_are_zero(&stats) ||
+                 stats.refactor_last_supernode_pipeline_tasks != 0 ||
+                 stats.refactor_last_supernode_pipeline_columns != 0 ||
+                 stats.refactor_supernode_pipeline_task_count != 0 ||
+                 stats.refactor_supernode_pipeline_column_count != 0)) {
+        fprintf(stderr, "retired statistics became nonzero\n");
+        ok = 0;
+      }
+    }
+    kls_destroy(solver);
+    if (!ok) return 0;
+  }
+  return 1;
+}
+
 static int test_large_sparse_low_degree_retained_tolerance(void) {
   const int32_t n = 150000;
   const int32_t block_size = 1000;
@@ -18086,15 +17927,10 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
   double *expected = (double *)malloc((size_t)n * sizeof(*expected));
   double *b = (double *)malloc((size_t)n * sizeof(*b));
   double *x = (double *)malloc((size_t)n * sizeof(*x));
-  const char *saved_enable_value =
-    getenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR");
   const char *saved_contract_disable_value =
     getenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY");
-  char *saved_enable = saved_enable_value != NULL
-    ? strdup(saved_enable_value) : NULL;
   char *saved_contract_disable = saved_contract_disable_value != NULL
     ? strdup(saved_contract_disable_value) : NULL;
-  const int had_enable = saved_enable_value != NULL;
   const int had_contract_disable = saved_contract_disable_value != NULL;
   kls_solver *solver = NULL;
   kls_solver *contract_solver = NULL;
@@ -18106,7 +17942,6 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
 
   if (ap == NULL || ai == NULL || ax == NULL || changed == NULL ||
       expected == NULL || b == NULL || x == NULL ||
-      (had_enable && saved_enable == NULL) ||
       (had_contract_disable && saved_contract_disable == NULL)) {
     free(ap);
     free(ai);
@@ -18115,7 +17950,6 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
     free(expected);
     free(b);
     free(x);
-    free(saved_enable);
     free(saved_contract_disable);
     return 0;
   }
@@ -18184,8 +18018,7 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
      the generic accuracy capability: it must enter the relative-L2 contract
      without depending on the public benchmark's dimensions, BTF geometry,
      ordering tuple, or eight-worker count. */
-  if (ok && (unsetenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR") != 0 ||
-             unsetenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") != 0)) {
+  if (ok && unsetenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") != 0) {
     perror("configure promoted-tolerance L2 contract");
     ok = 0;
   }
@@ -18379,50 +18212,10 @@ static int test_large_sparse_low_degree_retained_tolerance(void) {
     fprintf(stderr, "disabled promoted-tolerance L2 solve entered contract\n");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR", "1", 1) != 0) {
-    perror("setenv low-degree retained tolerance");
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
-                                        0, &options),
-                        "analyze low-degree retained tolerance")) {
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_factor(solver, ax),
-                        "factor low-degree retained tolerance")) {
-    ok = 0;
-  }
-  memset(&stats, 0, sizeof(stats));
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats low-degree retained tolerance")) {
-    ok = 0;
-  }
-  if (ok && !removed_shape_stats_are_zero(&stats)) {
-    fprintf(stderr,
-            "removed shape-policy statistic became nonzero\n");
-    ok = 0;
-  }
-  if (ok && (stats.selected_ordering != KLS_ORDERING_METIS ||
-             stats.selected_scale != 1 || stats.selected_btf != 1 ||
-             fabs(stats.selected_pivot_tolerance - 2.0e-3) > 1.0e-12)) {
-    fprintf(stderr,
-            "unexpected low-degree retained tolerance policy:"
-            " ordering=%d scale=%d btf=%d tol=%.17g\n",
-            (int)stats.selected_ordering, stats.selected_scale,
-            stats.selected_btf, stats.selected_pivot_tolerance);
-    ok = 0;
-  }
-
 cleanup:
   kls_destroy(scaled_contract_solver);
   kls_destroy(contract_csr_solver);
   kls_destroy(contract_solver);
-  if (!restore_env_value("KLS_ENABLE_DIAGONAL_EQUIVALENT_REFACTOR",
-                         had_enable,
-                         saved_enable != NULL ? saved_enable : "")) {
-    ok = 0;
-  }
   if (!restore_env_value("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY",
                          had_contract_disable,
                          saved_contract_disable != NULL
@@ -18437,7 +18230,6 @@ cleanup:
   free(expected);
   free(b);
   free(x);
-  free(saved_enable);
   free(saved_contract_disable);
   return ok;
 }
@@ -18467,6 +18259,9 @@ cleanup:
 
 
 int main(void) {
+  if (!test_scaled_update_refactor()) {
+    return EXIT_FAILURE;
+  }
   if (!run_sn_panel_factor_test()) {
     fprintf(stderr, "sn panel factor test failed\n");
     return EXIT_FAILURE;
@@ -18482,9 +18277,6 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_partial_btf_shadow_checker()) {
-    return EXIT_FAILURE;
-  }
-  if (!test_diagonal_equivalent_refactor()) {
     return EXIT_FAILURE;
   }
   if (!test_large_sparse_low_degree_retained_tolerance()) {

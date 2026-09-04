@@ -9958,19 +9958,14 @@ static int kls_egraph_refactor_pipeline_position_for_column(
     return 0;
   }
   const kls_solver *solver = shared->solver;
-  UF_long pos = KLS_KLU_EMPTY;
-  UF_long pipeline_begin = 0u;
-  if (shared->pipeline_natural_order) {
-    pos = col;
-  } else {
-    if (solver->refactor_level_pos == NULL ||
-        solver->refactor_level_ptr == NULL ||
-        shared->cluster_level_count > solver->refactor_level_count) {
-      return 0;
-    }
-    pos = solver->refactor_level_pos[col];
-    pipeline_begin = solver->refactor_level_ptr[shared->cluster_level_count];
+  if (solver->refactor_level_pos == NULL ||
+      solver->refactor_level_ptr == NULL ||
+      shared->cluster_level_count > solver->refactor_level_count) {
+    return 0;
   }
+  const UF_long pos = solver->refactor_level_pos[col];
+  const UF_long pipeline_begin =
+    solver->refactor_level_ptr[shared->cluster_level_count];
   if (pos == KLS_KLU_EMPTY || pos < pipeline_begin ||
       pos >= shared->pipeline_pos_end) {
     return 0;
@@ -18862,65 +18857,6 @@ static void kls_egraph_refactor_refresh_missing_prefix(
   }
 }
 
-static UF_long kls_egraph_refactor_lease_natural_pipeline(
-  kls_egraph_refactor_shared *shared,
-  UF_long *begin_out) {
-  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0u);
-  if (shared == NULL || shared->solver == NULL) {
-    return 0u;
-  }
-  const kls_solver *solver = shared->solver;
-  for (;;) {
-    const unsigned long loaded =
-      atomic_load_explicit(&shared->next_pipeline_pos,
-                           memory_order_relaxed);
-    const UF_long begin = (UF_long)loaded;
-    if (begin >= shared->pipeline_pos_end) {
-      if (begin_out != NULL) {
-        *begin_out = begin;
-      }
-      return begin;
-    }
-
-    UF_long end = begin + 1u;
-    if (solver->refactor_supernode_pipeline_end != NULL) {
-      const UF_long candidate_end =
-        solver->refactor_supernode_pipeline_end[begin];
-      if (candidate_end > end &&
-          candidate_end <= shared->pipeline_pos_end) {
-        const UF_long candidate_width = candidate_end - begin;
-        const UF_long max_task_width =
-          shared->thread_count > 0 ? (UF_long)(2 * shared->thread_count) : 0u;
-        if (candidate_width <= max_task_width) {
-          end = candidate_end;
-        }
-      }
-    }
-
-    unsigned long expected = loaded;
-    if (atomic_compare_exchange_weak_explicit(
-          &shared->next_pipeline_pos, &expected, (unsigned long)end,
-          memory_order_acq_rel, memory_order_relaxed)) {
-      if (begin_out != NULL) {
-        *begin_out = begin;
-      }
-      if (end > begin + 1u) {
-        atomic_fetch_add_explicit(&shared->supernode_pipeline_tasks, 1ul,
-                                  memory_order_relaxed);
-        atomic_fetch_add_explicit(
-          &shared->supernode_pipeline_columns,
-          (unsigned long)(end - begin), memory_order_relaxed);
-      }
-      return end;
-    }
-  }
-}
-
-static int kls_egraph_supernode_tasks_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_EGRAPH_SUPERNODE_TASKS");
-  return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
-}
-
 static int kls_egraph_supernode_numeric_updates_env_mode(void) {
   const char *value = getenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES");
   if (value == NULL || value[0] == '\0' || strcmp(value, "0") == 0) {
@@ -19336,12 +19272,10 @@ static int kls_egraph_refactor_try_pop_ready_column(
    every representation-changing or checked mode falls back to singles. */
 static int kls_egraph_pair_dispatch_allowed(
   const kls_egraph_refactor_shared *shared) {
-  /* forced by env, adopted by the per-matrix timed probe, or armed
-     for the probe refactor itself */
-  return (kls_pair_dispatch_enabled() ||
-          (shared->solver != NULL &&
-           (shared->solver->eg_pair_choice > 0 ||
-            shared->solver->eg_pair_pending))) &&
+  /* Adopted by the per-matrix timed probe or armed for the probe refactor. */
+  return shared->solver != NULL &&
+         (shared->solver->eg_pair_choice > 0 ||
+          shared->solver->eg_pair_pending) &&
          (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
           kls_egraph_kernel_is_btf_unscaled(shared->kernel)) &&
          !shared->check_pivots &&
@@ -19850,95 +19784,10 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
   if (shared->pipeline_done != NULL &&
       cluster_levels < solver->refactor_level_count &&
       !kls_egraph_refactor_should_stop(shared)) {
-    if (shared->pipeline_natural_order) {
-      for (;;) {
-        if (kls_egraph_refactor_should_stop(shared)) {
-          break;
-        }
-        const int queue_status =
-          kls_egraph_refactor_try_process_algorithm5_payoff_queue(worker);
-        if (queue_status < 0) {
-          break;
-        }
-        if (queue_status > 0) {
-          continue;
-        }
-        if (shared->pipeline_supernode_tasks) {
-          UF_long begin = 0u;
-          const UF_long end =
-            kls_egraph_refactor_lease_natural_pipeline(shared, &begin);
-          if (begin >= shared->pipeline_pos_end) {
-            break;
-          }
-          for (UF_long col = begin; col < end; ++col) {
-            if (kls_egraph_refactor_should_stop(shared)) {
-              break;
-            }
-            const int lease_status =
-              kls_egraph_refactor_try_lease_pipeline_column(worker, col);
-            if (lease_status < 0) {
-              break;
-            }
-            if (lease_status == 0) {
-              continue;
-            }
-            if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
-              if (!kls_egraph_refactor_should_stop(shared)) {
-                kls_egraph_refactor_record_invalid(shared);
-              }
-              break;
-            }
-            kls_egraph_refactor_mark_done(shared, col);
-            if (kls_egraph_refactor_after_pipeline_column_done(worker,
-                                                               col) < 0) {
-              break;
-            }
-          }
-        } else {
-          const UF_long col =
-            (UF_long)atomic_fetch_add_explicit(&shared->next_pipeline_pos,
-                                               1ul, memory_order_relaxed);
-          if (col >= shared->pipeline_pos_end) {
-            break;
-          }
-          const int lease_status =
-            kls_egraph_refactor_try_lease_pipeline_column(worker, col);
-          if (lease_status < 0) {
-            break;
-          }
-          if (lease_status == 0) {
-            continue;
-          }
-          if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
-            if (!kls_egraph_refactor_should_stop(shared)) {
-              kls_egraph_refactor_record_invalid(shared);
-            }
-            break;
-          }
-          kls_egraph_refactor_mark_done(shared, col);
-          if (kls_egraph_refactor_after_pipeline_column_done(worker, col) < 0) {
-            break;
-          }
-        }
-      }
-    } else if (shared->pipeline_ready_queue) {
+    if (shared->pipeline_ready_queue) {
       kls_egraph_refactor_worker_run_ready_pipeline(worker);
     } else if (solver->refactor_level_cols != NULL) {
       const int pair_allowed = kls_egraph_pair_dispatch_allowed(shared);
-      if (kls_pair_dispatch_enabled() && worker->tid == 0 &&
-          getenv("KLS_TRACE_SNB") != NULL) {
-        fprintf(stderr,
-                "KLS pair: allowed=%d kernel=%d cp=%d snu=%d cpl=%d rag=%d"
-                " usv=%d a5=%d fp32=%d runend=%d\n",
-                pair_allowed, (int)shared->kernel, shared->check_pivots,
-                shared->supernode_numeric_updates,
-                shared->supernode_consumer_plan_group_l_exec,
-                shared->u_supernode_ragged_l_updates,
-                shared->u_supernode_values,
-                shared->algorithm5_prefactor_updates,
-                shared->use_fp32_l_values,
-                shared->snode_run_end != NULL);
-      }
       if (pair_allowed && worker->pair_x == NULL) {
         worker->pair_x =
           (double *)calloc((size_t)solver->n, sizeof(double));
@@ -19946,8 +19795,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
       const int quad_allowed = pair_allowed &&
         (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
          kls_egraph_kernel_is_btf_unscaled(shared->kernel)) &&
-        (getenv("KLS_ENABLE_QUAD_DISPATCH") != NULL ||
-         solver->eg_pair_choice == 2 || solver->eg_pair_pending == 2);
+        (solver->eg_pair_choice == 2 || solver->eg_pair_pending == 2);
       if (quad_allowed && worker->fuse_x == NULL) {
         worker->fuse_x = (double *)calloc(
           (size_t)solver->n * (KLS_SNODE_MAX_FUSE - 2u), sizeof(double));
@@ -20800,187 +20648,6 @@ static void kls_contract_rgrowth_worker_run(
   results[tid] = local_ok ? local_min : -1.0;
 }
 
-static KLS_ALWAYS_INLINE int kls_diagonal_equiv_constraint_valid(
-  const double *restrict reference, const double *restrict values,
-  const double *restrict scales, const uint32_t *restrict row_idx,
-  const uint32_t *restrict validation_pos,
-  const uint32_t *restrict validation_col, uint32_t n, uint32_t q,
-  double rel_tol) {
-  const uint32_t p = validation_pos[q];
-  const uint32_t col = validation_col[q];
-  const double new_value = values[p];
-  const double predicted =
-    reference[p] * scales[row_idx[p]] * scales[n + col];
-  if (!isfinite(new_value) || !isfinite(predicted)) {
-    return 0;
-  }
-  const double error = fabs(new_value - predicted);
-  const double magnitude = fabs(new_value) + fabs(predicted);
-  return error <= rel_tol * magnitude + 16.0 * DBL_MIN;
-}
-
-static void kls_diagonal_equiv_worker_run(
-  kls_egraph_refactor_worker *worker) {
-  kls_egraph_refactor_shared *shared = worker->shared;
-  const uint32_t n = shared->diagonal_equiv_n;
-  const uint32_t validation_nnz =
-    shared->diagonal_equiv_validation_nnz;
-  const int tid = worker->tid;
-  const int nt = shared->thread_count;
-  const uint32_t q_begin =
-    (uint32_t)(((uint64_t)validation_nnz * (uint64_t)tid) /
-               (uint64_t)nt);
-  const uint32_t q_end =
-    (uint32_t)(((uint64_t)validation_nnz * (uint64_t)(tid + 1)) /
-               (uint64_t)nt);
-  const uint32_t *restrict row_idx = shared->diagonal_equiv_row_idx;
-  const uint32_t *restrict validation_pos =
-    shared->diagonal_equiv_validation_pos;
-  const uint32_t *restrict validation_col =
-    shared->diagonal_equiv_validation_col;
-  const double *restrict reference =
-    shared->diagonal_equiv_reference_values;
-  const double *restrict values = shared->diagonal_equiv_new_values;
-  double *restrict scales = shared->diagonal_equiv_scales;
-  const double rel_tol = shared->diagonal_equiv_rel_tol;
-  int invalid = 0;
-
-  if (shared->diagonal_equiv_recover_order != NULL &&
-      shared->diagonal_equiv_recover_thread_ptr != NULL &&
-      shared->diagonal_equiv_recover_thread_count == (uint32_t)nt) {
-    const uint32_t begin = shared->diagonal_equiv_recover_thread_ptr[tid];
-    const uint32_t end = shared->diagonal_equiv_recover_thread_ptr[tid + 1];
-    for (uint32_t at = begin; at < end; ++at) {
-      const uint32_t vertex = shared->diagonal_equiv_recover_order[at];
-      const uint64_t packed = shared->diagonal_equiv_parent[vertex];
-      const uint32_t edge = (uint32_t)(packed >> 32u);
-      const uint32_t other = (uint32_t)packed;
-      const double old_value = reference[edge];
-      const double new_value = values[edge];
-      const double other_scale = scales[other];
-      if (old_value == 0.0 || new_value == 0.0 || other_scale == 0.0 ||
-          !isfinite(old_value) || !isfinite(new_value) ||
-          !isfinite(other_scale)) {
-        scales[vertex] = 1.0;
-        invalid = 1;
-        continue;
-      }
-      const double denominator = old_value * other_scale;
-      const double scale = denominator != 0.0 && isfinite(denominator)
-        ? new_value / denominator : 0.0;
-      if (scale == 0.0 || !isfinite(scale)) {
-        scales[vertex] = 1.0;
-        invalid = 1;
-      } else {
-        scales[vertex] = scale;
-      }
-    }
-    /* All shallow parents were resolved by the caller; each remaining
-       parent is earlier in this worker's restricted BFS stream. */
-    pthread_barrier_wait(&shared->barrier);
-  } else {
-    for (uint32_t level = 0u;
-         level < shared->diagonal_equiv_level_count; ++level) {
-      const uint32_t level_begin = shared->diagonal_equiv_level_ptr[level];
-      const uint32_t level_end = shared->diagonal_equiv_level_ptr[level + 1u];
-      const uint32_t level_size = level_end - level_begin;
-      const uint32_t begin = level_begin +
-        (uint32_t)(((uint64_t)level_size * (uint64_t)tid) / (uint64_t)nt);
-      const uint32_t end = level_begin +
-        (uint32_t)(((uint64_t)level_size * (uint64_t)(tid + 1)) /
-                   (uint64_t)nt);
-      for (uint32_t at = begin; at < end; ++at) {
-        const uint32_t vertex = shared->diagonal_equiv_vertex_order[at];
-        const uint64_t packed = shared->diagonal_equiv_parent[vertex];
-        const uint32_t edge = (uint32_t)(packed >> 32u);
-        if (edge == UINT32_MAX) {
-          scales[vertex] = 1.0;
-          continue;
-        }
-        const uint32_t other = (uint32_t)packed;
-        const double old_value = reference[edge];
-        const double new_value = values[edge];
-        const double other_scale = scales[other];
-        if (old_value == 0.0 || new_value == 0.0 || other_scale == 0.0 ||
-            !isfinite(old_value) || !isfinite(new_value) ||
-            !isfinite(other_scale)) {
-          scales[vertex] = 1.0;
-          invalid = 1;
-          continue;
-        }
-        const double denominator = old_value * other_scale;
-        const double scale = denominator != 0.0 && isfinite(denominator)
-          ? new_value / denominator : 0.0;
-        if (scale == 0.0 || !isfinite(scale)) {
-          scales[vertex] = 1.0;
-          invalid = 1;
-        } else {
-          scales[vertex] = scale;
-        }
-      }
-      /* Every parent is in an earlier level. */
-      pthread_barrier_wait(&shared->barrier);
-    }
-  }
-
-  int validation_invalid = 0;
-  if (!invalid && validation_nnz > 0u) {
-    const uint32_t hint = shared->diagonal_equiv_validation_hint <
-                            validation_nnz
-      ? shared->diagonal_equiv_validation_hint : 0u;
-    /* Every worker checks the same remembered constraint after the recovery
-       rendezvous.  The redundant scalar read is cheaper than adding another
-       pool barrier and lets a recurring inconsistency bypass every worker's
-       full chord slice. */
-    validation_invalid = !kls_diagonal_equiv_constraint_valid(
-      reference, values, scales, row_idx, validation_pos, validation_col,
-      n, hint, rel_tol);
-  }
-  const uint32_t validation_begin = validation_invalid ? q_end : q_begin;
-#pragma omp simd reduction(|:validation_invalid)
-  for (uint32_t q = validation_begin; q < q_end; ++q) {
-    const uint32_t p = validation_pos[q];
-    const uint32_t col = validation_col[q];
-    const double old_value = reference[p];
-    const double new_value = values[p];
-    const double predicted =
-      old_value * scales[row_idx[p]] * scales[n + col];
-    if (!isfinite(new_value) || !isfinite(predicted)) {
-      validation_invalid = 1;
-      continue;
-    }
-    const double error = fabs(new_value - predicted);
-    const double magnitude = fabs(new_value) + fabs(predicted);
-    if (error > rel_tol * magnitude + 16.0 * DBL_MIN) {
-      validation_invalid = 1;
-    }
-  }
-  invalid |= validation_invalid;
-  if (invalid) {
-    atomic_store_explicit(&shared->diagonal_equiv_invalid, 1,
-                          memory_order_relaxed);
-  }
-
-  /* Every validation entry reads the forward scales.  Do not let an early
-     worker invert its slice for the solve maps while a later worker is
-     still scanning nonzeros against that same array. */
-  pthread_barrier_wait(&shared->barrier);
-
-  if (atomic_load_explicit(&shared->diagonal_equiv_invalid,
-                           memory_order_relaxed)) {
-    return;
-  }
-
-  const uint32_t vertices = 2u * n;
-  const uint32_t v_begin =
-    (uint32_t)(((uint64_t)vertices * (uint64_t)tid) / (uint64_t)nt);
-  const uint32_t v_end =
-    (uint32_t)(((uint64_t)vertices * (uint64_t)(tid + 1)) / (uint64_t)nt);
-  for (uint32_t v = v_begin; v < v_end; ++v) {
-    scales[v] = 1.0 / scales[v];
-  }
-}
-
 static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
   kls_egraph_refactor_worker *worker) {
   kls_egraph_refactor_shared *shared = worker->shared;
@@ -21025,8 +20692,7 @@ static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
          p < shared->workspace_touch_count; p += stride) {
       values[p] = 0.0;
     }
-  } else if (shared->diagonal_equiv_mode) {
-    kls_diagonal_equiv_worker_run(worker);
+
   } else if (shared->contract_rgrowth_mode) {
     kls_contract_rgrowth_worker_run(worker);
   } else if (shared->pts_refactor_mode) {
@@ -21798,8 +21464,6 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.stop, 0);
   atomic_init(&pool->shared.cluster_barrier_generation, 0u);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
-  atomic_init(&pool->shared.supernode_pipeline_tasks, 0ul);
-  atomic_init(&pool->shared.supernode_pipeline_columns, 0ul);
   atomic_init(&pool->shared.supernode_update_runs, 0ul);
   atomic_init(&pool->shared.supernode_update_rows, 0ul);
   atomic_init(&pool->shared.supernode_update_entries, 0ul);
@@ -23373,53 +23037,6 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
 
 
 
-/* Sparse one-component factors with a nearly all-private separator have a
-   wide dependency front followed by a small serializing tail.  Extending the
-   dependency-driven suffix and settling on the full worker width amortizes
-   barriers for this retained representation.  Classify the adopted factor
-   and separator rather than a public matrix identity; the cached verdict is
-   stable even when Common.noffdiag is reused as transient diagnostic state
-   after a values-only refactor. */
-
-
-
-
-static int kls_egraph_all_pipeline_huge_single_shape(
-  const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL ||
-      solver->symbolic->nblocks != 1u || solver->numeric == NULL ||
-      solver->n < 100000u) {
-    return 0;
-  }
-  if (solver->common.scale > 0) {
-    if (solver->numeric->Rs == NULL || solver->numeric->Pnum == NULL ||
-        solver->numeric->Xwork == NULL) {
-      return 0;
-    }
-  } else if (solver->numeric->Rs != NULL) {
-    return 0;
-  }
-  return solver->common.flops >= 1.0e9;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static const UF_long *kls_refactor_snode_run_end(
   const kls_solver *solver) {
   if (solver == NULL || solver->snode_run_end == NULL) {
@@ -23722,8 +23339,7 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
 }
 
 static void kls_egraph_release_unused_quad_scratch(kls_solver *solver) {
-  if (solver == NULL || solver->egraph_pool == NULL ||
-      getenv("KLS_ENABLE_QUAD_DISPATCH") != NULL) {
+  if (solver == NULL || solver->egraph_pool == NULL) {
     return;
   }
   kls_egraph_refactor_pool *pool = solver->egraph_pool;
@@ -24670,17 +24286,10 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_refactor_btf_scalar_run_group_wake_stats_env_enabled() ||
     btf_scalar_run_group_state_stats_active_requested;
 
-  const int all_pipeline =
-    0 &&
-    getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
-  const int natural_pipeline =
-    all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
-    getenv("KLS_DISABLE_EGRAPH_NATURAL_PIPELINE") == NULL;
   const int build_separator_private =
     kls_egraph_separator_private_requested(solver);
   const UF_long cluster_level_count =
-    all_pipeline ? 0u
-                 : kls_egraph_cluster_level_dispatch(solver, check_pivots);
+    kls_egraph_cluster_level_dispatch(solver, check_pivots);
   atomic_uint *pipeline_done = NULL;
   unsigned int pipeline_generation = 0;
   atomic_uint *pipeline_claimed = NULL;
@@ -24711,11 +24320,10 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   UF_long algorithm5_payoff_advance_u_size = 0u;
   UF_long algorithm5_payoff_current_state_size = 0u;
   UF_long algorithm5_payoff_current_count = 0u;
-  if (all_pipeline ||
-      (solver->refactor_cluster_level_count < solver->refactor_level_count &&
+  if (solver->refactor_cluster_level_count < solver->refactor_level_count &&
        solver->refactor_pipeline_column_count >= (UF_long)(2 * thread_count) &&
        solver->refactor_pipeline_work >=
-         0.10 * solver->refactor_dependency_work)) {
+         0.10 * solver->refactor_dependency_work) {
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
   }
@@ -24731,7 +24339,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
   }
-  if ((natural_pipeline || check_pivots) && pipeline_done == NULL) {
+  if (check_pivots && pipeline_done == NULL) {
     return -1;
   }
   const int consumer_plan_claims_requested =
@@ -24900,7 +24508,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
 
   const int use_pipeline_ready_queue =
     kls_egraph_ready_queue_env_enabled() &&
-    pipeline_done != NULL && !natural_pipeline &&
+    pipeline_done != NULL &&
     solver->refactor_pipeline_column_count > 0u &&
     solver->refactor_level_cols != NULL &&
     solver->refactor_pipeline_successor_ptr != NULL &&
@@ -24911,7 +24519,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   UF_long pipeline_initial_ready_count = 0u;
   if (use_pipeline_ready_queue) {
     const UF_long pipeline_begin =
-      all_pipeline ? 0u : solver->refactor_level_ptr[cluster_level_count];
+      solver->refactor_level_ptr[cluster_level_count];
     if (pipeline_begin > solver->n ||
         solver->refactor_pipeline_column_count > solver->n - pipeline_begin) {
       return -1;
@@ -25136,9 +24744,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->pipeline_lease_generation =
     pipeline_claim_generation != 0u ? pipeline_claim_generation + 1u : 0u;
   shared->separator_private = separator_private;
-  shared->pipeline_natural_order = natural_pipeline ? 1 : 0;
-  shared->pipeline_supernode_tasks =
-    (natural_pipeline && kls_egraph_supernode_tasks_env_enabled()) ? 1 : 0;
   shared->supernode_numeric_updates =
     supernode_numeric_updates ? 1 : 0;
   shared->subtree_supernode_split =
@@ -25341,7 +24946,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      solver->refactor_supernode_consumer_plan_current != NULL &&
      solver->refactor_supernode_consumer_plan_shape_group_ptr != NULL &&
      solver->refactor_supernode_consumer_plan_shape_group_runs != NULL &&
-     (natural_pipeline || solver->refactor_level_pos != NULL))
+     solver->refactor_level_pos != NULL)
       ? 1 : 0;
   shared->supernode_algorithm5_payoff_exec =
     (algorithm5_payoff_exec_requested &&
@@ -25392,7 +24997,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      solver->refactor_supernode_algorithm5_payoff_group_prefix_end != NULL &&
      solver->refactor_supernode_algorithm5_payoff_trigger_ptr != NULL &&
      solver->refactor_supernode_algorithm5_payoff_trigger_groups != NULL &&
-     (natural_pipeline || solver->refactor_level_pos != NULL))
+     solver->refactor_level_pos != NULL)
       ? 1 : 0;
   shared->supernode_algorithm5_payoff_queue =
     (algorithm5_payoff_queue_requested &&
@@ -25414,7 +25019,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      solver->refactor_supernode_algorithm5_payoff_group_current_run_ptr !=
        NULL &&
       solver->refactor_supernode_algorithm5_payoff_group_current_runs != NULL &&
-     (natural_pipeline || solver->refactor_level_pos != NULL))
+     solver->refactor_level_pos != NULL)
       ? 1 : 0;
   shared->supernode_algorithm5_payoff_workspace =
     (algorithm5_payoff_workspace_active &&
@@ -25733,7 +25338,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     !shared->check_pivots && !solver->padded_active &&
     shared->snode_run_end != NULL && !kls_batch_consume_disabled() &&
     solver->eg_pair_choice < 0 && !solver->eg_pair_pending &&
-    !kls_pair_dispatch_enabled() && !solver->eg_stream_pending &&
+    !solver->eg_stream_pending &&
     !shared->supernode_numeric_updates &&
     !shared->supernode_consumer_plan_group_l_exec &&
     !shared->supernode_consumer_plan_group_l_values &&
@@ -25798,10 +25403,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_store_explicit(&shared->algorithm5_payoff_queue_tail, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->algorithm5_payoff_queue_active, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->supernode_pipeline_tasks, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->supernode_pipeline_columns, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->supernode_update_runs, 0ul,
                         memory_order_release);
@@ -26221,9 +25822,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_store_explicit(
     &shared->next_pipeline_pos,
     (unsigned long)(pipeline_done != NULL
-                      ? (all_pipeline
-                           ? 0u
-                           : solver->refactor_level_ptr[cluster_level_count])
+                      ? solver->refactor_level_ptr[cluster_level_count]
                       : solver->n),
     memory_order_release);
   shared->pipeline_pos_end = solver->n;
@@ -26417,12 +26016,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->algorithm5_payoff_suffix_producer_trigger_entries = NULL;
   pthread_mutex_unlock(&shared->lock);
 
-  const UF_long supernode_pipeline_tasks =
-    (UF_long)atomic_load_explicit(&shared->supernode_pipeline_tasks,
-                                  memory_order_acquire);
-  const UF_long supernode_pipeline_columns =
-    (UF_long)atomic_load_explicit(&shared->supernode_pipeline_columns,
-                                  memory_order_acquire);
   const UF_long supernode_update_runs =
     (UF_long)atomic_load_explicit(&shared->supernode_update_runs,
                                   memory_order_acquire);
@@ -26990,14 +26583,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const UF_long algorithm5_prefactor_deps =
     (UF_long)atomic_load_explicit(&shared->algorithm5_prefactor_deps,
                                   memory_order_acquire);
-  solver->refactor_last_supernode_pipeline_tasks =
-    supernode_pipeline_tasks;
-  solver->refactor_last_supernode_pipeline_columns =
-    supernode_pipeline_columns;
-  solver->refactor_supernode_pipeline_task_count +=
-    supernode_pipeline_tasks;
-  solver->refactor_supernode_pipeline_column_count +=
-    supernode_pipeline_columns;
   solver->refactor_last_supernode_update_runs = supernode_update_runs;
   solver->refactor_last_supernode_update_rows = supernode_update_rows;
   solver->refactor_last_supernode_update_entries = supernode_update_entries;

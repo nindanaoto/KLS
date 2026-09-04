@@ -79,9 +79,6 @@ typedef enum kls_refactor_path {
   KLS_REFACTOR_PATH_KLU = 5,
   KLS_REFACTOR_PATH_SNB = 6,
   KLS_REFACTOR_PATH_UNCHANGED = 7,
-  /* The new values pass the Dr*A*Dc consistency check.  The retained factor
-     is reused and the two diagonal maps are applied at the solve boundary. */
-  KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT = 8,
   /* Only changed diagonal BTF blocks were numerically refreshed; unchanged
      block factors were retained and changed off-diagonal couplings copied. */
   KLS_REFACTOR_PATH_PARTIAL_BTF = 9,
@@ -482,6 +479,7 @@ typedef struct kls_stats {
   int64_t row_refactor_separator_flop_closure_group_count;
   int kls_first_auto_skipped_scaled_single_block;
   int64_t kls_first_auto_skipped_scaled_single_block_count;
+  /* Retired pipeline counters; retained for ABI compatibility, always zero. */
   int64_t refactor_last_supernode_pipeline_tasks;
   int64_t refactor_last_supernode_pipeline_columns;
   int64_t refactor_supernode_pipeline_task_count;

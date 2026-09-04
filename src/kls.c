@@ -560,43 +560,6 @@ struct kls_solver {
   int refactor_input_snapshot_valid;
   int unchanged_refactor_state; /* 0 unarmed, 1 first comparison,
                                    2 repeated values observed, -1 declined */
-  /* Optional structured-update plan for A_new = Dr*A_reference*Dc.  The
-     reference and compressed pattern stay in the solver's final internal
-     CSC frame.  Fixed orientation, matching, permutation, and equilibration
-     transforms preserve diagonal equivalence; public_scales maps the
-     validated internal inverses back to the API frame for solves. */
-  double *diagonal_equiv_reference_values;
-  uint32_t *diagonal_equiv_col_ptr;
-  uint32_t *diagonal_equiv_row_idx;
-  uint32_t *diagonal_equiv_validation_col_ptr;
-  uint32_t *diagonal_equiv_validation_pos;
-  uint32_t *diagonal_equiv_validation_col;
-  uint32_t diagonal_equiv_validation_nnz;
-  uint32_t diagonal_equiv_validation_hint;
-  uint32_t *diagonal_equiv_vertex_order;
-  uint32_t *diagonal_equiv_level_ptr;
-  uint32_t diagonal_equiv_level_count;
-  uint32_t *diagonal_equiv_recover_order;
-  uint32_t *diagonal_equiv_recover_thread_ptr;
-  uint32_t diagonal_equiv_recover_serial_count;
-  uint32_t diagonal_equiv_recover_thread_count;
-  uint32_t *diagonal_equiv_serial_recover_vertex;
-  uint32_t *diagonal_equiv_serial_recover_edge;
-  uint32_t *diagonal_equiv_serial_recover_other;
-  double *diagonal_equiv_serial_recover_recip;
-  uint32_t diagonal_equiv_serial_recover_nnz;
-  uint64_t *diagonal_equiv_parent;
-  double *diagonal_equiv_parent_recip;
-  double *diagonal_equiv_scales;
-  double *diagonal_equiv_public_scales;
-  double *diagonal_equiv_rhs_workspace;
-  size_t diagonal_equiv_rhs_capacity;
-  int diagonal_equiv_plan_state; /* 0 unbuilt, 1 ready, 2 gated,
-                                    -1 unsupported */
-  int diagonal_equiv_reference_valid;
-  int diagonal_equiv_active;
-  uint32_t diagonal_equiv_reject_streak;
-  uint32_t diagonal_equiv_retry_countdown;
   /* Opt-in block-local update plan.  Each stored input entry maps either to
      its independent diagonal BTF block or to one Offx slot.  The reference
      is in the same final internal CSC frame as the retained numeric. */
@@ -2094,10 +2057,6 @@ struct kls_solver {
   UF_long refactor_supernode_consumer_plan_batch_deferred_columns;
   UF_long refactor_supernode_consumer_plan_batch_deferred_entries;
   UF_long refactor_supernode_consumer_plan_batch_deferred_unique_rows;
-  UF_long refactor_last_supernode_pipeline_tasks;
-  UF_long refactor_last_supernode_pipeline_columns;
-  UF_long refactor_supernode_pipeline_task_count;
-  UF_long refactor_supernode_pipeline_column_count;
   UF_long refactor_last_supernode_update_runs;
   UF_long refactor_last_supernode_update_rows;
   UF_long refactor_last_supernode_update_entries;
@@ -2882,8 +2841,6 @@ typedef struct kls_egraph_refactor_shared {
   unsigned int pipeline_claim_generation;
   unsigned int pipeline_lease_generation;
   atomic_ulong next_pipeline_pos;
-  atomic_ulong supernode_pipeline_tasks;
-  atomic_ulong supernode_pipeline_columns;
   atomic_ulong supernode_update_runs;
   atomic_ulong supernode_update_rows;
   atomic_ulong supernode_update_entries;
@@ -3031,8 +2988,6 @@ typedef struct kls_egraph_refactor_shared {
   UF_long cluster_level_count;
   int cluster_done_premarked;
   int separator_private;
-  int pipeline_natural_order;
-  int pipeline_supernode_tasks;
   int supernode_numeric_updates;
   int subtree_supernode_split;
   int supernode_cached_updates_only;
@@ -3242,30 +3197,6 @@ typedef struct kls_egraph_refactor_shared {
   double *solve_permute_output;
   const uint32_t *solve_permute_map;
   UF_long solve_permute_count;
-  /* Retained-factor diagonal-equivalence check.  The persistent numeric
-     pool also serves this bandwidth-bound scan, avoiding pthread creation
-     on every changed matrix. */
-  int diagonal_equiv_mode;
-  const double *diagonal_equiv_new_values;
-  const double *diagonal_equiv_reference_values;
-  double *diagonal_equiv_scales;
-  const uint32_t *diagonal_equiv_col_ptr;
-  const uint32_t *diagonal_equiv_row_idx;
-  const uint32_t *diagonal_equiv_validation_pos;
-  const uint32_t *diagonal_equiv_validation_col;
-  const uint32_t *diagonal_equiv_vertex_order;
-  const uint32_t *diagonal_equiv_level_ptr;
-  const uint32_t *diagonal_equiv_recover_order;
-  const uint32_t *diagonal_equiv_recover_thread_ptr;
-  const uint64_t *diagonal_equiv_parent;
-  uint32_t diagonal_equiv_level_count;
-  uint32_t diagonal_equiv_recover_thread_count;
-  uint32_t diagonal_equiv_n;
-  uint32_t diagonal_equiv_nnz;
-  uint32_t diagonal_equiv_validation_nnz;
-  uint32_t diagonal_equiv_validation_hint;
-  double diagonal_equiv_rel_tol;
-  atomic_int diagonal_equiv_invalid;
   /* Parallel user-order -> internal-CSC value preparation.  This reuses the
      persistent numeric crew for repeated unscaled refactors whose input map
      is a proven permutation. */
@@ -3602,7 +3533,6 @@ static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
     !solver->certified_unscaled_l2_contract &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    !solver->diagonal_equiv_active &&
     !solver->row_refactor_values_ready &&
     !solver->row_refactor_values_dirty &&
     !solver->numeric_is_predicted && !solver->fp32_last_used &&
@@ -20654,10 +20584,6 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_last_u_supernode_value_right_writes = 0;
   solver->refactor_u_supernode_value_dense_write_count = 0;
   solver->refactor_u_supernode_value_right_write_count = 0;
-  solver->refactor_last_supernode_pipeline_tasks = 0;
-  solver->refactor_last_supernode_pipeline_columns = 0;
-  solver->refactor_supernode_pipeline_task_count = 0;
-  solver->refactor_supernode_pipeline_column_count = 0;
   solver->refactor_last_supernode_update_runs = 0;
   solver->refactor_last_supernode_update_rows = 0;
   solver->refactor_last_supernode_update_entries = 0;
@@ -23728,8 +23654,6 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  solver->refactor_last_supernode_pipeline_tasks = 0;
-  solver->refactor_last_supernode_pipeline_columns = 0;
   solver->refactor_last_supernode_update_runs = 0;
   solver->refactor_last_supernode_update_rows = 0;
   solver->refactor_last_supernode_update_entries = 0;
@@ -25104,17 +25028,6 @@ static int kls_batch_consume_disabled(void) {
   static int cached = -1;
   if (cached < 0) {
     const char *env = getenv("KLS_DISABLE_BATCH_CONSUME");
-    cached = env != NULL && env[0] == '1' && env[1] == '\0';
-  }
-  return cached;
-}
-
-/* Fused two-consumer pipeline dispatch (KLS_ENABLE_PAIR_DISPATCH=1).
-   Default off while the mechanism is validated. */
-static int kls_pair_dispatch_enabled(void) {
-  static int cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("KLS_ENABLE_PAIR_DISPATCH");
     cached = env != NULL && env[0] == '1' && env[1] == '\0';
   }
   return cached;
@@ -27718,25 +27631,6 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->prepared_value_scale);
   free(solver->prepared_value_input_pos);
   free(solver->refactor_input_snapshot);
-  free(solver->diagonal_equiv_reference_values);
-  free(solver->diagonal_equiv_col_ptr);
-  free(solver->diagonal_equiv_row_idx);
-  free(solver->diagonal_equiv_validation_col_ptr);
-  free(solver->diagonal_equiv_validation_pos);
-  free(solver->diagonal_equiv_validation_col);
-  free(solver->diagonal_equiv_vertex_order);
-  free(solver->diagonal_equiv_level_ptr);
-  free(solver->diagonal_equiv_recover_order);
-  free(solver->diagonal_equiv_recover_thread_ptr);
-  free(solver->diagonal_equiv_serial_recover_vertex);
-  free(solver->diagonal_equiv_serial_recover_edge);
-  free(solver->diagonal_equiv_serial_recover_other);
-  free(solver->diagonal_equiv_serial_recover_recip);
-  free(solver->diagonal_equiv_parent);
-  free(solver->diagonal_equiv_parent_recip);
-  free(solver->diagonal_equiv_scales);
-  free(solver->diagonal_equiv_public_scales);
-  free(solver->diagonal_equiv_rhs_workspace);
   free(solver->partial_btf_reference_values);
   free(solver->partial_btf_entry_block);
   free(solver->partial_btf_entry_offx);
@@ -27778,37 +27672,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->refactor_input_snapshot = NULL;
   solver->refactor_input_snapshot_valid = 0;
   solver->unchanged_refactor_state = 0;
-  solver->diagonal_equiv_reference_values = NULL;
-  solver->diagonal_equiv_col_ptr = NULL;
-  solver->diagonal_equiv_row_idx = NULL;
-  solver->diagonal_equiv_validation_col_ptr = NULL;
-  solver->diagonal_equiv_validation_pos = NULL;
-  solver->diagonal_equiv_validation_col = NULL;
-  solver->diagonal_equiv_validation_nnz = 0u;
-  solver->diagonal_equiv_validation_hint = UINT32_MAX;
-  solver->diagonal_equiv_vertex_order = NULL;
-  solver->diagonal_equiv_level_ptr = NULL;
-  solver->diagonal_equiv_level_count = 0u;
-  solver->diagonal_equiv_recover_order = NULL;
-  solver->diagonal_equiv_recover_thread_ptr = NULL;
-  solver->diagonal_equiv_recover_serial_count = 0u;
-  solver->diagonal_equiv_recover_thread_count = 0u;
-  solver->diagonal_equiv_serial_recover_vertex = NULL;
-  solver->diagonal_equiv_serial_recover_edge = NULL;
-  solver->diagonal_equiv_serial_recover_other = NULL;
-  solver->diagonal_equiv_serial_recover_recip = NULL;
-  solver->diagonal_equiv_serial_recover_nnz = 0u;
-  solver->diagonal_equiv_parent = NULL;
-  solver->diagonal_equiv_parent_recip = NULL;
-  solver->diagonal_equiv_scales = NULL;
-  solver->diagonal_equiv_public_scales = NULL;
-  solver->diagonal_equiv_rhs_workspace = NULL;
-  solver->diagonal_equiv_rhs_capacity = 0u;
-  solver->diagonal_equiv_plan_state = 0;
-  solver->diagonal_equiv_reference_valid = 0;
-  solver->diagonal_equiv_active = 0;
-  solver->diagonal_equiv_reject_streak = 0u;
-  solver->diagonal_equiv_retry_countdown = 0u;
   solver->partial_btf_reference_values = NULL;
   solver->partial_btf_entry_block = NULL;
   solver->partial_btf_entry_offx = NULL;
@@ -28638,27 +28501,9 @@ int kls_factor(kls_solver *solver, const double *values) {
      only a successful exit below is allowed to arm exact reuse. */
   solver->refactor_input_snapshot_valid = 0;
   solver->unchanged_refactor_state = 0;
-  solver->diagonal_equiv_active = 0;
-  solver->diagonal_equiv_validation_hint = UINT32_MAX;
-  solver->diagonal_equiv_reject_streak = 0u;
-  solver->diagonal_equiv_retry_countdown = 0u;
   solver->partial_btf_decline_streak = 0u;
   solver->partial_btf_gated = 0;
   solver->snb_factor_start = kls_now_seconds();
-  if (solver->diagonal_equiv_plan_state == 2) {
-    solver->diagonal_equiv_plan_state = 1;
-    solver->diagonal_equiv_reference_valid = 0;
-  }
-  if (solver->diagonal_equiv_plan_state == 1 &&
-      !kls_diagonal_equiv_plan_matches_pattern(solver)) {
-    /* A prior adaptive adoption may have replaced the internal coordinates.
-       Rebuild against the final pattern instead of pairing a new reference
-       value array with stale forest edges. */
-    kls_diagonal_equiv_reset_plan(solver);
-  }
-  const int kls_diagonal_equiv_candidate =
-    (solver->diagonal_equiv_plan_state == 1 ||
-     kls_diagonal_equiv_plan_eligible(solver));
   kls_reset_lean_scale_input_cache(solver);
   if (solver->metis_race != NULL && solver->metis_race->values_signaled) {
     /* stale race from a factor attempt that never reached its
@@ -28722,15 +28567,11 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
 
   if (solver->options.backend == KLS_BACKEND_SERIAL) {
-    if (kls_diagonal_equiv_candidate &&
-        solver->diagonal_equiv_plan_state == 0) {
-      kls_prepare_diagonal_equiv_plan(solver, numeric_values);
-    }
     status = kls_serial_factor(solver, numeric_values);
     if (status == KLS_OK) {
       kls_arm_unchanged_refactor_cache(solver, values);
       {
-        kls_update_structured_references(solver, numeric_values);
+        kls_partial_btf_update_reference(solver, numeric_values);
       }
       solver->stats.factor_seconds =
         kls_now_seconds() - solver->snb_factor_start;
@@ -28815,8 +28656,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->options.scale <= 0 && solver->n <= 200000 &&
       solver->nnz <= 4000000 && !solver->auto_amd_shortcut &&
       !solver->medium_spike_minfill_path &&
-      !solver->large_bounded_no_btf_amf_path &&
-      !kls_retained_structured_colamd_selected(solver)) {
+      !solver->large_bounded_no_btf_amf_path) {
     const char *block_ordering_env = getenv("KLS_ENABLE_BLOCK_ORDERING");
     if (!(block_ordering_env != NULL && block_ordering_env[0] == '0' &&
           block_ordering_env[1] == '\0')) {
@@ -28841,10 +28681,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     /* one-shot-lean deferral decided inside the match entry once the
        weak-diagonal census is known (majority-weak rows must stay
        inline; see the gate there) */
-    const int retain_structured_colamd =
-      kls_diagonal_equiv_candidate &&
-      kls_retained_structured_colamd_selected(solver);
-    if (!retain_structured_colamd &&
+    if (
 #ifdef KLS_HAVE_SPRAL_SCALING
         !block_order_candidate &&
 #endif
@@ -28936,12 +28773,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           elapsed += kls_now_seconds() - row_start;
         }
       }
-      if (kls_diagonal_equiv_candidate &&
-          solver->diagonal_equiv_plan_state == 0) {
-        const double plan_start = kls_now_seconds();
-        kls_prepare_diagonal_equiv_plan(solver, numeric_values);
-        elapsed += kls_now_seconds() - plan_start;
-      }
       const int compact_refactor_forest_candidate =
         kls_repeated_update_workload(&solver->options) &&
         solver->options.threads > 1 && solver->n <= (UF_long)UINT16_MAX &&
@@ -29010,12 +28841,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           }
           elapsed += kls_now_seconds() - forest_prep_start;
         }
-        if (kls_diagonal_equiv_candidate) {
-          kls_maybe_prepare_snode_panels(solver, &elapsed);
-          const double solve_prep_start = kls_now_seconds();
-          (void)kls_i32_solve_ready(solver);
-          elapsed += kls_now_seconds() - solve_prep_start;
-        }
       } else {
         kls_maybe_prepare_snode_panels(solver, &elapsed);
         kls_snb_maybe_accept(solver, numeric_values, &elapsed);
@@ -29034,7 +28859,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       {
         const double structured_start = kls_now_seconds();
-        kls_update_structured_references(solver, numeric_values);
+        kls_partial_btf_update_reference(solver, numeric_values);
         elapsed += kls_now_seconds() - structured_start;
       }
       solver->stats.factor_seconds = elapsed;
@@ -29079,7 +28904,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       elapsed += kls_now_seconds() - snapshot_start;
       {
         const double structured_start = kls_now_seconds();
-        kls_update_structured_references(solver, numeric_values);
+        kls_partial_btf_update_reference(solver, numeric_values);
         elapsed += kls_now_seconds() - structured_start;
       }
       solver->stats.factor_seconds = elapsed;
@@ -29116,7 +28941,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         elapsed += kls_now_seconds() - snapshot_start;
         {
           const double structured_start = kls_now_seconds();
-          kls_update_structured_references(solver, numeric_values);
+          kls_partial_btf_update_reference(solver, numeric_values);
           elapsed += kls_now_seconds() - structured_start;
         }
         solver->stats.factor_seconds = elapsed;
@@ -29211,8 +29036,7 @@ int kls_factor(kls_solver *solver, const double *values) {
            getenv("KLS_ENABLE_BLOCK_ORDERING") != NULL) &&
           !solver->auto_amd_shortcut &&
           !solver->medium_spike_minfill_path &&
-          !solver->large_bounded_no_btf_amf_path &&
-          !kls_retained_structured_colamd_selected(solver)) {
+          !solver->large_bounded_no_btf_amf_path) {
         maybe_select_block_structured_ordering(solver, &elapsed,
                                                numeric_values);
       }
@@ -29471,9 +29295,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       pthread_t lean_prewarm_thread;
       kls_lean_prewarm_job lean_prewarm_job;
       int lean_prewarm_active = 0;
-      pthread_t diagonal_plan_thread;
-      kls_diagonal_equiv_plan_job diagonal_plan_job;
-      int diagonal_plan_active = 0;
       const double generic_prewarm_horizon_work =
         solver->symbolic != NULL
           ? solver->symbolic->est_flops *
@@ -29531,19 +29352,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         lean_prewarm_active =
           pthread_create(&lean_prewarm_thread, NULL,
                          kls_lean_prewarm_main, &lean_prewarm_job) == 0;
-      }
-      if (!had_numeric && kls_diagonal_equiv_candidate &&
-          solver->diagonal_equiv_plan_state == 0) {
-        /* The spanning forest depends only on the immutable input CSC and
-           reference values.  Pipeline it beside KLU's independent numeric
-           factorization, then publish it at the join before any selector or
-           solve preparation can consume the plan. */
-        diagonal_plan_job.solver = solver;
-        diagonal_plan_job.values = numeric_values;
-        diagonal_plan_active =
-          pthread_create(&diagonal_plan_thread, NULL,
-                         kls_diagonal_equiv_plan_main,
-                         &diagonal_plan_job) == 0;
       }
       kls_set_last_factor_path(solver,
                                had_numeric ? KLS_FACTOR_PATH_KLU_FALLBACK
@@ -29723,12 +29531,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       if (lean_prewarm_active) {
         pthread_join(lean_prewarm_thread, NULL);
       }
-      if (diagonal_plan_active) {
-        pthread_join(diagonal_plan_thread, NULL);
-      } else if (kls_diagonal_equiv_candidate &&
-                 solver->diagonal_equiv_plan_state == 0) {
-        kls_prepare_diagonal_equiv_plan(solver, numeric_values);
-      }
       solver->numeric_from_pipe = kls_klu_pipe_threads > 0;
       kls_klu_pipe_threads = 0;
       kls_klu_pipe_det = 0;
@@ -29839,8 +29641,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver->generic_nd_numeric_validated) {
     /* The actual-fill-capped ND numeric settled this factor epoch. */
   } else if (!had_numeric &&
-      (kls_defer_cycle_trials_enabled() ||
-       kls_diagonal_equiv_candidate)) {
+      kls_defer_cycle_trials_enabled()) {
     /* A reactive post-factor match can only repay its matching, reanalysis,
        and trial-factor cost across later numeric iterations.  The incumbent
        factor has already passed its quality gates, so keep H1 cold and run
@@ -29861,13 +29662,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     if (solver->metis_race != NULL && solver->metis_race->metis_wanted) {
       kls_metis_race_abandon(solver);
     }
-  } else if (kls_diagonal_equiv_candidate) {
-    /* A validated boundary-map update retains this numeric indefinitely.
-       Defer the alternate ordering trial until (and unless) an input fails
-       that validation; the ordinary refactor fallback below then settles
-       the same policy before doing numeric work. */
-    solver->metis_race_deferred = 1;
-    solver->metis_race_deferred_invalid = promoted_numeric;
   } else if (kls_oneshot_lean &&
              (solver->metis_race != NULL ||
               should_try_auto_metis(solver))) {
@@ -29903,7 +29697,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     kls_repeated_update_workload(&solver->options);
   const int representation_trial_precedes_tight_pivot =
     allow_deferred_generic_tight_pivot &&
-    !kls_diagonal_equiv_candidate &&
     getenv("KLS_DISABLE_GENERIC_TIGHT_PIVOT_DEFERRAL") == NULL &&
     (solver->prestatic_deferred || solver->rowmatch_deferred ||
      solver->metis_race_deferred || solver->block_order_deferred);
@@ -29915,7 +29708,6 @@ int kls_factor(kls_solver *solver, const double *values) {
        to optimize a numeric that the first changed update discards. */
     solver->tight_pivot_deferred = 1;
   } else if (allow_deferred_generic_tight_pivot &&
-      !kls_diagonal_equiv_candidate &&
       maybe_select_tight_pivot_tolerance(
         solver, &elapsed, numeric_values, &early_tight_pivot_attempted)) {
     kls_first_factor_used = 0;
@@ -29923,9 +29715,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
-  if (kls_diagonal_equiv_candidate && should_try_auto_scale(solver)) {
-    solver->auto_scale_deferred = 1;
-  } else if (kls_oneshot_lean &&
+  if (kls_oneshot_lean &&
              (solver->prestatic_deferred || solver->rowmatch_deferred ||
               solver->metis_race_deferred
 #ifdef KLS_HAVE_SPRAL_SCALING
@@ -29974,7 +29764,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_rcond = 1;
   }
   KLS_ENTRY_PHASE("auto_metis")
-  if (!kls_oneshot_lean && !kls_diagonal_equiv_candidate &&
+  if (!kls_oneshot_lean &&
       maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
     promoted_numeric = 1;
@@ -29984,7 +29774,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   if ((!kls_oneshot_lean || allow_deferred_generic_tight_pivot) &&
       !early_tight_pivot_attempted &&
       !solver->tight_pivot_deferred &&
-      !kls_diagonal_equiv_candidate &&
       maybe_select_tight_pivot_tolerance(
         solver, &elapsed, numeric_values, NULL)) {
     kls_first_factor_used = 0;
@@ -29997,8 +29786,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver->generic_nd_numeric_validated) {
     /* Matching is retained as failure recovery, not another startup arm. */
   } else if (!had_numeric &&
-      (kls_defer_cycle_trials_enabled() ||
-       kls_diagonal_equiv_candidate)) {
+      kls_defer_cycle_trials_enabled()) {
     /* The exact Hungarian trial belongs to the same cycle-payoff family as
        the cheaper row-match trial above (OPF_10000: 61ms of an 82ms cold
        factor).  The shared deferred consult runs both, but only after a
@@ -30023,14 +29811,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       diagnostics_have_flops = 0;
       diagnostics_have_rcond = 0;
     }
-  }
-  if (kls_diagonal_equiv_candidate &&
-      solver->diagonal_equiv_plan_state == 0) {
-    /* Non-KLU first-factor routes (predicted, raced, or adopted numerics)
-       did not pass through the overlapped join above. */
-    const double plan_start = kls_now_seconds();
-    kls_prepare_diagonal_equiv_plan(solver, numeric_values);
-    elapsed += kls_now_seconds() - plan_start;
   }
   KLS_ENTRY_PHASE("rebuild_first")
   pthread_t compact_pattern_thread;
@@ -30196,19 +29976,6 @@ int kls_factor(kls_solver *solver, const double *values) {
 #undef KLS_FOREST_PHASE
         elapsed += kls_now_seconds() - forest_prep_start;
       }
-      if (kls_diagonal_equiv_candidate) {
-        /* Retaining the numeric removes the need for refactor maps and row
-           mirrors, but it makes the 100 triangular solves first-class work.
-           Build only the compact solve streams and their SubtreeLU-style PTS
-           partition here.  The PTS refactor warm-up is deliberately omitted:
-           this numeric will be retained, and that warm-up can rebuild solve
-           caches for work that never occurs.  A later non-equivalent update
-           still runs the deferred full refactor preparation below. */
-        kls_maybe_prepare_snode_panels(solver, &elapsed);
-        const double solve_prep_start = kls_now_seconds();
-        (void)kls_i32_solve_ready(solver);
-        elapsed += kls_now_seconds() - solve_prep_start;
-      }
       goto factor_preps_deferred_exit;
     }
     if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
@@ -30265,7 +30032,7 @@ factor_preps_deferred_exit:;
   }
   {
     const double structured_start = kls_now_seconds();
-    kls_update_structured_references(solver, numeric_values);
+    kls_partial_btf_update_reference(solver, numeric_values);
     elapsed += kls_now_seconds() - structured_start;
   }
   if (solver->bounded_degree_retained_preconditioner_symbolic_eligible ||
@@ -30691,8 +30458,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->input_format == KLS_INPUT_CSC &&
       solver->input_to_csc == NULL && solver->row_perm == NULL &&
       solver->user_col_perm == NULL && solver->row_scale == NULL &&
-      solver->col_scale == NULL && !solver->diagonal_equiv_active &&
-      solver->common.scale == -1 && solver->numeric->Rs == NULL &&
+      solver->col_scale == NULL && solver->common.scale == -1 &&
+      solver->numeric->Rs == NULL &&
       solver->unchanged_refactor_state < 0 &&
       !solver->factor_preps_deferred && !solver->prestatic_deferred &&
       !solver->rowmatch_deferred && !solver->metis_race_deferred &&
@@ -30890,7 +30657,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->refactor_input_user_pos32 != NULL &&
       solver->lean_btf_off_user_pos != NULL &&
       solver->unchanged_refactor_state < 0 &&
-      solver->diagonal_equiv_plan_state != 1 &&
       !solver->factor_preps_deferred && !solver->prestatic_deferred &&
       !solver->rowmatch_deferred && !solver->metis_race_deferred &&
       !solver->auto_scale_deferred && solver->row_perm == NULL &&
@@ -30929,13 +30695,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
   solver->verified_rhs_valid = 0;
   solver->compact_amf_two_block_exact_recip_fresh = 0;
   const double refactor_call_start = kls_now_seconds();
-  const int diagonal_equiv_trace_phases =
-    getenv("KLS_TRACE_DIAGONAL_EQUIV_PHASES") != NULL;
   kls_clear_fast_reject_stats(solver);
   kls_clear_tail_last_stats(solver);
   kls_clear_row_refactor_last_stats(solver);
-  const double diagonal_equiv_clear_end = diagonal_equiv_trace_phases
-    ? kls_now_seconds() : refactor_call_start;
   if (kls_refactor_input_is_unchanged(solver, values) &&
       kls_prepare_unchanged_solve_contract(solver, values)) {
     /* The current numeric already factors this exact input.  In particular,
@@ -30953,43 +30715,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     fill_numeric_stats(solver);
     return KLS_OK;
   }
-  double *diagonal_equiv_values = NULL;
   int status = KLS_OK;
-  if (solver->diagonal_equiv_plan_state == 1) {
-    status = prepare_numeric_values(solver, values,
-                                    &diagonal_equiv_values);
-    if (status != KLS_OK) {
-      return status;
-    }
-  }
-  const double diagonal_equiv_prepare_end = diagonal_equiv_trace_phases
-    ? kls_now_seconds() : diagonal_equiv_clear_end;
-  const int diagonal_equiv_accepted =
-    diagonal_equiv_values != NULL &&
-    kls_try_diagonal_equiv_refactor(solver, diagonal_equiv_values);
-  if (diagonal_equiv_accepted) {
-    /* The factor still represents A_reference.  The public solve wrapper
-       applies Dr^-1 to the right-hand side and Dc^-1 to the solution (with
-       the roles exchanged for A^T), so no numeric data need be rewritten. */
-    kls_set_last_refactor_path(
-      solver, KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT);
-    solver->stats.refactor_seconds =
-      kls_now_seconds() - refactor_call_start;
-    if (diagonal_equiv_trace_phases) {
-      const double diagonal_equiv_end = kls_now_seconds();
-      fprintf(stderr,
-              "KLS diagonal-equivalent wrapper clear=%.3fus"
-              " prepare=%.3fus validate=%.3fus total=%.3fus\n",
-              1e6 * (diagonal_equiv_clear_end - refactor_call_start),
-              1e6 * (diagonal_equiv_prepare_end -
-                      diagonal_equiv_clear_end),
-              1e6 * (diagonal_equiv_end - diagonal_equiv_prepare_end),
-              1e6 * (diagonal_equiv_end - refactor_call_start));
-    }
-    fill_numeric_stats(solver);
-    return KLS_OK;
-  }
-  solver->diagonal_equiv_active = 0;
   double *numeric_values = NULL;
   solver->lean_user_values_active = 0;
   solver->lean_deferred_value_prep_active = 0;
@@ -31062,8 +30788,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   } else if (deferred_lean_value_prep) {
     numeric_values = (double *)values;
     solver->lean_deferred_value_prep_active = 1;
-  } else if (diagonal_equiv_values != NULL) {
-    numeric_values = diagonal_equiv_values;
+
   } else if (pts_direct_values || symmetric_partial_diagonal_direct_values ||
              low_work_btf_direct_values) {
     numeric_values = (double *)values;
@@ -31222,8 +30947,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->orientation == KLS_ORIENTATION_NORMAL &&
       solver->input_to_csc == NULL && solver->row_perm == NULL &&
       solver->user_col_perm == NULL && solver->row_scale == NULL &&
-      solver->col_scale == NULL && !solver->diagonal_equiv_active &&
-      solver->n >= 512u && solver->n <= 131072u &&
+      solver->col_scale == NULL && solver->n >= 512u && solver->n <= 131072u &&
       solver->numeric->lnz <= UF_long_max - solver->numeric->unz) {
     const UF_long factor_entries =
       solver->numeric->lnz + solver->numeric->unz;
@@ -33163,11 +32887,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->common.status == TRILINOS_KLU_SINGULAR) {
     return KLS_ERR_SINGULAR;
   }
-  if (solver->diagonal_equiv_plan_state == 1 &&
-      !kls_diagonal_equiv_plan_matches_pattern(solver)) {
-    kls_diagonal_equiv_reset_plan(solver);
-  }
-  kls_update_structured_references(solver, numeric_values);
+  kls_partial_btf_update_reference(solver, numeric_values);
   return KLS_OK;
 }
 
@@ -34534,7 +34254,6 @@ static int solve_impl(kls_solver *solver,
         kls_direct_klu_public_frame_capable(solver))) &&
       solver->row_perm == NULL && solver->user_col_perm == NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
-      !solver->diagonal_equiv_active &&
       !solver->row_refactor_values_ready &&
       !solver->row_refactor_values_dirty &&
       !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
@@ -34597,23 +34316,10 @@ static int solve_impl(kls_solver *solver,
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
   const int has_row_scale = solver->row_scale != NULL;
   const int has_col_scale = solver->col_scale != NULL;
-  const double *diagonal_equiv_pre_scale =
-    solver->diagonal_equiv_active &&
-        solver->diagonal_equiv_scales != NULL
-      ? solver->diagonal_equiv_scales +
-          (kernel_transpose ? solver->n : 0u)
-      : NULL;
-  const double *diagonal_equiv_post_scale =
-    solver->diagonal_equiv_active &&
-        solver->diagonal_equiv_scales != NULL
-      ? solver->diagonal_equiv_scales +
-          (kernel_transpose ? 0u : solver->n)
-      : NULL;
   const int serial_mapped_vendor_solve =
     kls_serial_mapped_prefers_vendor_solve(solver);
   const int fused_compact_match_rhs =
     getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
-    !solver->diagonal_equiv_active &&
     solver->row_perm != NULL && !kernel_transpose && nrhs == 1 &&
     !has_row_scale && solver->numeric->Rs == NULL &&
     solver->lean_compact_match_row_factor_active &&
@@ -34646,7 +34352,7 @@ static int solve_impl(kls_solver *solver,
     kls_lean_single_block_prepared_solve_ready(solver);
   const int fused_matched_i32_rhs =
     getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL &&
-    !solver->diagonal_equiv_active && solver->row_perm != NULL &&
+    solver->row_perm != NULL &&
     !kernel_transpose && nrhs == 1 &&
     solver->numeric->Rs == NULL && b != x &&
     !solver->row_refactor_values_ready &&
@@ -34724,20 +34430,8 @@ static int solve_impl(kls_solver *solver,
       memmove(x + rhs * ldx, b + rhs * ldb, (size_t)solver->n * sizeof(double));
     }
   }
-  if (diagonal_equiv_pre_scale != NULL && !fused_general_i32_rhs) {
-    /* At this point x is in the factor's internal row coordinate for A and
-       internal column coordinate for A^T.  Apply the validated inverse map
-       here, after every fixed public-frame permutation/equilibration. */
-    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
-      double *dst = x + rhs * ldx;
-      for (UF_long i = 0u; i < solver->n; ++i) {
-        dst[i] *= diagonal_equiv_pre_scale[i];
-      }
-    }
-  }
 
   UF_long ok = 0;
-  int diagonal_equiv_post_applied = 0;
   int fixed_col_scale_post_applied = 0;
   const int trace_solve_path = getenv("KLS_TRACE_SOLVE_PATH") != NULL;
   const int trace_x = solver->n <= 8 && getenv("KLS_TRACE_X") != NULL;
@@ -34891,7 +34585,6 @@ static int solve_impl(kls_solver *solver,
         solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
         solver->row_perm == NULL && solver->user_col_perm == NULL &&
         solver->row_scale == NULL && solver->col_scale == NULL &&
-        !solver->diagonal_equiv_active &&
         ((solver->symbolic->nblocks == 1u &&
           factor_entries >= 2000000u) ||
          (solver->n >= 65536u && factor_entries >= 4u * solver->n)) &&
@@ -34962,16 +34655,13 @@ static int solve_impl(kls_solver *solver,
                            (fused_matched_i32_rhs ||
                             fused_matched_i32_rhs32) && has_row_scale
                              ? solver->row_scale
-                             : fused_general_i32_rhs
-                               ? diagonal_equiv_pre_scale : NULL,
+                             : NULL,
                            (fused_matched_i32_rhs ||
                             fused_matched_i32_rhs32) && has_col_scale
                              ? solver->col_scale
-                             : diagonal_equiv_post_scale,
+                             : NULL,
                            fused_matched_i32_rhs32 ? 2 : 0);
       }
-      diagonal_equiv_post_applied =
-        diagonal_equiv_post_scale != NULL;
       fixed_col_scale_post_applied =
         (fused_matched_i32_rhs || fused_matched_i32_rhs32) &&
         has_col_scale;
@@ -34991,19 +34681,6 @@ static int solve_impl(kls_solver *solver,
         fprintf(stderr, "TX klu t=%d ok=%ld: %.17g %.17g %.17g\n",
                 kernel_transpose, ok, x[0], x[1],
                 solver->n > 2 ? x[2] : 0.0);
-      }
-    }
-  }
-  if (ok && diagonal_equiv_post_scale != NULL &&
-      !diagonal_equiv_post_applied) {
-    /* The numeric solve returns in the factor's internal column coordinate
-       (internal row coordinate for A^T).  Complete the retained-factor map
-       before the solver's fixed output scale/permutation maps it back to the
-       public API frame. */
-    for (int64_t rhs = 0; rhs < nrhs; ++rhs) {
-      double *dst = x + rhs * ldx;
-      for (UF_long i = 0u; i < solver->n; ++i) {
-        dst[i] *= diagonal_equiv_post_scale[i];
       }
     }
   }
@@ -36232,130 +35909,6 @@ refine_skip:;
   return KLS_OK;
 }
 
-static int kls_solve_diagonal_equiv(kls_solver *solver,
-                                     int transpose,
-                                     int64_t nrhs,
-                                     const double *b,
-                                     int64_t ldb,
-                                     double *x,
-                                     int64_t ldx) {
-  if (solver == NULL || b == NULL || x == NULL || nrhs <= 0 ||
-      solver->diagonal_equiv_public_scales == NULL) {
-    return KLS_ERR_INVALID_ARGUMENT;
-  }
-  if (ldb == 0) {
-    ldb = (int64_t)solver->n;
-  }
-  if (ldx == 0) {
-    ldx = (int64_t)solver->n;
-  }
-  if (ldb < (int64_t)solver->n || ldx < (int64_t)solver->n ||
-      (uint64_t)nrhs > (uint64_t)SIZE_MAX /
-        (uint64_t)(solver->n > 0u ? solver->n : 1u)) {
-    return KLS_ERR_INVALID_ARGUMENT;
-  }
-  const size_t entries = (size_t)nrhs * (size_t)solver->n;
-  if (entries > solver->diagonal_equiv_rhs_capacity) {
-    if (entries > SIZE_MAX / sizeof(double)) {
-      return KLS_ERR_OUT_OF_MEMORY;
-    }
-    double *workspace = (double *)realloc(
-      solver->diagonal_equiv_rhs_workspace,
-      (entries > 0u ? entries : 1u) * sizeof(*workspace));
-    if (workspace == NULL) {
-      return KLS_ERR_OUT_OF_MEMORY;
-    }
-    solver->diagonal_equiv_rhs_workspace = workspace;
-    solver->diagonal_equiv_rhs_capacity = entries;
-  }
-
-  const double start = kls_now_seconds();
-  const double *row_scale = solver->diagonal_equiv_public_scales;
-  const double *col_scale =
-    solver->diagonal_equiv_public_scales + solver->n;
-  const double *pre_scale = transpose ? col_scale : row_scale;
-  const double *post_scale = transpose ? row_scale : col_scale;
-  if (!transpose && nrhs == 1 &&
-      solver->orientation == KLS_ORIENTATION_NORMAL &&
-      solver->row_perm == NULL && solver->user_col_perm == NULL &&
-      solver->row_scale == NULL && solver->col_scale == NULL &&
-      !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
-      solver->pivot_nudge_count == 0u &&
-      !kls_serial_mapped_prefers_vendor_solve(solver) &&
-      kls_i32_solve_ready(solver)) {
-    /* The i32 solve already gathers Pnum(rhs) and scatters Q(solution).
-       Fold Dr^-1 and Dc^-1 into those exact memory streams so a retained
-       factor pays no standalone O(n) boundary passes.  The initial-factor
-       probe and the update's all-nonzero identity check jointly certify the
-       numeric; transformed/matched frames retain the conservative wrapper. */
-    const double direct_start = kls_now_seconds();
-    if (getenv("KLS_TRACE_SOLVE_PATH") != NULL) {
-      fprintf(stderr, "KLS solve path: diagonal-equivalent fused i32\n");
-    }
-    solver->common.status = TRILINOS_KLU_OK;
-    UF_long ok =
-      kls_i32_solve(solver, b, x, NULL, pre_scale, post_scale, 0);
-    const int refine_retained = ok &&
-      solver->common.rcond > 0.0 && solver->common.rcond < 1.0e-10 &&
-      solver->stats.selected_pivot_tolerance > 0.0 &&
-      solver->stats.selected_pivot_tolerance < 1.0e-6;
-    if (refine_retained) {
-      /* A retained factor sees a different RHS direction after each boundary
-         scaling.  An ill-conditioned numeric admitted by an unusually loose
-         pivot line can solve the base probe accurately yet miss another
-         direction (TSOPF_FS_b9_c1).  Apply one honest refinement step against
-         Dr*Aref*Dc; the already-validated identity means no changed-value copy
-         is needed. */
-      const size_t need = 2u * (size_t)solver->n;
-      if (solver->diagonal_equiv_rhs_capacity < need) {
-        double *workspace = (double *)realloc(
-          solver->diagonal_equiv_rhs_workspace,
-          (need > 0u ? need : 1u) * sizeof(*workspace));
-        if (workspace == NULL) {
-          return KLS_ERR_OUT_OF_MEMORY;
-        }
-        solver->diagonal_equiv_rhs_workspace = workspace;
-        solver->diagonal_equiv_rhs_capacity = need;
-      }
-      double *residual = solver->diagonal_equiv_rhs_workspace;
-      double *correction = residual + solver->n;
-      memcpy(residual, b, (size_t)solver->n * sizeof(*residual));
-      for (uint32_t col = 0u; col < (uint32_t)solver->n; ++col) {
-        const double dc_x = x[col] / col_scale[col];
-        for (uint32_t p = solver->diagonal_equiv_col_ptr[col];
-             p < solver->diagonal_equiv_col_ptr[col + 1u]; ++p) {
-          const uint32_t row = solver->diagonal_equiv_row_idx[p];
-          residual[row] = fma(
-            -solver->diagonal_equiv_reference_values[p] / row_scale[row],
-            dc_x, residual[row]);
-        }
-      }
-      solver->common.status = TRILINOS_KLU_OK;
-      ok = kls_i32_solve(solver, residual, correction, NULL,
-                         pre_scale, post_scale, 0);
-      if (ok) {
-        for (UF_long i = 0u; i < solver->n; ++i) {
-          x[i] += correction[i];
-        }
-      }
-    }
-    solver->base_solve_seconds = kls_now_seconds() - direct_start;
-    solver->stats.solve_seconds = solver->base_solve_seconds;
-    solver->stats.last_kernel_status = (int)solver->common.status;
-    solver->stats.memory_bytes = solver->common.memusage;
-    solver->stats.memory_peak_bytes = solver->common.mempeak;
-    return ok && solver->common.status >= 0
-      ? KLS_OK : KLS_ERR_SOLVE_FAILED;
-  }
-  /* General transformed frames apply these same inverse diagonals inside
-     solve_impl, at the exact internal-factor boundaries.  The plain-frame
-     fast path above remains here because it also carries the retained-factor
-     refinement for exceptionally ill-conditioned numerics. */
-  const int status = solve_impl(solver, transpose, nrhs, b, ldb, x, ldx);
-  solver->stats.solve_seconds = kls_now_seconds() - start;
-  return status;
-}
-
 static int kls_solve_retained_preconditioner(kls_solver *solver,
                                               int transpose,
                                               int64_t nrhs,
@@ -36405,9 +35958,6 @@ int kls_solve(kls_solver *solver,
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
   }
-  if (solver != NULL && solver->diagonal_equiv_active) {
-    return kls_solve_diagonal_equiv(solver, 0, nrhs, b, ldb, x, ldx);
-  }
   if (solver != NULL && b == x &&
       kls_retained_preconditioner_requires_correction(solver)) {
     return kls_solve_retained_preconditioner(
@@ -36429,9 +35979,6 @@ int kls_solve_transpose(kls_solver *solver,
        exact publication sweep before using the established implementation. */
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
-  }
-  if (solver != NULL && solver->diagonal_equiv_active) {
-    return kls_solve_diagonal_equiv(solver, 1, nrhs, b, ldb, x, ldx);
   }
   if (solver != NULL && b == x &&
       kls_retained_preconditioner_requires_correction(solver)) {
@@ -36495,8 +36042,7 @@ int kls_refactor_solve(kls_solver *solver,
     solver->numeric->Pnum != NULL && solver->numeric->Rs == NULL &&
     solver->common.scale <= 0 && solver->row_perm == NULL &&
     solver->user_col_perm == NULL && solver->row_scale == NULL &&
-    solver->col_scale == NULL && !solver->diagonal_equiv_active &&
-    solver->lean_choice > 0 &&
+    solver->col_scale == NULL && solver->lean_choice > 0 &&
     solver->row_refactor_level_rows != NULL &&
     solver->row_refactor_l_ptr != NULL &&
     solver->row_refactor_l_cols != NULL &&
@@ -37255,8 +36801,6 @@ const char *kls_refactor_path_name(kls_refactor_path path) {
     case KLS_REFACTOR_PATH_KLU: return "klu_refactor";
     case KLS_REFACTOR_PATH_SNB: return "snb";
     case KLS_REFACTOR_PATH_UNCHANGED: return "unchanged";
-    case KLS_REFACTOR_PATH_DIAGONAL_EQUIVALENT:
-      return "diagonal_equivalent";
     case KLS_REFACTOR_PATH_PARTIAL_BTF: return "partial_btf";
     case KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER:
       return "retained_preconditioner";

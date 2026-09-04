@@ -3579,12 +3579,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   if (!kls_refactor_schedule_is_eligible(solver)) {
     return 0;
   }
-  const int all_pipeline =
-    0 &&
-    getenv("KLS_DISABLE_EGRAPH_ALL_PIPELINE") == NULL;
-  const int natural_pipeline =
-    all_pipeline && kls_egraph_all_pipeline_huge_single_shape(solver) &&
-    getenv("KLS_DISABLE_EGRAPH_NATURAL_PIPELINE") == NULL;
   const int build_separator_private =
     kls_egraph_separator_private_requested(solver);
   const int need_pipeline_ready_graph =
@@ -3654,7 +3648,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
      algorithm5_payoff_suffix_advance ||
      algorithm5_payoff_suffix_group_advance ||
      algorithm5_payoff_suffix_producer_advance ||
-     algorithm5_payoff_group_prep) && !natural_pipeline;
+     algorithm5_payoff_group_prep);
   const int algorithm5_payoff_exec =
     kls_refactor_supernode_algorithm5_payoff_exec_env_enabled() ||
     algorithm5_payoff_claim_surface_ready ||
@@ -3832,7 +3826,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
             solver->options.threads &&
           solver->refactor_separator_private_cluster_level_count ==
             solver->refactor_cluster_level_count)))) &&
-      (solver->refactor_level_cols != NULL || natural_pipeline)) {
+      solver->refactor_level_cols != NULL) {
     return 1;
   }
   if (record_stream_stats &&
@@ -4090,25 +4084,24 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   level_ptr =
     (UF_long *)malloc(((size_t)level_count + 1u) * sizeof(*level_ptr));
   const int thread_count = solver->options.threads;
-  level_cols = natural_pipeline ? NULL
-                                : (UF_long *)malloc((size_t)solver->n *
-                                                    sizeof(*level_cols));
+  level_cols =
+    (UF_long *)malloc((size_t)solver->n * sizeof(*level_cols));
   level_pos = need_level_pos
     ? (UF_long *)malloc((size_t)solver->n * sizeof(*level_pos))
     : NULL;
-  if (thread_count > 1 && !all_pipeline) {
+  if (thread_count > 1) {
     level_thread_ptr =
       (UF_long *)malloc((size_t)level_count *
                         ((size_t)thread_count + 1u) *
                         sizeof(*level_thread_ptr));
   }
   if (counts == NULL || level_ptr == NULL ||
-      (!natural_pipeline && level_cols == NULL) ||
+      level_cols == NULL ||
       (need_level_pos && level_pos == NULL)) {
     KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
   }
-  if (thread_count > 1 && !all_pipeline && level_thread_ptr == NULL) {
+  if (thread_count > 1 && level_thread_ptr == NULL) {
     KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
   }
@@ -4153,19 +4146,14 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     if (width > max_width) {
       max_width = width;
     }
-    if (!all_pipeline &&
-        cluster_levels == level_count &&
+    if (cluster_levels == level_count &&
         (double)width < cluster_width_limit) {
       cluster_levels = level;
     }
   }
-  if (all_pipeline) {
-    cluster_levels = 0u;
-  }
   UF_long cluster_levels_alpha3 = cluster_levels;
   UF_long cluster_levels_alpha4 = cluster_levels;
-  if (!explicit_cluster_width_alpha &&
-      !all_pipeline) {
+  if (!explicit_cluster_width_alpha) {
     cluster_levels_alpha3 = level_count;
     const double alpha3_limit = 3.0 * (double)solver->options.threads;
     for (UF_long level = 0u; level < level_count; ++level) {
@@ -4245,8 +4233,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   double pipeline_max_column_work = 0.0;
   if (cluster_levels < level_count) {
     for (UF_long pos = level_ptr[cluster_levels]; pos < solver->n; ++pos) {
-      const UF_long col = natural_pipeline ? pos : level_cols[pos];
-      if (!natural_pipeline && col >= solver->n) {
+      const UF_long col = level_cols[pos];
+      if (col >= solver->n) {
         KLS_FREE_REFACTOR_SCHEDULE_TEMP();
         return 0;
       }
@@ -4259,7 +4247,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     }
   }
 
-  if (build_separator_private && !all_pipeline && cluster_levels > 0u) {
+  if (build_separator_private && cluster_levels > 0u) {
     separator_private_plan_attempted = 1;
     (void)kls_build_refactor_separator_private_plan(
       solver, levels, cluster_levels, column_work, thread_count,

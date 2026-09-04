@@ -17967,8 +17967,7 @@ static int kls_direct_numeric_lean_pattern_capable(
       getenv("KLS_DISABLE_DIRECT_NUMERIC_LEAN_PATTERN") != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->user_col_perm != NULL || solver->row_scale != NULL ||
-      solver->col_scale != NULL || solver->diagonal_equiv_active ||
-      solver->pivot_nudge_count != 0u ||
+      solver->col_scale != NULL || solver->pivot_nudge_count != 0u ||
       solver->common.kls_perturb_count != 0u) {
     return 0;
   }
