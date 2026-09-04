@@ -463,14 +463,28 @@ endif()
 
 add_library(kls
   src/kls.c
+  src/kls_compact_solve.inc
+  src/kls_egraph_refactor.inc
+  src/kls_first_factor.inc
   src/kls_numeric_engines.inc
-  src/kls_ordering_policy.inc)
+  src/kls_numeric_prepare_repair.inc
+  src/kls_numeric_schedule.inc
+  src/kls_ordering_policy.inc
+  src/kls_pts.inc
+  src/kls_row_refactor.inc)
 
 # These implementation fragments stay in kls.c's translation unit so moving
 # the internal engines does not introduce call boundaries or inhibit inlining.
 set_source_files_properties(
+  src/kls_compact_solve.inc
+  src/kls_egraph_refactor.inc
+  src/kls_first_factor.inc
   src/kls_numeric_engines.inc
+  src/kls_numeric_prepare_repair.inc
+  src/kls_numeric_schedule.inc
   src/kls_ordering_policy.inc
+  src/kls_pts.inc
+  src/kls_row_refactor.inc
   PROPERTIES HEADER_FILE_ONLY ON)
 
 add_library(KLS::kls ALIAS kls)
