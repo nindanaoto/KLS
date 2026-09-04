@@ -31845,7 +31845,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->row_accept_decision <= 0 &&
       solver->solve_contract_probe == 0 &&
       kls_repeated_update_workload(&solver->options) &&
-      solver->options.expected_refactorizations > 2 &&
       kls_direct_klu_public_frame_capable(solver) &&
       solver->dense_tail_cols == 0 && !solver->numeric_is_predicted &&
       !solver->fp32_last_used && !solver->numeric_needs_refinement &&

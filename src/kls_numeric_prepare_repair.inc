@@ -382,8 +382,7 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
 }
 
 static int kls_refactor_pool_map_is_worthwhile(const kls_solver *solver) {
-  if (!kls_parallel_refactor_is_eligible(solver) ||
-      solver->symbolic == NULL || solver->symbolic->nblocks <= 1u) {
+  if (!kls_parallel_refactor_is_eligible(solver)) {
     return 0;
   }
   if ((double)solver->symbolic->maxblock < 0.75 * (double)solver->n) {

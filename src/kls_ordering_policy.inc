@@ -284,7 +284,7 @@ static int kls_low_work_single_block_direct_public_capable(
   const kls_solver *solver) {
   return kls_low_work_single_block_policy_enabled(solver) &&
     kls_direct_klu_public_frame_capable(solver) &&
-    solver->common.scale == -1 && solver->numeric->Rs == NULL;
+    solver->common.scale == -1;
 }
 
 enum {
