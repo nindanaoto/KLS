@@ -34400,7 +34400,12 @@ static UF_long kls_metis_order_inner(UF_long n,
     if (nseps != NULL && nseps[0] != '\0') {
       options[METIS_OPTION_NSEPS] = atoi(nseps);
     } else if (kls_auto_metis_promotion_quality) {
-      options[METIS_OPTION_NSEPS] = 4;
+      /* Expensive giant refactors benefit from the wider four-separator
+         search.  Compact, recurring KLU factors have a different economics:
+         two separator trials find the useful alternate tree without the
+         over-refinement and setup cost of the giant profile. */
+      options[METIS_OPTION_NSEPS] =
+        kls_auto_metis_promotion_quality == 2 ? 2 : 4;
     }
     if (kls_auto_metis_promotion_quality &&
         getenv("KLS_METIS_NITER") == NULL) {
@@ -44285,6 +44290,22 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   const int high_cost_promotion =
     solver->n >= 100000u && solver->common.flops >= 1.0e8 &&
     solver->numeric->lnz + solver->numeric->unz >= 1000000u;
+  const UF_long incumbent_entries =
+    solver->numeric->lnz + solver->numeric->unz;
+  const int compact_high_work_promotion =
+    !high_cost_promotion && solver->common.flops >= 1.0e8 &&
+    incumbent_entries >= 1000000u && incumbent_entries <= 3000000u &&
+    solver->n < 100000u && solver->symbolic != NULL;
+
+  if (compact_high_work_promotion && race != NULL) {
+    /* The analyze-time race uses the ordinary one-separator profile because
+       realized numeric work is not known yet.  Once the incumbent proves
+       this compact high-work lifecycle, that symbolic is not the challenger
+       selected below; release it and build the two-separator arm under the
+       now-observed economics. */
+    kls_metis_race_free(race);
+    race = NULL;
+  }
 
   trilinos_klu_l_symbolic *metis_symbolic = NULL;
   trilinos_klu_l_common metis_common;
@@ -44331,7 +44352,8 @@ static int maybe_promote_auto_metis(kls_solver *solver,
     }
     double start = kls_now_seconds();
     const int saved_promotion_quality = kls_auto_metis_promotion_quality;
-    kls_auto_metis_promotion_quality = high_cost_promotion;
+    kls_auto_metis_promotion_quality =
+      high_cost_promotion ? 1 : (compact_high_work_promotion ? 2 : 0);
     int status = analyze_with_ordering(solver->n, solver->col_ptr,
                                        solver->row_idx, &metis_options,
                                        KLS_ORDERING_METIS, &metis_symbolic,
@@ -44495,6 +44517,9 @@ static int maybe_promote_auto_metis(kls_solver *solver,
       (high_cost_promotion
         ? (promoted_fill <= 0.90 * incumbent_fill &&
            dt < 0.97 * incumbent_ref_seconds)
+        : compact_high_work_promotion
+          ? (promoted_fill <= 0.95 * incumbent_fill &&
+             dt < 0.97 * incumbent_ref_seconds)
         : dt < 1.05 * incumbent_ref_seconds);
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
       fprintf(stderr,

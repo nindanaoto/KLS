@@ -2302,7 +2302,13 @@ cost on small circuit matrices. A narrower post-factor promotion also covers
 small BTF-dominant matrices whose first AMD/COLAMD factorization shows both
 many off-diagonal pivots and high actual fill/flop growth; this catches
 power-grid-style cases where the symbolic estimate alone understates the
-benefit of nested dissection.
+benefit of nested dissection.  When that post-factor tournament observes a
+compact (one to three million retained entries), high-work factor below the
+giant-policy size, it rebuilds the challenger with two METIS separator trials.
+The incumbent remains live through a warmed refactor comparison; the compact
+challenger is retained only with at least 5% less realized fill and a measured
+refactor improvement of at least 3%.  User ordering and METIS environment
+overrides remain authoritative.
 
 Two analyze-time shortcuts use staged capability contracts rather than a
 benchmark-sized input box. A 65,536--262,144-row, almost-full-diagonal input
