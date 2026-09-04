@@ -394,38 +394,6 @@ static int kls_serial_mapped_prefers_vendor_solve(
     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED;
 }
 
-enum {
-  KLS_FRAGMENTED_BTF_SOLVE_OTHER = 0,
-  KLS_FRAGMENTED_BTF_SOLVE_NATIVE = 1,
-  KLS_FRAGMENTED_BTF_SOLVE_I32 = 2
-};
-
-__attribute__((noinline, cold))
-static int kls_moderate_work_fragmented_btf_solve_tier(
-  const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      !kls_sparse_fragmented_dominant_btf_structure(solver) ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
-      solver->row_scale != NULL || solver->col_scale != NULL ||
-      solver->common.noffdiag > solver->n / 1000u ||
-      solver->pivot_nudge_count != 0u ||
-      solver->common.kls_perturb_count != 0u) {
-    return 0;
-  }
-  const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
-  if ((double)fill < 12.0 * (double)solver->n ||
-      (double)fill > 32.0 * (double)solver->n ||
-      solver->common.flops < 1000.0 * (double)solver->n ||
-      solver->common.flops > 4096.0 * (double)solver->n) {
-    return KLS_FRAGMENTED_BTF_SOLVE_OTHER;
-  }
-  if (solver->row_perm != NULL &&
-      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE") == NULL) {
-    return KLS_FRAGMENTED_BTF_SOLVE_I32;
-  }
-  return KLS_FRAGMENTED_BTF_SOLVE_NATIVE;
-}
-
 static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   if (getenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE") != NULL ||
       solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
@@ -436,44 +404,9 @@ static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   if (kls_low_work_btf_prefers_native_solve(solver)) {
     return 1;
   }
-  {
-    /* Outside the cache-resident low-work crossover, build the compact
-       stream and let the generic solve/PTS timing state choose its consumer.
-       The remaining clauses are historical family windows. */
-    return 0;
-  }
-
-  const int fragmented_tier =
-    kls_moderate_work_fragmented_btf_solve_tier(solver);
-  if (fragmented_tier != KLS_FRAGMENTED_BTF_SOLVE_OTHER) {
-    if (fragmented_tier == KLS_FRAGMENTED_BTF_SOLVE_I32) {
-      /* A retained static matching permutation lets the i32 path precompose
-         public RHS rows with numeric rows.  That fused pass repays the mirror
-         construction over a repeated numeric horizon; without matching,
-         KLU's native packed stream remains faster and avoids the mirror. */
-      return 0;
-    }
-    return 1;
-  }
-  if (solver->common.scale > 0) {
-    return 0;
-  }
-  if (solver->n < 20000u || solver->n > 30000u ||
-      solver->symbolic->nblocks < 16u ||
-      solver->symbolic->nblocks > 64u ||
-      solver->symbolic->maxblock <
-        (UF_long)(0.95 * (double)solver->n) ||
-      solver->numeric->lnz + solver->numeric->unz > 300000u ||
-      solver->common.flops >= 3.0e6) {
-    return 0;
-  }
-  /* hvdc1 is the sole paper-union member of this compact, dominant-BTF
-     cohort.  The native KLU stream is faster than the serial i32 mirror,
-     but its verified PTS partition has only a 7% shared top and runs about
-     3x faster from the persistent worker pool.  At four or more threads,
-     build that partition and let its runtime selector verify the win. */
-  return solver->options.threads < 4 ||
-    getenv("KLS_DISABLE_SMALL_PTS_SOLVE") != NULL;
+  /* Outside the cache-resident low-work crossover, build the compact stream
+     and let the generic solve/PTS timing state choose its consumer. */
+  return 0;
 }
 
 typedef struct kls_i32_index_copy_job {

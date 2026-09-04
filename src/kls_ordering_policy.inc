@@ -1659,70 +1659,6 @@ static int choose_auto_scale_from_pattern(UF_long n,
     n, col_ptr, row_idx, options, numeric_values, NULL, NULL);
 }
 
-static int is_medium_spiked_many_block_scale0_pattern(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx,
-  const trilinos_klu_l_symbolic *symbolic) {
-  if (symbolic == NULL || !symbolic->do_btf || col_ptr == NULL ||
-      row_idx == NULL || n < 45000u || n > 100000u ||
-      col_ptr[n] < 4u * n || col_ptr[n] > 7u * n ||
-      symbolic->nblocks < 4000u || symbolic->maxblock == 0u ||
-      symbolic->maxblock < (UF_long)(0.70 * (double)n) ||
-      symbolic->maxblock > (UF_long)(0.92 * (double)n)) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  UF_long max_col_degree = 0;
-  int valid = 1;
-  for (UF_long col = 0; col < n && valid; ++col) {
-    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] == UF_long_max) {
-        valid = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        diagonal_count++;
-      }
-    }
-  }
-
-  UF_long max_row_degree = 0;
-  int no_empty_rows = 1;
-  for (UF_long row = 0; row < n && valid; ++row) {
-    if (row_degree[row] == 0u) {
-      no_empty_rows = 0;
-      break;
-    }
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-  if (!valid || !no_empty_rows) {
-    return 0;
-  }
-
-  const UF_long max_degree =
-    max_row_degree > max_col_degree ? max_row_degree : max_col_degree;
-  return 1000.0 * (double)diagonal_count >= 930.0 * (double)n &&
-         1000.0 * (double)diagonal_count <= 985.0 * (double)n &&
-         (double)max_degree >= 0.05 * (double)n &&
-         (double)max_degree <= 0.40 * (double)n;
-}
-
 static int symbolic_is_fragmented_many_block_unscaled_candidate(
   UF_long n,
   const trilinos_klu_l_symbolic *symbolic) {
@@ -1736,106 +1672,22 @@ static int symbolic_is_fragmented_many_block_unscaled_candidate(
   return symbolic->nblocks * 10u >= fringe * 8u;
 }
 
-static int symbolic_is_scale0_dense_fringe_dominant_btf_candidate(
-  UF_long n,
-  const UF_long *col_ptr,
-  const trilinos_klu_l_symbolic *symbolic) {
-  if (symbolic == NULL || col_ptr == NULL || !symbolic->do_btf ||
-      n < 100000u || n > 150000u ||
-      symbolic->nblocks < 8u || symbolic->nblocks > 64u ||
-      symbolic->maxblock == 0u ||
-      symbolic->maxblock * 100u < 99u * n ||
-      col_ptr[n] < 5u * n || col_ptr[n] > 8u * n) {
-    return 0;
-  }
-  return 1;
-}
-
-
-
-
-
 static int choose_auto_scale_from_values(kls_solver *solver,
                                          const double *numeric_values) {
   if (solver == NULL) {
     return 2;
   }
-  {
-    /* The generic first choice depends only on the current values.  Any
-       expensive factor can subsequently compare every KLU scale mode using
-       realized fill, work, pivoting, and condition estimates. */
-    int value_certified = 0;
-    int trial_certified = 0;
-    const int selected = choose_auto_scale_from_pattern_impl(
-      solver->n, solver->col_ptr, solver->row_idx, &solver->options,
-      numeric_values, &value_certified, &trial_certified);
-    solver->auto_scale_value_certified = value_certified;
-    solver->auto_scale_unscaled_trial_certified = trial_certified;
-    return selected;
-  }
-  solver->auto_scale_value_certified = 0;
-  solver->auto_scale_unscaled_trial_certified = 0;
-
-
-
-
-
-  if (kls_compact_amf_two_block_symbolic_state(solver)) {
-    /* This compact AMF symbolic has already passed the rank, SCC, estimated
-       fill, and work limits.  Retain structural checks without paying a
-       numeric row-scale census before the first factorization. */
-    return 0;
-  }
-
-
-  if (solver->options.scale == KLS_SCALE_AUTO &&
-      solver->large_sparse_amf3_path) {
-    /* Scaling trials are paid again at the first changed refactor and did
-       not improve this retained numeric.  Scale zero preserves structural
-       checks while avoiding the row-scale pass. */
-    return 0;
-  }
-  if (solver->options.scale == KLS_SCALE_AUTO &&
-      solver->large_bounded_no_btf_amf_path) {
-    /* Row scaling disables the fast retained subtree refactor on this
-       bounded-degree one-block factor and was slower over every H100 phase. */
-    return -1;
-  }
-
-
-  if (solver->options.scale == KLS_SCALE_AUTO &&
-      symbolic_is_low_work_dominant_btf(solver->n, solver->symbolic)) {
-    return 0;
-  }
-  if (solver->options.scale == KLS_SCALE_AUTO &&
-      is_medium_spiked_many_block_scale0_pattern(solver->n, solver->col_ptr,
-                                                 solver->row_idx,
-                                                 solver->symbolic)) {
-    return 0;
-  }
-  if (solver->options.scale == KLS_SCALE_AUTO &&
-      symbolic_is_fragmented_many_block_unscaled_candidate(solver->n,
-                                                          solver->symbolic)) {
-    return -1;
-  }
-  const int pattern_scale =
-    choose_auto_scale_from_pattern(solver->n, solver->col_ptr,
-                                   solver->row_idx, &solver->options,
-                                   numeric_values);
-  if (solver->options.scale == KLS_SCALE_AUTO &&
-      solver->n >= 1000u && solver->n <= 2000u && pattern_scale > 0) {
-    /* At this size the repeated row-scale pass costs more than it saves in
-       the numeric kernel.  The paper-union members for which the value rule
-       proposed scaling were both faster, with accepted pivots and residuals,
-       in KLU's no-scale/no-recheck mode. */
-    return -1;
-  }
-  if (solver->options.scale == KLS_SCALE_AUTO && pattern_scale == 2 &&
-      symbolic_is_scale0_dense_fringe_dominant_btf_candidate(
-        solver->n, solver->col_ptr, solver->symbolic)) {
-    return 0;
-  }
-  return pattern_scale;
+  /* The generic first choice depends only on the current values.  Any
+     expensive factor can subsequently compare every KLU scale mode using
+     realized fill, work, pivoting, and condition estimates. */
+  int value_certified = 0;
+  int trial_certified = 0;
+  const int selected = choose_auto_scale_from_pattern_impl(
+    solver->n, solver->col_ptr, solver->row_idx, &solver->options,
+    numeric_values, &value_certified, &trial_certified);
+  solver->auto_scale_value_certified = value_certified;
+  solver->auto_scale_unscaled_trial_certified = trial_certified;
+  return selected;
 }
 
 
@@ -13405,15 +13257,6 @@ static int kls_sparse_fragmented_dominant_btf_symbolic_work_profile(
     est_fill <= 64.0 * (double)n &&
     est_flops >= 1000.0 * (double)n &&
     est_flops <= 8192.0 * (double)n;
-}
-
-__attribute__((noinline, cold))
-static int kls_sparse_fragmented_dominant_btf_structure(
-  const kls_solver *solver) {
-  return solver != NULL &&
-    kls_sparse_fragmented_dominant_btf_symbolic_structure(
-      solver->n, solver->nnz, solver->orientation,
-      solver->stats.selected_ordering, solver->symbolic);
 }
 
 __attribute__((noinline, cold))
