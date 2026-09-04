@@ -32030,6 +32030,11 @@ static _Thread_local int kls_medium_partial_static_metis_ctx;
    account for the recurring row-scale stream without recognizing an input
    shape. */
 static _Thread_local int kls_generic_metis_tuning_ctx;
+/* A late AUTO challenge has already observed the incumbent's realized
+   numeric cost.  Let that narrowly scoped trial spend modestly more ordering
+   work to reduce every subsequent refactor; explicit METIS and analyze-time
+   portfolio candidates retain their established defaults. */
+static _Thread_local int kls_auto_metis_promotion_quality;
 static _Thread_local int kls_generic_metis_scale_hint;
 /* A high-work generic portfolio may compare the deterministic parallel leaf
    construction with METIS's serial NodeNDP forest.  This is scoped to the
@@ -34394,6 +34399,12 @@ static UF_long kls_metis_order_inner(UF_long n,
     const char *nseps = getenv("KLS_METIS_NSEPS");
     if (nseps != NULL && nseps[0] != '\0') {
       options[METIS_OPTION_NSEPS] = atoi(nseps);
+    } else if (kls_auto_metis_promotion_quality) {
+      options[METIS_OPTION_NSEPS] = 4;
+    }
+    if (kls_auto_metis_promotion_quality &&
+        getenv("KLS_METIS_NITER") == NULL) {
+      options[METIS_OPTION_NITER] = 10;
     }
     const char *ufactor = getenv("KLS_METIS_UFACTOR");
     if (ufactor != NULL && ufactor[0] != '\0') {
@@ -44205,12 +44216,19 @@ static int should_try_auto_metis(const kls_solver *solver) {
     const int realized_economics_stable =
       symbolic_fill > 0.0 && (double)fill <= 1.10 * symbolic_fill &&
       (!(symbolic_flops > 0.0) || flops <= 1.25 * symbolic_flops);
-    if (pivot_stable || realized_economics_stable) {
+    const int high_absolute_refactor_cost =
+      solver->n >= 100000u && flops >= 1.0e8 && fill >= 1000000u;
+    if ((pivot_stable || realized_economics_stable) &&
+        !high_absolute_refactor_cost) {
       /* The incumbent ordering has translated its symbolic promise into a
          storage-stable numeric with only bounded pivot arithmetic.  A
          moderate number of off-diagonal pivots is not itself a performance
          defect when the retained factor stays within those analyzed costs;
-         do not build an unbounded ND numeric merely to reduce that count. */
+         do not build an unbounded ND numeric merely to reduce that count.
+
+         Stability does not, however, compare AMD with another ordering.
+         Once the realized factor is large enough that repeated numeric work
+         dominates, retain the normal measured METIS challenge below. */
       return 0;
     }
   }
@@ -44264,6 +44282,9 @@ static int maybe_promote_auto_metis(kls_solver *solver,
     return 0;
   }
   solver->auto_metis_checked = 1;
+  const int high_cost_promotion =
+    solver->n >= 100000u && solver->common.flops >= 1.0e8 &&
+    solver->numeric->lnz + solver->numeric->unz >= 1000000u;
 
   trilinos_klu_l_symbolic *metis_symbolic = NULL;
   trilinos_klu_l_common metis_common;
@@ -44309,10 +44330,13 @@ static int maybe_promote_auto_metis(kls_solver *solver,
       metis_options.use_btf = solver->symbolic->do_btf ? 1 : 0;
     }
     double start = kls_now_seconds();
+    const int saved_promotion_quality = kls_auto_metis_promotion_quality;
+    kls_auto_metis_promotion_quality = high_cost_promotion;
     int status = analyze_with_ordering(solver->n, solver->col_ptr,
                                        solver->row_idx, &metis_options,
                                        KLS_ORDERING_METIS, &metis_symbolic,
                                        &metis_common, &metis_separator);
+    kls_auto_metis_promotion_quality = saved_promotion_quality;
     *elapsed += kls_now_seconds() - start;
     if (status != KLS_OK) {
       kls_separator_analysis_clear(&metis_separator);
@@ -44326,12 +44350,33 @@ static int maybe_promote_auto_metis(kls_solver *solver,
               solver->common.flops, symbolic_score(metis_symbolic),
               metis_symbolic->est_flops);
     }
+    if (high_cost_promotion &&
+        symbolic_score(metis_symbolic) >
+          0.90 * (double)(solver->numeric->lnz + solver->numeric->unz)) {
+      trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+      kls_separator_analysis_clear(&metis_separator);
+      return 0;
+    }
     start = kls_now_seconds();
     metis_numeric =
       trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
                             (double *)numeric_values, metis_symbolic,
                             &metis_common);
     *elapsed += kls_now_seconds() - start;
+  }
+  if (high_cost_promotion && metis_symbolic != NULL &&
+      symbolic_score(metis_symbolic) >
+        0.90 * (double)(solver->numeric->lnz + solver->numeric->unz)) {
+    /* The recurring-work override exists to find a substantially cheaper
+       numeric, not merely to question a stable AMD result.  Reject from the
+       symbolic lower bound before paying for a complete candidate factor.
+       This also bounds the cost of declined challenges on H100 workloads. */
+    if (metis_numeric != NULL) {
+      trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
+    }
+    trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
+    kls_separator_analysis_clear(&metis_separator);
+    return 0;
   }
   if (metis_numeric == NULL || metis_common.status < 0 ||
       metis_common.status == TRILINOS_KLU_SINGULAR) {
@@ -44440,10 +44485,17 @@ static int maybe_promote_auto_metis(kls_solver *solver,
        adaptive layers (row engine, fp32) exploit the promoted ordering
        further than one column refactor can show. The timing is only a
        veto against schedule catastrophes. */
+    const double incumbent_fill =
+      (double)(old_numeric->lnz + old_numeric->unz);
+    const double promoted_fill =
+      (double)(solver->numeric->lnz + solver->numeric->unz);
     const int promoted_wins =
       ok_met && dt > 0.0 && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
-      dt < 1.05 * incumbent_ref_seconds;
+      (high_cost_promotion
+        ? (promoted_fill <= 0.90 * incumbent_fill &&
+           dt < 0.97 * incumbent_ref_seconds)
+        : dt < 1.05 * incumbent_ref_seconds);
     if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
       fprintf(stderr,
               "KLS metis promotion timed: incumbent %.3fs metis %.3fs "
