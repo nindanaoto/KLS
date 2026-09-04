@@ -125,6 +125,9 @@ typedef struct kls_options {
      triangular-solve traffic in representation selection. */
   int64_t expected_refactorizations;
   int64_t expected_solves;
+  /* Set to zero when an outer integration owns timing and the overhead of
+     timing each tiny singleton solve would be part of the measured work. */
+  int record_tiny_solve_timing;
 } kls_options;
 
 typedef struct kls_stats {
@@ -1522,6 +1525,10 @@ typedef struct kls_stats {
   int bounded_degree_amf_no_btf_candidate;
   /* The selected one-block AMF symbolic passed its bounded-work contract. */
   int bounded_degree_amf_no_btf_symbolic_eligible;
+  /* The current numeric admits the compact one-RHS all-singleton BTF solve. */
+  int tiny_singleton_solve_eligible;
+  /* Number of public solves dispatched through that compact kernel. */
+  int64_t tiny_singleton_solve_count;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

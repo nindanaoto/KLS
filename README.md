@@ -102,6 +102,14 @@ sparsity fingerprints.
 Callers that know their numeric lifecycle can set
 `expected_refactorizations` and `expected_solves` in `kls_options`. These are
 performance hints only; they do not weaken factor or solve correctness checks.
+Tiny acyclic systems whose BTF consists entirely of singleton blocks use a
+compact one-right-hand-side substitution kernel.  Admission depends only on
+the retained factor structure and active accuracy contract.  Integrations
+that time the complete linear-solver call externally may set
+`record_tiny_solve_timing=0` to avoid per-solve clock overhead; the default is
+one, preserving `kls_stats.solve_seconds`.  The statistics fields
+`tiny_singleton_solve_eligible` and `tiny_singleton_solve_count` report
+admission and use.
 On heterogeneous-cache Linux systems, the implementation may keep a repeated
 factor's cooperative worker pool on distinct physical cores in the largest LLC
 domain when its retained working set exceeds a smaller eligible LLC. The

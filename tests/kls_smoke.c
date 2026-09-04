@@ -1042,6 +1042,101 @@ static int test_transposed_low_work_btf_native_solve(void) {
   return ok;
 }
 
+static int test_tiny_singleton_btf_solve(void) {
+  enum { N = 12, NNZ = 18 };
+  const int32_t ap[N + 1] = {
+    0, 1, 2, 4, 5, 7, 8, 10, 11, 13, 14, 16, 18
+  };
+  const int32_t ai[NNZ] = {
+    0, 1, 0, 2, 3, 1, 4, 5, 2, 6, 7, 3, 8, 9, 4, 10, 5, 11
+  };
+  double values[NNZ];
+  double changed[NNZ];
+  double truth[N];
+  double rhs[N];
+  double trhs[N];
+  double x[N];
+  for (int col = 0; col < N; ++col) {
+    for (int p = ap[col]; p < ap[col + 1]; ++p) {
+      const int diagonal = ai[p] == col;
+      values[p] = diagonal ? 2.0 + 0.125 * (double)(p % 3)
+                           : -0.0625 * (double)(1 + p % 2);
+      changed[p] = values[p] * (1.0 + 0.001 * (double)(1 + p % 3));
+    }
+  }
+  for (int i = 0; i < N; ++i) {
+    truth[i] = 0.5 + 0.03125 * (double)i;
+    rhs[i] = 0.0;
+    trhs[i] = 0.0;
+  }
+  for (int col = 0; col < N; ++col) {
+    for (int p = ap[col]; p < ap[col + 1]; ++p) {
+      rhs[ai[p]] += values[p] * truth[col];
+      trhs[col] += values[p] * truth[ai[p]];
+    }
+  }
+
+  kls_options options;
+  kls_default_options(&options);
+  options.ordering = KLS_ORDERING_NATURAL;
+  options.orientation = KLS_ORIENTATION_TRANSPOSE;
+  options.scale = 1;
+  options.use_btf = 1;
+
+  kls_solver *solver = NULL;
+  int ok = require_ok(kls_create(&solver), "create tiny singleton BTF") &&
+    require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, N, ap, ai, 0,
+                               &options),
+               "analyze tiny singleton BTF") &&
+    require_ok(kls_factor(solver, values), "factor tiny singleton BTF") &&
+    require_ok(kls_solve(solver, 1, rhs, 0, x, 0),
+               "solve tiny singleton BTF");
+  for (int i = 0; ok && i < N; ++i) {
+    ok = close_enough(x[i], truth[i]);
+  }
+  if (ok) {
+    memcpy(x, trhs, sizeof(x));
+    ok = require_ok(kls_solve_transpose(solver, 1, x, 0, x, 0),
+                    "transpose in-place tiny singleton BTF");
+  }
+  for (int i = 0; ok && i < N; ++i) {
+    ok = close_enough(x[i], truth[i]);
+  }
+  if (ok) {
+    for (int i = 0; i < N; ++i) {
+      rhs[i] = 0.0;
+    }
+    for (int col = 0; col < N; ++col) {
+      for (int p = ap[col]; p < ap[col + 1]; ++p) {
+        rhs[ai[p]] += changed[p] * truth[col];
+      }
+    }
+    ok = require_ok(kls_refactor_solve(solver, changed, 1, rhs, 0, x, 0),
+                    "changed refactor-solve tiny singleton BTF");
+  }
+  for (int i = 0; ok && i < N; ++i) {
+    ok = close_enough(x[i], truth[i]);
+  }
+
+  kls_stats stats;
+  memset(&stats, 0, sizeof(stats));
+  stats.struct_size = sizeof(stats);
+  if (ok) {
+    ok = require_ok(kls_get_stats(solver, &stats),
+                    "stats tiny singleton BTF") &&
+      stats.tiny_singleton_solve_eligible == 1 &&
+      stats.tiny_singleton_solve_count >= 3;
+  }
+  if (!ok) {
+    fprintf(stderr,
+            "tiny singleton BTF failed: eligible=%d count=%" PRId64 "\n",
+            stats.tiny_singleton_solve_eligible,
+            stats.tiny_singleton_solve_count);
+  }
+  kls_destroy(solver);
+  return ok;
+}
+
 static int test_compact_singleton_run_solve(void) {
   enum {
     N = 8192,
@@ -18396,6 +18491,9 @@ int main(void) {
     return EXIT_FAILURE;
   }
   if (!test_refactor_solve_api()) {
+    return EXIT_FAILURE;
+  }
+  if (!test_tiny_singleton_btf_solve()) {
     return EXIT_FAILURE;
   }
   /* The remaining smoke cases deliberately assert individual refactor-engine

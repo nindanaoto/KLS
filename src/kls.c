@@ -685,6 +685,9 @@ struct kls_solver {
   double **i16solve_ux;
   double *i32solve_udiag_recip;
   int i32solve_udiag_recip_fresh;
+  double *tiny_singleton_rs_recip;
+  int tiny_singleton_rs_recip_fresh;
+  int tiny_singleton_solve_state; /* 0 unclassified, 1 ready, -1 declined */
   UF_long i16solve_p_identity_prefix;
   UF_long i16solve_q_identity_prefix;
   int i32solve_state;       /* 0 unbuilt, 1 ready, -1 declined */
@@ -3421,6 +3424,7 @@ typedef struct kls_compact_match_entry {
 
 static int kls_build_refactor_schedule(kls_solver *solver);
 static int kls_i32_solve_ready(kls_solver *solver);
+static int kls_refresh_i32_udiag_recip(kls_solver *solver);
 static int kls_direct_user_value_maps_capable(const kls_solver *solver);
 
 static UF_long kls_padded_run_consume(const kls_solver *ps,
@@ -3431,6 +3435,189 @@ static UF_long kls_padded_run_consume(const kls_solver *ps,
                                       UF_long ucol_len,
                                       UF_long up,
                                       double *restrict x);
+/* A tiny acyclic factor can consist entirely of singleton BTF blocks.  KLU's
+   generic solve still pays an nrhs switch, one block loop per unknown, and a
+   separate public-vector copy before gathering into Xwork.  Cache the compact
+   descriptors once and admit a direct one-RHS walk from retained factor
+   geometry, never from a matrix name or exact benchmark dimension. */
+static int kls_tiny_singleton_solve_ready(kls_solver *solver) {
+  if (solver == NULL) {
+    return 0;
+  }
+  if (solver->tiny_singleton_solve_state != 0) {
+    return solver->tiny_singleton_solve_state > 0;
+  }
+  if (getenv("KLS_DISABLE_TINY_SINGLETON_SOLVE") != NULL ||
+      solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->n == 0u || solver->n > 64u ||
+      !solver->symbolic->do_btf ||
+      solver->symbolic->nblocks != solver->n ||
+      solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
+      solver->numeric->Pnum == NULL || solver->numeric->Offp == NULL ||
+      solver->numeric->Offi == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Udiag == NULL || solver->numeric->Xwork == NULL ||
+      (solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
+       solver->symbolic->structural_rank != solver->n)) {
+    solver->tiny_singleton_solve_state = -1;
+    return 0;
+  }
+  for (UF_long k = 0u; k <= solver->n; ++k) {
+    if (solver->symbolic->R[k] != k) {
+      solver->tiny_singleton_solve_state = -1;
+      return 0;
+    }
+  }
+  const UF_long offcount = solver->numeric->Offp[solver->n];
+  if (offcount > 8u * solver->n || offcount > (UF_long)UINT16_MAX) {
+    solver->tiny_singleton_solve_state = -1;
+    return 0;
+  }
+  for (UF_long k = 0u; k < solver->n; ++k) {
+    if (solver->numeric->Offp[k] > solver->numeric->Offp[k + 1u] ||
+        solver->numeric->Offp[k + 1u] > offcount) {
+      solver->tiny_singleton_solve_state = -1;
+      return 0;
+    }
+    for (UF_long p = solver->numeric->Offp[k];
+         p < solver->numeric->Offp[k + 1u]; ++p) {
+      if (solver->numeric->Offi[p] >= k) {
+        solver->tiny_singleton_solve_state = -1;
+        return 0;
+      }
+    }
+  }
+  if (!kls_i32_solve_ready(solver) ||
+      solver->i16solve_pnum == NULL || solver->i16solve_q == NULL ||
+      solver->i16solve_offp == NULL || solver->i16solve_offi == NULL) {
+    solver->tiny_singleton_solve_state = -1;
+    return 0;
+  }
+  solver->tiny_singleton_solve_state = 1;
+  solver->stats.tiny_singleton_solve_eligible = 1;
+  /* Every structural block already contains exactly one matched pivot, so a
+     deferred global row-matching portfolio cannot expose a larger diagonal
+     block or a different triangular executor.  Retaining that proposal made
+     each tiny unchanged update re-enter the adaptive preflight. */
+  solver->rowmatch_deferred = 0;
+  if (getenv("KLS_TRACE_TINY_SINGLETON_SOLVE") != NULL) {
+    fprintf(stderr,
+            "KLS tiny singleton solve ready: n=%lu off=%lu scale=%d\n",
+            (unsigned long)solver->n, (unsigned long)offcount,
+            solver->numeric->Rs != NULL);
+  }
+  return 1;
+}
+
+static int kls_tiny_singleton_refresh_reciprocals(kls_solver *solver) {
+  if (!kls_refresh_i32_udiag_recip(solver) ||
+      solver->i32solve_udiag_recip == NULL ||
+      !solver->i32solve_udiag_recip_fresh) {
+    return 0;
+  }
+  if (solver->numeric->Rs == NULL) {
+    solver->tiny_singleton_rs_recip_fresh = 1;
+    return 1;
+  }
+  if (solver->tiny_singleton_rs_recip_fresh &&
+      solver->tiny_singleton_rs_recip != NULL) {
+    return 1;
+  }
+  if (solver->tiny_singleton_rs_recip == NULL) {
+    solver->tiny_singleton_rs_recip = (double *)malloc(
+      (size_t)solver->n * sizeof(*solver->tiny_singleton_rs_recip));
+    if (solver->tiny_singleton_rs_recip == NULL) {
+      return 0;
+    }
+  }
+  for (UF_long k = 0u; k < solver->n; ++k) {
+    solver->tiny_singleton_rs_recip[k] = 1.0 / solver->numeric->Rs[k];
+  }
+  solver->tiny_singleton_rs_recip_fresh = 1;
+  return 1;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline, hot, aligned(64)))
+#endif
+static UF_long kls_tiny_singleton_solve_one_rhs(
+  kls_solver *solver,
+  int kernel_transpose,
+  const double *b,
+  double *out) {
+  const UF_long n = solver->n;
+  double *work = (double *)solver->numeric->Xwork;
+  const uint16_t *pnum = solver->i16solve_pnum;
+  const uint16_t *qperm = solver->i16solve_q;
+  const uint16_t *offp = solver->i16solve_offp;
+  const uint16_t *offi = solver->i16solve_offi;
+  const double *offx = (const double *)solver->numeric->Offx;
+  const double *udiag_recip = solver->i32solve_udiag_recip;
+  const double *rs_recip = solver->numeric->Rs != NULL
+    ? solver->tiny_singleton_rs_recip : NULL;
+
+  if (kernel_transpose) {
+    for (UF_long k = 0u; k < n; ++k) {
+      double value = b[(UF_long)qperm[k]];
+      for (UF_long p = (UF_long)offp[k];
+           p < (UF_long)offp[k + 1u]; ++p) {
+        value -= offx[p] * work[(UF_long)offi[p]];
+      }
+      work[k] = value * udiag_recip[k];
+    }
+    if (rs_recip == NULL && solver->i16solve_p_identity_prefix == n) {
+      memcpy(out, work, (size_t)n * sizeof(*out));
+    } else {
+      for (UF_long k = 0u; k < n; ++k) {
+        out[(UF_long)pnum[k]] = work[k] *
+          (rs_recip != NULL ? rs_recip[k] : 1.0);
+      }
+    }
+  } else {
+    if (rs_recip == NULL && solver->i16solve_p_identity_prefix == n) {
+      memcpy(work, b, (size_t)n * sizeof(*work));
+    } else {
+      for (UF_long k = 0u; k < n; ++k) {
+        work[k] = b[(UF_long)pnum[k]] *
+          (rs_recip != NULL ? rs_recip[k] : 1.0);
+      }
+    }
+    for (UF_long k = n; k-- > 0u;) {
+      const double value = work[k] * udiag_recip[k];
+      work[k] = value;
+      for (UF_long p = (UF_long)offp[k];
+           p < (UF_long)offp[k + 1u]; ++p) {
+        work[(UF_long)offi[p]] -= offx[p] * value;
+      }
+    }
+    if (solver->i16solve_q_identity_prefix == n) {
+      memcpy(out, work, (size_t)n * sizeof(*out));
+    } else {
+      for (UF_long k = 0u; k < n; ++k) {
+        out[(UF_long)qperm[k]] = work[k];
+      }
+    }
+  }
+  return 1u;
+}
+
+static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
+                                               int64_t nrhs) {
+  return solver != NULL && nrhs == 1 && !solver->in_solve_refinement &&
+    !solver->certified_unscaled_l2_contract &&
+    solver->row_perm == NULL && solver->user_col_perm == NULL &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    !solver->diagonal_equiv_active &&
+    !solver->row_refactor_values_ready &&
+    !solver->row_refactor_values_dirty &&
+    !solver->numeric_is_predicted && !solver->fp32_last_used &&
+    !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
+    !solver->promoted_tolerance_l2_recovery_required &&
+    !solver->solve_recovery_active && !solver->retained_preconditioner_active &&
+    solver->pivot_nudge_count == 0u &&
+    solver->common.kls_perturb_count == 0u &&
+    solver->solve_contract_probe == 1;
+}
+
 static int solve_impl(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
@@ -28244,6 +28431,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   free(solver->i16solve_lx);
   free(solver->i16solve_ux);
   free(solver->i32solve_udiag_recip);
+  free(solver->tiny_singleton_rs_recip);
   solver->i32solve_l = NULL;
   solver->i32solve_u = NULL;
   solver->mixed_i16solve_l = NULL;
@@ -28275,6 +28463,10 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->i16solve_ux = NULL;
   solver->i32solve_udiag_recip = NULL;
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->tiny_singleton_rs_recip = NULL;
+  solver->tiny_singleton_rs_recip_fresh = 0;
+  solver->tiny_singleton_solve_state = 0;
+  solver->stats.tiny_singleton_solve_eligible = 0;
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
@@ -28417,6 +28609,7 @@ static void free_numeric(kls_solver *solver) {
   free(solver->i16solve_lx);
   free(solver->i16solve_ux);
   free(solver->i32solve_udiag_recip);
+  free(solver->tiny_singleton_rs_recip);
   solver->i32solve_l = NULL;
   solver->i32solve_u = NULL;
   solver->mixed_i16solve_l = NULL;
@@ -28448,6 +28641,10 @@ static void free_numeric(kls_solver *solver) {
   solver->i16solve_ux = NULL;
   solver->i32solve_udiag_recip = NULL;
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->tiny_singleton_rs_recip = NULL;
+  solver->tiny_singleton_rs_recip_fresh = 0;
+  solver->tiny_singleton_solve_state = 0;
+  solver->stats.tiny_singleton_solve_eligible = 0;
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
@@ -28555,6 +28752,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   free(solver->i16solve_lx);
   free(solver->i16solve_ux);
   free(solver->i32solve_udiag_recip);
+  free(solver->tiny_singleton_rs_recip);
   solver->i32solve_l = NULL;
   solver->i32solve_u = NULL;
   solver->mixed_i16solve_l = NULL;
@@ -28586,6 +28784,10 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->i16solve_ux = NULL;
   solver->i32solve_udiag_recip = NULL;
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->tiny_singleton_rs_recip = NULL;
+  solver->tiny_singleton_rs_recip_fresh = 0;
+  solver->tiny_singleton_solve_state = 0;
+  solver->stats.tiny_singleton_solve_eligible = 0;
   solver->i16solve_p_identity_prefix = 0u;
   solver->i16solve_q_identity_prefix = 0u;
   solver->i32solve_state = 0;
@@ -29489,8 +29691,8 @@ static int kls_low_work_btf_public_klu_capable(const kls_solver *solver) {
       solver->n == 0u || solver->n > (UF_long)INT32_MAX ||
       solver->nnz == 0u || solver->nnz > (UF_long)INT32_MAX ||
       solver->symbolic->nblocks <= 1u ||
-      !(solver->common.flops > 0.0) ||
-      !(solver->common.flops < 100000.0)) {
+      !isfinite(solver->common.flops) || solver->common.flops < 0.0 ||
+      solver->common.flops >= 100000.0) {
     return 0;
   }
   return solver->symbolic->structural_rank == KLS_KLU_EMPTY ||
@@ -46676,7 +46878,9 @@ static int validate_options(const kls_options *options) {
     return 0;
   }
   if (options->expected_refactorizations < 0 ||
-      options->expected_solves < 0) {
+      options->expected_solves < 0 ||
+      (options->record_tiny_solve_timing != 0 &&
+       options->record_tiny_solve_timing != 1)) {
     return 0;
   }
   return 1;
@@ -51130,6 +51334,7 @@ void kls_default_options(kls_options *options) {
   options->backend = KLS_BACKEND_AUTO;
   options->expected_refactorizations = 0;
   options->expected_solves = 0;
+  options->record_tiny_solve_timing = 1;
 }
 
 #ifdef KLS_HAVE_CBLAS
@@ -130675,6 +130880,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
      republish the reciprocal mirror from its worker pool; all other paths
      leave the public wrapper to refresh it serially. */
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->tiny_singleton_rs_recip_fresh = 0;
   solver->parallel_refine_values_copied = 0;
   solver->compact_amf_two_block_exact_recip_fresh = 0;
   /* A tolerance selected below the caller's requested tolerance carries a
@@ -166875,6 +167081,9 @@ int kls_factor(kls_solver *solver, const double *values) {
   free(solver->i32solve_udiag_recip);
   solver->i32solve_udiag_recip = NULL;
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->tiny_singleton_rs_recip_fresh = 0;
+  solver->tiny_singleton_solve_state = 0;
+  solver->stats.tiny_singleton_solve_eligible = 0;
   solver->verified_rhs_valid = 0;
   solver->compact_amf_two_block_exact_recip_fresh = 0;
   /* A failed factor attempt may leave the old numeric partially refreshed;
@@ -168881,6 +169090,27 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  if (solver->tiny_singleton_solve_state > 0 &&
+      kls_tiny_singleton_runtime_capable(solver, 1) &&
+      solver->unchanged_refactor_state > 0 &&
+      solver->refactor_input_snapshot_valid) {
+    const double start = kls_now_seconds();
+    if (solver->nnz == 0u ||
+        memcmp(solver->refactor_input_snapshot, values,
+               (size_t)solver->nnz * sizeof(*values)) == 0) {
+      /* The public values and the complete numeric are byte-identical.  The
+         generic unchanged path prepares large-factor solve representations
+         and clears hundreds of adaptive statistics; this compact numeric
+         already owns its final solve descriptors and accuracy contract. */
+      solver->solve_contract_verified = 0;
+      solver->verified_rhs_valid = 0;
+      solver->unchanged_refactor_state = 2;
+      solver->common.status = TRILINOS_KLU_OK;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_UNCHANGED);
+      solver->stats.refactor_seconds = kls_now_seconds() - start;
+      return KLS_OK;
+    }
+  }
   /* A correction verified for the preceding numeric cannot certify the
      same one-shot exit after the values change.  Keep the armed contract
      itself, but require the first solve of every new numeric to verify its
@@ -168957,6 +169187,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->compact_amf_two_block_exact_recip_fresh = 0;
     solver->parallel_refine_values_copied = 0;
     solver->i32solve_udiag_recip_fresh = 0;
+    solver->tiny_singleton_rs_recip_fresh = 0;
     kls_clear_fast_reject_stats(solver);
     kls_clear_tail_last_stats(solver);
     kls_clear_row_refactor_last_stats(solver);
@@ -169056,6 +169287,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->compact_amf_two_block_exact_recip_fresh = 0;
     solver->parallel_refine_values_copied = 0;
     solver->i32solve_udiag_recip_fresh = 0;
+    solver->tiny_singleton_rs_recip_fresh = 0;
     /* These large diagnostic families are already zero after the first
        settled vendor update.  Clear them once at the representation handoff,
        then avoid hundreds of redundant stores on every tiny numeric. */
@@ -172692,7 +172924,54 @@ static int solve_impl(kls_solver *solver,
     return KLS_ERR_INVALID_ARGUMENT;
   }
 
-  const double start = kls_now_seconds();
+  const int unmeasured_tiny_singleton =
+    !solver->options.record_tiny_solve_timing &&
+    solver->tiny_singleton_solve_state > 0 && nrhs == 1 &&
+    kls_tiny_singleton_runtime_capable(solver, nrhs) &&
+    solver->i32solve_udiag_recip_fresh &&
+    (solver->numeric->Rs == NULL ||
+     solver->tiny_singleton_rs_recip_fresh);
+  const double start = unmeasured_tiny_singleton
+    ? 0.0 : kls_now_seconds();
+  int tiny_singleton_ready =
+    solver->tiny_singleton_solve_state > 0 && nrhs == 1 &&
+    kls_tiny_singleton_runtime_capable(solver, nrhs) &&
+    solver->i32solve_udiag_recip_fresh &&
+    (solver->numeric->Rs == NULL ||
+     solver->tiny_singleton_rs_recip_fresh);
+  if (!tiny_singleton_ready &&
+      kls_tiny_singleton_runtime_capable(solver, nrhs) &&
+      kls_tiny_singleton_solve_ready(solver) &&
+      kls_tiny_singleton_refresh_reciprocals(solver)) {
+    tiny_singleton_ready = 1;
+  }
+  if (tiny_singleton_ready) {
+    const int kernel_transpose =
+      (solver->orientation == KLS_ORIENTATION_TRANSPOSE)
+        ? !transpose : transpose;
+    solver->row_refactor_last_row_solve = 0;
+    solver->row_refactor_last_compact_panel_solve_values = 0;
+    solver->row_refactor_last_compact_panel_group_solve_rows = 0;
+    solver->row_refactor_last_compact_panel_group_solve_entries = 0;
+    solver->stats.row_refactor_last_row_solve = 0;
+    solver->stats.row_refactor_last_compact_panel_solve_values = 0;
+    solver->stats.row_refactor_last_compact_panel_group_solve_rows = 0;
+    solver->stats.row_refactor_last_compact_panel_group_solve_entries = 0;
+    solver->stats.verified_rhs_reused = 0;
+    solver->common.status = TRILINOS_KLU_OK;
+    const UF_long direct_ok = kls_tiny_singleton_solve_one_rhs(
+      solver, kernel_transpose, b, x);
+    solver->stats.tiny_singleton_solve_count++;
+    const double direct_seconds = unmeasured_tiny_singleton
+      ? 0.0 : kls_now_seconds() - start;
+    solver->base_solve_seconds = direct_seconds;
+    solver->stats.solve_seconds = direct_seconds;
+    solver->stats.last_kernel_status = (int)solver->common.status;
+    solver->stats.memory_bytes = solver->common.memusage;
+    solver->stats.memory_peak_bytes = solver->common.mempeak;
+    return direct_ok && solver->common.status >= 0
+      ? KLS_OK : KLS_ERR_SOLVE_FAILED;
+  }
   if (!solver->in_solve_refinement) {
     /* refinement's internal correction solves must not clear the
        user-visible last-solve stats of the solve they are refining */
@@ -174623,8 +174902,8 @@ int kls_solve(kls_solver *solver,
   if (solver != NULL && solver->diagonal_equiv_active) {
     return kls_solve_diagonal_equiv(solver, 0, nrhs, b, ldb, x, ldx);
   }
-  if (solver != NULL &&
-      kls_retained_preconditioner_requires_correction(solver) && b == x) {
+  if (solver != NULL && b == x &&
+      kls_retained_preconditioner_requires_correction(solver)) {
     return kls_solve_retained_preconditioner(
       solver, 0, nrhs, b, ldb, x, ldx);
   }
@@ -174648,8 +174927,8 @@ int kls_solve_transpose(kls_solver *solver,
   if (solver != NULL && solver->diagonal_equiv_active) {
     return kls_solve_diagonal_equiv(solver, 1, nrhs, b, ldb, x, ldx);
   }
-  if (solver != NULL &&
-      kls_retained_preconditioner_requires_correction(solver) && b == x) {
+  if (solver != NULL && b == x &&
+      kls_retained_preconditioner_requires_correction(solver)) {
     return kls_solve_retained_preconditioner(
       solver, 1, nrhs, b, ldb, x, ldx);
   }
@@ -174672,6 +174951,40 @@ int kls_refactor_solve(kls_solver *solver,
   if (effective_ldb < (int64_t)solver->n ||
       effective_ldx < (int64_t)solver->n) {
     return KLS_ERR_INVALID_ARGUMENT;
+  }
+
+  if (nrhs == 1 && solver->tiny_singleton_solve_state > 0 &&
+      kls_tiny_singleton_runtime_capable(solver, 1) &&
+      solver->i32solve_udiag_recip_fresh &&
+      (solver->numeric->Rs == NULL ||
+       solver->tiny_singleton_rs_recip_fresh) &&
+      solver->unchanged_refactor_state > 0 &&
+      solver->refactor_input_snapshot_valid) {
+    const double start = kls_now_seconds();
+    if (solver->nnz == 0u ||
+        memcmp(solver->refactor_input_snapshot, values,
+               (size_t)solver->nnz * sizeof(*values)) == 0) {
+      const double solve_start = kls_now_seconds();
+      solver->solve_contract_verified = 0;
+      solver->verified_rhs_valid = 0;
+      solver->unchanged_refactor_state = 2;
+      solver->common.status = TRILINOS_KLU_OK;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_UNCHANGED);
+      const int kernel_transpose =
+        solver->orientation == KLS_ORIENTATION_TRANSPOSE;
+      const UF_long ok = kls_tiny_singleton_solve_one_rhs(
+        solver, kernel_transpose, b, x);
+      const double end = kls_now_seconds();
+      solver->stats.refactor_seconds = solve_start - start;
+      solver->base_solve_seconds = end - solve_start;
+      solver->stats.solve_seconds = solver->base_solve_seconds;
+      solver->stats.tiny_singleton_solve_count++;
+      solver->stats.last_kernel_status = (int)solver->common.status;
+      solver->stats.memory_bytes = solver->common.memusage;
+      solver->stats.memory_peak_bytes = solver->common.mempeak;
+      return ok && solver->common.status >= 0
+        ? KLS_OK : KLS_ERR_SOLVE_FAILED;
+    }
   }
 
   /* The dependency equivalence is exact for one normal, untransformed
