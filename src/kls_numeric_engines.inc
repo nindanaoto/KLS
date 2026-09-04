@@ -737,12 +737,8 @@ static int kls_get_ordered_block_etree_parent(kls_solver *solver,
                                               UF_long k2,
                                               const UF_long **parent_out,
                                               UF_long **owned_parent_out) {
-  if (parent_out != NULL) {
-    *parent_out = NULL;
-  }
-  if (owned_parent_out != NULL) {
-    *owned_parent_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(parent_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(owned_parent_out, NULL);
   if (solver == NULL || solver->symbolic == NULL || parent_out == NULL ||
       owned_parent_out == NULL || k1 > k2 || k2 > solver->n) {
     return 0;
@@ -1359,12 +1355,8 @@ static int kls_build_fast_reject_pivoting_tail_plan(
   const UF_long **tail_cols_out,
   UF_long *tail_count_out,
   double *tail_work_out) {
-  if (tail_cols_out != NULL) {
-    *tail_cols_out = NULL;
-  }
-  if (tail_count_out != NULL) {
-    *tail_count_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(tail_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_count_out, 0);
   if (tail_work_out != NULL) {
     *tail_work_out = 0.0;
   }
@@ -1574,12 +1566,8 @@ static int kls_build_row_refactor_tail(kls_solver *solver,
                                        UF_long root,
                                        const UF_long **rows_out,
                                        UF_long *count_out) {
-  if (rows_out != NULL) {
-    *rows_out = NULL;
-  }
-  if (count_out != NULL) {
-    *count_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(rows_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(count_out, 0);
   if (solver == NULL || root >= solver->n ||
       solver->row_refactor_pattern_n != solver->n ||
       solver->row_refactor_successor_ptr == NULL ||
@@ -2702,15 +2690,9 @@ static int kls_reconstruct_block_live_prefix_state(
   size_t *prefix_lup_out,
   UF_long *prefix_lnz_out,
   UF_long *prefix_unz_out) {
-  if (prefix_lup_out != NULL) {
-    *prefix_lup_out = 0u;
-  }
-  if (prefix_lnz_out != NULL) {
-    *prefix_lnz_out = 0;
-  }
-  if (prefix_unz_out != NULL) {
-    *prefix_unz_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(prefix_lup_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(prefix_lnz_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(prefix_unz_out, 0);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->LUbx == NULL || solver->numeric->LUsize == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
@@ -3975,9 +3957,7 @@ static int kls_build_pivot_tail_restart_order_range(
   const unsigned char *mask,
   UF_long *order,
   UF_long *order_count_out) {
-  if (order_count_out != NULL) {
-    *order_count_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(order_count_out, 0);
   if (solver == NULL || mask == NULL || order == NULL ||
       order_count_out == NULL || required_local_col >= nk ||
       restart_begin > required_local_col ||
@@ -4071,21 +4051,11 @@ static int kls_pivot_tail_plan_local_range(
   UF_long *columns_out,
   int *contiguous_out,
   int *suffix_exact_out) {
-  if (begin_out != NULL) {
-    *begin_out = 0;
-  }
-  if (end_out != NULL) {
-    *end_out = 0;
-  }
-  if (columns_out != NULL) {
-    *columns_out = 0;
-  }
-  if (contiguous_out != NULL) {
-    *contiguous_out = 0;
-  }
-  if (suffix_exact_out != NULL) {
-    *suffix_exact_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(end_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(columns_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(contiguous_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(suffix_exact_out, 0);
   if (solver == NULL || local_reject >= nk ||
       solver->stats.fast_rejected_pivoting_tail_columns <= 0 ||
       !solver->stats.fast_rejected_pivoting_tail_contains_reject ||
@@ -4150,27 +4120,15 @@ static int kls_try_pivot_tail_restart_rejected_block(
   UF_long *skipped_columns_out,
   double *skipped_work_out,
   int *exact_mask_used_out) {
-  if (new_lu_out != NULL) {
-    *new_lu_out = NULL;
-  }
-  if (new_size_out != NULL) {
-    *new_size_out = 0u;
-  }
-  if (lnz_block_out != NULL) {
-    *lnz_block_out = 0;
-  }
-  if (unz_block_out != NULL) {
-    *unz_block_out = 0;
-  }
-  if (skipped_columns_out != NULL) {
-    *skipped_columns_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(new_lu_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(new_size_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(lnz_block_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(unz_block_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(skipped_columns_out, 0);
   if (skipped_work_out != NULL) {
     *skipped_work_out = 0.0;
   }
-  if (exact_mask_used_out != NULL) {
-    *exact_mask_used_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(exact_mask_used_out, 0);
   if (restart_end == KLS_KLU_EMPTY) {
     restart_end = nk;
   }
@@ -4561,21 +4519,13 @@ fail:
   (void)TRILINOS_KLU_free(new_lu, lusize, sizeof(Unit), &solver->common);
   free(scratch);
   free(active_tail_mask);
-  if (new_lu_out != NULL) {
-    *new_lu_out = NULL;
-  }
-  if (new_size_out != NULL) {
-    *new_size_out = 0u;
-  }
-  if (skipped_columns_out != NULL) {
-    *skipped_columns_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(new_lu_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(new_size_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(skipped_columns_out, 0);
   if (skipped_work_out != NULL) {
     *skipped_work_out = 0.0;
   }
-  if (exact_mask_used_out != NULL) {
-    *exact_mask_used_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(exact_mask_used_out, 0);
   return 0;
 }
 
@@ -6605,15 +6555,9 @@ static double *kls_prepare_refactor_btf_scalar_run_group_state_values(
   const UF_long **value_base_out,
   UF_long *value_base_count_out,
   double **u_values_out) {
-  if (value_base_out != NULL) {
-    *value_base_out = NULL;
-  }
-  if (value_base_count_out != NULL) {
-    *value_base_count_out = 0u;
-  }
-  if (u_values_out != NULL) {
-    *u_values_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(value_base_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(value_base_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(u_values_out, NULL);
   if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
       solver->refactor_btf_scalar_run_group_state_rows_total == 0u ||
       solver->refactor_btf_scalar_run_group_state_ptr == NULL ||
@@ -6787,9 +6731,7 @@ static int kls_collect_btf_scalar_run_group_state_rows(
   UF_long *rows,
   UF_long row_capacity,
   UF_long *row_count_out) {
-  if (row_count_out != NULL) {
-    *row_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(row_count_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
@@ -7022,18 +6964,10 @@ static int kls_count_refactor_btf_scalar_run_group_state_skip_summary(
   UF_long *state_best_skip_total_out,
   UF_long *state_max_best_skip_out,
   UF_long *member_skip_lower_bound_out) {
-  if (state_current_count_out != NULL) {
-    *state_current_count_out = 0u;
-  }
-  if (state_best_skip_total_out != NULL) {
-    *state_best_skip_total_out = 0u;
-  }
-  if (state_max_best_skip_out != NULL) {
-    *state_max_best_skip_out = 0u;
-  }
-  if (member_skip_lower_bound_out != NULL) {
-    *member_skip_lower_bound_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_current_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(state_best_skip_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(state_max_best_skip_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(member_skip_lower_bound_out, 0u);
   if (solver == NULL || state_current_count_out == NULL ||
       state_best_skip_total_out == NULL ||
       state_max_best_skip_out == NULL ||
@@ -7402,9 +7336,7 @@ static UF_long kls_refactor_btf_scalar_run_group_for_current(
   UF_long current_global,
   UF_long up,
   UF_long *rows_out) {
-  if (rows_out != NULL) {
-    *rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(rows_out, 0u);
   if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
       solver->refactor_btf_scalar_run_group_multi_count == 0u ||
       solver->refactor_btf_scalar_run_group_ptr == NULL ||
@@ -7452,12 +7384,8 @@ static int kls_refactor_btf_scalar_run_group_range_for_dep0(
   UF_long dep0_global,
   UF_long *begin_out,
   UF_long *end_out) {
-  if (begin_out != NULL) {
-    *begin_out = 0u;
-  }
-  if (end_out != NULL) {
-    *end_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(end_out, 0u);
   if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
       solver->refactor_btf_scalar_run_group_multi_count == 0u ||
       solver->refactor_btf_scalar_run_group_dep0 == NULL) {
@@ -7498,12 +7426,8 @@ static int kls_refactor_btf_scalar_run_group_wake_range_for_dep(
   UF_long producer_global,
   UF_long *begin_out,
   UF_long *end_out) {
-  if (begin_out != NULL) {
-    *begin_out = 0u;
-  }
-  if (end_out != NULL) {
-    *end_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(end_out, 0u);
   if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
       solver->refactor_btf_scalar_run_group_wake_count == 0u ||
       solver->refactor_btf_scalar_run_group_wake_dep == NULL) {
@@ -7546,12 +7470,8 @@ static int kls_refactor_btf_scalar_run_group_step_range_for_dep(
   UF_long producer_global,
   UF_long *begin_out,
   UF_long *end_out) {
-  if (begin_out != NULL) {
-    *begin_out = 0u;
-  }
-  if (end_out != NULL) {
-    *end_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(end_out, 0u);
   if (solver == NULL || !solver->refactor_btf_scalar_run_group_built ||
       solver->refactor_btf_scalar_run_group_step_dep_count == 0u ||
       solver->refactor_btf_scalar_run_group_step_dep == NULL ||
@@ -9686,15 +9606,9 @@ static int kls_refactor_supernode_panel_block_info(
   UF_long *k1_out,
   UF_long *block_size_out,
   UF_long *local_start_out) {
-  if (k1_out != NULL) {
-    *k1_out = 0u;
-  }
-  if (block_size_out != NULL) {
-    *block_size_out = 0u;
-  }
-  if (local_start_out != NULL) {
-    *local_start_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(k1_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(block_size_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(local_start_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || start >= end || end > solver->n) {
     return 0;
@@ -9743,9 +9657,7 @@ static int kls_refactor_supernode_panel_candidate(
   UF_long block_size,
   UF_long *trailing_len_out,
   UF_long *trailing_rows_out) {
-  if (trailing_len_out != NULL) {
-    *trailing_len_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(trailing_len_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Llen == NULL ||
       solver->refactor_l_indices == NULL ||
@@ -11026,9 +10938,7 @@ kls_collect_refactor_supernode_consumer_plan_group_l_state_rows(
   UF_long *rows,
   UF_long row_capacity,
   UF_long *row_count_out) {
-  if (row_count_out != NULL) {
-    *row_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(row_count_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->numeric->Llen == NULL ||
       solver->numeric->Ulen == NULL ||
@@ -12221,15 +12131,9 @@ static int kls_build_row_refactor_input_cleanup_flags(
   unsigned char **needs_cleanup_out,
   UF_long *cleanup_rows_out,
   UF_long *cleanup_entries_out) {
-  if (needs_cleanup_out != NULL) {
-    *needs_cleanup_out = NULL;
-  }
-  if (cleanup_rows_out != NULL) {
-    *cleanup_rows_out = 0;
-  }
-  if (cleanup_entries_out != NULL) {
-    *cleanup_entries_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(needs_cleanup_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(cleanup_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(cleanup_entries_out, 0);
   if (n < 0 || (uint64_t)n > (uint64_t)SIZE_MAX ||
       needs_cleanup_out == NULL || cleanup_rows_out == NULL ||
       cleanup_entries_out == NULL ||
@@ -12434,9 +12338,7 @@ static int kls_row_solve_pattern_is_ready(const kls_solver *solver) {
 static UF_long kls_row_solve_dense_tail_start(UF_long n,
                                               const UF_long *ptr,
                                               UF_long *entries_out) {
-  if (entries_out != NULL) {
-    *entries_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(entries_out, 0);
   if (n == 0u || ptr == NULL || ptr[n] == 0u ||
       ptr[n] < KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ) {
     return n;
@@ -12466,9 +12368,7 @@ static UF_long *kls_build_row_solve_slice_bounds(UF_long n,
                                                  UF_long start,
                                                  UF_long entries,
                                                  UF_long *max_entries_out) {
-  if (max_entries_out != NULL) {
-    *max_entries_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(max_entries_out, 0);
   if (ptr == NULL || start >= n || entries == 0u) {
     return NULL;
   }
@@ -12538,18 +12438,10 @@ static int kls_build_row_solve_segment_splits(UF_long n,
                                               UF_long *rows_out,
                                               UF_long *rect_entries_out,
                                               UF_long *tri_entries_out) {
-  if (split_out != NULL) {
-    *split_out = NULL;
-  }
-  if (rows_out != NULL) {
-    *rows_out = 0;
-  }
-  if (rect_entries_out != NULL) {
-    *rect_entries_out = 0;
-  }
-  if (tri_entries_out != NULL) {
-    *tri_entries_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(split_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(rect_entries_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(tri_entries_out, 0);
   if (split_out == NULL || ptr == NULL || cols == NULL || bounds == NULL ||
       n == 0u) {
     return 1;
@@ -12632,12 +12524,8 @@ static int kls_build_one_row_solve_thread_bounds(
   int thread_count,
   UF_long **bounds_out,
   UF_long *max_rect_entries_out) {
-  if (bounds_out != NULL) {
-    *bounds_out = NULL;
-  }
-  if (max_rect_entries_out != NULL) {
-    *max_rect_entries_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(bounds_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(max_rect_entries_out, 0);
   if (bounds_out == NULL || ptr == NULL || split == NULL ||
       slice_bounds == NULL || thread_count < 2) {
     return 0;
@@ -12809,18 +12697,10 @@ static int kls_build_row_solve_sparse_levels(
   UF_long **level_rows_out,
   UF_long *level_count_out,
   UF_long *level_max_width_out) {
-  if (level_ptr_out != NULL) {
-    *level_ptr_out = NULL;
-  }
-  if (level_rows_out != NULL) {
-    *level_rows_out = NULL;
-  }
-  if (level_count_out != NULL) {
-    *level_count_out = 0;
-  }
-  if (level_max_width_out != NULL) {
-    *level_max_width_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(level_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(level_rows_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(level_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(level_max_width_out, 0);
   if (level_ptr_out == NULL || level_rows_out == NULL ||
       ptr == NULL || cols == NULL || end > n) {
     return 0;
@@ -13512,30 +13392,14 @@ static int kls_build_row_refactor_group_successors(
   UF_long *root_count_out,
   UF_long *leaf_count_out,
   UF_long *max_fanout_out) {
-  if (successor_ptr_out != NULL) {
-    *successor_ptr_out = NULL;
-  }
-  if (successor_groups_out != NULL) {
-    *successor_groups_out = NULL;
-  }
-  if (pred_count_out != NULL) {
-    *pred_count_out = NULL;
-  }
-  if (root_groups_out != NULL) {
-    *root_groups_out = NULL;
-  }
-  if (edge_count_out != NULL) {
-    *edge_count_out = 0;
-  }
-  if (root_count_out != NULL) {
-    *root_count_out = 0;
-  }
-  if (leaf_count_out != NULL) {
-    *leaf_count_out = 0;
-  }
-  if (max_fanout_out != NULL) {
-    *max_fanout_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(successor_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(successor_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(pred_count_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(root_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(edge_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(root_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(leaf_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(max_fanout_out, 0);
   if (group_count < 0 ||
       (uint64_t)group_count >=
         (uint64_t)(SIZE_MAX / sizeof(UF_long)) ||
@@ -13800,18 +13664,10 @@ static void kls_try_build_row_refactor_compact_panel_storage(
   double **values_out,
   UF_long *groups_out,
   UF_long *entries_out) {
-  if (begin_out != NULL) {
-    *begin_out = NULL;
-  }
-  if (values_out != NULL) {
-    *values_out = NULL;
-  }
-  if (groups_out != NULL) {
-    *groups_out = 0;
-  }
-  if (entries_out != NULL) {
-    *entries_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(entries_out, 0);
   if (group_count == 0u || group_ptr == NULL || group_kind == NULL ||
       group_trailing_len == NULL || begin_out == NULL || values_out == NULL ||
       groups_out == NULL || entries_out == NULL ||
@@ -13900,12 +13756,8 @@ static int kls_row_refactor_dense_producer_run_start(
   if (group_out != NULL) {
     *group_out = KLS_KLU_EMPTY;
   }
-  if (len_out != NULL) {
-    *len_out = 0;
-  }
-  if (suffix_out != NULL) {
-    *suffix_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(len_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(suffix_out, 0);
   if (l_cols == NULL || row_group == NULL || group_ptr == NULL ||
       group_kind == NULL || p >= l_end || row >= n) {
     return 0;
@@ -14133,42 +13985,18 @@ static void kls_try_build_row_refactor_dense_producer_runs(
   UF_long *multi_run_rows_out,
   UF_long *fragmented_rows_out,
   int thread_count) {
-  if (run_ptr_out != NULL) {
-    *run_ptr_out = NULL;
-  }
-  if (run_l_begin_out != NULL) {
-    *run_l_begin_out = NULL;
-  }
-  if (run_group_out != NULL) {
-    *run_group_out = NULL;
-  }
-  if (run_len_out != NULL) {
-    *run_len_out = NULL;
-  }
-  if (run_count_out != NULL) {
-    *run_count_out = 0;
-  }
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0;
-  }
-  if (run_dep_rows_out != NULL) {
-    *run_dep_rows_out = 0;
-  }
-  if (run_max_per_row_out != NULL) {
-    *run_max_per_row_out = 0;
-  }
-  if (full_suffix_run_count_out != NULL) {
-    *full_suffix_run_count_out = 0;
-  }
-  if (full_suffix_rows_out != NULL) {
-    *full_suffix_rows_out = 0;
-  }
-  if (multi_run_rows_out != NULL) {
-    *multi_run_rows_out = 0;
-  }
-  if (fragmented_rows_out != NULL) {
-    *fragmented_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_l_begin_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_group_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_len_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(run_dep_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(run_max_per_row_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(full_suffix_run_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(full_suffix_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(multi_run_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(fragmented_rows_out, 0);
   if (n == 0u || l_ptr == NULL || l_cols == NULL || row_group == NULL ||
       group_count == 0u || group_ptr == NULL || group_kind == NULL ||
       group_compact_panel_begin == NULL || run_ptr_out == NULL ||
@@ -14531,33 +14359,15 @@ static void kls_try_build_row_refactor_dense_producer_target_maps(
   UF_long *target_trailing_count_out,
   int include_independent_targets,
   int thread_count) {
-  if (target_ptr_out != NULL) {
-    *target_ptr_out = NULL;
-  }
-  if (target_kind_out != NULL) {
-    *target_kind_out = NULL;
-  }
-  if (target_pos_out != NULL) {
-    *target_pos_out = NULL;
-  }
-  if (target_count_out != NULL) {
-    *target_count_out = 0;
-  }
-  if (target_none_count_out != NULL) {
-    *target_none_count_out = 0;
-  }
-  if (target_external_count_out != NULL) {
-    *target_external_count_out = 0;
-  }
-  if (target_dense_count_out != NULL) {
-    *target_dense_count_out = 0;
-  }
-  if (target_pivot_count_out != NULL) {
-    *target_pivot_count_out = 0;
-  }
-  if (target_trailing_count_out != NULL) {
-    *target_trailing_count_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(target_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_kind_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_pos_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(target_none_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(target_external_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(target_dense_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(target_pivot_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(target_trailing_count_out, 0);
   if (n == 0u || run_count == 0u || l_ptr == NULL || l_cols == NULL ||
       l_internal_ptr == NULL || u_cols == NULL || row_group == NULL ||
       group_count == 0u || group_ptr == NULL || group_kind == NULL ||
@@ -14767,33 +14577,15 @@ static void kls_try_build_row_refactor_segment_input_targets(
   UF_long *target_entries_out,
   UF_long *cleanup_rows_out,
   UF_long *cleanup_entries_out) {
-  if (row_ready_out != NULL) {
-    *row_ready_out = NULL;
-  }
-  if (target_kind_out != NULL) {
-    *target_kind_out = NULL;
-  }
-  if (target_pos_out != NULL) {
-    *target_pos_out = NULL;
-  }
-  if (cleanup_ptr_out != NULL) {
-    *cleanup_ptr_out = NULL;
-  }
-  if (cleanup_cols_out != NULL) {
-    *cleanup_cols_out = NULL;
-  }
-  if (target_rows_out != NULL) {
-    *target_rows_out = 0;
-  }
-  if (target_entries_out != NULL) {
-    *target_entries_out = 0;
-  }
-  if (cleanup_rows_out != NULL) {
-    *cleanup_rows_out = 0;
-  }
-  if (cleanup_entries_out != NULL) {
-    *cleanup_entries_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(row_ready_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_kind_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_pos_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(cleanup_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(cleanup_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(target_entries_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(cleanup_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(cleanup_entries_out, 0);
   if (n <= 0 || input_ptr == NULL || input_cols == NULL ||
       l_ptr == NULL || l_cols == NULL || u_ptr == NULL || u_cols == NULL ||
       row_group == NULL || group_count <= 0 || group_ptr == NULL ||
@@ -18871,12 +18663,8 @@ static int kls_build_row_refactor_private_thread_queues(
   int thread_count,
   UF_long **private_groups_out,
   UF_long **thread_ptr_out) {
-  if (private_groups_out != NULL) {
-    *private_groups_out = NULL;
-  }
-  if (thread_ptr_out != NULL) {
-    *thread_ptr_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(private_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(thread_ptr_out, NULL);
   if (private_groups_out == NULL || thread_ptr_out == NULL ||
       solver == NULL || source_groups == NULL || group_count == 0u ||
       thread_count <= 1) {
@@ -19064,15 +18852,9 @@ static int kls_build_row_refactor_separator_private_thread_queues(
   UF_long **private_groups_out,
   UF_long **thread_ptr_out,
   UF_long *component_count_out) {
-  if (private_groups_out != NULL) {
-    *private_groups_out = NULL;
-  }
-  if (thread_ptr_out != NULL) {
-    *thread_ptr_out = NULL;
-  }
-  if (component_count_out != NULL) {
-    *component_count_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(private_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(thread_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(component_count_out, 0);
   if (private_groups_out == NULL || thread_ptr_out == NULL ||
       component_count_out == NULL || solver == NULL ||
       source_groups == NULL || group_count == 0u || thread_count <= 1 ||
@@ -19295,54 +19077,22 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   UF_long *private_max_groups_out,
   double *private_min_work_out,
   double *private_max_work_out) {
-  if (ready_groups_out != NULL) {
-    *ready_groups_out = NULL;
-  }
-  if (ready_slots_out != NULL) {
-    *ready_slots_out = NULL;
-  }
-  if (remaining_preds_out != NULL) {
-    *remaining_preds_out = NULL;
-  }
-  if (tail_groups_out != NULL) {
-    *tail_groups_out = NULL;
-  }
-  if (private_groups_out != NULL) {
-    *private_groups_out = NULL;
-  }
-  if (private_thread_ptr_out != NULL) {
-    *private_thread_ptr_out = NULL;
-  }
-  if (private_group_mask_out != NULL) {
-    *private_group_mask_out = NULL;
-  }
-  if (tail_count_out != NULL) {
-    *tail_count_out = 0;
-  }
-  if (initial_ready_out != NULL) {
-    *initial_ready_out = 0;
-  }
-  if (private_group_count_out != NULL) {
-    *private_group_count_out = 0;
-  }
-  if (pipeline_group_count_out != NULL) {
-    *pipeline_group_count_out = 0;
-  }
-  if (closure_group_count_out != NULL) {
-    *closure_group_count_out = 0;
-  }
-  if (component_count_out != NULL) {
-    *component_count_out = 0;
-  }
-  if (private_threads_out != NULL) {
-    *private_threads_out = 0;
-  }
-  if (private_min_groups_out != NULL) {
-    *private_min_groups_out = 0;
-  }
-  if (private_max_groups_out != NULL) {
-    *private_max_groups_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(ready_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(ready_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(remaining_preds_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(private_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(private_thread_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(private_group_mask_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(initial_ready_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(private_group_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pipeline_group_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(closure_group_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(component_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(private_threads_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(private_min_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(private_max_groups_out, 0);
   if (private_min_work_out != NULL) {
     *private_min_work_out = 0.0;
   }
@@ -20574,9 +20324,7 @@ kls_row_refactor_private_external_wait_mask(
   const unsigned char *private_group_mask,
   int thread_count,
   UF_long *external_target_count_out) {
-  if (external_target_count_out != NULL) {
-    *external_target_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(external_target_count_out, 0u);
   if (solver == NULL || private_groups == NULL ||
       private_thread_ptr == NULL || private_group_mask == NULL ||
       thread_count <= 0 || external_target_count_out == NULL ||
@@ -21286,27 +21034,13 @@ static int kls_prepare_row_refactor_ready_queue(
   const UF_long **private_groups_out,
   UF_long *tail_count_out,
   UF_long *initial_ready_out) {
-  if (ready_groups_out != NULL) {
-    *ready_groups_out = NULL;
-  }
-  if (ready_slots_out != NULL) {
-    *ready_slots_out = NULL;
-  }
-  if (remaining_preds_out != NULL) {
-    *remaining_preds_out = NULL;
-  }
-  if (tail_groups_out != NULL) {
-    *tail_groups_out = NULL;
-  }
-  if (private_groups_out != NULL) {
-    *private_groups_out = NULL;
-  }
-  if (tail_count_out != NULL) {
-    *tail_count_out = 0;
-  }
-  if (initial_ready_out != NULL) {
-    *initial_ready_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(ready_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(ready_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(remaining_preds_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(private_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(initial_ready_out, 0);
   if (solver == NULL || ready_groups_out == NULL ||
       ready_slots_out == NULL || remaining_preds_out == NULL ||
       tail_groups_out == NULL || private_groups_out == NULL ||
@@ -21441,27 +21175,13 @@ static int kls_prepare_row_refactor_row_dep_ready_queue(
   const UF_long **private_groups_out,
   UF_long *tail_count_out,
   UF_long *initial_ready_out) {
-  if (ready_groups_out != NULL) {
-    *ready_groups_out = NULL;
-  }
-  if (ready_slots_out != NULL) {
-    *ready_slots_out = NULL;
-  }
-  if (remaining_preds_out != NULL) {
-    *remaining_preds_out = NULL;
-  }
-  if (tail_groups_out != NULL) {
-    *tail_groups_out = NULL;
-  }
-  if (private_groups_out != NULL) {
-    *private_groups_out = NULL;
-  }
-  if (tail_count_out != NULL) {
-    *tail_count_out = 0;
-  }
-  if (initial_ready_out != NULL) {
-    *initial_ready_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(ready_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(ready_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(remaining_preds_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(private_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(initial_ready_out, 0);
   if (solver == NULL || ready_groups_out == NULL ||
       ready_slots_out == NULL || remaining_preds_out == NULL ||
       tail_groups_out == NULL || private_groups_out == NULL ||
@@ -21574,24 +21294,12 @@ static int kls_prepare_row_refactor_row_dep_ready_queue_with_private(
   unsigned char **tail_groups_out,
   UF_long *tail_count_out,
   UF_long *initial_ready_out) {
-  if (ready_groups_out != NULL) {
-    *ready_groups_out = NULL;
-  }
-  if (ready_slots_out != NULL) {
-    *ready_slots_out = NULL;
-  }
-  if (remaining_preds_out != NULL) {
-    *remaining_preds_out = NULL;
-  }
-  if (tail_groups_out != NULL) {
-    *tail_groups_out = NULL;
-  }
-  if (tail_count_out != NULL) {
-    *tail_count_out = 0;
-  }
-  if (initial_ready_out != NULL) {
-    *initial_ready_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(ready_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(ready_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(remaining_preds_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_groups_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(initial_ready_out, 0);
   if (solver == NULL || private_group_mask == NULL ||
       ready_groups_out == NULL || ready_slots_out == NULL ||
       remaining_preds_out == NULL || tail_groups_out == NULL ||
@@ -21778,12 +21486,8 @@ static int kls_row_refactor_tail_has_large_partial_supernodes(
   int thread_count,
   UF_long *group_count_out,
   UF_long *row_count_out) {
-  if (group_count_out != NULL) {
-    *group_count_out = 0;
-  }
-  if (row_count_out != NULL) {
-    *row_count_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(group_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(row_count_out, 0);
   if (solver == NULL || group_count_out == NULL || row_count_out == NULL ||
       thread_count <= 1 ||
       solver->row_refactor_group_level_ptr == NULL ||
@@ -30121,18 +29825,10 @@ static int kls_row_refactor_compact_panel_solve_group(
   UF_long *row_begin_out,
   UF_long *row_end_out,
   UF_long *trailing_len_out) {
-  if (dense_panel_out != NULL) {
-    *dense_panel_out = NULL;
-  }
-  if (row_begin_out != NULL) {
-    *row_begin_out = 0;
-  }
-  if (row_end_out != NULL) {
-    *row_end_out = 0;
-  }
-  if (trailing_len_out != NULL) {
-    *trailing_len_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(dense_panel_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(row_begin_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(row_end_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(trailing_len_out, 0);
   if (solver == NULL ||
       kls_row_refactor_solve_uses_direct_values(solver) ||
       !solver->row_refactor_values_ready ||
@@ -31176,15 +30872,9 @@ static int kls_hybrid_btf_row_solve_capable(const kls_solver *solver,
                                             UF_long *giant_out,
                                             UF_long *k1_out,
                                             UF_long *k2_out) {
-  if (giant_out != NULL) {
-    *giant_out = 0u;
-  }
-  if (k1_out != NULL) {
-    *k1_out = 0u;
-  }
-  if (k2_out != NULL) {
-    *k2_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(giant_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(k1_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(k2_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->options.threads <= 1 ||
       solver->symbolic->nblocks <= 1u || solver->symbolic->R == NULL ||
@@ -33397,9 +33087,7 @@ static int kls_parallel_row_refactor_prefactor_compact_supernode_update(
   unsigned char *applied,
   double *x,
   UF_long *run_rows_out) {
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
   if (worker == NULL || worker->shared == NULL || applied == NULL ||
       x == NULL || run_rows_out == NULL || scan >= l_end) {
     return 0;
@@ -34126,9 +33814,7 @@ static int kls_egraph_worker_lookup_fragmented_row_target(
   if (kind_out != NULL) {
     *kind_out = KLS_FRAGMENTED_UPDATE_TARGET_NONE;
   }
-  if (pos_out != NULL) {
-    *pos_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(pos_out, 0u);
   if (worker == NULL || !worker->row_target_valid ||
       col >= worker->row_target_workspace_size ||
       worker->row_target_stamp_workspace == NULL ||
@@ -36750,12 +36436,8 @@ static int kls_compact_dense_group_single_producer_suffix(
   if (dep_group_out != NULL) {
     *dep_group_out = KLS_KLU_EMPTY;
   }
-  if (suffix_begin_out != NULL) {
-    *suffix_begin_out = 0;
-  }
-  if (dep_rows_out != NULL) {
-    *dep_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(suffix_begin_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(dep_rows_out, 0);
   if (solver == NULL ||
       row >= solver->n ||
       solver->row_refactor_l_ptr == NULL ||
@@ -36844,9 +36526,7 @@ static UF_long kls_compact_dense_group_ragged_supernode_end(
   if (copied_entries_out != NULL) {
     *copied_entries_out = 0.0;
   }
-  if (dep_rows_out != NULL) {
-    *dep_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(dep_rows_out, 0);
   if (solver == NULL ||
       solver->row_refactor_group_trailing_len == NULL ||
       batch_begin < row_begin ||
@@ -37991,15 +37671,9 @@ static int kls_compact_dense_group_parse_fragmented_dense_producer_runs(
   UF_long *run_count_out,
   UF_long *dense_dep_rows_out,
   UF_long *external_len_out) {
-  if (run_count_out != NULL) {
-    *run_count_out = 0;
-  }
-  if (dense_dep_rows_out != NULL) {
-    *dense_dep_rows_out = 0;
-  }
-  if (external_len_out != NULL) {
-    *external_len_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(dense_dep_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(external_len_out, 0);
   if (solver == NULL || row >= solver->n ||
       solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_cols == NULL ||
@@ -39735,12 +39409,8 @@ static int kls_batch_group_single_producer_suffix(
   if (dep_group_out != NULL) {
     *dep_group_out = KLS_KLU_EMPTY;
   }
-  if (suffix_begin_out != NULL) {
-    *suffix_begin_out = 0;
-  }
-  if (dep_rows_out != NULL) {
-    *dep_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(suffix_begin_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(dep_rows_out, 0);
   if (solver == NULL ||
       row >= solver->n ||
       solver->row_refactor_l_ptr == NULL ||
@@ -39826,9 +39496,7 @@ static UF_long kls_batch_group_ragged_supernode_end(
   if (copied_entries_out != NULL) {
     *copied_entries_out = 0.0;
   }
-  if (dep_rows_out != NULL) {
-    *dep_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(dep_rows_out, 0);
   if (solver == NULL ||
       solver->row_refactor_group_trailing_len == NULL ||
       batch_begin < row_begin ||
@@ -40260,12 +39928,8 @@ static int kls_independent_row_parse_dense_producer_runs(
   UF_long *run_dep_rows,
   UF_long *run_count_out,
   UF_long *dep_rows_out) {
-  if (run_count_out != NULL) {
-    *run_count_out = 0;
-  }
-  if (dep_rows_out != NULL) {
-    *dep_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(dep_rows_out, 0);
   if (solver == NULL ||
       row >= solver->n ||
       solver->row_refactor_l_ptr == NULL ||
@@ -40464,15 +40128,9 @@ static int kls_independent_row_parse_fragmented_dense_producer_runs(
   UF_long *run_count_out,
   UF_long *dense_dep_rows_out,
   UF_long *l_len_out) {
-  if (run_count_out != NULL) {
-    *run_count_out = 0;
-  }
-  if (dense_dep_rows_out != NULL) {
-    *dense_dep_rows_out = 0;
-  }
-  if (l_len_out != NULL) {
-    *l_len_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_count_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(dense_dep_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(l_len_out, 0);
   if (solver == NULL || row >= solver->n ||
       solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_cols == NULL ||
@@ -41893,15 +41551,9 @@ static int kls_row_refactor_group_trailing_slice(
   UF_long *begin_out,
   UF_long *len_out,
   const UF_long **cols_out) {
-  if (begin_out != NULL) {
-    *begin_out = 0;
-  }
-  if (len_out != NULL) {
-    *len_out = 0;
-  }
-  if (cols_out != NULL) {
-    *cols_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(len_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(cols_out, NULL);
   if (solver == NULL || group >= solver->row_refactor_group_count ||
       row_end == 0u || row_end > solver->n ||
       solver->row_refactor_u_ptr == NULL) {
@@ -44482,12 +44134,8 @@ static int kls_try_compact_map32_klu_tournament(
   double *numeric_values,
   UF_long *ok_out,
   int *compact_used_out) {
-  if (ok_out != NULL) {
-    *ok_out = 0u;
-  }
-  if (compact_used_out != NULL) {
-    *compact_used_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(ok_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(compact_used_out, 0);
   if (solver == NULL || numeric_values == NULL || ok_out == NULL ||
       compact_used_out == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
@@ -46865,15 +46513,11 @@ static int kls_egraph_find_consumer_plan_run(
   if (run_id_out != NULL) {
     *run_id_out = KLS_KLU_EMPTY;
   }
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0u);
   if (panel_start_out != NULL) {
     *panel_start_out = KLS_KLU_EMPTY;
   }
-  if (panel_offset_out != NULL) {
-    *panel_offset_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(panel_offset_out, 0u);
   if (solver == NULL || current_global >= solver->n ||
       solver->refactor_supernode_consumer_plan_col_ptr == NULL ||
       solver->refactor_supernode_consumer_plan_col_runs == NULL ||
@@ -46936,15 +46580,11 @@ static int kls_egraph_worker_find_consumer_plan_run(
   if (run_id_out != NULL) {
     *run_id_out = KLS_KLU_EMPTY;
   }
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0u);
   if (panel_start_out != NULL) {
     *panel_start_out = KLS_KLU_EMPTY;
   }
-  if (panel_offset_out != NULL) {
-    *panel_offset_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(panel_offset_out, 0u);
   if (worker == NULL || worker->shared == NULL ||
       worker->shared->solver == NULL) {
     return 0;
@@ -51846,9 +51486,7 @@ static int kls_egraph_refactor_prefactor_u_supernode_ragged_l_run(
   const unsigned char *applied,
   int record_u_value,
   UF_long *run_rows_out) {
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0u);
   if (worker == NULL || worker->shared == NULL ||
       worker->shared->solver == NULL || ui == NULL || ux == NULL ||
       x == NULL || applied == NULL || run_rows_out == NULL ||
@@ -55304,9 +54942,7 @@ static int kls_btf_scalar_run_group_state_position(
   UF_long member,
   UF_long row,
   UF_long *pos_out) {
-  if (pos_out != NULL) {
-    *pos_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(pos_out, 0u);
   if (solver == NULL || pos_out == NULL ||
       solver->refactor_btf_scalar_run_group_state_ptr == NULL ||
       solver->refactor_btf_scalar_run_group_state_rows == NULL ||
@@ -55338,18 +54974,10 @@ static int kls_egraph_btf_scalar_run_group_state_block_info(
   UF_long *k2_out,
   UF_long *block_size_out,
   UF_long *current_local_out) {
-  if (k1_out != NULL) {
-    *k1_out = 0u;
-  }
-  if (k2_out != NULL) {
-    *k2_out = 0u;
-  }
-  if (block_size_out != NULL) {
-    *block_size_out = 0u;
-  }
-  if (current_local_out != NULL) {
-    *current_local_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(k1_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(k2_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(block_size_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(current_local_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || k1_out == NULL || k2_out == NULL ||
       block_size_out == NULL || current_local_out == NULL ||
@@ -55385,15 +55013,9 @@ static int kls_btf_scalar_run_group_state_value_range(
   UF_long *state_begin_out,
   UF_long *state_count_out,
   UF_long *value_begin_out) {
-  if (state_begin_out != NULL) {
-    *state_begin_out = 0u;
-  }
-  if (state_count_out != NULL) {
-    *state_count_out = 0u;
-  }
-  if (value_begin_out != NULL) {
-    *value_begin_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_begin_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(state_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(value_begin_out, 0u);
   if (shared == NULL || solver == NULL ||
       state_begin_out == NULL || state_count_out == NULL ||
       value_begin_out == NULL ||
@@ -55438,9 +55060,7 @@ static int kls_btf_scalar_run_group_state_value_pos(
   UF_long member,
   UF_long state_abs_pos,
   UF_long *value_pos_out) {
-  if (value_pos_out != NULL) {
-    *value_pos_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(value_pos_out, 0u);
   if (value_pos_out == NULL) {
     return 0;
   }
@@ -55546,12 +55166,8 @@ static int kls_egraph_materialize_btf_scalar_run_group_state(
   UF_long member,
   UF_long *state_rows_out,
   UF_long *prefix_deps_out) {
-  if (state_rows_out != NULL) {
-    *state_rows_out = 0u;
-  }
-  if (prefix_deps_out != NULL) {
-    *prefix_deps_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(prefix_deps_out, 0u);
   if (worker == NULL || worker->shared == NULL ||
       !worker->shared->btf_scalar_run_group_state_stats ||
       state_rows_out == NULL || prefix_deps_out == NULL) {
@@ -55693,12 +55309,8 @@ kls_egraph_btf_scalar_run_group_state_member_row_union(
   UF_long *block_offsets,
   UF_long *state_rows_out,
   UF_long *unique_rows_out) {
-  if (state_rows_out != NULL) {
-    *state_rows_out = 0u;
-  }
-  if (unique_rows_out != NULL) {
-    *unique_rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(unique_rows_out, 0u);
   if (solver == NULL || members == NULL || member_count == 0u ||
       cursors == NULL || block_offsets == NULL ||
       state_rows_out == NULL || unique_rows_out == NULL ||
@@ -55812,12 +55424,8 @@ kls_egraph_btf_scalar_run_group_state_step_batch_row_union(
   UF_long *block_offsets,
   UF_long *state_rows_out,
   UF_long *unique_rows_out) {
-  if (state_rows_out != NULL) {
-    *state_rows_out = 0u;
-  }
-  if (unique_rows_out != NULL) {
-    *unique_rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(unique_rows_out, 0u);
   if (solver == NULL || members == NULL || active == NULL ||
       cursors == NULL || block_offsets == NULL ||
       state_rows_out == NULL || unique_rows_out == NULL ||
@@ -56112,12 +55720,8 @@ static int kls_egraph_advance_btf_scalar_run_group_state_window(
   UF_long row_limit,
   UF_long *advanced_rows_out,
   UF_long *advanced_entries_out) {
-  if (advanced_rows_out != NULL) {
-    *advanced_rows_out = 0u;
-  }
-  if (advanced_entries_out != NULL) {
-    *advanced_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(advanced_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(advanced_entries_out, 0u);
   if (worker == NULL || worker->shared == NULL ||
       !worker->shared->btf_scalar_run_group_state_stats ||
       advanced_rows_out == NULL || advanced_entries_out == NULL) {
@@ -57621,9 +57225,7 @@ static int kls_egraph_refactor_try_restore_btf_scalar_run_group_state(
   double *x,
   int record_u_value,
   UF_long *up_out) {
-  if (up_out != NULL) {
-    *up_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(up_out, 0u);
   if (worker == NULL || worker->shared == NULL || up_out == NULL ||
       !worker->shared->btf_scalar_run_group_state_exec) {
     return 0;
@@ -58702,12 +58304,8 @@ static int kls_egraph_refactor_try_pop_algorithm5_payoff_column(
   kls_egraph_refactor_shared *shared,
   UF_long *col_out,
   unsigned char *flags_out) {
-  if (col_out != NULL) {
-    *col_out = 0u;
-  }
-  if (flags_out != NULL) {
-    *flags_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(col_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(flags_out, 0u);
   if (shared == NULL || !shared->supernode_algorithm5_payoff_queue ||
       shared->algorithm5_payoff_queue_cols == NULL ||
       shared->algorithm5_payoff_queue_slots == NULL ||
@@ -59376,15 +58974,9 @@ static int kls_algorithm5_payoff_prepare_state_row_lookup(
   UF_long *stamp_value_out,
   UF_long **stamp_out,
   UF_long **pos_out) {
-  if (stamp_value_out != NULL) {
-    *stamp_value_out = 0u;
-  }
-  if (stamp_out != NULL) {
-    *stamp_out = NULL;
-  }
-  if (pos_out != NULL) {
-    *pos_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(stamp_value_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(stamp_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(pos_out, NULL);
   if (worker == NULL || item == NULL || stamp_value_out == NULL ||
       stamp_out == NULL || pos_out == NULL || item->block_size == 0u ||
       item->state_rows == 0u || item->state_row_idx == NULL ||
@@ -59427,9 +59019,7 @@ static int kls_algorithm5_payoff_state_value_position(
   const UF_long *stamp,
   const UF_long *pos,
   UF_long *state_pos_out) {
-  if (state_pos_out != NULL) {
-    *state_pos_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_pos_out, 0u);
   if (item == NULL || stamp == NULL || pos == NULL || state_pos_out == NULL ||
       row >= item->block_size || stamp[row] != stamp_value ||
       pos[row] >= item->state_rows) {
@@ -59443,9 +59033,7 @@ static int kls_algorithm5_payoff_state_value_position_sorted(
   const kls_algorithm5_payoff_group_prefix_item *item,
   UF_long row,
   UF_long *state_pos_out) {
-  if (state_pos_out != NULL) {
-    *state_pos_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_pos_out, 0u);
   if (item == NULL || item->state_row_idx == NULL ||
       state_pos_out == NULL || item->state_rows == 0u) {
     return 0;
@@ -59485,9 +59073,7 @@ static void kls_algorithm5_payoff_free_state_lookup_batch(
 static int kls_algorithm5_payoff_state_lookup_capacity(
   UF_long row_count,
   UF_long *capacity_out) {
-  if (capacity_out != NULL) {
-    *capacity_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(capacity_out, 0u);
   if (capacity_out == NULL || row_count == 0u ||
       row_count > UF_long_max / 2u) {
     return 0;
@@ -59607,9 +59193,7 @@ static int kls_algorithm5_payoff_state_lookup_batch_position(
   UF_long item_index,
   UF_long row,
   UF_long *state_pos_out) {
-  if (state_pos_out != NULL) {
-    *state_pos_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_pos_out, 0u);
   if (lookup == NULL || lookup->ptr == NULL || lookup->keys == NULL ||
       lookup->pos == NULL || item_index >= lookup->item_count ||
       state_pos_out == NULL) {
@@ -61262,9 +60846,7 @@ kls_egraph_refactor_advance_algorithm5_payoff_prepared_suffix(
     *next_up_out =
       item != NULL ? item->advance_deps + item->prefix_rows : 0u;
   }
-  if (finished_out != NULL) {
-    *finished_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(finished_out, 0);
   if (worker == NULL || worker->shared == NULL || item == NULL ||
       next_up_out == NULL || finished_out == NULL) {
     return 0;
@@ -61924,9 +61506,7 @@ static int kls_egraph_refactor_advance_algorithm5_payoff_current_suffix(
   kls_egraph_refactor_worker *worker,
   UF_long current_slot,
   int *finished_out) {
-  if (finished_out != NULL) {
-    *finished_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(finished_out, 0);
   if (worker == NULL || worker->shared == NULL || finished_out == NULL) {
     return 0;
   }
@@ -63678,9 +63258,7 @@ static void kls_egraph_refactor_refresh_missing_prefix(
 static UF_long kls_egraph_refactor_lease_natural_pipeline(
   kls_egraph_refactor_shared *shared,
   UF_long *begin_out) {
-  if (begin_out != NULL) {
-    *begin_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0u);
   if (shared == NULL || shared->solver == NULL) {
     return 0u;
   }
@@ -64005,9 +63583,7 @@ static int kls_egraph_refactor_enqueue_ready_column(
 static int kls_egraph_refactor_pop_ready_column(
   kls_egraph_refactor_shared *shared,
   UF_long *col_out) {
-  if (col_out != NULL) {
-    *col_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(col_out, 0u);
   if (shared == NULL || shared->pipeline_ready_cols == NULL ||
       shared->pipeline_ready_slots == NULL ||
       shared->pipeline_generation == 0u) {
@@ -64105,9 +63681,7 @@ static int kls_egraph_refactor_publish_ready_successors(
 static int kls_egraph_refactor_try_pop_ready_column(
   kls_egraph_refactor_shared *shared,
   UF_long *col_out) {
-  if (col_out != NULL) {
-    *col_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(col_out, 0u);
   if (shared == NULL || shared->pipeline_ready_cols == NULL ||
       shared->pipeline_ready_slots == NULL ||
       shared->pipeline_generation == 0u) {
@@ -67224,9 +66798,7 @@ static int kls_run_parallel_row_solve_sparse_block(
   const kls_row_solve_factor_view *view,
   double *work,
   UF_long *level_runs_out) {
-  if (level_runs_out != NULL) {
-    *level_runs_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(level_runs_out, 0);
   if (solver == NULL || pool == NULL || thread_count < 2 ||
       view == NULL || work == NULL) {
     return 0;
@@ -67348,12 +66920,8 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
                                        double *work,
                                        UF_long *slice_runs_out,
                                        UF_long *sparse_level_runs_out) {
-  if (slice_runs_out != NULL) {
-    *slice_runs_out = 0;
-  }
-  if (sparse_level_runs_out != NULL) {
-    *sparse_level_runs_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(slice_runs_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(sparse_level_runs_out, 0);
   if (solver == NULL || view == NULL || work == NULL ||
       view->ptr == NULL ||
       !kls_row_solve_view_has_values(solver, view) ||
@@ -77003,27 +76571,13 @@ static int kls_build_refactor_pipeline_graph(
   UF_long **ready_cols_out,
   atomic_uint **ready_slots_out,
   atomic_ulong **remaining_preds_out) {
-  if (successor_ptr_out != NULL) {
-    *successor_ptr_out = NULL;
-  }
-  if (successors_out != NULL) {
-    *successors_out = NULL;
-  }
-  if (pred_count_out != NULL) {
-    *pred_count_out = NULL;
-  }
-  if (edge_count_out != NULL) {
-    *edge_count_out = 0u;
-  }
-  if (ready_cols_out != NULL) {
-    *ready_cols_out = NULL;
-  }
-  if (ready_slots_out != NULL) {
-    *ready_slots_out = NULL;
-  }
-  if (remaining_preds_out != NULL) {
-    *remaining_preds_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(successor_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(successors_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(pred_count_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(edge_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(ready_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(ready_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(remaining_preds_out, NULL);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || levels == NULL ||
       successor_ptr_out == NULL || successors_out == NULL ||
@@ -77260,33 +76814,15 @@ static int kls_build_refactor_separator_private_plan(
   UF_long *tail_column_count_out,
   UF_long *private_component_count_out,
   UF_long *unsafe_component_count_out) {
-  if (private_cols_out != NULL) {
-    *private_cols_out = NULL;
-  }
-  if (thread_ptr_out != NULL) {
-    *thread_ptr_out = NULL;
-  }
-  if (tail_cols_out != NULL) {
-    *tail_cols_out = NULL;
-  }
-  if (tail_level_ptr_out != NULL) {
-    *tail_level_ptr_out = NULL;
-  }
-  if (tail_level_thread_ptr_out != NULL) {
-    *tail_level_thread_ptr_out = NULL;
-  }
-  if (private_column_count_out != NULL) {
-    *private_column_count_out = 0u;
-  }
-  if (tail_column_count_out != NULL) {
-    *tail_column_count_out = 0u;
-  }
-  if (private_component_count_out != NULL) {
-    *private_component_count_out = 0u;
-  }
-  if (unsafe_component_count_out != NULL) {
-    *unsafe_component_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(private_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(thread_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_level_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(tail_level_thread_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(private_column_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(tail_column_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(private_component_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(unsafe_component_count_out, 0u);
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       levels == NULL || column_work == NULL || thread_count <= 1 ||
       cluster_levels == 0u || private_cols_out == NULL ||
@@ -82356,9 +81892,7 @@ static int kls_row_first_validate_tail_separator_scope(
   UF_long nk,
   const unsigned char *active_mask,
   UF_long *scoped_rows_out) {
-  if (scoped_rows_out != NULL) {
-    *scoped_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(scoped_rows_out, 0);
   if (ctx == NULL || row_order == NULL || active_mask == NULL ||
       scoped_rows_out == NULL || nk > ctx->nk ||
       !ctx->use_separator_for_block) {
@@ -82482,18 +82016,12 @@ static int kls_row_first_select_pivot_exchange(
   UF_long *selected_col_out,
   int *selected_separator_exact_out,
   int *selected_separator_extent_out) {
-  if (pivot_needed_out != NULL) {
-    *pivot_needed_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(pivot_needed_out, 0);
   if (selected_col_out != NULL) {
     *selected_col_out = KLS_KLU_EMPTY;
   }
-  if (selected_separator_exact_out != NULL) {
-    *selected_separator_exact_out = 0;
-  }
-  if (selected_separator_extent_out != NULL) {
-    *selected_separator_extent_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(selected_separator_exact_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(selected_separator_extent_out, 0);
   if (choice == NULL || pivot_needed_out == NULL ||
       selected_col_out == NULL) {
     return 0;
@@ -83327,15 +82855,9 @@ static int kls_row_first_run_parallel_private_phase(
   UF_long *thread_rows_out,
   int allow_partial,
   int *all_private_completed_out) {
-  if (private_rows_out != NULL) {
-    *private_rows_out = 0u;
-  }
-  if (thread_rows_out != NULL) {
-    *thread_rows_out = 0u;
-  }
-  if (all_private_completed_out != NULL) {
-    *all_private_completed_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(private_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(thread_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(all_private_completed_out, 0);
   if (ctx == NULL || plan == NULL || thread_count <= 1 ||
       row_owner == NULL || l_entries == NULL || u_entries == NULL ||
       udiag_values == NULL || u_row_ptr == NULL || u_row_end == NULL ||
@@ -83766,9 +83288,7 @@ static UF_long kls_row_first_compact_window_index_slot(
   const kls_row_first_compact_window_state *state,
   UF_long col,
   int *found_out) {
-  if (found_out != NULL) {
-    *found_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(found_out, 0);
   if (state == NULL || state->index_capacity == 0u ||
       state->index_keys == NULL || state->index_pos == NULL ||
       state->index_mark == NULL || state->index_generation == 0u) {
@@ -83948,9 +83468,7 @@ static int kls_row_first_compact_window_prepare_update_pos(
   if (pos_out != NULL) {
     *pos_out = KLS_KLU_EMPTY;
   }
-  if (inserted_out != NULL) {
-    *inserted_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(inserted_out, 0);
   if (state == NULL || col == KLS_KLU_EMPTY || pos_out == NULL) {
     return 0;
   }
@@ -84065,9 +83583,7 @@ static UF_long kls_row_first_compact_window_deferred_output_index_slot(
   const kls_row_first_compact_window_state *state,
   UF_long col,
   int *found_out) {
-  if (found_out != NULL) {
-    *found_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(found_out, 0);
   if (state == NULL || state->deferred_output_index_capacity == 0u ||
       state->deferred_output_index_keys == NULL ||
       state->deferred_output_index_pos == NULL ||
@@ -84562,9 +84078,7 @@ static int kls_row_first_supernode_panel_shape(
   UF_long start,
   UF_long end,
   UF_long *tail_len_out) {
-  if (tail_len_out != NULL) {
-    *tail_len_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(tail_len_out, 0);
   if (u_entries == NULL || u_row_ptr == NULL || u_row_end == NULL ||
       start >= nk || end <= start || end >= nk ||
       u_row_ptr[end] > u_row_end[end] ||
@@ -85696,9 +85210,7 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
   UF_long dep_end,
   kls_row_first_pipeline_trace *trace,
   UF_long *run_rows_out) {
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       published_u_entries == NULL || udiag_values == NULL ||
       u_row_ptr == NULL || u_row_end == NULL || state == NULL ||
@@ -85810,9 +85322,7 @@ static int kls_row_first_partial_apply_supernode_run_cached_cblas(
   const double *tail_values,
   const UF_long *tail_cols,
   UF_long *run_rows_out) {
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       state == NULL || dense_panel == NULL ||
       workspace->x == NULL || workspace->mark == NULL ||
@@ -85957,9 +85467,7 @@ static int kls_row_first_partial_apply_supernode_run_cached_portable(
   const double *tail_values,
   const UF_long *tail_cols,
   UF_long *run_rows_out) {
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       state == NULL || dense_panel == NULL ||
       workspace->x == NULL || workspace->mark == NULL ||
@@ -86091,12 +85599,8 @@ static int kls_row_first_partial_apply_supernode_run_cached(
   UF_long dep_end,
   UF_long *run_rows_out,
   int *used_panel_out) {
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0;
-  }
-  if (used_panel_out != NULL) {
-    *used_panel_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(used_panel_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       udiag_values == NULL || state == NULL ||
       workspace->x == NULL || workspace->mark == NULL ||
@@ -86303,9 +85807,7 @@ static int kls_row_first_partial_apply_supernode_run_compact(
   int shape_known,
   int publish_panel,
   kls_row_first_row_stats *stats) {
-  if (run_rows_out != NULL) {
-    *run_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       published_u_entries == NULL || udiag_values == NULL ||
       u_row_ptr == NULL || u_row_end == NULL || state == NULL ||
@@ -86484,9 +85986,7 @@ static int kls_row_first_partial_apply_supernode_run(
       return 0;
     }
   }
-  if (used_panel_out != NULL) {
-    *used_panel_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(used_panel_out, 0);
   const int compact_status =
     kls_row_first_partial_apply_supernode_run_compact(
       ctx, workspace, local_l_entries, published_u_entries, udiag_values,
@@ -86606,9 +86106,7 @@ static int kls_row_first_partial_apply_ready_until(
   kls_row_first_row_stats *stats,
   kls_row_first_pipeline_trace *trace,
   int *blocked_out) {
-  if (blocked_out != NULL) {
-    *blocked_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(blocked_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       published_u_entries == NULL || udiag_values == NULL ||
       u_row_ptr == NULL || u_row_end == NULL || row_done == NULL ||
@@ -86740,21 +86238,13 @@ static int kls_row_first_partial_finish(
   UF_long *selected_col_out,
   int *selected_separator_exact_out,
   int *selected_separator_extent_out) {
-  if (pivot_needed_out != NULL) {
-    *pivot_needed_out = 0;
-  }
-  if (pivoted_out != NULL) {
-    *pivoted_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(pivot_needed_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivoted_out, 0);
   if (selected_col_out != NULL) {
     *selected_col_out = KLS_KLU_EMPTY;
   }
-  if (selected_separator_exact_out != NULL) {
-    *selected_separator_exact_out = 0;
-  }
-  if (selected_separator_extent_out != NULL) {
-    *selected_separator_extent_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(selected_separator_exact_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(selected_separator_extent_out, 0);
   if (ctx == NULL || workspace == NULL || local_u_entries == NULL ||
       state == NULL || workspace->x == NULL || workspace->mark == NULL ||
       workspace->pattern == NULL || workspace->dep_heap == NULL ||
@@ -88207,12 +87697,8 @@ static int kls_row_first_pipeline_apply_scalar_producer_targets(
   UF_long row_entries,
   UF_long *internal_entries_out,
   UF_long *output_entries_out) {
-  if (internal_entries_out != NULL) {
-    *internal_entries_out = 0u;
-  }
-  if (output_entries_out != NULL) {
-    *output_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(internal_entries_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(output_entries_out, 0u);
   if (shared == NULL || targets == NULL || target_count == 0u ||
       shared->ctx == NULL || row_cols == NULL || row_values == NULL ||
       dep >= shared->ctx->nk) {
@@ -91483,9 +90969,7 @@ static int kls_row_first_pipeline_count_span_owner_replay_entries(
   UF_long unique_deps,
   unsigned int col_generation,
   UF_long *replay_entries_out) {
-  if (replay_entries_out != NULL) {
-    *replay_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(replay_entries_out, 0u);
   if (shared == NULL || owner_slots == NULL || replay_entries_out == NULL ||
       shared->compact_window_states == NULL ||
       shared->compact_batch_positions == NULL ||
@@ -91565,9 +91049,7 @@ static int kls_row_first_pipeline_fill_span_owner_sparse_accum_values(
   UF_long unique_cols,
   UF_long expected_replay_entries,
   UF_long *storage_entries_out) {
-  if (storage_entries_out != NULL) {
-    *storage_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(storage_entries_out, 0u);
   if (shared == NULL || owner_slots == NULL || owner_l_counts == NULL ||
       storage_entries_out == NULL ||
       owner_count > KLS_ROW_FIRST_COMPACT_CLAIM_RUN_MAX_ROWS ||
@@ -94635,9 +94117,7 @@ static int kls_row_first_pipeline_try_compact_window_union_batch(
   UF_long row_entries,
   UF_long target_count,
   UF_long *handled_out) {
-  if (handled_out != NULL) {
-    *handled_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(handled_out, 0u);
   if (shared == NULL || shared->ctx == NULL ||
       shared->compact_batch_targets == NULL ||
       shared->compact_union_mark == NULL ||
@@ -97700,21 +97180,11 @@ static int kls_row_first_run_parallel_pipeline_phase(
   if (completed_pos_out != NULL) {
     *completed_pos_out = begin;
   }
-  if (pivot_tail_ready_out != NULL) {
-    *pivot_tail_ready_out = 0;
-  }
-  if (pivot_tail_rows_out != NULL) {
-    *pivot_tail_rows_out = 0;
-  }
-  if (pivot_restarts_out != NULL) {
-    *pivot_restarts_out = 0;
-  }
-  if (supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = 0;
-  }
-  if (supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_ready_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_rows_out, 0);
   if (ctx == NULL || row_order == NULL || begin >= end ||
       thread_count <= 1 || workspace == NULL || l_entries == NULL ||
       u_entries == NULL || udiag_values == NULL || row_done == NULL) {
@@ -98463,42 +97933,18 @@ static int kls_row_first_run_restartable_pipeline_suffix(
   kls_row_first_supernode_panel_cache *pivot_serial_panel_cache,
   UF_long *pivot_serial_open_panel_start_io,
   UF_long *pivot_serial_open_panel_end_io) {
-  if (pipeline_rows_out != NULL) {
-    *pipeline_rows_out = 0;
-  }
-  if (thread_rows_out != NULL) {
-    *thread_rows_out = 0;
-  }
-  if (partial_rows_out != NULL) {
-    *partial_rows_out = 0;
-  }
-  if (wait_partial_rows_out != NULL) {
-    *wait_partial_rows_out = 0;
-  }
-  if (wait_partial_deps_out != NULL) {
-    *wait_partial_deps_out = 0;
-  }
-  if (supernode_update_groups_out != NULL) {
-    *supernode_update_groups_out = 0;
-  }
-  if (supernode_update_rows_out != NULL) {
-    *supernode_update_rows_out = 0;
-  }
-  if (supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = 0;
-  }
-  if (supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = 0;
-  }
-  if (pivot_tail_rows_out != NULL) {
-    *pivot_tail_rows_out = 0;
-  }
-  if (pivot_restarts_out != NULL) {
-    *pivot_restarts_out = 0;
-  }
-  if (pivot_serial_rows_out != NULL) {
-    *pivot_serial_rows_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(pipeline_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(thread_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(partial_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_deps_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_serial_rows_out, 0);
   if (ctx == NULL || row_order == NULL || begin > end ||
       thread_count <= 1 || workspace == NULL || l_entries == NULL ||
       u_entries == NULL || udiag_values == NULL || row_done == NULL) {
@@ -98687,36 +98133,16 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
   UF_long *supernode_panel_update_rows_out,
   UF_long *pivot_tail_rows_out,
   UF_long *pivot_restarts_out) {
-  if (thread_rows_out != NULL) {
-    *thread_rows_out = 0;
-  }
-  if (prefactor_rows_out != NULL) {
-    *prefactor_rows_out = 0;
-  }
-  if (wait_partial_rows_out != NULL) {
-    *wait_partial_rows_out = 0;
-  }
-  if (wait_partial_deps_out != NULL) {
-    *wait_partial_deps_out = 0;
-  }
-  if (supernode_update_groups_out != NULL) {
-    *supernode_update_groups_out = 0;
-  }
-  if (supernode_update_rows_out != NULL) {
-    *supernode_update_rows_out = 0;
-  }
-  if (supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = 0;
-  }
-  if (supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = 0;
-  }
-  if (pivot_tail_rows_out != NULL) {
-    *pivot_tail_rows_out = 0;
-  }
-  if (pivot_restarts_out != NULL) {
-    *pivot_restarts_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(thread_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(prefactor_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_deps_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, 0);
   if (ctx == NULL || row_order == NULL || active_mask == NULL ||
       tail_parent == NULL ||
       active_rows == 0u || thread_count <= 1 || workspace == NULL ||
@@ -99959,39 +99385,17 @@ static int kls_try_row_first_etree_ready_tail_repair(
   double trace_boundary_done = trace_begin;
   double trace_ready_done = trace_begin;
   double trace_publish_done = trace_begin;
-  if (row_pipeline_ready_rows_out != NULL) {
-    *row_pipeline_ready_rows_out = 0;
-  }
-  if (row_pipeline_threads_out != NULL) {
-    *row_pipeline_threads_out = 0;
-  }
-  if (row_pipeline_prefactor_rows_out != NULL) {
-    *row_pipeline_prefactor_rows_out = 0;
-  }
-  if (row_pipeline_prefactor_wait_rows_out != NULL) {
-    *row_pipeline_prefactor_wait_rows_out = 0;
-  }
-  if (row_pipeline_prefactor_wait_deps_out != NULL) {
-    *row_pipeline_prefactor_wait_deps_out = 0;
-  }
-  if (supernode_update_groups_out != NULL) {
-    *supernode_update_groups_out = 0;
-  }
-  if (supernode_update_rows_out != NULL) {
-    *supernode_update_rows_out = 0;
-  }
-  if (supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = 0;
-  }
-  if (supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = 0;
-  }
-  if (pivot_tail_rows_out != NULL) {
-    *pivot_tail_rows_out = 0;
-  }
-  if (pivot_restarts_out != NULL) {
-    *pivot_restarts_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_ready_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_threads_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_prefactor_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_prefactor_wait_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_prefactor_wait_deps_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_groups_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, 0);
   if (worker == NULL || worker->shared == NULL ||
       worker->udiag_values == NULL || worker->u_row_ptr == NULL ||
       worker->u_row_end == NULL || ctx == NULL || ctx->solver == NULL ||

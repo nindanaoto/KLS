@@ -7555,6 +7555,12 @@ static inline int kls_env_flag_enabled(const char *name) {
     return kls_env_flag_enabled(variable_name);           \
   }
 
+#define KLS_SET_OPTIONAL_OUTPUT(output, value) do { \
+    if ((output) != NULL) {                         \
+      *(output) = (value);                          \
+    }                                               \
+  } while (0)
+
 KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_stats_env_enabled,
                     "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS")
 
@@ -9306,24 +9312,12 @@ static int kls_count_supernode_consumer_plan_shape_batches(
   UF_long *shape_batch_small_run_count_out,
   UF_long *shape_batch_small_run_rows_out,
   UF_long *shape_batch_max_runs_out) {
-  if (shape_batch_count_out != NULL) {
-    *shape_batch_count_out = 0u;
-  }
-  if (shape_batch_run_count_out != NULL) {
-    *shape_batch_run_count_out = 0u;
-  }
-  if (shape_batch_run_rows_out != NULL) {
-    *shape_batch_run_rows_out = 0u;
-  }
-  if (shape_batch_small_run_count_out != NULL) {
-    *shape_batch_small_run_count_out = 0u;
-  }
-  if (shape_batch_small_run_rows_out != NULL) {
-    *shape_batch_small_run_rows_out = 0u;
-  }
-  if (shape_batch_max_runs_out != NULL) {
-    *shape_batch_max_runs_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_small_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_small_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_max_runs_out, 0u);
   if (plan_ptr == NULL || plan_rows == NULL ||
       plan_panel_offset == NULL ||
       shape_batch_count_out == NULL ||
@@ -9550,24 +9544,12 @@ static int kls_count_supernode_consumer_plan_column_shape_batches(
   UF_long *shape_batch_small_run_count_out,
   UF_long *shape_batch_small_run_rows_out,
   UF_long *shape_batch_max_runs_out) {
-  if (shape_batch_count_out != NULL) {
-    *shape_batch_count_out = 0u;
-  }
-  if (shape_batch_run_count_out != NULL) {
-    *shape_batch_run_count_out = 0u;
-  }
-  if (shape_batch_run_rows_out != NULL) {
-    *shape_batch_run_rows_out = 0u;
-  }
-  if (shape_batch_small_run_count_out != NULL) {
-    *shape_batch_small_run_count_out = 0u;
-  }
-  if (shape_batch_small_run_rows_out != NULL) {
-    *shape_batch_small_run_rows_out = 0u;
-  }
-  if (shape_batch_max_runs_out != NULL) {
-    *shape_batch_max_runs_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_small_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_small_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_max_runs_out, 0u);
   if (column_ptr == NULL || column_runs == NULL ||
       plan_panel_start == NULL || plan_panel_offset == NULL ||
       plan_rows == NULL ||
@@ -9770,21 +9752,11 @@ static int kls_build_supernode_consumer_plan_shape_groups(
   UF_long **group_panel_start_out,
   UF_long **group_panel_offset_out,
   UF_long **group_rows_out) {
-  if (group_ptr_out != NULL) {
-    *group_ptr_out = NULL;
-  }
-  if (group_runs_out != NULL) {
-    *group_runs_out = NULL;
-  }
-  if (group_panel_start_out != NULL) {
-    *group_panel_start_out = NULL;
-  }
-  if (group_panel_offset_out != NULL) {
-    *group_panel_offset_out = NULL;
-  }
-  if (group_rows_out != NULL) {
-    *group_rows_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(group_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_runs_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_panel_start_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_panel_offset_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_rows_out, NULL);
   if (plan_ptr == NULL || plan_rows == NULL ||
       plan_panel_offset == NULL ||
       group_ptr_out == NULL || group_runs_out == NULL ||
@@ -10011,15 +9983,9 @@ static int kls_supernode_consumer_plan_run_dep_position(
   UF_long *position_out,
   UF_long *block_start_out,
   const UF_long **u_indices_out) {
-  if (position_out != NULL) {
-    *position_out = 0u;
-  }
-  if (block_start_out != NULL) {
-    *block_start_out = 0u;
-  }
-  if (u_indices_out != NULL) {
-    *u_indices_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(position_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(block_start_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(u_indices_out, NULL);
   if (solver == NULL || plan_current == NULL || plan_dep == NULL ||
       run >= run_count || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->R == NULL ||
@@ -10112,9 +10078,7 @@ static int kls_supernode_consumer_plan_run_advance_cost(
   UF_long run,
   UF_long *advance_deps_out,
   double *advance_work_out) {
-  if (advance_deps_out != NULL) {
-    *advance_deps_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(advance_deps_out, 0u);
   if (advance_work_out != NULL) {
     *advance_work_out = 0.0;
   }
@@ -10158,12 +10122,8 @@ static int kls_supernode_consumer_plan_run_suffix_cost(
   UF_long prefix_rows,
   UF_long *suffix_deps_out,
   UF_long *suffix_update_entries_out) {
-  if (suffix_deps_out != NULL) {
-    *suffix_deps_out = 0u;
-  }
-  if (suffix_update_entries_out != NULL) {
-    *suffix_update_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(suffix_deps_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(suffix_update_entries_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
       plan_current == NULL || plan_dep == NULL ||
@@ -10230,21 +10190,11 @@ static int kls_count_refactor_algorithm5_payoff_group_suffix_sharing(
   UF_long *shared_deps_total_out,
   UF_long *max_dep_fanout_out,
   UF_long *duplicate_update_entries_total_out) {
-  if (unique_deps_total_out != NULL) {
-    *unique_deps_total_out = 0u;
-  }
-  if (duplicate_deps_total_out != NULL) {
-    *duplicate_deps_total_out = 0u;
-  }
-  if (shared_deps_total_out != NULL) {
-    *shared_deps_total_out = 0u;
-  }
-  if (max_dep_fanout_out != NULL) {
-    *max_dep_fanout_out = 0u;
-  }
-  if (duplicate_update_entries_total_out != NULL) {
-    *duplicate_update_entries_total_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(unique_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(duplicate_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shared_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(max_dep_fanout_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(duplicate_update_entries_total_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
       plan_current == NULL || plan_dep == NULL ||
@@ -10417,18 +10367,10 @@ static int kls_refactor_algorithm5_payoff_run_suffix_pattern(
   UF_long *ulen_out,
   UF_long *block_start_out,
   const UF_long **ui_out) {
-  if (suffix_begin_out != NULL) {
-    *suffix_begin_out = 0u;
-  }
-  if (ulen_out != NULL) {
-    *ulen_out = 0u;
-  }
-  if (block_start_out != NULL) {
-    *block_start_out = 0u;
-  }
-  if (ui_out != NULL) {
-    *ui_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(suffix_begin_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(ulen_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(block_start_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(ui_out, NULL);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || plan_current == NULL ||
       plan_dep == NULL || run_advance_deps == NULL ||
@@ -10483,21 +10425,11 @@ static int kls_build_refactor_algorithm5_payoff_group_suffix_map(
   UF_long **group_suffix_run_ptr_out,
   UF_long **group_suffix_runs_out,
   UF_long **group_suffix_up_out) {
-  if (group_suffix_ptr_out != NULL) {
-    *group_suffix_ptr_out = NULL;
-  }
-  if (group_suffix_cols_out != NULL) {
-    *group_suffix_cols_out = NULL;
-  }
-  if (group_suffix_run_ptr_out != NULL) {
-    *group_suffix_run_ptr_out = NULL;
-  }
-  if (group_suffix_runs_out != NULL) {
-    *group_suffix_runs_out = NULL;
-  }
-  if (group_suffix_up_out != NULL) {
-    *group_suffix_up_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(group_suffix_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_suffix_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_suffix_run_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_suffix_runs_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_suffix_up_out, NULL);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || plan_current == NULL ||
       plan_dep == NULL || group_suffix_ptr_out == NULL ||
@@ -10829,15 +10761,9 @@ static int kls_refactor_algorithm5_payoff_run_advance_pattern(
   UF_long *advance_deps_out,
   UF_long *block_start_out,
   const UF_long **ui_out) {
-  if (advance_deps_out != NULL) {
-    *advance_deps_out = 0u;
-  }
-  if (block_start_out != NULL) {
-    *block_start_out = 0u;
-  }
-  if (ui_out != NULL) {
-    *ui_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(advance_deps_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(block_start_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(ui_out, NULL);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || plan_current == NULL ||
       plan_dep == NULL || run_advance_deps == NULL ||
@@ -10883,21 +10809,11 @@ static int kls_count_refactor_algorithm5_payoff_group_advance_sharing(
   UF_long *shared_deps_total_out,
   UF_long *max_dep_fanout_out,
   UF_long *duplicate_update_entries_total_out) {
-  if (unique_deps_total_out != NULL) {
-    *unique_deps_total_out = 0u;
-  }
-  if (duplicate_deps_total_out != NULL) {
-    *duplicate_deps_total_out = 0u;
-  }
-  if (shared_deps_total_out != NULL) {
-    *shared_deps_total_out = 0u;
-  }
-  if (max_dep_fanout_out != NULL) {
-    *max_dep_fanout_out = 0u;
-  }
-  if (duplicate_update_entries_total_out != NULL) {
-    *duplicate_update_entries_total_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(unique_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(duplicate_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shared_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(max_dep_fanout_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(duplicate_update_entries_total_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Ulen == NULL ||
       plan_current == NULL || plan_dep == NULL ||
@@ -11047,21 +10963,11 @@ static int kls_build_refactor_algorithm5_payoff_group_advance_map(
   UF_long **group_advance_map_run_ptr_out,
   UF_long **group_advance_map_runs_out,
   UF_long **group_advance_map_up_out) {
-  if (group_advance_map_ptr_out != NULL) {
-    *group_advance_map_ptr_out = NULL;
-  }
-  if (group_advance_map_cols_out != NULL) {
-    *group_advance_map_cols_out = NULL;
-  }
-  if (group_advance_map_run_ptr_out != NULL) {
-    *group_advance_map_run_ptr_out = NULL;
-  }
-  if (group_advance_map_runs_out != NULL) {
-    *group_advance_map_runs_out = NULL;
-  }
-  if (group_advance_map_up_out != NULL) {
-    *group_advance_map_up_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_map_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_map_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_map_run_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_map_runs_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_map_up_out, NULL);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || plan_current == NULL ||
       plan_dep == NULL || group_advance_map_ptr_out == NULL ||
@@ -11395,24 +11301,12 @@ static int kls_count_supernode_consumer_plan_first_dep_shape_batches(
   UF_long *shape_batch_small_run_count_out,
   UF_long *shape_batch_small_run_rows_out,
   UF_long *shape_batch_max_runs_out) {
-  if (shape_batch_count_out != NULL) {
-    *shape_batch_count_out = 0u;
-  }
-  if (shape_batch_run_count_out != NULL) {
-    *shape_batch_run_count_out = 0u;
-  }
-  if (shape_batch_run_rows_out != NULL) {
-    *shape_batch_run_rows_out = 0u;
-  }
-  if (shape_batch_small_run_count_out != NULL) {
-    *shape_batch_small_run_count_out = 0u;
-  }
-  if (shape_batch_small_run_rows_out != NULL) {
-    *shape_batch_small_run_rows_out = 0u;
-  }
-  if (shape_batch_max_runs_out != NULL) {
-    *shape_batch_max_runs_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_small_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_small_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(shape_batch_max_runs_out, 0u);
   if (solver == NULL || group_ptr == NULL || group_runs == NULL ||
       group_rows == NULL || plan_current == NULL || plan_dep == NULL ||
       shape_batch_count_out == NULL ||
@@ -11508,24 +11402,14 @@ static int kls_count_supernode_consumer_plan_shape_batch_advance_costs(
   double *advance_work_out,
   UF_long *advance_max_deps_out,
   double *advance_max_work_out) {
-  if (advance_count_out != NULL) {
-    *advance_count_out = 0u;
-  }
-  if (advance_run_count_out != NULL) {
-    *advance_run_count_out = 0u;
-  }
-  if (advance_run_rows_out != NULL) {
-    *advance_run_rows_out = 0u;
-  }
-  if (advance_dep_count_out != NULL) {
-    *advance_dep_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(advance_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(advance_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(advance_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(advance_dep_count_out, 0u);
   if (advance_work_out != NULL) {
     *advance_work_out = 0.0;
   }
-  if (advance_max_deps_out != NULL) {
-    *advance_max_deps_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(advance_max_deps_out, 0u);
   if (advance_max_work_out != NULL) {
     *advance_max_work_out = 0.0;
   }
@@ -11622,9 +11506,7 @@ static int kls_supernode_consumer_plan_shape_group_update_entries(
   UF_long panel_offset,
   UF_long width,
   UF_long *per_run_entries_out) {
-  if (per_run_entries_out != NULL) {
-    *per_run_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(per_run_entries_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Llen == NULL || per_run_entries_out == NULL ||
       width <= 1u || width > UF_long_max / width ||
@@ -11720,42 +11602,22 @@ static int kls_count_supernode_consumer_plan_shape_bounded_advance_batches(
   UF_long *payoff_update_entries_out,
   double *payoff_advance_work_out,
   double *max_payoff_ratio_out) {
-  if (bounded_count_out != NULL) {
-    *bounded_count_out = 0u;
-  }
-  if (bounded_run_count_out != NULL) {
-    *bounded_run_count_out = 0u;
-  }
-  if (bounded_run_rows_out != NULL) {
-    *bounded_run_rows_out = 0u;
-  }
-  if (bounded_dep_count_out != NULL) {
-    *bounded_dep_count_out = 0u;
-  }
-  if (bounded_update_entries_out != NULL) {
-    *bounded_update_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(bounded_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(bounded_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(bounded_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(bounded_dep_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(bounded_update_entries_out, 0u);
   if (bounded_work_out != NULL) {
     *bounded_work_out = 0.0;
   }
-  if (bounded_max_run_deps_out != NULL) {
-    *bounded_max_run_deps_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(bounded_max_run_deps_out, 0u);
   if (bounded_max_run_work_out != NULL) {
     *bounded_max_run_work_out = 0.0;
   }
-  if (payoff_count_out != NULL) {
-    *payoff_count_out = 0u;
-  }
-  if (payoff_run_count_out != NULL) {
-    *payoff_run_count_out = 0u;
-  }
-  if (payoff_run_rows_out != NULL) {
-    *payoff_run_rows_out = 0u;
-  }
-  if (payoff_update_entries_out != NULL) {
-    *payoff_update_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(payoff_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(payoff_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(payoff_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(payoff_update_entries_out, 0u);
   if (payoff_advance_work_out != NULL) {
     *payoff_advance_work_out = 0.0;
   }
@@ -11964,27 +11826,15 @@ static int kls_count_supernode_consumer_plan_prefix_advance_batches(
   UF_long *batch_max_runs_out,
   UF_long *batch_max_deps_out,
   double *batch_max_work_out) {
-  if (batch_count_out != NULL) {
-    *batch_count_out = 0u;
-  }
-  if (batch_run_count_out != NULL) {
-    *batch_run_count_out = 0u;
-  }
-  if (batch_run_rows_out != NULL) {
-    *batch_run_rows_out = 0u;
-  }
-  if (batch_dep_count_out != NULL) {
-    *batch_dep_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(batch_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(batch_run_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(batch_run_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(batch_dep_count_out, 0u);
   if (batch_work_out != NULL) {
     *batch_work_out = 0.0;
   }
-  if (batch_max_runs_out != NULL) {
-    *batch_max_runs_out = 0u;
-  }
-  if (batch_max_deps_out != NULL) {
-    *batch_max_deps_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(batch_max_runs_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(batch_max_deps_out, 0u);
   if (batch_max_work_out != NULL) {
     *batch_max_work_out = 0.0;
   }
@@ -12557,9 +12407,7 @@ static int kls_refactor_supernode_algorithm5_run_prefix_rows(
   UF_long run_count,
   UF_long run,
   UF_long *prefix_rows_out) {
-  if (prefix_rows_out != NULL) {
-    *prefix_rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(prefix_rows_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Llen == NULL || consumer_start == NULL ||
       consumer_end == NULL || plan_current == NULL || plan_dep == NULL ||
@@ -12620,9 +12468,7 @@ static int kls_refactor_supernode_algorithm5_run_target_entries(
   UF_long group_pattern_width,
   UF_long prefix_rows,
   UF_long *target_entries_out) {
-  if (target_entries_out != NULL) {
-    *target_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(target_entries_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Llen == NULL || solver->refactor_l_indices == NULL ||
       plan_dep == NULL || plan_panel_start == NULL ||
@@ -12696,9 +12542,7 @@ static int kls_refactor_supernode_algorithm5_next_target_stamp(
   UF_long stamp_workspace_size,
   UF_long *stamp_io,
   UF_long *stamp_out) {
-  if (stamp_out != NULL) {
-    *stamp_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(stamp_out, 0u);
   if (stamp_workspace == NULL || stamp_workspace_size == 0u ||
       stamp_io == NULL || stamp_out == NULL) {
     return 0;
@@ -12732,9 +12576,7 @@ static int kls_refactor_supernode_algorithm5_run_target_slots(
   UF_long *target_cols,
   UF_long target_col_capacity,
   UF_long *target_slots_out) {
-  if (target_slots_out != NULL) {
-    *target_slots_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(target_slots_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Llen == NULL || solver->refactor_l_indices == NULL ||
       plan_dep == NULL || plan_panel_start == NULL ||
@@ -12845,9 +12687,7 @@ static int kls_refactor_supernode_algorithm5_run_advance_slots(
   UF_long *advance_cols,
   UF_long advance_col_capacity,
   UF_long *advance_slots_out) {
-  if (advance_slots_out != NULL) {
-    *advance_slots_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(advance_slots_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
@@ -13063,71 +12903,61 @@ static int kls_build_refactor_supernode_algorithm5_payoff_plan(
   UF_long *group_advance_slots_total_out,
   UF_long *group_max_advance_slots_out,
   UF_long *group_max_run_advance_slots_out) {
-#define KLS_CLEAR_PLAN_POINTER(output) do { \
-    if ((output) != NULL) {                  \
-      *(output) = NULL;                      \
-    }                                        \
-  } while (0)
-#define KLS_CLEAR_PLAN_COUNT(output) do { \
-    if ((output) != NULL) {                \
-      *(output) = 0u;                      \
-    }                                      \
-  } while (0)
-  KLS_CLEAR_PLAN_POINTER(panel_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(selected_runs_out);
-  KLS_CLEAR_PLAN_POINTER(group_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(group_panel_start_out);
-  KLS_CLEAR_PLAN_POINTER(run_group_out);
-  KLS_CLEAR_PLAN_POINTER(run_group_pos_out);
-  KLS_CLEAR_PLAN_POINTER(run_current_pos_out);
-  KLS_CLEAR_PLAN_POINTER(run_advance_deps_out);
-  KLS_CLEAR_PLAN_POINTER(run_advance_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(run_prefix_rows_out);
-  KLS_CLEAR_PLAN_POINTER(run_target_entries_out);
-  KLS_CLEAR_PLAN_POINTER(run_target_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(run_target_slots_out);
-  KLS_CLEAR_PLAN_POINTER(run_target_slot_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(group_prefix_rows_out);
-  KLS_CLEAR_PLAN_POINTER(group_max_run_rows_out);
-  KLS_CLEAR_PLAN_POINTER(group_pattern_width_out);
-  KLS_CLEAR_PLAN_POINTER(group_target_entries_out);
-  KLS_CLEAR_PLAN_POINTER(group_target_slots_out);
-  KLS_CLEAR_PLAN_POINTER(group_target_cols_out);
-  KLS_CLEAR_PLAN_POINTER(group_advance_deps_out);
-  KLS_CLEAR_PLAN_POINTER(group_current_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(group_currents_out);
-  KLS_CLEAR_PLAN_POINTER(group_current_run_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(group_current_runs_out);
-  KLS_CLEAR_PLAN_POINTER(group_current_workspace_ptr_out);
-  KLS_CLEAR_PLAN_POINTER(group_workspace_rows_out);
-  KLS_CLEAR_PLAN_POINTER(run_selected_out);
-  KLS_CLEAR_PLAN_COUNT(group_count_out);
-  KLS_CLEAR_PLAN_COUNT(group_prefix_rows_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_run_rows_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_positioned_runs_out);
-  KLS_CLEAR_PLAN_COUNT(group_current_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_multi_current_count_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_currents_out);
-  KLS_CLEAR_PLAN_COUNT(group_workspace_rows_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_workspace_rows_out);
-  KLS_CLEAR_PLAN_COUNT(group_pattern_width_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_pattern_width_out);
-  KLS_CLEAR_PLAN_COUNT(group_target_entries_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_target_entries_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_run_target_entries_out);
-  KLS_CLEAR_PLAN_COUNT(group_target_slots_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_target_slots_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_run_target_slots_out);
-  KLS_CLEAR_PLAN_COUNT(group_advance_deps_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_advance_deps_out);
-  KLS_CLEAR_PLAN_COUNT(group_zero_advance_runs_out);
-  KLS_CLEAR_PLAN_COUNT(group_suffix_deps_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_suffix_deps_out);
-  KLS_CLEAR_PLAN_COUNT(group_suffix_update_entries_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_run_suffix_update_entries_out);
-  KLS_CLEAR_PLAN_COUNT(group_advance_slots_total_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_advance_slots_out);
-  KLS_CLEAR_PLAN_COUNT(group_max_run_advance_slots_out);
+  KLS_SET_OPTIONAL_OUTPUT(panel_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(selected_runs_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_panel_start_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_group_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_group_pos_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_current_pos_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_advance_deps_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_advance_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_prefix_rows_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_target_entries_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_target_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_target_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_target_slot_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_prefix_rows_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_run_rows_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_pattern_width_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_target_entries_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_target_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_target_cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_deps_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_current_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_currents_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_current_run_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_current_runs_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_current_workspace_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_workspace_rows_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_selected_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_prefix_rows_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_run_rows_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_positioned_runs_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_current_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_multi_current_count_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_currents_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_workspace_rows_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_workspace_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_pattern_width_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_pattern_width_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_target_entries_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_target_entries_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_run_target_entries_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_target_slots_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_target_slots_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_run_target_slots_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_advance_deps_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_zero_advance_runs_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_suffix_deps_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_suffix_deps_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_suffix_update_entries_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_run_suffix_update_entries_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_slots_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_advance_slots_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(group_max_run_advance_slots_out, 0u);
   if (solver == NULL || consumer_start == NULL || consumer_end == NULL ||
       plan_ptr == NULL || plan_current == NULL || plan_dep == NULL ||
       plan_rows == NULL || plan_panel_start == NULL ||
@@ -14260,8 +14090,6 @@ static int kls_build_refactor_supernode_algorithm5_payoff_plan(
 #undef KLS_FREE_PAYOFF_CURRENTS
 #undef KLS_FREE_PAYOFF_TARGETS
 #undef KLS_FREE_PAYOFF_BASE
-#undef KLS_CLEAR_PLAN_POINTER
-#undef KLS_CLEAR_PLAN_COUNT
   return 1;
 
 current_run_map_fail:
@@ -14311,18 +14139,10 @@ static int kls_build_refactor_supernode_algorithm5_advance_slot_plan(
   UF_long **run_advance_slot_ptr_out,
   UF_long **group_advance_slots_out,
   UF_long **group_advance_cols_out) {
-  if (run_advance_slots_out != NULL) {
-    *run_advance_slots_out = NULL;
-  }
-  if (run_advance_slot_ptr_out != NULL) {
-    *run_advance_slot_ptr_out = NULL;
-  }
-  if (group_advance_slots_out != NULL) {
-    *group_advance_slots_out = NULL;
-  }
-  if (group_advance_cols_out != NULL) {
-    *group_advance_cols_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_advance_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(run_advance_slot_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(group_advance_cols_out, NULL);
   if (solver == NULL || plan_current == NULL ||
       run_advance_slots_out == NULL ||
       run_advance_slot_ptr_out == NULL ||
@@ -14515,9 +14335,7 @@ static int kls_collect_refactor_supernode_algorithm5_current_state_rows(
   UF_long *rows,
   UF_long row_capacity,
   UF_long *row_count_out) {
-  if (row_count_out != NULL) {
-    *row_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(row_count_out, 0u);
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
       solver->refactor_col_ptr == NULL ||
@@ -14825,24 +14643,12 @@ static int kls_build_refactor_supernode_algorithm5_current_state_row_plan(
   UF_long *state_max_rows_out,
   UF_long *state_span_rows_total_out,
   UF_long *state_max_span_rows_out) {
-  if (state_ptr_out != NULL) {
-    *state_ptr_out = NULL;
-  }
-  if (state_rows_out != NULL) {
-    *state_rows_out = NULL;
-  }
-  if (state_rows_total_out != NULL) {
-    *state_rows_total_out = 0u;
-  }
-  if (state_max_rows_out != NULL) {
-    *state_max_rows_out = 0u;
-  }
-  if (state_span_rows_total_out != NULL) {
-    *state_span_rows_total_out = 0u;
-  }
-  if (state_max_span_rows_out != NULL) {
-    *state_max_span_rows_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(state_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(state_rows_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(state_rows_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(state_max_rows_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(state_span_rows_total_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(state_max_span_rows_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
@@ -15053,9 +14859,7 @@ static int kls_find_sorted_uf_long_position(
   UF_long count,
   UF_long key,
   UF_long *position_out) {
-  if (position_out != NULL) {
-    *position_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(position_out, 0u);
   if (values == NULL || count == 0u || position_out == NULL) {
     return 0;
   }
@@ -15109,15 +14913,9 @@ kls_build_refactor_supernode_algorithm5_advance_position_plan(
   UF_long **advance_pos_ptr_out,
   UF_long **advance_pos_out,
   UF_long *advance_pos_entries_out) {
-  if (advance_pos_ptr_out != NULL) {
-    *advance_pos_ptr_out = NULL;
-  }
-  if (advance_pos_out != NULL) {
-    *advance_pos_out = NULL;
-  }
-  if (advance_pos_entries_out != NULL) {
-    *advance_pos_entries_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(advance_pos_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(advance_pos_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(advance_pos_entries_out, 0u);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->Llen == NULL ||
@@ -15364,15 +15162,9 @@ static int kls_build_refactor_supernode_algorithm5_payoff_trigger_map(
   UF_long **group_prefix_end_out,
   UF_long **trigger_ptr_out,
   UF_long **trigger_groups_out) {
-  if (group_prefix_end_out != NULL) {
-    *group_prefix_end_out = NULL;
-  }
-  if (trigger_ptr_out != NULL) {
-    *trigger_ptr_out = NULL;
-  }
-  if (trigger_groups_out != NULL) {
-    *trigger_groups_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(group_prefix_end_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(trigger_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(trigger_groups_out, NULL);
   if (solver == NULL || group_prefix_end_out == NULL || trigger_ptr_out == NULL ||
       trigger_groups_out == NULL) {
     return 0;
@@ -18898,9 +18690,7 @@ static int kls_refactor_u_supernode_find_right_offset(
   UF_long len,
   UF_long col,
   UF_long *offset_out) {
-  if (offset_out != NULL) {
-    *offset_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(offset_out, 0u);
   if (cols == NULL || len == 0u) {
     return 0;
   }
@@ -21537,9 +21327,7 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
 static kls_lean_done_slot *ensure_lean_parallel_done(
   kls_solver *solver,
   unsigned int *generation_out) {
-  if (generation_out != NULL) {
-    *generation_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(generation_out, 0u);
   if (solver == NULL || solver->n == 0u) {
     return NULL;
   }
@@ -22262,9 +22050,7 @@ static int kls_lean_grouped_done_is_profitable(kls_solver *solver,
 static atomic_uint *ensure_egraph_pipeline_done(
   kls_solver *solver,
   unsigned int *generation_out) {
-  if (generation_out != NULL) {
-    *generation_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(generation_out, 0);
   if (solver == NULL || solver->n == 0u) {
     return NULL;
   }
@@ -22309,9 +22095,7 @@ static void free_egraph_pipeline_claimed(kls_solver *solver) {
 static atomic_uint *ensure_egraph_pipeline_claimed(
   kls_solver *solver,
   unsigned int *generation_out) {
-  if (generation_out != NULL) {
-    *generation_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(generation_out, 0);
   if (solver == NULL || solver->n == 0u) {
     return NULL;
   }
@@ -22530,12 +22314,8 @@ static int build_egraph_algorithm5_payoff_final_triggers(
   kls_solver *solver,
   UF_long **trigger_ptr_out,
   UF_long **trigger_slots_out) {
-  if (trigger_ptr_out != NULL) {
-    *trigger_ptr_out = NULL;
-  }
-  if (trigger_slots_out != NULL) {
-    *trigger_slots_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(trigger_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(trigger_slots_out, NULL);
   if (solver == NULL || trigger_ptr_out == NULL ||
       trigger_slots_out == NULL || solver->n == 0u ||
       solver->refactor_supernode_algorithm5_payoff_group_current_total == 0u ||
@@ -22678,12 +22458,8 @@ static int build_egraph_algorithm5_payoff_suffix_triggers(
   kls_solver *solver,
   UF_long **trigger_ptr_out,
   UF_long **trigger_slots_out) {
-  if (trigger_ptr_out != NULL) {
-    *trigger_ptr_out = NULL;
-  }
-  if (trigger_slots_out != NULL) {
-    *trigger_slots_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(trigger_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(trigger_slots_out, NULL);
   if (solver == NULL || trigger_ptr_out == NULL ||
       trigger_slots_out == NULL || solver->n == 0u ||
       solver->symbolic == NULL || solver->symbolic->R == NULL ||
@@ -22888,12 +22664,8 @@ static int build_egraph_algorithm5_payoff_suffix_entry_triggers(
   UF_long *solver_trigger_count,
   UF_long **trigger_ptr_out,
   UF_long **trigger_entries_out) {
-  if (trigger_ptr_out != NULL) {
-    *trigger_ptr_out = NULL;
-  }
-  if (trigger_entries_out != NULL) {
-    *trigger_entries_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(trigger_ptr_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(trigger_entries_out, NULL);
   if (solver == NULL || solver_trigger_ptr == NULL ||
       solver_trigger_entries == NULL || solver_trigger_count == NULL ||
       trigger_ptr_out == NULL ||
@@ -23033,15 +22805,9 @@ static int ensure_egraph_algorithm5_payoff_queue(
   UF_long **cols_out,
   atomic_uint **slots_out,
   unsigned char **flags_out) {
-  if (cols_out != NULL) {
-    *cols_out = NULL;
-  }
-  if (slots_out != NULL) {
-    *slots_out = NULL;
-  }
-  if (flags_out != NULL) {
-    *flags_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(cols_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(slots_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(flags_out, NULL);
   if (solver == NULL || capacity == 0u || cols_out == NULL ||
       slots_out == NULL || flags_out == NULL ||
       capacity > (UF_long)(SIZE_MAX / sizeof(UF_long)) ||
@@ -23106,27 +22872,13 @@ static int ensure_egraph_algorithm5_payoff_runtime_state(
   double **current_state_values_out,
   atomic_uchar **current_flags_out,
   atomic_ulong **current_up_out) {
-  if (workspace_values_out != NULL) {
-    *workspace_values_out = NULL;
-  }
-  if (target_values_out != NULL) {
-    *target_values_out = NULL;
-  }
-  if (advance_values_out != NULL) {
-    *advance_values_out = NULL;
-  }
-  if (advance_u_values_out != NULL) {
-    *advance_u_values_out = NULL;
-  }
-  if (current_state_values_out != NULL) {
-    *current_state_values_out = NULL;
-  }
-  if (current_flags_out != NULL) {
-    *current_flags_out = NULL;
-  }
-  if (current_up_out != NULL) {
-    *current_up_out = NULL;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(workspace_values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(advance_values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(advance_u_values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(current_state_values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(current_flags_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(current_up_out, NULL);
   const size_t workspace_row_count = (size_t)workspace_rows;
   const size_t target_slot_count = (size_t)target_slots;
   const size_t advance_slot_count = (size_t)advance_slots;
@@ -23324,27 +23076,13 @@ static int kls_prepare_refactor_algorithm5_payoff_runtime_state(
   UF_long *target_size_out,
   atomic_uchar **current_flags_out,
   UF_long *current_count_out) {
-  if (active_out != NULL) {
-    *active_out = 0;
-  }
-  if (workspace_values_out != NULL) {
-    *workspace_values_out = NULL;
-  }
-  if (workspace_size_out != NULL) {
-    *workspace_size_out = 0u;
-  }
-  if (target_values_out != NULL) {
-    *target_values_out = NULL;
-  }
-  if (target_size_out != NULL) {
-    *target_size_out = 0u;
-  }
-  if (current_flags_out != NULL) {
-    *current_flags_out = NULL;
-  }
-  if (current_count_out != NULL) {
-    *current_count_out = 0u;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(active_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(workspace_values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(workspace_size_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(target_values_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(target_size_out, 0u);
+  KLS_SET_OPTIONAL_OUTPUT(current_flags_out, NULL);
+  KLS_SET_OPTIONAL_OUTPUT(current_count_out, 0u);
   if (solver == NULL || active_out == NULL ||
       workspace_values_out == NULL || workspace_size_out == NULL ||
       target_values_out == NULL || target_size_out == NULL ||
@@ -27274,9 +27012,7 @@ static int run_refactor_pool(kls_solver *solver,
   }
   kls_refactor_pool *pool = solver->refactor_pool;
   kls_parallel_refactor_shared *shared = &pool->shared;
-  if (prefix_current_out != NULL) {
-    *prefix_current_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(prefix_current_out, 0);
 
   pthread_mutex_lock(&shared->lock);
   if (pool->active_workers != 0) {
