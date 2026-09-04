@@ -7738,6 +7738,20 @@ static int build_exact_numeric_row_match(UF_long n,
     (unsigned char *)malloc((size_t)n * sizeof(*seen_row));
   unsigned char *seen_col =
     (unsigned char *)malloc((size_t)n * sizeof(*seen_col));
+#define KLS_FREE_EXACT_MATCH_WORK() do { \
+    free(col_max_log);                     \
+    free(row_perm);                        \
+    free(col_match);                       \
+    free(row_potential);                   \
+    free(col_potential);                   \
+    free(dist_row);                        \
+    free(dist_col);                        \
+    free(matched_cost_by_col);             \
+    free(prev_cost_for_col);               \
+    free(prev_row_for_col);                \
+    free(seen_row);                        \
+    free(seen_col);                        \
+  } while (0)
   kls_min_heap heap;
   memset(&heap, 0, sizeof(heap));
   if (row_potential == NULL || col_potential == NULL ||
@@ -7745,18 +7759,7 @@ static int build_exact_numeric_row_match(UF_long n,
       matched_cost_by_col == NULL || prev_cost_for_col == NULL ||
       prev_row_for_col == NULL || seen_row == NULL || seen_col == NULL) {
     free_row_match_graph(&graph);
-    free(col_max_log);
-    free(row_perm);
-    free(col_match);
-    free(row_potential);
-    free(col_potential);
-    free(dist_row);
-    free(dist_col);
-    free(matched_cost_by_col);
-    free(prev_cost_for_col);
-    free(prev_row_for_col);
-    free(seen_row);
-    free(seen_col);
+    KLS_FREE_EXACT_MATCH_WORK();
     return KLS_ERR_OUT_OF_MEMORY;
   }
   for (UF_long col = 0; col < n; ++col) {
@@ -7779,18 +7782,7 @@ static int build_exact_numeric_row_match(UF_long n,
     if (path_status != KLS_OK) {
       kls_heap_free(&heap);
       free_row_match_graph(&graph);
-      free(col_max_log);
-      free(row_perm);
-      free(col_match);
-      free(row_potential);
-      free(col_potential);
-      free(dist_row);
-      free(dist_col);
-      free(matched_cost_by_col);
-      free(prev_cost_for_col);
-      free(prev_row_for_col);
-      free(seen_row);
-      free(seen_col);
+      KLS_FREE_EXACT_MATCH_WORK();
       return path_status;
     }
 
@@ -7812,18 +7804,7 @@ static int build_exact_numeric_row_match(UF_long n,
     if (!path_valid) {
       kls_heap_free(&heap);
       free_row_match_graph(&graph);
-      free(col_max_log);
-      free(row_perm);
-      free(col_match);
-      free(row_potential);
-      free(col_potential);
-      free(dist_row);
-      free(dist_col);
-      free(matched_cost_by_col);
-      free(prev_cost_for_col);
-      free(prev_row_for_col);
-      free(seen_row);
-      free(seen_col);
+      KLS_FREE_EXACT_MATCH_WORK();
       return KLS_ERR_INVALID_ARGUMENT;
     }
     matched++;
@@ -7832,18 +7813,7 @@ static int build_exact_numeric_row_match(UF_long n,
   if (matched < n) {
     kls_heap_free(&heap);
     free_row_match_graph(&graph);
-    free(col_max_log);
-    free(row_perm);
-    free(col_match);
-    free(row_potential);
-    free(col_potential);
-    free(dist_row);
-    free(dist_col);
-    free(matched_cost_by_col);
-    free(prev_cost_for_col);
-    free(prev_row_for_col);
-    free(seen_row);
-    free(seen_col);
+    KLS_FREE_EXACT_MATCH_WORK();
     return KLS_ERR_UNSUPPORTED;
   }
 
@@ -7856,18 +7826,7 @@ static int build_exact_numeric_row_match(UF_long n,
   if (scale_status == KLS_ERR_OUT_OF_MEMORY) {
     kls_heap_free(&heap);
     free_row_match_graph(&graph);
-    free(col_max_log);
-    free(row_perm);
-    free(col_match);
-    free(row_potential);
-    free(col_potential);
-    free(dist_row);
-    free(dist_col);
-    free(matched_cost_by_col);
-    free(prev_cost_for_col);
-    free(prev_row_for_col);
-    free(seen_row);
-    free(seen_col);
+    KLS_FREE_EXACT_MATCH_WORK();
     return scale_status;
   }
 
@@ -7890,6 +7849,7 @@ static int build_exact_numeric_row_match(UF_long n,
     *row_scale_out = row_scale;
     *col_scale_out = col_scale;
   }
+#undef KLS_FREE_EXACT_MATCH_WORK
   return KLS_OK;
 }
 
@@ -8920,6 +8880,7 @@ static int build_compact_numeric_row_match(
   }
   *row_perm_out = row_perm;
   *matched_out = matched;
+#undef KLS_FREE_GREEDY_MATCH
   return KLS_OK;
 }
 
@@ -9008,13 +8969,16 @@ static int build_greedy_numeric_row_match(UF_long n,
   UF_long *col_match = (UF_long *)malloc((size_t)n * sizeof(*col_match));
   unsigned char *row_used = (unsigned char *)calloc((size_t)n, sizeof(*row_used));
   unsigned char *col_used = (unsigned char *)calloc((size_t)n, sizeof(*col_used));
+#define KLS_FREE_GREEDY_MATCH() do { \
+    free(entries);                    \
+    free(row_perm);                   \
+    free(col_match);                  \
+    free(row_used);                   \
+    free(col_used);                   \
+  } while (0)
   if (entries == NULL || row_perm == NULL || col_match == NULL ||
       row_used == NULL || col_used == NULL) {
-    free(entries);
-    free(row_perm);
-    free(col_match);
-    free(row_used);
-    free(col_used);
+    KLS_FREE_GREEDY_MATCH();
     return KLS_ERR_OUT_OF_MEMORY;
   }
 
@@ -9113,11 +9077,7 @@ static int build_greedy_numeric_row_match(UF_long n,
             for (UF_long row = 0; row < n; ++row) {
               const UF_long col = row_perm[row];
               if (col >= n || col_match[col] != KLS_KLU_EMPTY) {
-                free(entries);
-                free(row_perm);
-                free(col_match);
-                free(row_used);
-                free(col_used);
+                KLS_FREE_GREEDY_MATCH();
                 free(spral_row_scale);
                 free(spral_col_scale);
                 return KLS_ERR_INVALID_ARGUMENT;
@@ -9138,22 +9098,14 @@ static int build_greedy_numeric_row_match(UF_long n,
           free(spral_row_scale);
           free(spral_col_scale);
         } else if (spral_status == KLS_ERR_OUT_OF_MEMORY) {
-          free(entries);
-          free(row_perm);
-          free(col_match);
-          free(row_used);
-          free(col_used);
+          KLS_FREE_GREEDY_MATCH();
           return spral_status;
         }
       }
 #endif
       free_row_match_graph(&graph);
     } else if (status == KLS_ERR_OUT_OF_MEMORY) {
-      free(entries);
-      free(row_perm);
-      free(col_match);
-      free(row_used);
-      free(col_used);
+      KLS_FREE_GREEDY_MATCH();
       return status;
     }
   }
@@ -9180,11 +9132,7 @@ static int build_greedy_numeric_row_match(UF_long n,
         for (UF_long row = 0; row < n; ++row) {
           const UF_long col = row_perm[row];
           if (col >= n || col_match[col] != KLS_KLU_EMPTY) {
-            free(entries);
-            free(row_perm);
-            free(col_match);
-            free(row_used);
-            free(col_used);
+            KLS_FREE_GREEDY_MATCH();
             return KLS_ERR_INVALID_ARGUMENT;
           }
           col_match[col] = row;
@@ -9197,11 +9145,7 @@ static int build_greedy_numeric_row_match(UF_long n,
         *col_scale_out = NULL;
       }
     } else if (spral_status == KLS_ERR_OUT_OF_MEMORY) {
-      free(entries);
-      free(row_perm);
-      free(col_match);
-      free(row_used);
-      free(col_used);
+      KLS_FREE_GREEDY_MATCH();
       return spral_status;
     }
   }
@@ -9210,11 +9154,7 @@ static int build_greedy_numeric_row_match(UF_long n,
   const int complete_status =
     complete_unmatched_row_match(n, row_perm, col_match);
   if (complete_status != KLS_OK) {
-    free(entries);
-    free(row_perm);
-    free(col_match);
-    free(row_used);
-    free(col_used);
+    KLS_FREE_GREEDY_MATCH();
     return complete_status;
   }
 
