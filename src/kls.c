@@ -15740,6 +15740,23 @@ static int kls_build_refactor_supernode_consumer_plan(
   UF_long *cursor = NULL;
   UF_long *column_cursor = NULL;
   UF_long *column_runs = NULL;
+#define KLS_FREE_CONSUMER_PLAN_CORE() do { \
+    free(panel_run_count);                       \
+    free(panel_run_rows);                        \
+    free(panel_small_run_count);                 \
+    free(panel_small_run_rows);                  \
+    free(column_run_count);                      \
+    free(plan_ptr);                              \
+    free(column_ptr);                            \
+    free(plan_current);                          \
+    free(plan_dep);                              \
+    free(plan_rows);                             \
+    free(plan_panel_start);                      \
+    free(plan_panel_offset);                     \
+    free(column_runs);                           \
+    free(cursor);                                \
+    free(column_cursor);                         \
+  } while (0)
   UF_long *shape_group_ptr = NULL;
   UF_long *shape_group_runs = NULL;
   UF_long *shape_group_panel_start = NULL;
@@ -15879,21 +15896,7 @@ static int kls_build_refactor_supernode_consumer_plan(
     if (plan_current == NULL || plan_dep == NULL || plan_rows == NULL ||
         plan_panel_start == NULL || plan_panel_offset == NULL ||
         column_runs == NULL || cursor == NULL || column_cursor == NULL) {
-      free(panel_run_count);
-      free(panel_run_rows);
-      free(panel_small_run_count);
-      free(panel_small_run_rows);
-      free(column_run_count);
-      free(plan_ptr);
-      free(column_ptr);
-      free(plan_current);
-      free(plan_dep);
-      free(plan_rows);
-      free(plan_panel_start);
-      free(plan_panel_offset);
-      free(column_runs);
-      free(cursor);
-      free(column_cursor);
+      KLS_FREE_CONSUMER_PLAN_CORE();
       return 0;
     }
     memcpy(cursor, plan_ptr, n * sizeof(*cursor));
@@ -15912,60 +15915,18 @@ static int kls_build_refactor_supernode_consumer_plan(
     if (!kls_scan_supernode_consumer_runs(
           solver, consumer_start, consumer_end,
           kls_fill_supernode_consumer_plan_run, &fill_ctx)) {
-      free(panel_run_count);
-      free(panel_run_rows);
-      free(panel_small_run_count);
-      free(panel_small_run_rows);
-      free(column_run_count);
-      free(plan_ptr);
-      free(column_ptr);
-      free(plan_current);
-      free(plan_dep);
-      free(plan_rows);
-      free(plan_panel_start);
-      free(plan_panel_offset);
-      free(column_runs);
-      free(cursor);
-      free(column_cursor);
+      KLS_FREE_CONSUMER_PLAN_CORE();
       return 0;
     }
     for (UF_long panel = 0; panel < solver->n; ++panel) {
       if (cursor[panel] != plan_ptr[panel + 1u]) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         return 0;
       }
     }
     for (UF_long col = 0; col < solver->n; ++col) {
       if (column_cursor[col] != column_ptr[col + 1u]) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         return 0;
       }
     }
@@ -15980,21 +15941,7 @@ static int kls_build_refactor_supernode_consumer_plan(
       for (UF_long pos = begin; pos < end; ++pos) {
         const UF_long run = column_runs[pos];
         if (run >= count_ctx.run_count) {
-          free(panel_run_count);
-          free(panel_run_rows);
-          free(panel_small_run_count);
-          free(panel_small_run_rows);
-          free(column_run_count);
-          free(plan_ptr);
-          free(column_ptr);
-          free(plan_current);
-          free(plan_dep);
-          free(plan_rows);
-          free(plan_panel_start);
-          free(plan_panel_offset);
-          free(column_runs);
-          free(cursor);
-          free(column_cursor);
+          KLS_FREE_CONSUMER_PLAN_CORE();
           return 0;
         }
         const UF_long dep = plan_dep[run];
@@ -16035,21 +15982,7 @@ static int kls_build_refactor_supernode_consumer_plan(
           &plan_column_shape_batch_small_run_count,
           &plan_column_shape_batch_small_run_rows,
           &plan_column_shape_batch_max_runs)) {
-      free(panel_run_count);
-      free(panel_run_rows);
-      free(panel_small_run_count);
-      free(panel_small_run_rows);
-      free(column_run_count);
-      free(plan_ptr);
-      free(column_ptr);
-      free(plan_current);
-      free(plan_dep);
-      free(plan_rows);
-      free(plan_panel_start);
-      free(plan_panel_offset);
-      free(column_runs);
-      free(cursor);
-      free(column_cursor);
+      KLS_FREE_CONSUMER_PLAN_CORE();
       return 0;
     }
     if (!kls_count_supernode_consumer_plan_shape_batches(
@@ -16060,21 +15993,7 @@ static int kls_build_refactor_supernode_consumer_plan(
           &plan_shape_batch_small_run_count,
           &plan_shape_batch_small_run_rows,
           &plan_shape_batch_max_runs)) {
-      free(panel_run_count);
-      free(panel_run_rows);
-      free(panel_small_run_count);
-      free(panel_small_run_rows);
-      free(column_run_count);
-      free(plan_ptr);
-      free(column_ptr);
-      free(plan_current);
-      free(plan_dep);
-      free(plan_rows);
-      free(plan_panel_start);
-      free(plan_panel_offset);
-      free(column_runs);
-      free(cursor);
-      free(column_cursor);
+      KLS_FREE_CONSUMER_PLAN_CORE();
       return 0;
     }
     if (plan_shape_batch_count > 0u) {
@@ -16085,21 +16004,7 @@ static int kls_build_refactor_supernode_consumer_plan(
           shape_groups > (SIZE_MAX / sizeof(UF_long)) - 1u ||
           shape_groups > SIZE_MAX / (3u * sizeof(UF_long)) ||
           shape_runs > SIZE_MAX / sizeof(UF_long)) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         return 0;
       }
       const size_t shape_group_bytes =
@@ -16115,21 +16020,7 @@ static int kls_build_refactor_supernode_consumer_plan(
             &shape_group_ptr, &shape_group_runs,
             &shape_group_panel_start, &shape_group_panel_offset,
             &shape_group_rows)) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         return 0;
       }
       if (!kls_count_supernode_consumer_plan_first_dep_shape_batches(
@@ -16142,21 +16033,7 @@ static int kls_build_refactor_supernode_consumer_plan(
             &plan_first_dep_shape_batch_small_run_count,
             &plan_first_dep_shape_batch_small_run_rows,
             &plan_first_dep_shape_batch_max_runs)) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         kls_free_supernode_consumer_plan_shape_groups(
           shape_group_ptr, shape_group_runs, shape_group_panel_start,
           shape_group_panel_offset, shape_group_rows);
@@ -16173,21 +16050,7 @@ static int kls_build_refactor_supernode_consumer_plan(
             &plan_shape_batch_advance_work,
             &plan_shape_batch_advance_max_deps,
             &plan_shape_batch_advance_max_work)) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         kls_free_supernode_consumer_plan_shape_groups(
           shape_group_ptr, shape_group_runs, shape_group_panel_start,
           shape_group_panel_offset, shape_group_rows);
@@ -16206,21 +16069,7 @@ static int kls_build_refactor_supernode_consumer_plan(
             &plan_prefix_advance_batch_max_runs,
             &plan_prefix_advance_batch_max_deps,
             &plan_prefix_advance_batch_max_work)) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         kls_free_supernode_consumer_plan_shape_groups(
           shape_group_ptr, shape_group_runs, shape_group_panel_start,
           shape_group_panel_offset, shape_group_rows);
@@ -16246,21 +16095,7 @@ static int kls_build_refactor_supernode_consumer_plan(
             &plan_shape_bounded_advance_payoff_update_entries,
             &plan_shape_bounded_advance_payoff_advance_work,
             &plan_shape_bounded_advance_max_payoff_ratio)) {
-        free(panel_run_count);
-        free(panel_run_rows);
-        free(panel_small_run_count);
-        free(panel_small_run_rows);
-        free(column_run_count);
-        free(plan_ptr);
-        free(column_ptr);
-        free(plan_current);
-        free(plan_dep);
-        free(plan_rows);
-        free(plan_panel_start);
-        free(plan_panel_offset);
-        free(column_runs);
-        free(cursor);
-        free(column_cursor);
+        KLS_FREE_CONSUMER_PLAN_CORE();
         kls_free_supernode_consumer_plan_shape_groups(
           shape_group_ptr, shape_group_runs, shape_group_panel_start,
           shape_group_panel_offset, shape_group_rows);
@@ -16272,21 +16107,7 @@ static int kls_build_refactor_supernode_consumer_plan(
         run_count >
           (SIZE_MAX - plan_bytes - plan_run_bytes) /
             (2u * sizeof(*plan_dep_pos))) {
-      free(panel_run_count);
-      free(panel_run_rows);
-      free(panel_small_run_count);
-      free(panel_small_run_rows);
-      free(column_run_count);
-      free(plan_ptr);
-      free(column_ptr);
-      free(plan_current);
-      free(plan_dep);
-      free(plan_rows);
-      free(plan_panel_start);
-      free(plan_panel_offset);
-      free(column_runs);
-      free(cursor);
-      free(column_cursor);
+      KLS_FREE_CONSUMER_PLAN_CORE();
       kls_free_supernode_consumer_plan_shape_groups(
         shape_group_ptr, shape_group_runs, shape_group_panel_start,
         shape_group_panel_offset, shape_group_rows);
@@ -17570,6 +17391,7 @@ static int kls_build_refactor_supernode_consumer_plan(
     ->refactor_supernode_algorithm5_payoff_current_state_max_span_rows_stat =
       solver
         ->refactor_supernode_algorithm5_payoff_current_state_max_span_rows;
+#undef KLS_FREE_CONSUMER_PLAN_CORE
   return 1;
 }
 
