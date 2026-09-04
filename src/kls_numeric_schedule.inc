@@ -4271,7 +4271,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       &separator_private_component_count,
       &separator_private_unsafe_component_count);
     if (kls_repeated_update_workload(&solver->options) &&
-        solver->options.expected_refactorizations >= 16 &&
         separator_private_cols != NULL &&
         separator_private_thread_ptr != NULL &&
         cluster_levels_alpha4 > 0u &&

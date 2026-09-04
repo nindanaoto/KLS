@@ -46,8 +46,7 @@ static int kls_moderate_btf_map32_trial_capable(const kls_solver *solver) {
       solver->symbolic->nblocks <= 1u ||
       solver->common.flops < 100000.0 ||
       solver->common.flops >= 500000.0 ||
-      !kls_repeated_update_workload(&solver->options) ||
-      solver->options.expected_refactorizations <= 6) {
+      !kls_repeated_update_workload(&solver->options)) {
     return 0;
   }
   return solver->symbolic->structural_rank == KLS_KLU_EMPTY ||
@@ -5658,7 +5657,6 @@ static int kls_symbolic_repeated_prediction_economic(
   const kls_options *options) {
   if (symbolic == NULL || options == NULL || options->threads <= 1 ||
       !kls_repeated_update_workload(options) ||
-      options->expected_refactorizations < 16 ||
       !(symbolic->est_flops > 0.0) || !isfinite(symbolic->est_flops)) {
     return 0;
   }
@@ -6154,7 +6152,7 @@ static int kls_generic_nd_trial_start(
   }
 
   const int recurring_independent_btf =
-    use_btf && options->expected_refactorizations >= 16 &&
+    use_btf &&
     getenv("KLS_DISABLE_RECURRING_INDEPENDENT_BTF_ND") == NULL;
   /* For a recurring portfolio, a second independently computed maximum
      matching is itself a valid BTF representation.  It remains provisional:
@@ -11746,7 +11744,6 @@ matching_attempt:;
         32.0 * 1024.0 * 1024.0 * (double)solver->options.threads;
       if (solver->options.threads > 2 &&
           kls_repeated_update_workload(&solver->options) &&
-          solver->options.expected_refactorizations >= 16 &&
           isfinite(metis_storage) && metis_storage >= aggregate_cache &&
           getenv("KLS_DISABLE_GENERIC_MATCHED_ND_WIDTH_PORTFOLIO") == NULL) {
         /* Separator width is a representation/resource choice, not merely
@@ -11981,7 +11978,6 @@ matching_attempt:;
     getenv("KLS_ENABLE_GENERIC_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL &&
     solver->options.threads > 1 &&
     kls_repeated_update_workload(&solver->options) &&
-    solver->options.expected_refactorizations >= 16 &&
     isfinite(generic_trial_storage_bytes) &&
     generic_trial_storage_bytes >= generic_aggregate_cache_bytes &&
     isfinite(generic_match_lifecycle_work) &&
@@ -11992,7 +11988,6 @@ matching_attempt:;
     !deferred &&
     solver->options.threads > 1 &&
     kls_repeated_update_workload(&solver->options) &&
-    solver->options.expected_refactorizations >= 16 &&
     trial_symbolic != NULL && trial_symbolic->nblocks == 1u &&
     trial_symbolic->maxblock == solver->n &&
     (trial_symbolic->structural_rank == KLS_KLU_EMPTY ||
@@ -12155,7 +12150,6 @@ matching_attempt:;
     solver->options.scale == KLS_SCALE_AUTO && solver->options.use_btf &&
     solver->options.backend != KLS_BACKEND_SERIAL &&
     solver->options.threads >= 2 &&
-    solver->options.expected_refactorizations >= 16 &&
     kls_repeated_update_workload(&solver->options) &&
     trial_symbolic != NULL && !trial_symbolic->do_btf &&
     trial_symbolic->nblocks == 1u &&
@@ -12531,7 +12525,6 @@ matching_attempt:;
       isfinite(trial_common.rcond) && trial_common.rcond > 0.0 &&
       trial_common.kls_perturb_count == 0u &&
       kls_repeated_update_workload(&solver->options) &&
-      solver->options.expected_refactorizations >= 16 &&
       getenv("KLS_DISABLE_GENERIC_RESOURCE_SCALED_NATIVE_MATCH_CERTIFICATE") ==
         NULL) {
     const double native_fill =

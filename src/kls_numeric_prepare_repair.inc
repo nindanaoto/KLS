@@ -9203,7 +9203,6 @@ static int kls_authoritative_packed_lu_enabled(const kls_solver *solver) {
     return 0;
   }
   if (!kls_repeated_update_workload(&solver->options) ||
-      solver->options.expected_refactorizations < 16 ||
       solver->i32solve_state <= 0 || solver->numeric == NULL) {
     return 0;
   }

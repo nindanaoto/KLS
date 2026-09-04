@@ -23492,7 +23492,6 @@ static int kls_egraph_pipeline_fusion_trial_worthwhile(
   return solver != NULL &&
     getenv("KLS_DISABLE_EGRAPH_PIPELINE_FUSION_TRIAL") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
-    solver->options.expected_refactorizations >= 16 &&
     solver->options.threads >= 2 &&
     solver->refactor_dependency_work > 0.0 &&
     solver->refactor_pipeline_work >=
@@ -23761,7 +23760,6 @@ static UF_long kls_egraph_cluster_level_dispatch(kls_solver *solver,
       getenv("KLS_CLUSTER_WIDTH_ALPHA") != NULL ||
       getenv("KLS_DISABLE_EGRAPH_CLUSTER_CUT_TRIAL") != NULL ||
       !kls_repeated_update_workload(&solver->options) ||
-      solver->options.expected_refactorizations < 16 ||
       (incumbent == alpha3 && incumbent == alpha4) ||
       alpha3 > incumbent || alpha4 > incumbent ||
       (solver->eg_separator_choice > 0 && !private_alpha4)) {
@@ -23813,8 +23811,7 @@ static int kls_egraph_cluster_premark_dispatch(
   if (check_pivots) {
     return 0;
   }
-  if (!kls_repeated_update_workload(&solver->options) ||
-      solver->options.expected_refactorizations < 16) {
+  if (!kls_repeated_update_workload(&solver->options)) {
     solver->eg_premark_choice = -1;
     return 0;
   }
@@ -24613,7 +24610,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     parallel_scale_env != NULL && parallel_scale_env[0] != '\0'
       ? strcmp(parallel_scale_env, "0") != 0
       : kls_repeated_update_workload(&solver->options) &&
-        solver->options.expected_refactorizations >= 16 &&
         solver->n >= (UF_long)(4096 * thread_count) &&
         solver->nnz >= (UF_long)(32768 * thread_count);
   const int parallel_scale_rows =
@@ -24626,7 +24622,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     parallel_permute_env != NULL && parallel_permute_env[0] != '\0'
       ? strcmp(parallel_permute_env, "0") != 0
       : kls_repeated_update_workload(&solver->options) &&
-        solver->options.expected_refactorizations >= 16 &&
         solver->n >= (UF_long)(4096 * thread_count);
   int parallel_scale_permute =
     common->scale > 0 && parallel_permute_requested &&
@@ -25034,7 +25029,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (
       getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
       !check_pivots && kls_repeated_update_workload(&solver->options) &&
-      solver->options.expected_refactorizations >= 16 &&
       kls_pts_solve_available(solver) &&
       pool->worker_spin_iters < 200000u) {
     /* A retained EGraph crew is reused by the following solve/value phases

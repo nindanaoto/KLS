@@ -805,7 +805,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   const int generic_compact_solve_meta =
         getenv("KLS_DISABLE_GENERIC_COMPACT_SOLVE_META") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
-    solver->options.expected_refactorizations >= 16 &&
     solver->i16solve_l == NULL && solver->i16solve_u == NULL &&
     n >= 512u && n <= (UF_long)UINT32_MAX &&
     lcur >= 0 && ucur >= 0 &&

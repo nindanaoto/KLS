@@ -22599,8 +22599,7 @@ static int kls_try_compact_map32_klu_tournament(
   const int settled_low_work_compact =
     getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_COMPACT_MAP32_POLICY") == NULL &&
     kls_low_work_single_block_policy_enabled(solver) &&
-    kls_repeated_update_workload(&solver->options) &&
-    solver->options.expected_refactorizations > 6;
+    kls_repeated_update_workload(&solver->options);
   if (!force_compact && solver->compact_map32_choice == 0 &&
       settled_low_work_compact) {
     /* In this cache-resident regime the compact walk performs the same
@@ -22617,8 +22616,7 @@ static int kls_try_compact_map32_klu_tournament(
   if (!force_compact &&
       (solver->compact_map32_choice < 0 ||
        getenv("KLS_DISABLE_COMPACT_MAP32_TOURNAMENT") != NULL ||
-       !kls_repeated_update_workload(&solver->options) ||
-       solver->options.expected_refactorizations <= 6)) {
+       !kls_repeated_update_workload(&solver->options))) {
     return 0;
   }
 
