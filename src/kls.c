@@ -654,8 +654,6 @@ struct kls_solver {
   int snode_numeric_pre_sorted;
   int32_t *i32solve_l;      /* flat i32 L row streams (solve fast path) */
   int32_t *i32solve_u;
-  uint16_t *mixed_i16solve_l; /* compact rows with wide stream offsets */
-  uint16_t *mixed_i16solve_u;
   int64_t *i32solve_loff;   /* per global column offsets into the streams */
   int64_t *i32solve_uoff;
   uint32_t *i32solve_pnum;  /* optional compact solve permutations */
@@ -7546,31 +7544,28 @@ static inline uint64_t kls_supernode_hash2(UF_long col) {
   return kls_mix_u64((uint64_t)col ^ UINT64_C(0xd1b54a32d192ed03));
 }
 
-static int kls_refactor_supernode_consumer_stats_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS");
+static inline int kls_env_flag_enabled(const char *name) {
+  const char *value = getenv(name);
   return value != NULL && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
 
-static int kls_refactor_supernode_consumer_plan_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+#define KLS_DEFINE_ENV_FLAG(function_name, variable_name) \
+  static int function_name(void) {                       \
+    return kls_env_flag_enabled(variable_name);           \
+  }
 
-static int kls_refactor_supernode_consumer_plan_exec_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS")
 
-static int kls_refactor_supernode_consumer_plan_output_stats_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_OUTPUT_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN")
+
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_exec_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_EXEC")
+
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_output_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_OUTPUT_STATS")
 
 static UF_long
 kls_refactor_supernode_consumer_plan_bounded_advance_dep_limit(void) {
@@ -7589,89 +7584,38 @@ kls_refactor_supernode_consumer_plan_bounded_advance_dep_limit(void) {
   return (UF_long)parsed;
 }
 
-static int
-kls_refactor_supernode_consumer_plan_shape_targets_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_TARGETS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_shape_targets_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_SHAPE_TARGETS")
 
-static int
-kls_refactor_supernode_consumer_plan_group_state_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_group_state_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE")
 
-static int
-kls_refactor_supernode_consumer_plan_group_state_focus_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_group_state_focus_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS")
 
-static int kls_refactor_supernode_algorithm5_payoff_plan_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_plan_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_PLAN")
 
-static int kls_refactor_supernode_algorithm5_payoff_exec_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_exec_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC")
 
-static int kls_refactor_supernode_algorithm5_payoff_claims_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_claims_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_CLAIMS")
 
-static int kls_refactor_supernode_algorithm5_payoff_queue_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_queue_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE")
 
-static int
-kls_refactor_supernode_algorithm5_payoff_queue_prefetch_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_queue_prefetch_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_QUEUE_PREFETCH")
 
-static int
-kls_refactor_supernode_algorithm5_payoff_group_prep_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_group_prep_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_PREP")
 
-static int
-kls_refactor_supernode_algorithm5_payoff_suffix_map_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_MAP");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_suffix_map_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SUFFIX_MAP")
 
-static int
-kls_refactor_supernode_algorithm5_payoff_advance_map_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_advance_map_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_ADVANCE_MAP")
 
 static int
 kls_refactor_supernode_algorithm5_payoff_group_advance_prep_hash_env_enabled(
@@ -7770,13 +7714,8 @@ kls_refactor_supernode_algorithm5_payoff_group_prefix_prep_env_enabled(void) {
          !(value[0] == '0' && value[1] == '\0');
 }
 
-static int
-kls_refactor_supernode_algorithm5_payoff_group_complete_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_group_complete_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_GROUP_COMPLETE")
 
 static int
 kls_refactor_supernode_algorithm5_payoff_suffix_advance_env_enabled(void) {
@@ -8075,21 +8014,11 @@ kls_refactor_supernode_algorithm5_payoff_group_advance_compact_state_plan_env_en
     !kls_refactor_supernode_algorithm5_payoff_suffix_producer_advance_env_enabled();
 }
 
-static int
-kls_refactor_supernode_algorithm5_payoff_workspace_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_workspace_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_WORKSPACE")
 
-static int
-kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_SLOT_ACCUM")
 
 static int
 kls_refactor_supernode_algorithm5_payoff_prefix_prep_env_enabled(void) {
@@ -8155,60 +8084,29 @@ static int kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(
            max_claim_surface;
 }
 
-static int
-kls_refactor_supernode_consumer_plan_group_cache_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_group_cache_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_CACHE")
 
-static int
-kls_refactor_supernode_consumer_plan_group_exec_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_EXEC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_group_exec_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_EXEC")
 
-static int
-kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_BATCH_EXEC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled,
+                    "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_BATCH_EXEC")
 
-static int kls_refactor_u_supernode_pattern_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_u_supernode_pattern_env_enabled,
+                    "KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN")
 
-static int kls_refactor_u_supernode_plan_pattern_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_u_supernode_plan_pattern_env_enabled,
+                    "KLS_ENABLE_REFACTOR_U_SUPERNODE_PLAN_PATTERN")
 
-static int kls_refactor_u_supernode_values_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_u_supernode_values_env_enabled,
+                    "KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES")
 
-static int kls_refactor_u_supernode_ragged_l_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_u_supernode_ragged_l_env_enabled,
+                    "KLS_ENABLE_REFACTOR_U_SUPERNODE_RAGGED_L")
 
-static int kls_refactor_btf_scalar_run_stats_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_STATS")
 
 static int kls_refactor_btf_scalar_run_exec_enabled(
   const kls_solver *solver) {
@@ -8243,48 +8141,23 @@ static int kls_refactor_btf_scalar_run_exec_enabled(
            8.0 * team * max_work;
 }
 
-static int kls_refactor_btf_scalar_run_group_wait_stats_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_wait_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAIT_STATS")
 
-static int kls_refactor_btf_scalar_run_group_claims_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_CLAIMS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_claims_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_CLAIMS")
 
-static int kls_refactor_btf_scalar_run_group_prefix_stats_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_PREFIX_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_prefix_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_PREFIX_STATS")
 
-static int kls_refactor_btf_scalar_run_group_wake_stats_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAKE_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_wake_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_WAKE_STATS")
 
-static int kls_refactor_btf_scalar_run_group_state_exec_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_state_exec_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC")
 
-static int
-kls_refactor_btf_scalar_run_group_state_exec_unguarded_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC_UNGUARDED");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_state_exec_unguarded_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_EXEC_UNGUARDED")
 
 static int
 kls_refactor_btf_scalar_run_group_state_runtime_guard_allows(
@@ -8302,37 +8175,17 @@ kls_refactor_btf_scalar_run_group_state_runtime_guard_allows(
          solver->refactor_btf_scalar_run_group_state_rows_total;
 }
 
-static int
-kls_refactor_btf_scalar_run_group_state_compact_values_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_state_compact_values_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_COMPACT_VALUES")
 
-static int
-kls_refactor_btf_scalar_run_group_state_advance_batch_stats_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_ADVANCE_BATCH_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_state_advance_batch_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_ADVANCE_BATCH_STATS")
 
-static int
-kls_refactor_btf_scalar_run_group_state_step_advance_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_state_step_advance_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_ADVANCE")
 
-static int
-kls_refactor_btf_scalar_run_group_state_step_window_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_WINDOW");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_state_step_window_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_STATE_STEP_WINDOW")
 
 static UF_long
 kls_refactor_btf_scalar_run_group_state_step_position_max_entries_env(void) {
@@ -8354,21 +8207,11 @@ kls_refactor_btf_scalar_run_group_state_step_position_max_entries_env(void) {
   return parsed > max_uf ? UF_long_max : (UF_long)parsed;
 }
 
-static int
-kls_refactor_btf_scalar_run_group_live_state_stats_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STATE_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_live_state_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STATE_STATS")
 
-static int
-kls_refactor_btf_scalar_run_group_live_step_stats_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_btf_scalar_run_group_live_step_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_GROUP_LIVE_STEP_STATS")
 
 static int
 kls_refactor_btf_scalar_run_group_live_step_partial_owner_stats_env_enabled(
@@ -28415,6 +28258,7 @@ static void free_symbolic(kls_solver *solver) {
 }
 
 static void kls_snb_free(kls_solver *solver);
+static void kls_invalidate_i32_solve(kls_solver *solver);
 
 static void free_snode_panels_impl(kls_solver *solver, int line) {
   if (solver == NULL) {
@@ -28426,80 +28270,7 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->snb_trial_seconds = 0.0;
   /* a later sort would reorder the packed columns under the i32 solve
      streams; they share the sorted-numeric lifecycle */
-  if (!solver->i32solve_indices_alias_refactor) {
-    free(solver->i32solve_l);
-    free(solver->i32solve_u);
-  }
-  free(solver->mixed_i16solve_l);
-  free(solver->mixed_i16solve_u);
-  free(solver->i32solve_loff);
-  free(solver->i32solve_uoff);
-  free(solver->i32solve_pnum);
-  free(solver->i32solve_rhs_perm32);
-  free(solver->i32solve_q);
-  free(solver->i32solve_llen);
-  free(solver->i32solve_ulen);
-  free(solver->i32solve_loff32);
-  free(solver->i32solve_uoff32);
-  free(solver->i32solve_singleton_run);
-  free(solver->i16solve_l);
-  free(solver->i16solve_u);
-  free(solver->i16solve_loff);
-  free(solver->i16solve_uoff);
-  free(solver->i16solve_pnum);
-  free(solver->i16solve_rhs_perm);
-  free(solver->i16solve_q);
-  free(solver->i16solve_r);
-  free(solver->i16solve_singleton_run);
-  free(solver->i16solve_offp);
-  free(solver->i16solve_offi);
-  free(solver->i16solve_offcols);
-  free(solver->i16solve_offcol_block_ptr);
-  free(solver->i16solve_lx);
-  free(solver->i16solve_ux);
-  free(solver->i32solve_udiag_recip);
-  free(solver->tiny_singleton_rs_recip);
-  solver->i32solve_l = NULL;
-  solver->i32solve_u = NULL;
-  solver->mixed_i16solve_l = NULL;
-  solver->mixed_i16solve_u = NULL;
-  solver->i32solve_loff = NULL;
-  solver->i32solve_uoff = NULL;
-  solver->i32solve_pnum = NULL;
-  solver->i32solve_rhs_perm32 = NULL;
-  solver->i32solve_q = NULL;
-  solver->i32solve_llen = NULL;
-  solver->i32solve_ulen = NULL;
-  solver->i32solve_loff32 = NULL;
-  solver->i32solve_uoff32 = NULL;
-  solver->i32solve_singleton_run = NULL;
-  solver->i16solve_l = NULL;
-  solver->i16solve_u = NULL;
-  solver->i16solve_loff = NULL;
-  solver->i16solve_uoff = NULL;
-  solver->i16solve_pnum = NULL;
-  solver->i16solve_rhs_perm = NULL;
-  solver->i16solve_q = NULL;
-  solver->i16solve_r = NULL;
-  solver->i16solve_singleton_run = NULL;
-  solver->i16solve_offp = NULL;
-  solver->i16solve_offi = NULL;
-  solver->i16solve_offcols = NULL;
-  solver->i16solve_offcol_block_ptr = NULL;
-  solver->i16solve_lx = NULL;
-  solver->i16solve_ux = NULL;
-  solver->i32solve_udiag_recip = NULL;
-  solver->i32solve_udiag_recip_fresh = 0;
-  solver->tiny_singleton_rs_recip = NULL;
-  solver->tiny_singleton_rs_recip_fresh = 0;
-  solver->tiny_singleton_solve_state = 0;
-  solver->stats.tiny_singleton_solve_eligible = 0;
-  solver->i16solve_p_identity_prefix = 0u;
-  solver->i16solve_q_identity_prefix = 0u;
-  solver->i32solve_state = 0;
-  solver->i32solve_indices_alias_refactor = 0;
-  solver->plain_solve_choice = 0;
-  kls_pts_free(solver);
+  kls_invalidate_i32_solve(solver);
   if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
     fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
   }
@@ -28604,80 +28375,6 @@ static void free_numeric(kls_solver *solver) {
     kls_clear_retained_preconditioner(solver);
   }
   solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
-  if (!solver->i32solve_indices_alias_refactor) {
-    free(solver->i32solve_l);
-    free(solver->i32solve_u);
-  }
-  free(solver->mixed_i16solve_l);
-  free(solver->mixed_i16solve_u);
-  free(solver->i32solve_loff);
-  free(solver->i32solve_uoff);
-  free(solver->i32solve_pnum);
-  free(solver->i32solve_rhs_perm32);
-  free(solver->i32solve_q);
-  free(solver->i32solve_llen);
-  free(solver->i32solve_ulen);
-  free(solver->i32solve_loff32);
-  free(solver->i32solve_uoff32);
-  free(solver->i32solve_singleton_run);
-  free(solver->i16solve_l);
-  free(solver->i16solve_u);
-  free(solver->i16solve_loff);
-  free(solver->i16solve_uoff);
-  free(solver->i16solve_pnum);
-  free(solver->i16solve_rhs_perm);
-  free(solver->i16solve_q);
-  free(solver->i16solve_r);
-  free(solver->i16solve_singleton_run);
-  free(solver->i16solve_offp);
-  free(solver->i16solve_offi);
-  free(solver->i16solve_offcols);
-  free(solver->i16solve_offcol_block_ptr);
-  free(solver->i16solve_lx);
-  free(solver->i16solve_ux);
-  free(solver->i32solve_udiag_recip);
-  free(solver->tiny_singleton_rs_recip);
-  solver->i32solve_l = NULL;
-  solver->i32solve_u = NULL;
-  solver->mixed_i16solve_l = NULL;
-  solver->mixed_i16solve_u = NULL;
-  solver->i32solve_loff = NULL;
-  solver->i32solve_uoff = NULL;
-  solver->i32solve_pnum = NULL;
-  solver->i32solve_rhs_perm32 = NULL;
-  solver->i32solve_q = NULL;
-  solver->i32solve_llen = NULL;
-  solver->i32solve_ulen = NULL;
-  solver->i32solve_loff32 = NULL;
-  solver->i32solve_uoff32 = NULL;
-  solver->i32solve_singleton_run = NULL;
-  solver->i16solve_l = NULL;
-  solver->i16solve_u = NULL;
-  solver->i16solve_loff = NULL;
-  solver->i16solve_uoff = NULL;
-  solver->i16solve_pnum = NULL;
-  solver->i16solve_rhs_perm = NULL;
-  solver->i16solve_q = NULL;
-  solver->i16solve_r = NULL;
-  solver->i16solve_singleton_run = NULL;
-  solver->i16solve_offp = NULL;
-  solver->i16solve_offi = NULL;
-  solver->i16solve_offcols = NULL;
-  solver->i16solve_offcol_block_ptr = NULL;
-  solver->i16solve_lx = NULL;
-  solver->i16solve_ux = NULL;
-  solver->i32solve_udiag_recip = NULL;
-  solver->i32solve_udiag_recip_fresh = 0;
-  solver->tiny_singleton_rs_recip = NULL;
-  solver->tiny_singleton_rs_recip_fresh = 0;
-  solver->tiny_singleton_solve_state = 0;
-  solver->stats.tiny_singleton_solve_eligible = 0;
-  solver->i16solve_p_identity_prefix = 0u;
-  solver->i16solve_q_identity_prefix = 0u;
-  solver->i32solve_state = 0;
-  solver->i32solve_indices_alias_refactor = 0;
-  solver->plain_solve_choice = 0;
-  kls_pts_free(solver);
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   solver->certified_unscaled_l2_contract = 0;
@@ -28751,8 +28448,6 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
     free(solver->i32solve_l);
     free(solver->i32solve_u);
   }
-  free(solver->mixed_i16solve_l);
-  free(solver->mixed_i16solve_u);
   free(solver->i32solve_loff);
   free(solver->i32solve_uoff);
   free(solver->i32solve_pnum);
@@ -28782,8 +28477,6 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   free(solver->tiny_singleton_rs_recip);
   solver->i32solve_l = NULL;
   solver->i32solve_u = NULL;
-  solver->mixed_i16solve_l = NULL;
-  solver->mixed_i16solve_u = NULL;
   solver->i32solve_loff = NULL;
   solver->i32solve_uoff = NULL;
   solver->i32solve_pnum = NULL;
@@ -31775,8 +31468,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       getenv("KLS_TRACE_PREP_CONSULT") != NULL;
 
     const int kls_direct_forced_row_prep =
-      ((getenv("KLS_DIRECT_FORCED_ROW_PREP") != NULL ||
-        (0)) &&
+      (getenv("KLS_DIRECT_FORCED_ROW_PREP") != NULL &&
        (kls_row_refactor_env_enabled() ||
         solver->prestatic_reused_raced_metis_symbolic ||
         solver->prestatic_dense_spiked_match));
@@ -31797,9 +31489,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     KLS_PC_MARK("frees")
     const int kls_skip_forced_row_column_preps =
       kls_direct_forced_row_prep &&
-      (0 ||
-       getenv("KLS_DIRECT_FORCED_ROW_SKIP_COLUMN_PREPS") != NULL ||
-       (0));
+      getenv("KLS_DIRECT_FORCED_ROW_SKIP_COLUMN_PREPS") != NULL;
     pthread_t kls_snode_prep_thread;
     pthread_t kls_map_prep_thread;
     pthread_t kls_schedule_prep_thread;
@@ -31816,8 +31506,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       const int kls_overlap_snode =
         !kls_direct_forced_row_prep &&
         (kls_generic_prep_overlap ||
-         getenv("KLS_ENABLE_DEFERRED_SNODE_OVERLAP") != NULL ||
-         (0)) &&
+         getenv("KLS_ENABLE_DEFERRED_SNODE_OVERLAP") != NULL) &&
         getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL &&
         kls_prepare_snode_sort_for_overlap(solver, &preps_elapsed);
       if (kls_overlap_snode) {
@@ -31913,9 +31602,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     KLS_PC_MARK("schedule")
     if (kls_direct_forced_row_prep) {
       const double row_start = kls_now_seconds();
-      if (0 ||
-          getenv("KLS_DIRECT_FORCED_ROW_PATTERN_ONLY") != NULL ||
-          (0)) {
+      if (getenv("KLS_DIRECT_FORCED_ROW_PATTERN_ONLY") != NULL) {
         /* The immediately following forced row refactor overwrites every
            row-factor value.  Preparing only the retained structure avoids a
            full numeric-to-row value copy whose contents would never be
@@ -31936,8 +31623,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       } else {
         (void)kls_prepare_auto_row_refactor_from_numeric(solver);
       }
-      if (getenv("KLS_ENABLE_ROW_I32_INDICES") != NULL ||
-          (0)) {
+      if (getenv("KLS_ENABLE_ROW_I32_INDICES") != NULL) {
         (void)kls_build_row_i32_indices(solver);
       }
       preps_elapsed += kls_now_seconds() - row_start;
@@ -32880,8 +32566,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->floor_choice = -1;
     solver->padded_choice = -1;
   } else
-  if ((getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL ||
-       (0)) &&
+  if (getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL &&
       solver->floor_choice == 0) {
     solver->floor_choice = -1;
   }
@@ -32896,8 +32581,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        verdict; a losing/default floor leaves the padded portfolio intact. */
     solver->padded_choice = -1;
   }
-  if ((getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL ||
-       (0)) &&
+  if (getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL &&
       solver->padded_choice == 0) {
     solver->padded_choice = -1;
   }
@@ -37958,9 +37642,7 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
   if (copy_size >= offsetof(kls_stats, compact_solve_index_bytes) +
                    sizeof(stats->compact_solve_index_bytes)) {
     stats->compact_solve_index_bytes = solver->i32solve_state > 0
-      ? ((solver->i16solve_l != NULL || solver->i16solve_u != NULL ||
-          solver->mixed_i16solve_l != NULL ||
-          solver->mixed_i16solve_u != NULL) ? 2 : 4)
+      ? ((solver->i16solve_l != NULL || solver->i16solve_u != NULL) ? 2 : 4)
       : 0;
   }
   if (copy_size >= offsetof(kls_stats, compact_solve_fused_rhs) +

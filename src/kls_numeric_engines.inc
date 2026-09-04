@@ -5667,21 +5667,14 @@ static int kls_build_refactor_user_input_pos32(kls_solver *solver) {
 
 static int kls_pts_direct_user_values_enabled(const kls_solver *solver) {
   return kls_pts_refactor_ready(solver) ||
-    getenv("KLS_ENABLE_PTS_DIRECT_USER_VALUES") != NULL ||
-    (0);
+    getenv("KLS_ENABLE_PTS_DIRECT_USER_VALUES") != NULL;
 }
 
-static int kls_refactor_l_pattern_stats_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_L_PATTERN_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_l_pattern_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_L_PATTERN_STATS")
 
-static int kls_refactor_stream_stats_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_STREAM_STATS");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_refactor_stream_stats_env_enabled,
+                    "KLS_ENABLE_REFACTOR_STREAM_STATS")
 
 static int kls_refactor_l_index32_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_REFACTOR_L_INDEX32");
@@ -19721,6 +19714,24 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     (double *)calloc(thread_count_size, sizeof(*thread_work));
   unsigned char *private_group_mask =
     (unsigned char *)calloc(group_count_size, sizeof(*private_group_mask));
+#define KLS_FREE_SEPARATOR_QUEUE_TEMP() do { \
+    free(group_component);                       \
+    free(group_forced_pipeline);                 \
+    free(component_group_count);                 \
+    free(component_work);                        \
+    free(subtree_begin);                         \
+    free(subtree_end);                           \
+    free(subtree_work);                          \
+    free(candidates);                            \
+    free(component_pipeline);                    \
+    free(component_thread);                      \
+    free(candidate_entries);                     \
+    free(private_groups);                        \
+    free(thread_ptr);                            \
+    free(thread_counts);                         \
+    free(thread_work);                           \
+    free(private_group_mask);                    \
+  } while (0)
   if (group_component == NULL || group_forced_pipeline == NULL ||
       component_group_count == NULL ||
       component_work == NULL || subtree_begin == NULL ||
@@ -19730,22 +19741,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
       private_groups == NULL || thread_ptr == NULL ||
       thread_counts == NULL || thread_work == NULL ||
       private_group_mask == NULL) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
   for (UF_long component = 0; component < component_count; ++component) {
@@ -19761,63 +19757,18 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
       if (row_begin >= row_end || row_end > solver->n ||
           row_begin < solver->separator.global_begin ||
           row_end > solver->separator.global_end) {
-        free(group_component);
-        free(group_forced_pipeline);
-        free(component_group_count);
-        free(component_work);
-        free(subtree_begin);
-        free(subtree_end);
-        free(subtree_work);
-        free(candidates);
-        free(component_pipeline);
-        free(component_thread);
-        free(candidate_entries);
-        free(private_groups);
-        free(thread_ptr);
-        free(thread_counts);
-        free(thread_work);
-        free(private_group_mask);
+        KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
       const UF_long local_begin =
         row_begin - solver->separator.global_begin;
       if (local_begin >= solver->separator.n) {
-        free(group_component);
-        free(group_forced_pipeline);
-        free(component_group_count);
-        free(component_work);
-        free(subtree_begin);
-        free(subtree_end);
-        free(subtree_work);
-        free(candidates);
-        free(component_pipeline);
-        free(component_thread);
-        free(candidate_entries);
-        free(private_groups);
-        free(thread_ptr);
-        free(thread_counts);
-        free(thread_work);
-        free(private_group_mask);
+        KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
       component = solver->separator.order_component[local_begin];
       if ((UF_long)component >= component_count) {
-        free(group_component);
-        free(group_forced_pipeline);
-        free(component_group_count);
-        free(component_work);
-        free(subtree_begin);
-        free(subtree_end);
-        free(subtree_work);
-        free(candidates);
-        free(component_pipeline);
-        free(component_thread);
-        free(candidate_entries);
-        free(private_groups);
-        free(thread_ptr);
-        free(thread_counts);
-        free(thread_work);
-        free(private_group_mask);
+        KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
       group_forced_pipeline[group] = 1u;
@@ -19837,22 +19788,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     const UF_long right = solver->separator.component_right_child[component];
     if (left != KLS_KLU_EMPTY) {
       if (left >= component || left >= component_count) {
-        free(group_component);
-        free(group_forced_pipeline);
-        free(component_group_count);
-        free(component_work);
-        free(subtree_begin);
-        free(subtree_end);
-        free(subtree_work);
-        free(candidates);
-        free(component_pipeline);
-        free(component_thread);
-        free(candidate_entries);
-        free(private_groups);
-        free(thread_ptr);
-        free(thread_counts);
-        free(thread_work);
-        free(private_group_mask);
+        KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
       begin = subtree_begin[left] < begin ? subtree_begin[left] : begin;
@@ -19861,22 +19797,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     }
     if (right != KLS_KLU_EMPTY) {
       if (right >= component || right >= component_count) {
-        free(group_component);
-        free(group_forced_pipeline);
-        free(component_group_count);
-        free(component_work);
-        free(subtree_begin);
-        free(subtree_end);
-        free(subtree_work);
-        free(candidates);
-        free(component_pipeline);
-        free(component_thread);
-        free(candidate_entries);
-        free(private_groups);
-        free(thread_ptr);
-        free(thread_counts);
-        free(thread_work);
-        free(private_group_mask);
+        KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
       begin = subtree_begin[right] < begin ? subtree_begin[right] : begin;
@@ -19890,22 +19811,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
 
   const UF_long root_component = component_count - 1u;
   if (subtree_work[root_component] <= 0.0) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
 
@@ -19986,22 +19892,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     }
   }
   if (candidate_count == 0u || pipeline_component_count == 0u) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
 
@@ -20012,22 +19903,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
       continue;
     }
     if (component > (UF_long)UINT_MAX) {
-      free(group_component);
-      free(group_forced_pipeline);
-      free(component_group_count);
-      free(component_work);
-      free(subtree_begin);
-      free(subtree_end);
-      free(subtree_work);
-      free(candidates);
-      free(component_pipeline);
-      free(component_thread);
-      free(candidate_entries);
-      free(private_groups);
-      free(thread_ptr);
-      free(thread_counts);
-      free(thread_work);
-      free(private_group_mask);
+      KLS_FREE_SEPARATOR_QUEUE_TEMP();
       return 0;
     }
     candidate_entries[assigned_component_count].component =
@@ -20038,22 +19914,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     assigned_component_count++;
   }
   if (assigned_component_count == 0u) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
   qsort(candidate_entries, (size_t)assigned_component_count,
@@ -20078,22 +19939,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   for (UF_long group = 0; group < group_count; ++group) {
     const unsigned int component = group_component[group];
     if ((UF_long)component >= component_count) {
-      free(group_component);
-      free(group_forced_pipeline);
-      free(component_group_count);
-      free(component_work);
-      free(subtree_begin);
-      free(subtree_end);
-      free(subtree_work);
-      free(candidates);
-      free(component_pipeline);
-      free(component_thread);
-      free(candidate_entries);
-      free(private_groups);
-      free(thread_ptr);
-      free(thread_counts);
-      free(thread_work);
-      free(private_group_mask);
+      KLS_FREE_SEPARATOR_QUEUE_TEMP();
       return 0;
     }
     if (component_pipeline[component] || group_forced_pipeline[group]) {
@@ -20102,22 +19948,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     }
     const int target = component_thread[component];
     if (target < 0 || target >= thread_count) {
-      free(group_component);
-      free(group_forced_pipeline);
-      free(component_group_count);
-      free(component_work);
-      free(subtree_begin);
-      free(subtree_end);
-      free(subtree_work);
-      free(candidates);
-      free(component_pipeline);
-      free(component_thread);
-      free(candidate_entries);
-      free(private_groups);
-      free(thread_ptr);
-      free(thread_counts);
-      free(thread_work);
-      free(private_group_mask);
+      KLS_FREE_SEPARATOR_QUEUE_TEMP();
       return 0;
     }
     private_group_mask[group] = 1u;
@@ -20136,44 +19967,14 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
         solver->row_refactor_group_successor_ptr[group + 1u];
       if (begin > end ||
           end > solver->row_refactor_group_dependency_edges) {
-        free(group_component);
-        free(group_forced_pipeline);
-        free(component_group_count);
-        free(component_work);
-        free(subtree_begin);
-        free(subtree_end);
-        free(subtree_work);
-        free(candidates);
-        free(component_pipeline);
-        free(component_thread);
-        free(candidate_entries);
-        free(private_groups);
-        free(thread_ptr);
-        free(thread_counts);
-        free(thread_work);
-        free(private_group_mask);
+        KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
       for (UF_long pos = begin; pos < end; ++pos) {
         const UF_long successor =
           solver->row_refactor_group_successor_groups[pos];
         if (successor >= group_count) {
-          free(group_component);
-          free(group_forced_pipeline);
-          free(component_group_count);
-          free(component_work);
-          free(subtree_begin);
-          free(subtree_end);
-          free(subtree_work);
-          free(candidates);
-          free(component_pipeline);
-          free(component_thread);
-          free(candidate_entries);
-          free(private_groups);
-          free(thread_ptr);
-          free(thread_counts);
-          free(thread_work);
-          free(private_group_mask);
+          KLS_FREE_SEPARATOR_QUEUE_TEMP();
           return 0;
         }
         if (private_group_mask[successor]) {
@@ -20217,22 +20018,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
         }
         const unsigned int component = group_component[group];
         if ((UF_long)component >= component_count) {
-          free(group_component);
-          free(group_forced_pipeline);
-          free(component_group_count);
-          free(component_work);
-          free(subtree_begin);
-          free(subtree_end);
-          free(subtree_work);
-          free(candidates);
-          free(component_pipeline);
-          free(component_thread);
-          free(candidate_entries);
-          free(private_groups);
-          free(thread_ptr);
-          free(thread_counts);
-          free(thread_work);
-          free(private_group_mask);
+          KLS_FREE_SEPARATOR_QUEUE_TEMP();
           return 0;
         }
         if (component_group_count[component] == 0u) {
@@ -20294,44 +20080,14 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
         solver->row_refactor_group_successor_ptr[group + 1u];
       if (begin > end ||
           end > solver->row_refactor_group_dependency_edges) {
-        free(group_component);
-        free(group_forced_pipeline);
-        free(component_group_count);
-        free(component_work);
-        free(subtree_begin);
-        free(subtree_end);
-        free(subtree_work);
-        free(candidates);
-        free(component_pipeline);
-        free(component_thread);
-        free(candidate_entries);
-        free(private_groups);
-        free(thread_ptr);
-        free(thread_counts);
-        free(thread_work);
-        free(private_group_mask);
+        KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
       for (UF_long pos = begin; pos < end; ++pos) {
         const UF_long successor =
           solver->row_refactor_group_successor_groups[pos];
         if (successor <= group || successor >= group_count) {
-          free(group_component);
-          free(group_forced_pipeline);
-          free(component_group_count);
-          free(component_work);
-          free(subtree_begin);
-          free(subtree_end);
-          free(subtree_work);
-          free(candidates);
-          free(component_pipeline);
-          free(component_thread);
-          free(candidate_entries);
-          free(private_groups);
-          free(thread_ptr);
-          free(thread_counts);
-          free(thread_work);
-          free(private_group_mask);
+          KLS_FREE_SEPARATOR_QUEUE_TEMP();
           return 0;
         }
         if (!private_group_mask[successor]) {
@@ -20355,64 +20111,19 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     }
     const unsigned int component = group_component[group];
     if ((UF_long)component >= component_count) {
-      free(group_component);
-      free(group_forced_pipeline);
-      free(component_group_count);
-      free(component_work);
-      free(subtree_begin);
-      free(subtree_end);
-      free(subtree_work);
-      free(candidates);
-      free(component_pipeline);
-      free(component_thread);
-      free(candidate_entries);
-      free(private_groups);
-      free(thread_ptr);
-      free(thread_counts);
-      free(thread_work);
-      free(private_group_mask);
+      KLS_FREE_SEPARATOR_QUEUE_TEMP();
       return 0;
     }
     const int target = component_thread[component];
     if (target < 0 || target >= thread_count) {
-      free(group_component);
-      free(group_forced_pipeline);
-      free(component_group_count);
-      free(component_work);
-      free(subtree_begin);
-      free(subtree_end);
-      free(subtree_work);
-      free(candidates);
-      free(component_pipeline);
-      free(component_thread);
-      free(candidate_entries);
-      free(private_groups);
-      free(thread_ptr);
-      free(thread_counts);
-      free(thread_work);
-      free(private_group_mask);
+      KLS_FREE_SEPARATOR_QUEUE_TEMP();
       return 0;
     }
     thread_counts[target]++;
     private_group_count++;
   }
   if (private_group_count == 0u || private_group_count >= group_count) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
   for (int tid = 0; tid < thread_count; ++tid) {
@@ -20420,22 +20131,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     thread_counts[tid] = thread_ptr[tid];
   }
   if (thread_ptr[thread_count] != private_group_count) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
   for (UF_long group = 0; group < group_count; ++group) {
@@ -20445,64 +20141,19 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     const int target = component_thread[group_component[group]];
     const UF_long dst = thread_counts[target]++;
     if (dst >= private_group_count) {
-      free(group_component);
-      free(group_forced_pipeline);
-      free(component_group_count);
-      free(component_work);
-      free(subtree_begin);
-      free(subtree_end);
-      free(subtree_work);
-      free(candidates);
-      free(component_pipeline);
-      free(component_thread);
-      free(candidate_entries);
-      free(private_groups);
-      free(thread_ptr);
-      free(thread_counts);
-      free(thread_work);
-      free(private_group_mask);
+      KLS_FREE_SEPARATOR_QUEUE_TEMP();
       return 0;
     }
     private_groups[dst] = group;
   }
   if (pipeline_group_count == 0u ||
       private_group_count + pipeline_group_count != group_count) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
   for (int tid = 0; tid < thread_count; ++tid) {
     if (thread_counts[tid] != thread_ptr[tid + 1]) {
-      free(group_component);
-      free(group_forced_pipeline);
-      free(component_group_count);
-      free(component_work);
-      free(subtree_begin);
-      free(subtree_end);
-      free(subtree_work);
-      free(candidates);
-      free(component_pipeline);
-      free(component_thread);
-      free(candidate_entries);
-      free(private_groups);
-      free(thread_ptr);
-      free(thread_counts);
-      free(thread_work);
-      free(private_group_mask);
+      KLS_FREE_SEPARATOR_QUEUE_TEMP();
       return 0;
     }
   }
@@ -20540,22 +20191,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   }
 
   if (!kls_ensure_row_refactor_ready_queue_workspace(solver, group_count)) {
-    free(group_component);
-    free(group_forced_pipeline);
-    free(component_group_count);
-    free(component_work);
-    free(subtree_begin);
-    free(subtree_end);
-    free(subtree_work);
-    free(candidates);
-    free(component_pipeline);
-    free(component_thread);
-    free(candidate_entries);
-    free(private_groups);
-    free(thread_ptr);
-    free(thread_counts);
-    free(thread_work);
-    free(private_group_mask);
+    KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
   }
   UF_long *ready_groups = solver->row_refactor_ready_groups;
@@ -20613,6 +20249,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   *private_max_groups_out = private_max_groups;
   *private_min_work_out = private_min_work;
   *private_max_work_out = private_max_work;
+#undef KLS_FREE_SEPARATOR_QUEUE_TEMP
   return 1;
 }
 
@@ -22433,11 +22070,8 @@ static int kls_row_refactor_tail_has_large_partial_supernodes(
   return groups > 0u;
 }
 
-static int kls_row_refactor_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_ROW_REFACTOR");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_refactor_env_enabled,
+                    "KLS_ENABLE_ROW_REFACTOR")
 
 static int kls_row_refactor_env_disabled(void) {
   const char *value = getenv("KLS_ENABLE_ROW_REFACTOR");
@@ -22496,11 +22130,8 @@ static int kls_auto_row_refactor_high_work_candidate(
          solver->refactor_dependency_work >= 1.0e8;
 }
 
-static int kls_checked_row_refactor_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_checked_row_refactor_env_enabled,
+                    "KLS_ENABLE_CHECKED_ROW_REFACTOR")
 
 static int kls_checked_row_refactor_should_run(void) {
   return kls_checked_row_refactor_env_enabled();
@@ -22796,104 +22427,52 @@ static int kls_cblas_dense_panel_checked_row_update_may_apply(
 }
 #endif
 
-static int kls_first_factor_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_first_factor_env_enabled,
+                    "KLS_ENABLE_KLS_FIRST_FACTOR")
 
 static int kls_first_factor_env_disabled(void) {
   const char *value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
-static int kls_first_factor_trace_env_enabled(void) {
-  const char *value = getenv("KLS_TRACE_KLS_FIRST_FACTOR");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_first_factor_trace_env_enabled,
+                    "KLS_TRACE_KLS_FIRST_FACTOR")
 
-static int kls_row_pipeline_trace_env_enabled(void) {
-  const char *value = getenv("KLS_TRACE_ROW_PIPELINE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_trace_env_enabled,
+                    "KLS_TRACE_ROW_PIPELINE")
 
-static int kls_row_pipeline_producer_batch_env_disabled(void) {
-  const char *value = getenv("KLS_DISABLE_ROW_PIPELINE_PRODUCER_BATCH");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_producer_batch_env_disabled,
+                    "KLS_DISABLE_ROW_PIPELINE_PRODUCER_BATCH")
 
-static int kls_row_pipeline_experimental_lookahead_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_EXPERIMENTAL_ROW_PIPELINE_LOOKAHEAD");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_experimental_lookahead_env_enabled,
+                    "KLS_ENABLE_EXPERIMENTAL_ROW_PIPELINE_LOOKAHEAD")
 
-static int kls_row_pipeline_pivot_lookahead_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_PIVOT_LOOKAHEAD");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_pivot_lookahead_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_PIVOT_LOOKAHEAD")
 
-static int kls_row_pipeline_active_catchup_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_active_catchup_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH")
 
-static int kls_row_pipeline_pivot_supernode_rebase_env_disabled(void) {
-  const char *value =
-    getenv("KLS_DISABLE_ROW_PIPELINE_PIVOT_SUPERNODE_REBASE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_pivot_supernode_rebase_env_disabled,
+                    "KLS_DISABLE_ROW_PIPELINE_PIVOT_SUPERNODE_REBASE")
 
-static int kls_row_pipeline_supernode_producer_batch_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_SUPERNODE_PRODUCER_BATCH");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_supernode_producer_batch_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_SUPERNODE_PRODUCER_BATCH")
 
-static int kls_row_first_strict_separator_pivot_scope_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_first_strict_separator_pivot_scope_env_enabled,
+                    "KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE")
 
-static int kls_row_pipeline_compact_window_trace_env_enabled(void) {
-  const char *value =
-    getenv("KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_window_trace_env_enabled,
+                    "KLS_TRACE_ROW_PIPELINE_COMPACT_WINDOW")
 
-static int kls_row_pipeline_compact_window_exec_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_window_exec_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_EXEC")
 
-static int kls_row_pipeline_compact_delay_output_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_delay_output_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_DELAY_OUTPUT")
 
-static int kls_row_pipeline_compact_deferred_output_cache_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_CACHE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_deferred_output_cache_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_DEFERRED_OUTPUT_CACHE")
 
 static UF_long kls_row_pipeline_compact_deferred_output_max_entries_env(void) {
   if (!kls_row_pipeline_compact_deferred_output_cache_env_enabled()) {
@@ -22937,12 +22516,8 @@ kls_row_pipeline_compact_deferred_output_min_u_entries_env(void) {
   return parsed > max_uf ? UF_long_max : (UF_long)parsed;
 }
 
-static int kls_row_pipeline_compact_group_output_cache_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_OUTPUT_CACHE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_group_output_cache_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_OUTPUT_CACHE")
 
 static UF_long kls_row_pipeline_compact_group_output_max_slots_env(void) {
   if (!kls_row_pipeline_compact_group_output_cache_env_enabled()) {
@@ -22986,26 +22561,14 @@ kls_row_pipeline_compact_group_output_min_u_entries_env(void) {
   return parsed > max_uf ? UF_long_max : (UF_long)parsed;
 }
 
-static int kls_row_pipeline_compact_sparse_group_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_sparse_group_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_SPARSE_GROUP")
 
-static int kls_row_pipeline_compact_group_replay_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_group_replay_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_REPLAY")
 
-static int kls_row_pipeline_compact_claim_run_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_CLAIM_RUN");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_claim_run_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_CLAIM_RUN")
 
 static int kls_row_pipeline_compact_claim_stream_owner_env_enabled(void) {
   if (!kls_row_pipeline_compact_claim_run_env_enabled()) {
@@ -23039,12 +22602,8 @@ static UF_long kls_row_pipeline_compact_claim_stream_owner_max_slots_env(void) {
   return parsed > max_uf ? UF_long_max : (UF_long)parsed;
 }
 
-static int kls_row_pipeline_compact_span_owner_env_enabled(void) {
-  const char *value =
-    getenv("KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_OWNER");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_compact_span_owner_env_enabled,
+                    "KLS_ENABLE_ROW_PIPELINE_COMPACT_SPAN_OWNER")
 
 static int kls_row_pipeline_compact_span_owner_allow_holes_env_enabled(void) {
   if (!kls_row_pipeline_compact_span_owner_env_enabled()) {
@@ -23194,12 +22753,8 @@ kls_row_pipeline_compact_span_shared_owner_scan_rows_env(void) {
     : (UF_long)parsed;
 }
 
-static int kls_row_pipeline_owner_surface_trace_env_enabled(void) {
-  const char *value =
-    getenv("KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_pipeline_owner_surface_trace_env_enabled,
+                    "KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE")
 
 static UF_long kls_row_pipeline_owner_surface_window_env(void) {
   if (!kls_row_pipeline_owner_surface_trace_env_enabled()) {
@@ -23670,11 +23225,8 @@ static int kls_pipeline_refactor_fast_factor_repair_is_risky(
            solver->refactor_dependency_work;
 }
 
-static int kls_row_solve_from_numeric_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
+KLS_DEFINE_ENV_FLAG(kls_row_solve_from_numeric_env_enabled,
+                    "KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC")
 
 static double kls_row_refactor_total_group_work(const kls_solver *solver) {
   if (solver == NULL || solver->row_refactor_group_count == 0u) {
@@ -109337,11 +108889,9 @@ static void kls_pts_try_build(kls_solver *solver) {
   int balanced_very_wide_solve_plan = 0;
   double bin_work[KLS_PTS_MAX_THREADS];
   const int very_wide_top_trial =
-    getenv("KLS_ENABLE_VERY_WIDE_TOP_PTS") != NULL ||
-    (0);
+    getenv("KLS_ENABLE_VERY_WIDE_TOP_PTS") != NULL;
   const int wide_top_trial =
-    very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL ||
-    (0);
+    very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL;
   if (ok) {
     for (int32_t root = head[nk]; root != -1; root = next[root]) {
       total += swork[root];
@@ -112239,41 +111789,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   if (trace_i32_prep) {
     i32_cache_done = kls_now_seconds();
   }
-  const char *mixed_i16_env = getenv("KLS_EXPERIMENT_MIXED_I16_SOLVE");
-  const int mixed_i16_forced =
-    mixed_i16_env != NULL && mixed_i16_env[0] != '\0' &&
-    !(mixed_i16_env[0] == '0' && mixed_i16_env[1] == '\0');
-  if ((mixed_i16_forced) &&
-      n <= (UF_long)UINT16_MAX && lcur >= 0 && ucur >= 0) {
-    uint16_t *lrows = (uint16_t *)malloc(
-      (size_t)(lcur > 0 ? lcur : 1) * sizeof(*lrows));
-    uint16_t *urows = (uint16_t *)malloc(
-      (size_t)(ucur > 0 ? ucur : 1) * sizeof(*urows));
-    int compact = lrows != NULL && urows != NULL;
-    for (int64_t p = 0; compact && p < lcur; ++p) {
-      const int32_t row = solver->i32solve_l[p];
-      if (row < 0 || row > (int32_t)UINT16_MAX) {
-        compact = 0;
-        break;
-      }
-      lrows[p] = (uint16_t)row;
-    }
-    for (int64_t p = 0; compact && p < ucur; ++p) {
-      const int32_t row = solver->i32solve_u[p];
-      if (row < 0 || row > (int32_t)UINT16_MAX) {
-        compact = 0;
-        break;
-      }
-      urows[p] = (uint16_t)row;
-    }
-    if (compact) {
-      solver->mixed_i16solve_l = lrows;
-      solver->mixed_i16solve_u = urows;
-    } else {
-      free(lrows);
-      free(urows);
-    }
-  }
   const int generic_compact_solve_meta =
         getenv("KLS_DISABLE_GENERIC_COMPACT_SOLVE_META") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
@@ -112283,8 +111798,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     lcur >= 0 && ucur >= 0 &&
     lcur <= (int64_t)UINT32_MAX && ucur <= (int64_t)UINT32_MAX;
   if (generic_compact_solve_meta ||
-      getenv("KLS_ENABLE_GENERIC_COMPACT_SOLVE_META") != NULL ||
-      (0)) {
+      getenv("KLS_ENABLE_GENERIC_COMPACT_SOLVE_META") != NULL) {
     uint32_t *pnum32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*pnum32));
     uint32_t *q32 = (uint32_t *)malloc(
@@ -112980,8 +112494,6 @@ static UF_long kls_i32_solve(kls_solver *solver,
      solver->compact_amf_two_block_exact_recip_fresh)
       ? solver->i32solve_udiag_recip : NULL;
   const uint32_t *restrict q32 = solver->i32solve_q;
-  const uint16_t *restrict mixed_l = solver->mixed_i16solve_l;
-  const uint16_t *restrict mixed_u = solver->mixed_i16solve_u;
   const double *rs = numeric->Rs;
   double *X = (double *)numeric->Xwork;
   if (X == NULL) {
@@ -113308,13 +112820,9 @@ static UF_long kls_i32_solve(kls_solver *solver,
               const UF_long begin = loff32 != NULL
                 ? (UF_long)loff32[k1 + k]
                 : (UF_long)solver->i32solve_loff[k1 + k];
-              if (mixed_l != NULL) {
-                kls_i16_solve_scatter(Xb, mixed_l + begin, lx, len, xk);
-              } else {
-                const int32_t *li = solver->i32solve_l + begin;
-                for (UF_long p = 0; p < len; ++p) {
-                  Xb[li[p]] -= lx[p] * xk;
-                }
+              const int32_t *li = solver->i32solve_l + begin;
+              for (UF_long p = 0; p < len; ++p) {
+                Xb[li[p]] -= lx[p] * xk;
               }
             }
           }
@@ -113334,13 +112842,9 @@ static UF_long kls_i32_solve(kls_solver *solver,
               const UF_long begin = uoff32 != NULL
                 ? (UF_long)uoff32[k1 + k]
                 : (UF_long)solver->i32solve_uoff[k1 + k];
-              if (mixed_u != NULL) {
-                kls_i16_solve_scatter(Xb, mixed_u + begin, ux, len, xk);
-              } else {
-                const int32_t *ui = solver->i32solve_u + begin;
-                for (UF_long p = 0; p < len; ++p) {
-                  Xb[ui[p]] -= ux[p] * xk;
-                }
+              const int32_t *ui = solver->i32solve_u + begin;
+              for (UF_long p = 0; p < len; ++p) {
+                Xb[ui[p]] -= ux[p] * xk;
               }
             }
           }
