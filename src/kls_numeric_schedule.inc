@@ -490,7 +490,6 @@ static int kls_snb_prepare(kls_solver *solver) {
     }
   }
 
-
   /* snode-level schedule: level(s) = 1 + max(level of producers); blocks
    * are independent so their levels merge directly */
   if (ok) {
@@ -1264,9 +1263,6 @@ typedef struct kls_snb_par_ctx {
   _Atomic int64_t cursor;
   _Atomic int go; /* 0 = hold, 1 = run, 2 = abort (spawn failed) */
 } kls_snb_par_ctx;
-
-
-
 
 /* Cooperative processing of one large supernode by the whole crew.
  * Edge updates: tid 0 gathers/TRSMs/writes back the (small) UB block,
@@ -2066,7 +2062,6 @@ static int kls_snode_panel_env_disabled(void) {
   const char *value = getenv("KLS_DISABLE_SNODE_PANEL_REFACTOR");
   return value != NULL && value[0] == '1';
 }
-
 
 /* ------------------------------------------------------------------ */
 /* Parallel packed-LU column sort (hard core D, brick 1).  The         */
@@ -3583,97 +3578,12 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_egraph_separator_private_requested(solver);
   const int need_pipeline_ready_graph =
     kls_egraph_ready_queue_env_enabled();
-  const int algorithm5_payoff_claims =
-    kls_refactor_supernode_algorithm5_payoff_claims_env_enabled();
-  const int algorithm5_payoff_queue_prefetch =
-    kls_refactor_supernode_algorithm5_payoff_queue_prefetch_env_enabled();
-  const int algorithm5_payoff_queue =
-    kls_refactor_supernode_algorithm5_payoff_queue_env_enabled() ||
-    algorithm5_payoff_queue_prefetch;
-  const int algorithm5_payoff_slot_accum =
-    kls_refactor_supernode_algorithm5_payoff_slot_accum_env_enabled();
-  const int algorithm5_payoff_suffix_advance =
-    kls_refactor_supernode_algorithm5_payoff_suffix_advance_env_enabled();
-  const int algorithm5_payoff_suffix_group_advance =
-    kls_refactor_supernode_algorithm5_payoff_suffix_group_advance_env_enabled() ||
-    kls_refactor_supernode_algorithm5_payoff_suffix_group_window_env_enabled();
-  const int algorithm5_payoff_suffix_producer_advance =
-    kls_refactor_supernode_algorithm5_payoff_suffix_producer_advance_env_enabled();
-  const int algorithm5_payoff_group_advance_prep =
-    kls_refactor_supernode_algorithm5_payoff_group_advance_prep_env_enabled();
-  const int algorithm5_payoff_advance_map =
-    kls_refactor_supernode_algorithm5_payoff_advance_map_env_enabled() ||
-    algorithm5_payoff_group_advance_prep;
-  const int algorithm5_payoff_suffix_map =
-    kls_refactor_supernode_algorithm5_payoff_suffix_map_env_enabled() ||
-    algorithm5_payoff_suffix_group_advance ||
-    algorithm5_payoff_suffix_producer_advance;
-  const int algorithm5_payoff_prefix_prep =
-    kls_refactor_supernode_algorithm5_payoff_prefix_prep_env_enabled();
-  const int algorithm5_payoff_direct_prefix_prep =
-    kls_refactor_supernode_algorithm5_payoff_direct_prefix_prep_env_enabled() ||
-    algorithm5_payoff_group_advance_prep ||
-    algorithm5_payoff_suffix_advance ||
-    algorithm5_payoff_suffix_group_advance ||
-    algorithm5_payoff_suffix_producer_advance;
-  const int algorithm5_payoff_group_prefix_prep =
-    kls_refactor_supernode_algorithm5_payoff_group_prefix_prep_env_enabled() ||
-    algorithm5_payoff_group_advance_prep ||
-    algorithm5_payoff_direct_prefix_prep;
-  const int algorithm5_payoff_workspace =
-    kls_refactor_supernode_algorithm5_payoff_workspace_env_enabled() ||
-    algorithm5_payoff_slot_accum ||
-    algorithm5_payoff_prefix_prep ||
-    algorithm5_payoff_group_prefix_prep ||
-    algorithm5_payoff_suffix_advance ||
-    algorithm5_payoff_suffix_group_advance;
-  const int algorithm5_payoff_group_prep =
-    kls_refactor_supernode_algorithm5_payoff_group_prep_env_enabled() ||
-    algorithm5_payoff_prefix_prep ||
-    algorithm5_payoff_group_prefix_prep ||
-    algorithm5_payoff_suffix_advance ||
-    algorithm5_payoff_suffix_group_advance ||
-    algorithm5_payoff_suffix_producer_advance;
-  const int algorithm5_payoff_claim_surface_ready =
-    algorithm5_payoff_claims &&
-    kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(
-      solver, solver->options.threads);
+
   const int need_level_pos =
-    (kls_refactor_supernode_consumer_plan_shape_claims_env_enabled() ||
-     algorithm5_payoff_claims ||
-     algorithm5_payoff_queue ||
-     algorithm5_payoff_slot_accum ||
-     algorithm5_payoff_prefix_prep ||
-     algorithm5_payoff_group_prefix_prep ||
-     algorithm5_payoff_suffix_advance ||
-     algorithm5_payoff_suffix_group_advance ||
-     algorithm5_payoff_suffix_producer_advance ||
-     algorithm5_payoff_group_prep);
-  const int algorithm5_payoff_exec =
-    kls_refactor_supernode_algorithm5_payoff_exec_env_enabled() ||
-    algorithm5_payoff_claim_surface_ready ||
-    algorithm5_payoff_slot_accum ||
-    algorithm5_payoff_group_prefix_prep ||
-    algorithm5_payoff_suffix_advance ||
-    algorithm5_payoff_suffix_group_advance ||
-    algorithm5_payoff_suffix_producer_advance;
-  const int build_algorithm5_payoff_plan =
-    kls_refactor_supernode_algorithm5_payoff_plan_env_enabled() ||
-    kls_refactor_supernode_algorithm5_payoff_exec_env_enabled() ||
-    algorithm5_payoff_claims ||
-    algorithm5_payoff_queue ||
-    algorithm5_payoff_slot_accum ||
-    algorithm5_payoff_prefix_prep ||
-    algorithm5_payoff_group_prefix_prep ||
-    algorithm5_payoff_workspace ||
-    algorithm5_payoff_suffix_advance ||
-    algorithm5_payoff_advance_map ||
-    algorithm5_payoff_suffix_map ||
-    algorithm5_payoff_suffix_group_advance ||
-    algorithm5_payoff_suffix_producer_advance ||
-    algorithm5_payoff_group_prep;
+    ((((((((((kls_refactor_supernode_consumer_plan_shape_claims_env_enabled()))))))))));
+
   const int build_supernode_consumer_plan =
-    kls_refactor_supernode_consumer_plan_env_enabled() ||
+    (kls_refactor_supernode_consumer_plan_env_enabled() ||
     kls_refactor_supernode_consumer_plan_exec_env_enabled() ||
     kls_refactor_supernode_consumer_plan_output_stats_env_enabled() ||
     kls_refactor_supernode_consumer_plan_shape_targets_env_enabled() ||
@@ -3682,56 +3592,21 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled() ||
     kls_refactor_supernode_consumer_plan_group_state_env_enabled() ||
     kls_refactor_supernode_consumer_plan_group_state_focus_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_shape_claims_env_enabled() ||
-    build_algorithm5_payoff_plan ||
+    kls_refactor_supernode_consumer_plan_shape_claims_env_enabled()) ||
     kls_refactor_u_supernode_plan_pattern_env_enabled();
   const int supernode_consumer_stats_env =
     kls_refactor_supernode_consumer_stats_env_enabled();
   const int record_stream_stats = kls_refactor_stream_stats_env_enabled();
   const int build_plan_u_supernode_pattern =
-    kls_refactor_u_supernode_plan_pattern_env_enabled() ||
-    algorithm5_payoff_exec;
-  const int build_algorithm5_payoff_u_supernode_pattern =
-    algorithm5_payoff_exec ||
-    (algorithm5_payoff_group_prep &&
-     solver->refactor_supernode_algorithm5_payoff_group_count > 0u);
+    kls_refactor_u_supernode_plan_pattern_env_enabled();
+
   const int need_u_supernode_pattern =
-    supernode_consumer_stats_env ||
+    (supernode_consumer_stats_env ||
     kls_refactor_u_supernode_pattern_env_enabled() ||
     kls_refactor_u_supernode_values_env_enabled() ||
     kls_refactor_u_supernode_ragged_l_env_enabled() ||
-    build_plan_u_supernode_pattern ||
-    build_algorithm5_payoff_u_supernode_pattern;
-  const int algorithm5_payoff_suffix_map_ready =
-    !algorithm5_payoff_suffix_map ||
-    solver->refactor_supernode_algorithm5_payoff_group_count == 0u ||
-    (solver->refactor_supernode_algorithm5_payoff_group_suffix_ptr != NULL &&
-     solver->refactor_supernode_algorithm5_payoff_group_suffix_run_ptr !=
-       NULL &&
-     (solver
-        ->refactor_supernode_algorithm5_payoff_group_suffix_unique_deps_total ==
-        0u ||
-      solver->refactor_supernode_algorithm5_payoff_group_suffix_cols != NULL) &&
-     (solver->refactor_supernode_algorithm5_payoff_group_suffix_deps_total ==
-        0u ||
-	      (solver->refactor_supernode_algorithm5_payoff_group_suffix_runs != NULL &&
-	       solver->refactor_supernode_algorithm5_payoff_group_suffix_up != NULL)));
-  const int algorithm5_payoff_advance_map_ready =
-    !algorithm5_payoff_advance_map ||
-    solver->refactor_supernode_algorithm5_payoff_group_count == 0u ||
-    (solver->refactor_supernode_algorithm5_payoff_group_advance_map_ptr != NULL &&
-     solver->refactor_supernode_algorithm5_payoff_group_advance_map_run_ptr !=
-       NULL &&
-     (solver
-        ->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_total ==
-        0u ||
-      solver->refactor_supernode_algorithm5_payoff_group_advance_map_cols != NULL) &&
-     (solver->refactor_supernode_algorithm5_payoff_group_advance_deps_total ==
-        0u ||
-      (solver
-         ->refactor_supernode_algorithm5_payoff_group_advance_map_runs != NULL &&
-       solver->refactor_supernode_algorithm5_payoff_group_advance_map_up !=
-         NULL)));
+    build_plan_u_supernode_pattern);
+
   if (solver->refactor_level_ptr != NULL &&
       solver->refactor_supernode_pipeline_end != NULL &&
       (!need_pipeline_ready_graph ||
@@ -3739,82 +3614,11 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
        solver->refactor_pipeline_successor_ptr != NULL) &&
       (!need_u_supernode_pattern ||
        (solver->refactor_u_supernode_pattern_built &&
-        (build_algorithm5_payoff_u_supernode_pattern
-           ? solver->refactor_u_supernode_algorithm5_payoff_pattern_built
-           : (build_plan_u_supernode_pattern
-                ? (solver->refactor_u_supernode_plan_pattern_built &&
-                   !solver
-                      ->refactor_u_supernode_algorithm5_payoff_pattern_built)
-                : (!solver->refactor_u_supernode_plan_pattern_built &&
-                   !solver
-                      ->refactor_u_supernode_algorithm5_payoff_pattern_built))))) &&
+        (build_plan_u_supernode_pattern
+           ? solver->refactor_u_supernode_plan_pattern_built
+           : !solver->refactor_u_supernode_plan_pattern_built))) &&
       (!build_supernode_consumer_plan ||
-       (solver->refactor_supernode_consumer_plan_built &&
-        (!build_algorithm5_payoff_plan ||
-         solver->refactor_supernode_consumer_plan_run_count == 0u ||
-         (solver->refactor_supernode_algorithm5_payoff_panel_ptr != NULL &&
-          solver->refactor_supernode_algorithm5_payoff_run_selected != NULL &&
-          (solver->refactor_supernode_algorithm5_payoff_group_count == 0u ||
-           (solver->refactor_supernode_algorithm5_payoff_runs != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_ptr != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_panel_start != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_prefix_end != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_trigger_ptr != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_trigger_groups != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_group != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_group_pos != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_current_pos != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_advance_deps != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_advance_ptr != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_advance_slots != NULL &&
-            solver
-              ->refactor_supernode_algorithm5_payoff_run_advance_slot_ptr !=
-              NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_prefix_rows != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_target_entries != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_target_ptr != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_target_slots != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_run_target_slot_ptr != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_pattern_width != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_target_entries != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_target_slots != NULL &&
-            (solver
-               ->refactor_supernode_algorithm5_payoff_group_target_slots_total ==
-               0u ||
-             solver
-               ->refactor_supernode_algorithm5_payoff_group_target_cols != NULL) &&
-            solver->refactor_supernode_algorithm5_payoff_group_advance_deps != NULL &&
-            solver
-              ->refactor_supernode_algorithm5_payoff_group_advance_slots !=
-              NULL &&
-            (solver
-               ->refactor_supernode_algorithm5_payoff_group_advance_slots_total ==
-               0u ||
-             solver
-               ->refactor_supernode_algorithm5_payoff_group_advance_cols !=
-               NULL) &&
-            solver->refactor_supernode_algorithm5_payoff_group_prefix_rows != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_max_run_rows != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_current_ptr != NULL &&
-            solver->refactor_supernode_algorithm5_payoff_group_currents != NULL &&
-            solver
-              ->refactor_supernode_algorithm5_payoff_group_current_run_ptr != NULL &&
-            solver
-              ->refactor_supernode_algorithm5_payoff_group_current_runs != NULL &&
-            solver
-              ->refactor_supernode_algorithm5_payoff_group_current_workspace_ptr != NULL &&
-            solver
-              ->refactor_supernode_algorithm5_payoff_group_workspace_rows != NULL &&
-            solver
-              ->refactor_supernode_algorithm5_payoff_current_state_ptr != NULL &&
-            (solver
-               ->refactor_supernode_algorithm5_payoff_current_state_rows_total ==
-               0u ||
-             solver
-               ->refactor_supernode_algorithm5_payoff_current_state_rows !=
-               NULL) &&
-	            algorithm5_payoff_suffix_map_ready &&
-	            algorithm5_payoff_advance_map_ready)))))) &&
+       solver->refactor_supernode_consumer_plan_built) &&
       (!record_stream_stats ||
        solver->refactor_stream_stats_built) &&
       (!need_level_pos || solver->refactor_level_pos != NULL) &&
@@ -3998,7 +3802,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       double *ux = NULL;
       UF_long ucol_len = 0;
       kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
-      (void)ux;
+
       UF_long level = 0;
       double work = 1.0;
       for (UF_long p = 0; p < ucol_len; ++p) {
@@ -4030,7 +3834,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
           double *lx = NULL;
           UF_long lcol_len = 0u;
           kls_klu_get_pointer(lu, lip, llen, dep, &li, &lx, &lcol_len);
-          (void)lx;
+
           if (li == NULL && lcol_len > 0u) {
             KLS_FREE_REFACTOR_SCHEDULE_TEMP();
             return 0;
@@ -4344,22 +4148,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       return 0;
     }
   }
-  const int algorithm5_payoff_group_prep_surface_ready =
-    algorithm5_payoff_group_prep &&
-    solver->refactor_supernode_algorithm5_payoff_group_count > 0u;
-  const int build_algorithm5_payoff_u_pattern_after_plan =
-    algorithm5_payoff_exec ||
-    algorithm5_payoff_group_prep_surface_ready ||
-    (algorithm5_payoff_claims &&
-     kls_refactor_supernode_algorithm5_payoff_claim_surface_allowed(
-       solver, solver->options.threads));
-  if (build_algorithm5_payoff_u_pattern_after_plan) {
-    if (!kls_build_refactor_u_supernode_pattern_from_algorithm5_payoff_plan(
-          solver, supernode_consumer_end)) {
-      KLS_FREE_REFACTOR_SCHEDULE_TEMP();
-      return 0;
-    }
-  } else if (build_u_supernode_pattern && build_plan_u_supernode_pattern) {
+
+  if (build_u_supernode_pattern && build_plan_u_supernode_pattern) {
     if (!kls_build_refactor_u_supernode_pattern_from_consumer_plan(solver)) {
       KLS_FREE_REFACTOR_SCHEDULE_TEMP();
       return 0;
@@ -4546,16 +4336,7 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
   }
   const double start = kls_now_seconds();
   if (kls_build_refactor_schedule(solver)) {
-    double *workspace_values = NULL;
-    double *target_values = NULL;
-    atomic_uchar *current_flags = NULL;
-    int active = 0;
-    UF_long workspace_size = 0u;
-    UF_long target_size = 0u;
-    UF_long current_count = 0u;
-    (void)kls_prepare_refactor_algorithm5_payoff_runtime_state(
-      solver, &active, &workspace_values, &workspace_size, &target_values,
-      &target_size, &current_flags, &current_count);
+
   }
   *elapsed += kls_now_seconds() - start;
 }

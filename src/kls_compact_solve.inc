@@ -2212,8 +2212,6 @@ static void kls_solve_contract_classify(kls_solver *solver,
     return;
   }
 
-
-
   if (solver->options.backend == KLS_BACKEND_SERIAL &&
       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU) {
     /* Explicit serial KLU-refactor mode keeps base KLU solve semantics.

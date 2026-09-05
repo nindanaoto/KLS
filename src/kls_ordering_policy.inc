@@ -299,21 +299,6 @@ enum {
    regimes without a maximum-transversal or an ordering tournament.  The
    degree and SCC predicates are invariant under transpose. */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* Candidate analyzes can run on independent threads.  Keep their structural
    policy local to the analyze call so an AMF trial for another orientation
    cannot inherit this class verdict. */
@@ -476,7 +461,6 @@ static int kls_medium_sparse_full_diagonal_amd_symbolic_contract(
    is preferable for this bounded low-flop shape (power197k: 0.33 s versus
    1.07 s).  The flop ceiling separates it from the superficially similar
    HTC systems, where COLAMD expands the factor by 5--10x. */
-
 
 static int is_medium_sparse_high_degree_diagonal_pattern(UF_long n,
                                                          const UF_long *col_ptr,
@@ -928,9 +912,6 @@ static int symbolic_is_low_work_dominant_btf(
    Select this route from the cached topology plus measured symbolic shape,
    rather than the former OPF_3754 dimension fingerprint. */
 
-
-
-
 /* A value-aware row match is a natural first operation when almost every
    structural diagonal entry is absent.  The compact matcher stores both row
    and column in one 32-bit word, and the later direct-value map stores input
@@ -938,15 +919,11 @@ static int symbolic_is_low_work_dominant_btf(
    matrix-family fingerprint.  Bounded, nonempty row and column degrees keep
    the sort/augment work linearithmic in a genuinely sparse graph. */
 
-
-
-
 /* A compact, full-rank one-block symbolic with almost no usable structural
    diagonal predicts that an unmatched first factor will be temporary.  When
    its estimated factor is large enough to amortize the value-aware match, run
    that guarded trial before factorization instead of building the unmatched
    numeric and replacing it at the first update. */
-
 
 /* A bounded-degree symmetric graph with roughly half of its structural
    diagonal missing is a useful proposal for value-aware row matching.  The
@@ -955,15 +932,11 @@ static int symbolic_is_low_work_dominant_btf(
    cost.  It intentionally says nothing about the eventual numeric engine;
    the matched symbolic and factor must prove those capabilities below. */
 
-
-
-
 /* Cheap analyze-time admission for the heavier lifecycle.  A quarter-million
    input entries is a conservative storage/work proxy for whether its fixed
    match, direct-map, and overlap setup can amortize.  The matched symbolic
    and numeric profiles remain authoritative and impose stricter measured
    fill/work floors before any recurring consumer is enabled. */
-
 
 /* A near-complete diagonal plus a macroscopic column hub and a measurable
    scalar-column population is a cheap proposal for the shallow, low-work
@@ -971,14 +944,10 @@ static int symbolic_is_low_work_dominant_btf(
    AMD symbolic below must prove the dominant-core and work geometry before
    any analyze-time shortcut is retained. */
 
-
-
-
 /* The retained AMD proposal must expose a dominant core with an almost
    entirely scalar fringe.  Normalized fill/work and balance bounds keep the
    subtype inside the same low-work PTS resource class as the broader
    many-fringe policy. */
-
 
 static int kls_sparse_symmetric_compare_uf_long(const void *lhs,
                                                  const void *rhs) {
@@ -1117,51 +1086,32 @@ static int kls_exact_structural_symmetry(
    dimension.  The actual METIS symbolic must still prove full rank, the BTF
    core/fringe geometry, bounded fill, and a usable separator decomposition. */
 
-
 /* Preserve the standard AUTO/8T contract. */
-
 
 /* Capability contract for the guarded dense reciprocal-hub route.  Explicit
    orientation, ordering, scaling, backend, BTF, and pivot choices retain
    their documented meaning. */
-
-
-
-
 
 /* A nearly diagonal sparse graph with one or a few moderate spikes can
    overlap matching with NodeND, then build a fixed-pivot predicted numeric.
    Keep the public contract separate from the topology and from the later
    measured factor: no input dimension authorizes the recurring engine. */
 
-
-
-
-
-
-
-
 /* The matched pattern no longer has the public input coordinates.  Recurring
    dispatch therefore starts from the cached input proposal, but still needs
    the real predicted factor, its separator, and normalized fill/work bounds. */
-
-
-
 
 /* A nearly all-private separator with moderate predicted work benefits from
    the retained cluster forest and the lower relaxed-consume floors.  Denser
    factors and wider separator pipelines keep the generic measured schedule. */
 
-
 /* Direct NodeNDP is a capability of sparse asymmetric graphs with bounded
    in/out degree and one nearly spanning strongly connected component.  Keep
    the standard AUTO/8T contract explicit. */
 
-
 /* Allocation-free exact reciprocity check for the rare balanced-triangle,
    unsorted case.  The proposal has already proved degree <= 32, so scanning
    the reciprocal column is bounded.  Multiplicity is compared exactly. */
-
 
 /* The proposal is invariant under transpose and simultaneous relabeling.
    Degree/diagonal guards make the SCC pass a rare cold-path cost.  Raw SCC
@@ -1169,43 +1119,17 @@ static int kls_exact_structural_symmetry(
    leaves and narrower CAMD windows, from a coarser fringe that benefits from
    eight leaves.  The retained symbolic and numeric are guarded separately. */
 
-
-
-
-
-
-
-
-
-
-
-
 /* Dense, almost-full-diagonal directed graphs with one dominant in/out hub
    can settle into a giant unscaled METIS block whose trailing pivot panel is
    profitable as a pipelined dense tail. */
-
 
 /* The proposal is invariant under transpose, simultaneous relabeling, and
    stored entry order.  A column-only pass rejects unrelated giant matrices
    before the row-degree allocation and O(nnz) scan. */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* A dense, almost-full-diagonal graph with nearly balanced directed degrees,
    one macroscopic-but-bounded hub, and a thin disconnected fringe is a
    proposal for direct AMD/BTF analysis and max row scaling. */
-
 
 /* The input stage is invariant under transpose and simultaneous relabeling.
    It admits only dense, almost-full-diagonal graphs with a macroscopic but
@@ -1214,34 +1138,11 @@ static int kls_exact_structural_symmetry(
    labels.  This is deliberately only a cheap proposal; the measured AMD/BTF
    symbolic below proves the dominant-core fringe and factor economics. */
 
-
-
-
-
-
-
-
-
-
-
-
 /* Dense inputs can settle into a much sparser collection of moderate BTF
    components.  Their factor geometry, not an input identity, determines
    whether the cooperative row mirror amortizes its retained storage. */
 
-
-
-
-
-
-
-
-
-
-
-
 /* Capability contract for giant symmetric scalar-fringe systems. */
-
 
 /* A giant, exactly structurally symmetric sparse graph with an almost-full
    diagonal, a small missing-diagonal scalar fringe, and one or a few bounded
@@ -1250,9 +1151,6 @@ static int kls_exact_structural_symmetry(
    window.  Topology merely launches the proposal; the retained symbolic and
    measured numeric below independently prove the expensive lifecycle. */
 
-
-
-
 /* Very sparse, full-diagonal graphs in these resource bands can amortize a
    tuned NodeNDP/CAMD refinement and a retained cooperative row numeric.  The
    input band caps the cost of evaluating that proposal; later absolute
@@ -1260,7 +1158,6 @@ static int kls_exact_structural_symmetry(
    while measured fill separates the fine and wider giant-matrix schedules.
    Topology only proposes the lifecycle; the retained symbolic and numeric
    must independently prove their fill, work, and separator bounds. */
-
 
 static int kls_sparse_full_diagonal_metis_row_input_economics(
   UF_long n,
@@ -1278,24 +1175,16 @@ static int kls_sparse_full_diagonal_metis_row_input_profile(
     is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx);
 }
 
-
-
 /* Classify the actual no-BTF METIS symbolic only after it proves balanced
    intermediate fill and a useful mostly private separator.  Absolute bounds
    express two setup-cost crossovers; normalized bounds keep both meaningful
    across the complete input band.  Class one uses the fine sparse schedule;
    class two retains the requested tolerance and wider giant schedule. */
 
-
-
-
 /* Recurring row dispatch requires the measured fixed-pivot factor to preserve
    the symbolic economics, balanced streams, and normalized arithmetic
    intensity.  The same proof applies to the predicted bootstrap and to a
    later KLU-built replacement.  Cache it after each numeric build. */
-
-
-
 
 /* The raced METIS symbolic must expose one giant SCC plus an almost entirely
    scalar fringe, bounded intermediate fill/work, and a complete mostly
@@ -1303,15 +1192,9 @@ static int kls_sparse_full_diagonal_metis_row_input_profile(
    Absolute fill/work floors are the cold-setup crossover; normalized bounds
    make the contract meaningful for extensions and relabelings. */
 
-
-
-
 /* Recurring row updates require the actual unscaled fixed-pivot factor to
    preserve the balanced fill and arithmetic-intensity regime.  Cache this
    verdict after each numeric build; replacements are reclassified. */
-
-
-
 
 /* A successful structural match is still not sufficient to justify the
    specialized repeated-update lifecycle.  Its direct-value map, solve tree,
@@ -1423,14 +1306,6 @@ static int choose_auto_scale_from_pattern_impl(
     return options == NULL ? 2 : initial_scale(options);
   }
 
-
-
-
-
-
-
-
-
   double *row_max = (double *)calloc((size_t)n, sizeof(*row_max));
   double *diag_max = (double *)calloc((size_t)n, sizeof(*diag_max));
   if (row_max == NULL || diag_max == NULL) {
@@ -1521,8 +1396,6 @@ static int choose_auto_scale_from_pattern_impl(
     free(row_max);
     return -1;
   }
-
-
 
   if ((double)row_count >= min_diag_fraction * (double)n && row_count > 1u) {
     qsort(row_max, row_count, sizeof(*row_max), compare_double);
@@ -1665,28 +1538,15 @@ static int choose_auto_scale_from_values(kls_solver *solver,
   return selected;
 }
 
-
-
-
-
-
-
-
-
-
-
-
 /* The input match is only a proposal.  Recurring compact row/value/solve
    machinery is admitted after the real numeric proves low measured work,
    balanced streams, a bounded pivot detour count, and no perturbation. */
-
 
 /* Admit sparse, low-work dominant BTF factors with only a bounded fixed-pivot
    fringe just below the generic EGraph crossover.  A shallow largest-block
    elimination tree excludes long skinny factors whose synchronization depth
    overwhelms the same nominal work.  The decision depends on retained factor
    geometry and numeric work, not on a public matrix fingerprint. */
-
 
 /* Close the fixed absolute-work gap immediately below the large dominant-BTF
    EGraph window.  These factors are effectively one high-work block plus a
@@ -1697,15 +1557,11 @@ static int choose_auto_scale_from_values(kls_solver *solver,
    has been built.  None of these tests use input nonzero counts or an exact
    dimension/option fingerprint. */
 
-
-
-
 /* A moderately fragmented factor with one bounded core can keep its complete
    paired row streams in the compact 16-bit representation.  In that regime,
    duplicate value publication, residual SpMVs, and speculative numerics cost
    as much as the retained factor/solve pair.  Select the capability from the
    adopted symbolic and numeric resources rather than one input fingerprint. */
-
 
 /* A compact triangular-solve mirror can collapse a long consecutive run of
    singleton BTF blocks into one backward loop.  Select that representation
@@ -1763,19 +1619,15 @@ static int kls_compact_singleton_run_solve_profile(
   return singleton_blocks * 4u >= nblocks * 3u && max_run >= 256u;
 }
 
-
-
 /* A sparse full-rank matrix split into thousands of genuinely tiny SCCs has
    less total numeric work than the global ordering, matching, and tolerance
    trials that generic medium matrices can amortize.  Select that resource
    regime from normalized BTF geometry and symbolic work rather than the
    dimensions of one operating-point family. */
 
-
 /* Recurring solve and accuracy decisions additionally require the compact,
    full-precision factor that justified skipping the speculative trials.
    Value changes that leave this bounded regime lose the shortcut. */
-
 
 /* A sparse, high-work min-fill factor with a tiny mixed-component BTF fringe
    can expose a useful subtree solve even though its EGraph numeric update
@@ -1785,11 +1637,6 @@ static int kls_compact_singleton_run_solve_profile(
    2,048--4,096 operations per row.  The PTS builder independently validates
    its actual forest before any solve is routed through it. */
 
-
-
-
-
-
 /* A moderately expensive, fragmented dominant-BTF factor amortizes a live
    worker crew and wide subtree scheduling without entering the high-fill
    regime where those fixed choices lose.  Use measured numeric work, fill,
@@ -1797,15 +1644,11 @@ static int kls_compact_singleton_run_solve_profile(
    Explicit normal/AMD/unscaled requests share the same retained factor
    capabilities as AUTO after those choices have actually been selected. */
 
-
-
-
 /* A high-fill compact factor with a deep, moderately wide dependency graph
    keeps the scalar lean crew useful across the short solve/update gap.  The
    normalized fill, work, depth, and width boundary covers both the power-grid
    case that motivated the policy and an independently generated sparse
    expander, while rejecting equally sized shallow/low-fill counterexamples. */
-
 
 /* Reusing a residual verdict depends on the factor epoch and numeric frame,
    not on a matrix fingerprint.  A solve already covered by an ordinary
@@ -1843,21 +1686,9 @@ static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
    numeric must pass the independent guards below before recurring kernels
    are selected. */
 
-
-
-
-
-
-
-
-
-
 /* Kernel admission is stricter than the topology proposal.  Numeric scaling,
    pivoting, fill, and work must still describe the balanced retained factor
    on which the lean lifecycle was measured. */
-
-
-
 
 /* A moderate-order AMD single block with high estimated work can amortize the
    retained EGraph/PTS lifecycle.  This symbolic half only records the
@@ -1867,26 +1698,13 @@ static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
    The bounds are normalized capabilities and broad resource limits, not a
    matrix dimension window. */
 
-
-
-
 /* Recurring lifecycle choices require a materially pivoted, balanced actual
    factor.  Symbolic admission alone never selects the settled kernels. */
-
-
-
-
-
 
 /* A low-work dominant BTF factor with a mostly scalar fringe can expose a
    useful PTS forest even when the symbolic flop estimate is pessimistic.
    Admit the retained execution regime rather than a matrix-size fingerprint;
    every consumer below still requires the measured numeric bounds. */
-
-
-
-
-
 
 /* A high-work AMD factor with a tiny, nearly scalar BTF fringe can amortize
    predicted first-factor construction and the settled EGraph lifecycle.
@@ -1894,15 +1712,9 @@ static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
    have to pass the measured factor contract below before recurring kernels
    are selected. */
 
-
-
-
 /* Recurring decisions require an unscaled, balanced numeric with bounded
    pivoting and measured fill/work.  A value-only change can therefore reject
    the lifecycle even when it shares an admitted symbolic pattern. */
-
-
-
 
 /* Count preferred symbolic diagonals that are rejected at the requested
    threshold but retained at 1e-4.  This is the numerical reason a tighter
@@ -2273,10 +2085,6 @@ static double choose_initial_auto_pivot_tolerance(
     return 3.0e-8;
   }
 
-
-
-
-
   if (kls_value_tolerance_crossing_initial_profile(
         solver, numeric_values)) {
     /* A material set of symbolic diagonal choices lies between the requested
@@ -2285,9 +2093,6 @@ static double choose_initial_auto_pivot_tolerance(
     solver->value_tolerance_crossing_cycle = 1;
     return 1.0e-4;
   }
-
-
-
 
   if (solver->options.ordering == KLS_ORDERING_AUTO &&
       solver->stats.selected_ordering == KLS_ORDERING_METIS &&
@@ -3345,25 +3150,14 @@ static UF_long kls_metis_order(UF_long n,
    and separator bounds keep the tuned eight-leaf ordering inside its intended
    resource and parallel-work regime. */
 
-
-
-
 /* Scale suppression additionally requires the actual unscaled, no-pivot
    numeric to remain in the balanced fill/work band.  Cache this measured
    verdict after each factor; a replacement invalidates it. */
-
-
-
-
-
-
-
 
 /* Recurring kernel choices require the measured numeric to stay within the
    normalized fill/work regime that motivated retaining the NodeNDP order.
    A structurally accepted candidate outside this range remains a valid METIS
    factor but uses the ordinary adaptive kernels. */
-
 
 /* Scoped to the generic bounded-degree/full-diagonal AUTO proposal.  One is
    the fine sparse resource class; two is its wider giant-graph class. */
@@ -4277,7 +4071,6 @@ cleanup:
   free(all);
   return ok;
 }
-
 
 static int kls_mtmetis_nd(UF_long n, const idx_t *xadj, const idx_t *adjncy,
                           idx_t *metis_perm, idx_t *metis_iperm) {
@@ -5496,12 +5289,6 @@ static int symbolic_is_high_work_dominant_btf_nd_candidate(
   return !symbolic_is_low_work_dominant_btf(n, symbolic);
 }
 
-
-
-
-
-
-
 static UF_long count_pattern_diagonal(UF_long n,
                                       const UF_long *col_ptr,
                                       const UF_long *row_idx) {
@@ -5523,14 +5310,6 @@ static UF_long count_pattern_diagonal(UF_long n,
   }
   return diagonal;
 }
-
-
-
-
-
-
-
-
 
 /* Once a no-btf retry loses DECISIVELY on this pattern (>2x the btf
    score against a 0.80x adoption bar), further retries with other
@@ -5897,7 +5676,6 @@ static int metis_start_should_skip_no_btf_retry(UF_long n,
          is_large_moderate_degree_weak_diagonal_metis_pattern(n, col_ptr,
                                                               row_idx);
 }
-
 
 /* Set for the duration of the top-level analyze so the pattern-level
    ordering gates can see whether a background METIS race already covers
@@ -6615,7 +6393,6 @@ static int should_start_auto_without_btf(UF_long n,
   if (options == NULL || !options->use_btf) {
     return 0;
   }
-
 
   if (is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
     return 1;
@@ -8737,8 +8514,6 @@ static int build_greedy_numeric_row_match(UF_long n,
       n, nnz, col_ptr, row_idx, numeric_values, row_perm_out, matched_out);
   }
 
-
-
   if (improve_matching && exact_weighted_match_is_affordable(n, nnz)) {
     UF_long *exact_row_perm = NULL;
     UF_long *exact_col_match = NULL;
@@ -9999,9 +9774,6 @@ done:
   return accepted;
 }
 
-
-
-
 /* A value-aware row match is a performance challenger once a valid numeric
    exists.  If pivoting has already produced a factor inside the symbolic
    fill/work uncertainty band, the symbolic model contains no measured
@@ -10060,7 +9832,6 @@ static int should_try_spral_hungarian_numeric_trial(
     return 0;
   }
 
-
   if (solver->dense_spiked_original_pivot_path) {
     /* On dense-spike systems the incumbent pivoted METIS numeric already
        supports the faster repeated row engine.  Converting it to a matched
@@ -10068,7 +9839,6 @@ static int should_try_spral_hungarian_numeric_trial(
        H100 solve/refactor pair even when the matched trial is accepted. */
     return 0;
   }
-
 
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   const double offdiag_ratio =
@@ -10209,10 +9979,6 @@ static UF_long count_weak_diagonal_rows(UF_long n,
   return weak;
 }
 
-
-
-
-
 static int reactive_static_match_setup_is_unlikely_to_pay(
   const kls_solver *solver,
   UF_long weak_diagonal,
@@ -10254,9 +10020,6 @@ static int reactive_static_match_setup_is_unlikely_to_pay(
 /* the pattern-only half of the refinement gate: everything knowable
    before the trial factor runs (the flops floor is checked at join) */
 
-
-
-
 /* Speculative nested-dissection analysis for the pre-static METIS
    refinement: the serial NodeND+CAMD dominates the refinement cost and
    has no dependency on the trial factor's numeric results, so it can
@@ -10282,8 +10045,6 @@ typedef struct kls_psmetis_spec {
   kls_separator_analysis separator;
 } kls_psmetis_spec;
 
-
-
 static void kls_psmetis_spec_join(kls_psmetis_spec *spec) {
   if (spec != NULL && spec->launched) {
     pthread_join(spec->thread, NULL);
@@ -10307,8 +10068,6 @@ static void kls_psmetis_spec_discard(kls_psmetis_spec *spec) {
   spec->numeric = NULL;
   spec->status = KLS_ERR_FACTOR_FAILED;
 }
-
-
 
 static int should_try_auto_row_match(const kls_solver *solver,
                                      const double *numeric_values) {
@@ -10800,8 +10559,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     return;
   }
 
-
-
   const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL;
 
   const int trace_gates =
@@ -10822,10 +10579,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
     return;
   }
-
-
-
-
 
   const int small_candidate = solver->n <= 20000u;
   const int medium_weak_candidate =
@@ -11370,7 +11123,6 @@ matching_attempt:;
      tournament, alternate numeric factor, and incumbent Pareto gates below
      supply measured evidence for the combined candidate. */
 
-
   if (getenv("KLS_PRESTATIC_FORCE_METIS") != NULL ||
       solver->medium_partial_static_metis_path) {
     trial_options.ordering = KLS_ORDERING_METIS;
@@ -11779,7 +11531,6 @@ matching_attempt:;
   }
 #endif
 
-
   trial_common.scale =
     trial_options.scale == KLS_SCALE_AUTO && prefer_unscaled_static_match
       ? -1
@@ -12027,7 +11778,6 @@ matching_attempt:;
     pipe_route = pipe_route ||
                  (use_large_spral_match && solver->nnz >= 8u * solver->n);
 #endif
-
 
     if (pipe_route && solver->options.threads >= 2 &&
         getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
@@ -13091,7 +12841,6 @@ static void kls_metis_race_abandon(kls_solver *solver) {
    before the symbolic join (rajat31: 10s predicted METIS build versus a
    roughly 38s race-side KLU trial). */
 
-
 static int kls_compact_medium_dominant_btf_symbolic_shape(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->n == 0u ||
@@ -13133,8 +12882,6 @@ static int kls_large_low_degree_fragmented_pattern(
   return nnz >= 2.0 * (double)n && nnz < 3.0 * (double)n;
 }
 
-
-
 /* A medium-size dominant BTF block with thousands of small fringe blocks is
    already well served by the incumbent AMD factor.  In this shape, ordering
    the dominant block with nested dissection destroys the useful local
@@ -13144,14 +12891,10 @@ static int kls_large_low_degree_fragmented_pattern(
    work and fill bounds keep this separate from low-work fragmented systems
    and from the single/few-block matrices where METIS is profitable. */
 
-
 /* A partial structural diagonal is a cheap proposal signal for sparse
    matching-class systems.  It is deliberately insufficient to select the
    policy: the actual AMD/BTF symbolic below must also demonstrate the
    normalized dominant-core work regime. */
-
-
-
 
 /* Sparse AMD analyses with a dominant core and a 10--20% scalar/block
    fringe form a distinct fragmented-BTF class.  Keep this normalized
@@ -13205,8 +12948,6 @@ static int kls_sparse_fragmented_dominant_btf_symbolic_work(
       solver->n, solver->nnz, solver->orientation,
       solver->stats.selected_ordering, solver->symbolic);
 }
-
-
 
 /* Analyze-time start: the METIS analyze stage needs only the pattern,
    so the worker launches when the analysis finishes and overlaps both
@@ -13332,7 +13073,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
     scale_wanted = 0;
   }
 
-
   if (scale_wanted &&
       is_large_very_low_degree_full_diagonal_pattern(
         solver->n, solver->col_ptr, solver->row_idx)) {
@@ -13384,7 +13124,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
    estimates do not exist yet; the n floor selects the class where the
    race is always worth a core, and the promotion gate discards the
    result if the analysis ends up choosing METIS on its own. */
-
 
 /* Values are known: copy them, capture the settled scale, and release
    the worker's value-dependent stages. */
@@ -13648,7 +13387,6 @@ static int should_try_auto_scale(const kls_solver *solver) {
     return 0;
   }
 
-
   if (solver->metis_promotion_validated) {
     /* A timed promotion just measured this numeric's refactor at the
        current scale; unmeasured scale trial factors cannot be trusted
@@ -13686,10 +13424,6 @@ static int should_try_auto_scale(const kls_solver *solver) {
        remain eligible for the ordinary trials. */
     return 0;
   }
-
-
-
-
 
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
@@ -14077,7 +13811,6 @@ static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
     return 0;
   }
 
-
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   return fill >= 1000000;
 }
@@ -14221,8 +13954,6 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
        eligible and still require the realized fill plus solve probe below. */
     return 0;
   }
-
-
 
   /* The symbolic lnz/unz are upper bounds (TSOPF: est 149k vs actual
      125k), so pivot inflation is not detectable from them. Gate on
@@ -14370,7 +14101,6 @@ static int should_try_auto_metis(const kls_solver *solver) {
       solver->numeric == NULL) {
     return 0;
   }
-
 
   const double flops = solver->common.flops;
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
@@ -15195,7 +14925,6 @@ static int kls_choose_symbolic_inner(UF_long n,
       kls_sparse_full_diagonal_metis_row_ctx;
     kls_sparse_full_diagonal_metis_row_ctx = 0;
 
-
     int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
                                        KLS_ORDERING_METIS, symbolic_out,
                                        common_out, separator_out);
@@ -15226,8 +14955,6 @@ static int kls_choose_symbolic_inner(UF_long n,
     auto_options.use_btf = 0;
     symbolic_options = &auto_options;
   }
-
-
 
   if (kls_prestatic_ordering_ctx && options->threads >= 3 &&
       n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
@@ -16300,7 +16027,6 @@ static int is_prestatic_bound_missing_diagonal_pattern(
    adoption replaces the base symbolic; a cheap NATURAL probe is therefore
    enough for the analyze-stage eligibility signal. */
 
-
 /* set while the prestatic rejection redo rebuilds a real ordering so
    the probe below cannot re-fire */
 static _Thread_local int kls_ps_ana_probe_disable;
@@ -16452,17 +16178,6 @@ static int choose_symbolic_for_pattern(UF_long n,
     kls_separator_analysis_clear(&btf_separator);
     kls_separator_analysis_clear(&direct_separator);
   }
-
-
-
-
-
-
-
-
-
-
-
 
   int generic_match_resource_bound =
     n <= 20000u || (n <= 150000u && col_ptr[n] <= 1500000u);
@@ -17060,7 +16775,6 @@ struct kls_candidate_analyze_job {
   int status;
 };
 
-
 static void *kls_candidate_analyze_main(void *arg) {
   struct kls_candidate_analyze_job *job =
     (struct kls_candidate_analyze_job *)arg;
@@ -17075,8 +16789,6 @@ static int auto_orientation_prefers_transpose(UF_long n) {
      usually costs more than the normal-vs-transpose fill estimate saves. */
   return n <= 30000;
 }
-
-
 
 /* Compare representations over the caller's stated lifecycle, rather than
    treating symbolic fill as the whole cost.  A derived orientation carries
@@ -17227,16 +16939,6 @@ static int select_candidate_inner(kls_pattern_candidate *normal,
   {
     goto generic_orientation_comparison;
   }
-
-
-
-
-
-
-
-
-
-
 
   if (transpose != NULL && auto_orientation_prefers_transpose(transpose->n)) {
     const int transpose_status = analyze_candidate(transpose, options);
@@ -17714,7 +17416,6 @@ static int kls_restore_generic_nd_fallback_symbolic(kls_solver *solver,
   }
   return 1;
 }
-
 
 /* A lower-span AMF3 ordering is retained only after the first value set
    proves that its static numeric is usable.  Rebuild the ordinary AMF3
@@ -19177,240 +18878,176 @@ static void fill_numeric_stats(kls_solver *solver) {
       (int64_t)solver
         ->refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents;
   solver->stats.refactor_supernode_algorithm5_payoff_group_count =
-    (int64_t)solver->refactor_supernode_algorithm5_payoff_group_count_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_prefix_rows =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_prefix_rows_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_max_run_rows =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_max_run_rows_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_positioned_runs =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_positioned_runs_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_current_total =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_current_total_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_multi_current_count =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_multi_current_count_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_max_currents =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_max_currents_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_workspace_rows =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_workspace_rows_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_workspace_rows =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_workspace_rows_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_advance_deps =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_advance_deps_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_max_advance_deps =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_max_advance_deps_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_zero_advance_runs =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_zero_advance_runs_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_advance_unique_deps =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_advance_unique_deps_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_deps_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_advance_shared_deps =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_advance_shared_deps_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_advance_max_dep_fanout_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_suffix_deps =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_suffix_deps_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_suffix_deps =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_suffix_deps_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_suffix_update_entries =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_suffix_update_entries_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_suffix_unique_deps =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_suffix_unique_deps_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_suffix_duplicate_deps_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_suffix_shared_deps =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_suffix_shared_deps_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_suffix_max_dep_fanout_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_advance_slots =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_advance_slots_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_advance_slots =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_advance_slots_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_run_advance_slots =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_run_advance_slots_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_target_entries =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_target_entries_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_target_entries =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_target_entries_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_run_target_entries =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_run_target_entries_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_target_slots =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_target_slots_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_target_slots =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_target_slots_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_run_target_slots =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_run_target_slots_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_group_pattern_width =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_group_pattern_width_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_group_max_pattern_width =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_group_max_pattern_width_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_current_state_rows =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_current_state_rows_stat;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_current_state_max_rows =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_current_state_max_rows_stat;
+    0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_current_state_span_rows =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_current_state_span_rows_stat;
+      0;
   solver->stats
     .refactor_supernode_algorithm5_payoff_current_state_max_span_rows =
-      (int64_t)solver
-        ->refactor_supernode_algorithm5_payoff_current_state_max_span_rows_stat;
+      0;
   solver->stats.refactor_supernode_algorithm5_payoff_runtime_workspace_rows =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_runtime_workspace_rows;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_runtime_target_slots =
-    (int64_t)solver->refactor_supernode_algorithm5_payoff_runtime_target_slots;
+    0;
   solver->stats.refactor_supernode_algorithm5_payoff_runtime_current_count =
-    (int64_t)solver
-      ->refactor_supernode_algorithm5_payoff_runtime_current_count;
+    0;
   solver->stats.refactor_last_supernode_algorithm5_payoff_slot_accum_runs =
-    (int64_t)solver
-      ->refactor_last_supernode_algorithm5_payoff_slot_accum_runs;
+    0;
   solver->stats.refactor_last_supernode_algorithm5_payoff_slot_accum_rows =
-    (int64_t)solver
-      ->refactor_last_supernode_algorithm5_payoff_slot_accum_rows;
+    0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots;
+      0;
   solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_runs =
-    (int64_t)solver
-      ->refactor_last_supernode_algorithm5_payoff_prefix_prep_runs;
+    0;
   solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_rows =
-    (int64_t)solver
-      ->refactor_last_supernode_algorithm5_payoff_prefix_prep_rows;
+    0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots;
+      0;
   solver->stats.refactor_last_supernode_algorithm5_payoff_advance_seed_runs =
-    (int64_t)solver
-      ->refactor_last_supernode_algorithm5_payoff_advance_seed_runs;
+    0;
   solver->stats.refactor_last_supernode_algorithm5_payoff_advance_seed_deps =
-    (int64_t)solver
-      ->refactor_last_supernode_algorithm5_payoff_advance_seed_deps;
+    0;
   solver->stats.refactor_last_supernode_algorithm5_payoff_advance_seed_slots =
-    (int64_t)solver
-      ->refactor_last_supernode_algorithm5_payoff_advance_seed_slots;
+    0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_current_state_seed_runs =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_current_state_seed_runs;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_current_state_seed_deps =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_current_state_seed_deps;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_current_state_seed_rows =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_current_state_seed_rows;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_final_trigger_batches =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_final_trigger_batches;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_final_trigger_claims =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_final_trigger_claims;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_suffix_advance_slots =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_suffix_advance_slots;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_suffix_advance_deps =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_suffix_advance_deps;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_suffix_advance_updates =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_suffix_advance_updates;
+      0;
   solver->stats
     .refactor_last_supernode_algorithm5_payoff_suffix_advance_finished =
-      (int64_t)solver
-        ->refactor_last_supernode_algorithm5_payoff_suffix_advance_finished;
+      0;
   solver->stats.refactor_last_supernode_consumer_plan_attempts =
     (int64_t)solver->refactor_last_supernode_consumer_plan_attempts;
   solver->stats.refactor_last_supernode_consumer_plan_hits =

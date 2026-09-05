@@ -1003,6 +1003,8 @@ typedef struct kls_stats {
   int64_t refactor_supernode_algorithm5_prefix_panel_payoff_subset_current_count;
   int64_t refactor_supernode_algorithm5_prefix_panel_payoff_subset_multi_current_count;
   int64_t refactor_supernode_algorithm5_prefix_panel_payoff_subset_max_currents;
+  /* Retired Algorithm5 payoff statistics: retained for ABI compatibility;
+     these fields through refactor_last_supernode_algorithm5_payoff_* are zero. */
   int64_t refactor_supernode_algorithm5_payoff_group_count;
   int64_t refactor_supernode_algorithm5_payoff_group_prefix_rows;
   int64_t refactor_supernode_algorithm5_payoff_group_max_run_rows;

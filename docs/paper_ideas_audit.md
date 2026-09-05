@@ -1,5 +1,11 @@
 # Paper Ideas Audit
 
+Historical note (2026-09-05): the Algorithm5 payoff variants, experimental
+row-pipeline lookahead, deferred/group output caches, multi-producer supernode
+mode, and predicted-factor row-refactor override have been removed. References
+to their controls and measurements below describe past experiments, not
+features available in the current library.
+
 This note records which ideas from the reference papers are present in KLS and
 which remain open. The intent is to keep KLS development focused on general
 solver algorithms instead of tuning individual benchmark matrices.
