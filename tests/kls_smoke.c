@@ -16146,7 +16146,7 @@ static int test_kls_first_parallel_pivoted_btf_fallback(void) {
   return ok;
 }
 
-static int test_benchmark_shape_does_not_enable_singular_completion(void) {
+static int test_structurally_full_rank_singular_rejection(void) {
   enum {
     n = 15066,
     lower_n = 15064,
@@ -16157,16 +16157,6 @@ static int test_benchmark_shape_does_not_enable_singular_completion(void) {
   int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
   double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
 
-  const char *saved_enable_value =
-    getenv("KLS_ENABLE_SINGULAR_COMPLETION");
-  char *saved_enable = saved_enable_value != NULL
-    ? strdup(saved_enable_value) : NULL;
-  const int had_enable = saved_enable_value != NULL;
-  const char *saved_disable_value =
-    getenv("KLS_DISABLE_SINGULAR_COMPLETION");
-  char *saved_disable = saved_disable_value != NULL
-    ? strdup(saved_disable_value) : NULL;
-  const int had_disable = saved_disable_value != NULL;
   const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
   char *saved_first = saved_first_value != NULL
     ? strdup(saved_first_value) : NULL;
@@ -16177,9 +16167,7 @@ static int test_benchmark_shape_does_not_enable_singular_completion(void) {
     fprintf(stderr, "failed to allocate singular fingerprint regression\n");
     ok = 0;
   }
-  if ((had_enable && saved_enable == NULL) ||
-      (had_disable && saved_disable == NULL) ||
-      (had_first && saved_first == NULL)) {
+  if ((had_first && saved_first == NULL)) {
     fprintf(stderr, "failed to save singular fingerprint environment\n");
     ok = 0;
   }
@@ -16242,9 +16230,7 @@ static int test_benchmark_shape_does_not_enable_singular_completion(void) {
     }
   }
 
-  if (ok && (unsetenv("KLS_ENABLE_SINGULAR_COMPLETION") != 0 ||
-             unsetenv("KLS_DISABLE_SINGULAR_COMPLETION") != 0 ||
-             setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0)) {
+  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
     perror("configure singular fingerprint regression");
     ok = 0;
   }
@@ -16273,14 +16259,6 @@ static int test_benchmark_shape_does_not_enable_singular_completion(void) {
   }
 
   kls_destroy(solver);
-  if (!restore_env_value("KLS_ENABLE_SINGULAR_COMPLETION", had_enable,
-                         saved_enable != NULL ? saved_enable : "")) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_DISABLE_SINGULAR_COMPLETION", had_disable,
-                         saved_disable != NULL ? saved_disable : "")) {
-    ok = 0;
-  }
   if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_first,
                          saved_first != NULL ? saved_first : "")) {
     ok = 0;
@@ -16288,136 +16266,11 @@ static int test_benchmark_shape_does_not_enable_singular_completion(void) {
   free(ap);
   free(ai);
   free(ax);
-  free(saved_enable);
-  free(saved_disable);
   free(saved_first);
   return ok;
 }
 
-static int test_consistent_singular_rank_completion(void) {
-  const int32_t ap[] = {0, 2, 4, 6, 8};
-  const int32_t ai[] = {0, 1, 0, 1, 2, 3, 2, 3};
-  const double ax0[] = {1.0, 1.0, 1.0, 1.0,
-                        2.0, 2.0, 2.0, 2.0};
-  const double ax1[] = {2.0, 2.0, 3.0, 3.0,
-                        4.0, 4.0, 5.0, 5.0};
-  const double b0[] = {2.0, 2.0, 4.0, 4.0};
-  const double b1[] = {5.0, 5.0, 9.0, 9.0};
-  double x[4] = {0.0, 0.0, 0.0, 0.0};
 
-  const char *saved_enable_value =
-    getenv("KLS_ENABLE_SINGULAR_COMPLETION");
-  char *saved_enable = saved_enable_value != NULL
-    ? strdup(saved_enable_value) : NULL;
-  const int had_enable = saved_enable_value != NULL;
-  const char *saved_disable_value =
-    getenv("KLS_DISABLE_SINGULAR_COMPLETION");
-  char *saved_disable = saved_disable_value != NULL
-    ? strdup(saved_disable_value) : NULL;
-  const int had_disable = saved_disable_value != NULL;
-  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
-  char *saved_first = saved_first_value != NULL
-    ? strdup(saved_first_value) : NULL;
-  const int had_first = saved_first_value != NULL;
-
-  int ok = 1;
-  if ((had_enable && saved_enable == NULL) ||
-      (had_disable && saved_disable == NULL) ||
-      (had_first && saved_first == NULL)) {
-    fprintf(stderr, "failed to save singular-completion environment\n");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_SINGULAR_COMPLETION", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_SINGULAR_COMPLETION");
-    ok = 0;
-  }
-  if (ok && unsetenv("KLS_DISABLE_SINGULAR_COMPLETION") != 0) {
-    perror("unsetenv KLS_DISABLE_SINGULAR_COMPLETION");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR=0");
-    ok = 0;
-  }
-
-  kls_solver *solver = NULL;
-  kls_options options;
-  kls_default_options(&options);
-  options.ordering = KLS_ORDERING_NATURAL;
-  options.use_btf = 1;
-  options.scale = 0;
-  options.static_pivoting = 0;
-  options.threads = 1;
-
-  if (ok && !require_ok(kls_create(&solver),
-                        "create singular completion")) {
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_analyze_csc(
-                          solver, KLS_INDEX_INT32, 4, ap, ai, 0, &options),
-                        "analyze singular completion")) {
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_factor(solver, ax0),
-                        "factor singular completion")) {
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b0, 0, x, 0),
-                        "solve singular completion")) {
-    ok = 0;
-  }
-  for (int32_t generation = 0; ok && generation < 2; ++generation) {
-    const double *ax = generation == 0 ? ax0 : ax1;
-    const double *b = generation == 0 ? b0 : b1;
-    double max_rhs = 0.0;
-    double max_residual = 0.0;
-    for (int32_t row = 0; row < 4; ++row) {
-      double residual = -b[row];
-      max_rhs = fmax(max_rhs, fabs(b[row]));
-      for (int32_t col = 0; col < 4; ++col) {
-        for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-          if (ai[p] == row) {
-            residual += ax[p] * x[col];
-          }
-        }
-      }
-      max_residual = fmax(max_residual, fabs(residual));
-    }
-    if (max_residual / fmax(max_rhs, 1.0) > 1.0e-10) {
-      fprintf(stderr,
-              "singular completion residual too large at generation %d:"
-              " %.17g\n",
-              generation, max_residual / fmax(max_rhs, 1.0));
-      ok = 0;
-    }
-    if (generation == 0 && ok) {
-      if (!require_ok(kls_refactor(solver, ax1),
-                      "refactor singular completion") ||
-          !require_ok(kls_solve(solver, 1, b1, 0, x, 0),
-                      "solve refactored singular completion")) {
-        ok = 0;
-      }
-    }
-  }
-
-  kls_destroy(solver);
-  if (!restore_env_value("KLS_ENABLE_SINGULAR_COMPLETION", had_enable,
-                         saved_enable != NULL ? saved_enable : "")) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_DISABLE_SINGULAR_COMPLETION", had_disable,
-                         saved_disable != NULL ? saved_disable : "")) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_first,
-                         saved_first != NULL ? saved_first : "")) {
-    ok = 0;
-  }
-  free(saved_enable);
-  free(saved_disable);
-  free(saved_first);
-  return ok;
-}
 
 static int test_parallel_btf_row_supernode_update(void) {
   const int32_t ap[] = {0, 3, 6, 9, 10};
@@ -17455,336 +17308,12 @@ static int test_exact_unchanged_refactor_reuse(void) {
   return ok;
 }
 
-static int test_partial_btf_refactor(void) {
-  /* Three independent 2x2 diagonal SCCs plus upper-BTF couplings. */
-  const int32_t n = 6;
-  const int32_t ap[7] = {0, 2, 4, 7, 9, 12, 15};
-  const int32_t ai[15] = {
-    0, 1, 0, 1, 0, 2, 3, 2, 3, 1, 4, 5, 3, 4, 5
-  };
-  const double ax0[15] = {
-    4.0, 1.0, 1.0, 3.0,
-    0.5, 5.0, 1.0, 1.0, 4.0,
-    -0.25, 6.0, 1.0, 0.75, 1.0, 5.0
-  };
-  const double expected[6] = {1.0, -2.0, 0.5, 3.0, -1.0, 2.0};
-  const double expected_transpose[6] = {-0.5, 1.5, 2.0, -1.0, 0.25, 3.0};
-  double ax[15];
-  double b[6];
-  double bt[6];
-  double x[6];
-  const char *saved_partial_value =
-    getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR");
-  const char *saved_unchanged_value = getenv("KLS_DISABLE_UNCHANGED_REFACTOR");
-  const char *saved_gate_value =
-    getenv("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE");
-  const char *saved_fraction_value =
-    getenv("KLS_PARTIAL_BTF_MAX_WORK_FRACTION");
-  char *saved_partial = saved_partial_value != NULL
-    ? strdup(saved_partial_value) : NULL;
-  char *saved_unchanged = saved_unchanged_value != NULL
-    ? strdup(saved_unchanged_value) : NULL;
-  char *saved_gate = saved_gate_value != NULL
-    ? strdup(saved_gate_value) : NULL;
-  char *saved_fraction = saved_fraction_value != NULL
-    ? strdup(saved_fraction_value) : NULL;
-  const int had_partial = saved_partial_value != NULL;
-  const int had_unchanged = saved_unchanged_value != NULL;
-  const int had_gate = saved_gate_value != NULL;
-  const int had_fraction = saved_fraction_value != NULL;
-  kls_solver *solver = NULL;
-  kls_options options;
-  kls_stats stats;
-  int ok = 1;
 
-  if ((had_partial && saved_partial == NULL) ||
-      (had_unchanged && saved_unchanged == NULL) ||
-      (had_gate && saved_gate == NULL) ||
-      (had_fraction && saved_fraction == NULL)) {
-    free(saved_partial);
-    free(saved_unchanged);
-    free(saved_gate);
-    free(saved_fraction);
-    return 0;
-  }
-  if (setenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR", "1", 1) != 0 ||
-      setenv("KLS_DISABLE_UNCHANGED_REFACTOR", "1", 1) != 0 ||
-      unsetenv("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE") != 0 ||
-      unsetenv("KLS_PARTIAL_BTF_MAX_WORK_FRACTION") != 0) {
-    perror("configure partial BTF refactor test");
-    ok = 0;
-  }
-
-  memcpy(ax, ax0, sizeof(ax));
-  kls_default_options(&options);
-  options.backend = KLS_BACKEND_SERIAL;
-  options.threads = 1;
-  options.ordering = KLS_ORDERING_NATURAL;
-  options.orientation = KLS_ORIENTATION_NORMAL;
-  options.scale = -1;
-  options.use_btf = 1;
-  options.static_pivoting = 0;
-  if (ok && !require_ok(kls_create(&solver), "create partial BTF")) ok = 0;
-  if (ok && !require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, n, ap, ai,
-                                        0, &options),
-                        "analyze partial BTF")) ok = 0;
-  if (ok && !require_ok(kls_factor(solver, ax), "factor partial BTF")) ok = 0;
-
-  /* First update only F: no diagonal block factor may be touched. */
-  ax[4] *= 1.2;
-  memset(b, 0, sizeof(b));
-  memset(bt, 0, sizeof(bt));
-  memset(x, 0, sizeof(x));
-  for (int col = 0; col < n; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      b[ai[p]] += ax[p] * expected[col];
-      bt[col] += ax[p] * expected_transpose[ai[p]];
-    }
-  }
-  if (ok && !require_ok(kls_refactor(solver, ax),
-                        "partial BTF coupling refresh")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats partial BTF coupling")) ok = 0;
-  if (ok && stats.last_refactor_path != KLS_REFACTOR_PATH_PARTIAL_BTF) {
-    fprintf(stderr, "coupling-only update used path %s\n",
-            kls_refactor_path_name(stats.last_refactor_path));
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve partial BTF coupling")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr, "partial BTF coupling mismatch at %d: %.17g\n", i,
-              x[i]);
-      ok = 0;
-    }
-  }
-  memset(x, 0, sizeof(x));
-  if (ok && !require_ok(kls_solve_transpose(solver, 1, bt, 0, x, 0),
-                        "transpose solve partial BTF coupling")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected_transpose[i])) {
-      fprintf(stderr,
-              "partial BTF transpose coupling mismatch at %d: %.17g\n",
-              i, x[i]);
-      ok = 0;
-    }
-  }
-
-  /* One diagonal SCC changes and remains under the retained-work gate. */
-  ax[10] *= 1.1;
-  memset(b, 0, sizeof(b));
-  memset(x, 0, sizeof(x));
-  for (int col = 0; col < n; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      b[ai[p]] += ax[p] * expected[col];
-    }
-  }
-  if (ok && !require_ok(kls_refactor(solver, ax),
-                        "partial BTF one-block refresh")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats partial BTF one-block")) ok = 0;
-  if (ok && stats.last_refactor_path != KLS_REFACTOR_PATH_PARTIAL_BTF) {
-    fprintf(stderr, "one-block update used path %s\n",
-            kls_refactor_path_name(stats.last_refactor_path));
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve partial BTF one-block")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr, "partial BTF block mismatch at %d: %.17g\n", i,
-              x[i]);
-      ok = 0;
-    }
-  }
-
-  /* Two of three equal-size blocks exceed the default 50% gate.  The normal
-     full refactor must take over and leave the next reference coherent. */
-  ax[0] *= 1.05;
-  ax[7] *= 1.04;
-  memset(b, 0, sizeof(b));
-  memset(x, 0, sizeof(x));
-  for (int col = 0; col < n; ++col) {
-    for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-      b[ai[p]] += ax[p] * expected[col];
-    }
-  }
-  if (ok && !require_ok(kls_refactor(solver, ax),
-                        "partial BTF work-gate fallback")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats partial BTF fallback")) ok = 0;
-  if (ok && stats.last_refactor_path == KLS_REFACTOR_PATH_PARTIAL_BTF) {
-    fprintf(stderr, "multi-block update bypassed partial BTF work gate\n");
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve partial BTF fallback")) ok = 0;
-  for (int i = 0; ok && i < n; ++i) {
-    if (!close_enough(x[i], expected[i])) {
-      fprintf(stderr, "partial BTF fallback mismatch at %d: %.17g\n", i,
-              x[i]);
-      ok = 0;
-    }
-  }
-
-  /* A second over-budget update gates the scan.  A subsequent one-block
-     update must therefore use the full fallback until explicit factorization
-     starts a new epoch and re-arms partial BTF. */
-  ax[0] *= 1.02;
-  ax[7] *= 1.03;
-  if (ok && !require_ok(kls_refactor(solver, ax),
-                        "partial BTF second work-gate fallback")) ok = 0;
-  ax[10] *= 1.01;
-  if (ok && !require_ok(kls_refactor(solver, ax),
-                        "partial BTF gated fallback")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats partial BTF gated fallback")) ok = 0;
-  if (ok && stats.last_refactor_path == KLS_REFACTOR_PATH_PARTIAL_BTF) {
-    fprintf(stderr, "partial BTF rejection gate did not suppress retry\n");
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_factor(solver, ax),
-                        "factor re-arm partial BTF")) ok = 0;
-  ax[10] *= 1.01;
-  if (ok && !require_ok(kls_refactor(solver, ax),
-                        "partial BTF after explicit factor")) ok = 0;
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats re-armed partial BTF")) ok = 0;
-  if (ok && stats.last_refactor_path != KLS_REFACTOR_PATH_PARTIAL_BTF) {
-    fprintf(stderr, "explicit factor did not re-arm partial BTF: %s\n",
-            kls_refactor_path_name(stats.last_refactor_path));
-    ok = 0;
-  }
-
-  kls_destroy(solver);
-  if (!restore_env_value("KLS_ENABLE_PARTIAL_BTF_REFACTOR", had_partial,
-                         saved_partial != NULL ? saved_partial : "") ||
-      !restore_env_value("KLS_DISABLE_UNCHANGED_REFACTOR", had_unchanged,
-                         saved_unchanged != NULL ? saved_unchanged : "") ||
-      !restore_env_value("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE", had_gate,
-                         saved_gate != NULL ? saved_gate : "") ||
-      !restore_env_value("KLS_PARTIAL_BTF_MAX_WORK_FRACTION", had_fraction,
-                         saved_fraction != NULL ? saved_fraction : "")) {
-    ok = 0;
-  }
-  free(saved_partial);
-  free(saved_unchanged);
-  free(saved_gate);
-  free(saved_fraction);
-  return ok;
-}
 
 /* Checker-mode coverage for the experimental partial-BTF path.  The fast
    solver and a second solver forced through the ordinary refactor see each
    generated numeric and RHS; their complete solutions must agree. */
-static int test_partial_btf_shadow_checker(void) {
-  const int32_t n = 6;
-  const int32_t ap[7] = {0, 2, 4, 7, 9, 12, 15};
-  const int32_t ai[15] = {
-    0, 1, 0, 1, 0, 2, 3, 2, 3, 1, 4, 5, 3, 4, 5
-  };
-  double ax[15] = {
-    4.0, 1.0, 1.0, 3.0, 0.5, 5.0, 1.0, 1.0, 4.0,
-    -0.25, 6.0, 1.0, 0.75, 1.0, 5.0
-  };
-  const double expected[6] = {1.0, -2.0, 0.5, 3.0, -1.0, 2.0};
-  const int32_t changed_positions[] = {4, 5, 10, 0, 12, 8};
-  const char *saved_value = getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR");
-  char *saved = saved_value != NULL ? strdup(saved_value) : NULL;
-  const int had_saved = saved_value != NULL;
-  kls_solver *partial = NULL;
-  kls_solver *full = NULL;
-  kls_options options;
-  double b[6];
-  double xp[6];
-  double xf[6];
-  int ok = 1;
 
-  if (had_saved && saved == NULL) return 0;
-  if (setenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR", "1", 1) != 0) {
-    perror("setenv partial BTF shadow checker");
-    free(saved);
-    return 0;
-  }
-  kls_default_options(&options);
-  options.backend = KLS_BACKEND_SERIAL;
-  options.threads = 1;
-  options.ordering = KLS_ORDERING_NATURAL;
-  options.orientation = KLS_ORIENTATION_NORMAL;
-  options.scale = -1;
-  options.use_btf = 1;
-  options.static_pivoting = 0;
-  if (!require_ok(kls_create(&partial), "create partial BTF shadow")) ok = 0;
-  if (ok && !require_ok(kls_create(&full), "create full BTF shadow")) ok = 0;
-  if (ok && !require_ok(kls_analyze_csc(partial, KLS_INDEX_INT32, n, ap, ai,
-                                        0, &options),
-                        "analyze partial BTF shadow")) ok = 0;
-  if (ok && !require_ok(kls_analyze_csc(full, KLS_INDEX_INT32, n, ap, ai,
-                                        0, &options),
-                        "analyze full BTF shadow")) ok = 0;
-  if (ok && !require_ok(kls_factor(partial, ax),
-                        "factor partial BTF shadow")) ok = 0;
-  if (ok && !require_ok(kls_factor(full, ax), "factor full BTF shadow")) ok = 0;
-
-  for (size_t update = 0; ok && update < sizeof(changed_positions) /
-                                      sizeof(changed_positions[0]); ++update) {
-    ax[changed_positions[update]] *= 1.0 + 0.002 * (double)(update + 1u);
-    memset(b, 0, sizeof(b));
-    for (int col = 0; col < n; ++col) {
-      for (int32_t p = ap[col]; p < ap[col + 1]; ++p) {
-        b[ai[p]] += ax[p] * expected[col];
-      }
-    }
-    if (!require_ok(kls_refactor(partial, ax),
-                    "partial BTF shadow refresh")) {
-      ok = 0;
-      break;
-    }
-    kls_stats stats;
-    stats.struct_size = sizeof(stats);
-    if (!require_ok(kls_get_stats(partial, &stats),
-                    "partial BTF shadow stats") ||
-        stats.last_refactor_path != KLS_REFACTOR_PATH_PARTIAL_BTF) {
-      fprintf(stderr, "partial BTF shadow did not select partial path\n");
-      ok = 0;
-      break;
-    }
-    if (unsetenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") != 0 ||
-        !require_ok(kls_refactor(full, ax), "full BTF shadow refresh") ||
-        setenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR", "1", 1) != 0) {
-      perror("toggle partial BTF shadow checker");
-      ok = 0;
-      break;
-    }
-    if (!require_ok(kls_solve(partial, 1, b, 0, xp, 0),
-                    "solve partial BTF shadow") ||
-        !require_ok(kls_solve(full, 1, b, 0, xf, 0),
-                    "solve full BTF shadow")) {
-      ok = 0;
-      break;
-    }
-    for (int i = 0; i < n; ++i) {
-      if (!close_enough(xp[i], xf[i]) || !close_enough(xp[i], expected[i])) {
-        fprintf(stderr, "partial BTF shadow mismatch update %zu row %d\n",
-                update, i);
-        ok = 0;
-        break;
-      }
-    }
-  }
-  kls_destroy(partial);
-  kls_destroy(full);
-  if (!restore_env_value("KLS_ENABLE_PARTIAL_BTF_REFACTOR", had_saved,
-                         saved != NULL ? saved : "")) ok = 0;
-  free(saved);
-  return ok;
-}
 
 
 
@@ -18273,12 +17802,6 @@ int main(void) {
   if (!test_repeated_factor_low_rcond_contract()) {
     return EXIT_FAILURE;
   }
-  if (!test_partial_btf_refactor()) {
-    return EXIT_FAILURE;
-  }
-  if (!test_partial_btf_shadow_checker()) {
-    return EXIT_FAILURE;
-  }
   if (!test_large_sparse_low_degree_retained_tolerance()) {
     return EXIT_FAILURE;
   }
@@ -18516,10 +18039,7 @@ int main(void) {
   if (!test_kls_first_parallel_pivoted_btf_fallback()) {
     return EXIT_FAILURE;
   }
-  if (!test_benchmark_shape_does_not_enable_singular_completion()) {
-    return EXIT_FAILURE;
-  }
-  if (!test_consistent_singular_rank_completion()) {
+  if (!test_structurally_full_rank_singular_rejection()) {
     return EXIT_FAILURE;
   }
   if (!test_row_solve_from_numeric_after_klu_first()) {

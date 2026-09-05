@@ -95,8 +95,7 @@ value records cannot be confused during review.
 For a deterministic rejection workload, use
 `REFACTOR_VALUES=entrywise`.  It applies an independent coordinate/generation
 multiplier to every stored entry, so it is generally not expressible as
-`D_row A_0 D_col`.  This mode exercises certificate rejection and ordinary
-numeric fallback.  Unlike the rank-preserving mode, it does not guarantee
+`D_row A_0 D_col`.  This mode exercises ordinary numeric refactorization.  Unlike the rank-preserving mode, it does not guarantee
 rank preservation; use a small amplitude and retain residual/status filters.
 
 For a solver-neutral localized counter-workload, use
@@ -107,35 +106,6 @@ the matrix dimension and a published constant, not by a solver ordering or
 BTF decomposition, and is identical in every harness. This mode is intended
 to measure localized numeric-update mechanisms; it has the same rank caveat
 as the full entrywise mode.
-
-## Opt-in partial-BTF retention
-
-Set `KLS_ENABLE_PARTIAL_BTF_REFACTOR=1` before the reference factorization to
-enable the localized numeric path. For an unscaled, multi-block BTF numeric,
-KLS retains an exact reference value array and maps every stored entry either
-to an independent diagonal block or to KLU's off-diagonal `Offx` storage. A
-refactor compares every entry, copies changed couplings, and numerically
-refreshes only changed diagonal blocks. It falls through to the ordinary full
-refactor on any unsupported numeric state or failed refresh; scaled,
-predicted, perturbed, reduced-precision, and refinement-dependent numerics are
-deliberately ineligible.
-
-The default work gate accepts a partial update only when changed blocks hold
-at most half of the stored factor-entry work proxy. Override that fraction
-with `KLS_PARTIAL_BTF_MAX_WORK_FRACTION` in `(0,1)`. Two consecutive
-over-budget observations suppress later scans until an explicit
-`kls_factor`; `KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE=1` disables that
-experimental backoff. `KLS_TRACE_PARTIAL_BTF=1` reports the changed-entry,
-block, and work counts.
-
-As a bounded paper-union check, `IBM_EDA/ckt11752_tr_0` has 199 BTF blocks and
-the localized generator changes 196 entries in one block, representing
-194,768 of 1,029,808 factor-work units. Seven solver-order-rotated processes
-with eight cores, 20 refactors, 100 measured solves, and amplitude 0.001 give
-median `H100` values of 0.2210 s for partial-BTF KLS, 0.2856 s for CKTSO, and
-0.4161 s for SubtreeLU; full-refactor KLS takes 0.4092 s. All relative
-residuals are at most 2.1e-15. This is a mechanism check on one localized
-case, not a union-wide arbitrary-update ranking.
 
 ## Local primary material
 

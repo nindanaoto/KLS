@@ -4657,7 +4657,6 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (!check_pivots && kls_low_work_btf_map32_policy_enabled(solver) &&
       solver->solve_contract_probe != 0 &&
       solver->refactor_input_user_pos32 == NULL &&
-      solver->partial_btf_reference_valid == 0 &&
       solver->snb == NULL && solver->lean_probe_arm <= 0 &&
       !solver->row_refactor_values_ready &&
       !solver->row_refactor_values_dirty &&
@@ -4741,11 +4740,6 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
-  if (!check_pivots &&
-      kls_try_partial_btf_refactor(solver, numeric_values, check_pivots)) {
-    kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_PARTIAL_BTF);
-    return 1;
-  }
   if (!check_pivots &&
       (solver->lean_probe_arm > 0 ||
        getenv("KLS_ENABLE_LEAN_ROW_CONSUME") != NULL)) {

@@ -78,15 +78,7 @@ typedef enum kls_refactor_path {
   KLS_REFACTOR_PATH_POOL = 4,
   KLS_REFACTOR_PATH_KLU = 5,
   KLS_REFACTOR_PATH_SNB = 6,
-  KLS_REFACTOR_PATH_UNCHANGED = 7,
-  /* Only changed diagonal BTF blocks were numerically refreshed; unchanged
-     block factors were retained and changed off-diagonal couplings copied. */
-  KLS_REFACTOR_PATH_PARTIAL_BTF = 9,
-  /* A bounded small update retained the preceding numeric as a
-     preconditioner; solves are certified against the new values by
-     residual-driven iterative refinement.  This includes the optional
-     representation-gated generic retained-preconditioner experiment. */
-  KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER = 10
+  KLS_REFACTOR_PATH_UNCHANGED = 7
 } kls_refactor_path;
 
 #define KLS_SCALE_AUTO (-2)

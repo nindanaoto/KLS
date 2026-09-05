@@ -560,22 +560,6 @@ struct kls_solver {
   int refactor_input_snapshot_valid;
   int unchanged_refactor_state; /* 0 unarmed, 1 first comparison,
                                    2 repeated values observed, -1 declined */
-  /* Opt-in block-local update plan.  Each stored input entry maps either to
-     its independent diagonal BTF block or to one Offx slot.  The reference
-     is in the same final internal CSC frame as the retained numeric. */
-  double *partial_btf_reference_values;
-  uint32_t *partial_btf_entry_block;
-  uint32_t *partial_btf_entry_offx;
-  uint32_t *partial_btf_changed_entries;
-  unsigned char *partial_btf_changed_blocks;
-  const UF_long *partial_btf_col_ptr_identity;
-  const UF_long *partial_btf_row_idx_identity;
-  const trilinos_klu_l_symbolic *partial_btf_symbolic_identity;
-  const trilinos_klu_l_numeric *partial_btf_numeric_identity;
-  UF_long partial_btf_nblocks;
-  int partial_btf_reference_valid;
-  uint32_t partial_btf_decline_streak;
-  int partial_btf_gated;
   double *solve_perm_workspace;
   UF_long solve_perm_workspace_n;
   kls_egraph_refactor_pool *egraph_pool;
@@ -898,10 +882,6 @@ struct kls_solver {
   UF_long pivot_nudge_capacity;
   double *solve_refine_workspace;
   double *solve_refine_values;
-  double *retained_preconditioner_reference_values;
-  int retained_preconditioner_active;
-  int retained_preconditioner_numeric_current;
-  int bounded_degree_retained_preconditioner_candidate;
   double *verified_rhs;
   double *verified_factor_rhs;
   double verified_rhs_norm2;
@@ -2689,12 +2669,7 @@ struct kls_solver {
   int promoted_tolerance_l2_recovery_required;
   uint64_t promoted_tolerance_l2_contract_run_count;
   uint64_t promoted_tolerance_l2_recovery_count;
-  /* Cold retained-preconditioner stage/counter state stays at the tail.  The
-     candidate bit above replaces the former exact-policy bit in place, so
-     these additions do not shift established factor/refactor hot fields. */
-  int bounded_degree_retained_preconditioner_symbolic_eligible;
-  int bounded_degree_retained_preconditioner_numeric_eligible; /* -1/0/1 */
-  uint64_t bounded_degree_retained_preconditioner_reuse_count;
+
   /* Keep the optional frontier stream at the cold tail so established hot
      solver fields retain their offsets. */
   uint32_t *lean_snode_wait_slot;
@@ -3538,7 +3513,7 @@ static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
     !solver->numeric_is_predicted && !solver->fp32_last_used &&
     !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
     !solver->promoted_tolerance_l2_recovery_required &&
-    !solver->solve_recovery_active && !solver->retained_preconditioner_active &&
+    !solver->solve_recovery_active &&
     solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u &&
     solver->solve_contract_probe == 1;
@@ -26233,403 +26208,6 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Opt-in partial BTF refactorization                                         */
-/* -------------------------------------------------------------------------- */
-
-static void kls_partial_btf_clear_plan(kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-  free(solver->partial_btf_reference_values);
-  free(solver->partial_btf_entry_block);
-  free(solver->partial_btf_entry_offx);
-  free(solver->partial_btf_changed_entries);
-  free(solver->partial_btf_changed_blocks);
-  solver->partial_btf_reference_values = NULL;
-  solver->partial_btf_entry_block = NULL;
-  solver->partial_btf_entry_offx = NULL;
-  solver->partial_btf_changed_entries = NULL;
-  solver->partial_btf_changed_blocks = NULL;
-  solver->partial_btf_col_ptr_identity = NULL;
-  solver->partial_btf_row_idx_identity = NULL;
-  solver->partial_btf_symbolic_identity = NULL;
-  solver->partial_btf_numeric_identity = NULL;
-  solver->partial_btf_nblocks = 0u;
-  solver->partial_btf_reference_valid = 0;
-  solver->partial_btf_decline_streak = 0u;
-  solver->partial_btf_gated = 0;
-}
-
-static int kls_partial_btf_base_eligible(const kls_solver *solver) {
-  return solver != NULL &&
-    getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") != NULL &&
-    solver->symbolic != NULL && solver->numeric != NULL &&
-    solver->col_ptr != NULL && solver->row_idx != NULL &&
-    solver->symbolic->Q != NULL && solver->symbolic->R != NULL &&
-    solver->numeric->Pinv != NULL && solver->numeric->Offp != NULL &&
-    solver->numeric->Llen != NULL && solver->numeric->Ulen != NULL &&
-    solver->numeric->Udiag != NULL && solver->numeric->LUbx != NULL &&
-    solver->symbolic->nblocks > 1u &&
-    solver->symbolic->nblocks <= (UF_long)UINT32_MAX &&
-    solver->nnz <= (UF_long)UINT32_MAX &&
-    solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double)) &&
-    solver->common.status >= TRILINOS_KLU_OK &&
-    solver->common.status != TRILINOS_KLU_SINGULAR &&
-    solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
-    solver->pivot_nudge_count == 0u &&
-    solver->common.kls_perturb_count == 0u &&
-    !solver->numeric_is_predicted && !solver->fp32_last_used &&
-    !solver->numeric_needs_refinement;
-}
-
-static int kls_partial_btf_plan_matches(const kls_solver *solver) {
-  return kls_partial_btf_base_eligible(solver) &&
-    solver->partial_btf_reference_valid &&
-    solver->partial_btf_reference_values != NULL &&
-    solver->partial_btf_entry_block != NULL &&
-    solver->partial_btf_entry_offx != NULL &&
-    solver->partial_btf_changed_entries != NULL &&
-    solver->partial_btf_changed_blocks != NULL &&
-    solver->partial_btf_col_ptr_identity == solver->col_ptr &&
-    solver->partial_btf_row_idx_identity == solver->row_idx &&
-    solver->partial_btf_symbolic_identity == solver->symbolic &&
-    solver->partial_btf_numeric_identity == solver->numeric &&
-    solver->partial_btf_nblocks == solver->symbolic->nblocks;
-}
-
-/* Build a direct entry-to-block/Offx map in KLU's final BTF coordinates.
-   Pivoting is constrained within each diagonal block, so Pinv assigns every
-   stored entry either to exactly one independent block or to the strictly
-   off-diagonal F region used only during block back substitution. */
-static int kls_partial_btf_build_plan(kls_solver *solver,
-                                      const double *values) {
-  if (!kls_partial_btf_base_eligible(solver) || values == NULL) {
-    kls_partial_btf_clear_plan(solver);
-    return 0;
-  }
-  const UF_long nnz = solver->nnz;
-  const UF_long nblocks = solver->symbolic->nblocks;
-  const size_t entry_count = (size_t)(nnz > 0u ? nnz : 1u);
-  double *reference =
-    (double *)malloc(entry_count * sizeof(*reference));
-  uint32_t *entry_block =
-    (uint32_t *)malloc(entry_count * sizeof(*entry_block));
-  uint32_t *entry_offx =
-    (uint32_t *)malloc(entry_count * sizeof(*entry_offx));
-  uint32_t *changed_entries =
-    (uint32_t *)malloc(entry_count * sizeof(*changed_entries));
-  unsigned char *changed_blocks =
-    (unsigned char *)calloc((size_t)nblocks, sizeof(*changed_blocks));
-  if (reference == NULL || entry_block == NULL || entry_offx == NULL ||
-      changed_entries == NULL || changed_blocks == NULL) {
-    free(reference);
-    free(entry_block);
-    free(entry_offx);
-    free(changed_entries);
-    free(changed_blocks);
-    kls_partial_btf_clear_plan(solver);
-    return 0;
-  }
-  for (UF_long p = 0u; p < nnz; ++p) {
-    entry_block[p] = UINT32_MAX;
-    entry_offx[p] = UINT32_MAX;
-  }
-
-  const UF_long *q = solver->symbolic->Q;
-  const UF_long *r = solver->symbolic->R;
-  const UF_long *pinv = solver->numeric->Pinv;
-  const UF_long *offp = solver->numeric->Offp;
-  int valid = r[0] == 0u && r[nblocks] == solver->n;
-  for (UF_long block = 0u; block < nblocks && valid; ++block) {
-    const UF_long k1 = r[block];
-    const UF_long k2 = r[block + 1u];
-    if (k1 > k2 || k2 > solver->n) {
-      valid = 0;
-      break;
-    }
-    for (UF_long k = k1; k < k2 && valid; ++k) {
-      const UF_long oldcol = q[k];
-      if (oldcol >= solver->n || offp[k] > offp[k + 1u] ||
-          offp[k + 1u] > solver->symbolic->nzoff) {
-        valid = 0;
-        break;
-      }
-      UF_long poff = offp[k];
-      for (UF_long p = solver->col_ptr[oldcol];
-           p < solver->col_ptr[oldcol + 1u]; ++p) {
-        const UF_long oldrow = solver->row_idx[p];
-        if (oldrow >= solver->n || pinv[oldrow] >= solver->n) {
-          valid = 0;
-          break;
-        }
-        const UF_long newrow = pinv[oldrow];
-        if (newrow < k1) {
-          if (poff >= offp[k + 1u] || poff > (UF_long)UINT32_MAX) {
-            valid = 0;
-            break;
-          }
-          entry_offx[p] = (uint32_t)poff++;
-        } else if (newrow < k2) {
-          entry_block[p] = (uint32_t)block;
-        } else {
-          /* A valid upper BTF has no entry below its diagonal block. */
-          valid = 0;
-          break;
-        }
-      }
-      if (poff != offp[k + 1u]) {
-        valid = 0;
-      }
-    }
-  }
-  for (UF_long p = 0u; p < nnz && valid; ++p) {
-    valid = entry_block[p] != UINT32_MAX || entry_offx[p] != UINT32_MAX;
-  }
-  if (!valid) {
-    free(reference);
-    free(entry_block);
-    free(entry_offx);
-    free(changed_entries);
-    free(changed_blocks);
-    kls_partial_btf_clear_plan(solver);
-    return 0;
-  }
-  if (nnz > 0u) {
-    memcpy(reference, values, (size_t)nnz * sizeof(*reference));
-  }
-
-  kls_partial_btf_clear_plan(solver);
-  solver->partial_btf_reference_values = reference;
-  solver->partial_btf_entry_block = entry_block;
-  solver->partial_btf_entry_offx = entry_offx;
-  solver->partial_btf_changed_entries = changed_entries;
-  solver->partial_btf_changed_blocks = changed_blocks;
-  solver->partial_btf_col_ptr_identity = solver->col_ptr;
-  solver->partial_btf_row_idx_identity = solver->row_idx;
-  solver->partial_btf_symbolic_identity = solver->symbolic;
-  solver->partial_btf_numeric_identity = solver->numeric;
-  solver->partial_btf_nblocks = nblocks;
-  solver->partial_btf_reference_valid = 1;
-  return 1;
-}
-
-/* Call only after a successful full or partial numeric update. */
-static void kls_partial_btf_update_reference(kls_solver *solver,
-                                             const double *values) {
-  if (solver == NULL || values == NULL ||
-      getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") == NULL) {
-    return;
-  }
-  if (solver->partial_btf_gated) {
-    return;
-  }
-  if (!kls_partial_btf_plan_matches(solver)) {
-    (void)kls_partial_btf_build_plan(solver, values);
-    return;
-  }
-  if (solver->partial_btf_reference_valid == 2) {
-    /* The successful partial walk already copied exactly its changed list. */
-    solver->partial_btf_reference_valid = 1;
-    return;
-  }
-  if (solver->nnz > 0u) {
-    memcpy(solver->partial_btf_reference_values, values,
-           (size_t)solver->nnz * sizeof(*values));
-  }
-  solver->partial_btf_reference_valid = 1;
-}
-
-static double kls_partial_btf_max_work_fraction(void) {
-  double fraction = 0.50;
-  const char *env = getenv("KLS_PARTIAL_BTF_MAX_WORK_FRACTION");
-  if (env != NULL && env[0] != '\0') {
-    const double parsed = atof(env);
-    if (parsed > 0.0 && parsed < 1.0) {
-      fraction = parsed;
-    }
-  }
-  return fraction;
-}
-
-/* Return 1 only when a complete, solve-ready partial update was published.
-   Any structural decline or failed block refresh returns 0; the caller then
-   runs its ordinary full refactor, which overwrites any tentative values. */
-static int kls_try_partial_btf_refactor(kls_solver *solver,
-                                        double *values,
-                                        int check_pivots) {
-  if (solver == NULL || values == NULL || check_pivots ||
-      solver->partial_btf_gated ||
-      !kls_partial_btf_plan_matches(solver) ||
-      solver->row_refactor_values_ready ||
-      solver->row_refactor_values_dirty) {
-    return 0;
-  }
-  const UF_long nblocks = solver->symbolic->nblocks;
-  unsigned char *changed = solver->partial_btf_changed_blocks;
-  memset(changed, 0, (size_t)nblocks * sizeof(*changed));
-  UF_long changed_block_count = 0u;
-  UF_long changed_entry_count = 0u;
-  UF_long changed_offdiag_count = 0u;
-  uint32_t *changed_entries = solver->partial_btf_changed_entries;
-  for (UF_long p = 0u; p < solver->nnz; ++p) {
-    if (memcmp(values + p, solver->partial_btf_reference_values + p,
-               sizeof(*values)) == 0) {
-      continue;
-    }
-    changed_entries[changed_entry_count++] = (uint32_t)p;
-    const uint32_t block = solver->partial_btf_entry_block[p];
-    if (block != UINT32_MAX) {
-      if (block >= nblocks) {
-        return 0;
-      }
-      if (!changed[block]) {
-        changed[block] = 1u;
-        changed_block_count++;
-      }
-    } else if (solver->partial_btf_entry_offx[p] != UINT32_MAX) {
-      changed_offdiag_count++;
-    } else {
-      return 0;
-    }
-  }
-
-  long double total_work = 0.0L;
-  long double changed_work = 0.0L;
-  for (UF_long block = 0u; block < nblocks; ++block) {
-    const UF_long k1 = solver->symbolic->R[block];
-    const UF_long k2 = solver->symbolic->R[block + 1u];
-    long double work = 0.0L;
-    if (k2 - k1 == 1u) {
-      work = 1.0L;
-    }
-    for (UF_long k = k1; k < k2 && k2 - k1 > 1u; ++k) {
-      /* Stored factor entries are a stable per-block work proxy.  KLU does
-         not initialize packed L/U metadata for singleton blocks, which are
-         represented only by Udiag, so those blocks take the unit estimate. */
-      work += 1.0L + (long double)solver->numeric->Llen[k] +
-              (long double)solver->numeric->Ulen[k];
-    }
-    total_work += work;
-    if (changed[block]) {
-      changed_work += work;
-    }
-  }
-  const double max_fraction = kls_partial_btf_max_work_fraction();
-  if (changed_block_count == nblocks ||
-      (changed_block_count > 0u && total_work > 0.0L &&
-       changed_work > (long double)max_fraction * total_work)) {
-    if (solver->partial_btf_decline_streak < UINT32_MAX) {
-      solver->partial_btf_decline_streak++;
-    }
-    if (solver->partial_btf_decline_streak >= 2u &&
-        getenv("KLS_DISABLE_PARTIAL_BTF_REJECTION_GATE") == NULL) {
-      /* A stable localized workload normally touches the same SCCs.  After
-         two over-budget observations, stop both the comparison scan and the
-         O(nnz) reference copy until an explicit factor starts a new epoch. */
-      solver->partial_btf_gated = 1;
-    }
-    if (getenv("KLS_TRACE_PARTIAL_BTF") != NULL) {
-      fprintf(stderr,
-              "KLS partial BTF decline: entries=%ld blocks=%ld/%ld"
-              " work=%.3Lf/%.3Lf max=%.3f gated=%d\n",
-              (long)changed_entry_count, (long)changed_block_count,
-              (long)nblocks, changed_work, total_work, max_fraction,
-              solver->partial_btf_gated);
-    }
-    return 0;
-  }
-
-  /* Off-diagonal entries never enter a diagonal block factor.  Publish only
-     changed couplings; unchanged Offx slots already describe the reference. */
-  double *offx = (double *)solver->numeric->Offx;
-  for (UF_long q = 0u; q < changed_entry_count; ++q) {
-    const UF_long p = (UF_long)changed_entries[q];
-    const uint32_t off = solver->partial_btf_entry_offx[p];
-    if (off != UINT32_MAX) {
-      if (off >= solver->symbolic->nzoff || offx == NULL) {
-        return 0;
-      }
-      offx[off] = values[p];
-    }
-  }
-
-  kls_parallel_refactor_shared shared;
-  memset(&shared, 0, sizeof(shared));
-  shared.solver = solver;
-  shared.native_short_l = kls_mapped_native_short_l_enabled(solver);
-  shared.n = solver->n;
-  shared.nnz = solver->nnz;
-  shared.col_ptr = solver->col_ptr;
-  shared.row_idx = solver->row_idx;
-  shared.map_col_ptr = solver->refactor_col_ptr;
-  shared.map_row_idx = solver->refactor_row_idx;
-  shared.map_input_pos = solver->refactor_input_pos;
-  shared.map_block_start = solver->refactor_block_start;
-  shared.snode_run_end = kls_refactor_snode_run_end(solver);
-  shared.padded_src = solver->padded_run_of != NULL ? solver : NULL;
-  shared.values = values;
-  shared.symbolic = solver->symbolic;
-  shared.numeric = solver->numeric;
-  shared.scale = -1;
-  shared.halt_if_singular = solver->common.halt_if_singular;
-  shared.check_pivots = 0;
-
-  kls_parallel_refactor_worker worker;
-  memset(&worker, 0, sizeof(worker));
-  worker.shared = &shared;
-  worker.rejected_pivot = KLS_KLU_EMPTY;
-  worker.rejected_pivot_col = KLS_KLU_EMPTY;
-  worker.rejected_row = KLS_KLU_EMPTY;
-  worker.numerical_rank = UF_long_max;
-  worker.singular_col = KLS_KLU_EMPTY;
-  worker.x = (double *)calloc(
-    (size_t)(solver->symbolic->maxblock > 0u
-               ? solver->symbolic->maxblock : 1u),
-    sizeof(*worker.x));
-  if (worker.x == NULL) {
-    return 0;
-  }
-
-  solver->common.status = TRILINOS_KLU_OK;
-  solver->common.numerical_rank = KLS_KLU_EMPTY;
-  solver->common.singular_col = KLS_KLU_EMPTY;
-  solver->common.nrealloc = 0;
-  for (UF_long block = 0u; block < nblocks; ++block) {
-    if (!changed[block]) {
-      continue;
-    }
-    kls_parallel_refactor_block(&worker, block);
-    if (worker.invalid || worker.pivot_rejected || worker.singular) {
-      break;
-    }
-  }
-  free(worker.x);
-  if (worker.invalid || worker.pivot_rejected || worker.singular) {
-    /* The normal full refactor below restores a coherent numeric and reports
-       singularity through the established API path. */
-    solver->common.status = TRILINOS_KLU_OK;
-    return 0;
-  }
-
-  for (UF_long q = 0u; q < changed_entry_count; ++q) {
-    const UF_long p = (UF_long)changed_entries[q];
-    solver->partial_btf_reference_values[p] = values[p];
-  }
-  solver->partial_btf_reference_valid = 2;
-  solver->partial_btf_decline_streak = 0u;
-
-  if (getenv("KLS_TRACE_PARTIAL_BTF") != NULL) {
-    fprintf(stderr,
-            "KLS partial BTF accepted: entries=%ld offdiag=%ld"
-            " blocks=%ld/%ld work=%.3Lf/%.3Lf\n",
-            (long)changed_entry_count, (long)changed_offdiag_count,
-            (long)changed_block_count, (long)nblocks,
-            changed_work, total_work);
-  }
-  return 1;
-}
-
 static void *kls_refactor_pool_worker_main(void *arg) {
   kls_parallel_refactor_worker *worker = (kls_parallel_refactor_worker *)arg;
   kls_refactor_pool *pool = worker->pool;
@@ -27200,19 +26778,7 @@ static void free_solve_refine_workspace(kls_solver *solver) {
   solver->solve_refine_rs_inv_src = NULL;
 }
 
-static void kls_clear_retained_preconditioner(kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-  solver->retained_preconditioner_numeric_current = 0;
-  if (solver->retained_preconditioner_reference_values == NULL &&
-      !solver->retained_preconditioner_active) {
-    return;
-  }
-  free(solver->retained_preconditioner_reference_values);
-  solver->retained_preconditioner_reference_values = NULL;
-  solver->retained_preconditioner_active = 0;
-}
+
 
 static void free_pivot_nudges(kls_solver *solver) {
   free(solver->pivot_nudge_pos);
@@ -27226,10 +26792,6 @@ static void free_pivot_nudges(kls_solver *solver) {
 }
 
 static void free_numeric(kls_solver *solver) {
-  if (solver->retained_preconditioner_active) {
-    kls_clear_retained_preconditioner(solver);
-  }
-  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   solver->certified_unscaled_l2_contract = 0;
@@ -27395,12 +26957,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
   solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
-  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
-  if (solver->retained_preconditioner_active) {
-    kls_clear_retained_preconditioner(solver);
-  }
   free(solver->solve_refine_values);
   free(solver->verified_rhs);
   free(solver->verified_factor_rhs);
@@ -27631,11 +27189,6 @@ static void clear_matrix(kls_solver *solver) {
   free(solver->prepared_value_scale);
   free(solver->prepared_value_input_pos);
   free(solver->refactor_input_snapshot);
-  free(solver->partial_btf_reference_values);
-  free(solver->partial_btf_entry_block);
-  free(solver->partial_btf_entry_offx);
-  free(solver->partial_btf_changed_entries);
-  free(solver->partial_btf_changed_blocks);
   free(solver->lean_scale_input_snapshot);
   free(solver->lean_scale_rs_snapshot);
   free(solver->solve_perm_workspace);
@@ -27672,19 +27225,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->refactor_input_snapshot = NULL;
   solver->refactor_input_snapshot_valid = 0;
   solver->unchanged_refactor_state = 0;
-  solver->partial_btf_reference_values = NULL;
-  solver->partial_btf_entry_block = NULL;
-  solver->partial_btf_entry_offx = NULL;
-  solver->partial_btf_changed_entries = NULL;
-  solver->partial_btf_changed_blocks = NULL;
-  solver->partial_btf_col_ptr_identity = NULL;
-  solver->partial_btf_row_idx_identity = NULL;
-  solver->partial_btf_symbolic_identity = NULL;
-  solver->partial_btf_numeric_identity = NULL;
-  solver->partial_btf_nblocks = 0u;
-  solver->partial_btf_reference_valid = 0;
-  solver->partial_btf_decline_streak = 0u;
-  solver->partial_btf_gated = 0;
   solver->lean_scale_input_snapshot = NULL;
   solver->lean_scale_rs_snapshot = NULL;
   solver->lean_scale_input_state = 0;
@@ -27697,9 +27237,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->promoted_tolerance_l2_recovery_required = 0;
   solver->promoted_tolerance_l2_contract_run_count = 0u;
   solver->promoted_tolerance_l2_recovery_count = 0u;
-  solver->retained_preconditioner_reference_values = NULL;
-  solver->retained_preconditioner_active = 0;
-  solver->retained_preconditioner_numeric_current = 0;
   solver->solve_refine_csc_ptr16 = NULL;
   solver->solve_refine_csc_row16 = NULL;
   solver->solve_refine_csc_state = 0;
@@ -27728,10 +27265,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->nnz = 0;
   solver->input_format = KLS_INPUT_NONE;
   solver->orientation = KLS_ORIENTATION_NORMAL;
-  solver->bounded_degree_retained_preconditioner_candidate = 0;
-  solver->bounded_degree_retained_preconditioner_symbolic_eligible = 0;
-  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
-  solver->bounded_degree_retained_preconditioner_reuse_count = 0u;
   solver->auto_metis_checked = 0;
   solver->auto_pivot_checked = 0;
   solver->auto_scale_checked = 0;
@@ -28459,10 +27992,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  if (solver->retained_preconditioner_active) {
-    kls_clear_retained_preconditioner(solver);
-  }
-  solver->bounded_degree_retained_preconditioner_numeric_eligible = 0;
   solver->certified_unscaled_l2_contract = 0;
   solver->certified_unscaled_recovery_scale = 0;
   solver->generic_btf_unscaled_recovery_scale = 0;
@@ -28501,8 +28030,6 @@ int kls_factor(kls_solver *solver, const double *values) {
      only a successful exit below is allowed to arm exact reuse. */
   solver->refactor_input_snapshot_valid = 0;
   solver->unchanged_refactor_state = 0;
-  solver->partial_btf_decline_streak = 0u;
-  solver->partial_btf_gated = 0;
   solver->snb_factor_start = kls_now_seconds();
   kls_reset_lean_scale_input_cache(solver);
   if (solver->metis_race != NULL && solver->metis_race->values_signaled) {
@@ -28570,9 +28097,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     status = kls_serial_factor(solver, numeric_values);
     if (status == KLS_OK) {
       kls_arm_unchanged_refactor_cache(solver, values);
-      {
-        kls_partial_btf_update_reference(solver, numeric_values);
-      }
       solver->stats.factor_seconds =
         kls_now_seconds() - solver->snb_factor_start;
       fill_numeric_stats(solver);
@@ -28857,11 +28381,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         kls_arm_unchanged_refactor_cache(solver, values);
         elapsed += kls_now_seconds() - snapshot_start;
       }
-      {
-        const double structured_start = kls_now_seconds();
-        kls_partial_btf_update_reference(solver, numeric_values);
-        elapsed += kls_now_seconds() - structured_start;
-      }
+
       solver->stats.factor_seconds = elapsed;
       kls_factor_solve_contract_classify(solver, numeric_values);
       fill_numeric_stats(solver);
@@ -28902,11 +28422,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       const double snapshot_start = kls_now_seconds();
       kls_arm_unchanged_refactor_cache(solver, values);
       elapsed += kls_now_seconds() - snapshot_start;
-      {
-        const double structured_start = kls_now_seconds();
-        kls_partial_btf_update_reference(solver, numeric_values);
-        elapsed += kls_now_seconds() - structured_start;
-      }
+
       solver->stats.factor_seconds = elapsed;
       kls_update_numeric_diagnostics(solver, 1);
       kls_factor_solve_contract_classify(solver, numeric_values);
@@ -28939,11 +28455,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         const double snapshot_start = kls_now_seconds();
         kls_arm_unchanged_refactor_cache(solver, values);
         elapsed += kls_now_seconds() - snapshot_start;
-        {
-          const double structured_start = kls_now_seconds();
-          kls_partial_btf_update_reference(solver, numeric_values);
-          elapsed += kls_now_seconds() - structured_start;
-        }
+
         solver->stats.factor_seconds = elapsed;
         kls_factor_solve_contract_classify(solver, numeric_values);
         fill_numeric_stats(solver);
@@ -29537,13 +29049,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       kls_klu_dense_tail = 0;
       solver->dense_tail_cols = 0;
       solver->dense_tail_block = 0;
-      if ((solver->numeric == NULL ||
-           solver->common.status == TRILINOS_KLU_SINGULAR) &&
-          kls_try_singular_rank_completion(solver, numeric_values)) {
-        /* The helper owns and resets its retry routing.  An accepted giant
-           dominant-hub symbolic reinstates its parallel/dense-tail route. */
-        solver->numeric_from_pipe = 0;
-      }
       if (solver->numeric != NULL && dense_tail_req > 1 &&
           solver->common.status >= 0 && solver->symbolic != NULL &&
           solver->pivot_nudge_count == 0u) {
@@ -30030,17 +29535,7 @@ factor_preps_deferred_exit:;
     fill_numeric_stats(solver);
     return KLS_ERR_SINGULAR;
   }
-  {
-    const double structured_start = kls_now_seconds();
-    kls_partial_btf_update_reference(solver, numeric_values);
-    elapsed += kls_now_seconds() - structured_start;
-  }
-  if (solver->bounded_degree_retained_preconditioner_symbolic_eligible ||
-      getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
-    const double retained_start = kls_now_seconds();
-    kls_bounded_degree_arm_retained_preconditioner(solver, numeric_values);
-    elapsed += kls_now_seconds() - retained_start;
-  }
+
   kls_factor_solve_contract_classify(solver, numeric_values);
   solver->stats.factor_seconds = elapsed;
   fill_numeric_stats(solver);
@@ -30529,7 +30024,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->direct_klu_choice == 2 ||
     (solver->direct_klu_choice == 0 &&
      getenv("KLS_DISABLE_LOW_WORK_BTF_PUBLIC_DIRECT_REFACTOR") == NULL &&
-     getenv("KLS_ENABLE_PARTIAL_BTF_REFACTOR") == NULL &&
      kls_low_work_btf_public_klu_capable(solver) &&
      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FIRST &&
      kls_direct_klu_public_frame_capable(solver));
@@ -30798,36 +30292,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if (status != KLS_OK) {
     return status;
-  }
-  if (kls_bounded_degree_update_is_preconditioner_safe(
-        solver, numeric_values) &&
-      solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double))) {
-    if (solver->solve_refine_values == NULL) {
-      solver->solve_refine_values = (double *)malloc(
-        (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
-    }
-    if (solver->solve_refine_values != NULL) {
-      memcpy(solver->solve_refine_values, numeric_values,
-             (size_t)solver->nnz * sizeof(*numeric_values));
-      solver->numeric_needs_refinement = 0;
-      solver->solve_refine_single_shot = 0;
-      solver->row_solve_self_check = 1;
-      solver->retained_preconditioner_numeric_current = 0;
-      (void)kls_i32_solve_ready(solver);
-      kls_set_last_refactor_path(
-        solver, KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER);
-      solver->bounded_degree_retained_preconditioner_reuse_count++;
-      solver->stats.refactor_seconds =
-        kls_now_seconds() - refactor_call_start;
-      fill_numeric_stats(solver);
-      return KLS_OK;
-    }
-  }
-  if (solver->retained_preconditioner_active) {
-    /* A larger update or allocation failure returns to an ordinary numeric
-       refactor and permanently declines reuse for this factor epoch. */
-    kls_clear_retained_preconditioner(solver);
-    solver->row_solve_self_check = 0;
   }
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (solver->block_order_deferred) {
@@ -32887,7 +32351,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->common.status == TRILINOS_KLU_SINGULAR) {
     return KLS_ERR_SINGULAR;
   }
-  kls_partial_btf_update_reference(solver, numeric_values);
   return KLS_OK;
 }
 
@@ -33695,27 +33158,21 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
                                         const double *b,
                                         double *x,
                                         double bnorm2,
-                                        double *residual,
-                                        double relative_l2_limit,
-                                        int max_steps,
-                                        int orthogonalization_passes) {
+                                        double *residual) {
   enum { KLS_GMRES_RESTART = 4, KLS_GMRES_CYCLES = 2 };
   if (solver == NULL || a == NULL || b == NULL || x == NULL ||
       residual == NULL || !isfinite(bnorm2) || bnorm2 < 0.0 ||
-      !(relative_l2_limit > 0.0) || !isfinite(relative_l2_limit) ||
-      max_steps < 1 || max_steps > KLS_GMRES_RESTART ||
-      orthogonalization_passes < 1 || orthogonalization_passes > 2 ||
       getenv("KLS_DISABLE_GMRES_SOLVE_RECOVERY") != NULL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->row_perm != NULL || solver->user_col_perm != NULL ||
       solver->row_scale != NULL || solver->col_scale != NULL ||
       solver->col_ptr == NULL || solver->row_idx == NULL ||
       solver->n > (UF_long)(SIZE_MAX /
-        ((2u * (size_t)max_steps + 1u) * sizeof(double)))) {
+        ((2u * (size_t)KLS_GMRES_RESTART + 1u) * sizeof(double)))) {
     return 0;
   }
   const UF_long n = solver->n;
-  const size_t vector_count = 2u * (size_t)max_steps + 1u;
+  const size_t vector_count = 2u * (size_t)KLS_GMRES_RESTART + 1u;
   double *vectors = (double *)malloc(
     vector_count * (size_t)(n > 0u ? n : 1u) * sizeof(*vectors));
   if (vectors == NULL) {
@@ -33723,15 +33180,15 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
   }
   double *v[KLS_GMRES_RESTART + 1u];
   double *z[KLS_GMRES_RESTART];
-  for (size_t j = 0u; j <= (size_t)max_steps; ++j) {
+  for (size_t j = 0u; j <= (size_t)KLS_GMRES_RESTART; ++j) {
     v[j] = vectors + j * (size_t)n;
   }
-  for (size_t j = 0u; j < (size_t)max_steps; ++j) {
-    z[j] = vectors + ((size_t)max_steps + 1u + j) * (size_t)n;
+  for (size_t j = 0u; j < (size_t)KLS_GMRES_RESTART; ++j) {
+    z[j] = vectors + ((size_t)KLS_GMRES_RESTART + 1u + j) * (size_t)n;
   }
   const double l2_scale = bnorm2 > 0.0 ? bnorm2 : 1.0;
   const double limit2 =
-    relative_l2_limit * relative_l2_limit * l2_scale;
+    25.0e-18 * l2_scale;
   int verified = 0;
   double carried_residual_norm2 = -1.0;
 
@@ -33776,7 +33233,7 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
     memset(g, 0, sizeof(g));
     g[0] = beta;
     int steps = 0;
-    for (int j = 0; j < max_steps; ++j) {
+    for (int j = 0; j < KLS_GMRES_RESTART; ++j) {
       solver->in_solve_refinement = 1;
       const int precondition_status =
         solve_impl(solver, 0, 1, v[j], n, z[j], n);
@@ -33793,10 +33250,8 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
           v[j + 1][row] = fma(a[p], zv, v[j + 1][row]);
         }
       }
-      /* Ordinary recovery uses twice-modified Gram-Schmidt for difficult
-         factors.  The separately certified retained-factor experiment can
-         probe one pass because its final true residual remains authoritative. */
-      for (int pass = 0; pass < orthogonalization_passes; ++pass) {
+      /* Twice-modified Gram-Schmidt stabilizes difficult factors. */
+      for (int pass = 0; pass < 2; ++pass) {
         for (int i = 0; i <= j; ++i) {
           long double dot = 0.0L;
           for (UF_long k = 0u; k < n; ++k) {
@@ -34924,8 +34379,6 @@ static int solve_impl(kls_solver *solver,
     double *previous_residual =
       residual != NULL ? residual + 3u * (size_t)solver->n : NULL;
     const UF_long nloc = solver->n;
-    const int retained_preconditioner_contract =
-      kls_retained_preconditioner_requires_correction(solver);
     for (int64_t rhs = 0; residual != NULL && rhs < nrhs; ++rhs) {
       const double *brhs = b + rhs * ldb;
       double *xrhs = x + rhs * ldx;
@@ -34959,15 +34412,12 @@ static int solve_impl(kls_solver *solver,
         (solver->row_solve_self_check || contract_probe_wanted ||
          contract_armed) &&
         !promoted_tolerance_l2_contract &&
-        !retained_preconditioner_contract &&
         !repeated_rhs_raw_l2_contract &&
         getenv("KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT") == NULL &&
         /* compatibility spelling from the row-only prototype */
         getenv("KLS_DISABLE_ROW_SELF_CHECK_L2_CONTRACT") == NULL;
       const int generic_parallel_contract_residual =
-        (ordinary_self_check_l2_contract ||
-         (retained_preconditioner_contract &&
-          getenv("KLS_ENABLE_GENERIC_RETAINED_GMRES") == NULL)) &&
+        ordinary_self_check_l2_contract &&
         kls_generic_contract_residual_parallel_dispatch(solver);
       const double contract_residual_probe_start =
         solver->contract_residual_pending != 0
@@ -34985,7 +34435,6 @@ static int solve_impl(kls_solver *solver,
       double bnorm2 = 0.0;
       if (!parallel_plain_contract_stats &&
           (verified_rhs_contract ||
-          retained_preconditioner_contract ||
           promoted_tolerance_l2_contract ||
           ordinary_self_check_l2_contract ||
           certified_unscaled_transpose_l2_contract)) {
@@ -35061,36 +34510,10 @@ static int solve_impl(kls_solver *solver,
         !ordinary_self_check_l2_contract;
       int certified_unscaled_l2_verified =
         !solver->certified_unscaled_l2_contract;
-      int retained_preconditioner_verified =
-        !retained_preconditioner_contract;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
-      const int retained_gmres_plain_frame =
-        retained_preconditioner_contract && !kernel_transpose && nrhs == 1 &&
-        b != x && solver->orientation == KLS_ORIENTATION_NORMAL &&
-        solver->row_perm == NULL && solver->user_col_perm == NULL &&
-        solver->row_scale == NULL && solver->col_scale == NULL &&
-        getenv("KLS_DISABLE_GENERIC_RETAINED_GMRES") == NULL &&
-        getenv("KLS_DISABLE_GMRES_SOLVE_RECOVERY") == NULL;
-      const int retained_gmres_forced = retained_gmres_plain_frame &&
-        getenv("KLS_ENABLE_GENERIC_RETAINED_GMRES") != NULL;
-      const int retained_gmres_selected = retained_gmres_plain_frame &&
-        retained_gmres_forced;
       int refinement_limit = solver->solve_recovery_active
         ? 16
-        : (retained_preconditioner_contract || self_check_only ? 8 : 3);
-      if (retained_gmres_selected) {
-        /* xrhs already contains M^-1 b, so a selected Krylov recovery starts
-           directly from that preconditioned estimate. */
-        refinement_limit = 0;
-        const char *steps_env =
-          getenv("KLS_GENERIC_RETAINED_GMRES_RICHARDSON_STEPS");
-        if (steps_env != NULL && steps_env[0] != '\0') {
-          const long parsed = strtol(steps_env, NULL, 10);
-          if (parsed >= 0 && parsed <= 7) {
-            refinement_limit = (int)parsed;
-          }
-        }
-      }
+        : (self_check_only ? 8 : 3);
       for (int iter = 0; iter < refinement_limit; ++iter) {
         double rmax = 0.0;
         double rnorm2 = 0.0;
@@ -35104,8 +34527,7 @@ static int solve_impl(kls_solver *solver,
           b != x && kls_repeated_update_workload(&solver->options) &&
           solver->row_perm == NULL && solver->user_col_perm == NULL &&
           solver->row_scale == NULL && solver->col_scale == NULL &&
-          ((!ordinary_self_check_l2_contract &&
-            !retained_preconditioner_contract) ||
+          (!ordinary_self_check_l2_contract ||
            generic_parallel_contract_residual) &&
           !compact_amf_two_block_parallel_residual &&
           kls_run_parallel_refine_csr_residual(
@@ -35238,7 +34660,6 @@ static int solve_impl(kls_solver *solver,
             const double av = fabs(residual[i]);
             rmax = rmax < av ? av : rmax;
             if (verified_rhs_contract ||
-                retained_preconditioner_contract ||
                 promoted_tolerance_l2_contract ||
                 ordinary_self_check_l2_contract ||
                 certified_unscaled_transpose_l2_contract) {
@@ -35247,8 +34668,7 @@ static int solve_impl(kls_solver *solver,
           }
         }
         if (iter == 0 &&
-            (ordinary_self_check_l2_contract ||
-             retained_preconditioner_contract) &&
+            ordinary_self_check_l2_contract &&
             solver->contract_residual_pending != 0) {
           kls_generic_contract_residual_record(
             solver, kls_now_seconds() - contract_residual_probe_start);
@@ -35349,10 +34769,6 @@ static int solve_impl(kls_solver *solver,
              ? ordinary_self_check_l2_ok
              : rmax <= target && isfinite(bnorm2) && isfinite(rnorm2) &&
                rnorm2 <= 1.0e-18 * l2_scale);
-        const int retained_preconditioner_l2_ok =
-          retained_preconditioner_contract &&
-          isfinite(bnorm2) && isfinite(rnorm2) &&
-          rnorm2 <= 1.0e-18 * l2_scale;
         /* Ordinary promoted numerics target 1e-9.  A recovery numeric may
            stop at 5e-9: this retains a 2x margin below the audited 1e-8
            validity line while avoiding another expensive full factor when
@@ -35363,7 +34779,6 @@ static int solve_impl(kls_solver *solver,
           promoted_tolerance_l2_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= promoted_tolerance_l2_limit_squared * l2_scale;
-        retained_preconditioner_verified |= retained_preconditioner_l2_ok;
         ordinary_self_check_l2_verified |= ordinary_self_check_l2_ok;
         if (ordinary_self_check_l2_ok &&
             solver->low_rcond_solve_contract_state == 0 &&
@@ -35392,13 +34807,11 @@ static int solve_impl(kls_solver *solver,
                   " l2ok=%d\n",
                   iter, rmax, target,
                   (verified_rhs_contract ||
-                   retained_preconditioner_contract ||
                    promoted_tolerance_l2_contract ||
                    ordinary_self_check_l2_contract ||
                    certified_unscaled_transpose_l2_contract)
                     ? sqrt(rnorm2 / l2_scale) : -1.0,
                   raw_l2_ok || verified_rhs_cache_ok ||
-                    retained_preconditioner_l2_ok ||
                     ordinary_self_check_l2_ok || promoted_tolerance_l2_ok ||
                     certified_unscaled_transpose_l2_ok);
         }
@@ -35445,9 +34858,8 @@ static int solve_impl(kls_solver *solver,
         }
         if ((!promoted_tolerance_l2_contract &&
              !ordinary_self_check_l2_contract &&
-             !retained_preconditioner_contract && rmax <= target) ||
-            raw_l2_ok || retained_preconditioner_l2_ok ||
-            ordinary_self_check_l2_ok ||
+             rmax <= target) ||
+            raw_l2_ok || ordinary_self_check_l2_ok ||
             promoted_tolerance_l2_ok ||
             certified_unscaled_transpose_l2_ok ||
             (!promoted_tolerance_l2_contract &&
@@ -35543,8 +34955,7 @@ static int solve_impl(kls_solver *solver,
              max-norm controller still computes the norm locally. */
           const int rhs_norm2_available =
             getenv("KLS_DISABLE_SPARSE_REFINEMENT_NORM_REUSE") == NULL &&
-            (verified_rhs_contract || retained_preconditioner_contract ||
-             promoted_tolerance_l2_contract ||
+            (verified_rhs_contract || promoted_tolerance_l2_contract ||
              ordinary_self_check_l2_contract ||
              certified_unscaled_transpose_l2_contract);
           long double sparse_rhs_norm2 = (long double)bnorm2;
@@ -35766,8 +35177,7 @@ static int solve_impl(kls_solver *solver,
           !ordinary_self_check_l2_verified && !kernel_transpose &&
           nrhs == 1 && b != x &&
           kls_try_gmres_solve_recovery(
-            solver, refine_a, brhs, xrhs, bnorm2, residual, 5.0e-9,
-            4, 2)) {
+            solver, refine_a, brhs, xrhs, bnorm2, residual)) {
         ordinary_self_check_l2_verified = 1;
         solver->low_rcond_solve_contract_state = 2;
         solver->fp32_decision = -1;
@@ -35787,83 +35197,6 @@ static int solve_impl(kls_solver *solver,
         if (contract_probe_wanted || contract_armed) {
           solver->solve_contract_probe = 2;
         }
-      }
-      if (retained_preconditioner_contract &&
-          !retained_preconditioner_verified &&
-          retained_gmres_selected) {
-        int retained_gmres_steps = 2;
-        int retained_gmres_orthogonalization_passes = 1;
-        const char *steps_env =
-          getenv("KLS_GENERIC_RETAINED_GMRES_STEPS");
-        const char *orthogonalization_env =
-          getenv("KLS_GENERIC_RETAINED_GMRES_ORTHOGONALIZATION_PASSES");
-        if (steps_env != NULL && steps_env[0] != '\0') {
-          const long parsed = strtol(steps_env, NULL, 10);
-          if (parsed >= 1 && parsed <= 4) {
-            retained_gmres_steps = (int)parsed;
-          }
-        }
-        if (orthogonalization_env != NULL &&
-            orthogonalization_env[0] != '\0') {
-          const long parsed = strtol(orthogonalization_env, NULL, 10);
-          if (parsed >= 1 && parsed <= 2) {
-            retained_gmres_orthogonalization_passes = (int)parsed;
-          }
-        }
-        if (kls_try_gmres_solve_recovery(
-              solver, refine_a, brhs, xrhs, bnorm2, residual, 1.0e-9,
-              retained_gmres_steps,
-              retained_gmres_orthogonalization_passes)) {
-          retained_preconditioner_verified = 1;
-        }
-      }
-      if (!retained_preconditioner_verified) {
-        /* This path deliberately retained an older factor.  Never return a
-           merely plausible correction if the true current-matrix residual
-           failed the public 1e-9 relative-L2 contract. */
-        if (getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL &&
-            !solver->solve_recovery_active && b != x &&
-            solver->orientation == KLS_ORIENTATION_NORMAL &&
-            solver->row_perm == NULL && solver->row_scale == NULL &&
-            solver->col_scale == NULL && solver->nnz > 0u &&
-            solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double))) {
-          /* Generic admission is a performance speculation.  If stationary
-             refinement cannot certify this RHS, rebuild the exact current
-             numeric and retry rather than exposing a solve failure.  The
-             retained generic envelope excludes row/scaling transforms;
-             input_to_csc is therefore the only frame conversion required. */
-          double *recovery_values = (double *)malloc(
-            (size_t)solver->nnz * sizeof(*recovery_values));
-          if (recovery_values != NULL) {
-            if (solver->input_to_csc == NULL) {
-              memcpy(recovery_values, refine_a,
-                     (size_t)solver->nnz * sizeof(*recovery_values));
-            } else {
-              for (UF_long p = 0u; p < solver->nnz; ++p) {
-                recovery_values[p] = refine_a[solver->input_to_csc[p]];
-              }
-            }
-            if (getenv("KLS_TRACE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
-              fprintf(stderr,
-                      "KLS generic retained recovery: exact current refactor\n");
-            }
-            /* Retire reuse before recursively entering the ordinary update
-               dispatcher.  That preserves the installed symbolic/factor
-               epoch and pays an exact changed-numeric refactor, rather than
-               the much costlier cold full-factor recovery. */
-            kls_clear_retained_preconditioner(solver);
-            const int refactor_status =
-              kls_refactor(solver, recovery_values);
-            const int recovery_status = refactor_status == KLS_OK
-              ? solve_impl(solver, transpose, nrhs, b, ldb, x, ldx)
-              : refactor_status;
-            free(recovery_values);
-            solver->base_solve_seconds = kls_now_seconds() - start;
-            solver->stats.solve_seconds = solver->base_solve_seconds;
-            return recovery_status;
-          }
-        }
-        ok = 0;
       }
       if (!ordinary_self_check_l2_verified) {
         /* An ordinary self-check must not silently return an answer that
@@ -35909,44 +35242,7 @@ refine_skip:;
   return KLS_OK;
 }
 
-static int kls_solve_retained_preconditioner(kls_solver *solver,
-                                              int transpose,
-                                              int64_t nrhs,
-                                              const double *b,
-                                              int64_t ldb,
-                                              double *x,
-                                              int64_t ldx) {
-  if (!kls_bounded_degree_retained_preconditioner_enabled(solver) || b != x) {
-    return solve_impl(solver, transpose, nrhs, b, ldb, x, ldx);
-  }
-  if (b == NULL || nrhs <= 0 || solver->n == 0u ||
-      (uint64_t)nrhs > (uint64_t)SIZE_MAX / (uint64_t)solver->n) {
-    return solve_impl(solver, transpose, nrhs, b, ldb, x, ldx);
-  }
-  const int64_t input_stride = ldb == 0 ? (int64_t)solver->n : ldb;
-  if (input_stride < (int64_t)solver->n) {
-    return solve_impl(solver, transpose, nrhs, b, ldb, x, ldx);
-  }
-  const size_t entries = (size_t)nrhs * (size_t)solver->n;
-  if (entries > SIZE_MAX / sizeof(double)) {
-    return KLS_ERR_OUT_OF_MEMORY;
-  }
-  const double start = kls_now_seconds();
-  double *rhs = (double *)malloc(entries * sizeof(*rhs));
-  if (rhs == NULL) {
-    return KLS_ERR_OUT_OF_MEMORY;
-  }
-  for (int64_t j = 0; j < nrhs; ++j) {
-    memcpy(rhs + (size_t)j * (size_t)solver->n,
-           b + j * input_stride,
-           (size_t)solver->n * sizeof(*rhs));
-  }
-  const int status =
-    solve_impl(solver, transpose, nrhs, rhs, (int64_t)solver->n, x, ldx);
-  free(rhs);
-  solver->stats.solve_seconds = kls_now_seconds() - start;
-  return status;
-}
+
 
 int kls_solve(kls_solver *solver,
               int64_t nrhs,
@@ -35957,11 +35253,6 @@ int kls_solve(kls_solver *solver,
   if (solver != NULL && nrhs != 1 && solver->refactor_l_packed_valid) {
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
-  }
-  if (solver != NULL && b == x &&
-      kls_retained_preconditioner_requires_correction(solver)) {
-    return kls_solve_retained_preconditioner(
-      solver, 0, nrhs, b, ldb, x, ldx);
   }
   return solve_impl(solver, 0, nrhs, b, ldb, x, ldx);
 }
@@ -35979,11 +35270,6 @@ int kls_solve_transpose(kls_solver *solver,
        exact publication sweep before using the established implementation. */
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
-  }
-  if (solver != NULL && b == x &&
-      kls_retained_preconditioner_requires_correction(solver)) {
-    return kls_solve_retained_preconditioner(
-      solver, 1, nrhs, b, ldb, x, ldx);
   }
   return solve_impl(solver, 1, nrhs, b, ldb, x, ldx);
 }
@@ -36123,8 +35409,6 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
   const size_t copy_size = requested_size < sizeof(kls_stats)
     ? requested_size
     : sizeof(kls_stats);
-  const int retained_preconditioner_stats =
-    getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL;
   memcpy(stats, &solver->stats, copy_size);
   if (copy_size >= offsetof(kls_stats, compact_solve_index_bytes) +
                    sizeof(stats->compact_solve_index_bytes)) {
@@ -36412,22 +35696,13 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
       offsetof(kls_stats,
                bounded_degree_retained_preconditioner_factor_eligible) +
         sizeof(stats->bounded_degree_retained_preconditioner_factor_eligible)) {
-    stats->bounded_degree_retained_preconditioner_factor_eligible =
-      retained_preconditioner_stats
-        ? kls_bounded_degree_retained_preconditioner_factor_cycle(solver) : 0;
+    stats->bounded_degree_retained_preconditioner_factor_eligible = 0;
   }
   if (copy_size >=
       offsetof(kls_stats,
                bounded_degree_retained_preconditioner_reuse_count) +
         sizeof(stats->bounded_degree_retained_preconditioner_reuse_count)) {
-    stats->bounded_degree_retained_preconditioner_reuse_count =
-      retained_preconditioner_stats
-        ? (solver->bounded_degree_retained_preconditioner_reuse_count >
-            (uint64_t)INT64_MAX
-          ? INT64_MAX
-          : (int64_t)
-              solver->bounded_degree_retained_preconditioner_reuse_count)
-        : 0;
+    stats->bounded_degree_retained_preconditioner_reuse_count = 0;
   }
   if (copy_size >=
       offsetof(kls_stats,
@@ -36551,184 +35826,6 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
   return KLS_OK;
 }
 
-/* A costly retained factor is useful beyond one benchmark identity when the
-   input exposes the same mechanism: almost no structural diagonal, bounded
-   in/out degree, and sparse storage.  The small scalar allowance admits
-   independent BTF fringe blocks without tying the proposal to one order or
-   entry count.  Symbolic and numeric gates below still have to prove that the
-   chosen representation has enough work to amortize residual-policed reuse. */
-
-
-
-
-
-
-
-
-
-
-
-
-/* Experimental, representation-based admission for measuring whether a
-   retained exact factor is useful outside the bounded-degree proposal. */
-__attribute__((noinline))
-static int kls_generic_retained_preconditioner_factor_profile(
-  const kls_solver *solver) {
-  if (getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") == NULL ||
-      solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->solve_recovery_active ||
-      !kls_repeated_update_workload(&solver->options) ||
-      solver->orientation != KLS_ORIENTATION_NORMAL ||
-      solver->common.scale > 0 || solver->numeric->Rs != NULL ||
-      solver->row_perm != NULL || solver->row_scale != NULL ||
-      solver->col_scale != NULL ||
-      (solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
-       solver->symbolic->structural_rank != solver->n) ||
-      solver->common.status < TRILINOS_KLU_OK ||
-      solver->common.status == TRILINOS_KLU_SINGULAR ||
-      (solver->common.numerical_rank != KLS_KLU_EMPTY &&
-       solver->common.numerical_rank != solver->n) ||
-      solver->pivot_nudge_count != 0u ||
-      solver->common.kls_perturb_count != 0u ||
-      !(solver->common.rcond >= 1.0e-8) ||
-      !(solver->common.flops >= 4096.0 * (double)solver->n)) {
-    return 0;
-  }
-  return 1;
-}
-
-__attribute__((noinline))
-static int kls_bounded_degree_retained_preconditioner_factor_cycle(
-  const kls_solver *solver) {
-  if (solver == NULL) {
-    return 0;
-  }
-  const int generic_requested =
-    getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL;
-  if (!generic_requested) {
-    return 0;
-  }
-  return solver->bounded_degree_retained_preconditioner_numeric_eligible != 0
-    ? solver->bounded_degree_retained_preconditioner_numeric_eligible > 0
-    : (kls_generic_retained_preconditioner_factor_profile(solver));
-}
-
-__attribute__((noinline))
-static int kls_bounded_degree_retained_preconditioner_enabled(
-  const kls_solver *solver) {
-  return kls_bounded_degree_retained_preconditioner_factor_cycle(solver) &&
-    solver->retained_preconditioner_active &&
-    solver->retained_preconditioner_reference_values != NULL;
-}
-
-static int kls_retained_preconditioner_requires_correction(
-  const kls_solver *solver) {
-  return kls_bounded_degree_retained_preconditioner_enabled(solver) &&
-    !solver->retained_preconditioner_numeric_current;
-}
-
-__attribute__((noinline))
-static void kls_bounded_degree_arm_retained_preconditioner(
-  kls_solver *solver,
-  const double *numeric_values) {
-  if (solver != NULL) {
-    solver->bounded_degree_retained_preconditioner_numeric_eligible =
-      (kls_generic_retained_preconditioner_factor_profile(solver))
-        ? 1 : -1;
-    if (getenv("KLS_TRACE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
-      fprintf(stderr,
-              "KLS generic retained gate: eligible=%d recovery=%d repeated=%d"
-              " orientation=%d scale=%ld Rs=%d row_perm=%d row_scale=%d"
-              " col_scale=%d predicted=%d srank=%ld nrank=%ld status=%ld"
-              " nudges=%ld perturb=%ld rcond=%.3e flops_per_n=%.3e\n",
-              solver->bounded_degree_retained_preconditioner_numeric_eligible,
-              solver->solve_recovery_active,
-              kls_repeated_update_workload(&solver->options),
-              (int)solver->orientation, (long)solver->common.scale,
-              solver->numeric != NULL && solver->numeric->Rs != NULL,
-              solver->row_perm != NULL, solver->row_scale != NULL,
-              solver->col_scale != NULL, solver->numeric_is_predicted,
-              solver->symbolic != NULL
-                ? (long)solver->symbolic->structural_rank : -2L,
-              (long)solver->common.numerical_rank,
-              (long)solver->common.status,
-              (long)solver->pivot_nudge_count,
-              (long)solver->common.kls_perturb_count,
-              solver->common.rcond,
-              solver->n > 0u
-                ? solver->common.flops / (double)solver->n : 0.0);
-    }
-  }
-  if (!kls_bounded_degree_retained_preconditioner_factor_cycle(solver) ||
-      numeric_values == NULL ||
-      solver->nnz > (UF_long)(SIZE_MAX / sizeof(double))) {
-    return;
-  }
-  double *reference = (double *)malloc(
-    (size_t)(solver->nnz > 0u ? solver->nnz : 1u) * sizeof(*reference));
-  if (reference == NULL) {
-    return;
-  }
-  if (solver->nnz > 0u) {
-    memcpy(reference, numeric_values,
-           (size_t)solver->nnz * sizeof(*reference));
-  }
-  kls_clear_retained_preconditioner(solver);
-  solver->retained_preconditioner_reference_values = reference;
-  solver->retained_preconditioner_active = 1;
-  solver->retained_preconditioner_numeric_current = 1;
-}
-
-__attribute__((noinline))
-static int kls_bounded_degree_update_is_preconditioner_safe(
-  const kls_solver *solver,
-  const double *numeric_values) {
-  if (!kls_bounded_degree_retained_preconditioner_enabled(solver) ||
-      numeric_values == NULL) {
-    return 0;
-  }
-  const double *reference =
-    solver->retained_preconditioner_reference_values;
-  double relative_limit = 1.01e-3;
-  const char *relative_limit_env =
-    getenv("KLS_GENERIC_RETAINED_PRECONDITIONER_RELATIVE_LIMIT");
-  if (getenv("KLS_ENABLE_GENERIC_RETAINED_PRECONDITIONER") != NULL &&
-      relative_limit_env != NULL && relative_limit_env[0] != '\0') {
-    const double parsed = atof(relative_limit_env);
-    if (isfinite(parsed) && parsed >= 1.01e-3 && parsed <= 0.1) {
-      relative_limit = parsed;
-    }
-  }
-  int invalid = 0;
-#pragma omp simd reduction(|:invalid)
-  for (UF_long p = 0u; p < solver->nnz; ++p) {
-    const double old_value = reference[p];
-    const double new_value = numeric_values[p];
-    const double allowed = relative_limit * fabs(old_value) + 64.0 * DBL_MIN;
-    invalid |= !isfinite(old_value) || !isfinite(new_value) ||
-      fabs(new_value - old_value) > allowed;
-  }
-  if (getenv("KLS_TRACE_GENERIC_RETAINED_PRECONDITIONER") != NULL) {
-    UF_long violations = 0u;
-    double worst_fraction = 0.0;
-    for (UF_long p = 0u; p < solver->nnz; ++p) {
-      const double old_value = reference[p];
-      const double new_value = numeric_values[p];
-      const double allowed = relative_limit * fabs(old_value) + 64.0 * DBL_MIN;
-      const double fraction = allowed > 0.0
-        ? fabs(new_value - old_value) / allowed : HUGE_VAL;
-      violations += !isfinite(fraction) || fraction > 1.0;
-      worst_fraction = isfinite(fraction) && fraction > worst_fraction
-        ? fraction : worst_fraction;
-    }
-    fprintf(stderr,
-            "KLS generic retained update: safe=%d violations=%ld"
-            " worst_fraction=%.6g\n",
-            !invalid, (long)violations, worst_fraction);
-  }
-  return !invalid;
-}
-
 const char *kls_status_string(int status) {
   switch (status) {
     case KLS_OK: return "ok";
@@ -36801,9 +35898,6 @@ const char *kls_refactor_path_name(kls_refactor_path path) {
     case KLS_REFACTOR_PATH_KLU: return "klu_refactor";
     case KLS_REFACTOR_PATH_SNB: return "snb";
     case KLS_REFACTOR_PATH_UNCHANGED: return "unchanged";
-    case KLS_REFACTOR_PATH_PARTIAL_BTF: return "partial_btf";
-    case KLS_REFACTOR_PATH_RETAINED_PRECONDITIONER:
-      return "retained_preconditioner";
     default: return "unknown";
   }
 }

@@ -1202,15 +1202,6 @@ static int kls_exact_structural_symmetry(
 
 
 
-/* Rank completion changes the mathematical problem by constraining degrees
-   of freedom at zero pivots.  It must therefore be a deliberate caller
-   choice, never an automatic decision based on an input fingerprint. */
-static int kls_singular_completion_enabled(const kls_solver *solver) {
-  return solver != NULL &&
-         getenv("KLS_DISABLE_SINGULAR_COMPLETION") == NULL &&
-         getenv("KLS_ENABLE_SINGULAR_COMPLETION") != NULL;
-}
-
 /* A dense, almost-full-diagonal graph with nearly balanced directed degrees,
    one macroscopic-but-bounded hub, and a thin disconnected fringe is a
    proposal for direct AMD/BTF analysis and max row scaling. */
@@ -1241,26 +1232,13 @@ static int kls_singular_completion_enabled(const kls_solver *solver) {
 
 
 
-/* Keep the bounded-degree retained-preconditioner policy out of the
-   established factor/refactor kernel layout.  Its cold definitions live after
-   the public solve/stats path; these declarations keep the staged classifier
-   available to analysis, factorization, refactorization, and solve. */
 
 
 
 
 
 
-static int kls_bounded_degree_retained_preconditioner_factor_cycle(
-  const kls_solver *solver);
-static int kls_bounded_degree_retained_preconditioner_enabled(
-  const kls_solver *solver);
-static int kls_retained_preconditioner_requires_correction(
-  const kls_solver *solver);
-static void kls_bounded_degree_arm_retained_preconditioner(
-  kls_solver *solver, const double *numeric_values);
-static int kls_bounded_degree_update_is_preconditioner_safe(
-  const kls_solver *solver, const double *numeric_values);
+
 
 /* Capability contract for giant symmetric scalar-fringe systems. */
 
@@ -13262,13 +13240,11 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
     generic_scale_horizon_work >= 0.5 * est_flops + est_fill;
   if (solver != NULL && solver->symbolic != NULL &&
       solver->symbolic->structural_rank != KLS_KLU_EMPTY &&
-      solver->symbolic->structural_rank < solver->n &&
-      !kls_singular_completion_enabled(solver)) {
+      solver->symbolic->structural_rank < solver->n) {
     /* Ordering cannot repair a known structural-rank deficit.  Without an
        explicit singular-completion request, a background NodeND/scale race
        has no admissible recurring factor to promote and can make analyze +
-       destroy wait on an otherwise immediate rejection.  Keep the existing
-       race available when completion is deliberate. */
+       destroy wait on an otherwise immediate rejection. */
     return;
   }
   {
