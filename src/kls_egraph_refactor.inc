@@ -2297,7 +2297,7 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
   } else if (current_global < start + width) {
     available_end = current_global - start;
   }
-  if ((wait_for_dependencies)) {
+  if (wait_for_dependencies) {
     available_end = kls_egraph_algorithm5_split_available_end(
       shared, panel_offset, available_end);
   }
@@ -2339,8 +2339,8 @@ static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
     trailing_entries += end - begin;
   }
   const UF_long dense_scatter_cols = width - available_end;
-  if ((!kls_egraph_ragged_u_supernode_update_allows(
-        run_rows, dense_scatter_cols, trailing_entries))) {
+  if (!kls_egraph_ragged_u_supernode_update_allows(
+        run_rows, dense_scatter_cols, trailing_entries)) {
     kls_egraph_record_u_supernode_l_work_reject(shared);
     return 0;
   }
@@ -5524,13 +5524,13 @@ static int kls_egraph_refactor_single_scaled_column(
    same scalar arithmetic/storage order as the general no-wait path. */
 static int kls_egraph_btf_plain_cluster_allowed(
   const kls_egraph_refactor_shared *shared) {
-  return (((shared != NULL && !shared->check_pivots &&
+  return (shared != NULL && !shared->check_pivots &&
          !shared->supernode_numeric_updates &&
          !shared->supernode_consumer_plan_group_l_exec &&
          !shared->supernode_consumer_plan_group_l_values &&
          !shared->u_supernode_ragged_l_updates &&
          !shared->u_supernode_values &&
-         !shared->algorithm5_prefactor_updates))) &&
+         !shared->algorithm5_prefactor_updates) &&
          !shared->btf_scalar_run_stats &&
          !shared->btf_scalar_run_exec &&
          !shared->btf_scalar_run_group_wait_stats &&
@@ -5752,7 +5752,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
 
   UF_long up = 0;
   const int restore_btf_group_state_gate =
-    ((plain_scalar_updates));
+    (plain_scalar_updates);
   if (!restore_btf_group_state_gate) {
     kls_egraph_record_btf_scalar_run_group_state_exec_dispatch_bypass(
       worker, k);
@@ -11405,7 +11405,7 @@ static int kls_egraph_refactor_try_pop_ready_column(
 static int kls_egraph_pair_dispatch_allowed(
   const kls_egraph_refactor_shared *shared) {
   /* Adopted by the per-matrix timed probe or armed for the probe refactor. */
-  return (((shared->solver != NULL &&
+  return (shared->solver != NULL &&
          (shared->solver->eg_pair_choice > 0 ||
           shared->solver->eg_pair_pending) &&
          (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
@@ -11416,7 +11416,7 @@ static int kls_egraph_pair_dispatch_allowed(
          !shared->supernode_consumer_plan_group_l_values &&
          !shared->u_supernode_ragged_l_updates &&
          !shared->u_supernode_values &&
-         !shared->algorithm5_prefactor_updates))) &&
+         !shared->algorithm5_prefactor_updates) &&
          !shared->use_fp32_l_values &&
          shared->solver != NULL &&
          shared->snode_run_end != NULL &&
@@ -16346,7 +16346,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     solver->refactor_btf_scalar_run_group_built &&
     solver->refactor_btf_scalar_run_group_wake_count > 0u;
   const int pipeline_claims_requested =
-    (((consumer_plan_claims_requested))) ||
+    (consumer_plan_claims_requested) ||
     btf_scalar_run_group_claims_have_groups ||
     btf_scalar_run_group_prefix_stats_have_groups ||
     btf_scalar_run_group_wake_stats_have_groups;
@@ -16854,7 +16854,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       getenv("KLS_STRICT_PREDICTED_REFINEMENT") == NULL;
   }
   shared->single_unscaled_plain =
-    (((selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
+    (selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
     !shared->check_pivots && !solver->padded_active &&
     shared->snode_run_end != NULL && !kls_batch_consume_disabled() &&
     solver->eg_pair_choice < 0 && !solver->eg_pair_pending &&
@@ -16863,7 +16863,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     !shared->supernode_consumer_plan_group_l_exec &&
     !shared->supernode_consumer_plan_group_l_values &&
     !shared->u_supernode_ragged_l_updates &&
-    !shared->u_supernode_values && !shared->algorithm5_prefactor_updates))) &&
+    !shared->u_supernode_values && !shared->algorithm5_prefactor_updates) &&
     !shared->use_fp32_l_values &&
     getenv("KLS_DISABLE_PLAIN_SINGLE_UNSCALED_EGRAPH") == NULL;
   /* All inputs to the plain-BTF capability test are immutable for one
@@ -20027,7 +20027,6 @@ typedef struct kls_snb_block {
   int32_t *subcols;
   int32_t *edge_dsts;
   double *panels;
-  float *panels32;      /* f32 producer mirror (fp32 mode), same offsets */
   int64_t panel_doubles;
   int32_t *writeback;   /* per LU entry (block walk order): panel index */
   int64_t *wb_col_off;  /* per local column: offset into writeback[] */
@@ -20055,7 +20054,6 @@ typedef struct kls_snb_state {
   double *rs_tmp;          /* n scratch for the Rs permute */
   int wnarrow;
   int wmax;
-  int fp32;             /* consume producer panels through f32 mirrors */
   /* snode-level schedule for the EGraph integration (rock 1): levels of
    * the per-block snode DAGs, merged across independent blocks */
   int64_t slevel_count;

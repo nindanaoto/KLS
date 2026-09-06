@@ -10911,11 +10911,11 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     if (!medium_weak_candidate) {
       const int large_spral_weak =
         large_spral_candidate &&
-        ((solver->symbolic != NULL && solver->symbolic->do_btf &&
+        (solver->symbolic != NULL && solver->symbolic->do_btf &&
           solver->symbolic->maxblock * 4u >= solver->n * 3u &&
           ((weak >= 32768u && weak * 100u >= solver->n) ||
            (missing_diagonal >= 4096u &&
-            missing_diagonal * 200u >= solver->n))));
+            missing_diagonal * 200u >= solver->n)));
       if (!large_spral_weak && !forced_match) {
         goto done;
       }

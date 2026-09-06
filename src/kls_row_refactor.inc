@@ -1024,7 +1024,7 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
       (solver == NULL || solver->n > 64u)) {
     return 0;
   }
-  if ((solver != NULL && solver->numeric_is_predicted)) {
+  if (solver != NULL && solver->numeric_is_predicted) {
     return 0;
   }
   return solver != NULL &&
@@ -1047,7 +1047,7 @@ static int kls_row_refactor_acceptance_structurally_ready(
           (solver != NULL &&
            (solver->n <= 64u))) &&
          solver != NULL &&
-         ((!solver->numeric_is_predicted)) &&
+         (!solver->numeric_is_predicted) &&
          !kls_row_refactor_env_disabled() &&
          solver->row_refactor_auto_enabled &&
          solver->row_refactor_pattern_n == solver->n &&
@@ -6234,7 +6234,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     !shared->lean_compact_match_mode && grouped_done_ready &&
     solver->lean_snode_wait_mask != NULL &&
     solver->lean_snode_wait_slot != NULL &&
-    ((kls_generic_hoisted_snode_worker_capable(solver)));
+    (kls_generic_hoisted_snode_worker_capable(solver));
   shared->lean_symmetric_scalar_fringe_mode =
     symmetric_scalar_fringe_lean_mode;
   shared->lean_snode_avx512_enabled = 0;
@@ -6267,7 +6267,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     kls_lean_grouped_done_is_profitable(solver, thread_count, rows);
   shared->lean_grouped_done_mode =
     grouped_done_ready &&
-    ((generic_grouped_done &&
+    (generic_grouped_done &&
           /* Deferred gathering changes which worker publishes the first
              ready generation.  The compact grouped-token proof assumes the
              already-prepared row stream and cannot represent that extra
@@ -6276,7 +6276,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
              Keep both optimizations independently, but never compose them. */
           !deferred_value_prep &&
           getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
-          getenv("KLS_DISABLE_GENERIC_GROUPED_DONE") == NULL));
+          getenv("KLS_DISABLE_GENERIC_GROUPED_DONE") == NULL);
   const UF_long factor_entries =
     solver->numeric->lnz + solver->numeric->unz;
   const int generic_scaled_row_values =
@@ -7446,7 +7446,7 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
      unmeasured mirror and every column refactor paid to keep it coherent.
      Require the same eligibility at preparation time so an optional
      representation cannot become the default merely as a setup side effect. */
-  if ((solver->numeric_is_predicted)) {
+  if (solver->numeric_is_predicted) {
     return;
   }
 
@@ -10227,7 +10227,7 @@ static int kls_parallel_row_refactor_load_targeted_input_row(
 static int kls_serial_row_refactor_numeric(kls_solver *solver,
                                            double *numeric_values,
                                            int check_pivots) {
-  if ((solver != NULL && solver->numeric_is_predicted)) {
+  if (solver != NULL && solver->numeric_is_predicted) {
     return -1;
   }
   const int scaled = solver != NULL && solver->common.scale > 0;
@@ -18182,7 +18182,7 @@ static void kls_row_publish_worker_run(kls_egraph_refactor_worker *worker) {
 static int kls_threaded_row_refactor_numeric(kls_solver *solver,
                                              double *numeric_values,
                                              int check_pivots) {
-  if ((solver != NULL && solver->numeric_is_predicted)) {
+  if (solver != NULL && solver->numeric_is_predicted) {
     return -1;
   }
   const int scaled = solver != NULL && solver->common.scale > 0;

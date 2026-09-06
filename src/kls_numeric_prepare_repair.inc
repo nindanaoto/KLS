@@ -16093,7 +16093,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
   KLS_ROW_FINISH_MARK("group work");
-  if ((getenv("KLS_SKIP_SUCCESSOR_SORT") == NULL)) {
+  if (getenv("KLS_SKIP_SUCCESSOR_SORT") == NULL) {
     kls_sort_row_refactor_successors_by_work(solver);
   }
   KLS_ROW_FINISH_MARK("successor sort");
@@ -18018,7 +18018,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
     return 1;
   }
   if (lean_only &&
-      ((kls_direct_numeric_lean_pattern_capable(solver))) &&
+      (kls_direct_numeric_lean_pattern_capable(solver)) &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 1, 1)) {
     if (trace_prep) {
       const double trace_end = kls_now_seconds();

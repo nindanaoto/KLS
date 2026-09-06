@@ -17,7 +17,7 @@ static void kls_snb_free(kls_solver *solver) {
       free(blk->subcols);
       free(blk->edge_dsts);
       free(blk->panels);
-      free(blk->panels32);
+
       free(blk->writeback);
       free(blk->wb_col_off);
       free((void *)blk->published);
@@ -52,26 +52,6 @@ static int kls_snb_trace_enabled(void) {
 
 /* Build the supernodal structures from the sorted numeric.  Returns 1 on
  * success; on failure or decline the solver is marked so we never retry. */
-/* fp32 producer mirrors reuse the fp32-egraph error model (f32 L
-   inputs, f64 accumulation) and its per-solve refinement policing; the
-   3e7-fill floor is the measured break-even of that machinery. */
-static int kls_snb_fp32_eligible(const kls_solver *solver) {
-  /* Opt-in only: measured on the ND-chain giants (memchip 747 vs 682,
-     circuit5M_dc 668 vs 632, Freescale1 605 vs 556 fp32-egraph) the f32
-     mirrors gain ~7% over f64 panels but do not beat the incumbent --
-     the ~3.5-wide snodes leave no SIMD room -- and the rejected trials
-     tax every giant's init ~3s. */
-  const char *env = getenv("KLS_SNB_FP32");
-  if (env == NULL || env[0] != '1' || env[1] != '\0') {
-    return 0;
-  }
-  if (solver->numeric == NULL ||
-      (double)(solver->numeric->lnz + solver->numeric->unz) < 3.0e7) {
-    return 0;
-  }
-  return kls_fp32_refactor_env_state() >= 0;
-}
-
 static int kls_snb_prepare(kls_solver *solver) {
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -103,7 +83,7 @@ static int kls_snb_prepare(kls_solver *solver) {
       st->wnarrow = atoi(wn);
     }
   }
-  st->fp32 = kls_snb_fp32_eligible(solver);
+
   st->wmax = KLS_SNB_WMAX;
   {
     const char *wm = getenv("KLS_SNB_WMAX");
@@ -149,7 +129,7 @@ static int kls_snb_prepare(kls_solver *solver) {
     double *lu = (double *)numeric->LUbx[block];
 
     /* greedy zeta amalgamation over sorted L patterns */
-    double snb_zeta = st->fp32 ? 1.0 : KLS_SNB_ZETA;
+    double snb_zeta = (KLS_SNB_ZETA);
     {
       const char *z = getenv("KLS_SNB_ZETA");
       if (z != NULL && z[0] != '\0') {
@@ -670,7 +650,7 @@ static int kls_snb_prepare(kls_solver *solver) {
       fprintf(stderr, "KLS snb: shares coop %.2f par %.2f\n",
               st->coop_work_share, st->par_work_share);
     }
-    if (st->coop_work_share < 0.50 && !st->fp32 &&
+    if ((st->coop_work_share < 0.50) &&
         getenv("KLS_SNB_FORCE_TRIAL") == NULL) {
       if (kls_snb_trace_enabled()) {
         fprintf(stderr, "KLS snb: t4 gated off (coop %.2f)\n",
@@ -687,13 +667,7 @@ static int kls_snb_prepare(kls_solver *solver) {
         (double *)malloc((size_t)blk->panel_doubles * sizeof(double));
       if (blk->panels == NULL) { ok = 0; break; }
       memset(blk->panels, 0, (size_t)blk->panel_doubles * sizeof(double));
-      if (st->fp32) {
-        blk->panels32 =
-          (float *)malloc((size_t)blk->panel_doubles * sizeof(float));
-        if (blk->panels32 == NULL) { ok = 0; break; }
-        memset(blk->panels32, 0,
-               (size_t)blk->panel_doubles * sizeof(float));
-      }
+
     }
   }
 
@@ -931,10 +905,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
     const int32_t pld = ps->height;
     const double *Ldiag = Lp + ps->uw;
     const double *Lbelow = Lp + ps->uw + pw;
-    const float *Lp32 =
-      st->fp32 ? blk->panels32 + ps->panel : NULL;
-    const float *Ldiag32 = Lp32 != NULL ? Lp32 + ps->uw : NULL;
-    const float *Lbelow32 = Lp32 != NULL ? Lp32 + ps->uw + pw : NULL;
+
     if (pipelined) {
       /* the producer publishes each getrf column right after its
          division; this edge only reads columns <= sub[sc-1] */
@@ -950,19 +921,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
         for (int32_t i = 0; i < sc; ++i) {
           const double u = Wc[ustart + i];
           if (u == 0.0) continue;
-          if (Lp32 != NULL) {
-            const float *lcol = Ldiag32 + (size_t)sub[i] * pld;
-            for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-              Wc[ustart + i2] -= (double)lcol[sub[i2]] * u;
-            }
-            const float *lb = Lbelow32 + (size_t)sub[i] * pld;
-            for (int32_t r = 0; r < ph; ++r) {
-              const int32_t dst = dsts[r];
-              if (dst >= 0) {
-                Wc[dst] -= (double)lb[r] * u;
-              }
-            }
-          } else {
+          {
             const double *lcol = Ldiag + (size_t)sub[i] * pld;
             for (int32_t i2 = i + 1; i2 < sc; ++i2) {
               Wc[ustart + i2] -= lcol[sub[i2]] * u;
@@ -986,17 +945,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
     }
     for (int32_t i = 0; i < sc; ++i) {
-      if (Lp32 != NULL) {
-        const float *lcol = Ldiag32 + (size_t)sub[i] * pld;
-        for (int32_t c = 0; c < w; ++c) {
-          double *Bc = B + (size_t)c * sc;
-          const double u = Bc[i];
-          if (u == 0.0) continue;
-          for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-            Bc[i2] -= (double)lcol[sub[i2]] * u;
-          }
-        }
-      } else {
+      {
         const double *lcol = Ldiag + (size_t)sub[i] * pld;
         for (int32_t c = 0; c < w; ++c) {
           double *Bc = B + (size_t)c * sc;
@@ -1022,24 +971,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       }
     }
     double *T = gemm_scratch;
-    if (Lp32 != NULL) {
-      const float *lb = Lbelow32 + (size_t)sub[0] * pld;
-      const double *br = Brow;
-      for (int32_t r = 0; r < ph; ++r) {
-        const double l = (double)lb[r];
-        double *tr = T + (size_t)r * w;
-        for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
-      }
-      for (int32_t i = 1; i < sc; ++i) {
-        const float *lbi = Lbelow32 + (size_t)sub[i] * pld;
-        const double *bri = Brow + (size_t)i * w;
-        for (int32_t r = 0; r < ph; ++r) {
-          const double l = (double)lbi[r];
-          double *tr = T + (size_t)r * w;
-          for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-        }
-      }
-    } else {
+    {
       const double *lb = Lbelow + (size_t)sub[0] * pld;
       const double *br = Brow;
       for (int32_t r = 0; r < ph; ++r) {
@@ -1071,8 +1003,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
   /* fused no-pivot getrf/TRSM */
   {
     double *diag = W + uw;
-    float *diag32 =
-      st->fp32 ? blk->panels32 + sn->panel + uw : NULL;
+
     for (int32_t i = 0; i < w; ++i) {
       double *ci = diag + (size_t)i * H;
       const double pivot = ci[i];
@@ -1083,11 +1014,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       const int32_t hrem = H - uw - i - 1;
       double *lsub = ci + i + 1;
       for (int32_t r = 0; r < hrem; ++r) lsub[r] /= pivot;
-      if (diag32 != NULL) {
-        /* consumers read only the sub-diagonal L of published columns */
-        float *msub = diag32 + (size_t)i * H + i + 1;
-        for (int32_t r = 0; r < hrem; ++r) msub[r] = (float)lsub[r];
-      }
+
       if (pipelined) {
         atomic_store_explicit(&blk->published[s], i + 1,
                               memory_order_release);
@@ -1198,12 +1125,7 @@ static UF_long kls_snb_refactor_epilogue(kls_solver *solver) {
     }
     memcpy(numeric->Rs, rs_tmp, (size_t)solver->n * sizeof(double));
   }
-  if (st->fp32) {
-    /* f32 producer values: same error model as the fp32 egraph mode;
-       the per-solve refinement policing owns accuracy */
-    solver->numeric_needs_refinement = 1;
-    solver->fp32_last_used = 0;
-  }
+
   return 1;
 }
 
@@ -1325,10 +1247,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
     const int32_t pld = ps->height;
     const double *Ldiag = Lp + ps->uw;
     const double *Lbelow = Lp + ps->uw + pw;
-    const float *Lp32 =
-      st->fp32 ? blk->panels32 + ps->panel : NULL;
-    const float *Ldiag32 = Lp32 != NULL ? Lp32 + ps->uw : NULL;
-    const float *Lbelow32 = Lp32 != NULL ? Lp32 + ps->uw + pw : NULL;
+
     if (sc < wnarrow || (int64_t)ph * w < KLS_SNB_COOP_MIN_DOUBLES) {
       /* small edge: tid 0 runs the ordinary serial edge body */
       if (tid == 0) {
@@ -1339,19 +1258,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
             for (int32_t i = 0; i < sc; ++i) {
               const double u = Wc[ustart + i];
               if (u == 0.0) continue;
-              if (Lp32 != NULL) {
-                const float *lcol = Ldiag32 + (size_t)sub[i] * pld;
-                for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-                  Wc[ustart + i2] -= (double)lcol[sub[i2]] * u;
-                }
-                const float *lb = Lbelow32 + (size_t)sub[i] * pld;
-                for (int32_t r = 0; r < ph; ++r) {
-                  const int32_t dst = dsts[r];
-                  if (dst >= 0) {
-                    Wc[dst] -= (double)lb[r] * u;
-                  }
-                }
-              } else {
+              {
                 const double *lcol = Ldiag + (size_t)sub[i] * pld;
                 for (int32_t i2 = i + 1; i2 < sc; ++i2) {
                   Wc[ustart + i2] -= lcol[sub[i2]] * u;
@@ -1373,17 +1280,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
             for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
           }
           for (int32_t i = 0; i < sc; ++i) {
-            if (Lp32 != NULL) {
-              const float *lcol = Ldiag32 + (size_t)sub[i] * pld;
-              for (int32_t c = 0; c < w; ++c) {
-                double *Bc = B + (size_t)c * sc;
-                const double u = Bc[i];
-                if (u == 0.0) continue;
-                for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-                  Bc[i2] -= (double)lcol[sub[i2]] * u;
-                }
-              }
-            } else {
+            {
               const double *lcol = Ldiag + (size_t)sub[i] * pld;
               for (int32_t c = 0; c < w; ++c) {
                 double *Bc = B + (size_t)c * sc;
@@ -1408,24 +1305,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
             }
           }
           double *T = st->gemm_w[0];
-          if (Lp32 != NULL) {
-            const float *lb = Lbelow32 + (size_t)sub[0] * pld;
-            const double *br = Brow;
-            for (int32_t r = 0; r < ph; ++r) {
-              const double l = (double)lb[r];
-              double *tr = T + (size_t)r * w;
-              for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
-            }
-            for (int32_t i = 1; i < sc; ++i) {
-              const float *lbi = Lbelow32 + (size_t)sub[i] * pld;
-              const double *bri = Brow + (size_t)i * w;
-              for (int32_t r = 0; r < ph; ++r) {
-                const double l = (double)lbi[r];
-                double *tr = T + (size_t)r * w;
-                for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-              }
-            }
-          } else {
+          {
             const double *lb = Lbelow + (size_t)sub[0] * pld;
             const double *br = Brow;
             for (int32_t r = 0; r < ph; ++r) {
@@ -1469,17 +1349,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
         for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
       }
       for (int32_t i = 0; i < sc; ++i) {
-        if (Lp32 != NULL) {
-          const float *lcol = Ldiag32 + (size_t)sub[i] * pld;
-          for (int32_t c = 0; c < w; ++c) {
-            double *Bc = B + (size_t)c * sc;
-            const double u = Bc[i];
-            if (u == 0.0) continue;
-            for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-              Bc[i2] -= (double)lcol[sub[i2]] * u;
-            }
-          }
-        } else {
+        {
           const double *lcol = Ldiag + (size_t)sub[i] * pld;
           for (int32_t c = 0; c < w; ++c) {
             double *Bc = B + (size_t)c * sc;
@@ -1508,23 +1378,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
       if (r1 > ph) r1 = ph;
       if (r0 < r1) {
         double *T = st->gemm_w[tid];
-        if (Lp32 != NULL) {
-          const float *lb = Lbelow32 + (size_t)sub[0] * pld;
-          for (int32_t r = r0; r < r1; ++r) {
-            const double l = (double)lb[r];
-            double *tr = T + (size_t)(r - r0) * w;
-            for (int32_t c = 0; c < w; ++c) tr[c] = l * Brow[c];
-          }
-          for (int32_t i = 1; i < sc; ++i) {
-            const float *lbi = Lbelow32 + (size_t)sub[i] * pld;
-            const double *bri = Brow + (size_t)i * w;
-            for (int32_t r = r0; r < r1; ++r) {
-              const double l = lbi[r];
-              double *tr = T + (size_t)(r - r0) * w;
-              for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-            }
-          }
-        } else {
+        {
           const double *lb = Lbelow + (size_t)sub[0] * pld;
           for (int32_t r = r0; r < r1; ++r) {
             const double l = lb[r];
@@ -1574,11 +1428,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
       if (r1 > hrem) r1 = hrem;
       double *lsub = ci + i + 1;
       for (int32_t r = r0; r < r1; ++r) lsub[r] /= pivot;
-      if (st->fp32) {
-        float *msub = blk->panels32 + sn->panel + uw +
-                      (size_t)i * H + i + 1;
-        for (int32_t r = r0; r < r1; ++r) msub[r] = (float)lsub[r];
-      }
+
       kls_snb_spin_barrier_wait(&ctx->coop, crew);
       if (tid == 0) {
         atomic_store_explicit(&blk->published[s], i + 1,
@@ -1773,7 +1623,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
       solver->snb != NULL || kls_snb_env_disabled() ||
       solver->symbolic == NULL ||
       solver->numeric == NULL || solver->numeric->LUbx == NULL ||
-      (solver->fp32_decision > 0 && !kls_snb_fp32_eligible(solver)) ||
+      (solver->fp32_decision > 0) ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
     return;
   }
@@ -1844,7 +1694,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
       getenv("KLS_SNB_FORCE_TRIAL") == NULL &&
       (solver->snb_factor_start <= 0.0 ||
        kls_now_seconds() - solver->snb_factor_start <
-         (kls_snb_fp32_eligible(solver) ? 10.0 : 30.0))) {
+         (30.0))) {
     /* t4: prep+trial cost only amortizes on matrices whose factor is
        already expensive (the adopters measure 18s+); cheap-factor rows
        are the pipelined incumbent's territory and the trial would tax
@@ -1965,8 +1815,7 @@ static int kls_snb_try_refactor(kls_solver *solver,
               check_pivots, kls_snb_env_disabled(),
               solver->numeric == NULL, solver->symbolic == NULL,
               solver->snb == NULL,
-              solver->fp32_decision > 0 &&
-                (solver->snb == NULL || !solver->snb->fp32),
+              solver->fp32_decision > 0,
               solver->snb_decision, solver->snb_trial_verdict);
     }
     return 0;
@@ -3580,7 +3429,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_egraph_ready_queue_env_enabled();
 
   const int need_level_pos =
-    ((((((((((kls_refactor_supernode_consumer_plan_shape_claims_env_enabled()))))))))));
+    (kls_refactor_supernode_consumer_plan_shape_claims_env_enabled());
 
   const int build_supernode_consumer_plan =
     (kls_refactor_supernode_consumer_plan_env_enabled() ||
@@ -5104,8 +4953,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     solver->solve_contract_verified = 0;
     free(solver->solve_refine_values);
     solver->solve_refine_values = NULL;
-    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-        1) {
+    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
       solver->factor_preps_deferred = 1;
     }
     if (solver->fast_kls_rebuild_restarts >

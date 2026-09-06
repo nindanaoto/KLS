@@ -1,5 +1,12 @@
 # Paper Ideas Audit
 
+Historical note (2026-09-06): the row-symbolic validation/trial engines
+(`KLS_VALIDATE_ROW_SYMBOLIC`, `KLS_ROW_ENGINE_*`) and the opt-in FP32
+supernode-panel mirror (`KLS_SNB_FP32`) have also been removed from the library.
+The production row-first factorization, FP64 supernode panels, and ordinary
+FP32 EGraph/refinement paths remain. The standalone supernodal benchmark is a
+historical experimental harness, not the library's execution path.
+
 Historical note (2026-09-05): the Algorithm5 payoff variants, experimental
 row-pipeline lookahead, deferred/group output caches, multi-producer supernode
 mode, and predicted-factor row-refactor override have been removed. References
