@@ -7444,11 +7444,10 @@ typedef struct {
   int ok;
 } kls_row_input_cleanup_prep_job;
 
-static void *kls_row_input_cleanup_prep_main(void *arg) {
-  kls_row_input_cleanup_prep_job *job =
-    (kls_row_input_cleanup_prep_job *)arg;
+static void kls_row_input_cleanup_prep_run(
+  kls_row_input_cleanup_prep_job *job) {
   if (job == NULL) {
-    return NULL;
+    return;
   }
   const double begin = kls_now_seconds();
   job->ok = kls_build_row_refactor_input_cleanup_flags(
@@ -7456,7 +7455,6 @@ static void *kls_row_input_cleanup_prep_main(void *arg) {
     job->input_ptr, job->input_cols, &job->needs_cleanup,
     &job->cleanup_rows, &job->cleanup_entries);
   job->seconds = kls_now_seconds() - begin;
-  return NULL;
 }
 
 typedef struct {
@@ -7472,18 +7470,17 @@ typedef struct {
   int ok;
 } kls_row_level_prep_job;
 
-static void *kls_row_level_prep_main(void *arg) {
-  kls_row_level_prep_job *job = (kls_row_level_prep_job *)arg;
+static void kls_row_level_prep_run(kls_row_level_prep_job *job) {
   if (job == NULL || job->n < 0 ||
       (uint64_t)job->n > (uint64_t)(SIZE_MAX / sizeof(UF_long))) {
-    return NULL;
+    return;
   }
   const double begin = kls_now_seconds();
   const UF_long n = job->n;
   UF_long *levels = n > 0u
     ? (UF_long *)calloc((size_t)n, sizeof(*levels)) : NULL;
   if (n > 0u && levels == NULL) {
-    return NULL;
+    return;
   }
   UF_long max_level = 0;
   for (UF_long row = 0; row < n; ++row) {
@@ -7492,7 +7489,7 @@ static void *kls_row_level_prep_main(void *arg) {
       const UF_long dep = job->l_cols[p];
       if (dep >= row) {
         free(levels);
-        return NULL;
+        return;
       }
       const UF_long dep_level = levels[dep] + 1u;
       if (dep_level > level) {
@@ -7513,7 +7510,7 @@ static void *kls_row_level_prep_main(void *arg) {
     free(levels);
     free(level_ptr);
     free(level_rows);
-    return NULL;
+    return;
   }
   for (UF_long row = 0; row < n; ++row) {
     level_ptr[levels[row] + 1u]++;
@@ -7527,7 +7524,7 @@ static void *kls_row_level_prep_main(void *arg) {
     free(levels);
     free(level_ptr);
     free(level_rows);
-    return NULL;
+    return;
   }
   if (level_count > 0u) {
     memcpy(write_pos, level_ptr, (size_t)level_count * sizeof(*write_pos));
@@ -7550,7 +7547,6 @@ static void *kls_row_level_prep_main(void *arg) {
   job->max_width = max_width;
   job->seconds = kls_now_seconds() - begin;
   job->ok = 1;
-  return NULL;
 }
 
 static int kls_row_solve_pattern_is_ready(const kls_solver *solver) {
@@ -8337,40 +8333,6 @@ static void kls_build_one_row_solve_partition(kls_solver *solver,
   }
 }
 
-typedef struct {
-  kls_solver *solver;
-  int kind;
-  double seconds;
-} kls_row_solve_plan_build_job;
-
-static void *kls_row_solve_plan_build_main(void *arg) {
-  kls_row_solve_plan_build_job *job = (kls_row_solve_plan_build_job *)arg;
-  if (job == NULL || job->solver == NULL) {
-    return NULL;
-  }
-  const double begin = kls_now_seconds();
-  switch (job->kind) {
-    case 0:
-      kls_build_one_row_solve_partition(job->solver, 0);
-      break;
-    case 1:
-      kls_build_one_row_solve_partition(job->solver, 1);
-      break;
-    case 2:
-      (void)kls_build_one_row_solve_transpose_plan(
-        job->solver, 1, &job->solver->row_solve_ut_plan);
-      break;
-    case 3:
-      (void)kls_build_one_row_solve_transpose_plan(
-        job->solver, 0, &job->solver->row_solve_lt_plan);
-      break;
-    default:
-      break;
-  }
-  job->seconds = kls_now_seconds() - begin;
-  return NULL;
-}
-
 static void kls_record_row_solve_partition(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -8386,59 +8348,11 @@ static void kls_record_row_solve_partition(kls_solver *solver) {
   solver->row_solve_partition_slices = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
   const int defer_transpose =
     getenv("KLS_DEFER_ROW_TRANSPOSE_PLANS") != NULL;
-  const int parallel =
-    getenv("KLS_PARALLEL_ROW_SOLVE_PARTITION_BUILD") != NULL &&
-    solver->options.threads >= 4 && solver->n >= 10000u;
-  if (!parallel) {
-    kls_build_one_row_solve_partition(solver, 0);
-    kls_build_one_row_solve_partition(solver, 1);
-    if (!defer_transpose) {
-      kls_build_row_solve_transpose_plans(solver);
-    }
-    return;
+  kls_build_one_row_solve_partition(solver, 0);
+  kls_build_one_row_solve_partition(solver, 1);
+  if (!defer_transpose) {
+    kls_build_row_solve_transpose_plans(solver);
   }
-
-  kls_row_solve_plan_build_job jobs[4] = {
-    { solver, 0, 0.0 }, { solver, 1, 0.0 },
-    { solver, 2, 0.0 }, { solver, 3, 0.0 }
-  };
-  pthread_t threads[4];
-  unsigned char launched[4] = { 0u, 0u, 0u, 0u };
-  const int job_count = defer_transpose ? 2 : 4;
-  for (int kind = 1; kind < job_count; ++kind) {
-    if (pthread_create(&threads[kind], NULL,
-                       kls_row_solve_plan_build_main, &jobs[kind]) == 0) {
-      launched[kind] = 1u;
-    } else {
-      (void)kls_row_solve_plan_build_main(&jobs[kind]);
-    }
-  }
-  (void)kls_row_solve_plan_build_main(&jobs[0]);
-  for (int kind = 1; kind < job_count; ++kind) {
-    if (launched[kind]) {
-      (void)pthread_join(threads[kind], NULL);
-    }
-  }
-  if (getenv("KLS_TRACE_ROW_SOLVE_PARTITION_PREP") != NULL) {
-    fprintf(stderr,
-            "KLS row solve partition plans L %.3fms U %.3fms "
-            "UT %.3fms LT %.3fms\n",
-            1e3 * jobs[0].seconds, 1e3 * jobs[1].seconds,
-            1e3 * jobs[2].seconds, 1e3 * jobs[3].seconds);
-  }
-}
-
-typedef struct {
-  kls_solver *solver;
-} kls_row_solve_partition_prep_job;
-
-static void *kls_row_solve_partition_prep_main(void *arg) {
-  kls_row_solve_partition_prep_job *job =
-    (kls_row_solve_partition_prep_job *)arg;
-  if (job != NULL) {
-    kls_record_row_solve_partition(job->solver);
-  }
-  return NULL;
 }
 
 static int kls_build_row_solve_pattern(kls_solver *solver) {
@@ -8792,11 +8706,9 @@ typedef struct {
   int ok;
 } kls_group_successor_prep_job;
 
-static void *kls_group_successor_prep_main(void *arg) {
-  kls_group_successor_prep_job *job =
-    (kls_group_successor_prep_job *)arg;
+static void kls_group_successor_prep_run(kls_group_successor_prep_job *job) {
   if (job == NULL) {
-    return NULL;
+    return;
   }
   const double begin = kls_now_seconds();
   job->ok = kls_build_row_refactor_group_successors(
@@ -8805,22 +8717,6 @@ static void *kls_group_successor_prep_main(void *arg) {
     &job->pred_count, &job->root_groups, &job->edge_count,
     &job->root_count, &job->leaf_count, &job->max_fanout);
   job->seconds = kls_now_seconds() - begin;
-  return NULL;
-}
-
-static void kls_free_group_successor_prep_job(
-  kls_group_successor_prep_job *job) {
-  if (job == NULL) {
-    return;
-  }
-  free(job->successor_ptr);
-  free(job->successor_groups);
-  free(job->pred_count);
-  free(job->root_groups);
-  job->successor_ptr = NULL;
-  job->successor_groups = NULL;
-  job->pred_count = NULL;
-  job->root_groups = NULL;
 }
 
 static int kls_row_refactor_u_row_extends_next(const UF_long *u_ptr,
@@ -9066,14 +8962,13 @@ typedef struct {
   int ok;
 } kls_dense_producer_run_build_job;
 
-static void *kls_dense_producer_run_build_main(void *arg) {
-  kls_dense_producer_run_build_job *job =
-    (kls_dense_producer_run_build_job *)arg;
+static void kls_dense_producer_run_build(
+  kls_dense_producer_run_build_job *job) {
   if (job == NULL || job->l_ptr == NULL || job->l_cols == NULL ||
       job->row_group == NULL || job->group_ptr == NULL ||
       job->group_kind == NULL || job->group_compact_panel_begin == NULL ||
       job->run_ptr == NULL) {
-    return NULL;
+    return;
   }
   job->ok = 1;
   for (UF_long row = job->row_begin; row < job->row_end; ++row) {
@@ -9100,7 +8995,7 @@ static void *kls_dense_producer_run_build_main(void *arg) {
               job->run_l_begin == NULL || job->run_group == NULL ||
               job->run_len == NULL) {
             job->ok = 0;
-            return NULL;
+            return;
           }
           job->run_l_begin[write] = p;
           job->run_group[write] = dep_group;
@@ -9126,7 +9021,7 @@ static void *kls_dense_producer_run_build_main(void *arg) {
     if (job->fill) {
       if (write != job->run_ptr[row + 1u]) {
         job->ok = 0;
-        return NULL;
+        return;
       }
       continue;
     }
@@ -9148,52 +9043,6 @@ static void *kls_dense_producer_run_build_main(void *arg) {
       }
     }
   }
-  return NULL;
-}
-
-static int kls_run_dense_producer_run_build_jobs(
-  kls_dense_producer_run_build_job *jobs,
-  int job_count) {
-  if (jobs == NULL || job_count < 1 || job_count > 8) {
-    return 0;
-  }
-  pthread_t threads[8];
-  unsigned char launched[8] = { 0u };
-  for (int tid = 1; tid < job_count; ++tid) {
-    if (pthread_create(&threads[tid], NULL,
-                       kls_dense_producer_run_build_main,
-                       &jobs[tid]) == 0) {
-      launched[tid] = 1u;
-    } else {
-      (void)kls_dense_producer_run_build_main(&jobs[tid]);
-    }
-  }
-  (void)kls_dense_producer_run_build_main(&jobs[0]);
-  int ok = jobs[0].ok;
-  for (int tid = 1; tid < job_count; ++tid) {
-    if (launched[tid]) {
-      (void)pthread_join(threads[tid], NULL);
-    }
-    ok = ok && jobs[tid].ok;
-  }
-  return ok;
-}
-
-static UF_long kls_dense_producer_run_row_boundary(
-  const UF_long *l_ptr,
-  UF_long n,
-  UF_long target) {
-  UF_long lo = 0u;
-  UF_long hi = n;
-  while (lo < hi) {
-    const UF_long mid = lo + (hi - lo) / 2u;
-    if (l_ptr[mid] < target) {
-      lo = mid + 1u;
-    } else {
-      hi = mid;
-    }
-  }
-  return lo;
 }
 
 static void kls_try_build_row_refactor_dense_producer_runs(
@@ -9216,8 +9065,7 @@ static void kls_try_build_row_refactor_dense_producer_runs(
   UF_long *full_suffix_run_count_out,
   UF_long *full_suffix_rows_out,
   UF_long *multi_run_rows_out,
-  UF_long *fragmented_rows_out,
-  int thread_count) {
+  UF_long *fragmented_rows_out) {
   KLS_SET_OPTIONAL_OUTPUT(run_ptr_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(run_l_begin_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(run_group_out, NULL);
@@ -9244,72 +9092,32 @@ static void kls_try_build_row_refactor_dense_producer_runs(
     return;
   }
 
-  UF_long run_count = 0;
-  UF_long run_rows = 0;
-  UF_long run_dep_rows = 0;
-  UF_long run_max_per_row = 0;
-  UF_long full_suffix_run_count = 0;
-  UF_long full_suffix_rows = 0;
-  UF_long multi_run_rows = 0;
-  UF_long fragmented_rows = 0;
-  int run_job_count = 1;
-  if (thread_count >= 2 && n >= 10000u) {
-    run_job_count = thread_count;
-    if (run_job_count > 8) {
-      run_job_count = 8;
-    }
-  }
-  kls_dense_producer_run_build_job run_jobs[8];
-  memset(run_jobs, 0, sizeof(run_jobs));
-  const UF_long l_nnz = l_ptr[n];
-  for (int tid = 0; tid < run_job_count; ++tid) {
-    const UF_long begin_target =
-      (l_nnz / (UF_long)run_job_count) * (UF_long)tid +
-      ((l_nnz % (UF_long)run_job_count) * (UF_long)tid) /
-        (UF_long)run_job_count;
-    const UF_long end_target =
-      (l_nnz / (UF_long)run_job_count) * (UF_long)(tid + 1) +
-      ((l_nnz % (UF_long)run_job_count) * (UF_long)(tid + 1)) /
-        (UF_long)run_job_count;
-    const UF_long row_begin = tid == 0
-      ? 0u : kls_dense_producer_run_row_boundary(l_ptr, n, begin_target);
-    const UF_long row_end = tid + 1 == run_job_count
-      ? n : kls_dense_producer_run_row_boundary(l_ptr, n, end_target);
-    run_jobs[tid] = (kls_dense_producer_run_build_job){
-      .n = n,
-      .l_ptr = l_ptr,
-      .l_cols = l_cols,
-      .row_group = row_group,
-      .group_count = group_count,
-      .group_ptr = group_ptr,
-      .group_kind = group_kind,
-      .group_compact_panel_begin = group_compact_panel_begin,
-      .row_begin = row_begin,
-      .row_end = row_end,
-      .run_ptr = run_ptr
-    };
-  }
-  if (!kls_run_dense_producer_run_build_jobs(run_jobs, run_job_count)) {
+  kls_dense_producer_run_build_job run_job = {
+    .n = n,
+    .l_ptr = l_ptr,
+    .l_cols = l_cols,
+    .row_group = row_group,
+    .group_count = group_count,
+    .group_ptr = group_ptr,
+    .group_kind = group_kind,
+    .group_compact_panel_begin = group_compact_panel_begin,
+    .row_begin = 0u,
+    .row_end = n,
+    .run_ptr = run_ptr
+  };
+  kls_dense_producer_run_build(&run_job);
+  if (!run_job.ok) {
     free(run_ptr);
     return;
   }
-  for (int tid = 0; tid < run_job_count; ++tid) {
-    if (run_count > UF_long_max - run_jobs[tid].run_count ||
-        run_dep_rows > UF_long_max - run_jobs[tid].run_dep_rows) {
-      free(run_ptr);
-      return;
-    }
-    run_count += run_jobs[tid].run_count;
-    run_rows += run_jobs[tid].run_rows;
-    run_dep_rows += run_jobs[tid].run_dep_rows;
-    full_suffix_run_count += run_jobs[tid].full_suffix_run_count;
-    full_suffix_rows += run_jobs[tid].full_suffix_rows;
-    multi_run_rows += run_jobs[tid].multi_run_rows;
-    fragmented_rows += run_jobs[tid].fragmented_rows;
-    if (run_jobs[tid].run_max_per_row > run_max_per_row) {
-      run_max_per_row = run_jobs[tid].run_max_per_row;
-    }
-  }
+  const UF_long run_count = run_job.run_count;
+  const UF_long run_rows = run_job.run_rows;
+  const UF_long run_dep_rows = run_job.run_dep_rows;
+  const UF_long run_max_per_row = run_job.run_max_per_row;
+  const UF_long full_suffix_run_count = run_job.full_suffix_run_count;
+  const UF_long full_suffix_rows = run_job.full_suffix_rows;
+  const UF_long multi_run_rows = run_job.multi_run_rows;
+  const UF_long fragmented_rows = run_job.fragmented_rows;
 
   if (run_count == 0u) {
     free(run_ptr);
@@ -9345,14 +9153,13 @@ static void kls_try_build_row_refactor_dense_producer_runs(
     return;
   }
 
-  for (int tid = 0; tid < run_job_count; ++tid) {
-    run_jobs[tid].run_l_begin = run_l_begin;
-    run_jobs[tid].run_group = run_group;
-    run_jobs[tid].run_len = run_len;
-    run_jobs[tid].fill = 1;
-    run_jobs[tid].ok = 0;
-  }
-  if (!kls_run_dense_producer_run_build_jobs(run_jobs, run_job_count)) {
+  run_job.run_l_begin = run_l_begin;
+  run_job.run_group = run_group;
+  run_job.run_len = run_len;
+  run_job.fill = 1;
+  run_job.ok = 0;
+  kls_dense_producer_run_build(&run_job);
+  if (!run_job.ok) {
     free(run_ptr);
     free(run_l_begin);
     free(run_group);
@@ -9419,11 +9226,9 @@ typedef struct {
   int ok;
 } kls_dense_producer_target_job;
 
-static void *kls_dense_producer_target_main(void *arg) {
-  kls_dense_producer_target_job *job =
-    (kls_dense_producer_target_job *)arg;
+static void kls_dense_producer_target_run(kls_dense_producer_target_job *job) {
   if (job == NULL) {
-    return NULL;
+    return;
   }
   job->ok = 1;
   UF_long none_count = 0;
@@ -9435,7 +9240,7 @@ static void *kls_dense_producer_target_main(void *arg) {
     const UF_long current_group = job->row_group[row];
     if (current_group >= job->group_count) {
       job->ok = 0;
-      return NULL;
+      return;
     }
     const UF_long row_begin = job->group_ptr[current_group];
     const UF_long row_end = job->group_ptr[current_group + 1u];
@@ -9458,7 +9263,7 @@ static void *kls_dense_producer_target_main(void *arg) {
       const UF_long dep_group = job->run_group[run];
       if (dep_group >= job->group_count) {
         job->ok = 0;
-        return NULL;
+        return;
       }
       const UF_long dep_trailing_begin =
         job->group_trailing_begin[dep_group];
@@ -9467,12 +9272,12 @@ static void *kls_dense_producer_target_main(void *arg) {
             dep_trailing_len ||
           job->run_l_begin[run] < l_begin) {
         job->ok = 0;
-        return NULL;
+        return;
       }
       const UF_long run_offset = job->run_l_begin[run] - l_begin;
       if (job->run_len[run] > UF_long_max - run_offset) {
         job->ok = 0;
-        return NULL;
+        return;
       }
       const UF_long run_end = run_offset + job->run_len[run];
       for (UF_long dep_col_pos = 0; dep_col_pos < dep_trailing_len;
@@ -9530,7 +9335,6 @@ static void *kls_dense_producer_target_main(void *arg) {
   job->dense_count = dense_count;
   job->pivot_count = pivot_count;
   job->trailing_count = trailing_count;
-  return NULL;
 }
 
 static void kls_try_build_row_refactor_dense_producer_target_maps(
@@ -9558,8 +9362,7 @@ static void kls_try_build_row_refactor_dense_producer_target_maps(
   UF_long *target_external_count_out,
   UF_long *target_dense_count_out,
   UF_long *target_pivot_count_out,
-  UF_long *target_trailing_count_out,
-  int thread_count) {
+  UF_long *target_trailing_count_out) {
   KLS_SET_OPTIONAL_OUTPUT(target_ptr_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(target_kind_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(target_pos_out, NULL);
@@ -9634,95 +9437,13 @@ static void kls_try_build_row_refactor_dense_producer_target_maps(
     run_l_begin, run_group, run_len, target_ptr, target_kind, target_pos,
     0u, n, 0u, 0u, 0u, 0u, 0u, 0
   };
-  int workers =
-    getenv("KLS_PARALLEL_DENSE_PRODUCER_TARGET_MAPS") != NULL
-      ? thread_count : 1;
-  if (workers < 1) {
-    workers = 1;
-  }
-  if (workers > 32) {
-    workers = 32;
-  }
-  if ((UF_long)workers > n) {
-    workers = (int)n;
-  }
-  if (target_count < 262144u) {
-    workers = 1;
-  }
-
-  UF_long none_count = 0;
-  UF_long external_count = 0;
-  UF_long dense_count = 0;
-  UF_long pivot_count = 0;
-  UF_long trailing_count = 0;
-  int ok = 1;
-  kls_dense_producer_target_job *jobs = workers > 1
-    ? (kls_dense_producer_target_job *)calloc((size_t)workers,
-                                               sizeof(*jobs)) : NULL;
-  pthread_t *threads = workers > 1
-    ? (pthread_t *)malloc((size_t)workers * sizeof(*threads)) : NULL;
-  unsigned char *launched = workers > 1
-    ? (unsigned char *)calloc((size_t)workers, sizeof(*launched)) : NULL;
-  UF_long *row_bounds = workers > 1
-    ? (UF_long *)malloc(((size_t)workers + 1u) * sizeof(*row_bounds)) : NULL;
-  if (workers > 1 && jobs != NULL && threads != NULL && launched != NULL &&
-      row_bounds != NULL) {
-    row_bounds[0] = 0u;
-    row_bounds[workers] = n;
-    UF_long row = 0u;
-    const UF_long target_per_worker = target_count / (UF_long)workers;
-    const UF_long target_remainder = target_count % (UF_long)workers;
-    for (int tid = 1; tid < workers; ++tid) {
-      const UF_long tid_u = (UF_long)tid;
-      const UF_long goal = target_per_worker * tid_u +
-        (target_remainder * tid_u) / (UF_long)workers;
-      while (row < n && target_ptr[run_ptr[row]] < goal) {
-        row++;
-      }
-      row_bounds[tid] = row;
-    }
-    for (int tid = 0; tid < workers; ++tid) {
-      jobs[tid] = common;
-      jobs[tid].row_begin = row_bounds[tid];
-      jobs[tid].row_end = row_bounds[tid + 1];
-    }
-    for (int tid = 1; tid < workers; ++tid) {
-      if (pthread_create(&threads[tid], NULL,
-                         kls_dense_producer_target_main, &jobs[tid]) == 0) {
-        launched[tid] = 1u;
-      } else {
-        (void)kls_dense_producer_target_main(&jobs[tid]);
-      }
-    }
-    (void)kls_dense_producer_target_main(&jobs[0]);
-    for (int tid = 1; tid < workers; ++tid) {
-      if (launched[tid]) {
-        (void)pthread_join(threads[tid], NULL);
-      }
-    }
-    for (int tid = 0; tid < workers; ++tid) {
-      ok = ok && jobs[tid].ok;
-      none_count += jobs[tid].none_count;
-      external_count += jobs[tid].external_count;
-      dense_count += jobs[tid].dense_count;
-      pivot_count += jobs[tid].pivot_count;
-      trailing_count += jobs[tid].trailing_count;
-    }
-  } else {
-    common.row_begin = 0u;
-    common.row_end = n;
-    (void)kls_dense_producer_target_main(&common);
-    ok = common.ok;
-    none_count = common.none_count;
-    external_count = common.external_count;
-    dense_count = common.dense_count;
-    pivot_count = common.pivot_count;
-    trailing_count = common.trailing_count;
-  }
-  free(jobs);
-  free(threads);
-  free(launched);
-  free(row_bounds);
+  kls_dense_producer_target_run(&common);
+  const int ok = common.ok;
+  const UF_long none_count = common.none_count;
+  const UF_long external_count = common.external_count;
+  const UF_long dense_count = common.dense_count;
+  const UF_long pivot_count = common.pivot_count;
+  const UF_long trailing_count = common.trailing_count;
   if (!ok) {
     free(target_ptr);
     free(target_kind);
@@ -10102,11 +9823,10 @@ typedef struct {
   double seconds;
 } kls_segment_input_target_prep_job;
 
-static void *kls_segment_input_target_prep_main(void *arg) {
-  kls_segment_input_target_prep_job *job =
-    (kls_segment_input_target_prep_job *)arg;
+static void kls_segment_input_target_prep_run(
+  kls_segment_input_target_prep_job *job) {
   if (job == NULL) {
-    return NULL;
+    return;
   }
   const double begin = kls_now_seconds();
   kls_try_build_row_refactor_segment_input_targets(
@@ -10118,7 +9838,6 @@ static void *kls_segment_input_target_prep_main(void *arg) {
     &job->cleanup_cols, &job->target_rows, &job->target_entries,
     &job->cleanup_rows, &job->cleanup_entries);
   job->seconds = kls_now_seconds() - begin;
-  return NULL;
 }
 
 typedef struct {
@@ -10150,11 +9869,10 @@ typedef struct {
   double seconds;
 } kls_dense_group_classification_job;
 
-static void *kls_dense_group_classification_main(void *arg) {
-  kls_dense_group_classification_job *job =
-    (kls_dense_group_classification_job *)arg;
+static void kls_dense_group_classification_run(
+  kls_dense_group_classification_job *job) {
   if (job == NULL) {
-    return NULL;
+    return;
   }
   const double begin = kls_now_seconds();
   for (UF_long group = 0; group < job->group_count; ++group) {
@@ -10247,18 +9965,7 @@ static void *kls_dense_group_classification_main(void *arg) {
     }
   }
   job->seconds = kls_now_seconds() - begin;
-  return NULL;
 }
-
-typedef struct {
-  kls_solver *solver;
-  int thread_count;
-  int prewarm_solve_separator;
-  int cached;
-  int ordered_private;
-  int solve_separator_ready;
-  double seconds;
-} kls_row_schedule_prewarm_job;
 
 static int kls_row_refactor_private_thread_order_valid(
   const kls_solver *solver,
@@ -10272,167 +9979,14 @@ static int kls_update_row_solve_separator_plan_from_row_schedule(
   const UF_long *private_thread_ptr,
   const unsigned char *private_group_mask,
   int thread_count);
-static void *kls_row_schedule_prewarm_main(void *arg);
 
-typedef struct {
-  UF_long n;
-  const UF_long *l_ptr;
-  const UF_long *l_cols;
-  const UF_long *row_group;
-  const UF_long *group_ptr;
-  UF_long group_count;
-  UF_long group_begin;
-  UF_long group_end;
-  UF_long *group_dep_ptr;
-  UF_long *group_dep_rows;
-  uint32_t *marks;
-  uint32_t token_offset;
-  int fill;
-  int ok;
-} kls_group_dep_build_job;
-
-static void *kls_group_dep_build_main(void *arg) {
-  kls_group_dep_build_job *job = (kls_group_dep_build_job *)arg;
-  if (job == NULL || job->l_ptr == NULL || job->l_cols == NULL ||
-      job->row_group == NULL || job->group_ptr == NULL ||
-      job->group_dep_ptr == NULL ||
-      job->marks == NULL) {
-    return NULL;
-  }
-  job->ok = 1;
-  for (UF_long group = job->group_begin; group < job->group_end; ++group) {
-    const uint32_t token =
-      job->token_offset + (uint32_t)group + 1u;
-    UF_long count = 0u;
-    UF_long write = job->fill ? job->group_dep_ptr[group] : 0u;
-    const UF_long row_begin = job->group_ptr[group];
-    const UF_long row_end = job->group_ptr[group + 1u];
-    if (row_begin > row_end || row_end > job->n) {
-      job->ok = 0;
-      return NULL;
-    }
-    for (UF_long row = row_begin; row < row_end; ++row) {
-      for (UF_long p = job->l_ptr[row]; p < job->l_ptr[row + 1u]; ++p) {
-        const UF_long dep = job->l_cols[p];
-        if (dep >= row || dep >= job->n) {
-          job->ok = 0;
-          return NULL;
-        }
-        if (job->row_group[dep] == group || job->marks[dep] == token) {
-          continue;
-        }
-        job->marks[dep] = token;
-        if (job->fill) {
-          if (write >= job->group_dep_ptr[group + 1u] ||
-              job->group_dep_rows == NULL) {
-            job->ok = 0;
-            return NULL;
-          }
-          job->group_dep_rows[write++] = dep;
-        } else {
-          count++;
-        }
-      }
-    }
-    if (job->fill) {
-      if (write != job->group_dep_ptr[group + 1u]) {
-        job->ok = 0;
-        return NULL;
-      }
-    } else {
-      job->group_dep_ptr[group + 1u] = count;
-    }
-  }
-  return NULL;
-}
-
-static int kls_run_group_dep_build_jobs(kls_group_dep_build_job *jobs,
-                                        int job_count) {
-  if (jobs == NULL || job_count < 1 || job_count > 8) {
-    return 0;
-  }
-  pthread_t threads[8];
-  unsigned char launched[8] = { 0u };
-  for (int tid = 1; tid < job_count; ++tid) {
-    if (pthread_create(&threads[tid], NULL,
-                       kls_group_dep_build_main, &jobs[tid]) == 0) {
-      launched[tid] = 1u;
-    } else {
-      (void)kls_group_dep_build_main(&jobs[tid]);
-    }
-  }
-  (void)kls_group_dep_build_main(&jobs[0]);
-  int ok = jobs[0].ok;
-  for (int tid = 1; tid < job_count; ++tid) {
-    if (launched[tid]) {
-      (void)pthread_join(threads[tid], NULL);
-    }
-    ok = ok && jobs[tid].ok;
-  }
-  return ok;
-}
-
-typedef struct {
-  kls_solver *solver;
-  UF_long group_begin;
-  UF_long group_end;
-} kls_group_work_build_job;
-
-static void *kls_group_work_build_main(void *arg) {
-  kls_group_work_build_job *job = (kls_group_work_build_job *)arg;
-  if (job == NULL || job->solver == NULL ||
-      job->solver->row_refactor_group_work == NULL) {
-    return NULL;
-  }
-  for (UF_long group = job->group_begin; group < job->group_end; ++group) {
-    job->solver->row_refactor_group_work[group] =
-      kls_row_refactor_compute_group_work(job->solver, group);
-  }
-  return NULL;
-}
-
-static void kls_build_group_work_parallel(kls_solver *solver,
-                                          UF_long group_count) {
+static void kls_build_group_work(kls_solver *solver, UF_long group_count) {
   if (solver == NULL || solver->row_refactor_group_work == NULL) {
     return;
   }
-  int job_count = 1;
-  if (getenv("KLS_ENABLE_PARALLEL_GROUP_WORK_PREP") != NULL &&
-      solver->options.threads >= 4 && group_count >= 10000u) {
-    job_count = solver->options.threads - 1;
-    if (job_count > 7) {
-      job_count = 7;
-    }
-  }
-  kls_group_work_build_job jobs[7];
-  pthread_t threads[7];
-  unsigned char launched[7] = { 0u };
-  const UF_long groups_per_job =
-    (group_count + (UF_long)job_count - 1u) / (UF_long)job_count;
-  for (int tid = 0; tid < job_count; ++tid) {
-    UF_long begin = (UF_long)tid * groups_per_job;
-    UF_long end = begin + groups_per_job;
-    if (begin > group_count) {
-      begin = group_count;
-    }
-    if (end > group_count) {
-      end = group_count;
-    }
-    jobs[tid] = (kls_group_work_build_job){ solver, begin, end };
-  }
-  for (int tid = 1; tid < job_count; ++tid) {
-    if (pthread_create(&threads[tid], NULL,
-                       kls_group_work_build_main, &jobs[tid]) == 0) {
-      launched[tid] = 1u;
-    } else {
-      (void)kls_group_work_build_main(&jobs[tid]);
-    }
-  }
-  (void)kls_group_work_build_main(&jobs[0]);
-  for (int tid = 1; tid < job_count; ++tid) {
-    if (launched[tid]) {
-      (void)pthread_join(threads[tid], NULL);
-    }
+  for (UF_long group = 0; group < group_count; ++group) {
+    solver->row_refactor_group_work[group] =
+      kls_row_refactor_compute_group_work(solver, group);
   }
 }
 
@@ -10565,13 +10119,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
                               sizeof(*input_cleanup_job.needs_cleanup));
     input_cleanup_job.ok = input_cleanup_job.needs_cleanup != NULL;
   }
-  pthread_t input_cleanup_thread;
-  const int input_cleanup_thread_started =
-    !defer_input_cleanup &&
-    getenv("KLS_PARALLEL_ROW_INPUT_CLEANUP_PREP") != NULL &&
-    pthread_create(&input_cleanup_thread, NULL,
-                   kls_row_input_cleanup_prep_main,
-                   &input_cleanup_job) == 0;
   kls_row_level_prep_job row_level_job = {
     .n = n,
     .l_ptr = l_ptr,
@@ -10582,12 +10129,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   if (disable_scalar_row_batches) {
     row_level_job.ok = 1;
   }
-  pthread_t row_level_thread;
-  const int row_level_thread_started =
-    !disable_scalar_row_batches &&
-    getenv("KLS_PARALLEL_ROW_LEVEL_PREP") != NULL &&
-    pthread_create(&row_level_thread, NULL, kls_row_level_prep_main,
-                   &row_level_job) == 0;
   if (!defer_row_successors) {
     for (UF_long row = 0; row < n; ++row) {
       successor_ptr[row + 1u] += successor_ptr[row];
@@ -10601,15 +10142,11 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
   free(next);
-  if (input_cleanup_thread_started) {
-    (void)pthread_join(input_cleanup_thread, NULL);
-  } else if (!defer_input_cleanup) {
-    (void)kls_row_input_cleanup_prep_main(&input_cleanup_job);
+  if (!defer_input_cleanup) {
+    kls_row_input_cleanup_prep_run(&input_cleanup_job);
   }
-  if (row_level_thread_started) {
-    (void)pthread_join(row_level_thread, NULL);
-  } else if (!disable_scalar_row_batches) {
-    (void)kls_row_level_prep_main(&row_level_job);
+  if (!disable_scalar_row_batches) {
+    kls_row_level_prep_run(&row_level_job);
   }
   if (trace_finish) {
     fprintf(stderr,
@@ -10871,93 +10408,22 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     .group_dense = group_dense,
     .group_kind = group_kind
   };
-  pthread_t dense_classification_thread;
-  const int dense_classification_thread_started =
-    getenv("KLS_PARALLEL_DENSE_GROUP_CLASSIFICATION_PREP") != NULL &&
-    pthread_create(&dense_classification_thread, NULL,
-                   kls_dense_group_classification_main,
-                   &dense_classification_job) == 0;
-  kls_group_dep_build_job group_dep_jobs[8];
-  memset(group_dep_jobs, 0, sizeof(group_dep_jobs));
-  int group_dep_job_count = solver->options.threads - 1;
-  if (group_dep_job_count > 7) {
-    group_dep_job_count = 7;
+  for (UF_long i = 0; i < n; ++i) {
+    dep_marks[i] = KLS_KLU_EMPTY;
   }
-  int parallel_group_deps =
-    getenv("KLS_ENABLE_PARALLEL_GROUP_DEP_PREP") != NULL &&
-    group_dep_job_count >= 2 && group_count >= 10000u &&
-    group_count <= ((UF_long)UINT32_MAX - 1u) / 2u;
-  if (parallel_group_deps) {
-    const UF_long groups_per_job =
-      (group_count + (UF_long)group_dep_job_count - 1u) /
-      (UF_long)group_dep_job_count;
-    for (int tid = 0; tid < group_dep_job_count; ++tid) {
-      UF_long begin = (UF_long)tid * groups_per_job;
-      UF_long end = begin + groups_per_job;
-      if (begin > group_count) {
-        begin = group_count;
-      }
-      if (end > group_count) {
-        end = group_count;
-      }
-      group_dep_jobs[tid] = (kls_group_dep_build_job){
-        .n = n,
-        .l_ptr = l_ptr,
-        .l_cols = l_cols,
-        .row_group = row_group,
-        .group_ptr = group_ptr,
-        .group_count = group_count,
-        .group_begin = begin,
-        .group_end = end,
-        .group_dep_ptr = group_dep_ptr,
-        .marks = (uint32_t *)calloc(
-          (size_t)(n > 0u ? n : 1u), sizeof(uint32_t))
-      };
-      if (group_dep_jobs[tid].marks == NULL) {
-        parallel_group_deps = 0;
-      }
-    }
-  }
-  if (!parallel_group_deps) {
-    for (int tid = 0; tid < group_dep_job_count; ++tid) {
-      free(group_dep_jobs[tid].marks);
-      group_dep_jobs[tid].marks = NULL;
-    }
-    for (UF_long i = 0; i < n; ++i) {
-      dep_marks[i] = KLS_KLU_EMPTY;
-    }
-    for (UF_long g = 0; g < group_count; ++g) {
-      for (UF_long i = group_ptr[g]; i < group_ptr[g + 1u]; ++i) {
-        for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
-          const UF_long dep = l_cols[p];
-          if (dep >= n || row_group[dep] == g || dep_marks[dep] == g) {
-            continue;
-          }
-          dep_marks[dep] = g;
-          group_dep_ptr[g + 1u]++;
+  for (UF_long g = 0; g < group_count; ++g) {
+    for (UF_long i = group_ptr[g]; i < group_ptr[g + 1u]; ++i) {
+      for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
+        const UF_long dep = l_cols[p];
+        if (dep >= n || row_group[dep] == g || dep_marks[dep] == g) {
+          continue;
         }
+        dep_marks[dep] = g;
+        group_dep_ptr[g + 1u]++;
       }
     }
-  } else if (!kls_run_group_dep_build_jobs(group_dep_jobs,
-                                            group_dep_job_count)) {
-    if (dense_classification_thread_started) {
-      (void)pthread_join(dense_classification_thread, NULL);
-    }
-    for (int tid = 0; tid < group_dep_job_count; ++tid) {
-      free(group_dep_jobs[tid].marks);
-    }
-    free(row_group);
-    free(group_ptr);
-    free(l_internal_ptr);
-    free(group_trailing_len);
-    free(group_trailing_begin);
-    free(group_dense);
-    free(group_kind);
-    free(group_dep_ptr);
-    free(dep_marks);
-    free_row_refactor_pattern(solver);
-    return 0;
   }
+
   for (UF_long g = 0; g < group_count; ++g) {
     group_dep_ptr[g + 1u] += group_dep_ptr[g];
   }
@@ -10965,15 +10431,11 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   group_dep_rows = group_dep_count > 0u
     ? (UF_long *)malloc((size_t)group_dep_count * sizeof(*group_dep_rows))
     : NULL;
-  UF_long *group_dep_write = !parallel_group_deps && group_count > 0u
+  UF_long *group_dep_write = group_count > 0u
     ? (UF_long *)malloc((size_t)group_count * sizeof(*group_dep_write))
     : NULL;
   if ((group_dep_count > 0u && group_dep_rows == NULL) ||
-      (!parallel_group_deps && group_count > 0u &&
-       group_dep_write == NULL)) {
-    if (dense_classification_thread_started) {
-      (void)pthread_join(dense_classification_thread, NULL);
-    }
+      (group_count > 0u && group_dep_write == NULL)) {
     free(row_group);
     free(group_ptr);
     free(l_internal_ptr);
@@ -10988,68 +10450,30 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     free_row_refactor_pattern(solver);
     return 0;
   }
-  if (!parallel_group_deps) {
-    for (UF_long i = 0; i < n; ++i) {
-      dep_marks[i] = KLS_KLU_EMPTY;
-    }
-    if (group_count > 0u) {
-      memcpy(group_dep_write, group_dep_ptr,
-             (size_t)group_count * sizeof(*group_dep_write));
-    }
-    for (UF_long g = 0; g < group_count; ++g) {
-      for (UF_long i = group_ptr[g]; i < group_ptr[g + 1u]; ++i) {
-        for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
-          const UF_long dep = l_cols[p];
-          if (dep >= n || row_group[dep] == g || dep_marks[dep] == g) {
-            continue;
-          }
-          dep_marks[dep] = g;
-          group_dep_rows[group_dep_write[g]++] = dep;
+  for (UF_long i = 0; i < n; ++i) {
+    dep_marks[i] = KLS_KLU_EMPTY;
+  }
+  if (group_count > 0u) {
+    memcpy(group_dep_write, group_dep_ptr,
+           (size_t)group_count * sizeof(*group_dep_write));
+  }
+  for (UF_long g = 0; g < group_count; ++g) {
+    for (UF_long i = group_ptr[g]; i < group_ptr[g + 1u]; ++i) {
+      for (UF_long p = l_ptr[i]; p < l_ptr[i + 1u]; ++p) {
+        const UF_long dep = l_cols[p];
+        if (dep >= n || row_group[dep] == g || dep_marks[dep] == g) {
+          continue;
         }
+        dep_marks[dep] = g;
+        group_dep_rows[group_dep_write[g]++] = dep;
       }
-    }
-  } else {
-    for (int tid = 0; tid < group_dep_job_count; ++tid) {
-      group_dep_jobs[tid].group_dep_rows = group_dep_rows;
-      group_dep_jobs[tid].token_offset = (uint32_t)group_count;
-      group_dep_jobs[tid].fill = 1;
-      group_dep_jobs[tid].ok = 0;
-    }
-    if (!kls_run_group_dep_build_jobs(group_dep_jobs,
-                                      group_dep_job_count)) {
-      if (dense_classification_thread_started) {
-        (void)pthread_join(dense_classification_thread, NULL);
-      }
-      for (int tid = 0; tid < group_dep_job_count; ++tid) {
-        free(group_dep_jobs[tid].marks);
-      }
-      free(row_group);
-      free(group_ptr);
-      free(l_internal_ptr);
-      free(group_trailing_len);
-      free(group_trailing_begin);
-      free(group_dense);
-      free(group_kind);
-      free(group_dep_ptr);
-      free(group_dep_rows);
-      free(group_dep_write);
-      free(dep_marks);
-      free_row_refactor_pattern(solver);
-      return 0;
-    }
-    for (int tid = 0; tid < group_dep_job_count; ++tid) {
-      free(group_dep_jobs[tid].marks);
-      group_dep_jobs[tid].marks = NULL;
     }
   }
+
   free(group_dep_write);
   free(dep_marks);
   KLS_ROW_FINISH_MARK("group dependencies");
-  if (dense_classification_thread_started) {
-    (void)pthread_join(dense_classification_thread, NULL);
-  } else {
-    (void)kls_dense_group_classification_main(&dense_classification_job);
-  }
+  kls_dense_group_classification_run(&dense_classification_job);
   const UF_long segment_count = dense_classification_job.segment_count;
   const UF_long segment_rows = dense_classification_job.segment_rows;
   const UF_long segment_max_width =
@@ -11092,20 +10516,9 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     .group_dep_ptr = group_dep_ptr,
     .group_dep_rows = group_dep_rows
   };
-  pthread_t group_successor_thread;
-  const int group_successor_thread_started =
-    getenv("KLS_PARALLEL_GROUP_SUCCESSOR_PREP") != NULL &&
-    pthread_create(&group_successor_thread, NULL,
-                   kls_group_successor_prep_main,
-                   &group_successor_job) == 0;
-
   UF_long *group_levels = group_count > 0u
     ? (UF_long *)calloc((size_t)group_count, sizeof(*group_levels)) : NULL;
   if (group_count > 0u && group_levels == NULL) {
-    if (group_successor_thread_started) {
-      (void)pthread_join(group_successor_thread, NULL);
-    }
-    kls_free_group_successor_prep_job(&group_successor_job);
     free(row_group);
     free(group_ptr);
     free(l_internal_ptr);
@@ -11128,10 +10541,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
           continue;
         }
         if (dep_group > g) {
-          if (group_successor_thread_started) {
-            (void)pthread_join(group_successor_thread, NULL);
-          }
-          kls_free_group_successor_prep_job(&group_successor_job);
           free(row_group);
           free(group_ptr);
           free(group_levels);
@@ -11165,10 +10574,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     ? (UF_long *)malloc((size_t)group_count * sizeof(*level_groups)) : NULL;
   if (group_level_ptr == NULL ||
       (group_count > 0u && level_groups == NULL)) {
-    if (group_successor_thread_started) {
-      (void)pthread_join(group_successor_thread, NULL);
-    }
-    kls_free_group_successor_prep_job(&group_successor_job);
     free(row_group);
     free(group_ptr);
     free(group_levels);
@@ -11194,10 +10599,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     ? (UF_long *)malloc((size_t)group_level_count *
                         sizeof(*group_write_pos)) : NULL;
   if (group_level_count > 0u && group_write_pos == NULL) {
-    if (group_successor_thread_started) {
-      (void)pthread_join(group_successor_thread, NULL);
-    }
-    kls_free_group_successor_prep_job(&group_successor_job);
     free(row_group);
     free(group_ptr);
     free(group_levels);
@@ -11227,11 +10628,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   }
   free(group_write_pos);
   KLS_ROW_FINISH_MARK("group level plan");
-  if (group_successor_thread_started) {
-    (void)pthread_join(group_successor_thread, NULL);
-  } else {
-    (void)kls_group_successor_prep_main(&group_successor_job);
-  }
+  kls_group_successor_prep_run(&group_successor_job);
   group_successor_ptr = group_successor_job.successor_ptr;
   group_successor_groups = group_successor_job.successor_groups;
   group_pred_count = group_successor_job.pred_count;
@@ -11263,21 +10660,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   free(group_levels);
   KLS_ROW_FINISH_MARK("group successors");
 
-  /* Row-solve pattern construction only reads L/U.  Start it before the
-     group work/sort passes so its destructive initialization completes
-     before the schedule prewarm derives the separator solve partition. */
-  pthread_t solve_partition_thread;
-  kls_row_solve_partition_prep_job solve_partition_job = { solver };
-  const int solve_partition_thread_started =
-    getenv("KLS_PARALLEL_ROW_SOLVE_PARTITION_PREP") != NULL &&
-    pthread_create(&solve_partition_thread, NULL,
-                   kls_row_solve_partition_prep_main,
-                   &solve_partition_job) == 0;
-  int solve_partition_thread_joined = 0;
-
-  /* Install the completed group DAG before building optional execution
-     metadata.  This lets the reusable separator schedule run concurrently
-     with producer-target construction below. */
+  /* Publish the group DAG before deriving its cached work estimates. */
   solver->row_refactor_group_ptr = group_ptr;
   solver->row_refactor_group_dep_ptr = group_dep_ptr;
   solver->row_refactor_group_dep_rows = group_dep_rows;
@@ -11325,7 +10708,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
       (double *)malloc((size_t)group_count *
                        sizeof(*solver->row_refactor_group_work));
     if (solver->row_refactor_group_work != NULL) {
-      kls_build_group_work_parallel(solver, group_count);
+      kls_build_group_work(solver, group_count);
     }
   }
   KLS_ROW_FINISH_MARK("group work");
@@ -11333,23 +10716,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     kls_sort_row_refactor_successors_by_work(solver);
   }
   KLS_ROW_FINISH_MARK("successor sort");
-  if (solve_partition_thread_started) {
-    (void)pthread_join(solve_partition_thread, NULL);
-    solve_partition_thread_joined = 1;
-  }
-
-  kls_row_schedule_prewarm_job schedule_prewarm_job = {
-    solver, solver->options.threads, solve_partition_thread_joined,
-    0, 0, 0, 0.0
-  };
-  pthread_t schedule_prewarm_thread;
-  const int schedule_prewarm_thread_started =
-    getenv("KLS_ENABLE_ROW_SCHEDULE_PREWARM") != NULL &&
-    solver->options.threads >= 4 &&
-    pthread_create(&schedule_prewarm_thread, NULL,
-                   kls_row_schedule_prewarm_main,
-                   &schedule_prewarm_job) == 0;
-
   kls_segment_input_target_prep_job segment_input_job = {
     .n = n,
     .input_ptr = input_ptr,
@@ -11366,13 +10732,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     .group_trailing_begin = group_trailing_begin,
     .group_trailing_len = group_trailing_len
   };
-  pthread_t segment_input_thread;
-  const int segment_input_thread_started =
-    getenv("KLS_PARALLEL_SEGMENT_INPUT_TARGET_PREP") != NULL &&
-    pthread_create(&segment_input_thread, NULL,
-                   kls_segment_input_target_prep_main,
-                   &segment_input_job) == 0;
-
   UF_long *group_compact_panel_begin = NULL;
   double *compact_panel_values = NULL;
   atomic_uint *compact_panel_valid = NULL;
@@ -11416,14 +10775,8 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long dense_producer_target_dense_count = 0;
   UF_long dense_producer_target_pivot_count = 0;
   UF_long dense_producer_target_trailing_count = 0;
-  if (!segment_input_thread_started) {
-    (void)kls_segment_input_target_prep_main(&segment_input_job);
-    KLS_ROW_FINISH_MARK("segment targets");
-  }
-  const int dense_producer_run_threads =
-    getenv("KLS_ENABLE_PARALLEL_DENSE_PRODUCER_RUNS") != NULL &&
-    solver->options.threads > 2
-      ? solver->options.threads - 2 : 1;
+  kls_segment_input_target_prep_run(&segment_input_job);
+  KLS_ROW_FINISH_MARK("segment targets");
   kls_try_build_row_refactor_dense_producer_runs(
     n, l_ptr, l_cols, row_group, group_count, group_ptr, group_kind,
     group_compact_panel_begin, &dense_producer_run_ptr,
@@ -11434,8 +10787,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     &dense_producer_full_suffix_run_count,
     &dense_producer_full_suffix_rows,
     &dense_producer_multi_run_rows,
-    &dense_producer_fragmented_rows,
-    dense_producer_run_threads);
+    &dense_producer_fragmented_rows);
   KLS_ROW_FINISH_MARK("producer runs");
   kls_try_build_row_refactor_dense_producer_target_maps(
     n, l_ptr, l_cols, l_internal_ptr, u_cols, row_group, group_count,
@@ -11447,8 +10799,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     &dense_producer_target_count, &dense_producer_target_none_count,
     &dense_producer_target_external_count,
     &dense_producer_target_dense_count, &dense_producer_target_pivot_count,
-    &dense_producer_target_trailing_count,
-    solver->options.threads - (solve_partition_thread_started ? 1 : 0));
+    &dense_producer_target_trailing_count);
   KLS_ROW_FINISH_MARK("producer targets");
 
   UF_long group_single_count = 0u;
@@ -11499,23 +10850,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
         break;
       }
   }
-  if (segment_input_thread_started) {
-    (void)pthread_join(segment_input_thread, NULL);
-    KLS_ROW_FINISH_MARK("segment target join");
-  }
-  if (schedule_prewarm_thread_started) {
-    (void)pthread_join(schedule_prewarm_thread, NULL);
-  }
-  if (trace_finish && schedule_prewarm_thread_started) {
-    fprintf(stderr,
-            "KLS row schedule prewarm %.3fms cached %d ordered %d solve %d\n",
-            1e3 * schedule_prewarm_job.seconds,
-            schedule_prewarm_job.cached,
-            schedule_prewarm_job.ordered_private,
-            schedule_prewarm_job.solve_separator_ready);
-  }
-  KLS_ROW_FINISH_MARK("schedule prewarm");
-
   solver->row_refactor_group_ptr = group_ptr;
   solver->row_refactor_group_dep_ptr = group_dep_ptr;
   solver->row_refactor_group_dep_rows = group_dep_rows;
@@ -11700,13 +11034,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
   KLS_ROW_FINISH_MARK("group stats");
-  if (solve_partition_thread_started) {
-    if (!solve_partition_thread_joined) {
-      (void)pthread_join(solve_partition_thread, NULL);
-    }
-  } else {
-    kls_record_row_solve_partition(solver);
-  }
+  kls_record_row_solve_partition(solver);
   KLS_ROW_FINISH_MARK("solve partition");
 #undef KLS_ROW_FINISH_MARK
   return 1;
@@ -15190,86 +14518,6 @@ static int kls_cache_row_refactor_separator_flop_plan(
   return 1;
 }
 
-static void *kls_row_schedule_prewarm_main(void *arg) {
-  kls_row_schedule_prewarm_job *job =
-    (kls_row_schedule_prewarm_job *)arg;
-  if (job == NULL || job->solver == NULL || job->thread_count <= 1) {
-    return NULL;
-  }
-  const double begin = kls_now_seconds();
-  kls_solver *solver = job->solver;
-  const char *cache_env = getenv("KLS_ENABLE_ROW_SEPARATOR_PLAN_CACHE");
-  if (cache_env == NULL || cache_env[0] == '\0' ||
-      (cache_env[0] == '0' && cache_env[1] == '\0') ||
-      solver->row_refactor_separator_cache_private_groups != NULL ||
-      solver->row_refactor_separator_cache_pipeline_groups != NULL) {
-    job->seconds = kls_now_seconds() - begin;
-    return NULL;
-  }
-
-  UF_long *ready_groups = NULL;
-  atomic_uint *ready_slots = NULL;
-  atomic_ulong *remaining_preds = NULL;
-  unsigned char *tail_groups = NULL;
-  UF_long *private_groups = NULL;
-  UF_long *private_thread_ptr = NULL;
-  unsigned char *private_group_mask = NULL;
-  UF_long tail_count = 0u;
-  UF_long initial_ready = 0u;
-  UF_long private_count = 0u;
-  UF_long pipeline_count = 0u;
-  UF_long closure_count = 0u;
-  UF_long component_count = 0u;
-  UF_long private_threads = 0u;
-  UF_long min_groups = 0u;
-  UF_long max_groups = 0u;
-  double min_work = 0.0;
-  double max_work = 0.0;
-  const int prepared =
-    kls_prepare_row_refactor_separator_flop_ready_queue(
-      solver, job->thread_count, &ready_groups, &ready_slots,
-      &remaining_preds, &tail_groups, &private_groups,
-      &private_thread_ptr, &private_group_mask, &tail_count,
-      &initial_ready, &private_count, &pipeline_count, &closure_count,
-      &component_count, &private_threads, &min_groups, &max_groups,
-      &min_work, &max_work);
-  if (prepared) {
-    job->ordered_private =
-      kls_row_refactor_private_thread_order_valid(
-        solver, private_groups, private_thread_ptr, private_group_mask,
-        job->thread_count);
-    job->cached = kls_cache_row_refactor_separator_flop_plan(
-      solver, job->thread_count, private_groups, private_thread_ptr,
-      private_group_mask, private_count, pipeline_count, closure_count,
-      component_count, private_threads, min_groups, max_groups,
-      min_work, max_work);
-    if (job->cached) {
-      solver->row_refactor_separator_cache_order_checked = 1;
-      solver->row_refactor_separator_cache_ordered_private =
-        job->ordered_private ? 1 : 0;
-    }
-    if (job->prewarm_solve_separator) {
-      const char *solve_separator_env = getenv("KLS_ROW_SOLVE_SEPARATOR");
-      const int solve_separator_enabled =
-        solve_separator_env != NULL && solve_separator_env[0] != '\0' &&
-        !(solve_separator_env[0] == '0' &&
-          solve_separator_env[1] == '\0');
-      if (solve_separator_enabled) {
-        solver->row_solve_separator_schedule_attempted = 1;
-        job->solve_separator_ready =
-          kls_update_row_solve_separator_plan_from_row_schedule(
-            solver, private_groups, private_thread_ptr,
-            private_group_mask, job->thread_count);
-      }
-    }
-  }
-  free(private_groups);
-  free(private_thread_ptr);
-  free(private_group_mask);
-  job->seconds = kls_now_seconds() - begin;
-  return NULL;
-}
-
 static int kls_restore_row_refactor_separator_flop_plan(
   kls_solver *solver,
   int thread_count,
@@ -15985,40 +15233,6 @@ static int kls_update_row_solve_separator_plan_from_row_schedule(
   return 1;
 }
 
-typedef struct {
-  kls_solver *solver;
-  const double *group_work;
-  UF_long group_begin;
-  UF_long group_end;
-  int ok;
-} kls_row_successor_sort_job;
-
-static void *kls_row_successor_sort_main(void *arg) {
-  kls_row_successor_sort_job *job =
-    (kls_row_successor_sort_job *)arg;
-  if (job == NULL || job->solver == NULL || job->group_work == NULL) {
-    return NULL;
-  }
-  kls_solver *solver = job->solver;
-  job->ok = 1;
-  for (UF_long group = job->group_begin; group < job->group_end; ++group) {
-    const UF_long begin =
-      solver->row_refactor_group_successor_ptr[group];
-    const UF_long end =
-      solver->row_refactor_group_successor_ptr[group + 1u];
-    if (begin >= end) {
-      continue;
-    }
-    if (!kls_sort_row_refactor_group_list_by_cached_work(
-          solver->row_refactor_group_successor_groups + begin, end - begin,
-          job->group_work)) {
-      job->ok = 0;
-      break;
-    }
-  }
-  return NULL;
-}
-
 static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
   if (solver == NULL ||
       solver->row_refactor_group_successor_ptr == NULL ||
@@ -16047,58 +15261,18 @@ static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
     }
     group_work = owned_group_work;
   }
-  int thread_count = 1;
-  if (getenv("KLS_ENABLE_PARALLEL_SUCCESSOR_SORT") != NULL &&
-      solver->options.threads >= 4 &&
-      solver->row_refactor_group_count >= 10000u) {
-    thread_count = solver->options.threads;
-    if (thread_count > 8) {
-      thread_count = 8;
-    }
-  }
   int sort_ok = 1;
-  if (thread_count == 1) {
-    kls_row_successor_sort_job job = {
-      solver, group_work, 0u, solver->row_refactor_group_count, 0
-    };
-    (void)kls_row_successor_sort_main(&job);
-    sort_ok = job.ok;
-  } else {
-    kls_row_successor_sort_job jobs[8];
-    pthread_t threads[8];
-    unsigned char launched[8] = { 0u };
-    const UF_long groups_per_thread =
-      (solver->row_refactor_group_count + (UF_long)thread_count - 1u) /
-      (UF_long)thread_count;
-    for (int tid = 0; tid < thread_count; ++tid) {
-      UF_long begin = (UF_long)tid * groups_per_thread;
-      UF_long end = begin + groups_per_thread;
-      if (begin > solver->row_refactor_group_count) {
-        begin = solver->row_refactor_group_count;
-      }
-      if (end > solver->row_refactor_group_count) {
-        end = solver->row_refactor_group_count;
-      }
-      jobs[tid] = (kls_row_successor_sort_job){
-        solver, group_work, begin, end, 0
-      };
+  for (UF_long group = 0; group < solver->row_refactor_group_count; ++group) {
+    const UF_long begin = solver->row_refactor_group_successor_ptr[group];
+    const UF_long end = solver->row_refactor_group_successor_ptr[group + 1u];
+    if (begin >= end) {
+      continue;
     }
-    for (int tid = 1; tid < thread_count; ++tid) {
-      if (pthread_create(&threads[tid], NULL,
-                         kls_row_successor_sort_main, &jobs[tid]) == 0) {
-        launched[tid] = 1u;
-      } else {
-        (void)kls_row_successor_sort_main(&jobs[tid]);
-      }
-    }
-    (void)kls_row_successor_sort_main(&jobs[0]);
-    for (int tid = 1; tid < thread_count; ++tid) {
-      if (launched[tid]) {
-        (void)pthread_join(threads[tid], NULL);
-      }
-    }
-    for (int tid = 0; tid < thread_count; ++tid) {
-      sort_ok = sort_ok && jobs[tid].ok;
+    if (!kls_sort_row_refactor_group_list_by_cached_work(
+          solver->row_refactor_group_successor_groups + begin, end - begin,
+          group_work)) {
+      sort_ok = 0;
+      break;
     }
   }
   if (!sort_ok) {
