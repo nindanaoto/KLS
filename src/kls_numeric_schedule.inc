@@ -3428,33 +3428,15 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   const int need_pipeline_ready_graph =
     kls_egraph_ready_queue_env_enabled();
 
-  const int need_level_pos =
-    (kls_refactor_supernode_consumer_plan_shape_claims_env_enabled());
-
-  const int build_supernode_consumer_plan =
-    (kls_refactor_supernode_consumer_plan_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_exec_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_output_stats_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_shape_targets_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_group_cache_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_group_exec_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_group_batch_exec_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_group_state_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_group_state_focus_env_enabled() ||
-    kls_refactor_supernode_consumer_plan_shape_claims_env_enabled()) ||
-    kls_refactor_u_supernode_plan_pattern_env_enabled();
   const int supernode_consumer_stats_env =
     kls_refactor_supernode_consumer_stats_env_enabled();
   const int record_stream_stats = kls_refactor_stream_stats_env_enabled();
-  const int build_plan_u_supernode_pattern =
-    kls_refactor_u_supernode_plan_pattern_env_enabled();
 
   const int need_u_supernode_pattern =
     (supernode_consumer_stats_env ||
     kls_refactor_u_supernode_pattern_env_enabled() ||
     kls_refactor_u_supernode_values_env_enabled() ||
-    kls_refactor_u_supernode_ragged_l_env_enabled() ||
-    build_plan_u_supernode_pattern);
+    kls_refactor_u_supernode_ragged_l_env_enabled());
 
   if (solver->refactor_level_ptr != NULL &&
       solver->refactor_supernode_pipeline_end != NULL &&
@@ -3462,15 +3444,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
        solver->refactor_pipeline_column_count == 0u ||
        solver->refactor_pipeline_successor_ptr != NULL) &&
       (!need_u_supernode_pattern ||
-       (solver->refactor_u_supernode_pattern_built &&
-        (build_plan_u_supernode_pattern
-           ? solver->refactor_u_supernode_plan_pattern_built
-           : !solver->refactor_u_supernode_plan_pattern_built))) &&
-      (!build_supernode_consumer_plan ||
-       solver->refactor_supernode_consumer_plan_built) &&
+       solver->refactor_u_supernode_pattern_built) &&
       (!record_stream_stats ||
        solver->refactor_stream_stats_built) &&
-      (!need_level_pos || solver->refactor_level_pos != NULL) &&
       (!build_separator_private ||
        (solver->refactor_separator_private_plan_attempted &&
         (solver->refactor_separator_private_cols == NULL ||
@@ -3498,7 +3474,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *counts = NULL;
   UF_long *level_ptr = NULL;
   UF_long *level_cols = NULL;
-  UF_long *level_pos = NULL;
+
   UF_long *level_thread_ptr = NULL;
   UF_long *separator_private_cols = NULL;
   UF_long *separator_private_thread_ptr = NULL;
@@ -3528,7 +3504,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *supernode_consumer_start = NULL;
   UF_long *supernode_consumer_end = NULL;
   const int record_supernode_consumer_stats =
-    supernode_consumer_stats_env || build_supernode_consumer_plan;
+    (supernode_consumer_stats_env);
   const int build_u_supernode_pattern =
     need_u_supernode_pattern;
 
@@ -3544,7 +3520,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(counts); \
     free(level_ptr); \
     free(level_cols); \
-    free(level_pos); \
     free(level_thread_ptr); \
     free(separator_private_cols); \
     free(separator_private_thread_ptr); \
@@ -3739,9 +3714,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   const int thread_count = solver->options.threads;
   level_cols =
     (UF_long *)malloc((size_t)solver->n * sizeof(*level_cols));
-  level_pos = need_level_pos
-    ? (UF_long *)malloc((size_t)solver->n * sizeof(*level_pos))
-    : NULL;
+
   if (thread_count > 1) {
     level_thread_ptr =
       (UF_long *)malloc((size_t)level_count *
@@ -3749,8 +3722,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
                         sizeof(*level_thread_ptr));
   }
   if (counts == NULL || level_ptr == NULL ||
-      level_cols == NULL ||
-      (need_level_pos && level_pos == NULL)) {
+      level_cols == NULL) {
     KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
   }
@@ -3829,11 +3801,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
 
   if (level_cols != NULL) {
     UF_long *next = counts;
-    if (level_pos != NULL) {
-      for (UF_long k = 0; k < solver->n; ++k) {
-        level_pos[k] = KLS_KLU_EMPTY;
-      }
-    }
+
     for (UF_long k = 0; k < solver->n; ++k) {
       const UF_long level = levels[k];
       const UF_long dst = next[level]++;
@@ -3842,9 +3810,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         return 0;
       }
       level_cols[dst] = k;
-      if (level_pos != NULL) {
-        level_pos[k] = dst;
-      }
+
     }
   }
 
@@ -3981,7 +3947,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
                                       supernode_consumer_end);
   }
 
-  if (build_u_supernode_pattern && !build_plan_u_supernode_pattern) {
+  if (build_u_supernode_pattern) {
     (void)kls_build_refactor_u_supernode_pattern(
       solver, supernode_pipeline_end, successor_counts);
   }
@@ -3989,20 +3955,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   if (record_supernode_consumer_stats) {
     kls_count_supernode_consumer_runs(
       solver, supernode_consumer_start, supernode_consumer_end);
-  }
-  if (build_supernode_consumer_plan) {
-    if (!kls_build_refactor_supernode_consumer_plan(
-          solver, supernode_consumer_start, supernode_consumer_end)) {
-      KLS_FREE_REFACTOR_SCHEDULE_TEMP();
-      return 0;
-    }
-  }
-
-  if (build_u_supernode_pattern && build_plan_u_supernode_pattern) {
-    if (!kls_build_refactor_u_supernode_pattern_from_consumer_plan(solver)) {
-      KLS_FREE_REFACTOR_SCHEDULE_TEMP();
-      return 0;
-    }
   }
 
   if (pair_hash != NULL && level_ptr != NULL && level_cols != NULL) {
@@ -4082,7 +4034,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
 #undef KLS_FREE_REFACTOR_SCHEDULE_TEMP
   solver->refactor_level_ptr = level_ptr;
   solver->refactor_level_cols = level_cols;
-  solver->refactor_level_pos = level_pos;
+
   solver->refactor_level_thread_ptr = level_thread_ptr;
   solver->refactor_separator_private_cols = separator_private_cols;
   solver->refactor_separator_private_thread_ptr =
@@ -4151,7 +4103,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_stream_output_entries = stream_output_entries;
   level_ptr = NULL;
   level_cols = NULL;
-  level_pos = NULL;
+
   level_thread_ptr = NULL;
   separator_private_cols = NULL;
   separator_private_thread_ptr = NULL;

@@ -1,5 +1,11 @@
 # Paper Ideas Audit
 
+Historical note (2026-09-06): the opt-in supernode consumer-plan and BTF
+scalar-run group experiments, including their diagnostic-only bookkeeping,
+have been removed. Their controls and measurements below are historical.
+The default BTF scalar-run executor and shared supernode kernels remain.
+Retired public statistics retain their ABI slots and report zero.
+
 Historical note (2026-09-06): the row-symbolic validation/trial engines
 (`KLS_VALIDATE_ROW_SYMBOLIC`, `KLS_ROW_ENGINE_*`) and the opt-in FP32
 supernode-panel mirror (`KLS_SNB_FP32`) have also been removed from the library.

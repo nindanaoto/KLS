@@ -724,6 +724,8 @@ typedef struct kls_stats {
   int row_refactor_auto_value_copy_failed;
   int64_t refactor_supernode_panel_count;
   int64_t refactor_supernode_panel_used_count;
+  /* Retired consumer_plan fields throughout this struct are ABI-reserved,
+     always zero. */
   int64_t refactor_supernode_consumer_plan_cached_panel_count;
   int64_t refactor_supernode_consumer_plan_cached_panel_rows;
   int64_t refactor_supernode_consumer_plan_strict_cached_panel_count;
@@ -1105,6 +1107,8 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_exec_rows;
   int64_t refactor_btf_scalar_run_exec_entries;
   int64_t refactor_btf_scalar_run_exec_max_rows;
+  /* Retired btf_scalar_run_group fields are ABI-reserved, always zero.
+     The ordinary BTF scalar-run executor remains supported. */
   int refactor_btf_scalar_run_group_built;
   int64_t refactor_btf_scalar_run_group_count;
   int64_t refactor_btf_scalar_run_group_current_total;

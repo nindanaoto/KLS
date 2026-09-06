@@ -6618,17 +6618,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   char *saved_first =
     saved_first_value != NULL ? strdup(saved_first_value) : NULL;
   const int had_first = saved_first_value != NULL;
-  const char *saved_group_l_state_value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE");
-  char *saved_group_l_state =
-    saved_group_l_state_value != NULL ? strdup(saved_group_l_state_value) : NULL;
-  const int had_group_l_state = saved_group_l_state_value != NULL;
-  const char *saved_group_l_state_focus_value =
-    getenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS");
-  char *saved_group_l_state_focus =
-    saved_group_l_state_focus_value != NULL
-      ? strdup(saved_group_l_state_focus_value) : NULL;
-  const int had_group_l_state_focus = saved_group_l_state_focus_value != NULL;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -6672,21 +6661,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
 
-  if (ok &&
-      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE", "0",
-             1) != 0) {
-    perror(
-      "setenv KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE=0");
-    ok = 0;
-  }
-  if (ok &&
-      setenv("KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS",
-             "0", 1) != 0) {
-    perror(
-      "setenv KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS=0");
-    ok = 0;
-  }
-
   /* The production EGraph work floor would route this small fixture to the
      serial mapped path; pin it to zero so the forced supernode machinery
      under test actually executes. */
@@ -6707,9 +6681,20 @@ static int test_egraph_cached_supernode_blocked_update(void) {
                         "solve EGraph blocked")) ok = 0;
 
   kls_stats stats;
+  memset(&stats, 0xa5, sizeof(stats));
   stats.struct_size = sizeof(stats);
   if (ok && !require_ok(kls_get_stats(solver, &stats),
                         "stats EGraph blocked")) {
+    ok = 0;
+  }
+
+  if (ok &&
+      (stats.refactor_supernode_consumer_plan_cached_panel_count != 0 ||
+       stats.refactor_supernode_consumer_plan_group_l_built != 0 ||
+       stats.refactor_btf_scalar_run_group_built != 0 ||
+       stats.refactor_last_btf_scalar_run_group_waits != 0 ||
+       stats.refactor_supernode_algorithm5_candidate_run_count != 0)) {
+    fprintf(stderr, "retired experiment statistics must remain zero\n");
     ok = 0;
   }
 
@@ -6849,17 +6834,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
 
-  if (!restore_env_value(
-        "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE",
-        had_group_l_state, saved_group_l_state)) {
-    ok = 0;
-  }
-  if (!restore_env_value(
-        "KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_PLAN_GROUP_STATE_FOCUS",
-        had_group_l_state_focus, saved_group_l_state_focus)) {
-    ok = 0;
-  }
-
   free(saved_row);
   free(saved_checked);
   free(saved_egraph);
@@ -6867,8 +6841,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_u_values);
   free(saved_cblas);
   free(saved_first);
-  free(saved_group_l_state);
-  free(saved_group_l_state_focus);
   kls_destroy(solver);
   free(ap);
   free(ai);
