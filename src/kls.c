@@ -732,8 +732,6 @@ struct kls_solver {
   int egraph_tight_tol_state;  /* tight-tol numeric x egraph refactor:
                                   0 unprobed, 1 factor probe passed,
                                   -1 vetoed (Raj1-class value defect) */
-  double reftr_pre, reftr_kernel, reftr_post;  /* KLS_TRACE_REFACTOR_US */
-  int reftr_n;
   int floor_choice;    /* batch-floor trial (mapped/egraph rows):
                           0 undecided, 1 low floors, -1 defaults */
   int floor_pending;   /* low-floor probe refactor outstanding */
@@ -13058,9 +13056,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->auto_scale_deferred && !solver->numeric_is_predicted &&
       !solver->fp32_last_used && !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
-      solver->common.kls_perturb_count == 0u &&
-      getenv("KLS_DUMP_UDIAG") == NULL &&
-      getenv("KLS_TRACE_REFACTOR_US") == NULL) {
+      solver->common.kls_perturb_count == 0u) {
     /* The first public update has already built and certified the retained
        row mirrors.  Re-enter their settled scalar worker directly on later
        updates, bypassing only the adaptive probes and transformed-value
@@ -13156,9 +13152,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->auto_scale_deferred && !solver->numeric_is_predicted &&
       !solver->fp32_last_used && !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
-      solver->common.kls_perturb_count == 0u &&
-      getenv("KLS_DUMP_UDIAG") == NULL &&
-      getenv("KLS_TRACE_REFACTOR_US") == NULL) {
+      solver->common.kls_perturb_count == 0u) {
     /* The first changed refactor has already certified this plain CSC factor
        and discharged all deferred preparation.  Later entrywise
        updates can therefore enter KLU's fixed-pattern numeric walk directly:
@@ -13255,9 +13249,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->numeric->Rs == NULL && !solver->numeric_is_predicted &&
       !solver->fp32_last_used && !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
-      solver->common.kls_perturb_count == 0u &&
-      getenv("KLS_DUMP_UDIAG") == NULL &&
-      getenv("KLS_TRACE_REFACTOR_US") == NULL) {
+      solver->common.kls_perturb_count == 0u) {
     const double start = kls_now_seconds();
     solver->verified_rhs_valid = 0;
     solver->compact_amf_two_block_exact_recip_fresh = 0;
@@ -13754,23 +13746,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
   }
 
-  if (solver->lean_choice == 0 &&
-      getenv("KLS_ENABLE_GENERIC_SCALED_LEAN_DECLINE") != NULL &&
-      solver->common.scale > 0 && solver->numeric->Rs != NULL &&
-      solver->numeric->lnz <= UF_long_max - solver->numeric->unz) {
-    const UF_long factor_entries =
-      solver->numeric->lnz + solver->numeric->unz;
-    if (factor_entries > 0u && solver->common.flops > 0.0 &&
-        solver->common.flops < 16.0 * (double)factor_entries) {
-      /* Retain the old work-model shortcut only as a diagnostic control.
-         A scaled row walk must refresh Rs, but realized measurements show
-         that its cache-local traversal can still dominate the incumbent at
-         low arithmetic intensity.  Production AUTO therefore leaves the
-         ordinary bounded row/column tournament open and publishes only its
-         measured winner. */
-      solver->lean_choice = -1;
-    }
-  }
   if (solver->lean_choice == 0 && solver->common.flops > 0.0 &&
       solver->common.flops < 100000.0) {
     /* Below this work floor, even a real 10--20% lean-kernel win saves less
@@ -15263,20 +15238,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
     }
   }
-  {
-    const char *dump = getenv("KLS_DUMP_UDIAG");
-    if (dump != NULL && *dump != '\0' && ok &&
-        solver->numeric != NULL && solver->numeric->Udiag != NULL) {
-      /* frame-free factor diffing for engine-defect hunts: overwrite
-         per refactor so the file holds the last steady factor */
-      FILE *f = fopen(dump, "wb");
-      if (f != NULL) {
-        fwrite(solver->numeric->Udiag, sizeof(double),
-               (size_t)solver->n, f);
-        fclose(f);
-      }
-    }
-  }
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
       !solver->fp32_last_used && solver->pivot_nudge_count == 0 &&
@@ -15288,32 +15249,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->numeric_needs_refinement = 0;
     solver->solve_refine_single_shot = 0;
   }
-  /* The dense-spiked matched route has already paid the generic structural
-     contract probe on its first changed-value solve.  Once that probe has
-     certified a full-fp64, unscaled, unperturbed row factor, repeating the
-     same O(nnz) residual on every later solve adds no protection but is a
-     material part of the SPICE-cycle cost (rajat30: about 5.4 ms/solve).
-     Keep the conservative per-solve check for every other route and for any
-     numeric that carries a precision or pivot-repair risk.  The positive
-     environment switch remains useful for controlled first-probe experiments;
-     the automatic path requires the probe's clean verdict. */
-  const int full_precision_row_solve_contract =
-    !solver->fp32_last_used && solver->pivot_nudge_count == 0u &&
-    solver->common.kls_perturb_count == 0u &&
-    !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
-    solver->row_scale == NULL && solver->col_scale == NULL;
-  const int contract_certified_trusted_row_solve =
-    full_precision_row_solve_contract &&
-    solver->solve_contract_probe == 1 &&
-    getenv("KLS_ENABLE_CONTRACT_CERTIFIED_TRUSTED_ROW_SOLVE") != NULL;
   solver->row_solve_self_check = 0;
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
       solver->row_refactor_values_ready &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
-      numeric_values != NULL &&
-      1 &&
-      !contract_certified_trusted_row_solve) {
+      numeric_values != NULL) {
     /* Solves will be served from the row engine's published replica
        values.  That machinery's acceptance is timed, not
        value-validated, and rare draws publish a reduced-accuracy
@@ -15341,85 +15282,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
      user-visible timing.  The private adaptive sample above deliberately
      excludes that consultation overhead; stats measures the complete call. */
   solver->stats.refactor_seconds = kls_now_seconds() - refactor_call_start;
-  if (ok && solver->common.status >= 0 && solver->padded_run_of != NULL &&
-      getenv("KLS_VERIFY_PADDED_PANELS") != NULL) {
-    /* stage-1 harness: every refreshed panel row must equal its
-       column's values on its slots, zeros elsewhere */
-    long bad = 0, checked = 0;
-    const trilinos_klu_l_symbolic *sym = solver->symbolic;
-    for (UF_long run = 0; run < solver->padded_run_count; ++run) {
-      const UF_long gs = solver->padded_run_start[run];
-      const UF_long len = solver->padded_run_len[run];
-      const UF_long ulen_run =
-        solver->padded_union_ptr[run + 1u] - solver->padded_union_ptr[run];
-      UF_long block = 0;
-      while (sym->R[block + 1u] <= gs) {
-        block++;
-      }
-      const UF_long k1 = sym->R[block];
-      double *lu = (double *)solver->numeric->LUbx[block];
-      for (UF_long c = 0; c < len; ++c) {
-        UF_long *li;
-        double *lx;
-        UF_long l1;
-        kls_klu_get_pointer(lu, solver->numeric->Lip + k1,
-                            solver->numeric->Llen + k1, gs + c - k1,
-                            &li, &lx, &l1);
-        const double *row = solver->padded_panel_values +
-          solver->padded_panel_ptr[run] + c * ulen_run;
-        const UF_long *slots =
-          solver->padded_slots + solver->padded_slot_ptr[gs + c];
-        for (UF_long p = 0; p < l1; ++p) {
-          checked++;
-          if (row[slots[p]] != lx[p]) {
-            bad++;
-          }
-        }
-      }
-    }
-    fprintf(stderr, "KLS padded verify: %ld checked %ld BAD\n",
-            checked, bad);
-  }
-  {
-    static const char *trace_us;
-    static int trace_us_checked;
-    if (!trace_us_checked) {
-      trace_us = getenv("KLS_TRACE_REFACTOR_US");
-      trace_us_checked = 1;
-    }
-    if (trace_us != NULL) {
-      /* small-row overhead forensics: split the call into pre-kernel
-         (deferred preps, race checks), kernel, and post (recorders,
-         audits, publishes, stats) - the tiny-row family loses ~6-70us
-         per refactor somewhere in here, below sampler resolution */
-      solver->reftr_pre += start - refactor_call_start;
-      solver->reftr_kernel += elapsed;
-      solver->reftr_post +=
-        (solver->stats.refactor_seconds - (start - refactor_call_start)) -
-        elapsed;
-      if (atoi(trace_us) >= 2) {
-        fprintf(stderr,
-                "KLS refactor call %d: pre=%.3f kernel=%.3f post=%.3f"
-                " total=%.3f ms path=%d\n",
-                solver->reftr_n + 1,
-                1e3 * (start - refactor_call_start), 1e3 * elapsed,
-                1e3 * ((solver->stats.refactor_seconds -
-                         (start - refactor_call_start)) - elapsed),
-                1e3 * solver->stats.refactor_seconds,
-                (int)solver->stats.last_refactor_path);
-      }
-      if (++solver->reftr_n >= 512) {
-        fprintf(stderr,
-                "KLS refactor us/call over %d: pre=%.2f kernel=%.2f"
-                " post=%.2f\n",
-                solver->reftr_n, 1e6 * solver->reftr_pre / solver->reftr_n,
-                1e6 * solver->reftr_kernel / solver->reftr_n,
-                1e6 * solver->reftr_post / solver->reftr_n);
-        solver->reftr_pre = solver->reftr_kernel = solver->reftr_post = 0.0;
-        solver->reftr_n = 0;
-      }
-    }
-  }
   fill_numeric_stats(solver);
   if (!ok || solver->common.status < 0) {
     return solver->common.status == TRILINOS_KLU_SINGULAR ? KLS_ERR_SINGULAR

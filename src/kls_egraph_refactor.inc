@@ -5456,39 +5456,14 @@ static int kls_egraph_ready_queue_env_enabled(void) {
   return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
 }
 
-static int kls_egraph_algorithm5_prefactor_update_requested(
-  const kls_solver *solver) {
+static int kls_egraph_algorithm5_prefactor_update_requested(void) {
   const char *value = getenv("KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE");
   if (value != NULL && value[0] != '\0') {
     return strcmp(value, "0") != 0;
   }
-  {
-    /* The current Algorithm-5 helper speculates a few finished
-       dependencies one column at a time.  Merely enabling it also excludes
-       the narrower fused BTF dispatch for the whole refactor, whether or not
-       any speculative dependency is found.  That global implementation cost
-       is not justified by the two coarse work counters above: realized
-       trials on scaled/unscaled, single/many-block, and several orderings all
-       found the ordinary dependency walk faster.  Keep the incomplete
-       scalar-prefactor experiment available through the explicit environment
-       control, but do not turn it into a generic default without a grouped
-       multi-current executor or a like-for-like runtime consultation. */
-    return 0;
-  }
-
-  if (solver != NULL && solver->common.scale <= 0 &&
-      symbolic_is_fragmented_many_block_unscaled_candidate(
-        solver->n, solver->symbolic)) {
-    /* A handful of speculative prefactor columns serializes the dominant
-       ASIC_680k pipeline and costs ~0.83ms per forced refactor.  The plain
-       cached-supernode walk is both faster and bit-identical here. */
-    return 0;
-  }
-
-  return solver != NULL &&
-         solver->refactor_dependency_work >=
-           KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK &&
-         solver->refactor_pipeline_work > 0.0;
+  /* This scalar-prefactor experiment also excludes fused BTF dispatch.
+     Paired trials favored the ordinary dependency walk; keep it opt-in. */
+  return 0;
 }
 
 static int kls_egraph_separator_private_requested(const kls_solver *solver) {
@@ -10146,7 +10121,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_refactor_btf_scalar_run_exec_enabled(solver);
 
   const int algorithm5_prefactor_update_requested =
-    kls_egraph_algorithm5_prefactor_update_requested(solver);
+    kls_egraph_algorithm5_prefactor_update_requested();
 
   const int cached_supernode_updates_only =
     supernode_numeric_update_mode == 2;

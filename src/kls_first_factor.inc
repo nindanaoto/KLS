@@ -12264,18 +12264,6 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
             &row_stats, &row_open_panel_start, &row_open_panel_end, i);
         }
       }
-      if (getenv("KLS_DUMP_SEP_PIPE_ROWS") != NULL) {
-        /* fixture-regeneration aid: the separator pipeline suffix's
-           block-local row ids and their q_order images, one per line */
-        for (UF_long iter = block_separator_private_rows; iter < nk;
-             ++iter) {
-          fprintf(stderr, "KLS sep-pipe row %ld q %ld\n",
-                  (long)row_order[iter],
-                  row_ctx.q_order != NULL
-                    ? (long)row_ctx.q_order[row_order[iter]]
-                    : -1L);
-        }
-      }
       if (block_separator_pipeline_rows > 0u) {
         kls_row_first_supernode_panel_cache_reset_active(
           &row_supernode_panel_cache, &row_workspace, nk,
@@ -16991,38 +16979,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   trial_col_perm = block_perm;
   block_perm = NULL;
 
-  {
-    const char *dumpm = getenv("KLS_DUMP_BLOCK_TRIAL");
-    if (dumpm != NULL) {
-      FILE *df = fopen(dumpm, "w");
-      if (df != NULL) {
-        fprintf(df, "%%%%MatrixMarket matrix coordinate real general\n");
-        fprintf(df, "%ld %ld %ld\n", (long)n, (long)n, (long)nnz);
-        for (UF_long k = 0; k < n; ++k) {
-          for (UF_long p = trial_col_ptr[k]; p < trial_col_ptr[k + 1u];
-               ++p) {
-            fprintf(df, "%ld %ld %.17g\n", (long)trial_row_idx[p] + 1,
-                    (long)k + 1, trial_values[p]);
-          }
-        }
-        fclose(df);
-      }
-    }
-  }
-  {
-    const char *dump = getenv("KLS_DUMP_BLOCK_PERMS");
-    if (dump != NULL) {
-      FILE *df = fopen(dump, "w");
-      if (df != NULL) {
-        fprintf(df, "%ld\n", (long)n);
-        for (UF_long k = 0; k < n; ++k) {
-          fprintf(df, "%ld %ld\n", (long)trial_col_perm[k],
-                  (long)trial_row_perm[k]);
-        }
-        fclose(df);
-      }
-    }
-  }
   if (getenv("KLS_TRACE_PREDICTED") != NULL) {
     fprintf(stderr, "KLS block: match+build done %.2fs\n",
             kls_now_seconds() - start);
