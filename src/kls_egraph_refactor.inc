@@ -7084,94 +7084,6 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
   }
 }
 
-/* Parallel form of KLU's reciprocal-growth diagnostic for a single block.
-   Keep its packed-factor and scaling semantics exactly: the purpose of this
-   path is to remove a serial O(|A|+|U|) post-pass without changing which
-   numerics arm solve refinement. */
-static void kls_contract_rgrowth_worker_run(
-  kls_egraph_refactor_worker *worker) {
-  if (worker == NULL || worker->shared == NULL) {
-    return;
-  }
-  kls_egraph_refactor_shared *shared = worker->shared;
-  kls_solver *solver = shared->solver;
-  const int tid = worker->tid;
-  const int threads = shared->thread_count;
-  double *results = shared->contract_rgrowth_results;
-  if (solver == NULL || results == NULL || tid < 0 || tid >= threads ||
-      solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->symbolic->Q == NULL || solver->numeric->Pinv == NULL ||
-      solver->numeric->Udiag == NULL || solver->numeric->LUbx == NULL ||
-      solver->numeric->LUbx[0] == NULL || solver->numeric->Uip == NULL ||
-      solver->numeric->Ulen == NULL ||
-      solver->col_ptr == NULL || solver->row_idx == NULL ||
-      shared->values == NULL) {
-    if (results != NULL && tid >= 0 && tid < threads) {
-      results[tid] = -1.0;
-    }
-    return;
-  }
-
-  const UF_long n = solver->n;
-  double *lu = (double *)solver->numeric->LUbx[0];
-  const double *udiag = (const double *)solver->numeric->Udiag;
-  const UF_long *q = solver->symbolic->Q;
-  const UF_long *pinv = solver->numeric->Pinv;
-  const double *rs = solver->numeric->Rs;
-  int local_ok = 1;
-  double local_min = 1.0;
-  for (UF_long col = (UF_long)tid; col < n; col += (UF_long)threads) {
-    const UF_long oldcol = q[col];
-    if (oldcol >= n || solver->col_ptr[oldcol] >
-                         solver->col_ptr[oldcol + 1u] ||
-        solver->col_ptr[oldcol + 1u] > solver->nnz) {
-      local_ok = 0;
-      continue;
-    }
-    double max_a = 0.0;
-    for (UF_long p = solver->col_ptr[oldcol];
-         p < solver->col_ptr[oldcol + 1u]; ++p) {
-      const UF_long oldrow = solver->row_idx[p];
-      if (oldrow >= n || pinv[oldrow] >= n ||
-          (rs != NULL && rs[pinv[oldrow]] == 0.0)) {
-        local_ok = 0;
-        continue;
-      }
-      const double raw = shared->values[p];
-      const double value = fabs(
-        rs != NULL ? raw / rs[pinv[oldrow]] : raw);
-      if (value > max_a) {
-        max_a = value;
-      }
-    }
-    UF_long *u_rows = NULL;
-    double *u_values = NULL;
-    UF_long u_len = 0u;
-    kls_klu_get_pointer(lu, solver->numeric->Uip,
-                        solver->numeric->Ulen, col,
-                        &u_rows, &u_values, &u_len);
-    double max_u = fabs(udiag[col]);
-    if (u_len > 0u && u_values == NULL) {
-      local_ok = 0;
-      continue;
-    }
-    for (UF_long p = 0u; p < u_len; ++p) {
-      const double value = fabs(u_values[p]);
-      if (value > max_u) {
-        max_u = value;
-      }
-    }
-    if (max_u == 0.0) {
-      continue;
-    }
-    const double growth = max_a / max_u;
-    if (growth < local_min) {
-      local_min = growth;
-    }
-  }
-  results[tid] = local_ok ? local_min : -1.0;
-}
-
 static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
   kls_egraph_refactor_worker *worker) {
   kls_egraph_refactor_shared *shared = worker->shared;
@@ -7216,9 +7128,6 @@ static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
          p < shared->workspace_touch_count; p += stride) {
       values[p] = 0.0;
     }
-
-  } else if (shared->contract_rgrowth_mode) {
-    kls_contract_rgrowth_worker_run(worker);
   } else if (shared->pts_refactor_mode) {
     kls_pts_refactor_pool_worker_run(worker);
   } else if (shared->pts_solve_mode) {
@@ -8148,81 +8057,6 @@ static int kls_parallel_prepare_permuted_values(
   shared->value_prep_nnz = 0u;
   pthread_mutex_unlock(&shared->lock);
   return 1;
-}
-
-static int kls_parallel_row_contract_rgrowth(kls_solver *solver,
-                                              const double *numeric_values,
-                                              double *rgrowth_out) {
-  if (solver == NULL || numeric_values == NULL || rgrowth_out == NULL ||
-      solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->symbolic->nblocks != 1u || solver->symbolic->R == NULL ||
-      solver->symbolic->R[0] != 0u || solver->symbolic->R[1] != solver->n ||
-      solver->options.threads < 2 ||
-      solver->stats.last_refactor_path != KLS_REFACTOR_PATH_ROW) {
-    return 0;
-  }
-  int thread_count = solver->options.threads;
-  if ((UF_long)thread_count > solver->n) {
-    thread_count = (int)solver->n;
-  }
-  if (thread_count < 2) {
-    return 0;
-  }
-  kls_egraph_refactor_pool *pool =
-    ensure_egraph_refactor_pool(solver, thread_count);
-  double *results =
-    (double *)malloc((size_t)thread_count * sizeof(*results));
-  if (pool == NULL || results == NULL) {
-    free(results);
-    return 0;
-  }
-  for (int tid = 0; tid < thread_count; ++tid) {
-    results[tid] = -1.0;
-  }
-
-  kls_egraph_refactor_shared *shared = &pool->shared;
-  pthread_mutex_lock(&shared->lock);
-  if (atomic_load_explicit(&pool->active_workers,
-                           memory_order_acquire) != 0) {
-    pthread_mutex_unlock(&shared->lock);
-    free(results);
-    return 0;
-  }
-  shared->solver = solver;
-  shared->values = (double *)(uintptr_t)numeric_values;
-  shared->thread_count = thread_count;
-  shared->lean_pattern_mode = 0;
-  shared->lean_refactor_mode = 0;
-  shared->row_publish_mode = 0;
-  shared->row_solve_mode = 0;
-  shared->row_refactor_mode = 0;
-  shared->pts_solve_mode = 0;
-  shared->contract_rgrowth_results = results;
-  shared->contract_rgrowth_mode = 1;
-  for (int tid = 0; tid < thread_count; ++tid) {
-    pool->workers[tid].shared = shared;
-  }
-  kls_egraph_pool_dispatch_and_spin_wait(pool, shared, thread_count);
-  shared->contract_rgrowth_mode = 0;
-  shared->contract_rgrowth_results = NULL;
-  pthread_mutex_unlock(&shared->lock);
-
-  double rgrowth = 1.0;
-  int ok = 1;
-  for (int tid = 0; tid < thread_count; ++tid) {
-    if (!(results[tid] >= 0.0) || !isfinite(results[tid])) {
-      ok = 0;
-      break;
-    }
-    if (results[tid] < rgrowth) {
-      rgrowth = results[tid];
-    }
-  }
-  free(results);
-  if (ok) {
-    *rgrowth_out = rgrowth;
-  }
-  return ok;
 }
 
 static int kls_run_parallel_row_solve_factor(kls_solver *solver,

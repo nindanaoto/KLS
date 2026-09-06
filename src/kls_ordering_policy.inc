@@ -2181,10 +2181,6 @@ static _Thread_local int kls_generic_metis_tuning_ctx;
    portfolio candidates retain their established defaults. */
 static _Thread_local int kls_auto_metis_promotion_quality;
 static _Thread_local int kls_generic_metis_scale_hint;
-/* A high-work generic portfolio may compare the deterministic parallel leaf
-   construction with METIS's serial NodeNDP forest.  This is scoped to the
-   candidate analyze and changes no public/user-forced ordering policy. */
-static _Thread_local int kls_generic_metis_serial_ndp_trial;
 /* A symbolic portfolio may compare separator widths on the identical graph.
    Keep the override thread-local so concurrent orientation/order trials do
    not change one another's resource choice. */
@@ -4599,16 +4595,13 @@ static UF_long kls_metis_order_inner(UF_long n,
     }
   }
 #ifdef KLS_HAVE_MTMETIS
-  const int permit_det_ndp =
-    !kls_generic_metis_serial_ndp_trial ||
-    getenv("KLS_FORCE_DET_NDP") != NULL;
   const int force_det_ndp =
     getenv("KLS_FORCE_DET_NDP") != NULL ||
     kls_medium_partial_static_metis_ctx ||
-    (kls_generic_metis_tuning_ctx && permit_det_ndp) ||
+    kls_generic_metis_tuning_ctx ||
     kls_asymmetric_bounded_degree_direct_metis_analyze_class;
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
-      n >= 50000 && permit_det_ndp &&
+      n >= 50000 &&
       (force_det_ndp || kls_spiked_ndp_class ||
        (kls_metis_order_threads >= (int)metis_ndp_npes &&
         (kls_det_ndp_requested || kls_lowdeg_ndp_class ||
@@ -5832,7 +5825,6 @@ static void *kls_generic_nd_trial_main(void *arg) {
   kls_generic_nd_trial *trial = (kls_generic_nd_trial *)arg;
   const int saved_tuning_ctx = kls_generic_metis_tuning_ctx;
   const int saved_scale_hint = kls_generic_metis_scale_hint;
-  const int saved_serial_ndp_trial = kls_generic_metis_serial_ndp_trial;
   const struct kls_btf_stash_s saved_btf_stash = kls_btf_stash;
   const double start = kls_now_seconds();
   /* A complete no-BTF graph receives two deterministic separator leaves per
@@ -5844,7 +5836,6 @@ static void *kls_generic_nd_trial_main(void *arg) {
     trial->options.use_btf &&
     getenv("KLS_DISABLE_BTF_SINGLE_LEAF_ND") == NULL ? 7 : 5;
   kls_generic_metis_scale_hint = trial->scale_hint;
-  kls_generic_metis_serial_ndp_trial = 0;
   memset(&kls_btf_stash, 0, sizeof(kls_btf_stash));
   trial->status = analyze_with_ordering(
     trial->n, trial->col_ptr, trial->row_idx, &trial->options,
@@ -5853,7 +5844,6 @@ static void *kls_generic_nd_trial_main(void *arg) {
   trial->seconds = kls_now_seconds() - start;
   kls_generic_metis_tuning_ctx = saved_tuning_ctx;
   kls_generic_metis_scale_hint = saved_scale_hint;
-  kls_generic_metis_serial_ndp_trial = saved_serial_ndp_trial;
   kls_btf_stash = saved_btf_stash;
   return NULL;
 }
@@ -5992,7 +5982,6 @@ static void kls_maybe_promote_selected_generic_nd(
   kls_pattern_candidate *candidate,
   const kls_options *options,
   int bounded_symmetric_union,
-  int btf_redundant_certificate,
   kls_generic_nd_trial *precomputed_no_btf_trial,
   kls_generic_nd_trial *precomputed_btf_trial) {
   /* The only absolute upper bound is the ordering backend's index width.
@@ -6097,7 +6086,6 @@ static void kls_maybe_promote_selected_generic_nd(
   memset(&trial_separator, 0, sizeof(trial_separator));
   const int saved_tuning_ctx = kls_generic_metis_tuning_ctx;
   const int saved_scale_hint = kls_generic_metis_scale_hint;
-  const int saved_serial_ndp_trial = kls_generic_metis_serial_ndp_trial;
   const struct kls_btf_stash_s saved_btf_stash = kls_btf_stash;
   int scale_hint = initial_scale(options);
   if (candidate->values != NULL) {
@@ -6132,7 +6120,6 @@ static void kls_maybe_promote_selected_generic_nd(
     const double trial_start = kls_now_seconds();
     kls_generic_metis_tuning_ctx = generic_nd_tuning_ctx;
     kls_generic_metis_scale_hint = scale_hint;
-    kls_generic_metis_serial_ndp_trial = 0;
     if (trial_options.use_btf && candidate->symbolic->do_btf &&
         candidate->symbolic->nblocks > 1u &&
         candidate->symbolic->P != NULL && candidate->symbolic->Q != NULL &&
@@ -6154,7 +6141,6 @@ static void kls_maybe_promote_selected_generic_nd(
       KLS_ORDERING_METIS, &trial_symbolic, &trial_common, &trial_separator);
     kls_generic_metis_tuning_ctx = saved_tuning_ctx;
     kls_generic_metis_scale_hint = saved_scale_hint;
-    kls_generic_metis_serial_ndp_trial = saved_serial_ndp_trial;
     kls_btf_stash = saved_btf_stash;
     trial_seconds = kls_now_seconds() - trial_start;
   }
@@ -6217,90 +6203,9 @@ static void kls_maybe_promote_selected_generic_nd(
   double trial_fill = symbolic_score(trial_symbolic);
   double trial_flops = trial_symbolic->est_flops;
 
-  /* For very expensive recurring factors, separator construction itself is
-     a worthwhile portfolio dimension.  The deterministic parallel splitter
-     minimizes analysis latency, but its independently ordered leaves can
-     retain more fill than serial NodeNDP.  Also allow the same trial to drop
-     BTF: SCC boundaries sometimes constrain the best global separator tree.
-     Run this extra analysis only when the already-realized minimum-degree
-     work is large enough to repay it, then retain it only on a material fill
-     win over the first ND candidate.  No matrix dimensions, names, or degree
-     profiles participate in either decision. */
   const double numeric_horizon =
     1.0 + (double)options->expected_refactorizations +
     (double)options->expected_solves;
-  const int serial_ndp_portfolio_economic =
-    getenv("KLS_ENABLE_GENERIC_SERIAL_NDP_PORTFOLIO") != NULL &&
-    incumbent_flops >= 1.0e10 && isfinite(incumbent_flops) &&
-    numeric_horizon >= 16.0 && isfinite(numeric_horizon) &&
-    !btf_redundant_certificate &&
-    ((!options->use_btf) ||
-     (trial_symbolic->do_btf && trial_symbolic->nblocks > 1u)) &&
-    getenv("KLS_DISABLE_GENERIC_SERIAL_NDP_PORTFOLIO") == NULL;
-  if (serial_ndp_portfolio_economic) {
-    kls_options serial_options = trial_options;
-    serial_options.use_btf = 0;
-    trilinos_klu_l_symbolic *serial_symbolic = NULL;
-    trilinos_klu_l_common serial_common;
-    kls_separator_analysis serial_separator;
-    memset(&serial_separator, 0, sizeof(serial_separator));
-    const double serial_start = kls_now_seconds();
-    kls_generic_metis_tuning_ctx = 1;
-    kls_generic_metis_scale_hint = scale_hint;
-    kls_generic_metis_serial_ndp_trial = 1;
-    kls_btf_stash = saved_btf_stash;
-    const int serial_status = analyze_with_ordering(
-      candidate->n, candidate->col_ptr, candidate->row_idx, &serial_options,
-      KLS_ORDERING_METIS, &serial_symbolic, &serial_common,
-      &serial_separator);
-    kls_generic_metis_tuning_ctx = saved_tuning_ctx;
-    kls_generic_metis_scale_hint = saved_scale_hint;
-    kls_generic_metis_serial_ndp_trial = saved_serial_ndp_trial;
-    kls_btf_stash = saved_btf_stash;
-    const double serial_seconds = kls_now_seconds() - serial_start;
-    trial_seconds += serial_seconds;
-    if (serial_status == KLS_OK && serial_symbolic != NULL) {
-      const double serial_fill = symbolic_score(serial_symbolic);
-      const double saved_fill = trial_fill - serial_fill;
-      const double comparison_work =
-        4.0 * ((double)candidate->n + (double)candidate->nnz);
-      const int preserves_static_diagonal =
-        !kls_symbolic_has_complete_pivot_diagonal(
-          candidate->n, candidate->col_ptr, candidate->row_idx,
-          trial_symbolic) ||
-        kls_symbolic_has_complete_pivot_diagonal(
-          candidate->n, candidate->col_ptr, candidate->row_idx,
-          serial_symbolic);
-      const int serial_wins =
-        isfinite(serial_fill) && serial_fill > 0.0 &&
-        (trial_fill >= DBL_MAX / 4.0 ||
-         (isfinite(trial_fill) && serial_fill <= 0.98 * trial_fill &&
-          saved_fill * numeric_horizon >= comparison_work)) &&
-        preserves_static_diagonal;
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr,
-                "KLS generic serial ND portfolio: fill %.4e/%.4e "
-                "analyze %.3fs -> %s\n",
-                serial_fill, trial_fill, serial_seconds,
-                serial_wins ? "adopt" : "reject");
-      }
-      if (serial_wins) {
-        trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
-        kls_separator_analysis_clear(&trial_separator);
-        trial_symbolic = serial_symbolic;
-        serial_symbolic = NULL;
-        trial_common = serial_common;
-        trial_fill = serial_fill;
-        trial_flops = trial_symbolic->est_flops;
-        kls_separator_analysis_move(&trial_separator, &serial_separator);
-      }
-    }
-    if (serial_symbolic != NULL) {
-      trilinos_klu_l_free_symbolic(&serial_symbolic, &serial_common);
-    }
-    kls_separator_analysis_clear(&serial_separator);
-  }
-
   const int work_estimate_available =
     trial_flops > 0.0 && incumbent_flops > 0.0;
   /* A bounded union can produce an exact predicted fill certificate.  An
@@ -17184,7 +17089,6 @@ static int select_candidate(kls_pattern_candidate *normal,
          numeric expansion before a retained factor can be published. */
       kls_maybe_promote_selected_generic_nd(
         *chosen_out, generic_options, bounded_symmetric_union,
-        btf_is_provably_redundant,
         *chosen_out == overlap_candidate && overlap_started &&
           !overlap_used_btf
           ? &overlapped_nd : NULL,
@@ -17221,7 +17125,7 @@ static int select_candidate(kls_pattern_candidate *normal,
         if (inspect_other_nd) {
           kls_maybe_promote_selected_generic_nd(
             other, generic_options, bounded_symmetric_union,
-            btf_is_provably_redundant, NULL, NULL);
+            NULL, NULL);
         } else if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
           fprintf(stderr,
                   "KLS cross-orientation ND: skip unsupported second pass "

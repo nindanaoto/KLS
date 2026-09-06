@@ -1,5 +1,12 @@
 # Paper Ideas Audit
 
+Historical note (2026-09-06): the opt-in parallel reciprocal-growth worker,
+extra serial NodeNDP portfolio, and diagnostic preselected-row/direct-KLU
+challenger have been removed. The ordinary KLU growth certificate, production
+METIS ordering, column challenger, and shared solve-reduction scratch remain.
+Validation and the measured one-thread first-refactor penalty are recorded
+in [the removal report](optional_branch_trim.md).
+
 Historical note (2026-09-06): the opt-in row-pipeline compact-window family
 (execution, delayed output, sparse-group replay, claim-run and stream/span
 ownership, plus window tracing) has been removed. Ordinary producer batching

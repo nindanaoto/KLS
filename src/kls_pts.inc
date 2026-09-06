@@ -51,7 +51,6 @@ static int kls_pts_pool_touch_refactor_workspace(kls_solver *solver,
   shared->solver = solver;
   shared->thread_count = pts->nthreads;
   shared->value_prep_mode = 0;
-  shared->contract_rgrowth_mode = 0;
   shared->pts_refactor_mode = 0;
   shared->pts_solve_mode = 0;
   shared->lean_pattern_mode = 0;

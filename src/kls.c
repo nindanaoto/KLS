@@ -2055,7 +2055,7 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_simple_scalar_update;
   int row_solve_mode;
   int row_publish_mode;
-  int contract_rgrowth_mode;
+  /* Shared reduction scratch for the production solve/contract workers. */
   double *contract_rgrowth_results;
   double *udiag_recip;
   int row_solve_upper;
@@ -14093,31 +14093,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
     ok = kls_parallel_refactor(solver, numeric_values, 0);
     elapsed = kls_now_seconds() - start;
   }
-  const UF_long retained_factor_entries =
-    solver->numeric->lnz <= UF_long_max - solver->numeric->unz
-      ? solver->numeric->lnz + solver->numeric->unz : UF_long_max;
-  const UF_long direct_klu_cache_entry_budget =
-    (UF_long)(512u * 1024u / (sizeof(double) + sizeof(UF_long)));
-  const int direct_klu_preselected_cache_resident_row =
-    retained_factor_entries <= direct_klu_cache_entry_budget &&
-    kls_moderate_work_single_block_lean_policy_enabled(solver);
-  const int direct_klu_row_challenger =
-    getenv("KLS_ENABLE_PRESELECTED_ROW_DIRECT_KLU_TOURNAMENT") != NULL &&
-    solver->lean_choice > 0 && solver->lean_reaudit_state == 5 &&
-    direct_klu_preselected_cache_resident_row &&
-    getenv("KLS_LEAN_CHOICE") == NULL &&
-    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW;
   /* A low-work column incumbent already enters the settled direct-KLU arm
      on the next public update.  Re-timing that same representation would
      add two numeric walks and a residual probe without changing its route.
      Likewise, the low-intensity verdict has just declined a multi-pass
      executor consultation; do not replace it immediately with another one.
-     Retain the tournament for other mapped incumbents above the crossover.
-     A model-preselected row incumbent enters its settled direct worker on
-     later calls, while this location can time it only through the adaptive
-     dispatcher.  Comparing that setup-bearing sample with direct KLU is not
-     a recurring-engine comparison and caused a redundant losing portfolio;
-     keep it as an explicit diagnostic rather than a production challenger. */
+     Retain the tournament for other mapped incumbents above the crossover. */
   const int direct_klu_column_challenger =
     solver->lean_choice < 0 &&
     !generic_low_intensity_column_preselected &&
@@ -14135,7 +14116,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u &&
       getenv("KLS_DISABLE_DIRECT_KLU_TOURNAMENT") == NULL &&
-      (direct_klu_row_challenger || direct_klu_column_challenger)) {
+      direct_klu_column_challenger) {
     const int incumbent_path = (int)solver->stats.last_refactor_path;
     if (incumbent_path == KLS_REFACTOR_PATH_KLU) {
       /* The adaptive dispatcher has already certified the vendor walk on
@@ -15644,7 +15625,6 @@ static int kls_run_compact_amf_two_block_parallel_residual(
   shared->row_publish_mode = 0;
   shared->row_refactor_mode = 0;
   shared->pts_solve_mode = 0;
-  shared->contract_rgrowth_mode = 0;
   shared->contract_rgrowth_results = results;
   shared->row_solve_work = residual;
   shared->row_solve_residual_x = x;
@@ -15705,7 +15685,6 @@ static int kls_run_compact_residual_error_bound(
   shared->row_publish_mode = 0;
   shared->row_refactor_mode = 0;
   shared->pts_solve_mode = 0;
-  shared->contract_rgrowth_mode = 0;
   shared->contract_rgrowth_results = results;
   shared->row_solve_residual_x = x;
   shared->row_solve_mode = 7;
@@ -16026,7 +16005,6 @@ static int kls_run_parallel_refine_csr_residual(
   shared->row_publish_mode = 0;
   shared->row_refactor_mode = 0;
   shared->pts_solve_mode = 0;
-  shared->contract_rgrowth_mode = 0;
   shared->contract_rgrowth_results = collect_stats ? results : NULL;
   shared->row_solve_work = residual;
   shared->row_solve_residual_x = x;
@@ -16116,7 +16094,6 @@ static int kls_run_generic_plain_contract_vector_stats(
   shared->row_publish_mode = 0;
   shared->row_refactor_mode = 0;
   shared->pts_solve_mode = 0;
-  shared->contract_rgrowth_mode = 0;
   shared->contract_rgrowth_results = results;
   shared->row_solve_mode = 6;
   for (int tid = 0; tid < pool->thread_count; ++tid) {

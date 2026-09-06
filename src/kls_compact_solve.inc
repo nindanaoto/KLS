@@ -2224,17 +2224,10 @@ static void kls_solve_contract_classify(kls_solver *solver,
     return;
   }
   trilinos_klu_l_common growth_common = solver->common;
-  double parallel_rgrowth = 0.0;
-  const int used_parallel_rgrowth =
-    getenv("KLS_ENABLE_PARALLEL_CONTRACT_RGROWTH") != NULL &&
-    kls_parallel_row_contract_rgrowth(solver, numeric_values,
-                                       &parallel_rgrowth);
-  if (used_parallel_rgrowth) {
-    growth_common.rgrowth = parallel_rgrowth;
-  } else if (!trilinos_klu_l_rgrowth(
-               solver->col_ptr, solver->row_idx,
-               (double *)numeric_values, solver->symbolic,
-               solver->numeric, &growth_common)) {
+  if (!trilinos_klu_l_rgrowth(
+        solver->col_ptr, solver->row_idx,
+        (double *)numeric_values, solver->symbolic,
+        solver->numeric, &growth_common)) {
     return;
   }
   double thresh = 1.0e-6;
@@ -2259,8 +2252,8 @@ static void kls_solve_contract_classify(kls_solver *solver,
   }
   if (getenv("KLS_TRACE_REFINE") != NULL) {
     fprintf(stderr,
-            "KLS contract classify: rgrowth=%.3e parallel=%d -> probe=%d\n",
-            growth_common.rgrowth, used_parallel_rgrowth,
+            "KLS contract classify: rgrowth=%.3e -> probe=%d\n",
+            growth_common.rgrowth,
             solver->solve_contract_probe);
   }
 }
