@@ -1,5 +1,11 @@
 # Paper Ideas Audit
 
+Historical note (2026-09-06): the opt-in row-pipeline compact-window family
+(execution, delayed output, sparse-group replay, claim-run and stream/span
+ownership, plus window tracing) has been removed. Ordinary producer batching
+and production compact-supernode kernels remain. Controls and measurements
+for the removed family below are historical, not current library features.
+
 Historical note (2026-09-06): the opt-in L-pattern/stream statistics scans and
 row-pipeline owner-surface tracing have been removed. Their controls below are
 historical. Sorted-L eligibility checks, ordinary row-pipeline tracing, and

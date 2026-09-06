@@ -691,6 +691,10 @@ if(KLS_BUILD_TESTS)
   enable_testing()
   if(Python3_Interpreter_FOUND)
     add_test(
+      NAME kls_slim_build_provenance
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_slim_build_provenance.py")
+    add_test(
       NAME kls_license_boundary
       COMMAND "${Python3_EXECUTABLE}"
               "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_license_boundary.py"
