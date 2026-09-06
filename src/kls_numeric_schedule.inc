@@ -3428,23 +3428,13 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   const int need_pipeline_ready_graph =
     kls_egraph_ready_queue_env_enabled();
 
-  const int supernode_consumer_stats_env =
-    kls_refactor_supernode_consumer_stats_env_enabled();
   const int record_stream_stats = kls_refactor_stream_stats_env_enabled();
 
-  const int need_u_supernode_pattern =
-    (supernode_consumer_stats_env ||
-    kls_refactor_u_supernode_pattern_env_enabled() ||
-    kls_refactor_u_supernode_values_env_enabled() ||
-    kls_refactor_u_supernode_ragged_l_env_enabled());
-
-  if (solver->refactor_level_ptr != NULL &&
+  if ((solver->refactor_level_ptr != NULL &&
       solver->refactor_supernode_pipeline_end != NULL &&
       (!need_pipeline_ready_graph ||
        solver->refactor_pipeline_column_count == 0u ||
-       solver->refactor_pipeline_successor_ptr != NULL) &&
-      (!need_u_supernode_pattern ||
-       solver->refactor_u_supernode_pattern_built) &&
+       solver->refactor_pipeline_successor_ptr != NULL)) &&
       (!record_stream_stats ||
        solver->refactor_stream_stats_built) &&
       (!build_separator_private ||
@@ -3469,7 +3459,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long *first_successor = NULL;
   uint64_t *row_hash1 = NULL;
   uint64_t *row_hash2 = NULL;
-  uint64_t *pair_hash = NULL;
+
   double *column_work = NULL;
   UF_long *counts = NULL;
   UF_long *level_ptr = NULL;
@@ -3501,12 +3491,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   atomic_uint *pipeline_ready_slots = NULL;
   atomic_ulong *pipeline_remaining_preds = NULL;
   UF_long *supernode_pipeline_end = NULL;
-  UF_long *supernode_consumer_start = NULL;
-  UF_long *supernode_consumer_end = NULL;
-  const int record_supernode_consumer_stats =
-    (supernode_consumer_stats_env);
-  const int build_u_supernode_pattern =
-    need_u_supernode_pattern;
 
 #define KLS_FREE_REFACTOR_SCHEDULE_TEMP() \
   do { \
@@ -3515,7 +3499,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(first_successor); \
     free(row_hash1); \
     free(row_hash2); \
-    free(pair_hash); \
     free(column_work); \
     free(counts); \
     free(level_ptr); \
@@ -3538,8 +3521,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(pipeline_ready_slots); \
     free(pipeline_remaining_preds); \
     free(supernode_pipeline_end); \
-    free(supernode_consumer_start); \
-    free(supernode_consumer_end); \
   } while (0)
 
   levels = (UF_long *)calloc((size_t)solver->n, sizeof(*levels));
@@ -3549,9 +3530,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     (UF_long *)malloc((size_t)solver->n * sizeof(*first_successor));
   row_hash1 = (uint64_t *)calloc((size_t)solver->n, sizeof(*row_hash1));
   row_hash2 = (uint64_t *)calloc((size_t)solver->n, sizeof(*row_hash2));
-  if (getenv("KLS_TRACE_PAIR_HASH") != NULL) {
-    pair_hash = (uint64_t *)calloc((size_t)solver->n, sizeof(*pair_hash));
-  }
+
   column_work =
     (double *)calloc((size_t)solver->n, sizeof(*column_work));
   supernode_pipeline_end =
@@ -3563,22 +3542,10 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     KLS_FREE_REFACTOR_SCHEDULE_TEMP();
     return 0;
   }
-  if (record_supernode_consumer_stats) {
-    supernode_consumer_start =
-      (UF_long *)malloc((size_t)solver->n * sizeof(*supernode_consumer_start));
-    supernode_consumer_end =
-      (UF_long *)calloc((size_t)solver->n, sizeof(*supernode_consumer_end));
-    if (supernode_consumer_start == NULL ||
-        supernode_consumer_end == NULL) {
-      KLS_FREE_REFACTOR_SCHEDULE_TEMP();
-      return 0;
-    }
-  }
+
   for (UF_long k = 0; k < solver->n; ++k) {
     first_successor[k] = KLS_KLU_EMPTY;
-    if (supernode_consumer_start != NULL) {
-      supernode_consumer_start[k] = KLS_KLU_EMPTY;
-    }
+
   }
 
   UF_long max_level = 0;
@@ -3643,11 +3610,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         }
         row_hash1[global_dep] += kls_supernode_hash1(global_col);
         row_hash2[global_dep] += kls_supernode_hash2(global_col);
-        if (pair_hash != NULL) {
-          pair_hash[global_col] +=
-            kls_supernode_hash1(global_dep) ^
-            (kls_supernode_hash2(global_dep) << 1);
-        }
+
         const UF_long dep_level = levels[global_dep] + 1u;
         if (dep_level > level) {
           level = dep_level;
@@ -3934,103 +3897,25 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         kls_record_supernode_candidate(solver, start, width,
                                        successor_counts,
                                        supernode_pipeline_end);
-        kls_mark_supernode_consumer_range(start, width,
-                                          supernode_consumer_start,
-                                          supernode_consumer_end);
+
         start = next;
         width = 1u;
       }
     }
     kls_record_supernode_candidate(solver, start, width, successor_counts,
                                    supernode_pipeline_end);
-    kls_mark_supernode_consumer_range(start, width, supernode_consumer_start,
-                                      supernode_consumer_end);
+
   }
 
-  if (build_u_supernode_pattern) {
-    (void)kls_build_refactor_u_supernode_pattern(
-      solver, supernode_pipeline_end, successor_counts);
-  }
-
-  if (record_supernode_consumer_stats) {
-    kls_count_supernode_consumer_runs(
-      solver, supernode_consumer_start, supernode_consumer_end);
-  }
-
-  if (pair_hash != NULL && level_ptr != NULL && level_cols != NULL) {
-    typedef struct { uint64_t h; UF_long len; } kls_pair_sig;
-    const UF_long pbegin = level_ptr[cluster_levels];
-    const UF_long pcount = solver->n > pbegin ? solver->n - pbegin : 0u;
-    kls_pair_sig *sigs = pcount > 0u
-      ? (kls_pair_sig *)malloc((size_t)pcount * sizeof(*sigs)) : NULL;
-    if (sigs != NULL) {
-      UF_long m = 0;
-      double total_w = 0.0;
-      for (UF_long pos = pbegin; pos < solver->n; ++pos) {
-        const UF_long col = level_cols[pos];
-        const UF_long ul = solver->numeric->Ulen[col];
-        if (ul >= 8u) {
-          sigs[m].h = pair_hash[col];
-          sigs[m].len = ul;
-          m++;
-          total_w += (double)ul;
-        }
-      }
-      int cmp(const void *a, const void *b);
-      /* local qsort comparator not allowed portably; simple shell sort */
-      for (UF_long gap = m / 2u; gap > 0u; gap /= 2u) {
-        for (UF_long i = gap; i < m; ++i) {
-          kls_pair_sig tmp = sigs[i];
-          UF_long jj = i;
-          while (jj >= gap &&
-                 (sigs[jj - gap].h > tmp.h ||
-                  (sigs[jj - gap].h == tmp.h && sigs[jj - gap].len > tmp.len))) {
-            sigs[jj] = sigs[jj - gap];
-            jj -= gap;
-          }
-          sigs[jj] = tmp;
-        }
-      }
-      UF_long dup_cols = 0;
-      UF_long max_group = 0;
-      double dup_w = 0.0;
-      UF_long i = 0;
-      while (i < m) {
-        UF_long jrun = i;
-        double gw = 0.0;
-        while (jrun < m && sigs[jrun].h == sigs[i].h &&
-               sigs[jrun].len == sigs[i].len) {
-          gw += (double)sigs[jrun].len;
-          jrun++;
-        }
-        const UF_long g = jrun - i;
-        if (g >= 2u) {
-          dup_cols += g;
-          dup_w += gw;
-          if (g > max_group) {
-            max_group = g;
-          }
-        }
-        i = jrun;
-      }
-      fprintf(stderr,
-              "KLS pairhash: pipeline_cols %ld (ulen>=8: %ld) dup_cols %ld"
-              " max_group %ld dup_work %.2f%%\n",
-              (long)pcount, (long)m, (long)dup_cols, (long)max_group,
-              total_w > 0.0 ? 100.0 * dup_w / total_w : 0.0);
-      free(sigs);
-    }
-  }
   free(levels);
   free(successor_counts);
   free(first_successor);
   free(row_hash1);
   free(row_hash2);
-  free(pair_hash);
+
   free(column_work);
   free(counts);
-  free(supernode_consumer_start);
-  free(supernode_consumer_end);
+
 #undef KLS_FREE_REFACTOR_SCHEDULE_TEMP
   solver->refactor_level_ptr = level_ptr;
   solver->refactor_level_cols = level_cols;
@@ -4121,8 +4006,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   pipeline_ready_cols = NULL;
   pipeline_ready_slots = NULL;
   pipeline_remaining_preds = NULL;
-  supernode_consumer_start = NULL;
-  supernode_consumer_end = NULL;
+
   supernode_pipeline_end = NULL;
   return 1;
 }

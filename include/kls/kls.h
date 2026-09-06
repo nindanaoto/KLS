@@ -213,6 +213,7 @@ typedef struct kls_stats {
   int64_t refactor_supernode_candidate_max_width;
   double refactor_supernode_candidate_dense_entries;
   double refactor_supernode_candidate_trailing_entries;
+  /* Retired supernode_consumer diagnostics are ABI-reserved, always zero. */
   int64_t refactor_supernode_consumer_run_count;
   int64_t refactor_supernode_consumer_run_rows;
   int64_t refactor_supernode_consumer_run_max_width;
@@ -812,6 +813,8 @@ typedef struct kls_stats {
   int64_t row_refactor_last_separator_flop_private_max_groups;
   double row_refactor_last_separator_flop_private_min_work;
   double row_refactor_last_separator_flop_private_max_work;
+  /* Retired u_supernode experiment fields throughout this struct are
+     ABI-reserved, always zero. Ordinary supernode update statistics remain. */
   int64_t refactor_u_supernode_pattern_count;
   int64_t refactor_u_supernode_pattern_rows;
   int64_t refactor_u_supernode_pattern_max_width;
@@ -1091,6 +1094,8 @@ typedef struct kls_stats {
   int64_t refactor_supernode_consumer_plan_group_l_state_selected_bytes;
   int64_t refactor_supernode_algorithm5_payoff_current_state_span_rows;
   int64_t refactor_supernode_algorithm5_payoff_current_state_max_span_rows;
+  /* Retired surface-tracker counters (next eight fields): always zero.
+     The following scalar_run_exec counters remain active. */
   int64_t refactor_last_btf_scalar_run_candidates;
   int64_t refactor_last_btf_scalar_run_rows;
   int64_t refactor_last_btf_scalar_run_entries;

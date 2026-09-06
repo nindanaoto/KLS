@@ -1,5 +1,11 @@
 # Paper Ideas Audit
 
+Historical note (2026-09-06): supernode consumer statistics, the BTF scalar-run
+surface tracker, pair-hash tracing, and the opt-in U-supernode pattern/value/
+ragged-L experiments have been removed. References to their controls below
+describe historical experiments. Ordinary cached supernode updates and the
+default BTF scalar-run executor remain; retired public statistics report zero.
+
 Historical note (2026-09-06): the opt-in supernode consumer-plan and BTF
 scalar-run group experiments, including their diagnostic-only bookkeeping,
 have been removed. Their controls and measurements below are historical.

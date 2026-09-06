@@ -6600,16 +6600,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   char *saved_egraph =
     saved_egraph_value != NULL ? strdup(saved_egraph_value) : NULL;
   const int had_egraph = saved_egraph_value != NULL;
-  const char *saved_u_pattern_value =
-    getenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN");
-  char *saved_u_pattern =
-    saved_u_pattern_value != NULL ? strdup(saved_u_pattern_value) : NULL;
-  const int had_u_pattern = saved_u_pattern_value != NULL;
-  const char *saved_u_values_value =
-    getenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES");
-  char *saved_u_values =
-    saved_u_values_value != NULL ? strdup(saved_u_values_value) : NULL;
-  const int had_u_values = saved_u_values_value != NULL;
   const char *saved_cblas_value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
   char *saved_cblas =
     saved_cblas_value != NULL ? strdup(saved_cblas_value) : NULL;
@@ -6642,14 +6632,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   }
   if (ok && setenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN=1");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES=1");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CBLAS_SUPERNODE", "0", 1) != 0) {
@@ -6693,7 +6675,12 @@ static int test_egraph_cached_supernode_blocked_update(void) {
        stats.refactor_supernode_consumer_plan_group_l_built != 0 ||
        stats.refactor_btf_scalar_run_group_built != 0 ||
        stats.refactor_last_btf_scalar_run_group_waits != 0 ||
-       stats.refactor_supernode_algorithm5_candidate_run_count != 0)) {
+       stats.refactor_supernode_algorithm5_candidate_run_count != 0 ||
+       stats.refactor_supernode_consumer_run_count != 0 ||
+       stats.refactor_last_btf_scalar_run_candidates != 0 ||
+       stats.refactor_u_supernode_pattern_count != 0 ||
+       stats.refactor_u_supernode_value_dense_entries != 0 ||
+       stats.refactor_last_u_supernode_l_update_runs != 0)) {
     fprintf(stderr, "retired experiment statistics must remain zero\n");
     ok = 0;
   }
@@ -6705,14 +6692,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
        stats.refactor_supernode_panel_used_count < 1 ||
        stats.refactor_supernode_panel_used_count >
          stats.refactor_supernode_panel_count ||
-       stats.refactor_u_supernode_pattern_count < 1 ||
-       stats.refactor_u_supernode_pattern_rows < panel_width ||
-       stats.refactor_u_supernode_pattern_max_width < panel_width ||
-       stats.refactor_u_supernode_pattern_internal_entries <= 0.0 ||
-       stats.refactor_u_supernode_value_dense_entries <= 0 ||
-       stats.refactor_last_u_supernode_value_dense_writes <= 0 ||
-       stats.refactor_u_supernode_value_dense_write_count <
-         stats.refactor_last_u_supernode_value_dense_writes ||
        stats.refactor_last_supernode_update_runs < 1 ||
        stats.refactor_last_supernode_update_rows < panel_width ||
        stats.refactor_last_supernode_blocked_update_runs < 1 ||
@@ -6735,9 +6714,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
             ", updates=%" PRId64 "/%" PRId64 "/%" PRId64
             ", blocked=%" PRId64 "/%" PRId64 "/%" PRId64
             ", blocked_total=%" PRId64 ", cblas=%" PRId64
-            ", u_patterns=%" PRId64 "/%" PRId64 "/%" PRId64
-            ", u_internal=%.17g"
-            ", u_values=%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", update_disabled=%d/%" PRId64 "\n",
             stats.row_refactor_last_run,
             stats.refactor_supernode_candidate_count,
@@ -6751,14 +6727,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
             stats.refactor_last_supernode_blocked_update_entries,
             stats.refactor_supernode_blocked_update_run_count,
             stats.refactor_last_supernode_cblas_update_runs,
-            stats.refactor_u_supernode_pattern_count,
-            stats.refactor_u_supernode_pattern_rows,
-            stats.refactor_u_supernode_pattern_right_entries,
-            stats.refactor_u_supernode_pattern_internal_entries,
-            stats.refactor_u_supernode_value_dense_entries,
-            stats.refactor_u_supernode_value_right_entries,
-            stats.refactor_last_u_supernode_value_dense_writes,
-            stats.refactor_last_u_supernode_value_right_writes,
             stats.refactor_supernode_update_disabled,
             stats.refactor_supernode_update_disable_count);
     ok = 0;
@@ -6817,14 +6785,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
                          saved_egraph)) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_ENABLE_REFACTOR_U_SUPERNODE_PATTERN",
-                         had_u_pattern, saved_u_pattern)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_REFACTOR_U_SUPERNODE_VALUES",
-                         had_u_values, saved_u_values)) {
-    ok = 0;
-  }
   if (!restore_env_value("KLS_ENABLE_CBLAS_SUPERNODE", had_cblas,
                          saved_cblas)) {
     ok = 0;
@@ -6837,8 +6797,6 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   free(saved_row);
   free(saved_checked);
   free(saved_egraph);
-  free(saved_u_pattern);
-  free(saved_u_values);
   free(saved_cblas);
   free(saved_first);
   kls_destroy(solver);

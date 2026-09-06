@@ -161,7 +161,6 @@ def egraph_scalar_numeric_owner_missing(row: dict[str, object]) -> bool:
     active_grouped_updates = (
         int_value(row, "refactor_last_supernode_update_runs")
         + int_value(row, "refactor_last_supernode_cached_probe_applied")
-        + int_value(row, "refactor_last_u_supernode_l_update_runs")
         + int_value(row, "refactor_last_supernode_algorithm5_payoff_prefix_prep_runs")
         + int_value(row, "refactor_last_supernode_algorithm5_payoff_current_state_seed_runs")
         + int_value(row, "refactor_last_supernode_algorithm5_payoff_suffix_advance_deps")
@@ -228,9 +227,6 @@ def paper_gap_signal(
     compact_eligible_rows = int_value(
         cand_row, "row_refactor_compact_dense_panel_eligible_rows"
     )
-    btf_scalar_run_rows = int_value(
-        cand_row, "refactor_last_btf_scalar_run_rows"
-    )
 
     if first_skip_scaled_single:
         return "missing_parallel_rowup_first_factor"
@@ -270,8 +266,6 @@ def paper_gap_signal(
                         "refactor_btf_scalar_run_group_reused_entries",
                     ) > 0:
                         return "egraph_scalar_tail_grouped_producer_runs_unowned"
-                    if btf_scalar_run_rows > 0:
-                        return "egraph_scalar_tail_producer_runs_unowned"
                     return "egraph_scalar_tail_numeric_owner_missing"
                 return "egraph_scalar_pipeline_numeric_owner_missing"
             if auto_lower_rejected:
@@ -332,8 +326,6 @@ def print_concise_report(
         "refactor_dependency_pipeline_share",
         "refactor_dependency_work",
         "refactor_dependency_pipeline_work",
-        "refactor_last_btf_scalar_run_rows",
-        "refactor_last_btf_scalar_run_entries",
         "refactor_btf_scalar_run_group_multi_current_total",
         "refactor_btf_scalar_run_group_reused_entries",
         "refactor_last_btf_scalar_run_group_state_step_batch_currents",
@@ -380,8 +372,6 @@ def print_concise_report(
             ),
             f"{egraph_work:.6g}",
             f"{float_value(cand_row, 'refactor_dependency_pipeline_work'):.6g}",
-            str(int_value(cand_row, "refactor_last_btf_scalar_run_rows")),
-            str(int_value(cand_row, "refactor_last_btf_scalar_run_entries")),
             str(
                 int_value(
                     cand_row, "refactor_btf_scalar_run_group_multi_current_total"
@@ -706,14 +696,6 @@ def main() -> int:
         "refactor_supernode_cached_probe_work_reject_rows,"
         "refactor_supernode_cached_probe_workspace_rejects,"
         "refactor_supernode_cached_probe_workspace_reject_rows,"
-        "refactor_last_btf_scalar_run_candidates,"
-        "refactor_last_btf_scalar_run_rows,"
-        "refactor_last_btf_scalar_run_entries,"
-        "refactor_last_btf_scalar_run_max_rows,"
-        "refactor_btf_scalar_run_candidate_count,"
-        "refactor_btf_scalar_run_rows,"
-        "refactor_btf_scalar_run_entries,"
-        "refactor_btf_scalar_run_max_rows,"
         "refactor_last_btf_scalar_run_exec_runs,"
         "refactor_last_btf_scalar_run_exec_rows,"
         "refactor_last_btf_scalar_run_exec_entries,"
@@ -959,10 +941,6 @@ def main() -> int:
         "refactor_dependency_cluster_levels,"
         "refactor_dependency_pipeline_columns,refactor_dependency_work,"
         "refactor_dependency_pipeline_work,"
-        "refactor_last_btf_scalar_run_candidates,"
-        "refactor_last_btf_scalar_run_rows,"
-        "refactor_last_btf_scalar_run_entries,"
-        "refactor_last_btf_scalar_run_max_rows,"
         "refactor_last_btf_scalar_run_exec_runs,"
         "refactor_last_btf_scalar_run_exec_rows,"
         "refactor_last_btf_scalar_run_exec_entries,"
@@ -1303,14 +1281,6 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_supernode_cached_probe_work_reject_rows')},"
             f"{int_value(cand_row, 'refactor_supernode_cached_probe_workspace_rejects')},"
             f"{int_value(cand_row, 'refactor_supernode_cached_probe_workspace_reject_rows')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_candidates')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_rows')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_entries')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_max_rows')},"
-            f"{int_value(cand_row, 'refactor_btf_scalar_run_candidate_count')},"
-            f"{int_value(cand_row, 'refactor_btf_scalar_run_rows')},"
-            f"{int_value(cand_row, 'refactor_btf_scalar_run_entries')},"
-            f"{int_value(cand_row, 'refactor_btf_scalar_run_max_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_runs')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_entries')},"
@@ -1569,10 +1539,6 @@ def main() -> int:
             f"{int_value(cand_row, 'refactor_dependency_pipeline_columns')},"
             f"{float_value(cand_row, 'refactor_dependency_work'):.6g},"
             f"{float_value(cand_row, 'refactor_dependency_pipeline_work'):.6g},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_candidates')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_rows')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_entries')},"
-            f"{int_value(cand_row, 'refactor_last_btf_scalar_run_max_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_runs')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_rows')},"
             f"{int_value(cand_row, 'refactor_last_btf_scalar_run_exec_entries')},"

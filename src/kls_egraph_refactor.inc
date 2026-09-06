@@ -825,23 +825,6 @@ static void kls_atomic_update_max_ulong(atomic_ulong *target,
   }
 }
 
-static void kls_egraph_record_btf_scalar_run(
-  kls_egraph_refactor_shared *shared,
-  UF_long rows,
-  UF_long entries) {
-  if (shared == NULL || rows <= 1u) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->btf_scalar_run_candidates, 1ul,
-                            memory_order_relaxed);
-  atomic_fetch_add_explicit(
-    &shared->btf_scalar_run_rows, (unsigned long)rows, memory_order_relaxed);
-  atomic_fetch_add_explicit(
-    &shared->btf_scalar_run_entries, (unsigned long)entries,
-    memory_order_relaxed);
-  kls_atomic_update_max_ulong(&shared->btf_scalar_run_max_rows, rows);
-}
-
 static void kls_egraph_record_btf_scalar_run_exec(
   kls_egraph_refactor_shared *shared,
   UF_long rows,
@@ -856,123 +839,6 @@ static void kls_egraph_record_btf_scalar_run_exec(
   atomic_fetch_add_explicit(&shared->btf_scalar_run_exec_entries,
                             (unsigned long)entries, memory_order_relaxed);
   kls_atomic_update_max_ulong(&shared->btf_scalar_run_exec_max_rows, rows);
-}
-
-typedef struct kls_btf_scalar_run_tracker {
-  int enabled;
-  int active;
-  UF_long last_pos;
-  UF_long last_dep;
-  UF_long rows;
-  UF_long entries;
-} kls_btf_scalar_run_tracker;
-
-static void kls_btf_scalar_run_tracker_flush(
-  kls_egraph_refactor_shared *shared,
-  kls_btf_scalar_run_tracker *tracker) {
-  if (tracker == NULL || !tracker->enabled) {
-    return;
-  }
-  if (tracker->active && tracker->rows > 1u) {
-    kls_egraph_record_btf_scalar_run(shared, tracker->rows, tracker->entries);
-  }
-  tracker->active = 0;
-  tracker->rows = 0u;
-  tracker->entries = 0u;
-}
-
-static void kls_btf_scalar_run_tracker_note(
-  kls_egraph_refactor_shared *shared,
-  kls_btf_scalar_run_tracker *tracker,
-  UF_long pos,
-  UF_long dep,
-  UF_long lcol_len) {
-  if (tracker == NULL || !tracker->enabled) {
-    return;
-  }
-  const int extends =
-    tracker->active &&
-    tracker->last_pos != UF_long_max &&
-    tracker->last_dep != UF_long_max &&
-    pos == tracker->last_pos + 1u &&
-    dep == tracker->last_dep + 1u;
-  if (!extends) {
-    kls_btf_scalar_run_tracker_flush(shared, tracker);
-    tracker->active = 1;
-    tracker->rows = 1u;
-    tracker->entries = lcol_len;
-  } else {
-    if (tracker->rows < UF_long_max) {
-      tracker->rows++;
-    }
-    if (lcol_len > UF_long_max - tracker->entries) {
-      tracker->entries = UF_long_max;
-    } else {
-      tracker->entries += lcol_len;
-    }
-  }
-  tracker->last_pos = pos;
-  tracker->last_dep = dep;
-}
-
-static void kls_egraph_record_u_supernode_l_update(
-  kls_egraph_refactor_shared *shared,
-  UF_long rows,
-  UF_long entries) {
-  if (shared == NULL || rows <= 1u) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->u_supernode_l_update_runs, 1ul,
-                            memory_order_relaxed);
-  atomic_fetch_add_explicit(&shared->u_supernode_l_update_rows,
-                            (unsigned long)rows, memory_order_relaxed);
-  atomic_fetch_add_explicit(&shared->u_supernode_l_update_entries,
-                            (unsigned long)entries, memory_order_relaxed);
-}
-
-static void kls_egraph_record_u_supernode_l_probe_attempt(
-  kls_egraph_refactor_shared *shared) {
-  if (shared == NULL) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->u_supernode_l_probe_attempts, 1ul,
-                            memory_order_relaxed);
-}
-
-static void kls_egraph_record_u_supernode_l_panel_miss(
-  kls_egraph_refactor_shared *shared) {
-  if (shared == NULL) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->u_supernode_l_panel_misses, 1ul,
-                            memory_order_relaxed);
-}
-
-static void kls_egraph_record_u_supernode_l_short_reject(
-  kls_egraph_refactor_shared *shared) {
-  if (shared == NULL) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->u_supernode_l_short_rejects, 1ul,
-                            memory_order_relaxed);
-}
-
-static void kls_egraph_record_u_supernode_l_stream_reject(
-  kls_egraph_refactor_shared *shared) {
-  if (shared == NULL) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->u_supernode_l_stream_rejects, 1ul,
-                            memory_order_relaxed);
-}
-
-static void kls_egraph_record_u_supernode_l_work_reject(
-  kls_egraph_refactor_shared *shared) {
-  if (shared == NULL) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->u_supernode_l_work_rejects, 1ul,
-                            memory_order_relaxed);
 }
 
 static UF_long kls_egraph_subtree_split_available_end(
@@ -996,17 +862,6 @@ static UF_long kls_egraph_subtree_split_available_end(
   return prefix_rows > 1u ? panel_offset + prefix_rows : available_end;
 }
 
-static UF_long kls_egraph_algorithm5_split_available_end(
-  const kls_egraph_refactor_shared *shared,
-  UF_long panel_offset,
-  UF_long available_end) {
-  if (shared == NULL || !shared->u_supernode_ragged_l_updates) {
-    return available_end;
-  }
-  return kls_egraph_subtree_split_available_end(
-    shared, panel_offset, available_end);
-}
-
 static void kls_egraph_disable_supernode_panel(kls_solver *solver,
                                                UF_long panel) {
   if (solver == NULL ||
@@ -1015,191 +870,6 @@ static void kls_egraph_disable_supernode_panel(kls_solver *solver,
     return;
   }
   solver->refactor_supernode_panel_width[panel] = 0u;
-}
-
-static void kls_egraph_disable_u_supernode_l_panel(kls_solver *solver,
-                                                   UF_long panel) {
-  if (solver == NULL ||
-      solver->refactor_u_supernode_l_valid == NULL ||
-      panel >= solver->refactor_u_supernode_pattern_count) {
-    return;
-  }
-  solver->refactor_u_supernode_l_valid[panel] = 0u;
-}
-
-static void kls_egraph_reset_u_supernode_l_used(kls_solver *solver) {
-  if (solver == NULL || solver->refactor_u_supernode_l_pruned ||
-      solver->refactor_u_supernode_l_used == NULL) {
-    return;
-  }
-  for (UF_long panel = 0u;
-       panel < solver->refactor_u_supernode_pattern_count; ++panel) {
-    atomic_store_explicit(&solver->refactor_u_supernode_l_used[panel], 0u,
-                          memory_order_relaxed);
-  }
-}
-
-static void kls_egraph_mark_u_supernode_l_panel_used(kls_solver *solver,
-                                                     UF_long panel) {
-  if (solver == NULL || solver->refactor_u_supernode_l_pruned ||
-      solver->refactor_u_supernode_l_used == NULL ||
-      panel >= solver->refactor_u_supernode_pattern_count) {
-    return;
-  }
-  atomic_store_explicit(&solver->refactor_u_supernode_l_used[panel], 1u,
-                        memory_order_relaxed);
-}
-
-static void kls_egraph_prune_unused_u_supernode_l_panels(kls_solver *solver) {
-  if (solver == NULL || solver->refactor_u_supernode_l_pruned ||
-      solver->refactor_u_supernode_l_used == NULL ||
-      solver->refactor_u_supernode_l_valid == NULL ||
-      solver->refactor_u_supernode_width == NULL ||
-      solver->refactor_u_supernode_l_row_begin == NULL ||
-      solver->refactor_u_supernode_l_row_ptr == NULL) {
-    return;
-  }
-
-  UF_long pruned_panels = 0u;
-  UF_long pruned_dense_entries = 0u;
-  UF_long pruned_trailing_entries = 0u;
-  for (UF_long panel = 0u;
-       panel < solver->refactor_u_supernode_pattern_count; ++panel) {
-    if (!solver->refactor_u_supernode_l_valid[panel]) {
-      continue;
-    }
-    if (atomic_load_explicit(&solver->refactor_u_supernode_l_used[panel],
-                             memory_order_relaxed) != 0u) {
-      continue;
-    }
-    const UF_long width = solver->refactor_u_supernode_width[panel];
-    const UF_long row_begin = solver->refactor_u_supernode_l_row_begin[panel];
-    if (width > 0u &&
-        row_begin <= solver->refactor_u_supernode_pattern_rows &&
-        width <= solver->refactor_u_supernode_pattern_rows - row_begin) {
-      pruned_panels++;
-      pruned_dense_entries += width * width;
-      const UF_long begin = solver->refactor_u_supernode_l_row_ptr[row_begin];
-      const UF_long end =
-        solver->refactor_u_supernode_l_row_ptr[row_begin + width];
-      if (end >= begin) {
-        pruned_trailing_entries += end - begin;
-      }
-    }
-    solver->refactor_u_supernode_l_valid[panel] = 0u;
-  }
-  solver->refactor_u_supernode_l_pruned = 1;
-  solver->refactor_u_supernode_l_prune_count++;
-  solver->refactor_u_supernode_l_pruned_panels += pruned_panels;
-  solver->refactor_u_supernode_l_pruned_dense_entries +=
-    pruned_dense_entries;
-  solver->refactor_u_supernode_l_pruned_trailing_entries +=
-    pruned_trailing_entries;
-}
-
-static void kls_egraph_publish_u_supernode_l_column(
-  kls_egraph_refactor_shared *shared,
-  UF_long col) {
-  if (shared == NULL || !shared->u_supernode_ragged_l_updates) {
-    return;
-  }
-  kls_solver *solver = shared->solver;
-  if (solver == NULL || col >= solver->n ||
-      solver->refactor_u_supernode_col_id == NULL ||
-      solver->refactor_u_supernode_start == NULL ||
-      solver->refactor_u_supernode_local_start == NULL ||
-      solver->refactor_u_supernode_width == NULL ||
-      solver->refactor_u_supernode_dense_begin == NULL ||
-      solver->refactor_u_supernode_l_valid == NULL ||
-      solver->refactor_u_supernode_l_row_begin == NULL ||
-      solver->refactor_u_supernode_l_row_ptr == NULL ||
-      solver->refactor_u_supernode_l_cols == NULL ||
-      solver->refactor_u_supernode_l_dense_values == NULL ||
-      solver->refactor_l_indices == NULL ||
-      solver->refactor_l_values == NULL ||
-      solver->numeric == NULL || solver->numeric->Llen == NULL) {
-    return;
-  }
-  const UF_long panel = solver->refactor_u_supernode_col_id[col];
-  if (panel == KLS_KLU_EMPTY ||
-      panel >= solver->refactor_u_supernode_pattern_count ||
-      !solver->refactor_u_supernode_l_valid[panel]) {
-    return;
-  }
-  const UF_long start = solver->refactor_u_supernode_start[panel];
-  const UF_long width = solver->refactor_u_supernode_width[panel];
-  const UF_long local_start =
-    solver->refactor_u_supernode_local_start[panel];
-  if (width <= 1u || col < start || col >= start + width) {
-    return;
-  }
-  const UF_long local = col - start;
-  const UF_long row_base =
-    solver->refactor_u_supernode_l_row_begin[panel] + local;
-  if (row_base + 1u > solver->refactor_u_supernode_pattern_rows) {
-    kls_egraph_disable_u_supernode_l_panel(solver, panel);
-    return;
-  }
-  const UF_long *rows = solver->refactor_l_indices[col];
-  const double *values = solver->refactor_l_values[col];
-  const UF_long length = solver->numeric->Llen[col];
-  if ((rows == NULL || values == NULL) && length > 0u) {
-    kls_egraph_disable_u_supernode_l_panel(solver, panel);
-    return;
-  }
-
-  const UF_long skip_begin = local_start;
-  const UF_long skip_end = local_start + width;
-  double *dense_row =
-    solver->refactor_u_supernode_l_dense_values +
-    solver->refactor_u_supernode_dense_begin[panel] + local * width;
-  memset(dense_row, 0, (size_t)width * sizeof(*dense_row));
-
-  const UF_long trailing_begin =
-    solver->refactor_u_supernode_l_row_ptr[row_base];
-  const UF_long trailing_end =
-    solver->refactor_u_supernode_l_row_ptr[row_base + 1u];
-  const UF_long trailing_len = trailing_end - trailing_begin;
-  const UF_long *trailing_rows =
-    trailing_len > 0u
-      ? solver->refactor_u_supernode_l_cols + trailing_begin
-      : NULL;
-  double *trailing_values =
-    trailing_len > 0u
-      ? solver->refactor_u_supernode_l_values + trailing_begin
-      : NULL;
-  if (trailing_len > 0u &&
-      (trailing_rows == NULL || trailing_values == NULL)) {
-    kls_egraph_disable_u_supernode_l_panel(solver, panel);
-    return;
-  }
-  if (trailing_len > 0u) {
-    memset(trailing_values, 0,
-           (size_t)trailing_len * sizeof(*trailing_values));
-  }
-
-  UF_long trailing_offset = 0u;
-  for (UF_long p = 0u; p < length; ++p) {
-    const UF_long row = rows[p];
-    if (row >= skip_begin && row < skip_end) {
-      const UF_long target = row - skip_begin;
-      if (target <= local || target >= width) {
-        kls_egraph_disable_u_supernode_l_panel(solver, panel);
-        return;
-      }
-      dense_row[target] = values[p];
-      continue;
-    }
-    if (trailing_offset >= trailing_len ||
-        trailing_rows[trailing_offset] != row) {
-      kls_egraph_disable_u_supernode_l_panel(solver, panel);
-      return;
-    }
-    trailing_values[trailing_offset++] = values[p];
-  }
-  if (trailing_offset != trailing_len) {
-    kls_egraph_disable_u_supernode_l_panel(solver, panel);
-  }
 }
 
 static void kls_egraph_publish_supernode_panel_column(
@@ -1460,198 +1130,6 @@ static int kls_egraph_apply_cached_supernode_blocked(
   return 1;
 }
 
-static int kls_egraph_refactor_try_u_supernode_ragged_l_run(
-  kls_egraph_refactor_worker *worker,
-  UF_long k1,
-  UF_long current_global,
-  UF_long current_local,
-  UF_long *up_io,
-  UF_long ucol_len,
-  const UF_long *ui,
-  double *ux,
-  double *x,
-  int wait_for_dependencies) {
-  if (worker == NULL || worker->shared == NULL || up_io == NULL ||
-      ui == NULL || ux == NULL || x == NULL || *up_io >= ucol_len) {
-    return 0;
-  }
-  kls_egraph_refactor_shared *shared = worker->shared;
-  kls_solver *solver = shared->solver;
-  if (solver == NULL || !shared->u_supernode_ragged_l_updates ||
-      solver->refactor_u_supernode_col_id == NULL ||
-      solver->refactor_u_supernode_start == NULL ||
-      solver->refactor_u_supernode_local_start == NULL ||
-      solver->refactor_u_supernode_width == NULL ||
-      solver->refactor_u_supernode_dense_begin == NULL ||
-      solver->refactor_u_supernode_l_valid == NULL ||
-      solver->refactor_u_supernode_l_row_begin == NULL ||
-      solver->refactor_u_supernode_l_row_ptr == NULL ||
-      solver->refactor_u_supernode_l_cols == NULL ||
-      solver->refactor_u_supernode_l_dense_values == NULL) {
-    return 0;
-  }
-
-  const UF_long up = *up_io;
-  const UF_long dep_local = ui[up];
-  if (dep_local >= current_local || k1 > current_global) {
-    kls_egraph_record_u_supernode_l_short_reject(shared);
-    return 0;
-  }
-  const UF_long dep_global = k1 + dep_local;
-  if (dep_global >= current_global || dep_global >= solver->n) {
-    kls_egraph_record_u_supernode_l_short_reject(shared);
-    return 0;
-  }
-
-  kls_egraph_record_u_supernode_l_probe_attempt(shared);
-  const UF_long panel = solver->refactor_u_supernode_col_id[dep_global];
-  if (panel == KLS_KLU_EMPTY ||
-      panel >= solver->refactor_u_supernode_pattern_count ||
-      !solver->refactor_u_supernode_l_valid[panel]) {
-    kls_egraph_record_u_supernode_l_panel_miss(shared);
-    return 0;
-  }
-  const UF_long start = solver->refactor_u_supernode_start[panel];
-  const UF_long local_start =
-    solver->refactor_u_supernode_local_start[panel];
-  const UF_long width = solver->refactor_u_supernode_width[panel];
-  if (width <= 1u || start > dep_global || dep_global >= start + width ||
-      start > solver->n || width > solver->n - start) {
-    kls_egraph_record_u_supernode_l_panel_miss(shared);
-    return 0;
-  }
-  const UF_long panel_offset = dep_global - start;
-  if (local_start > dep_local ||
-      dep_local - local_start != panel_offset) {
-    kls_egraph_record_u_supernode_l_panel_miss(shared);
-    return 0;
-  }
-  UF_long available_end = width;
-  if (current_global < start + width) {
-    available_end = current_global - start;
-  }
-  if (wait_for_dependencies) {
-    available_end = kls_egraph_algorithm5_split_available_end(
-      shared, panel_offset, available_end);
-  }
-  if (available_end > width || available_end <= panel_offset + 1u) {
-    kls_egraph_record_u_supernode_l_short_reject(shared);
-    return 0;
-  }
-  const UF_long run_rows = available_end - panel_offset;
-  if (run_rows > ucol_len - up ||
-      run_rows > current_local - dep_local ||
-      run_rows > (UF_long)(SIZE_MAX / sizeof(double))) {
-    kls_egraph_record_u_supernode_l_short_reject(shared);
-    return 0;
-  }
-  for (UF_long local = 0u; local < run_rows; ++local) {
-    if (ui[up + local] != dep_local + local) {
-      kls_egraph_record_u_supernode_l_stream_reject(shared);
-      return 0;
-    }
-  }
-
-  const UF_long row_base =
-    solver->refactor_u_supernode_l_row_begin[panel] + panel_offset;
-  if (row_base + run_rows > solver->refactor_u_supernode_pattern_rows) {
-    kls_egraph_record_u_supernode_l_panel_miss(shared);
-    return 0;
-  }
-  UF_long trailing_entries = 0u;
-  for (UF_long local = 0u; local < run_rows; ++local) {
-    const UF_long begin =
-      solver->refactor_u_supernode_l_row_ptr[row_base + local];
-    const UF_long end =
-      solver->refactor_u_supernode_l_row_ptr[row_base + local + 1u];
-    if (end < begin || end > solver->refactor_u_supernode_l_trailing_entries ||
-        end - begin > UF_long_max - trailing_entries) {
-      kls_egraph_record_u_supernode_l_panel_miss(shared);
-      return 0;
-    }
-    trailing_entries += end - begin;
-  }
-  const UF_long dense_scatter_cols = width - available_end;
-  if (!kls_egraph_ragged_u_supernode_update_allows(
-        run_rows, dense_scatter_cols, trailing_entries)) {
-    kls_egraph_record_u_supernode_l_work_reject(shared);
-    return 0;
-  }
-
-  const double *dense_panel =
-    solver->refactor_u_supernode_l_dense_values +
-    solver->refactor_u_supernode_dense_begin[panel];
-  const UF_long *trailing_cols = solver->refactor_u_supernode_l_cols;
-  const double *trailing_values = solver->refactor_u_supernode_l_values;
-  if (trailing_entries > 0u &&
-      (trailing_cols == NULL || trailing_values == NULL)) {
-    return 0;
-  }
-
-  const UF_long trsv_entries = (run_rows * (run_rows - 1u)) / 2u;
-  const UF_long dense_entries = run_rows * dense_scatter_cols;
-
-  UF_long workspace_request = run_rows;
-  UF_long workspace_offset = 0u;
-  double *workspace_base = NULL;
-
-  {
-    workspace_base =
-      kls_egraph_worker_supernode_workspace(worker, workspace_request);
-  }
-  if (workspace_base == NULL) {
-    return 0;
-  }
-  double *workspace = workspace_base + workspace_offset;
-  if (wait_for_dependencies) {
-    for (UF_long local = 0u; local < run_rows; ++local) {
-      if (!kls_egraph_refactor_wait_done(
-            shared, start + panel_offset + local)) {
-        return -1;
-      }
-    }
-  }
-
-  for (UF_long local = 0u; local < run_rows; ++local) {
-    const UF_long row = dep_local + local;
-    workspace[local] = x[row];
-    x[row] = 0.0;
-  }
-
-  for (UF_long local = 0u; local < run_rows; ++local) {
-    const UF_long panel_local = panel_offset + local;
-    const double ujk = workspace[local];
-    ux[up + local] = ujk;
-    if (shared->u_supernode_values) {
-      kls_egraph_record_u_supernode_value(
-        shared, start + panel_local, current_global, ujk);
-    }
-    const double *dense_row = dense_panel + panel_local * width;
-    for (UF_long target = panel_local + 1u; target < width; ++target) {
-      const double update = ujk * dense_row[target];
-      if (target < available_end) {
-        workspace[target - panel_offset] -= update;
-      } else {
-        x[local_start + target] -= update;
-      }
-    }
-    const UF_long row = row_base + local;
-    const UF_long begin = solver->refactor_u_supernode_l_row_ptr[row];
-    const UF_long end = solver->refactor_u_supernode_l_row_ptr[row + 1u];
-    for (UF_long p = begin; p < end; ++p) {
-      {
-        x[trailing_cols[p]] -= ujk * trailing_values[p];
-      }
-    }
-  }
-
-  kls_egraph_record_u_supernode_l_update(
-    shared, run_rows, trsv_entries + dense_entries + trailing_entries);
-  kls_egraph_mark_u_supernode_l_panel_used(solver, panel);
-  *up_io = up + run_rows;
-  return 1;
-}
-
 static int kls_egraph_refactor_dependency_done_now(
   const kls_egraph_refactor_shared *shared,
   UF_long col);
@@ -1848,13 +1326,6 @@ static int kls_egraph_refactor_try_cached_supernode_dependency_run(
           trailing_workspace[offset] += ujk * row_values[offset];
         }
       }
-    }
-  }
-  if (shared->u_supernode_values) {
-    for (UF_long local = 0; local < run_rows; ++local) {
-      kls_egraph_record_u_supernode_value(
-        shared, start + panel_offset + local, current_global,
-        workspace[local]);
     }
   }
 
@@ -2137,12 +1608,6 @@ static int kls_egraph_refactor_try_supernode_dependency_run(
       return -1;
     }
     trailing_entries += run_rows * trailing_len;
-  }
-  if (shared->u_supernode_values) {
-    for (UF_long local = 0; local < run_rows; ++local) {
-      kls_egraph_record_u_supernode_value(
-        shared, dep_global + local, current_global, workspace[local]);
-    }
   }
 
   const UF_long trsv_entries = (run_rows * (run_rows - 1u)) / 2u;
@@ -3213,7 +2678,6 @@ static int kls_egraph_btf_prefactor_dep_safe(
 static void kls_egraph_refactor_apply_btf_scalar_dep(
   kls_egraph_refactor_shared *shared,
   UF_long k1,
-  UF_long current_global,
   UF_long dep_local,
   UF_long dep_pos,
   double *ux,
@@ -3221,16 +2685,11 @@ static void kls_egraph_refactor_apply_btf_scalar_dep(
   int32_t **l_indices32,
   double **l_values,
   const UF_long *llen,
-  double *x,
-  int record_u_value) {
+  double *x) {
   const UF_long dep_global = k1 + dep_local;
   const double ujk = x[dep_local];
   x[dep_local] = 0.0;
   ux[dep_pos] = ujk;
-  if (record_u_value) {
-    kls_egraph_record_u_supernode_value(shared, dep_global, current_global,
-                                        ujk);
-  }
 
   if (ujk != 0.0) {
     UF_long *li = l_indices[dep_global];
@@ -3290,7 +2749,6 @@ static UF_long kls_egraph_btf_scalar_producer_run_len(
 static int kls_egraph_refactor_try_btf_scalar_producer_run(
   kls_egraph_refactor_worker *worker,
   UF_long k1,
-  UF_long current_global,
   UF_long local_k,
   UF_long *up,
   UF_long ucol_len,
@@ -3303,8 +2761,7 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
   const UF_long *llen,
   double *x,
   const unsigned char *applied,
-  int wait_for_dependencies,
-  int record_u_value) {
+  int wait_for_dependencies) {
   if (worker == NULL || worker->shared == NULL || up == NULL ||
       !worker->shared->btf_scalar_run_exec || *up >= ucol_len ||
       (ui == NULL && ui32 == NULL) || ux == NULL || l_indices == NULL ||
@@ -3384,10 +2841,7 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
     const UF_long dep_global = k1 + dep;
     const double ujk = workspace[local];
     ux[start_pos + local] = ujk;
-    if (record_u_value) {
-      kls_egraph_record_u_supernode_value(shared, dep_global, current_global,
-                                          ujk);
-    }
+
     if (ujk == 0.0) {
       continue;
     }
@@ -3428,198 +2882,14 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
     }
   }
 
-  if (shared->btf_scalar_run_stats) {
-    kls_egraph_record_btf_scalar_run(shared, rows, entries);
-  }
   kls_egraph_record_btf_scalar_run_exec(shared, rows, entries);
   *up = start_pos + rows;
-  return 1;
-}
-
-static int kls_egraph_refactor_prefactor_u_supernode_ragged_l_run(
-  kls_egraph_refactor_worker *worker,
-  UF_long k1,
-  UF_long current_global,
-  UF_long local_k,
-  UF_long scan,
-  UF_long ucol_len,
-  const UF_long *ui,
-  const int32_t *ui32,
-  double *ux,
-  const UF_long *llen,
-  double *x,
-  const unsigned char *applied,
-  int record_u_value,
-  UF_long *run_rows_out) {
-  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0u);
-  if (worker == NULL || worker->shared == NULL ||
-      worker->shared->solver == NULL || ui == NULL || ux == NULL ||
-      x == NULL || applied == NULL || run_rows_out == NULL ||
-      scan >= ucol_len) {
-    return 0;
-  }
-  kls_egraph_refactor_shared *shared = worker->shared;
-  kls_solver *solver = shared->solver;
-  if ((!shared->u_supernode_ragged_l_updates) ||
-      solver->refactor_u_supernode_col_id == NULL ||
-      solver->refactor_u_supernode_start == NULL ||
-      solver->refactor_u_supernode_local_start == NULL ||
-      solver->refactor_u_supernode_width == NULL ||
-      solver->refactor_u_supernode_dense_begin == NULL ||
-      solver->refactor_u_supernode_l_valid == NULL ||
-      solver->refactor_u_supernode_l_row_begin == NULL ||
-      solver->refactor_u_supernode_l_row_ptr == NULL ||
-      solver->refactor_u_supernode_l_cols == NULL ||
-      solver->refactor_u_supernode_l_dense_values == NULL) {
-    return 0;
-  }
-
-  const UF_long dep0_local = ui32 != NULL ? (UF_long)ui32[scan] : ui[scan];
-  if (dep0_local >= local_k || dep0_local > UF_long_max - k1) {
-    return 0;
-  }
-  const UF_long dep0_global = k1 + dep0_local;
-  if (dep0_global >= current_global || dep0_global >= solver->n) {
-    return 0;
-  }
-  const UF_long panel = solver->refactor_u_supernode_col_id[dep0_global];
-  if (panel == KLS_KLU_EMPTY ||
-      panel >= solver->refactor_u_supernode_pattern_count ||
-      !solver->refactor_u_supernode_l_valid[panel]) {
-    return 0;
-  }
-  const UF_long start = solver->refactor_u_supernode_start[panel];
-  const UF_long local_start =
-    solver->refactor_u_supernode_local_start[panel];
-  const UF_long width = solver->refactor_u_supernode_width[panel];
-  if (width <= 1u || start > dep0_global ||
-      dep0_global >= start + width ||
-      start > solver->n || width > solver->n - start ||
-      local_start > dep0_local ||
-      dep0_local - local_start != dep0_global - start) {
-    return 0;
-  }
-  const UF_long panel_offset = dep0_global - start;
-  UF_long available_end = width;
-  if (start + available_end > current_global) {
-    available_end = current_global - start;
-  }
-  if (available_end > width || available_end <= panel_offset + 1u) {
-    return 0;
-  }
-
-  UF_long run_rows = 0u;
-  while (panel_offset + run_rows < available_end &&
-         scan + run_rows < ucol_len) {
-    const UF_long pos = scan + run_rows;
-    if (applied[pos]) {
-      break;
-    }
-    const UF_long dep_local = ui32 != NULL ? (UF_long)ui32[pos] : ui[pos];
-    if (dep_local != dep0_local + run_rows ||
-        dep_local >= local_k || dep_local > UF_long_max - k1) {
-      break;
-    }
-    const int safe =
-      kls_egraph_btf_prefactor_dep_safe_with_run(
-        solver, shared, k1, scan, pos, applied, ui, ui32, llen, local_k,
-        dep_local);
-    if (safe < 0) {
-      return -1;
-    }
-    if (safe == 0) {
-      break;
-    }
-    run_rows++;
-  }
-  if (run_rows < 2u) {
-    return 0;
-  }
-  const UF_long run_end = panel_offset + run_rows;
-  const UF_long row_base =
-    solver->refactor_u_supernode_l_row_begin[panel] + panel_offset;
-  if (row_base + run_rows > solver->refactor_u_supernode_pattern_rows) {
-    return -1;
-  }
-  UF_long trailing_entries = 0u;
-  for (UF_long local = 0u; local < run_rows; ++local) {
-    const UF_long begin =
-      solver->refactor_u_supernode_l_row_ptr[row_base + local];
-    const UF_long end =
-      solver->refactor_u_supernode_l_row_ptr[row_base + local + 1u];
-    if (end < begin || end > solver->refactor_u_supernode_l_trailing_entries ||
-        end - begin > UF_long_max - trailing_entries) {
-      return -1;
-    }
-    trailing_entries += end - begin;
-  }
-  const UF_long dense_scatter_cols = width - run_end;
-  if (!kls_egraph_ragged_u_supernode_update_allows(
-        run_rows, dense_scatter_cols, trailing_entries)) {
-    return 0;
-  }
-  const UF_long *trailing_cols = solver->refactor_u_supernode_l_cols;
-  const double *trailing_values = solver->refactor_u_supernode_l_values;
-  if (trailing_entries > 0u &&
-      (trailing_cols == NULL || trailing_values == NULL)) {
-    return -1;
-  }
-  if (run_rows > (UF_long)(SIZE_MAX / sizeof(double))) {
-    return 0;
-  }
-  double *workspace =
-    kls_egraph_worker_supernode_workspace(worker, run_rows);
-  if (workspace == NULL) {
-    return 0;
-  }
-  for (UF_long local = 0u; local < run_rows; ++local) {
-    const UF_long row = dep0_local + local;
-    workspace[local] = x[row];
-    x[row] = 0.0;
-  }
-
-  const double *dense_panel =
-    solver->refactor_u_supernode_l_dense_values +
-    solver->refactor_u_supernode_dense_begin[panel];
-
-  for (UF_long local = 0u; local < run_rows; ++local) {
-    const UF_long panel_local = panel_offset + local;
-    const double ujk = workspace[local];
-    ux[scan + local] = ujk;
-    if (record_u_value) {
-      kls_egraph_record_u_supernode_value(
-        shared, start + panel_local, current_global, ujk);
-    }
-    const double *dense_row = dense_panel + panel_local * width;
-    for (UF_long target = panel_local + 1u; target < width; ++target) {
-      const double update = ujk * dense_row[target];
-      if (target < run_end) {
-        workspace[target - panel_offset] -= update;
-      } else {
-        x[local_start + target] -= update;
-      }
-    }
-    const UF_long row = row_base + local;
-    const UF_long begin = solver->refactor_u_supernode_l_row_ptr[row];
-    const UF_long end = solver->refactor_u_supernode_l_row_ptr[row + 1u];
-    for (UF_long p = begin; p < end; ++p) {
-      x[trailing_cols[p]] -= ujk * trailing_values[p];
-    }
-  }
-
-  const UF_long trsv_entries = (run_rows * (run_rows - 1u)) / 2u;
-  const UF_long dense_entries = run_rows * dense_scatter_cols;
-  kls_egraph_record_u_supernode_l_update(
-    shared, run_rows, trsv_entries + dense_entries + trailing_entries);
-  kls_egraph_mark_u_supernode_l_panel_used(solver, panel);
-  *run_rows_out = run_rows;
   return 1;
 }
 
 static int kls_egraph_refactor_prefactor_finished_btf_deps(
   kls_egraph_refactor_worker *worker,
   UF_long k1,
-  UF_long current_global,
   UF_long local_k,
   UF_long blocked_pos,
   UF_long ucol_len,
@@ -3631,7 +2901,6 @@ static int kls_egraph_refactor_prefactor_finished_btf_deps(
   const UF_long *llen,
   double *x,
   unsigned char *applied,
-  int record_u_value,
   UF_long *prefactor_deps_out) {
   if (worker == NULL || worker->shared == NULL ||
       worker->shared->solver == NULL || applied == NULL ||
@@ -3653,25 +2922,7 @@ static int kls_egraph_refactor_prefactor_finished_btf_deps(
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
-    UF_long run_rows = 0u;
-    const int run_status =
-      kls_egraph_refactor_prefactor_u_supernode_ragged_l_run(
-        worker, k1, current_global, local_k, scan, ucol_len, ui, ui32, ux,
-        llen, x, applied, record_u_value, &run_rows);
-    if (run_status < 0) {
-      kls_egraph_refactor_record_invalid(shared);
-      return 0;
-    }
-    if (run_status > 0) {
-      if (run_rows == 0u || run_rows > ucol_len - scan) {
-        kls_egraph_refactor_record_invalid(shared);
-        return 0;
-      }
-      memset(applied + scan, 1, (size_t)run_rows);
-      *prefactor_deps_out += run_rows;
-      scan += run_rows - 1u;
-      continue;
-    }
+
     const int safe =
       kls_egraph_btf_prefactor_dep_safe(
         solver, shared, k1, scan, applied, ui, ui32, llen, local_k,
@@ -3684,8 +2935,8 @@ static int kls_egraph_refactor_prefactor_finished_btf_deps(
       continue;
     }
     kls_egraph_refactor_apply_btf_scalar_dep(
-      shared, k1, current_global, dep_local, scan, ux, l_indices,
-      solver->refactor_l_indices32, l_values, llen, x, record_u_value);
+      shared, k1, dep_local, scan, ux, l_indices,
+      solver->refactor_l_indices32, l_values, llen, x);
     applied[scan] = 1u;
     (*prefactor_deps_out)++;
   }
@@ -3728,17 +2979,13 @@ static int kls_egraph_refactor_single_unscaled_column(
   UF_long up = 0;
   const int supernode_numeric_updates = shared->supernode_numeric_updates;
 
-  const int u_supernode_ragged_l_updates =
-    shared->u_supernode_ragged_l_updates;
-  const int u_supernode_values = shared->u_supernode_values;
   UF_long algorithm5_prefactor_deps = 0u;
   const int algorithm5_prefactor_enabled =
     wait_for_dependencies && shared->algorithm5_prefactor_updates &&
     ucol_len > 1u;
 
   const int snode_batches_allowed =
-    !kls_batch_consume_disabled() && shared->snode_run_end != NULL &&
-    !u_supernode_values;
+    (!kls_batch_consume_disabled() && shared->snode_run_end != NULL);
   unsigned char *algorithm5_prefactor_applied = NULL;
 
   while (up < ucol_len) {
@@ -3768,23 +3015,6 @@ static int kls_egraph_refactor_single_unscaled_column(
       }
     }
 
-    if (batch_paths_allowed && u_supernode_ragged_l_updates) {
-      const UF_long run_begin = up;
-      const int ragged_status =
-        kls_egraph_refactor_try_u_supernode_ragged_l_run(
-          worker, 0u, k, k, &up, ucol_len, ui, ux, x,
-          wait_for_dependencies);
-      if (ragged_status < 0) {
-        return 0;
-      }
-      if (ragged_status > 0) {
-        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
-          memset(algorithm5_prefactor_applied + run_begin, 1,
-                 (size_t)(up - run_begin));
-        }
-        continue;
-      }
-    }
     if (snode_batches_allowed) {
       const UF_long consumed = shared->use_fp32_l_values
         ? kls_snode_batch_consume_cached_f32(
@@ -3845,9 +3075,9 @@ static int kls_egraph_refactor_single_unscaled_column(
       }
       if (algorithm5_prefactor_applied != NULL &&
           !kls_egraph_refactor_prefactor_finished_btf_deps(
-            worker, 0u, k, k, up, ucol_len, ui, ui32, ux, l_indices,
-            l_values, numeric->Llen, x, algorithm5_prefactor_applied,
-            u_supernode_values, &algorithm5_prefactor_deps)) {
+            worker, 0u, k, up, ucol_len, ui, ui32, ux, l_indices, l_values,
+            numeric->Llen, x, algorithm5_prefactor_applied,
+            &algorithm5_prefactor_deps)) {
         return 0;
       }
     }
@@ -3858,9 +3088,6 @@ static int kls_egraph_refactor_single_unscaled_column(
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    if (u_supernode_values) {
-      kls_egraph_record_u_supernode_value(shared, j, k, ujk);
-    }
 
     if (ujk != 0.0) {
       UF_long *li = l_indices[j];
@@ -3901,9 +3128,6 @@ static int kls_egraph_refactor_single_unscaled_column(
     }
   }
   kls_egraph_store_udiag(shared, udiag, k, ukk);
-  if (u_supernode_values) {
-    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
-  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
@@ -3928,7 +3152,6 @@ static int kls_egraph_refactor_single_unscaled_column(
   }
   kls_egraph_store_l_column_from_workspace(solver, x, k, li, lx, lcol_len,
                                            ukk);
-  kls_egraph_publish_u_supernode_l_column(shared, k);
 
   if (supernode_numeric_updates) {
     kls_egraph_publish_supernode_panel_column(shared, k);
@@ -4160,7 +3383,6 @@ static int kls_egraph_refactor_single_unscaled_column_pair(
       kls_egraph_store_l_column_from_workspace(solver, xa, ka,
                                                l_indices[ka], l_values[ka],
                                                numeric->Llen[ka], ukka);
-      kls_egraph_publish_u_supernode_l_column(shared, ka);
 
       kls_egraph_refactor_mark_done(shared, ka);
       a_done = 1;
@@ -4179,7 +3401,6 @@ static int kls_egraph_refactor_single_unscaled_column_pair(
       kls_egraph_store_l_column_from_workspace(solver, xb, kb,
                                                l_indices[kb], l_values[kb],
                                                numeric->Llen[kb], ukkb);
-      kls_egraph_publish_u_supernode_l_column(shared, kb);
 
       kls_egraph_refactor_mark_done(shared, kb);
       b_done = 1;
@@ -4398,7 +3619,6 @@ static int kls_egraph_refactor_single_unscaled_column_multi(
                                                  l_indices[k],
                                                  l_values[k],
                                                  numeric->Llen[k], ukk);
-        kls_egraph_publish_u_supernode_l_column(shared, k);
 
         kls_egraph_refactor_mark_done(shared, k);
         done[c] = 1;
@@ -4452,17 +3672,13 @@ static int kls_egraph_refactor_single_scaled_column(
   UF_long up = 0;
   const int supernode_numeric_updates = shared->supernode_numeric_updates;
 
-  const int u_supernode_ragged_l_updates =
-    shared->u_supernode_ragged_l_updates;
-  const int u_supernode_values = shared->u_supernode_values;
   UF_long algorithm5_prefactor_deps = 0u;
   const int algorithm5_prefactor_enabled =
     wait_for_dependencies && shared->algorithm5_prefactor_updates &&
     ucol_len > 1u;
 
   const int snode_batches_allowed =
-    !kls_batch_consume_disabled() && shared->snode_run_end != NULL &&
-    !u_supernode_values;
+    (!kls_batch_consume_disabled() && shared->snode_run_end != NULL);
   unsigned char *algorithm5_prefactor_applied = NULL;
 
   while (up < ucol_len) {
@@ -4492,23 +3708,6 @@ static int kls_egraph_refactor_single_scaled_column(
       }
     }
 
-    if (batch_paths_allowed && u_supernode_ragged_l_updates) {
-      const UF_long run_begin = up;
-      const int ragged_status =
-        kls_egraph_refactor_try_u_supernode_ragged_l_run(
-          worker, 0u, k, k, &up, ucol_len, ui, ux, x,
-          wait_for_dependencies);
-      if (ragged_status < 0) {
-        return 0;
-      }
-      if (ragged_status > 0) {
-        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
-          memset(algorithm5_prefactor_applied + run_begin, 1,
-                 (size_t)(up - run_begin));
-        }
-        continue;
-      }
-    }
     if (snode_batches_allowed) {
       const UF_long consumed = shared->use_fp32_l_values
         ? kls_snode_batch_consume_cached_f32(
@@ -4569,9 +3768,9 @@ static int kls_egraph_refactor_single_scaled_column(
       }
       if (algorithm5_prefactor_applied != NULL &&
           !kls_egraph_refactor_prefactor_finished_btf_deps(
-            worker, 0u, k, k, up, ucol_len, ui, ui32, ux, l_indices,
-            l_values, numeric->Llen, x, algorithm5_prefactor_applied,
-            u_supernode_values, &algorithm5_prefactor_deps)) {
+            worker, 0u, k, up, ucol_len, ui, ui32, ux, l_indices, l_values,
+            numeric->Llen, x, algorithm5_prefactor_applied,
+            &algorithm5_prefactor_deps)) {
         return 0;
       }
     }
@@ -4582,9 +3781,6 @@ static int kls_egraph_refactor_single_scaled_column(
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    if (u_supernode_values) {
-      kls_egraph_record_u_supernode_value(shared, j, k, ujk);
-    }
 
     if (ujk != 0.0) {
       UF_long *li = l_indices[j];
@@ -4615,9 +3811,6 @@ static int kls_egraph_refactor_single_scaled_column(
     }
   }
   udiag[k] = ukk;
-  if (u_supernode_values) {
-    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
-  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
@@ -4642,7 +3835,6 @@ static int kls_egraph_refactor_single_scaled_column(
   }
   kls_egraph_store_l_column_from_workspace(solver, x, k, li, lx, lcol_len,
                                            ukk);
-  kls_egraph_publish_u_supernode_l_column(shared, k);
 
   if (supernode_numeric_updates) {
     kls_egraph_publish_supernode_panel_column(shared, k);
@@ -4660,12 +3852,9 @@ static int kls_egraph_refactor_single_scaled_column(
    same scalar arithmetic/storage order as the general no-wait path. */
 static int kls_egraph_btf_plain_cluster_allowed(
   const kls_egraph_refactor_shared *shared) {
-  return (((shared != NULL && !shared->check_pivots &&
-         !shared->supernode_numeric_updates) &&
-         !shared->u_supernode_ragged_l_updates &&
-         !shared->u_supernode_values &&
-         !shared->algorithm5_prefactor_updates) &&
-         !shared->btf_scalar_run_stats &&
+  return ((((((shared != NULL && !shared->check_pivots &&
+         !shared->supernode_numeric_updates))) &&
+         !shared->algorithm5_prefactor_updates)) &&
          !shared->btf_scalar_run_exec) &&
          !shared->use_fp32_l_values;
 }
@@ -4861,12 +4050,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
   UF_long ucol_len = numeric->Ulen[k];
   const int supernode_numeric_updates = shared->supernode_numeric_updates;
 
-  const int u_supernode_ragged_l_updates =
-    shared->u_supernode_ragged_l_updates;
-  const int u_supernode_values = shared->u_supernode_values;
   const int plain_scalar_updates =
-    (!supernode_numeric_updates) &&
-    !u_supernode_ragged_l_updates && !u_supernode_values;
+    (((!supernode_numeric_updates)));
   const int snode_batches_allowed =
     !kls_batch_consume_disabled() && shared->snode_run_end != NULL;
   const UF_long *llen = numeric->Llen + k1;
@@ -4899,10 +4084,6 @@ static int kls_egraph_refactor_btf_unscaled_column(
     ucol_len > 1u;
 
   unsigned char *algorithm5_prefactor_applied = NULL;
-  kls_btf_scalar_run_tracker scalar_run_tracker;
-  memset(&scalar_run_tracker, 0, sizeof(scalar_run_tracker));
-  scalar_run_tracker.enabled =
-    shared->btf_scalar_run_stats && plain_scalar_updates;
 
   /* Cluster columns already have their predecessors published; keep that
      CKTSO-style cluster loop free of the per-entry wait check used below. */
@@ -4975,8 +4156,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
           }
           if (algorithm5_prefactor_applied != NULL &&
               !kls_egraph_refactor_prefactor_finished_btf_deps(
-                worker, k1, k, local_k, up, ucol_len, ui, ui32, ux,
-                l_indices, l_values, llen, x, algorithm5_prefactor_applied, 0,
+                worker, k1, local_k, up, ucol_len, ui, ui32, ux, l_indices,
+                l_values, llen, x, algorithm5_prefactor_applied,
                 &algorithm5_prefactor_deps)) {
             return 0;
           }
@@ -4984,9 +4165,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
         const UF_long run_begin = up;
         const int run_status =
           kls_egraph_refactor_try_btf_scalar_producer_run(
-            worker, k1, k, local_k, &up, ucol_len, ui, ui32, ux, l_indices,
-            l_indices32, l_values, llen, x, algorithm5_prefactor_applied, 1,
-            0);
+            worker, k1, local_k, &up, ucol_len, ui, ui32, ux, l_indices,
+            l_indices32, l_values, llen, x, algorithm5_prefactor_applied, 1);
         if (run_status < 0) {
           return 0;
         }
@@ -5003,11 +4183,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
           return 0;
         }
 
-        kls_btf_scalar_run_tracker_note(
-          shared, &scalar_run_tracker, up, j, llen[j]);
         kls_egraph_refactor_apply_btf_scalar_dep(
-          shared, k1, k, j, up, ux, l_indices, l_indices32, l_values,
-          llen, x, 0);
+          shared, k1, j, up, ux, l_indices, l_indices32, l_values, llen, x);
         if (algorithm5_prefactor_applied != NULL) {
           algorithm5_prefactor_applied[up] = 1u;
         }
@@ -5032,8 +4209,8 @@ static int kls_egraph_refactor_btf_unscaled_column(
         }
         const int run_status =
           kls_egraph_refactor_try_btf_scalar_producer_run(
-            worker, k1, k, local_k, &up, ucol_len, ui, ui32, ux, l_indices,
-            l_indices32, l_values, llen, x, NULL, 0, 0);
+            worker, k1, local_k, &up, ucol_len, ui, ui32, ux, l_indices,
+            l_indices32, l_values, llen, x, NULL, 0);
         if (run_status < 0) {
           return 0;
         }
@@ -5041,11 +4218,9 @@ static int kls_egraph_refactor_btf_unscaled_column(
           continue;
         }
         const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-        kls_btf_scalar_run_tracker_note(
-          shared, &scalar_run_tracker, up, j, llen[j]);
+
         kls_egraph_refactor_apply_btf_scalar_dep(
-          shared, k1, k, j, up, ux, l_indices, l_indices32, l_values,
-          llen, x, 0);
+          shared, k1, j, up, ux, l_indices, l_indices32, l_values, llen, x);
         up++;
       }
     }
@@ -5077,22 +4252,6 @@ static int kls_egraph_refactor_btf_unscaled_column(
         }
       }
 
-      if (batch_paths_allowed && u_supernode_ragged_l_updates) {
-        const UF_long run_begin = up;
-        const int ragged_status =
-          kls_egraph_refactor_try_u_supernode_ragged_l_run(
-            worker, k1, k, local_k, &up, ucol_len, ui, ux, x, 1);
-        if (ragged_status < 0) {
-          return 0;
-        }
-        if (ragged_status > 0) {
-          if (algorithm5_prefactor_applied != NULL && up > run_begin) {
-            memset(algorithm5_prefactor_applied + run_begin, 1,
-                   (size_t)(up - run_begin));
-          }
-          continue;
-        }
-      }
       const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
       if (algorithm5_prefactor_enabled &&
           !kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
@@ -5108,9 +4267,9 @@ static int kls_egraph_refactor_btf_unscaled_column(
         }
         if (algorithm5_prefactor_applied != NULL &&
             !kls_egraph_refactor_prefactor_finished_btf_deps(
-              worker, k1, k, local_k, up, ucol_len, ui, ui32, ux,
-              l_indices, l_values, llen, x, algorithm5_prefactor_applied,
-              u_supernode_values, &algorithm5_prefactor_deps)) {
+              worker, k1, local_k, up, ucol_len, ui, ui32, ux, l_indices,
+              l_values, llen, x, algorithm5_prefactor_applied,
+              &algorithm5_prefactor_deps)) {
           return 0;
         }
       }
@@ -5118,8 +4277,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
         return 0;
       }
       kls_egraph_refactor_apply_btf_scalar_dep(
-        shared, k1, k, j, up, ux, l_indices, l_indices32, l_values,
-        llen, x, u_supernode_values);
+        shared, k1, j, up, ux, l_indices, l_indices32, l_values, llen, x);
       if (algorithm5_prefactor_applied != NULL) {
         algorithm5_prefactor_applied[up] = 1u;
       }
@@ -5140,24 +4298,10 @@ static int kls_egraph_refactor_btf_unscaled_column(
         }
       }
 
-      if (u_supernode_ragged_l_updates) {
-        const int ragged_status =
-          kls_egraph_refactor_try_u_supernode_ragged_l_run(
-            worker, k1, k, local_k, &up, ucol_len, ui, ux, x, 0);
-        if (ragged_status < 0) {
-          return 0;
-        }
-        if (ragged_status > 0) {
-          continue;
-        }
-      }
       const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
-      if (u_supernode_values) {
-        kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
-      }
 
       if (ujk != 0.0) {
         UF_long *li = l_indices[k1 + j];
@@ -5180,7 +4324,6 @@ static int kls_egraph_refactor_btf_unscaled_column(
       up++;
     }
   }
-  kls_btf_scalar_run_tracker_flush(shared, &scalar_run_tracker);
 
   if (algorithm5_prefactor_deps > 0u) {
     atomic_fetch_add_explicit(&shared->algorithm5_prefactor_columns, 1ul,
@@ -5199,9 +4342,6 @@ static int kls_egraph_refactor_btf_unscaled_column(
     }
   }
   kls_egraph_store_udiag(shared, udiag, k, ukk);
-  if (u_supernode_values) {
-    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
-  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
@@ -5226,9 +4366,6 @@ static int kls_egraph_refactor_btf_unscaled_column(
   }
   kls_egraph_store_l_column_from_workspace(solver, x, k, li, lx, lcol_len,
                                            ukk);
-  if (u_supernode_ragged_l_updates) {
-    kls_egraph_publish_u_supernode_l_column(shared, k);
-  }
 
   if (supernode_numeric_updates) {
     kls_egraph_publish_supernode_panel_column(shared, k);
@@ -5403,8 +4540,8 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
         const UF_long ja = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
         if (kls_egraph_refactor_dependency_done_now(shared, k1 + ja)) {
           kls_egraph_refactor_apply_btf_scalar_dep(
-            shared, k1, ka, ja, upa, uxa, l_indices, l_indices32, l_values,
-            llen, xa, 0);
+            shared, k1, ja, upa, uxa, l_indices, l_indices32, l_values, llen,
+            xa);
           upa++;
           progress = 1;
         }
@@ -5421,8 +4558,8 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
         const UF_long jb = uib32 != NULL ? (UF_long)uib32[upb] : uib[upb];
         if (kls_egraph_refactor_dependency_done_now(shared, k1 + jb)) {
           kls_egraph_refactor_apply_btf_scalar_dep(
-            shared, k1, kb, jb, upb, uxb, l_indices, l_indices32, l_values,
-            llen, xb, 0);
+            shared, k1, jb, upb, uxb, l_indices, l_indices32, l_values, llen,
+            xb);
           upb++;
           progress = 1;
         }
@@ -5665,8 +4802,8 @@ static int kls_egraph_refactor_btf_unscaled_column_multi(
         ? (UF_long)ui32[c][up[c]] : ui[c][up[c]];
       if (kls_egraph_refactor_dependency_done_now(shared, k1 + j)) {
         kls_egraph_refactor_apply_btf_scalar_dep(
-          shared, k1, cols[c], j, up[c], ux[c], l_indices, l_indices32,
-          l_values, llen, xv[c], 0);
+          shared, k1, j, up[c], ux[c], l_indices, l_indices32, l_values,
+          llen, xv[c]);
         up[c]++;
         progress = 1;
       }
@@ -5850,17 +4987,13 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   UF_long up = 0u;
   const int supernode_numeric_updates = shared->supernode_numeric_updates;
 
-  const int u_supernode_ragged_l_updates =
-    shared->u_supernode_ragged_l_updates;
-  const int u_supernode_values = shared->u_supernode_values;
   UF_long algorithm5_prefactor_deps = 0u;
   const int algorithm5_prefactor_enabled =
     wait_for_dependencies && shared->algorithm5_prefactor_updates &&
     ucol_len > 1u;
 
   const int snode_batches_allowed =
-    !kls_batch_consume_disabled() && shared->snode_run_end != NULL &&
-    !u_supernode_values;
+    (!kls_batch_consume_disabled() && shared->snode_run_end != NULL);
   unsigned char *algorithm5_prefactor_applied = NULL;
 
   while (up < ucol_len) {
@@ -5890,23 +5023,6 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
       }
     }
 
-    if (batch_paths_allowed && u_supernode_ragged_l_updates) {
-      const UF_long run_begin = up;
-      const int ragged_status =
-        kls_egraph_refactor_try_u_supernode_ragged_l_run(
-          worker, k1, k, local_k, &up, ucol_len, ui, ux, x,
-          wait_for_dependencies);
-      if (ragged_status < 0) {
-        return 0;
-      }
-      if (ragged_status > 0) {
-        if (algorithm5_prefactor_applied != NULL && up > run_begin) {
-          memset(algorithm5_prefactor_applied + run_begin, 1,
-                 (size_t)(up - run_begin));
-        }
-        continue;
-      }
-    }
     if (snode_batches_allowed) {
       const UF_long consumed = shared->use_fp32_l_values
         ? kls_snode_batch_consume_cached_f32(
@@ -5945,9 +5061,9 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
       }
       if (algorithm5_prefactor_applied != NULL &&
           !kls_egraph_refactor_prefactor_finished_btf_deps(
-            worker, k1, k, local_k, up, ucol_len, ui, ui32, ux, l_indices,
+            worker, k1, local_k, up, ucol_len, ui, ui32, ux, l_indices,
             l_values, llen, x, algorithm5_prefactor_applied,
-            u_supernode_values, &algorithm5_prefactor_deps)) {
+            &algorithm5_prefactor_deps)) {
         return 0;
       }
     }
@@ -5958,9 +5074,6 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     const double ujk = x[j];
     x[j] = 0.0;
     ux[up] = ujk;
-    if (u_supernode_values) {
-      kls_egraph_record_u_supernode_value(shared, k1 + j, k, ujk);
-    }
 
     if (ujk != 0.0) {
       UF_long *li = l_indices[k1 + j];
@@ -5992,9 +5105,6 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
     }
   }
   udiag[k] = ukk;
-  if (u_supernode_values) {
-    kls_egraph_record_u_supernode_value(shared, k, k, ukk);
-  }
 
   UF_long *li = l_indices[k];
   double *lx = l_values[k];
@@ -6019,7 +5129,6 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   }
   kls_egraph_store_l_column_from_workspace(solver, x, k, li, lx, lcol_len,
                                            ukk);
-  kls_egraph_publish_u_supernode_l_column(shared, k);
 
   if (supernode_numeric_updates) {
     kls_egraph_publish_supernode_panel_column(shared, k);
@@ -6726,15 +5835,13 @@ static int kls_egraph_refactor_try_pop_ready_column(
 static int kls_egraph_pair_dispatch_allowed(
   const kls_egraph_refactor_shared *shared) {
   /* Adopted by the per-matrix timed probe or armed for the probe refactor. */
-  return ((shared->solver != NULL &&
+  return ((((shared->solver != NULL &&
          (shared->solver->eg_pair_choice > 0 ||
           shared->solver->eg_pair_pending) &&
          (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
           kls_egraph_kernel_is_btf_unscaled(shared->kernel)) &&
          !shared->check_pivots &&
-         !shared->supernode_numeric_updates) &&
-         !shared->u_supernode_ragged_l_updates &&
-         !shared->u_supernode_values &&
+         !shared->supernode_numeric_updates))) &&
          !shared->algorithm5_prefactor_updates) &&
          !shared->use_fp32_l_values &&
          shared->solver != NULL &&
@@ -8905,25 +8012,11 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.supernode_cached_probe_work_reject_rows, 0ul);
   atomic_init(&pool->shared.supernode_cached_probe_workspace_rejects, 0ul);
   atomic_init(&pool->shared.supernode_cached_probe_workspace_reject_rows, 0ul);
-  atomic_init(&pool->shared.btf_scalar_run_candidates, 0ul);
-  atomic_init(&pool->shared.btf_scalar_run_rows, 0ul);
-  atomic_init(&pool->shared.btf_scalar_run_entries, 0ul);
-  atomic_init(&pool->shared.btf_scalar_run_max_rows, 0ul);
+
   atomic_init(&pool->shared.btf_scalar_run_exec_runs, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_exec_rows, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_exec_entries, 0ul);
   atomic_init(&pool->shared.btf_scalar_run_exec_max_rows, 0ul);
-
-  atomic_init(&pool->shared.u_supernode_value_dense_writes, 0ul);
-  atomic_init(&pool->shared.u_supernode_value_right_writes, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_update_runs, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_update_rows, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_update_entries, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_probe_attempts, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_panel_misses, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_short_rejects, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_stream_rejects, 0ul);
-  atomic_init(&pool->shared.u_supernode_l_work_rejects, 0ul);
 
   atomic_init(&pool->shared.pipeline_ready_head, 0ul);
   atomic_init(&pool->shared.pipeline_ready_tail, 0ul);
@@ -11215,8 +10308,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const int supernode_numeric_update_mode =
     kls_egraph_supernode_numeric_updates_env_mode();
 
-  const int btf_scalar_run_stats_requested =
-    kls_refactor_btf_scalar_run_stats_env_enabled();
   const int btf_scalar_run_exec_requested =
     kls_refactor_btf_scalar_run_exec_enabled(solver);
 
@@ -11254,30 +10345,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     }
   } else if (supernode_numeric_update_mode == 0) {
     free_refactor_supernode_panel_cache(solver);
-  }
-  const int u_supernode_values =
-    kls_refactor_u_supernode_values_env_enabled();
-  if (u_supernode_values &&
-      (!solver->refactor_u_supernode_pattern_built ||
-       !kls_prepare_refactor_u_supernode_values(solver))) {
-    return -1;
-  }
-  const int u_supernode_ragged_l_requested =
-    (kls_refactor_u_supernode_ragged_l_env_enabled());
-  const int u_supernode_ragged_l_updates =
-    u_supernode_ragged_l_requested &&
-    !solver->refactor_u_supernode_l_exec_disabled;
-  if (u_supernode_ragged_l_updates) {
-    if (!solver->refactor_u_supernode_pattern_built ||
-        !kls_build_refactor_u_supernode_l_cache(solver)) {
-      return -1;
-    }
-  } else if (!u_supernode_ragged_l_requested &&
-             solver->refactor_u_supernode_l_built) {
-    kls_free_refactor_u_supernode_l_cache(solver);
-  }
-  if (u_supernode_ragged_l_updates) {
-    kls_egraph_reset_u_supernode_l_used(solver);
   }
 
   trilinos_klu_l_common *common = &solver->common;
@@ -11533,10 +10600,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_egraph_subtree_supernode_split_env_enabled() ? 1 : 0;
   shared->supernode_cached_updates_only =
     cached_supernode_updates_only ? 1 : 0;
-  shared->btf_scalar_run_stats =
-    (btf_scalar_run_stats_requested &&
-     kls_egraph_kernel_is_btf_unscaled(shared->kernel))
-      ? 1 : 0;
+
   shared->btf_scalar_run_exec =
     (btf_scalar_run_exec_requested &&
      kls_egraph_kernel_is_btf_unscaled(shared->kernel))
@@ -11547,9 +10611,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      pipeline_done != NULL && pipeline_generation != 0u)
       ? 1 : 0;
 
-  shared->u_supernode_values = u_supernode_values ? 1 : 0;
-  shared->u_supernode_ragged_l_updates =
-    u_supernode_ragged_l_updates ? 1 : 0;
   /* Float-mirrored L values halve the dominant refactorization traffic;
      iterative refinement in the solve recovers the factor accuracy, so the
      mode requires the shapes refinement supports. */
@@ -11585,14 +10646,12 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       getenv("KLS_STRICT_PREDICTED_REFINEMENT") == NULL;
   }
   shared->single_unscaled_plain =
-    ((selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
+    ((((selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
     !shared->check_pivots && !solver->padded_active &&
     shared->snode_run_end != NULL && !kls_batch_consume_disabled() &&
     solver->eg_pair_choice < 0 && !solver->eg_pair_pending &&
     !solver->eg_stream_pending &&
-    !shared->supernode_numeric_updates) &&
-    !shared->u_supernode_ragged_l_updates &&
-    !shared->u_supernode_values && !shared->algorithm5_prefactor_updates) &&
+    !shared->supernode_numeric_updates))) && !shared->algorithm5_prefactor_updates) &&
     !shared->use_fp32_l_values &&
     getenv("KLS_DISABLE_PLAIN_SINGLE_UNSCALED_EGRAPH") == NULL;
   /* All inputs to the plain-BTF capability test are immutable for one
@@ -11614,8 +10673,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
             solver->eg_stream_pending, shared->supernode_numeric_updates,
             0,
             0,
-            shared->u_supernode_ragged_l_updates,
-            shared->u_supernode_values, shared->algorithm5_prefactor_updates,
+            0,
+            0, shared->algorithm5_prefactor_updates,
             0,
             0,
             shared->use_fp32_l_values);
@@ -11693,14 +10752,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_store_explicit(
     &shared->supernode_cached_probe_workspace_reject_rows,
     0ul, memory_order_release);
-  atomic_store_explicit(&shared->btf_scalar_run_candidates, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->btf_scalar_run_rows, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->btf_scalar_run_entries, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->btf_scalar_run_max_rows, 0ul,
-                        memory_order_release);
+
   atomic_store_explicit(&shared->btf_scalar_run_exec_runs, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->btf_scalar_run_exec_rows, 0ul,
@@ -11708,27 +10760,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   atomic_store_explicit(&shared->btf_scalar_run_exec_entries, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->btf_scalar_run_exec_max_rows, 0ul,
-                        memory_order_release);
-
-  atomic_store_explicit(&shared->u_supernode_value_dense_writes, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_value_right_writes, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_update_runs, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_update_rows, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_update_entries, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_probe_attempts, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_panel_misses, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_short_rejects, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_stream_rejects, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->u_supernode_l_work_rejects, 0ul,
                         memory_order_release);
 
   atomic_store_explicit(&shared->algorithm5_prefactor_columns, 0ul,
@@ -11877,7 +10908,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->pipeline_lease_generation = 0u;
   shared->separator_private = 0;
   shared->subtree_supernode_split = 0;
-  shared->btf_scalar_run_stats = 0;
+
   shared->btf_scalar_run_exec = 0;
 
   shared->algorithm5_prefactor_updates = 0;
@@ -11961,18 +10992,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     (UF_long)atomic_load_explicit(
       &shared->supernode_cached_probe_workspace_reject_rows,
       memory_order_acquire);
-  const UF_long btf_scalar_run_candidates =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_candidates,
-                                  memory_order_acquire);
-  const UF_long btf_scalar_run_rows =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_rows,
-                                  memory_order_acquire);
-  const UF_long btf_scalar_run_entries =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_entries,
-                                  memory_order_acquire);
-  const UF_long btf_scalar_run_max_rows =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_max_rows,
-                                  memory_order_acquire);
+
   const UF_long btf_scalar_run_exec_runs =
     (UF_long)atomic_load_explicit(&shared->btf_scalar_run_exec_runs,
                                   memory_order_acquire);
@@ -11984,37 +11004,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
                                   memory_order_acquire);
   const UF_long btf_scalar_run_exec_max_rows =
     (UF_long)atomic_load_explicit(&shared->btf_scalar_run_exec_max_rows,
-                                  memory_order_acquire);
-
-  const UF_long u_supernode_value_dense_writes =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_value_dense_writes,
-                                  memory_order_acquire);
-  const UF_long u_supernode_value_right_writes =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_value_right_writes,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_update_runs =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_update_runs,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_update_rows =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_update_rows,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_update_entries =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_update_entries,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_probe_attempts =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_probe_attempts,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_panel_misses =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_panel_misses,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_short_rejects =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_short_rejects,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_stream_rejects =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_stream_rejects,
-                                  memory_order_acquire);
-  const UF_long u_supernode_l_work_rejects =
-    (UF_long)atomic_load_explicit(&shared->u_supernode_l_work_rejects,
                                   memory_order_acquire);
 
   const UF_long algorithm5_prefactor_columns =
@@ -12113,18 +11102,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     supernode_cached_probe_workspace_rejects;
   solver->refactor_supernode_cached_probe_workspace_reject_rows +=
     supernode_cached_probe_workspace_reject_rows;
-  solver->refactor_last_btf_scalar_run_candidates =
-    btf_scalar_run_candidates;
-  solver->refactor_last_btf_scalar_run_rows = btf_scalar_run_rows;
-  solver->refactor_last_btf_scalar_run_entries = btf_scalar_run_entries;
-  solver->refactor_last_btf_scalar_run_max_rows = btf_scalar_run_max_rows;
-  solver->refactor_btf_scalar_run_candidate_count +=
-    btf_scalar_run_candidates;
-  solver->refactor_btf_scalar_run_rows += btf_scalar_run_rows;
-  solver->refactor_btf_scalar_run_entries += btf_scalar_run_entries;
-  if (btf_scalar_run_max_rows > solver->refactor_btf_scalar_run_max_rows) {
-    solver->refactor_btf_scalar_run_max_rows = btf_scalar_run_max_rows;
-  }
+
   solver->refactor_last_btf_scalar_run_exec_runs =
     btf_scalar_run_exec_runs;
   solver->refactor_last_btf_scalar_run_exec_rows = btf_scalar_run_exec_rows;
@@ -12141,37 +11119,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
       btf_scalar_run_exec_max_rows;
   }
 
-  solver->refactor_last_u_supernode_value_dense_writes =
-    u_supernode_value_dense_writes;
-  solver->refactor_last_u_supernode_value_right_writes =
-    u_supernode_value_right_writes;
-  solver->refactor_u_supernode_value_dense_write_count +=
-    u_supernode_value_dense_writes;
-  solver->refactor_u_supernode_value_right_write_count +=
-    u_supernode_value_right_writes;
-  solver->refactor_last_u_supernode_l_update_runs =
-    u_supernode_l_update_runs;
-  solver->refactor_last_u_supernode_l_update_rows =
-    u_supernode_l_update_rows;
-  solver->refactor_last_u_supernode_l_update_entries =
-    u_supernode_l_update_entries;
-  solver->refactor_last_u_supernode_l_probe_attempts =
-    u_supernode_l_probe_attempts;
-  solver->refactor_last_u_supernode_l_panel_misses =
-    u_supernode_l_panel_misses;
-  solver->refactor_last_u_supernode_l_short_rejects =
-    u_supernode_l_short_rejects;
-  solver->refactor_last_u_supernode_l_stream_rejects =
-    u_supernode_l_stream_rejects;
-  solver->refactor_last_u_supernode_l_work_rejects =
-    u_supernode_l_work_rejects;
-  solver->refactor_u_supernode_l_update_run_count +=
-    u_supernode_l_update_runs;
-  solver->refactor_u_supernode_l_update_rows +=
-    u_supernode_l_update_rows;
-  solver->refactor_u_supernode_l_update_entries +=
-    u_supernode_l_update_entries;
-
   solver->refactor_last_egraph_algorithm5_prefactor_columns =
     algorithm5_prefactor_columns;
   solver->refactor_last_egraph_algorithm5_prefactor_deps =
@@ -12180,19 +11127,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     algorithm5_prefactor_columns;
   solver->refactor_egraph_algorithm5_prefactor_dep_count +=
     algorithm5_prefactor_deps;
-  if (!shared->invalid && !shared->pivot_rejected &&
-      !(shared->singular && common->halt_if_singular) &&
-      u_supernode_ragged_l_updates &&
-      u_supernode_l_probe_attempts > 0u &&
-      u_supernode_l_update_rows < u_supernode_l_probe_attempts / 4u) {
-    solver->refactor_u_supernode_l_exec_disabled = 1;
-    solver->refactor_u_supernode_l_exec_disable_count++;
-  }
-  if (!shared->invalid && !shared->pivot_rejected &&
-      !(shared->singular && common->halt_if_singular) &&
-      u_supernode_ragged_l_updates) {
-    kls_egraph_prune_unused_u_supernode_l_panels(solver);
-  }
 
   if (!shared->invalid && !shared->pivot_rejected &&
       !(shared->singular && common->halt_if_singular) &&

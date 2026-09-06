@@ -18504,34 +18504,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_supernode_candidate_dense_entries;
   solver->stats.refactor_supernode_candidate_trailing_entries =
     solver->refactor_supernode_candidate_trailing_entries;
-  solver->stats.refactor_supernode_consumer_run_count =
-    (int64_t)solver->refactor_supernode_consumer_run_count;
-  solver->stats.refactor_supernode_consumer_run_rows =
-    (int64_t)solver->refactor_supernode_consumer_run_rows;
-  solver->stats.refactor_supernode_consumer_run_max_width =
-    (int64_t)solver->refactor_supernode_consumer_run_max_width;
-  solver->stats.refactor_supernode_consumer_suffix_count =
-    (int64_t)solver->refactor_supernode_consumer_suffix_count;
-  solver->stats.refactor_supernode_consumer_l_entries =
-    solver->refactor_supernode_consumer_l_entries;
-  solver->stats.refactor_supernode_consumer_internal_entries =
-    solver->refactor_supernode_consumer_internal_entries;
-  solver->stats.refactor_supernode_consumer_panel_count =
-    (int64_t)solver->refactor_supernode_consumer_panel_count;
-  solver->stats.refactor_supernode_consumer_reused_panel_count =
-    (int64_t)solver->refactor_supernode_consumer_reused_panel_count;
-  solver->stats.refactor_supernode_consumer_reused_run_count =
-    (int64_t)solver->refactor_supernode_consumer_reused_run_count;
-  solver->stats.refactor_supernode_consumer_reused_run_rows =
-    (int64_t)solver->refactor_supernode_consumer_reused_run_rows;
-  solver->stats.refactor_supernode_consumer_panel_max_runs =
-    (int64_t)solver->refactor_supernode_consumer_panel_max_runs;
-  solver->stats.refactor_supernode_consumer_panel_max_rows =
-    (int64_t)solver->refactor_supernode_consumer_panel_max_rows;
-  solver->stats.refactor_supernode_consumer_reused_l_entries =
-    solver->refactor_supernode_consumer_reused_l_entries;
-  solver->stats.refactor_supernode_consumer_reused_internal_entries =
-    solver->refactor_supernode_consumer_reused_internal_entries;
 
   solver->stats.refactor_last_egraph_algorithm5_prefactor_columns =
     (int64_t)solver->refactor_last_egraph_algorithm5_prefactor_columns;
@@ -18602,68 +18574,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     .refactor_last_supernode_algorithm5_payoff_suffix_advance_finished =
       0;
 
-  solver->stats.refactor_u_supernode_pattern_count =
-    (int64_t)solver->refactor_u_supernode_pattern_count;
-  solver->stats.refactor_u_supernode_pattern_rows =
-    (int64_t)solver->refactor_u_supernode_pattern_rows;
-  solver->stats.refactor_u_supernode_pattern_max_width =
-    (int64_t)solver->refactor_u_supernode_pattern_max_width;
-  solver->stats.refactor_u_supernode_pattern_right_entries =
-    (int64_t)solver->refactor_u_supernode_pattern_right_entries;
-  solver->stats.refactor_u_supernode_pattern_internal_entries =
-    solver->refactor_u_supernode_pattern_internal_entries;
-  solver->stats.refactor_u_supernode_value_dense_entries =
-    (int64_t)solver->refactor_u_supernode_value_dense_entries;
-  solver->stats.refactor_u_supernode_value_right_entries =
-    (int64_t)solver->refactor_u_supernode_value_right_entries;
-  solver->stats.refactor_last_u_supernode_value_dense_writes =
-    (int64_t)solver->refactor_last_u_supernode_value_dense_writes;
-  solver->stats.refactor_last_u_supernode_value_right_writes =
-    (int64_t)solver->refactor_last_u_supernode_value_right_writes;
-  solver->stats.refactor_u_supernode_value_dense_write_count =
-    (int64_t)solver->refactor_u_supernode_value_dense_write_count;
-  solver->stats.refactor_u_supernode_value_right_write_count =
-    (int64_t)solver->refactor_u_supernode_value_right_write_count;
-  solver->stats.refactor_u_supernode_l_panel_count =
-    (int64_t)solver->refactor_u_supernode_l_panel_count;
-  solver->stats.refactor_u_supernode_l_dense_entries =
-    (int64_t)solver->refactor_u_supernode_l_dense_entries;
-  solver->stats.refactor_u_supernode_l_trailing_entries =
-    (int64_t)solver->refactor_u_supernode_l_trailing_entries;
-  solver->stats.refactor_u_supernode_l_prune_count =
-    (int64_t)solver->refactor_u_supernode_l_prune_count;
-  solver->stats.refactor_u_supernode_l_pruned_panels =
-    (int64_t)solver->refactor_u_supernode_l_pruned_panels;
-  solver->stats.refactor_u_supernode_l_pruned_dense_entries =
-    (int64_t)solver->refactor_u_supernode_l_pruned_dense_entries;
-  solver->stats.refactor_u_supernode_l_pruned_trailing_entries =
-    (int64_t)solver->refactor_u_supernode_l_pruned_trailing_entries;
-  solver->stats.refactor_last_u_supernode_l_update_runs =
-    (int64_t)solver->refactor_last_u_supernode_l_update_runs;
-  solver->stats.refactor_last_u_supernode_l_update_rows =
-    (int64_t)solver->refactor_last_u_supernode_l_update_rows;
-  solver->stats.refactor_last_u_supernode_l_update_entries =
-    (int64_t)solver->refactor_last_u_supernode_l_update_entries;
-  solver->stats.refactor_last_u_supernode_l_probe_attempts =
-    (int64_t)solver->refactor_last_u_supernode_l_probe_attempts;
-  solver->stats.refactor_last_u_supernode_l_panel_misses =
-    (int64_t)solver->refactor_last_u_supernode_l_panel_misses;
-  solver->stats.refactor_last_u_supernode_l_short_rejects =
-    (int64_t)solver->refactor_last_u_supernode_l_short_rejects;
-  solver->stats.refactor_last_u_supernode_l_stream_rejects =
-    (int64_t)solver->refactor_last_u_supernode_l_stream_rejects;
-  solver->stats.refactor_last_u_supernode_l_work_rejects =
-    (int64_t)solver->refactor_last_u_supernode_l_work_rejects;
-  solver->stats.refactor_u_supernode_l_exec_disabled =
-    solver->refactor_u_supernode_l_exec_disabled;
-  solver->stats.refactor_u_supernode_l_exec_disable_count =
-    (int64_t)solver->refactor_u_supernode_l_exec_disable_count;
-  solver->stats.refactor_u_supernode_l_update_run_count =
-    (int64_t)solver->refactor_u_supernode_l_update_run_count;
-  solver->stats.refactor_u_supernode_l_update_rows =
-    (int64_t)solver->refactor_u_supernode_l_update_rows;
-  solver->stats.refactor_u_supernode_l_update_entries =
-    (int64_t)solver->refactor_u_supernode_l_update_entries;
   solver->stats.refactor_supernode_panel_count =
     (int64_t)solver->refactor_supernode_panel_count;
   solver->stats.refactor_supernode_panel_used_count =
@@ -18797,22 +18707,7 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_supernode_cached_probe_workspace_rejects;
   solver->stats.refactor_supernode_cached_probe_workspace_reject_rows =
     (int64_t)solver->refactor_supernode_cached_probe_workspace_reject_rows;
-  solver->stats.refactor_last_btf_scalar_run_candidates =
-    (int64_t)solver->refactor_last_btf_scalar_run_candidates;
-  solver->stats.refactor_last_btf_scalar_run_rows =
-    (int64_t)solver->refactor_last_btf_scalar_run_rows;
-  solver->stats.refactor_last_btf_scalar_run_entries =
-    (int64_t)solver->refactor_last_btf_scalar_run_entries;
-  solver->stats.refactor_last_btf_scalar_run_max_rows =
-    (int64_t)solver->refactor_last_btf_scalar_run_max_rows;
-  solver->stats.refactor_btf_scalar_run_candidate_count =
-    (int64_t)solver->refactor_btf_scalar_run_candidate_count;
-  solver->stats.refactor_btf_scalar_run_rows =
-    (int64_t)solver->refactor_btf_scalar_run_rows;
-  solver->stats.refactor_btf_scalar_run_entries =
-    (int64_t)solver->refactor_btf_scalar_run_entries;
-  solver->stats.refactor_btf_scalar_run_max_rows =
-    (int64_t)solver->refactor_btf_scalar_run_max_rows;
+
   solver->stats.refactor_last_btf_scalar_run_exec_runs =
     (int64_t)solver->refactor_last_btf_scalar_run_exec_runs;
   solver->stats.refactor_last_btf_scalar_run_exec_rows =

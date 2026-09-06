@@ -165,25 +165,6 @@ static int kls_egraph_cached_supernode_update_allows(
                    copied_entries;
 }
 
-static int kls_egraph_ragged_u_supernode_update_allows(
-  UF_long run_rows,
-  UF_long dense_scatter_cols,
-  UF_long trailing_entries) {
-  if (run_rows < KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_ROWS) {
-    return 0;
-  }
-  const double work =
-    0.5 * (double)run_rows * (double)(run_rows - 1u) +
-    (double)run_rows * (double)dense_scatter_cols +
-    (double)trailing_entries;
-  const double copied_entries =
-    (double)run_rows + (double)dense_scatter_cols +
-    (double)trailing_entries;
-  return work >= KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_WORK &&
-         work >= KLS_EGRAPH_RAGGED_U_SUPERNODE_MIN_WORK_PER_ENTRY *
-                   copied_entries;
-}
-
 #ifdef KLS_HAVE_CBLAS
 static int kls_cblas_supernode_env_enabled(void) {
   const char *value = getenv("KLS_ENABLE_CBLAS_SUPERNODE");
