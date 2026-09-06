@@ -232,9 +232,6 @@ static void kls_accumulate_scaled_dense_rows8(
 #define KLS_ROW_FIRST_COMPACT_CLAIM_SPAN_TRACE_MAX_ROWS \
   KLS_ROW_FIRST_COMPACT_WINDOW_MAX_SLOTS
 #define KLS_ROW_FIRST_COMPACT_DENSE_UNION_MAX_SPARSE_MULT 2u
-#define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW 4096u
-#define KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW 65536u
-#define KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_INTERVAL 512u
 #define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
 #define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
@@ -1407,14 +1404,6 @@ struct kls_solver {
   UF_long refactor_egraph_algorithm5_prefactor_column_count;
   UF_long refactor_egraph_algorithm5_prefactor_dep_count;
 
-  UF_long refactor_l_pattern_columns;
-  UF_long refactor_l_pattern_entries;
-  UF_long refactor_l_adjacent_run_count;
-  UF_long refactor_l_adjacent_run_entries;
-  UF_long refactor_l_adjacent_run_max_len;
-  UF_long refactor_l_contiguous_suffix_columns;
-  UF_long refactor_l_contiguous_suffix_entries;
-  UF_long refactor_l_contiguous_suffix_max_len;
   int refactor_l_index32_enabled;
   int refactor_u_index32_enabled;
   int refactor_map_index32_enabled;
@@ -1425,10 +1414,7 @@ struct kls_solver {
   UF_long *refactor_pipeline_ready_cols;
   atomic_uint *refactor_pipeline_ready_slots;
   atomic_ulong *refactor_pipeline_remaining_preds;
-  int refactor_stream_stats_built;
-  double refactor_stream_dependency_entries;
-  double refactor_stream_pivot_entries;
-  double refactor_stream_output_entries;
+
   UF_long *refactor_supernode_pipeline_end;
 
   UF_long *refactor_supernode_panel_start_id;
@@ -3501,14 +3487,7 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
 
   solver->refactor_l_index32_enabled = 0;
   solver->refactor_u_index32_enabled = 0;
-  solver->refactor_l_pattern_columns = 0;
-  solver->refactor_l_pattern_entries = 0;
-  solver->refactor_l_adjacent_run_count = 0;
-  solver->refactor_l_adjacent_run_entries = 0;
-  solver->refactor_l_adjacent_run_max_len = 0;
-  solver->refactor_l_contiguous_suffix_columns = 0;
-  solver->refactor_l_contiguous_suffix_entries = 0;
-  solver->refactor_l_contiguous_suffix_max_len = 0;
+
 }
 
 static void free_fast_reject_tail_plan(kls_solver *solver) {
@@ -5182,10 +5161,7 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_pipeline_column_count = 0;
   solver->refactor_dependency_work = 0.0;
   solver->refactor_pipeline_work = 0.0;
-  solver->refactor_stream_stats_built = 0;
-  solver->refactor_stream_dependency_entries = 0.0;
-  solver->refactor_stream_pivot_entries = 0.0;
-  solver->refactor_stream_output_entries = 0.0;
+
 }
 
 static void kls_free_refactor_separator_alpha4_plan(kls_solver *solver) {

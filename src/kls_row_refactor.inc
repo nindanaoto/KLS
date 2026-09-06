@@ -542,52 +542,6 @@ kls_row_pipeline_compact_span_shared_owner_scan_rows_env(void) {
     : (UF_long)parsed;
 }
 
-KLS_DEFINE_ENV_FLAG(kls_row_pipeline_owner_surface_trace_env_enabled,
-                    "KLS_TRACE_ROW_PIPELINE_OWNER_SURFACE")
-
-static UF_long kls_row_pipeline_owner_surface_window_env(void) {
-  if (!kls_row_pipeline_owner_surface_trace_env_enabled()) {
-    return 0u;
-  }
-  const char *value = getenv("KLS_ROW_PIPELINE_OWNER_SURFACE_WINDOW");
-  if (value == NULL || value[0] == '\0') {
-    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW;
-  }
-  if (value[0] == '0' && value[1] == '\0') {
-    return 0u;
-  }
-  errno = 0;
-  char *end = NULL;
-  const unsigned long long parsed = strtoull(value, &end, 10);
-  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
-    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_WINDOW;
-  }
-  return parsed > KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW
-    ? KLS_ROW_FIRST_OWNER_SURFACE_MAX_WINDOW
-    : (UF_long)parsed;
-}
-
-static UF_long kls_row_pipeline_owner_surface_interval_env(void) {
-  if (!kls_row_pipeline_owner_surface_trace_env_enabled()) {
-    return 0u;
-  }
-  const char *value = getenv("KLS_ROW_PIPELINE_OWNER_SURFACE_INTERVAL");
-  if (value == NULL || value[0] == '\0') {
-    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_INTERVAL;
-  }
-  if (value[0] == '0' && value[1] == '\0') {
-    return 1u;
-  }
-  errno = 0;
-  char *end = NULL;
-  const unsigned long long parsed = strtoull(value, &end, 10);
-  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
-    return KLS_ROW_FIRST_OWNER_SURFACE_DEFAULT_INTERVAL;
-  }
-  const unsigned long long max_uf = (unsigned long long)UF_long_max;
-  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
-}
-
 static UF_long kls_row_pipeline_compact_window_slots_env(void) {
   if (!kls_row_pipeline_compact_window_trace_env_enabled() &&
       !kls_row_pipeline_compact_window_exec_env_enabled()) {

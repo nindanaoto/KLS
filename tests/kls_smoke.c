@@ -6680,7 +6680,13 @@ static int test_egraph_cached_supernode_blocked_update(void) {
        stats.refactor_last_btf_scalar_run_candidates != 0 ||
        stats.refactor_u_supernode_pattern_count != 0 ||
        stats.refactor_u_supernode_value_dense_entries != 0 ||
-       stats.refactor_last_u_supernode_l_update_runs != 0)) {
+       stats.refactor_last_u_supernode_l_update_runs != 0 ||
+       stats.refactor_l_pattern_columns != 0 ||
+       stats.refactor_l_adjacent_run_count != 0 ||
+       stats.refactor_l_contiguous_suffix_columns != 0 ||
+       stats.refactor_stream_dependency_entries != 0.0 ||
+       stats.refactor_stream_pivot_entries != 0.0 ||
+       stats.refactor_stream_output_entries != 0.0)) {
     fprintf(stderr, "retired experiment statistics must remain zero\n");
     ok = 0;
   }

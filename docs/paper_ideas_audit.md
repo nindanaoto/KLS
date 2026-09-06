@@ -1,5 +1,10 @@
 # Paper Ideas Audit
 
+Historical note (2026-09-06): the opt-in L-pattern/stream statistics scans and
+row-pipeline owner-surface tracing have been removed. Their controls below are
+historical. Sorted-L eligibility checks, ordinary row-pipeline tracing, and
+production producer batching remain. Retired public statistics report zero.
+
 Historical note (2026-09-06): supernode consumer statistics, the BTF scalar-run
 surface tracker, pair-hash tracing, and the opt-in U-supernode pattern/value/
 ragged-L experiments have been removed. References to their controls below

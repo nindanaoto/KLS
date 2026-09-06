@@ -4,6 +4,9 @@
 The row-pipeline trace is intentionally line-oriented so long timeout runs can
 be inspected after a process cap. This helper extracts the counters most useful
 for comparing first-factor tail experiments.
+
+Owner-surface counters are retained here for archived traces. Current KLS no
+longer emits them; missing counters are treated as zero.
 """
 
 from __future__ import annotations

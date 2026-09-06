@@ -18579,22 +18579,6 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_supernode_panel_used_count =
     (int64_t)solver->refactor_supernode_panel_used_count;
 
-  solver->stats.refactor_l_pattern_columns =
-    (int64_t)solver->refactor_l_pattern_columns;
-  solver->stats.refactor_l_pattern_entries =
-    (int64_t)solver->refactor_l_pattern_entries;
-  solver->stats.refactor_l_adjacent_run_count =
-    (int64_t)solver->refactor_l_adjacent_run_count;
-  solver->stats.refactor_l_adjacent_run_entries =
-    (int64_t)solver->refactor_l_adjacent_run_entries;
-  solver->stats.refactor_l_adjacent_run_max_len =
-    (int64_t)solver->refactor_l_adjacent_run_max_len;
-  solver->stats.refactor_l_contiguous_suffix_columns =
-    (int64_t)solver->refactor_l_contiguous_suffix_columns;
-  solver->stats.refactor_l_contiguous_suffix_entries =
-    (int64_t)solver->refactor_l_contiguous_suffix_entries;
-  solver->stats.refactor_l_contiguous_suffix_max_len =
-    (int64_t)solver->refactor_l_contiguous_suffix_max_len;
   solver->stats.refactor_map_index32_enabled =
     solver->refactor_map_index32_enabled;
   solver->stats.refactor_map_index32_entries =
@@ -19462,10 +19446,5 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->refactor_dependency_work;
   solver->stats.refactor_dependency_pipeline_work =
     solver->refactor_pipeline_work;
-  solver->stats.refactor_stream_dependency_entries =
-    solver->refactor_stream_dependency_entries;
-  solver->stats.refactor_stream_pivot_entries =
-    solver->refactor_stream_pivot_entries;
-  solver->stats.refactor_stream_output_entries =
-    solver->refactor_stream_output_entries;
+
 }

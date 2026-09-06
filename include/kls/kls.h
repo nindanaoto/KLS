@@ -182,6 +182,7 @@ typedef struct kls_stats {
   int64_t refactor_dependency_pipeline_columns;
   double refactor_dependency_work;
   double refactor_dependency_pipeline_work;
+  /* Retired stream dependency/pivot/output diagnostics: always zero. */
   double refactor_stream_dependency_entries;
   double refactor_stream_pivot_entries;
   double refactor_stream_output_entries;
@@ -698,6 +699,8 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_fallback_count;
   int64_t row_refactor_native_row_panel_checked_reject_count;
   int64_t row_refactor_native_row_panel_auto_disable_count;
+  /* Retired L-pattern/adjacent-run/contiguous-suffix diagnostic fields are
+     ABI-reserved, always zero. Sorted-L eligibility statistics remain active. */
   int64_t refactor_l_pattern_columns;
   int64_t refactor_l_pattern_entries;
   int64_t refactor_l_adjacent_run_count;
