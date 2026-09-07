@@ -7373,54 +7373,9 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     return 0;
   }
 
-  /* A caller may already have supplied the exact placement contract this
-     helper would construct: one homogeneous LLC domain with one logical CPU
-     from each physical core.  In that case pinning the background workers is
-     redundant, while pinning and restoring worker zero around every short
-     recurring dispatch adds affinity syscalls to the numeric critical path.
-     Keep the explicit plan for mixed LLCs, frequency tiers, SMT-duplicated
-     cpusets, and incomplete topology data. */
-  int constrained_representative = -1;
-  int constrained_core_count = 0;
-  int constrained_cores[CPU_SETSIZE];
-  int already_constrained = 1;
-  for (int cpu = 0; cpu < CPU_SETSIZE && already_constrained; ++cpu) {
-    if (!CPU_ISSET(cpu, allowed_out)) {
-      continue;
-    }
-    if (!valid[cpu]) {
-      already_constrained = 0;
-      break;
-    }
-    if (constrained_representative < 0) {
-      constrained_representative = cpu;
-    } else if (package[cpu] != package[constrained_representative] ||
-               llc_id[cpu] != llc_id[constrained_representative] ||
-               max_frequency_khz[cpu] !=
-                 max_frequency_khz[constrained_representative]) {
-      already_constrained = 0;
-      break;
-    }
-    for (int i = 0; i < constrained_core_count; ++i) {
-      if (constrained_cores[i] == core_id[cpu]) {
-        already_constrained = 0;
-        break;
-      }
-    }
-    if (already_constrained) {
-      constrained_cores[constrained_core_count++] = core_id[cpu];
-    }
-  }
-  if (already_constrained && constrained_representative >= 0 &&
-      constrained_core_count >= thread_count) {
-    if (getenv("KLS_TRACE_AFFINITY") != NULL) {
-      fprintf(stderr,
-              "KLS affinity declined: caller already supplies one "
-              "homogeneous LLC with %d physical cores\n",
-              constrained_core_count);
-    }
-    return 0;
-  }
+  /* A shared cpuset bounds placement but does not assign one worker per
+     core. Even within one LLC, retain the explicit plan: delayed workers
+     can otherwise stall dependency consumers that spin awaiting them. */
 
   /* Linux exposes a portable per-CPU maximum policy frequency even when it
      does not export Intel's hybrid core-type CPUID leaf through sysfs.  On a

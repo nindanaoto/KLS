@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
 #include "kls/kls.h"
@@ -10,10 +11,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __linux__
+#include <sched.h>
+static cpu_set_t caller_affinity;
+static int caller_affinity_valid;
+#endif
+
 static int restore_env_value(const char *name, int had_value,
                              const char *saved_value);
 
 static int require_ok(int status, const char *what) {
+#ifdef __linux__
+  /* Worker placement may temporarily pin the caller, but no public call
+     may leave its affinity changed, including calls returning an error. */
+  if (caller_affinity_valid) {
+    cpu_set_t current;
+    if (sched_getaffinity(0, sizeof(current), &current) != 0 ||
+        !CPU_EQUAL(&current, &caller_affinity)) {
+      fprintf(stderr, "%s did not preserve caller affinity\n", what);
+      return 0;
+    }
+  }
+#endif
   if (status != KLS_OK) {
     fprintf(stderr, "%s failed: %s (%d)\n", what, kls_status_string(status), status);
     return 0;
@@ -13638,7 +13657,7 @@ static int test_row_solve_from_numeric_after_klu_first(void) {
   return ok;
 }
 
-static int test_transpose_row_solve_from_numeric_parallel(void) {
+static int test_transpose_row_solve_from_numeric_parallel(int repeated) {
   const int32_t n = 4000;
   const int64_t nnz64 = ((int64_t)n * ((int64_t)n + 1)) / 2;
   int ok = 1;
@@ -13738,6 +13757,11 @@ static int test_transpose_row_solve_from_numeric_parallel(void) {
   options.use_btf = 0;
   options.scale = 0;
   options.static_pivoting = 0;
+
+  /* Exercise both ordinary scheduling and repeated-workload worker pinning.
+     require_ok checks caller-affinity restoration after each public call. */
+  options.expected_refactorizations = repeated ? 100 : 0;
+  options.expected_solves = repeated ? 100 : 0;
 
   if (ok && !require_ok(kls_create(&solver),
                         "create transpose parallel row solve")) ok = 0;
@@ -14761,6 +14785,10 @@ cleanup:
 }
 
 int main(void) {
+#ifdef __linux__
+  caller_affinity_valid =
+    sched_getaffinity(0, sizeof(caller_affinity), &caller_affinity) == 0;
+#endif
   if (!test_scaled_update_refactor()) {
     return EXIT_FAILURE;
   }
@@ -15007,7 +15035,8 @@ int main(void) {
   if (!test_row_solve_from_numeric_after_klu_first()) {
     return EXIT_FAILURE;
   }
-  if (!test_transpose_row_solve_from_numeric_parallel()) {
+  if (!test_transpose_row_solve_from_numeric_parallel(0) ||
+      !test_transpose_row_solve_from_numeric_parallel(1)) {
     return EXIT_FAILURE;
   }
   if (!test_kls_first_reseeds_after_pivot_repair()) {
