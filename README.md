@@ -1780,30 +1780,13 @@ comparisons. Benchmark JSON reports `refactor_map_index32_enabled` and
 `refactor_map_index32_entries`, `refactor_l_index32_enabled` and
 `refactor_l_index32_entries`, plus `refactor_u_index32_enabled` and
 `refactor_u_index32_entries` so runs can verify whether each mirror was active.
-The EGraph numeric kernels include a guarded CKTSO Algorithm 5-style prefactor
-slice. The production generic policy leaves this scalar experiment disabled:
-enabling it globally excludes the narrower fused BTF dispatch even when no
-profitable speculative dependency is found. Set
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=1` to force it or
-`KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE=0` to disable it for A/B runs. When a
-pipeline column is
-blocked on its current U predecessor, the kernel scans later U predecessors that
-are already published, applies only those whose workspace entry cannot be
-changed by any earlier unapplied predecessor, records them in an applied bitmap,
-and skips them when the normal postfactor cursor reaches that position. This is
-deliberately scalar. It only uses already-existing pipeline completion state, so
-using this path does not create `pipeline_done` state or change the scheduler
-shape by itself. The applied bitmap is allocated only after
-a dependency actually blocks and is initialized with the already-consumed
-prefix. The path now covers the single-block unscaled/scaled kernels, the
-unscaled BTF kernel, and the generic scaled/fallback kernel. This fills more of
-the paper's skip-unfinished prefactor semantics without pretending that the
-grouped Algorithm 5 payoff descriptor already has a multi-current numeric
-kernel. Benchmark JSON reports
-`refactor_last_egraph_algorithm5_prefactor_columns`,
-`refactor_last_egraph_algorithm5_prefactor_deps`,
-`refactor_egraph_algorithm5_prefactor_column_count`, and
-`refactor_egraph_algorithm5_prefactor_dep_count`.
+The opt-in Algorithm-5 speculative prefactor and FP32 factor-mirror experiments
+have been removed. `KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE`,
+`KLS_ENABLE_FP32_REFACTOR`, and `KLS_FP32_TAIL_FLOAT_ACCUM` no longer have an
+effect. The four public EGraph Algorithm-5 prefactor statistics remain reserved
+and always zero for ABI compatibility. Production double-precision refinement,
+dependency scheduling, fused BTF dispatch, and narrow integer-index mirrors
+remain supported.
 The separate repeated-factor repair guard still blocks high-work pipeline
 factors when pivot repair would be risky, but no longer blocks numerics whose
 retained factor has zero off-diagonal pivots. Those no-pivot cases reuse the

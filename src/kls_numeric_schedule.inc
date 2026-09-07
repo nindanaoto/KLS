@@ -1623,7 +1623,6 @@ static void kls_snb_maybe_accept(kls_solver *solver,
       solver->snb != NULL || kls_snb_env_disabled() ||
       solver->symbolic == NULL ||
       solver->numeric == NULL || solver->numeric->LUbx == NULL ||
-      (solver->fp32_decision > 0) ||
       solver->common.status == TRILINOS_KLU_SINGULAR) {
     return;
   }
@@ -1661,10 +1660,9 @@ static void kls_snb_maybe_accept(kls_solver *solver,
   const double accept_start = kls_now_seconds();
   if (getenv("KLS_TRACE_SNB") != NULL) {
     fprintf(stderr,
-            "KLS snb gate: prep=%d decl=%d verd=%d dec=%d fp32=%d wall=%.1f\n",
+            "KLS snb gate: prep=%d decl=%d verd=%d dec=%d wall=%.1f\n",
             solver->snode_prepared, solver->snb_declined,
             solver->snb_trial_verdict, solver->snb_decision,
-            solver->fp32_decision,
             solver->snb_factor_start > 0.0
               ? kls_now_seconds() - solver->snb_factor_start : -1.0);
   }
@@ -1804,18 +1802,13 @@ static int kls_snb_try_refactor(kls_solver *solver,
       solver->numeric == NULL ||
       solver->symbolic == NULL || solver->snb == NULL ||
       solver->snb_decision < 0 || solver->snb_trial_verdict < 0) {
-    /* No fp32 conjunct here: a fp64 snb build is strictly more accurate
-       and the 0.60 timed acceptance already arbitrates speed (pre2: the
-       fp32-decided pipeline sat at 8.5s while the fp64 snb trial
-       measured 3.1s and was vetoed by the flag alone). */
     if (kls_snb_trace_enabled()) {
       fprintf(stderr,
-              "KLS snb try gate: cp=%d dis=%d num=%d sym=%d snb=%d fp32=%d"
+              "KLS snb try gate: cp=%d dis=%d num=%d sym=%d snb=%d"
               " dec=%d verd=%d\n",
               check_pivots, kls_snb_env_disabled(),
               solver->numeric == NULL, solver->symbolic == NULL,
               solver->snb == NULL,
-              solver->fp32_decision > 0,
               solver->snb_decision, solver->snb_trial_verdict);
     }
     return 0;
@@ -4029,7 +4022,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   }
   /* Refinement computes residuals against the true input values, which for
      pass-through CSC inputs are not otherwise retained past this call. */
-  if ((solver->numeric_needs_refinement || kls_fp32_refactor_wanted(solver) ||
+  if ((solver->numeric_needs_refinement ||
        solver->pivot_nudge_count > 0) &&
       numeric_values != solver->pivot_nudge_values &&
       numeric_values != solver->solve_refine_values) {
@@ -4262,110 +4255,6 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     kls_egraph_mapped_refactor(solver, numeric_values, check_pivots);
   if (deferred_pts_active) {
     pthread_join(deferred_pts_thread, NULL);
-  }
-  if (egraph > 0 && solver->fp32_last_used && !solver->fp32_validated) {
-    /* First reduced-precision pass on this numeric: ill conditioning can
-       amplify the storage rounding beyond what refinement recovers, so
-       prove the factorization on A e before trusting the mode; on failure
-       redo this pass in double precision and lock the mode off. */
-    int probe_ok = 0;
-    /* The mode's contract is float factors plus one refinement shot per
-       solve, so probe what it delivers: solve A x = A e, apply one
-       correction, and judge the corrected residual.  Judging the raw
-       solve rejects float-cancellation columns the correction absorbs
-       (ASIC_320k: six of 6.9M L entries off at 1e-2 raw, corrected
-       solves at 2e-15). */
-    double *probe =
-      (double *)malloc(3u * (size_t)solver->n * sizeof(*probe));
-    if (probe != NULL) {
-      double *px = probe + solver->n;
-      double *pc = px + solver->n;
-      for (UF_long i = 0; i < solver->n; ++i) {
-        probe[i] = 0.0;
-      }
-      for (UF_long j = 0; j < solver->n; ++j) {
-        for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
-             ++p) {
-          probe[solver->row_idx[p]] += numeric_values[p];
-        }
-      }
-      double bmax = 0.0;
-      for (UF_long i = 0; i < solver->n; ++i) {
-        const double v = fabs(probe[i]);
-        bmax = bmax < v ? v : bmax;
-      }
-      memcpy(px, probe, (size_t)solver->n * sizeof(*px));
-      if (trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
-                               1, px, &solver->common) &&
-          solver->common.status >= TRILINOS_KLU_OK) {
-        int step_ok = 1;
-        double rmax = 0.0;
-        for (int step = 0; step < 2 && step_ok; ++step) {
-          memcpy(pc, probe, (size_t)solver->n * sizeof(*pc));
-          for (UF_long j = 0; j < solver->n; ++j) {
-            const double xv = px[j];
-            if (xv == 0.0) {
-              continue;
-            }
-            for (UF_long p = solver->col_ptr[j];
-                 p < solver->col_ptr[j + 1u]; ++p) {
-              pc[solver->row_idx[p]] -= numeric_values[p] * xv;
-            }
-          }
-          rmax = 0.0;
-          for (UF_long i = 0; i < solver->n; ++i) {
-            const double v = fabs(pc[i]);
-            rmax = rmax < v ? v : rmax;
-          }
-          if (getenv("KLS_TRACE_REFINE") != NULL) {
-            fprintf(stderr,
-                    "KLS fp32 probe: step %d rmax %.3e bmax %.3e\n",
-                    step, rmax, bmax);
-          }
-          if (step == 0) {
-            step_ok =
-              trilinos_klu_l_solve(solver->symbolic, solver->numeric,
-                                   solver->n, 1, pc, &solver->common) &&
-              solver->common.status >= TRILINOS_KLU_OK;
-            if (step_ok) {
-              for (UF_long i = 0; i < solver->n; ++i) {
-                px[i] += pc[i];
-              }
-            }
-          }
-        }
-        /* Bar chosen against the fleet: healthy fp32 adopters land
-           their corrected residual at 1e-14..1e-9 relative (memchip
-           7.7e-12/5e2, Freescale1 1.4e-8/8.1); the ASIC_320k failure
-           mode sits at 3e-3.  1e-8 keeps the adopters and rejects the
-           unrecoverable state by five orders. */
-        probe_ok =
-          step_ok && rmax <= (bmax > 0.0 ? bmax : 1.0) * 1.0e-8;
-      }
-      free(probe);
-    }
-    if (getenv("KLS_TRACE_REFINE") != NULL) {
-      fprintf(stderr, "KLS fp32 probe: ok=%d\n", probe_ok);
-    }
-    if (probe_ok) {
-      solver->fp32_validated = 1;
-      solver->fp32_decision = 1;
-    } else {
-      /* The first float pass over a factor-built numeric fails this
-         probe deterministically (ASIC_320k: rmax 3e-2) while the next
-         pass validates at float accuracy; the failed pass is replaced
-         by the double redo below, so give the mode one retry per
-         numeric before locking it off. */
-      if (solver->fp32_probe_retry_used) {
-        solver->fp32_decision = -1;
-      }
-      solver->fp32_probe_retry_used = 1;
-      solver->numeric_needs_refinement = 0;
-      solver->fp32_redo_pass = 1;
-      egraph = kls_egraph_mapped_refactor(solver, numeric_values,
-                                          check_pivots);
-      solver->fp32_redo_pass = 0;
-    }
   }
   if (egraph >= 0) {
 #ifdef KLS_HAVE_CBLAS

@@ -1665,7 +1665,7 @@ static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
     !solver->numeric_is_predicted &&
-    !solver->fp32_last_used && !solver->numeric_needs_refinement &&
+    !solver->numeric_needs_refinement &&
     !solver->tight_tol_refine && !solver->solve_recovery_active &&
     solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u &&
@@ -14305,7 +14305,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
     }
     /* Fill (metis_numeric_is_better) stays the primary adoption
        criterion - it is what 99 refactorizations pay, and downstream
-       adaptive layers (row engine, fp32) exploit the promoted ordering
+       adaptive layers (row engine) exploit the promoted ordering
        further than one column refactor can show. The timing is only a
        veto against schedule catastrophes. */
     const double incumbent_fill =
@@ -18409,14 +18409,10 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_supernode_candidate_trailing_entries =
     solver->refactor_supernode_candidate_trailing_entries;
 
-  solver->stats.refactor_last_egraph_algorithm5_prefactor_columns =
-    (int64_t)solver->refactor_last_egraph_algorithm5_prefactor_columns;
-  solver->stats.refactor_last_egraph_algorithm5_prefactor_deps =
-    (int64_t)solver->refactor_last_egraph_algorithm5_prefactor_deps;
-  solver->stats.refactor_egraph_algorithm5_prefactor_column_count =
-    (int64_t)solver->refactor_egraph_algorithm5_prefactor_column_count;
-  solver->stats.refactor_egraph_algorithm5_prefactor_dep_count =
-    (int64_t)solver->refactor_egraph_algorithm5_prefactor_dep_count;
+  solver->stats.refactor_last_egraph_algorithm5_prefactor_columns = 0;
+  solver->stats.refactor_last_egraph_algorithm5_prefactor_deps = 0;
+  solver->stats.refactor_egraph_algorithm5_prefactor_column_count = 0;
+  solver->stats.refactor_egraph_algorithm5_prefactor_dep_count = 0;
 
   solver->stats.refactor_last_supernode_algorithm5_payoff_slot_accum_runs =
     0;

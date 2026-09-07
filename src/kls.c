@@ -863,12 +863,6 @@ struct kls_solver {
                                    identity tracks adoption swaps) */
   const double *solve_refine_rs_inv_src;
   double base_solve_seconds;
-  int fp32_decision;
-  int fp32_last_used;
-  int fp32_validated;
-  int fp32_probe_retry_used;
-  int fp32_redo_pass;
-  int fp32_mirror_fresh;
   int metis_race_deferred;
   int metis_race_deferred_invalid;
   int prestatic_deferred;
@@ -936,8 +930,6 @@ struct kls_solver {
   double **refactor_l_packed_values;
   double *refactor_l_packed_storage;
   int refactor_l_packed_valid;
-  float **refactor_l_values32;
-  float *refactor_l_values32_storage;
   double **refactor_l_sorted_values;
   double *refactor_l_sorted_values_storage;
   UF_long **refactor_u_indices;
@@ -1376,11 +1368,6 @@ struct kls_solver {
   UF_long refactor_supernode_candidate_max_width;
   double refactor_supernode_candidate_dense_entries;
   double refactor_supernode_candidate_trailing_entries;
-
-  UF_long refactor_last_egraph_algorithm5_prefactor_columns;
-  UF_long refactor_last_egraph_algorithm5_prefactor_deps;
-  UF_long refactor_egraph_algorithm5_prefactor_column_count;
-  UF_long refactor_egraph_algorithm5_prefactor_dep_count;
 
   int refactor_l_index32_enabled;
   int refactor_u_index32_enabled;
@@ -2002,13 +1989,6 @@ typedef struct kls_egraph_refactor_shared {
   int subtree_supernode_split;
   int supernode_cached_updates_only;
 
-  int algorithm5_prefactor_updates;
-
-  int use_fp32_l_values;
-
-  atomic_ulong algorithm5_prefactor_columns;
-  atomic_ulong algorithm5_prefactor_deps;
-
   int pipeline_ready_queue;
   UF_long *pipeline_ready_cols;
   atomic_uint *pipeline_ready_slots;
@@ -2447,7 +2427,7 @@ static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
     solver->row_scale == NULL && solver->col_scale == NULL &&
     !solver->row_refactor_values_ready &&
     !solver->row_refactor_values_dirty &&
-    !solver->numeric_is_predicted && !solver->fp32_last_used &&
+    !solver->numeric_is_predicted &&
     !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
     !solver->promoted_tolerance_l2_recovery_required &&
     !solver->solve_recovery_active &&
@@ -3016,28 +2996,6 @@ kls_scatter_subtract_i32_avx512(double *restrict x,
 }
 
 __attribute__((target("avx512f"), noinline)) static void
-kls_scatter_subtract_i32_f32_avx512(double *restrict x,
-                                    const int32_t *restrict rows,
-                                    const float *restrict values,
-                                    UF_long length,
-                                    double scale) {
-  const __m512d vs = _mm512_set1_pd(scale);
-  UF_long p = 0;
-  for (; p + 8u <= length; p += 8u) {
-    const __m256i idx =
-      _mm256_loadu_si256((const __m256i *)(const void *)(rows + p));
-    const __m512d vals =
-      _mm512_cvtps_pd(_mm256_loadu_ps(values + p));
-    __m512d xv = _mm512_i32gather_pd(idx, x, 8);
-    xv = _mm512_fnmadd_pd(vals, vs, xv);
-    _mm512_i32scatter_pd(x, idx, xv, 8);
-  }
-  for (; p < length; ++p) {
-    x[rows[p]] -= (double)values[p] * scale;
-  }
-}
-
-__attribute__((target("avx512f"), noinline)) static void
 kls_store_l_i32_avx512(double *restrict x,
                        const int32_t *restrict rows,
                        double *restrict values,
@@ -3152,38 +3110,6 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract_refactor_i32(
     kls_scatter_subtract_i32_scalar(x, rows, values, length, scale);
   } else {
     kls_scatter_subtract_i32(x, rows, values, length, scale);
-  }
-}
-
-static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32_f32(
-  double *restrict x,
-  const int32_t *restrict rows,
-  const float *restrict values,
-  UF_long length,
-  double scale) {
-  if (scale == 0.0) {
-    return;
-  }
-#if KLS_HAVE_AVX512_KERNELS
-  if (length >= kls_avx512_scatter_min_length() &&
-      kls_avx512_scatter_enabled()) {
-    kls_scatter_subtract_i32_f32_avx512(x, rows, values, length, scale);
-    return;
-  }
-#endif
-  UF_long p = 0;
-  for (; p + 7u < length; p += 8u) {
-    x[rows[p]] -= (double)values[p] * scale;
-    x[rows[p + 1u]] -= (double)values[p + 1u] * scale;
-    x[rows[p + 2u]] -= (double)values[p + 2u] * scale;
-    x[rows[p + 3u]] -= (double)values[p + 3u] * scale;
-    x[rows[p + 4u]] -= (double)values[p + 4u] * scale;
-    x[rows[p + 5u]] -= (double)values[p + 5u] * scale;
-    x[rows[p + 6u]] -= (double)values[p + 6u] * scale;
-    x[rows[p + 7u]] -= (double)values[p + 7u] * scale;
-  }
-  for (; p < length; ++p) {
-    x[rows[p]] -= (double)values[p] * scale;
   }
 }
 
@@ -3420,8 +3346,6 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   free(solver->refactor_l_values);
   free(solver->refactor_l_packed_values);
   free(solver->refactor_l_packed_storage);
-  free(solver->refactor_l_values32);
-  free(solver->refactor_l_values32_storage);
   free(solver->refactor_l_sorted_values);
   free(solver->refactor_l_sorted_values_storage);
   free(solver->refactor_u_indices);
@@ -3442,8 +3366,6 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_packed_values = NULL;
   solver->refactor_l_packed_storage = NULL;
   solver->refactor_l_packed_valid = 0;
-  solver->refactor_l_values32 = NULL;
-  solver->refactor_l_values32_storage = NULL;
   solver->refactor_l_sorted_values = NULL;
   solver->refactor_l_sorted_values_storage = NULL;
   solver->refactor_u_indices = NULL;
@@ -9952,12 +9874,6 @@ static void free_numeric(kls_solver *solver) {
   solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
   solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
-  solver->fp32_decision = 0;
-  solver->fp32_last_used = 0;
-  solver->fp32_validated = 0;
-  solver->fp32_probe_retry_used = 0;
-  solver->fp32_redo_pass = 0;
-  solver->fp32_mirror_fresh = 0;
   /* deferral flags are solver-level intent (the consult re-validates);
      mid-factor numeric replacements must not wipe them */
   if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
@@ -10104,12 +10020,6 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->prepared_value_scale = NULL;
   free(solver->prepared_value_input_pos);
   solver->prepared_value_input_pos = NULL;
-  solver->fp32_decision = 0;
-  solver->fp32_last_used = 0;
-  solver->fp32_validated = 0;
-  solver->fp32_probe_retry_used = 0;
-  solver->fp32_redo_pass = 0;
-  solver->fp32_mirror_fresh = 0;
   /* Engine timing belongs to the exact retained pattern, scaling, and pivot
      frame.  A wholesale trial adoption starts a fresh measured comparison. */
   solver->numeric_full_factor_seconds = 0.0;
@@ -13054,7 +12964,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->factor_preps_deferred && !solver->prestatic_deferred &&
       !solver->rowmatch_deferred && !solver->metis_race_deferred &&
       !solver->auto_scale_deferred && !solver->numeric_is_predicted &&
-      !solver->fp32_last_used && !solver->numeric_needs_refinement &&
+      !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u) {
     /* The first public update has already built and certified the retained
@@ -13150,7 +13060,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->factor_preps_deferred && !solver->prestatic_deferred &&
       !solver->rowmatch_deferred && !solver->metis_race_deferred &&
       !solver->auto_scale_deferred && !solver->numeric_is_predicted &&
-      !solver->fp32_last_used && !solver->numeric_needs_refinement &&
+      !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u) {
     /* The first changed refactor has already certified this plain CSC factor
@@ -13247,7 +13157,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->auto_scale_deferred && solver->row_perm == NULL &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       solver->numeric->Rs == NULL && !solver->numeric_is_predicted &&
-      !solver->fp32_last_used && !solver->numeric_needs_refinement &&
+      !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u) {
     const double start = kls_now_seconds();
@@ -14087,7 +13997,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       kls_repeated_update_workload(&solver->options) &&
       kls_direct_klu_public_frame_capable(solver) &&
       solver->dense_tail_cols == 0 && !solver->numeric_is_predicted &&
-      !solver->fp32_last_used && !solver->numeric_needs_refinement &&
+      !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u &&
       getenv("KLS_DISABLE_DIRECT_KLU_TOURNAMENT") == NULL &&
@@ -15240,12 +15150,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
-      !solver->fp32_last_used && solver->pivot_nudge_count == 0 &&
+      solver->pivot_nudge_count == 0 &&
       !solver->tight_tol_refine) {
     /* The factor values were just recomputed at full precision with no
-       diagonal corrections: any fp32 refinement debt left by an earlier
-       trial or promotion numeric is stale, and each solve would pay a
-       needless correction pass (2.3x on ASIC-class). */
+       diagonal corrections. */
     solver->numeric_needs_refinement = 0;
     solver->solve_refine_single_shot = 0;
   }
@@ -16648,7 +16556,7 @@ static int solve_impl(kls_solver *solver,
       !solver->row_refactor_values_dirty &&
       !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
       solver->pivot_nudge_count == 0u &&
-      solver->common.kls_perturb_count == 0u && !solver->fp32_last_used &&
+      solver->common.kls_perturb_count == 0u &&
       solver->solve_contract_probe == 1) {
     /* This verified public-frame factor already selected KLU's native packed
        solve because a second compact mirror cannot repay in its cache-sized
@@ -16737,7 +16645,7 @@ static int solve_impl(kls_solver *solver,
     ldb == (int64_t)solver->n && ldx == (int64_t)solver->n &&
     !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
     solver->pivot_nudge_count == 0u &&
-    solver->common.kls_perturb_count == 0u && !solver->fp32_last_used &&
+    solver->common.kls_perturb_count == 0u &&
     kls_i32_solve_ready(solver) &&
     kls_lean_single_block_prepared_solve_ready(solver);
   const int fused_matched_i32_rhs =
@@ -17131,7 +17039,7 @@ static int solve_impl(kls_solver *solver,
             solver->n > 2 ? x[2] : 0.0);
   }
   /* Iterative refinement recovers full double-precision accuracy from a
-     reduced-accuracy factorization (float-stored values, nudged pivots) at
+     reduced-accuracy factorization (such as nudged pivots) at
      the cost of one residual pass and one extra solve per iteration.  The
      residual pass runs against the stored internal-frame matrix; scaled
      shapes are supported on the untransposed path by folding the row and
@@ -17148,7 +17056,7 @@ static int solve_impl(kls_solver *solver,
   const int contract_structural_risk = solver->row_perm != NULL ||
     solver->row_scale != NULL || solver->col_scale != NULL ||
     solver->pivot_nudge_count > 0 || solver->common.kls_perturb_count > 0 ||
-    solver->numeric_is_predicted || solver->fp32_last_used ||
+    solver->numeric_is_predicted ||
     /* KLU's diagonal-ratio estimate below sqrt(epsilon) means a backward-
        stable triangular solve can still lose roughly half the available
        digits.  Treat that measured numeric state exactly like the existing
@@ -17192,7 +17100,7 @@ static int solve_impl(kls_solver *solver,
     solver->common.tol >= 1.0e-8 && solver->common.tol <= 1.0e-7 &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    !solver->numeric_is_predicted && !solver->fp32_last_used &&
+    !solver->numeric_is_predicted &&
     !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
     solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u;
@@ -17206,7 +17114,7 @@ static int solve_impl(kls_solver *solver,
     solver->certified_unscaled_l2_contract &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    !solver->numeric_is_predicted && !solver->fp32_last_used &&
+    !solver->numeric_is_predicted &&
     !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
     solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u;
@@ -17678,7 +17586,7 @@ static int solve_impl(kls_solver *solver,
           solver->lean_compact_match_row_factor_active &&
           !solver->row_refactor_values_ready &&
           !solver->row_solve_self_check &&
-          !solver->numeric_is_predicted && !solver->fp32_last_used &&
+          !solver->numeric_is_predicted &&
           !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
           solver->pivot_nudge_count == 0u &&
           solver->common.kls_perturb_count == 0u &&
@@ -17691,7 +17599,7 @@ static int solve_impl(kls_solver *solver,
           kls_repeated_update_workload(&solver->options) &&
           solver->pts_ref_decision > 0 &&
           solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
-          !solver->fp32_last_used && solver->pivot_nudge_count == 0u &&
+          solver->pivot_nudge_count == 0u &&
           solver->common.kls_perturb_count == 0u &&
           !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
           solver->row_scale == NULL && solver->col_scale == NULL &&
@@ -17813,7 +17721,6 @@ static int solve_impl(kls_solver *solver,
             } else {
               memcpy(xrhs, saved_x, (size_t)nloc * sizeof(*saved_x));
             }
-            solver->fp32_decision = -1;
             if (contract_probe_wanted || contract_armed) {
               solver->solve_contract_probe = 3;
             }
@@ -18115,7 +18022,6 @@ static int solve_impl(kls_solver *solver,
             solver, refine_a, brhs, xrhs, bnorm2, residual)) {
         ordinary_self_check_l2_verified = 1;
         solver->low_rcond_solve_contract_state = 2;
-        solver->fp32_decision = -1;
         if (contract_probe_wanted || contract_armed) {
           solver->solve_contract_probe = 2;
         }
@@ -18128,7 +18034,6 @@ static int solve_impl(kls_solver *solver,
             solver, refine_a, brhs, xrhs, bnorm2, residual)) {
         ordinary_self_check_l2_verified = 1;
         solver->low_rcond_solve_contract_state = 2;
-        solver->fp32_decision = -1;
         if (contract_probe_wanted || contract_armed) {
           solver->solve_contract_probe = 2;
         }

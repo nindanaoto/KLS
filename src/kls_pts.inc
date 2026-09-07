@@ -1143,10 +1143,6 @@ typedef struct {
   const uint32_t *ulen32;
   const uint32_t *loff32;
   const uint32_t *uoff32;
-  /* fp32 rows maintain per-refactor f32 L value mirrors in the same
-     LUbx stream order; reading them halves the L value traffic and the
-     refined solve already polices the f32-accurate numbers */
-  float *const *l32;
   double *const *l64;
   double *const *u64;
   UF_long gk0;
@@ -1172,25 +1168,14 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
       const int32_t *li = a->i32l +
         (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
       const UF_long split = (UF_long)pts->lsplit[k];
-      const float *lx32 =
-        a->l32 != NULL ? a->l32[a->gk0 + (UF_long)k] : NULL;
-      if (lx32 != NULL) {
-        for (UF_long p = 0; p < split; ++p) {
-          Xb[li[p]] -= (double)lx32[p] * xk;
-        }
-        for (UF_long p = split; p < len; ++p) {
-          acc[pts->top_map[li[p]]] += (double)lx32[p] * xk;
-        }
-      } else {
-        const double *lx = a->l64 != NULL
-          ? a->l64[a->gk0 + (UF_long)k]
-          : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
-        for (UF_long p = 0; p < split; ++p) {
-          Xb[li[p]] -= lx[p] * xk;
-        }
-        for (UF_long p = split; p < len; ++p) {
-          acc[pts->top_map[li[p]]] += lx[p] * xk;
-        }
+      const double *lx = a->l64 != NULL
+        ? a->l64[a->gk0 + (UF_long)k]
+        : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+      for (UF_long p = 0; p < split; ++p) {
+        Xb[li[p]] -= lx[p] * xk;
+      }
+      for (UF_long p = split; p < len; ++p) {
+        acc[pts->top_map[li[p]]] += lx[p] * xk;
       }
     }
   }
@@ -1214,26 +1199,18 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
           ? (UF_long)a->llen32[k] : a->llen[k];
         const int32_t *li = a->i32l +
           (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
-        const float *lx32 =
-          a->l32 != NULL ? a->l32[a->gk0 + (UF_long)k] : NULL;
-        if (lx32 != NULL) {
-          for (UF_long p = 0; p < len; ++p) {
-            Xb[li[p]] -= (double)lx32[p] * xk;
-          }
+        const double *lx = a->l64 != NULL
+          ? a->l64[a->gk0 + (UF_long)k]
+          : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+        if (pts->top_run_scatter) {
+          const uint32_t run_begin = pts->top_l_run_ptr[j];
+          const uint32_t run_end = pts->top_l_run_ptr[j + 1u];
+          kls_pts_scatter_top_runs(
+            Xb, lx, pts->top_l_runs + run_begin,
+            run_end - run_begin, xk);
         } else {
-          const double *lx = a->l64 != NULL
-            ? a->l64[a->gk0 + (UF_long)k]
-            : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
-          if (pts->top_run_scatter) {
-            const uint32_t run_begin = pts->top_l_run_ptr[j];
-            const uint32_t run_end = pts->top_l_run_ptr[j + 1u];
-            kls_pts_scatter_top_runs(
-              Xb, lx, pts->top_l_runs + run_begin,
-              run_end - run_begin, xk);
-          } else {
-            for (UF_long p = 0; p < len; ++p) {
-              Xb[li[p]] -= lx[p] * xk;
-            }
+          for (UF_long p = 0; p < len; ++p) {
+            Xb[li[p]] -= lx[p] * xk;
           }
         }
       }
@@ -1306,7 +1283,6 @@ typedef struct kls_pts_pool_job {
   const uint32_t *ulen32;
   const uint32_t *loff32;
   const uint32_t *uoff32;
-  float *const *l32;
   double *const *l64;
   double *const *u64;
   UF_long gk0;
@@ -1338,7 +1314,6 @@ static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker) {
   arg.ulen32 = job->ulen32;
   arg.loff32 = job->loff32;
   arg.uoff32 = job->uoff32;
-  arg.l32 = job->l32;
   arg.l64 = job->l64;
   arg.u64 = job->u64;
   arg.gk0 = job->gk0;
@@ -1410,8 +1385,6 @@ static int kls_pts_block_pool(kls_solver *solver,
     ? solver->i32solve_loff32 + pts->k1 : NULL;
   job.uoff32 = solver->i32solve_uoff32 != NULL
     ? solver->i32solve_uoff32 + pts->k1 : NULL;
-  job.l32 = !forward_only && solver->fp32_last_used > 0
-    ? (float *const *)solver->refactor_l_values32 : NULL;
   job.l64 = solver->refactor_l_packed_valid
     ? (double *const *)solver->refactor_l_packed_values : NULL;
   job.u64 = solver->refactor_u_packed_valid
@@ -1551,8 +1524,6 @@ static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
       ? solver->i32solve_loff32 + pts->k1 : NULL;
     args[t].uoff32 = solver->i32solve_uoff32 != NULL
       ? solver->i32solve_uoff32 + pts->k1 : NULL;
-    args[t].l32 = solver->fp32_last_used > 0
-      ? (float *const *)solver->refactor_l_values32 : NULL;
     args[t].l64 = solver->refactor_l_packed_valid
       ? (double *const *)solver->refactor_l_packed_values : NULL;
     args[t].u64 = solver->refactor_u_packed_valid

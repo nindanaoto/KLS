@@ -986,6 +986,7 @@ typedef struct kls_stats {
   int64_t refactor_supernode_algorithm5_prefix_payoff_run_rows;
   double refactor_supernode_algorithm5_prefix_payoff_update_work;
   double refactor_supernode_algorithm5_prefix_payoff_advance_work;
+  /* Reserved ABI fields: retired EGraph prefactor experiment; always zero. */
   int64_t refactor_last_egraph_algorithm5_prefactor_columns;
   int64_t refactor_last_egraph_algorithm5_prefactor_deps;
   int64_t refactor_egraph_algorithm5_prefactor_column_count;

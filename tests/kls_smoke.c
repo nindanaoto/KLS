@@ -68,6 +68,14 @@ static int require_build_feature_stats(const kls_stats *stats,
 
 static int require_parallel_model_stats(const kls_stats *stats,
                                         const char *what) {
+  if (stats != NULL &&
+      (stats->refactor_last_egraph_algorithm5_prefactor_columns != 0 ||
+       stats->refactor_last_egraph_algorithm5_prefactor_deps != 0 ||
+       stats->refactor_egraph_algorithm5_prefactor_column_count != 0 ||
+       stats->refactor_egraph_algorithm5_prefactor_dep_count != 0)) {
+    fprintf(stderr, "retired prefactor stats are nonzero for %s\n", what);
+    return 0;
+  }
   if (stats == NULL ||
       stats->parallel_model_r1 <= 0.0 ||
       stats->parallel_model_r2 <= 0.0) {

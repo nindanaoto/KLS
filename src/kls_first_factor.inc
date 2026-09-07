@@ -15545,10 +15545,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       solver->solve_refine_single_shot =
         refine_iters <= 2 && getenv("KLS_STRICT_PREDICTED_REFINEMENT") == NULL;
     }
-    if (solver->fp32_last_used) {
-      /* This probe just validated the reduced-precision fill. */
-      solver->fp32_validated = 1;
-    }
     break;
   }
   solver->auto_scale_checked = 1;

@@ -2181,7 +2181,7 @@ static void kls_solve_contract_classify(kls_solver *solver,
       solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->pivot_nudge_count > 0 ||
       solver->common.kls_perturb_count > 0 ||
-      solver->numeric_is_predicted || solver->fp32_last_used ||
+      solver->numeric_is_predicted ||
       solver->numeric == NULL || solver->symbolic == NULL ||
       numeric_values == NULL || solver->col_ptr == NULL ||
       solver->row_idx == NULL ||

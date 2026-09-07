@@ -6620,7 +6620,6 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
-  solver->fp32_last_used = 0;
   if (trace_phases) {
     const double trace_end = kls_now_seconds();
     fprintf(stderr,
@@ -9843,8 +9842,6 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   atomic_init(&shared.row_prefactor_deps, 0ul);
   atomic_init(&shared.row_prefactor_supernode_rows, 0ul);
   atomic_init(&shared.row_prefactor_supernode_deps, 0ul);
-  atomic_init(&shared.algorithm5_prefactor_columns, 0ul);
-  atomic_init(&shared.algorithm5_prefactor_deps, 0ul);
 
   kls_egraph_refactor_worker worker;
   memset(&worker, 0, sizeof(worker));
@@ -9933,7 +9930,6 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = 1;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
-  solver->fp32_last_used = 0;
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   kls_maybe_disable_native_row_panel_auto(
@@ -18332,7 +18328,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
                         memory_order_relaxed);
   shared->row_refactor_simple_scalar_update =
     getenv("KLS_ROW_SCALAR_SIMPLE") != NULL;
-  shared->algorithm5_prefactor_updates = 0;
   solver->row_refactor_native_row_panel_enabled =
     kls_native_row_panel_enabled_for_run(
       solver, native_row_panel_state, check_pivots);
@@ -18383,10 +18378,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   atomic_store_explicit(&shared->row_prefactor_supernode_rows, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->row_prefactor_supernode_deps, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->algorithm5_prefactor_columns, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->algorithm5_prefactor_deps, 0ul,
                         memory_order_release);
   atomic_store_explicit(&shared->row_pipeline_ready_head, 0ul,
                         memory_order_release);
@@ -18743,9 +18734,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = published_for_solve ? 0 : 1;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
-  /* Full fp64 factors: clear any fp32 refinement debt left by a prior
-     column-engine refactor so solves stop paying the correction pass. */
-  solver->fp32_last_used = 0;
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   kls_maybe_disable_native_row_panel_auto(
