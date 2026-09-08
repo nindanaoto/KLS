@@ -1850,8 +1850,6 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long producer_batch_target_u_entries;
   UF_long producer_batch_internal_entries;
   UF_long producer_batch_output_entries;
-  UF_long producer_batch_state_rows;
-  UF_long producer_batch_unique_state_rows;
   UF_long producer_candidate_targets;
   UF_long producer_candidate_target_u_entries;
   UF_long producer_underfilled_target_u_entries;
@@ -1971,10 +1969,6 @@ static void kls_row_first_pipeline_trace_add(
                           source->producer_batch_internal_entries);
   kls_row_first_stats_add(&target->producer_batch_output_entries,
                           source->producer_batch_output_entries);
-  kls_row_first_stats_add(&target->producer_batch_state_rows,
-                          source->producer_batch_state_rows);
-  kls_row_first_stats_add(&target->producer_batch_unique_state_rows,
-                          source->producer_batch_unique_state_rows);
   kls_row_first_stats_add(&target->producer_candidate_targets,
                           source->producer_candidate_targets);
   kls_row_first_stats_add(&target->producer_candidate_target_u_entries,
@@ -5952,7 +5946,6 @@ typedef struct kls_row_first_pipeline_shared {
   kls_row_first_workspace *workspace;
   kls_row_first_entries *l_entries;
   kls_row_first_entries *u_entries;
-  unsigned int *trace_state_union_mark;
   kls_row_first_entries *private_u_entries;
   const UF_long *private_u_row_ptr;
   const UF_long *private_u_row_end;
@@ -5980,7 +5973,6 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long completed_pos;
 
   UF_long order_epoch;
-  unsigned int trace_state_union_generation;
   UF_long pivot_tail_rows;
   UF_long pivot_restarts;
 
@@ -6185,53 +6177,6 @@ static int kls_row_first_pipeline_worker_supernode_batch_candidate(
   return 1;
 }
 
-static void kls_row_first_pipeline_trace_producer_batch_state_union(
-  kls_row_first_pipeline_shared *shared,
-  kls_row_first_pipeline_trace *trace,
-  UF_long target_count) {
-  if (shared == NULL || trace == NULL ||
-      shared->trace_state_union_mark == NULL ||
-      shared->ctx == NULL || shared->batch_targets == NULL ||
-      target_count == 0u) {
-    return;
-  }
-  unsigned int generation = shared->trace_state_union_generation + 1u;
-  if (generation == 0u) {
-    memset(shared->trace_state_union_mark, 0,
-           (size_t)shared->ctx->nk *
-             sizeof(*shared->trace_state_union_mark));
-    generation = 1u;
-  }
-  shared->trace_state_union_generation = generation;
-
-  UF_long state_rows = 0u;
-  UF_long unique_rows = 0u;
-  for (UF_long t = 0; t < target_count; ++t) {
-    kls_row_first_pipeline_worker *worker =
-      shared->batch_targets[t].worker;
-    kls_row_first_partial_row *state = shared->batch_targets[t].state;
-    if (worker == NULL || state == NULL ||
-        worker->workspace.pattern == NULL ||
-        state->pattern_count > shared->ctx->nk) {
-      return;
-    }
-    kls_row_first_stats_add(&state_rows, state->pattern_count);
-    for (UF_long p = 0; p < state->pattern_count; ++p) {
-      const UF_long col = worker->workspace.pattern[p];
-      if (col >= shared->ctx->nk) {
-        return;
-      }
-      if (shared->trace_state_union_mark[col] != generation) {
-        shared->trace_state_union_mark[col] = generation;
-        kls_row_first_stats_add(&unique_rows, 1u);
-      }
-    }
-  }
-  kls_row_first_stats_add(&trace->producer_batch_state_rows, state_rows);
-  kls_row_first_stats_add(&trace->producer_batch_unique_state_rows,
-                          unique_rows);
-}
-
 static int kls_row_first_pipeline_apply_supernode_producer_batch(
   kls_row_first_pipeline_shared *shared,
   kls_row_first_pipeline_worker *current_worker,
@@ -6411,8 +6356,6 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
                             run_entries);
     kls_row_first_stats_add(&producer_trace->producer_batch_target_u_entries,
                             candidate_target_u_entries);
-    kls_row_first_pipeline_trace_producer_batch_state_union(
-      shared, producer_trace, target_count);
   }
   return 1;
 }
@@ -6741,8 +6684,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
                             internal_entries);
     kls_row_first_stats_add(&producer_trace->producer_batch_output_entries,
                             output_entries);
-    kls_row_first_pipeline_trace_producer_batch_state_union(
-      shared, producer_trace, target_count);
   }
   return 1;
 }
@@ -6776,8 +6717,6 @@ static void kls_row_first_pipeline_trace_print(
           " producer_target_u_entries=%" PRIu64
           " producer_u_internal=%" PRIu64
           " producer_u_output=%" PRIu64
-          " producer_state_rows=%" PRIu64
-          " producer_unique_state_rows=%" PRIu64
           " producer_candidate_targets=%" PRIu64
           " producer_candidate_target_u_entries=%" PRIu64
           " producer_underfilled_target_u_entries=%" PRIu64
@@ -6801,8 +6740,6 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->producer_batch_target_u_entries,
           (uint64_t)trace->producer_batch_internal_entries,
           (uint64_t)trace->producer_batch_output_entries,
-          (uint64_t)trace->producer_batch_state_rows,
-          (uint64_t)trace->producer_batch_unique_state_rows,
           (uint64_t)trace->producer_candidate_targets,
           (uint64_t)trace->producer_candidate_target_u_entries,
           (uint64_t)trace->producer_underfilled_target_u_entries,
@@ -7573,13 +7510,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
 
   shared.trace_enabled =
     (kls_row_pipeline_trace_env_enabled());
-  if (shared.trace_enabled &&
-      ctx->nk <=
-        (UF_long)(SIZE_MAX / sizeof(*shared.trace_state_union_mark))) {
-    shared.trace_state_union_mark =
-      (unsigned int *)calloc((size_t)ctx->nk,
-                             sizeof(*shared.trace_state_union_mark));
-  }
   shared.workers = workers;
 
   shared.batch_targets = batch_targets;
@@ -7618,7 +7548,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(supernode_start);
     free(supernode_end);
 
-    free(shared.trace_state_union_mark);
     return 0;
   }
   if (pthread_cond_init(&shared.cond, NULL) != 0) {
@@ -7635,7 +7564,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
     free(supernode_start);
     free(supernode_end);
 
-    free(shared.trace_state_union_mark);
     return 0;
   }
 
@@ -7753,7 +7681,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
   free(workers);
 
   free(batch_targets);
-  free(shared.trace_state_union_mark);
   return ok;
 }
 
