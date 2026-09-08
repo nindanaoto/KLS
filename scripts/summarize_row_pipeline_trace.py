@@ -17,6 +17,8 @@ Candidate-target and rejected-work entry counts are also archived-only.
 Successful producer-batch and active-catch-up counters are archived-only too.
 Panel update/append progress-trace counters are also archived-only; separate
 solver panel statistics remain available.
+Scalar dependency/run counters are archived-only. Current progress records
+retain event and completed/begin/end positions without numeric-work counters.
 """
 
 from __future__ import annotations
