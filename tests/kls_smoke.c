@@ -14036,7 +14036,8 @@ static int run_sn_panel_factor_test(void) {
    streams.  Large factors defer their engine preparations until the first
    changed refactorization, and that preparation sorts the packed LU columns.
    The sort must invalidate and rebuild the streams before the next solve. */
-static int test_deferred_sort_rebuilds_compact_solve(int interleaved) {
+static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
+                                                   int dense_updates) {
   enum { block_size = 64, block_count = 256, n = block_size * block_count };
   const size_t nnz = (size_t)n * (block_size / (interleaved ? 2 : 1));
   const char *env_names[] = {
@@ -14048,7 +14049,8 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved) {
     "KLS_DISABLE_I32_SOLVE",
     "KLS_DISABLE_SNB_REFACTOR",
     "KLS_SNB_WMAX",
-    "KLS_SNB_ZETA"
+    "KLS_SNB_ZETA",
+    "KLS_SNB_WNARROW"
   };
   enum { env_count = (int)(sizeof(env_names) / sizeof(env_names[0])) };
   char *saved[env_count];
@@ -14081,6 +14083,9 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved) {
        unsetenv("KLS_DISABLE_I32_SOLVE") != 0 ||
        unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0 ||
        setenv("KLS_SNB_WMAX", "4", 1) != 0 ||
+       /* Run both sparse updates and the dense scratch-buffer product on
+          the same panels, including the interleaved structural zeros. */
+       setenv("KLS_SNB_WNARROW", dense_updates ? "1" : "8", 1) != 0 ||
        (interleaved ? setenv("KLS_SNB_ZETA", "2", 1)
                     : unsetenv("KLS_SNB_ZETA")) != 0)) {
     perror("configure deferred-sort compact-solve test");
@@ -14821,8 +14826,10 @@ int main(void) {
     perror("setenv KLS_DISABLE_UNCHANGED_REFACTOR=1");
     return EXIT_FAILURE;
   }
-  if (!test_deferred_sort_rebuilds_compact_solve(0) ||
-      !test_deferred_sort_rebuilds_compact_solve(1)) {
+  if (!test_deferred_sort_rebuilds_compact_solve(0, 0) ||
+      !test_deferred_sort_rebuilds_compact_solve(1, 0) ||
+      !test_deferred_sort_rebuilds_compact_solve(0, 1) ||
+      !test_deferred_sort_rebuilds_compact_solve(1, 1)) {
     return EXIT_FAILURE;
   }
 

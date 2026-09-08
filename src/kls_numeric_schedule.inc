@@ -785,11 +785,12 @@ static int kls_snb_prepare(kls_solver *solver) {
     st->rs_tmp = (double *)malloc((size_t)symbolic->n * sizeof(double));
     ok = st->ub_w != NULL && st->gemm_w != NULL && st->rs_tmp != NULL;
     for (int t = 0; ok && t < nworkers; ++t) {
-      st->ub_w[t] = (double *)malloc(2u * (size_t)st->wmax *
-                                     (size_t)st->wmax * sizeof(double));
-      st->gemm_w[t] = (double *)malloc((size_t)gmax_below *
-                                       (size_t)st->wmax *
-                                       sizeof(double));
+      /* Dense updates reuse these SIMD scratch streams. Give them the
+         same alignment guarantee as the other numeric work buffers. */
+      st->ub_w[t] = kls_aligned_double_values(2u * (UF_long)st->wmax *
+                                             (UF_long)st->wmax);
+      st->gemm_w[t] = kls_aligned_double_values((UF_long)gmax_below *
+                                               (UF_long)st->wmax);
       ok = st->ub_w[t] != NULL && st->gemm_w[t] != NULL;
     }
     if (ok) {

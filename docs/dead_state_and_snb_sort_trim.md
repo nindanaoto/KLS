@@ -1,5 +1,9 @@
 # Dead state, diagnostic paths, and SNB union-sort cleanup
 
+Subsequent repair: [SNB scratch alignment](snb_scratch_alignment_fix.md)
+addresses the transient regression documented below while retaining this
+cleanup. The measurements here describe the original cleanup commit.
+
 Relative to `e01e3ca`, removed:
 
 - Six private fields with no live nonzero state: `lean_pending`,
