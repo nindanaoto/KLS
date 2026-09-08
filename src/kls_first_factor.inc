@@ -5157,9 +5157,7 @@ static int kls_row_first_partial_apply_supernode_run_compact(
   UF_long dep_begin,
   UF_long dep_end,
   UF_long *run_rows_out,
-  int shape_known,
-  int publish_panel,
-  kls_row_first_row_stats *stats) {
+  int shape_known) {
   KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       published_u_entries == NULL || udiag_values == NULL ||
@@ -5282,13 +5280,6 @@ static int kls_row_first_partial_apply_supernode_run_compact(
     x[col] -= trailing_workspace[offset];
   }
 
-  if (publish_panel && workspace->supernode_panel_cache != NULL) {
-    (void)kls_row_first_supernode_panel_cache_append(
-      workspace->supernode_panel_cache, published_u_entries, u_row_ptr,
-      u_row_end, udiag_values, ctx->nk, dep_begin, dep_end, UF_long_max,
-      stats);
-  }
-
   if (run_rows_out != NULL) {
     *run_rows_out = run_rows;
   }
@@ -5320,7 +5311,6 @@ static int kls_row_first_partial_apply_supernode_run(
   if (cached_status < 0) {
     return 0;
   }
-  int publish_compact_panel = 0;
   if (workspace != NULL && workspace->supernode_panel_cache != NULL &&
       kls_row_first_supernode_panel_cache_append(
         workspace->supernode_panel_cache, published_u_entries,
@@ -5343,7 +5333,7 @@ static int kls_row_first_partial_apply_supernode_run(
     kls_row_first_partial_apply_supernode_run_compact(
       ctx, workspace, local_l_entries, published_u_entries, udiag_values,
       u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out,
-      shape_known, publish_compact_panel, stats);
+      shape_known);
   if (compact_status > 0) {
     return 1;
   }
@@ -5952,8 +5942,7 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
         shared->ctx, &worker->workspace, &worker->l_entries,
         shared->u_entries, shared->udiag_values,
         shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-        state, dep_begin, dep_end, &applied_rows, 1, 0,
-        shared->stats);
+        state, dep_begin, dep_end, &applied_rows, 1);
     if (compact_status < 0) {
       ok = 0;
       break;
