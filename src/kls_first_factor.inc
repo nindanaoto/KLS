@@ -12741,8 +12741,6 @@ static int kls_compare_uf_long_asc(const void *a, const void *b) {
   return (left > right) - (left < right);
 }
 
-static int kls_predicted_pivoting_fill(kls_solver *solver,
-                                       const double *numeric_values);
 static int kls_predicted_pivot_rescue(kls_solver *solver,
                                       const double *numeric_values,
                                       double *elapsed);
@@ -14610,13 +14608,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
    any in-run candidate.  Values are left uninitialized; the pivoting fill
    rewrites every pattern position. */
 static int kls_predicted_suffix_close_numeric_mode(
-  kls_solver *solver, const unsigned char *span_full);
-
-static int kls_predicted_suffix_close_numeric(kls_solver *solver) {
-  return kls_predicted_suffix_close_numeric_mode(solver, NULL);
-}
-
-static int kls_predicted_suffix_close_numeric_mode(
   kls_solver *solver, const unsigned char *span_full) {
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
@@ -14953,15 +14944,6 @@ static int kls_predicted_suffix_close_numeric_mode(
   numeric->max_lnz_block = max_lnz_block;
   numeric->max_unz_block = max_unz_block;
   return 1;
-}
-
-static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
-                                           const double *numeric_values,
-                                           unsigned char *span_hot);
-
-static int kls_predicted_pivoting_fill(kls_solver *solver,
-                                       const double *numeric_values) {
-  return kls_predicted_pivoting_fill_hot(solver, numeric_values, NULL);
 }
 
 static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
@@ -16267,7 +16249,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
        full closure is their legalization.  The probe-retry path instead
        fills first with vetoes and opens only the veto-hot spans - the
        full closure explodes on spiked patterns (rajat25: 11x est). */
-    if (!kls_predicted_suffix_close_numeric(solver)) {
+    if (!kls_predicted_suffix_close_numeric_mode(solver, NULL)) {
       return 0;
     }
     if (est_total > 0.0 &&
@@ -16336,7 +16318,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
           }
           filled = 0;
         } else {
-          filled = kls_predicted_pivoting_fill(solver, numeric_values);
+          filled = kls_predicted_pivoting_fill_hot(solver, numeric_values, NULL);
         }
       }
     }
