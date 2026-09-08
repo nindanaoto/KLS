@@ -45,11 +45,6 @@ static void kls_snb_free(kls_solver *solver) {
   solver->snb_decision = 0;
 }
 
-static int kls_snb_trace_enabled(void) {
-  const char *value = getenv("KLS_TRACE_SNB");
-  return value != NULL && value[0] == '1';
-}
-
 /* Edge construction sorts the U-row union, and supernodes partition
  * consecutive columns.  Producer IDs and each producer's subcolumns are
  * therefore strictly increasing.  Locate a panel row without rescanning
@@ -656,16 +651,8 @@ static int kls_snb_prepare(kls_solver *solver) {
        (memchip 1.5-wide) and scattered shapes always reject, and their
        trial+panels would tax the once-charged factor term ~4s each.
        Gate on the cooperative work share computed from the schedule. */
-    if (kls_snb_trace_enabled()) {
-      fprintf(stderr, "KLS snb: shares coop %.2f par %.2f\n",
-              st->coop_work_share, st->par_work_share);
-    }
     if ((st->coop_work_share < 0.50) &&
         getenv("KLS_SNB_FORCE_TRIAL") == NULL) {
-      if (kls_snb_trace_enabled()) {
-        fprintf(stderr, "KLS snb: t4 gated off (coop %.2f)\n",
-                st->coop_work_share);
-      }
       ok = 0;
     }
   }
@@ -807,20 +794,6 @@ static int kls_snb_prepare(kls_solver *solver) {
     return 0;
   }
   solver->snb = st;
-  if (kls_snb_trace_enabled()) {
-    int64_t snodes = 0, cols = 0, panels = 0;
-    for (UF_long b = 0; b < st->nblocks; ++b) {
-      if (st->blocks[b].nk < 2u) continue;
-      snodes += st->blocks[b].snode_count;
-      cols += st->blocks[b].nk;
-      panels += st->blocks[b].panel_doubles;
-    }
-    fprintf(stderr,
-            "KLS snb: prepared %ld snodes over %ld cols, %.1f MB panels, "
-            "%ld snode levels, par share %.2f\n",
-            (long)snodes, (long)cols, (double)panels * 8.0 / 1048576.0,
-            (long)st->slevel_count, st->par_work_share);
-  }
   return 1;
 }
 
@@ -1595,14 +1568,6 @@ static void kls_snb_maybe_accept(kls_solver *solver,
     }
   }
   const double accept_start = kls_now_seconds();
-  if (getenv("KLS_TRACE_SNB") != NULL) {
-    fprintf(stderr,
-            "KLS snb gate: prep=%d decl=%d verd=%d dec=%d wall=%.1f\n",
-            solver->snode_prepared, solver->snb_declined,
-            solver->snb_trial_verdict, solver->snb_decision,
-            solver->snb_factor_start > 0.0
-              ? kls_now_seconds() - solver->snb_factor_start : -1.0);
-  }
   if (!solver->snode_prepared) {
     /* relaxed sort: same safety guards as the snode-panel prep, lower
        size floor (no retained position-based structures may exist) */
@@ -1679,10 +1644,6 @@ static void kls_snb_maybe_accept(kls_solver *solver,
       kls_snb_free(solver);
       solver->snb_declined = 1;
     }
-    if (kls_snb_trace_enabled()) {
-      fprintf(stderr, "KLS snb: factor-time trial %.3fms t%d ok=%ld\n",
-              trial * 1e3, threads, (long)snb_ok);
-    }
   }
   *elapsed += kls_now_seconds() - accept_start;
 }
@@ -1710,14 +1671,6 @@ static int kls_snb_try_refactor(kls_solver *solver,
                                   solver->options.threads)
       : kls_snb_refactor(solver, numeric_values);
     const double dt = kls_now_seconds() - t0;
-    if (kls_snb_trace_enabled()) {
-      fprintf(stderr,
-              "KLS snb steady re-trial: snb %.3fms vs incumbent %.3fms"
-              " -> %s\n", dt * 1e3,
-              solver->adaptive_refactor_seconds * 1e3,
-              rok && dt < 0.85 * solver->adaptive_refactor_seconds
-                ? "adopted" : "rejected");
-    }
     if (rok && dt < 0.85 * solver->adaptive_refactor_seconds) {
       solver->snb_decision = 1;
       *ok_out = rok;
@@ -1739,15 +1692,6 @@ static int kls_snb_try_refactor(kls_solver *solver,
       solver->numeric == NULL ||
       solver->symbolic == NULL || solver->snb == NULL ||
       solver->snb_decision < 0 || solver->snb_trial_verdict < 0) {
-    if (kls_snb_trace_enabled()) {
-      fprintf(stderr,
-              "KLS snb try gate: cp=%d dis=%d num=%d sym=%d snb=%d"
-              " dec=%d verd=%d\n",
-              check_pivots, kls_snb_env_disabled(),
-              solver->numeric == NULL, solver->symbolic == NULL,
-              solver->snb == NULL,
-              solver->snb_decision, solver->snb_trial_verdict);
-    }
     return 0;
   }
   const int threads = solver->options.threads;
@@ -1787,12 +1731,6 @@ static int kls_snb_try_refactor(kls_solver *solver,
     solver->snb_decision =
       snb_ok && snb_seconds < adoption_ratio * solver->snb_incumbent_seconds
         ? 1 : -1;
-    if (kls_snb_trace_enabled()) {
-      fprintf(stderr,
-              "KLS snb: acceptance incumbent %.3fms snb %.3fms t%d -> %s\n",
-              solver->snb_incumbent_seconds * 1e3, snb_seconds * 1e3,
-              threads, solver->snb_decision > 0 ? "adopted" : "rejected");
-    }
     if (solver->snb_decision < 0) {
       if (snb_ok && snb_seconds < solver->snb_incumbent_seconds &&
           solver->snb_retrial == 0) {
