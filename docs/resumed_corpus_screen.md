@@ -26,11 +26,31 @@ The baseline hash is checked against the accepted alignment-fix campaign;
 the candidate hash matches the preceding rejection-cleanup validation.
 The captured source diff is empty. No benchmark overlaps builds or tests.
 
-The screen is in progress. Completion or a verified stopping regression
-must be established before making an acceptance claim for the wider corpus.
+## Completed result
 
-At the commit-and-push checkpoint, cases 0-42 (43 of 186 planned cases)
-had completed with valid results and no confirmed stopping regression.
-The initial slowdowns on `circuit_1` (CPUs 0-7) and `hcircuit` (CPUs 8-15)
-did not persist above the review threshold in their 12-pair repeats.
-The campaign remains running; this snapshot is not a final benchmark result.
+The runner exited successfully after all 186 cases. The summary matches the
+metadata job list exactly, and both frozen binary hashes still match their
+recorded hashes. Of 1,264 launches, 1,254 were valid, producing 181 valid
+case comparisons and five inconclusive cases:
+
+- `ss1`, CPUs 8-15: both versions exceeded the 90-second launch limit.
+- `OPF_10000` and `OPF_3754`, both CPU domains: both versions exited with
+  `KLS benchmark failed: solve failed (-6)` and no JSON result.
+
+These limitations are not candidate-only regressions or successful checks.
+`ss1` on CPUs 0-7 completed with a -0.22% paired lifecycle change.
+
+Seven initial slowdown flags received 12-pair repeats. Their median paired
+lifecycle changes were `circuit_1` -0.76%, `hcircuit` +0.51%, `rajat17`
+-2.28%, `rajat18` -1.45%, `rajat21` -0.18%, `gemat11` +1.42%, and
+`qh1484` -1.07%. Only `hcircuit` used CPUs 8-15; the others used CPUs 0-7.
+None persisted above the 2.5% review trigger. The `gemat11` repeat was slower
+in all 12 pairs, so this is a small observed slowdown, not a zero-regression
+claim; its median remains below the approximately 3% stopping rule.
+
+Among valid cases, using the repeat when present, the largest median
+lifecycle increase was +2.46% on `rajat25`, CPUs 8-15 (three screen pairs).
+The historical `TSOPF_FS_b9_c6` regression case measured +0.34% on CPUs
+8-15 and -3.19% on CPUs 0-7. No notable stopping regression was confirmed.
+The medium-corpus checkpoint permits the next cleanup trial; it does not
+prove the five inconclusive cases or untested configurations regression-free.
