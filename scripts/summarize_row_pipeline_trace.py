@@ -15,6 +15,8 @@ Producer probe/ready-root/underfilled/low-saved-stream counts are archived-only;
 the retired producer_probe_lookahead counter was never incremented.
 Candidate-target and rejected-work entry counts are also archived-only.
 Successful producer-batch and active-catch-up counters are archived-only too.
+Panel update/append progress-trace counters are also archived-only; separate
+solver panel statistics remain available.
 """
 
 from __future__ import annotations
