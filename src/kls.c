@@ -16971,11 +16971,12 @@ static int solve_impl(kls_solver *solver,
           kls_run_compact_amf_two_block_parallel_residual(
             solver, refine_a, brhs, xrhs, residual,
             &bmax, &bnorm2, &rmax, &rnorm2);
+        /* The CSR worker maps internal rows/columns and undoes scaling.
+           Let the existing timing trial compare it in transformed frames
+           too; a plain-frame gate here would time CSC on both trial arms. */
         const int generic_parallel_residual =
           !kernel_transpose && nrhs == 1 &&
           b != x && kls_repeated_update_workload(&solver->options) &&
-          solver->row_perm == NULL && solver->user_col_perm == NULL &&
-          solver->row_scale == NULL && solver->col_scale == NULL &&
           (!ordinary_self_check_l2_contract ||
            generic_parallel_contract_residual) &&
           !compact_amf_two_block_parallel_residual &&

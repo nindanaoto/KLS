@@ -1,5 +1,9 @@
 # Regression investigation after preparation diagnostic cleanup
 
+Follow-up: the remaining eight-thread TSOPF loss is recovered by the
+[transformed residual dispatch fix](tsopf_transformed_residual_fix.md).
+The results below describe the earlier `cc8b1e5` partial repair.
+
 The requested cleanup was committed as `da66a15`. All removals remain:
 preparation timers, the row-supernode census, manual supernode overrides,
 the separator-private diagnostic scan, and lifecycle cycle maxima.

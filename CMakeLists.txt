@@ -726,6 +726,14 @@ if(KLS_BUILD_TESTS)
   target_compile_options(kls_smoke PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
   add_test(NAME kls_smoke COMMAND kls_smoke)
+  add_executable(kls_transformed_residual tests/kls_transformed_residual.c)
+  target_link_libraries(kls_transformed_residual PRIVATE KLS::kls)
+  if(KLS_MATH_LIBRARY)
+    target_link_libraries(kls_transformed_residual PRIVATE "${KLS_MATH_LIBRARY}")
+  endif()
+  target_compile_options(kls_transformed_residual PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+  add_test(NAME kls_transformed_residual COMMAND kls_transformed_residual)
 endif()
 
 install(TARGETS kls
