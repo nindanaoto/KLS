@@ -2833,15 +2833,9 @@ static int kls_repaired_tail_prefix_state_valid(const kls_solver *solver,
   UF_long *live_pinv = scratch + nk;
   UF_long *final_pinv = scratch + 2u * nk;
   UF_long *lpend = scratch + 3u * nk;
-  size_t prefix_lup = 0u;
-  UF_long prefix_lnz = 0;
-  UF_long prefix_unz = 0;
   const int ok = kls_reconstruct_block_live_prefix_state(
     solver, block, k1, nk, prefix_cols, final_pblock, live_p, live_pinv,
-    final_pinv, lpend, &prefix_lup, &prefix_lnz, &prefix_unz);
-  (void)prefix_lup;
-  (void)prefix_lnz;
-  (void)prefix_unz;
+    final_pinv, lpend, NULL, NULL, NULL);
   free(scratch);
   return ok;
 }

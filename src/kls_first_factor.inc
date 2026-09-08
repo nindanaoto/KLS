@@ -3653,7 +3653,6 @@ static UF_long kls_row_first_supernode_panel_cache_growth(
 
 static int kls_row_first_supernode_panel_cache_reserve_uf(
   UF_long **array_io,
-  UF_long used,
   UF_long *capacity_io,
   UF_long needed) {
   if (array_io == NULL || capacity_io == NULL) {
@@ -3673,7 +3672,6 @@ static int kls_row_first_supernode_panel_cache_reserve_uf(
   if (grown == NULL) {
     return 0;
   }
-  (void)used;
   *array_io = grown;
   *capacity_io = capacity;
   return 1;
@@ -3681,7 +3679,6 @@ static int kls_row_first_supernode_panel_cache_reserve_uf(
 
 static int kls_row_first_supernode_panel_cache_reserve_double(
   double **array_io,
-  UF_long used,
   UF_long *capacity_io,
   UF_long needed) {
   if (array_io == NULL || capacity_io == NULL) {
@@ -3701,7 +3698,6 @@ static int kls_row_first_supernode_panel_cache_reserve_double(
   if (grown == NULL) {
     return 0;
   }
-  (void)used;
   *array_io = grown;
   *capacity_io = capacity;
   return 1;
@@ -3821,13 +3817,13 @@ static int kls_row_first_supernode_panel_cache_append(
     return 0;
   }
   if (!kls_row_first_supernode_panel_cache_reserve_double(
-        &cache->dense_values, cache->dense_value_count,
+        &cache->dense_values,
         &cache->dense_value_capacity, dense_needed) ||
       !kls_row_first_supernode_panel_cache_reserve_double(
-        &cache->tail_values, cache->tail_value_count,
+        &cache->tail_values,
         &cache->tail_value_capacity, tail_value_needed) ||
       !kls_row_first_supernode_panel_cache_reserve_uf(
-        &cache->tail_cols, cache->tail_col_count,
+        &cache->tail_cols,
         &cache->tail_col_capacity, tail_col_needed)) {
     return 0;
   }
