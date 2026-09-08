@@ -6361,8 +6361,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
     shared->batch_targets[target_count].lij = lij;
     target_count++;
   }
-  const UF_long active_target_count = target_count;
-
   const UF_long candidate_target_u_entries =
     target_count != 0u && row_entries > UF_long_max / target_count
       ? UF_long_max
@@ -6401,7 +6399,7 @@ static int kls_row_first_pipeline_apply_producer_batch(
     return 1;
   }
 
-  if (active_target_count == target_count) {
+  {
     if (target_count >
           (UF_long)(SIZE_MAX / sizeof(*shared->batch_targets)) ||
         row_entries > (UF_long)(SIZE_MAX / sizeof(*shared->u_entries->col)) ||
@@ -6462,11 +6460,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
     free(detached_values);
     free(detached_cols);
     free(detached_targets);
-  } else if (!kls_row_first_pipeline_apply_scalar_producer_targets(
-               shared, shared->batch_targets, target_count, dep,
-               shared->u_entries->col + row_begin,
-               shared->u_entries->value + row_begin, row_entries)) {
-    return 0;
   }
 
   if (producer_trace != NULL) {
