@@ -9953,8 +9953,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_scale_checked = 0;
   solver->auto_scale_value_certified = 0;
   solver->auto_scale_unscaled_trial_certified = 0;
-  solver->auto_scale_deferred = 0;
-  solver->tight_pivot_deferred = 0;
   solver->auto_amd_shortcut = 0;
   solver->exact_matching_selected = 0;
   solver->exact_matching_scaling_selected = 0;
@@ -14938,6 +14936,24 @@ static int kls_compact_amf_two_block_parallel_residual_ready(kls_solver *solver)
   return pool != NULL && pool->thread_count == 5 && pool->created_count == 4;
 }
 
+/* Reduce worker statistics in their original tid order, including maxima's
+   original comparison semantics. */
+static KLS_ALWAYS_INLINE void kls_reduce_residual_stats(
+  const double *results, int threads,
+  double *bmax_out, double *bnorm2_out, double *rmax_out, double *rnorm2_out) {
+  double bmax = 0.0, bnorm2 = 0.0, rmax = 0.0, rnorm2 = 0.0;
+  for (int tid = 0; tid < threads; ++tid) {
+    bmax = bmax < results[4 * tid] ? results[4 * tid] : bmax;
+    bnorm2 += results[4 * tid + 1];
+    rmax = rmax < results[4 * tid + 2] ? results[4 * tid + 2] : rmax;
+    rnorm2 += results[4 * tid + 3];
+  }
+  *bmax_out = bmax;
+  *bnorm2_out = bnorm2;
+  *rmax_out = rmax;
+  *rnorm2_out = rnorm2;
+}
+
 static int kls_run_compact_amf_two_block_parallel_residual(
   kls_solver *solver,
   const double *a,
@@ -14987,20 +15003,8 @@ static int kls_run_compact_amf_two_block_parallel_residual(
   shared->values = NULL;
   shared->rs = NULL;
   pthread_mutex_unlock(&shared->lock);
-  double bmax = 0.0;
-  double bnorm2 = 0.0;
-  double rmax = 0.0;
-  double rnorm2 = 0.0;
-  for (int tid = 0; tid < 5; ++tid) {
-    bmax = bmax < results[4 * tid] ? results[4 * tid] : bmax;
-    bnorm2 += results[4 * tid + 1];
-    rmax = rmax < results[4 * tid + 2] ? results[4 * tid + 2] : rmax;
-    rnorm2 += results[4 * tid + 3];
-  }
-  *bmax_out = bmax;
-  *bnorm2_out = bnorm2;
-  *rmax_out = rmax;
-  *rnorm2_out = rnorm2;
+  kls_reduce_residual_stats(results, 5,
+                            bmax_out, bnorm2_out, rmax_out, rnorm2_out);
   return 1;
 }
 
@@ -15359,20 +15363,8 @@ static int kls_run_parallel_refine_csr_residual(
   shared->rs = NULL;
   pthread_mutex_unlock(&shared->lock);
   if (collect_stats) {
-    double bmax = 0.0;
-    double bnorm2 = 0.0;
-    double rmax = 0.0;
-    double rnorm2 = 0.0;
-    for (int tid = 0; tid < contract_threads; ++tid) {
-      bmax = bmax < results[4 * tid] ? results[4 * tid] : bmax;
-      bnorm2 += results[4 * tid + 1];
-      rmax = rmax < results[4 * tid + 2] ? results[4 * tid + 2] : rmax;
-      rnorm2 += results[4 * tid + 3];
-    }
-    *bmax_out = bmax;
-    *bnorm2_out = bnorm2;
-    *rmax_out = rmax;
-    *rnorm2_out = rnorm2;
+    kls_reduce_residual_stats(results, contract_threads,
+                              bmax_out, bnorm2_out, rmax_out, rnorm2_out);
   }
   return 1;
 }
@@ -15444,21 +15436,9 @@ static int kls_run_generic_plain_contract_vector_stats(
   shared->rs = NULL;
   pthread_mutex_unlock(&shared->lock);
 
-  double bmax = 0.0;
-  double bnorm2 = 0.0;
-  double rmax = 0.0;
-  double rnorm2 = 0.0;
-  for (int tid = 0; tid < pool->thread_count; ++tid) {
-    bmax = bmax < results[4 * tid] ? results[4 * tid] : bmax;
-    bnorm2 += results[4 * tid + 1];
-    rmax = rmax < results[4 * tid + 2] ? results[4 * tid + 2] : rmax;
-    rnorm2 += results[4 * tid + 3];
-  }
+  kls_reduce_residual_stats(results, pool->thread_count,
+                            bmax_out, bnorm2_out, rmax_out, rnorm2_out);
   free(results);
-  *bmax_out = bmax;
-  *bnorm2_out = bnorm2;
-  *rmax_out = rmax;
-  *rnorm2_out = rnorm2;
   return 1;
 }
 
@@ -16823,9 +16803,7 @@ static int solve_impl(kls_solver *solver,
          contract_armed) &&
         !promoted_tolerance_l2_contract &&
         !repeated_rhs_raw_l2_contract &&
-        getenv("KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT") == NULL &&
-        /* compatibility spelling from the row-only prototype */
-        getenv("KLS_DISABLE_ROW_SELF_CHECK_L2_CONTRACT") == NULL;
+        getenv("KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT") == NULL;
       const int generic_parallel_contract_residual =
         ordinary_self_check_l2_contract &&
         kls_generic_contract_residual_parallel_dispatch(solver);

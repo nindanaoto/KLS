@@ -12998,46 +12998,6 @@ static double kls_dense_help_wait_large_seconds(void) {
   return cached;
 }
 
-/* Trace one dense group without enabling the global help counters or printing
-   every cooperative session.  The unfiltered trace is intentionally much
-   heavier: on nxp1 it records hundreds of sessions per refactor and changes
-   the contention pattern that it is meant to diagnose. */
-static UF_long kls_dense_help_trace_group(void) {
-  static UF_long cached = KLS_KLU_EMPTY;
-  static int initialized;
-  if (!initialized) {
-    const char *env = getenv("KLS_TRACE_DENSE_HELP_GROUP");
-    if (env != NULL && *env != '\0') {
-      char *end = NULL;
-      const unsigned long long parsed = strtoull(env, &end, 10);
-      if (end != env && *end == '\0' &&
-          parsed <= (unsigned long long)UF_long_max) {
-        cached = (UF_long)parsed;
-      }
-    }
-    initialized = 1;
-  }
-  return cached;
-}
-
-static UF_long kls_row_trace_task_root(void) {
-  static UF_long cached = KLS_KLU_EMPTY;
-  static int initialized;
-  if (!initialized) {
-    const char *env = getenv("KLS_TRACE_ROW_TASK_ROOT");
-    if (env != NULL && *env != '\0') {
-      char *end = NULL;
-      const unsigned long long parsed = strtoull(env, &end, 10);
-      if (end != env && *end == '\0' &&
-          parsed <= (unsigned long long)UF_long_max) {
-        cached = (UF_long)parsed;
-      }
-    }
-    initialized = 1;
-  }
-  return cached;
-}
-
 /* Claim the next work index of the current help session. The cursor
    packs (epoch << 32 | index); a claim succeeds only when the caller's
    session epoch matches, so a participant holding a stale view of the
@@ -15149,13 +15109,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
     trailing_panel = dense_panel + dense_panel_entries;
   }
 
-  const int trace_dense_group = kls_dense_help_trace_group() == group;
-  const double trace_assembly_start =
-    trace_dense_group ? kls_now_seconds() : 0.0;
-  double trace_lock_wait_seconds = 0.0;
-  long trace_owner_rows = -1;
-  int trace_large_waiter = 0;
-  int trace_coop = 0;
   {
     int coop = 0;
     if (shared->thread_count > 1 && width >= 8 && kls_dense_help_enabled()) {
@@ -15166,7 +15119,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
       const int large_waiter = wait_large_enabled &&
         (width >= large_width ||
          (large_min_entries > 0u && panel_entries >= large_min_entries));
-      trace_large_waiter = large_waiter;
       int expected = 0;
       if ((!wait_large_enabled || large_waiter ||
            atomic_load_explicit(&shared->dense_help_large_waiters,
@@ -15177,8 +15129,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         coop = 1;
       }
       if (!coop && large_waiter) {
-        const double trace_lock_wait_start =
-          trace_dense_group ? kls_now_seconds() : 0.0;
         atomic_fetch_add_explicit(&shared->dense_help_large_waiters, 1,
                                   memory_order_acq_rel);
         const double wait_deadline = kls_now_seconds() +
@@ -15201,13 +15151,8 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         }
         atomic_fetch_sub_explicit(&shared->dense_help_large_waiters, 1,
                                   memory_order_acq_rel);
-        if (trace_dense_group) {
-          trace_lock_wait_seconds =
-            kls_now_seconds() - trace_lock_wait_start;
-        }
       }
     }
-    trace_coop = coop;
     if (coop) {
       struct kls_dense_help_ctx help_ctx;
       help_ctx.kind = KLS_DENSE_HELP_ASSEMBLE;
@@ -15278,7 +15223,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         &shared->dense_help_fail, memory_order_relaxed);
       atomic_store_explicit(&shared->dense_help_owner_lock, 0,
                             memory_order_release);
-      trace_owner_rows = owner_rows;
       if (getenv("KLS_TRACE_DENSE_HELP") != NULL) {
         fprintf(stderr,
                 "DH group=%ld width=%ld owner=%ld helped=%ld%s"
@@ -15351,18 +15295,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         row++;
       }
     }
-  }
-  if (trace_dense_group) {
-    fprintf(stderr,
-            "DHG group=%ld rows=%ld:%ld width=%ld trailing=%ld"
-            " coop=%d large=%d owner=%ld helped=%ld wait=%.6f"
-            " assembly=%.6f\n",
-            (long)group, (long)row_begin, (long)row_end, (long)width,
-            (long)trailing_len, trace_coop, trace_large_waiter,
-            trace_owner_rows,
-            trace_owner_rows >= 0 ? (long)width - trace_owner_rows : -1l,
-            trace_lock_wait_seconds,
-            kls_now_seconds() - trace_assembly_start);
   }
 
   if (shared->check_pivots) {
@@ -16867,8 +16799,6 @@ static int kls_row_refactor_process_ready_group_with_local_tail(
   if (worker == NULL || worker->shared == NULL) {
     return 0;
   }
-  const UF_long task_root = group;
-  const int trace_task = kls_row_trace_task_root() == task_root;
   for (;;) {
     if (kls_egraph_refactor_should_stop(worker->shared)) {
       return 0;
@@ -16876,7 +16806,7 @@ static int kls_row_refactor_process_ready_group_with_local_tail(
     const int wait_for_dependencies =
       worker->shared->row_pipeline_row_dep_ready_queue ? 1 : 0;
     const int time_group =
-      worker->shared->row_refactor_trace_worker_times || trace_task;
+      worker->shared->row_refactor_trace_worker_times;
     const double group_start = time_group ? kls_now_seconds() : 0.0;
     if (!kls_parallel_row_refactor_process_group(
           worker, group, wait_for_dependencies)) {
@@ -16884,28 +16814,11 @@ static int kls_row_refactor_process_ready_group_with_local_tail(
     }
     if (time_group) {
       const double group_seconds = kls_now_seconds() - group_start;
-      if (worker->shared->row_refactor_trace_worker_times &&
-          group_seconds > worker->telemetry_row_pipeline_max_group_seconds) {
+      if (group_seconds > worker->telemetry_row_pipeline_max_group_seconds) {
         worker->telemetry_row_pipeline_max_group_seconds = group_seconds;
         worker->telemetry_row_pipeline_max_group = group;
       }
-      if (trace_task) {
-        const kls_solver *solver = worker->shared->solver;
-        const UF_long row_begin = solver->row_refactor_group_ptr[group];
-        const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
-        fprintf(stderr,
-                "RTG root=%ld group=%ld kind=%d rows=%ld:%ld width=%ld"
-                " trailing=%ld work=%.0f seconds=%.6f tid=%d\n",
-                (long)task_root, (long)group,
-                solver->row_refactor_group_kind != NULL
-                  ? (int)solver->row_refactor_group_kind[group] : -1,
-                (long)row_begin, (long)row_end,
-                (long)(row_end - row_begin),
-                solver->row_refactor_group_trailing_len != NULL
-                  ? (long)solver->row_refactor_group_trailing_len[group] : -1l,
-                kls_row_refactor_group_work(solver, group),
-                group_seconds, worker->tid);
-      }
+
     }
     kls_parallel_row_refactor_mark_group_done(worker->shared,
                                              worker->shared->solver,
