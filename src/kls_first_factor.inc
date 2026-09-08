@@ -15655,8 +15655,6 @@ static int kls_build_block_structured_order(UF_long n,
      reversed.  The degree sorting is what keeps the component banded;
      without it the no-pivot fill bound explodes. */
   UF_long write = 0;
-  UF_long *rcm_queue = comp_order + 0; /* reuse below via perm scratch */
-  (void)rcm_queue;
   for (UF_long ci = 0; ci < ncomp; ++ci) {
     const UF_long c = comp_order[ci];
     const UF_long ms = comp_start[c];

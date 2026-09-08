@@ -12432,16 +12432,6 @@ static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
            KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY * panel_entries;
 }
 
-static int kls_native_row_panel_should_try(UF_long width,
-                                           UF_long trailing_len,
-                                           int env_state) {
-  (void)trailing_len;
-  if (env_state < 0 || width <= 1u) {
-    return 0;
-  }
-  return 1;
-}
-
 static int kls_native_row_panel_enabled_for_run(const kls_solver *solver,
                                                 int env_state,
                                                 int check_pivots) {
@@ -12458,14 +12448,13 @@ static int kls_native_row_panel_enabled_for_run(const kls_solver *solver,
 static int kls_native_row_panel_should_try_for_solver(
   const kls_solver *solver,
   UF_long width,
-  UF_long trailing_len,
   int env_state,
   int check_pivots) {
   if (!kls_native_row_panel_enabled_for_run(solver, env_state,
                                             check_pivots)) {
     return 0;
   }
-  return kls_native_row_panel_should_try(width, trailing_len, env_state);
+  return width > 1u;
 }
 
 static void kls_maybe_disable_native_row_panel_auto(
@@ -15404,7 +15393,7 @@ static int kls_parallel_row_refactor_process_dense_group(
   const int native_row_panel =
     shared != NULL &&
     kls_native_row_panel_should_try_for_solver(
-      solver, width, trailing_len, native_env_state, shared->check_pivots);
+      solver, width, native_env_state, shared->check_pivots);
   int compact_attempted = 0;
 
   if (native_row_panel) {
