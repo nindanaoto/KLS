@@ -10,6 +10,7 @@ are retained here for archived traces. Current KLS no longer emits them;
 missing counters are treated as zero.
 Scalar and producer internal/output touch counters are archived-only; the removed
 scalar L-entry count duplicated scalar_deps.
+Producer rejection-reason counters are also retained only for archived logs.
 """
 
 from __future__ import annotations
