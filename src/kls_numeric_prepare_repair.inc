@@ -4669,7 +4669,7 @@ static int kls_try_fast_reject_kls_first_rebuild(kls_solver *solver,
   if (solver == NULL || numeric_values == NULL) {
     return 0;
   }
-  if (!kls_should_try_first_factor_recovery(solver)) {
+  if (!kls_first_factor_env_enabled()) {
     return 0;
   }
   if (!kls_try_rebuild_current_numeric_with_kls_first_mode(

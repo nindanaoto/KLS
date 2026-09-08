@@ -312,6 +312,7 @@ static int kls_cblas_dense_panel_checked_row_update_may_apply(
 }
 #endif
 
+/* First-factor recovery is opt-in; ordinary first factorization may use AUTO. */
 KLS_DEFINE_ENV_FLAG(kls_first_factor_env_enabled,
                     "KLS_ENABLE_KLS_FIRST_FACTOR")
 
@@ -434,23 +435,6 @@ static int kls_should_try_first_factor(kls_solver *solver) {
     return 0;
   }
   return kls_auto_first_factor_should_run(solver);
-}
-
-static int kls_should_try_first_factor_recovery(kls_solver *solver) {
-  if (kls_first_factor_env_enabled()) {
-    return 1;
-  }
-  if (kls_first_factor_env_disabled()) {
-    return 0;
-  }
-  /*
-   * Retaining a successful prestatic/KLU first factor is faster on the current
-   * low-density many-BTF gap cases than replaying through the incomplete
-   * KLS-first scaffold. The scaffold remains forceable with
-   * KLS_ENABLE_KLS_FIRST_FACTOR=1.
-   */
-  (void)solver;
-  return 0;
 }
 
 static int kls_pipeline_refactor_fast_factor_repair_is_risky(

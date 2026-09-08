@@ -2405,7 +2405,6 @@ static int kls_try_rebuild_current_numeric_with_kls_first_mode(
   double *numeric_values,
   double *elapsed,
   int force);
-static int kls_should_try_first_factor_recovery(kls_solver *solver);
 static int kls_try_row_first_rebuild_rejected_block(
   kls_solver *solver,
   double *numeric_values,
@@ -10886,7 +10885,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     if (solver->numeric != NULL) {
       numeric_values = solver->values != NULL ? solver->values : numeric_values;
       const int kls_first_factor_used =
-        kls_should_try_first_factor_recovery(solver) &&
+        kls_first_factor_env_enabled() &&
         kls_try_rebuild_current_numeric_with_kls_first_mode(
           solver, numeric_values, &elapsed, 1);
       kls_set_last_factor_path(solver,
