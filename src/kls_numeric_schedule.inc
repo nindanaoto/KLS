@@ -308,15 +308,8 @@ static int kls_snb_prepare(kls_solver *solver) {
             if (union_rows[t - 1] > union_rows[t]) { sorted = 0; break; }
           }
           if (!sorted) {
-            for (int64_t i2 = 1; i2 < m; ++i2) {
-              const UF_long v = union_rows[i2];
-              int64_t j2 = i2 - 1;
-              while (j2 >= 0 && union_rows[j2] > v) {
-                union_rows[j2 + 1] = union_rows[j2];
-                j2--;
-              }
-              union_rows[j2 + 1] = v;
-            }
+            qsort(union_rows, (size_t)m, sizeof(*union_rows),
+                  kls_compare_uf_long);
           }
         }
         int64_t cnt = 0;

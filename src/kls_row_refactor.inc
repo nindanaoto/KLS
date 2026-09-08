@@ -10454,10 +10454,6 @@ static int kls_row_refactor_try_light_supernode_run(
   }
   const UF_long e = sn_end[dep0];
   if (e <= dep0) {
-    if (shared->row_refactor_trace_snode) {
-      atomic_fetch_add_explicit(&solver->lsn_decl_norun, 1u,
-                                memory_order_relaxed);
-    }
     return 0;
   }
   UF_long q = p0 + 1u;
@@ -10468,20 +10464,12 @@ static int kls_row_refactor_try_light_supernode_run(
   }
   const UF_long run = q - p0;
   if (run < 2u) {
-    if (shared->row_refactor_trace_snode) {
-      atomic_fetch_add_explicit(&solver->lsn_decl_short, 1u,
-                                memory_order_relaxed);
-    }
     return 0;
   }
   const UF_long d1 = dep0 + run - 1u;
   if (wait_for_dependencies) {
     for (UF_long r = dep0; r <= d1; ++r) {
       if (!kls_row_refactor_dependency_done_now(shared, r)) {
-        if (shared->row_refactor_trace_snode) {
-          atomic_fetch_add_explicit(&solver->lsn_decl_wait, 1u,
-                                    memory_order_relaxed);
-        }
         return 0;
       }
     }
@@ -10493,10 +10481,6 @@ static int kls_row_refactor_try_light_supernode_run(
   const UF_long tail_begin = up[d1];
   const UF_long tail_len = up[d1 + 1u] - tail_begin;
   const UF_long *tail_cols = uc + tail_begin;
-  if (shared->row_refactor_trace_snode) {
-    atomic_fetch_add_explicit(&solver->lsn_consumed, 1u,
-                              memory_order_relaxed);
-  }
   double *acc = NULL;
   if (tail_len > 0u) {
     acc = kls_egraph_worker_supernode_workspace(worker, tail_len);
@@ -10527,13 +10511,6 @@ static int kls_row_refactor_try_light_supernode_run(
   }
   for (UF_long t = 0; t < tail_len; ++t) {
     x[tail_cols[t]] = acc[t];
-  }
-  if (shared->row_refactor_trace_snode) {
-    atomic_fetch_add_explicit(&solver->row_light_snode_runs, 1u,
-                              memory_order_relaxed);
-    atomic_fetch_add_explicit(&solver->row_light_snode_entries,
-                              (unsigned long long)(up[d1 + 1u] - up[dep0]),
-                              memory_order_relaxed);
   }
   *p_io = q;
   return 1;
@@ -10580,11 +10557,6 @@ static int kls_parallel_row_refactor_apply_scalar_dep(
       }
     } else {
       kls_scatter_subtract(x, u_cols, u_values, u_end - u_begin, lij);
-    }
-    if (shared->row_refactor_trace_snode) {
-      atomic_fetch_add_explicit(&solver->row_scalar_dep_entries,
-                                (unsigned long long)(u_end - u_begin),
-                                memory_order_relaxed);
     }
   }
   return 1;
@@ -18009,8 +17981,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_native_row_panel_state = native_row_panel_state;
   shared->row_refactor_native_row_panel_active = 0;
 
-  shared->row_refactor_trace_snode =
-    getenv("KLS_TRACE_ROW_SNODE") != NULL;
   shared->row_refactor_shared_telemetry =
     getenv("KLS_ROW_TELEMETRY_SHARED") != NULL;
   shared->row_refactor_trace_dense_help =

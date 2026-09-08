@@ -12017,7 +12017,6 @@ kls_adopt_unfactored:;
     trial_col_scale != NULL;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
-  solver->prestatic_dense_spiked_match = 0;
   kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
@@ -12572,7 +12571,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       (kls_sparse_fragmented_dominant_btf_symbolic_work(solver) &&
        getenv("KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION") == NULL) ||
       solver->medium_partial_static_metis_path ||
-      solver->medium_spike_minfill_path || solver->large_sparse_amf3_path ||
+      solver->medium_spike_minfill_path ||
       solver->large_bounded_no_btf_amf_path) {
     return;
   }
@@ -16708,15 +16707,8 @@ static int select_candidate(kls_pattern_candidate *normal,
         ? transpose : normal;
       if (overlap_candidate != NULL) {
         overlap_candidate->generic_nd_overlap_target = &overlapped_nd;
-        /* The minimum-degree tournament settles BTF before launching this
-           worker through the handoff above.  An explicit diagnostic can
-           retain the old eager launch, but AUTO now spends resources on only
-           the realized coordinate frame. */
-        if (getenv("KLS_ENABLE_GENERIC_EARLY_COORDINATE_FREE_ND") != NULL) {
-          (void)kls_generic_nd_trial_start(
-            &overlapped_nd, overlap_candidate, generic_options,
-            generic_options->use_btf ? 1 : 0);
-        }
+        /* The minimum-degree tournament launches this worker after
+           settling BTF, using the realized coordinate frame. */
       }
     }
     const int status =

@@ -14036,9 +14036,9 @@ static int run_sn_panel_factor_test(void) {
    streams.  Large factors defer their engine preparations until the first
    changed refactorization, and that preparation sorts the packed LU columns.
    The sort must invalidate and rebuild the streams before the next solve. */
-static int test_deferred_sort_rebuilds_compact_solve(void) {
+static int test_deferred_sort_rebuilds_compact_solve(int interleaved) {
   enum { block_size = 64, block_count = 256, n = block_size * block_count };
-  const size_t nnz = (size_t)n * block_size;
+  const size_t nnz = (size_t)n * (block_size / (interleaved ? 2 : 1));
   const char *env_names[] = {
     "KLS_ENABLE_KLS_FIRST_FACTOR",
     "KLS_ENABLE_ROW_REFACTOR",
@@ -14047,7 +14047,8 @@ static int test_deferred_sort_rebuilds_compact_solve(void) {
     "KLS_SYNC_FACTOR_PREPS",
     "KLS_DISABLE_I32_SOLVE",
     "KLS_DISABLE_SNB_REFACTOR",
-    "KLS_SNB_WMAX"
+    "KLS_SNB_WMAX",
+    "KLS_SNB_ZETA"
   };
   enum { env_count = (int)(sizeof(env_names) / sizeof(env_names[0])) };
   char *saved[env_count];
@@ -14079,7 +14080,9 @@ static int test_deferred_sort_rebuilds_compact_solve(void) {
        unsetenv("KLS_SYNC_FACTOR_PREPS") != 0 ||
        unsetenv("KLS_DISABLE_I32_SOLVE") != 0 ||
        unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0 ||
-       setenv("KLS_SNB_WMAX", "4", 1) != 0)) {
+       setenv("KLS_SNB_WMAX", "4", 1) != 0 ||
+       (interleaved ? setenv("KLS_SNB_ZETA", "2", 1)
+                    : unsetenv("KLS_SNB_ZETA")) != 0)) {
     perror("configure deferred-sort compact-solve test");
     ok = 0;
   }
@@ -14113,6 +14116,10 @@ static int test_deferred_sort_rebuilds_compact_solve(void) {
          its packed factors therefore give the deferred sort real work. */
       for (int32_t q = 0; q < block_size; ++q) {
         const int32_t local_row = (17 * q + 7 * local_col) % block_size;
+        /* Interleaved even/odd dense subblocks give successive panel
+           columns different U predecessors: union [0,2] with [1,3]
+           exercises sorting, while the dense variant tests sorted unions. */
+        if (interleaved && ((local_row ^ local_col) & 1)) continue;
         const int32_t row = first + local_row;
         ai[pos] = row;
         ax[pos] = local_row == local_col
@@ -14814,7 +14821,8 @@ int main(void) {
     perror("setenv KLS_DISABLE_UNCHANGED_REFACTOR=1");
     return EXIT_FAILURE;
   }
-  if (!test_deferred_sort_rebuilds_compact_solve()) {
+  if (!test_deferred_sort_rebuilds_compact_solve(0) ||
+      !test_deferred_sort_rebuilds_compact_solve(1)) {
     return EXIT_FAILURE;
   }
 

@@ -6995,35 +6995,6 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       solver->refactor_level_max_width < (UF_long)(4 * solver->options.threads)) {
     return 0;
   }
-  if (solver->egraph_tight_tol_state < 0 ||
-      (solver->stats.selected_pivot_tolerance > 0.0 &&
-       solver->stats.selected_pivot_tolerance <
-         solver->options.pivot_tolerance &&
-       solver->n >= 200000u &&
-       solver->row_perm == NULL && solver->user_col_perm == NULL &&
-       !solver->spral_matching_selected &&
-       getenv("KLS_VETO_EGRAPH_TIGHT_TOL") != NULL)) {
-    /* Historic tight-tolerance veto, default-OFF again (2026-07-15,
-       third and final flip — full story in docs/paper_ideas_audit.md).
-       The "tight-tol egraph corruption" (raj1 constant 2.5e-4,
-       mac_econ 1-in-3 draws above the 1e-8 bar) was never this
-       engine's arithmetic: tiny tight-tol pivots trigger the fast
-       factor's rejected-pivot block restart, whose row-first rebuild
-       reallocates and re-pivots the block, and the only invalidation
-       was the i32 mirror — this engine then consumed a dangling LU
-       pointer cache and a refactor map ordered by the dead pivot
-       sequence (watchpoint-proven: its values were bit-exact to the
-       WRONG factorization).  The row engine re-derives pointers from
-       the live numeric per run, which is why every veto-era
-       engine-swap comparison blamed the egraph.  Fixed at the restart
-       call site (565e4ea): the column-engine caches are freed and the
-       deferred consult re-armed.  Re-lift evidence: raj1 15 draws
-       clean across t2/t4/t8 x rr3/rr20 (t8 egraph 1.35-1.40e-16),
-       mac_econ 6/6 valid (1.1e-10..4.4e-9 corrected band).
-       KLS_VETO_EGRAPH_TIGHT_TOL restores the ban (plain-frame,
-       n>=200k) if the class ever regresses. */
-    return 0;
-  }
   if (solver->dense_tail_cols > 0) {
     /* pipe-emitted dense-tail numerics (see the schedule gate): the
        tail no-ops in the dispatch, the BLAS3 refresh rebuilds it */

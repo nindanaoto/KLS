@@ -598,8 +598,6 @@ struct kls_solver {
   int row_accept_publish_preferred; /* measured: column solve beats row solve */
   int prestatic_adopted_unfactored; /* matched pattern installed, numeric
                                        deferred to the parallel first factor */
-  int prestatic_dense_spiked_match; /* dense spiked matrix adopted the
-                                       direct matched METIS route */
   int medium_partial_static_metis_path; /* structurally guaranteed medium
                                            pre-static METIS adoption */
   int dense_spiked_original_pivot_path; /* dense spike kept the incumbent
@@ -608,8 +606,6 @@ struct kls_solver {
   int medium_spike_minfill_path; /* full-diagonal medium spike selected the
                                     retained AMMF numeric */
   int large_sparse_amf3_candidate; /* input proposed broad-column AMF3 */
-  int large_sparse_amf3_path;    /* broad-column sparse diagonal system
-                                    passed the AMF3/no-BTF contract */
   int large_bounded_no_btf_amf_candidate; /* input proposed bounded AMF */
   int large_bounded_no_btf_amf_path; /* bounded-degree diagonal system
                                         passed the one-block AMF contract */
@@ -724,9 +720,6 @@ struct kls_solver {
   int snode_tail_chunk128; /* 128-entry fused-tail accumulator */
   int snode_tail_chunk144; /* 144-entry fused-tail accumulator */
   int snode_tail_masked_remainder; /* one-pass masked 33--63 tail */
-  int egraph_tight_tol_state;  /* tight-tol numeric x egraph refactor:
-                                  0 unprobed, 1 factor probe passed,
-                                  -1 vetoed (Raj1-class value defect) */
   int floor_choice;    /* batch-floor trial (mapped/egraph rows):
                           0 undecided, 1 low floors, -1 defaults */
   int floor_pending;   /* low-floor probe refactor outstanding */
@@ -752,12 +745,10 @@ struct kls_solver {
   double moderate_btf_trial_seconds;
   int lean_choice;     /* lean-row-walk trial (low-flop cohort):
                           0 undecided, 1 lean, 2 lean-pair, -1 incumbent */
-  int lean_pending;    /* alternating three-arm probe refactors left */
   int lean_wait;
   int lean_probe_arm;  /* arm the NEXT refactor runs: 0 incumbent,
                           1 lean, 2 lean-pair */
   int lean_pair_active;
-  double lean_probe_min[3];
   int lean_reaudit_state; /* generic timed lean verdict: 0 collect selected,
                              1/3 arm incumbent, 2/4 record it, 6 await its
                              final solve, 5 settled;
@@ -971,11 +962,6 @@ struct kls_solver {
                                      the retained L stream is fused */
   int lean_snode_avx512_candidate; /* 0 none, 1 profitable width eight,
                                       2 includes isolated width sixteen */
-  atomic_ullong row_light_snode_runs;     /* light-run consume telemetry */
-  atomic_ullong row_light_snode_entries;
-  atomic_ullong row_scalar_dep_entries;   /* scalar-fallback U entries */
-  atomic_ullong lsn_decl_norun, lsn_decl_short, lsn_decl_wait,
-                lsn_consumed;             /* decline-reason census */
   UF_long *row_refactor_input_ptr;
   uint32_t *row_refactor_input_ptr32;
   uint16_t *row_refactor_input_ptr16;
@@ -1458,7 +1444,6 @@ struct kls_solver {
   int tight_pivot_deferred; /* repeated lifecycle: evaluate the tight-pivot
                                numeric after pending representation trials */
   int auto_amd_shortcut;
-  int compact_partial_diagonal_column_fringe;
   int exact_matching_selected;
   int exact_matching_scaling_selected;
   int spral_matching_selected;
@@ -1899,7 +1884,6 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_native_row_panel_state;
   int row_refactor_native_row_panel_active;
 
-  int row_refactor_trace_snode;
   int row_refactor_shared_telemetry;
   int row_refactor_trace_dense_help;
   int row_refactor_trace_worker_times;
@@ -9810,7 +9794,6 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->snode_tail_chunk128 = 0;
   solver->snode_tail_chunk144 = 0;
   solver->snode_tail_masked_remainder = 0;
-  solver->egraph_tight_tol_state = 0;
   solver->floor_choice = 0;
   solver->floor_pending = 0;
   solver->floor_wait = 0;
@@ -9829,11 +9812,9 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->moderate_btf_compact_seconds = 0.0;
   solver->moderate_btf_trial_seconds = 0.0;
   solver->lean_choice = 0;
-  solver->lean_pending = 0;
   solver->lean_wait = 0;
   solver->lean_probe_arm = 0;
   solver->lean_pair_active = 0;
-  memset(solver->lean_probe_min, 0, sizeof(solver->lean_probe_min));
   solver->lean_reaudit_state = 0;
   solver->lean_reaudit_samples = 0;
   solver->lean_reaudit_seconds = 0.0;
@@ -10010,7 +9991,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_scale_deferred = 0;
   solver->tight_pivot_deferred = 0;
   solver->auto_amd_shortcut = 0;
-  solver->compact_partial_diagonal_column_fringe = 0;
   solver->exact_matching_selected = 0;
   solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
@@ -10018,7 +9998,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->medium_spike_minfill_candidate = 0;
   solver->medium_spike_minfill_path = 0;
   solver->large_sparse_amf3_candidate = 0;
-  solver->large_sparse_amf3_path = 0;
   solver->large_bounded_no_btf_amf_candidate = 0;
   solver->large_bounded_no_btf_amf_path = 0;
   solver->partial_diagonal_many_block_no_btf_cycle = 0;

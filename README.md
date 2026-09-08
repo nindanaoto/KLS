@@ -1142,24 +1142,24 @@ reports retain their results. Explicit deferred-preparation bypass and overlap
 overrides have also been removed. Automatic preparation overlap, normal row
 preparation, and phase-timing diagnostics remain supported.
 
-`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` enables a guarded executor for the
-same BTF scalar producer-run shape. It first waits for every dependency in a
-contiguous run, then applies the run through a local row workspace. Under the
-same flag, KLS also retains an owned sorted L-row mirror: the in-run triangular
-prefix is applied locally and the trailing suffix is sent through the existing
-scatter primitive without rewriting the KLU-owned numeric factor.
+The BTF scalar producer-run executor is selected automatically for repeated,
+multithreaded BTF workloads whose retained pipeline work is concentrated in
+expensive columns and whose supernode candidates are wide enough. Set
+`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` to request it explicitly, or `=0`
+to disable it. Kernel compatibility and execution-time checks still apply.
+The executor first waits for every dependency in a contiguous run, then applies
+the run through a local row workspace and retains an owned sorted L-row mirror:
+the in-run triangular prefix is applied locally and the trailing suffix uses
+the existing scatter primitive without rewriting the KLU-owned numeric factor.
 Benchmark JSON reports the applied surface through
 `refactor_last_btf_scalar_run_exec_runs`,
 `refactor_last_btf_scalar_run_exec_rows`,
 `refactor_last_btf_scalar_run_exec_entries`,
 `refactor_last_btf_scalar_run_exec_max_rows`, and cumulative
-`refactor_btf_scalar_run_exec_*` counters. This is intentionally off by default:
-the direct unsorted-row prototype was residual-clean but slower on `ASIC_100ks`,
-and the sorted-mirror executor activates the intended large producer-run surface
-but still remains slower than the default scalar EGraph path on the focused ASIC
-cases. The useful conclusion is that closing this refactor gap needs grouped
-current-state arithmetic over this row-ordered representation, not another
-wrapper around the scalar KLU scatter layout.
+`refactor_btf_scalar_run_exec_*` counters. Broad experimental activation was
+slower on earlier ASIC probes; the automatic policy limits use to the retained
+work-concentration criteria rather than enabling every reusable run.
+
 Eligible retained refactor-map row/input positions and L row-index arrays are
 mirrored as 32-bit integers by default while leaving the KLU-owned numeric
 factor and public index ABI unchanged. The EGraph value-scatter path and

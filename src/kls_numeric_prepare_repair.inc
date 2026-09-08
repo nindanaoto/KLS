@@ -10420,28 +10420,6 @@ static void kls_row_refactor_ensure_sn_end(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  {
-    const char *trace = getenv("KLS_TRACE_ROW_SNODE");
-    if (trace != NULL && atoi(trace) >= 2) {
-      fprintf(stderr,
-              "KLS light-snode: runs=%llu entries=%llu scalar=%llu"
-              " decl(norun=%llu short=%llu wait=%llu ok=%llu)\n",
-              (unsigned long long)atomic_load_explicit(
-                &solver->row_light_snode_runs, memory_order_relaxed),
-              (unsigned long long)atomic_load_explicit(
-                &solver->row_light_snode_entries, memory_order_relaxed),
-              (unsigned long long)atomic_load_explicit(
-                &solver->row_scalar_dep_entries, memory_order_relaxed),
-              (unsigned long long)atomic_load_explicit(
-                &solver->lsn_decl_norun, memory_order_relaxed),
-              (unsigned long long)atomic_load_explicit(
-                &solver->lsn_decl_short, memory_order_relaxed),
-              (unsigned long long)atomic_load_explicit(
-                &solver->lsn_decl_wait, memory_order_relaxed),
-              (unsigned long long)atomic_load_explicit(
-                &solver->lsn_consumed, memory_order_relaxed));
-    }
-  }
   if (solver->row_refactor_sn_end != NULL ||
       solver->row_refactor_u_ptr == NULL ||
       solver->row_refactor_u_cols == NULL || solver->n == 0u ||
@@ -12921,8 +12899,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
       } else if (strcmp(model_env, "overhead") == 0) {
         separator_work_model = 4;
       }
-    } else if (solver->prestatic_dense_spiked_match ||
-               solver->dense_spiked_original_pivot_path) {
+    } else if (solver->dense_spiked_original_pivot_path) {
       /* Dense-spiked systems have a long separator chain whose
          compact-group setup and dependency traffic dominate the nominal
          flop estimate.  Charge each group its measured fixed scheduling
