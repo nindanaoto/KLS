@@ -1990,7 +1990,6 @@ static int kls_row_first_partial_apply_supernode_run(
   UF_long dep_end,
   UF_long *run_rows_out,
   int *used_panel_out,
-  int shape_known,
   kls_row_first_row_stats *stats);
 
 static void kls_row_first_supernode_panel_cache_free(
@@ -2384,7 +2383,7 @@ static int kls_row_first_factor_one_row(
       if (!kls_row_first_partial_apply_supernode_run(
             ctx, workspace, l_entries, u_entries, udiag_values,
             workspace->u_row_ptr, workspace->u_row_end, &state, dep,
-            run_end, &run_rows, &used_panel, 1, stats)) {
+            run_end, &run_rows, &used_panel, stats)) {
         kls_row_first_factor_row_failure_set(
           failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_UPDATE, i, dep,
           owner, row_owner != NULL ? row_owner[dep] : -1);
@@ -5145,6 +5144,7 @@ static int kls_row_first_partial_apply_supernode_run_cached(
   return 1;
 }
 
+/* Callers supply runs already identified by the supernode machinery. */
 static int kls_row_first_partial_apply_supernode_run_compact(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -5156,8 +5156,7 @@ static int kls_row_first_partial_apply_supernode_run_compact(
   kls_row_first_partial_row *state,
   UF_long dep_begin,
   UF_long dep_end,
-  UF_long *run_rows_out,
-  int shape_known) {
+  UF_long *run_rows_out) {
   KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       published_u_entries == NULL || udiag_values == NULL ||
@@ -5193,23 +5192,6 @@ static int kls_row_first_partial_apply_supernode_run_compact(
     if (row_end - row_begin < internal_len ||
         row_end - row_begin - internal_len != tail_len) {
       return 0;
-    }
-    if (!shape_known) {
-      for (UF_long offset = 0; offset < internal_len; ++offset) {
-        const UF_long col = published_u_entries->col[row_begin + offset];
-        if (col != dep + offset + 1u || col >= ctx->nk) {
-          return 0;
-        }
-      }
-      for (UF_long offset = 0; offset < tail_len; ++offset) {
-        const UF_long col = published_u_entries->col[row_begin + internal_len +
-                                                     offset];
-        if (tail_begin + offset >= published_u_entries->count ||
-            col != published_u_entries->col[tail_begin + offset] ||
-            col <= dep_end || col >= ctx->nk) {
-          return 0;
-        }
-      }
     }
   }
 
@@ -5299,7 +5281,6 @@ static int kls_row_first_partial_apply_supernode_run(
   UF_long dep_end,
   UF_long *run_rows_out,
   int *used_panel_out,
-  int shape_known,
   kls_row_first_row_stats *stats) {
   const int cached_status =
     kls_row_first_partial_apply_supernode_run_cached(
@@ -5332,8 +5313,7 @@ static int kls_row_first_partial_apply_supernode_run(
   const int compact_status =
     kls_row_first_partial_apply_supernode_run_compact(
       ctx, workspace, local_l_entries, published_u_entries, udiag_values,
-      u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out,
-      shape_known);
+      u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out);
   if (compact_status > 0) {
     return 1;
   }
@@ -5463,7 +5443,7 @@ static int kls_row_first_partial_apply_ready_until(
       if (!kls_row_first_partial_apply_supernode_run(
             ctx, workspace, local_l_entries, published_u_entries,
             udiag_values, u_row_ptr, u_row_end, state, dep, run_end,
-            &run_rows, &used_panel, 1, stats)) {
+            &run_rows, &used_panel, stats)) {
         return 0;
       }
     } else {
@@ -5942,7 +5922,7 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
         shared->ctx, &worker->workspace, &worker->l_entries,
         shared->u_entries, shared->udiag_values,
         shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-        state, dep_begin, dep_end, &applied_rows, 1);
+        state, dep_begin, dep_end, &applied_rows);
     if (compact_status < 0) {
       ok = 0;
       break;
