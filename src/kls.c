@@ -9433,7 +9433,7 @@ static void free_symbolic(kls_solver *solver) {
 static void kls_snb_free(kls_solver *solver);
 static void kls_invalidate_i32_solve(kls_solver *solver);
 
-static void free_snode_panels_impl(kls_solver *solver, int line) {
+static void free_snode_panels(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
@@ -9444,9 +9444,6 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   /* a later sort would reorder the packed columns under the i32 solve
      streams; they share the sorted-numeric lifecycle */
   kls_invalidate_i32_solve(solver);
-  if (solver->snode_run_end != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
-    fprintf(stderr, "KLS snode: panels freed from line %d\n", line);
-  }
   free(solver->snode_run_end);
   solver->snode_run_end = NULL;
   free(solver->padded_run_of);
@@ -9471,8 +9468,6 @@ static void free_snode_panels_impl(kls_solver *solver, int line) {
   solver->snode_prepared = 0;
   solver->snode_numeric_pre_sorted = 0;
 }
-
-#define free_snode_panels(s) free_snode_panels_impl((s), __LINE__)
 
 /* Diagonal nudges make an accepted predicted numeric the exact factor of
    A plus a tiny explicit diagonal correction: every refactorization applies
@@ -9943,35 +9938,11 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_scale_deferred = 0;
   solver->tight_pivot_deferred = 0;
   solver->solve_perm_workspace = NULL;
-  solver->solve_refine_workspace = NULL;
   solver->solve_refine_values = NULL;
   solver->solve_recovery_active = 0;
   solver->promoted_tolerance_l2_recovery_required = 0;
   solver->promoted_tolerance_l2_contract_run_count = 0u;
   solver->promoted_tolerance_l2_recovery_count = 0u;
-  solver->solve_refine_csc_ptr16 = NULL;
-  solver->solve_refine_csc_row16 = NULL;
-  solver->solve_refine_csc_state = 0;
-  solver->solve_refine_csr_ptr16 = NULL;
-  solver->solve_refine_csr_col_pos32 = NULL;
-  solver->solve_refine_csr_state = 0;
-  memset(solver->solve_refine_csr_row_bound16, 0,
-         sizeof(solver->solve_refine_csr_row_bound16));
-  solver->solve_refine_csr_ptr32 = NULL;
-  solver->solve_refine_csr_pos32 = NULL;
-  solver->solve_refine_csr_col16 = NULL;
-  solver->solve_refine_csr_col32 = NULL;
-  solver->solve_refine_csr32_state = 0;
-  solver->solve_refine_csr32_threads = 0;
-  memset(solver->solve_refine_csr_row_bound32, 0,
-         sizeof(solver->solve_refine_csr_row_bound32));
-  solver->contract_residual_choice = 0;
-  solver->contract_residual_pending = 0;
-  memset(solver->contract_residual_samples, 0,
-         sizeof(solver->contract_residual_samples));
-  memset(solver->contract_residual_min, 0,
-         sizeof(solver->contract_residual_min));
-  solver->contract_residual_build_seconds = 0.0;
   solver->solve_perm_workspace_n = 0;
   solver->n = 0;
   solver->nnz = 0;
@@ -15094,30 +15065,25 @@ static int kls_run_compact_residual_error_bound(
    expressed only in lifecycle, work, and representation-width terms. */
 static int kls_generic_contract_residual_thread_count(
   const kls_solver *solver,
-  const kls_egraph_refactor_pool *pool,
-  int generic_candidate) {
-  if (solver == NULL || pool == NULL || pool->thread_count < 2) {
-    return 0;
-  }
+  const kls_egraph_refactor_pool *pool) {
+  /* The sole caller has already established workload and pool eligibility. */
   int threads = pool->thread_count;
-  if (generic_candidate) {
-    /* A retained worker wake plus CSR indirection needs substantially more
-       than a cache-sized sparse slice to beat the contiguous serial CSC
-       walk.  Keep roughly 16K multiply-adds per participant; the timing
-       tournament below can still reject the whole parallel representation.
-       This selects a resource width from realized work, not an input family. */
-    const uint64_t work = (uint64_t)solver->nnz;
-    uint64_t wanted = (work + UINT64_C(16383)) / UINT64_C(16384);
-    if (wanted < 2u) {
-      wanted = 2u;
-    }
-    if (wanted < (uint64_t)threads) {
-      threads = (int)wanted;
-    }
-    while (threads > 2 &&
-           solver->n < (UF_long)512u * (UF_long)threads) {
-      threads--;
-    }
+  /* A retained worker wake plus CSR indirection needs substantially more
+     than a cache-sized sparse slice to beat the contiguous serial CSC
+     walk.  Keep roughly 16K multiply-adds per participant; the timing
+     tournament below can still reject the whole parallel representation.
+     This selects a resource width from realized work, not an input family. */
+  const uint64_t work = (uint64_t)solver->nnz;
+  uint64_t wanted = (work + UINT64_C(16383)) / UINT64_C(16384);
+  if (wanted < 2u) {
+    wanted = 2u;
+  }
+  if (wanted < (uint64_t)threads) {
+    threads = (int)wanted;
+  }
+  while (threads > 2 &&
+         solver->n < (UF_long)512u * (UF_long)threads) {
+    threads--;
   }
   const char *env = getenv("KLS_GENERIC_CONTRACT_THREADS");
   if (env != NULL && env[0] != '\0') {
@@ -15138,19 +15104,19 @@ static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
     kls_repeated_update_workload(&solver->options) &&
     solver->options.expected_solves >= 16 &&
     getenv("KLS_DISABLE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") == NULL;
-  const int contract_threads =
-    kls_generic_contract_residual_thread_count(
-      solver, pool, generic_candidate);
   if (!generic_candidate || pool == NULL ||
       pool->thread_count < 2 || pool->thread_count > 8 ||
       pool->created_count != pool->thread_count - 1 ||
       solver->n > (UF_long)UINT32_MAX ||
       solver->nnz > (UF_long)UINT32_MAX || solver->col_ptr == NULL ||
-      solver->row_idx == NULL ||
-      (generic_candidate &&
-       getenv("KLS_FORCE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") == NULL &&
+      solver->row_idx == NULL) {
+    return 0;
+  }
+  const int contract_threads =
+    kls_generic_contract_residual_thread_count(solver, pool);
+  if (getenv("KLS_FORCE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") == NULL &&
        (solver->n < 512u * (UF_long)contract_threads ||
-        solver->nnz < 16384u * (UF_long)contract_threads))) {
+        solver->nnz < 16384u * (UF_long)contract_threads)) {
     return 0;
   }
   if (solver->solve_refine_csr32_state != 0) {
@@ -15355,12 +15321,7 @@ static int kls_run_parallel_refine_csr_residual(
     return 0;
   }
   kls_egraph_refactor_pool *pool = solver->egraph_pool;
-  if (pool == NULL || pool->thread_count < 2 || pool->thread_count > 8 ||
-      pool->created_count != pool->thread_count - 1 ||
-      solver->solve_refine_csr32_threads < 2 ||
-      solver->solve_refine_csr32_threads > pool->thread_count) {
-    return 0;
-  }
+  /* Successful preparation establishes the pool and CSR crew invariants. */
   const int contract_threads = solver->solve_refine_csr32_threads;
   const int collect_stats = bmax_out != NULL && bnorm2_out != NULL &&
     rmax_out != NULL && rnorm2_out != NULL;

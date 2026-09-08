@@ -4618,54 +4618,36 @@ static void kls_csr32_residual_worker_run(
   const double *restrict cs = solver->col_scale;
   const int transformed = rinv != NULL || cmap != NULL ||
     rs_inv != NULL || cs != NULL;
+  /* Share source while retaining compile-time column widths in both loops. */
+#define KLS_TRANSFORMED_CSR_ROWS(columns) \
+    for (UF_long row = begin; row < end; ++row) { \
+      const UF_long public_row = rinv != NULL ? rinv[row] : row; \
+      const double row_recip = rs_inv != NULL ? rs_inv[row] : 1.0; \
+      double value = b[public_row]; \
+      for (UF_long p = (UF_long)ptr[row]; \
+           p < (UF_long)ptr[row + 1u]; ++p) { \
+        const UF_long col = (UF_long)(columns)[p]; \
+        double xv = x[cmap != NULL ? cmap[col] : col]; \
+        if (cs != NULL) { \
+          xv /= cs[col]; \
+        } \
+        value = fma(-a[pos[p]] * row_recip, xv, value); \
+      } \
+      residual[public_row] = value; \
+      if (results != NULL) { \
+        const double ab = fabs(b[public_row]); \
+        const double ar = fabs(value); \
+        bmax = bmax < ab ? ab : bmax; \
+        bnorm2 += b[public_row] * b[public_row]; \
+        rmax = rmax < ar ? ar : rmax; \
+        rnorm2 += value * value; \
+      } \
+    }
   if (cols16 != NULL) {
-    for (UF_long row = begin; row < end; ++row) {
-      const UF_long public_row = rinv != NULL ? rinv[row] : row;
-      const double row_recip = rs_inv != NULL ? rs_inv[row] : 1.0;
-      double value = b[public_row];
-      for (UF_long p = (UF_long)ptr[row];
-           p < (UF_long)ptr[row + 1u]; ++p) {
-        const UF_long col = (UF_long)cols16[p];
-        double xv = x[cmap != NULL ? cmap[col] : col];
-        if (cs != NULL) {
-          xv /= cs[col];
-        }
-        value = fma(-a[pos[p]] * row_recip, xv, value);
-      }
-      residual[public_row] = value;
-      if (results != NULL) {
-        const double ab = fabs(b[public_row]);
-        const double ar = fabs(value);
-        bmax = bmax < ab ? ab : bmax;
-        bnorm2 += b[public_row] * b[public_row];
-        rmax = rmax < ar ? ar : rmax;
-        rnorm2 += value * value;
-      }
-    }
+    KLS_TRANSFORMED_CSR_ROWS(cols16)
   } else if (transformed) {
-    for (UF_long row = begin; row < end; ++row) {
-      const UF_long public_row = rinv != NULL ? rinv[row] : row;
-      const double row_recip = rs_inv != NULL ? rs_inv[row] : 1.0;
-      double value = b[public_row];
-      for (UF_long p = (UF_long)ptr[row];
-           p < (UF_long)ptr[row + 1u]; ++p) {
-        const UF_long col = (UF_long)cols32[p];
-        double xv = x[cmap != NULL ? cmap[col] : col];
-        if (cs != NULL) {
-          xv /= cs[col];
-        }
-        value = fma(-a[pos[p]] * row_recip, xv, value);
-      }
-      residual[public_row] = value;
-      if (results != NULL) {
-        const double ab = fabs(b[public_row]);
-        const double ar = fabs(value);
-        bmax = bmax < ab ? ab : bmax;
-        bnorm2 += b[public_row] * b[public_row];
-        rmax = rmax < ar ? ar : rmax;
-        rnorm2 += value * value;
-      }
-    }
+    KLS_TRANSFORMED_CSR_ROWS(cols32)
+#undef KLS_TRANSFORMED_CSR_ROWS
   } else {
     for (UF_long row = begin; row < end; ++row) {
       double value = b[row];
