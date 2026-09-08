@@ -138,8 +138,6 @@ typedef struct kls_row_first_entries {
   UF_long capacity;
   UF_long col_head_len;
   UF_long col_count_len;
-  UF_long reserve_growths;
-  UF_long reserve_copied_entries;
 } kls_row_first_entries;
 
 static void kls_row_first_entries_free(kls_row_first_entries *entries) {
@@ -162,8 +160,6 @@ static void kls_row_first_entries_free(kls_row_first_entries *entries) {
   entries->capacity = 0;
   entries->col_head_len = 0;
   entries->col_count_len = 0;
-  entries->reserve_growths = 0;
-  entries->reserve_copied_entries = 0;
 }
 
 static int kls_row_first_entries_enable_col_counts(
@@ -242,14 +238,6 @@ static int kls_row_first_entries_reserve(kls_row_first_entries *entries,
              (size_t)entries->count * sizeof(*new_next));
     }
   }
-  entries->reserve_growths =
-    entries->reserve_growths == UF_long_max
-      ? UF_long_max
-      : entries->reserve_growths + 1u;
-  entries->reserve_copied_entries =
-    entries->reserve_copied_entries > UF_long_max - entries->count
-      ? UF_long_max
-      : entries->reserve_copied_entries + entries->count;
 
   free(entries->row);
   free(entries->col);
@@ -1891,10 +1879,6 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long panel_update_entries;
   UF_long panel_cache_appends;
   UF_long panel_cache_append_entries;
-  UF_long local_l_reserve_growths;
-  UF_long local_l_reserve_copied_entries;
-  UF_long local_u_reserve_growths;
-  UF_long local_u_reserve_copied_entries;
   UF_long long_row_threshold;
   UF_long long_row;
   UF_long long_row_pos;
@@ -2048,14 +2032,6 @@ static void kls_row_first_pipeline_trace_add(
                           source->panel_cache_appends);
   kls_row_first_stats_add(&target->panel_cache_append_entries,
                           source->panel_cache_append_entries);
-  kls_row_first_stats_add(&target->local_l_reserve_growths,
-                          source->local_l_reserve_growths);
-  kls_row_first_stats_add(&target->local_l_reserve_copied_entries,
-                          source->local_l_reserve_copied_entries);
-  kls_row_first_stats_add(&target->local_u_reserve_growths,
-                          source->local_u_reserve_growths);
-  kls_row_first_stats_add(&target->local_u_reserve_copied_entries,
-                          source->local_u_reserve_copied_entries);
 }
 
 static void kls_row_first_pipeline_trace_maybe_print_live_long_row(
@@ -6080,10 +6056,6 @@ struct kls_row_first_pipeline_worker {
   UF_long pipeline_supernode_panel_update_groups;
   UF_long pipeline_supernode_panel_update_rows;
   kls_row_first_pipeline_trace trace_current;
-  UF_long l_reserve_growths_reported;
-  UF_long l_reserve_copied_reported;
-  UF_long u_reserve_growths_reported;
-  UF_long u_reserve_copied_reported;
 };
 
 static void kls_row_first_pipeline_worker_free(
@@ -6095,37 +6067,6 @@ static void kls_row_first_pipeline_worker_free(
   kls_row_first_entries_free(&worker->l_entries);
   kls_row_first_entries_free(&worker->u_entries);
 
-}
-
-static void kls_row_first_pipeline_collect_worker_storage_trace(
-  kls_row_first_pipeline_worker *worker) {
-  if (worker == NULL || worker->shared == NULL ||
-      !worker->shared->trace_enabled) {
-    return;
-  }
-  kls_row_first_pipeline_trace *trace = &worker->trace_current;
-  const UF_long l_growths =
-    worker->l_entries.reserve_growths -
-    worker->l_reserve_growths_reported;
-  const UF_long l_copied =
-    worker->l_entries.reserve_copied_entries -
-    worker->l_reserve_copied_reported;
-  const UF_long u_growths =
-    worker->u_entries.reserve_growths -
-    worker->u_reserve_growths_reported;
-  const UF_long u_copied =
-    worker->u_entries.reserve_copied_entries -
-    worker->u_reserve_copied_reported;
-  kls_row_first_stats_add(&trace->local_l_reserve_growths, l_growths);
-  kls_row_first_stats_add(&trace->local_l_reserve_copied_entries, l_copied);
-  kls_row_first_stats_add(&trace->local_u_reserve_growths, u_growths);
-  kls_row_first_stats_add(&trace->local_u_reserve_copied_entries, u_copied);
-  worker->l_reserve_growths_reported = worker->l_entries.reserve_growths;
-  worker->l_reserve_copied_reported =
-    worker->l_entries.reserve_copied_entries;
-  worker->u_reserve_growths_reported = worker->u_entries.reserve_growths;
-  worker->u_reserve_copied_reported =
-    worker->u_entries.reserve_copied_entries;
 }
 
 static int kls_row_first_pipeline_worker_scalar_batch_candidate(
@@ -6862,16 +6803,6 @@ static void kls_row_first_pipeline_trace_print(
   const UF_long total =
     shared->end >= shared->begin ? shared->end - shared->begin : 0u;
   const kls_row_first_pipeline_trace *trace = &shared->trace_committed;
-  const UF_long shared_l_growths =
-    shared->l_entries != NULL ? shared->l_entries->reserve_growths : 0u;
-  const UF_long shared_l_copied =
-    shared->l_entries != NULL
-      ? shared->l_entries->reserve_copied_entries : 0u;
-  const UF_long shared_u_growths =
-    shared->u_entries != NULL ? shared->u_entries->reserve_growths : 0u;
-  const UF_long shared_u_copied =
-    shared->u_entries != NULL
-      ? shared->u_entries->reserve_copied_entries : 0u;
   fprintf(stderr,
           "KLS row-pipeline trace: event=%s completed=%" PRIu64
           "/%" PRIu64 " begin=%" PRIu64 " end=%" PRIu64
@@ -6940,10 +6871,6 @@ static void kls_row_first_pipeline_trace_print(
           " panel_updates=%" PRIu64 " panel_update_rows=%" PRIu64
           " panel_update_entries=%" PRIu64
           " panel_appends=%" PRIu64 " panel_append_entries=%" PRIu64
-          " local_l_growths=%" PRIu64 " local_l_copied=%" PRIu64
-          " local_u_growths=%" PRIu64 " local_u_copied=%" PRIu64
-          " shared_l_growths=%" PRIu64 " shared_l_copied=%" PRIu64
-          " shared_u_growths=%" PRIu64 " shared_u_copied=%" PRIu64
           "\n",
           (uint64_t)trace->producer_probe_workers,
           (uint64_t)trace->producer_probe_lookahead,
@@ -6963,13 +6890,7 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->panel_update_rows,
           (uint64_t)trace->panel_update_entries,
           (uint64_t)trace->panel_cache_appends,
-          (uint64_t)trace->panel_cache_append_entries,
-          (uint64_t)trace->local_l_reserve_growths,
-          (uint64_t)trace->local_l_reserve_copied_entries,
-          (uint64_t)trace->local_u_reserve_growths,
-          (uint64_t)trace->local_u_reserve_copied_entries,
-          (uint64_t)shared_l_growths, (uint64_t)shared_l_copied,
-          (uint64_t)shared_u_growths, (uint64_t)shared_u_copied);
+          (uint64_t)trace->panel_cache_append_entries);
 }
 
 static void kls_row_first_pipeline_mark_failed(
@@ -7615,7 +7536,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
           (uint64_t)selected_col);
               }
               if (shared->trace_enabled) {
-                kls_row_first_pipeline_collect_worker_storage_trace(worker);
                 kls_row_first_pipeline_trace_add(
                   &shared->trace_committed, &worker->trace_current);
                 memset(&worker->trace_current, 0,
