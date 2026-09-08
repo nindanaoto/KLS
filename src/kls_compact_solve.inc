@@ -2150,8 +2150,7 @@ static int kls_serial_factor(kls_solver *solver,
   } else {
     kls_update_numeric_diagnostics(solver, 1);
   }
-  if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-      1) {
+  if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
     /* Preserve the lean one-shot, then let the first refactor pay once for
        the same mapped-pointer/index32 preparations used by native KLS. */
     solver->factor_preps_deferred = 1;

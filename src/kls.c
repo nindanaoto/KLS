@@ -10666,7 +10666,7 @@ int kls_analyze_csr(kls_solver *solver,
   if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
     fprintf(stderr, "KLS analyze: select %.2fs (both=%d)\n",
             kls_now_seconds() - kls_ana_sel_start,
-            normal.col_ptr != NULL && 1);
+            normal.col_ptr != NULL);
   }
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
@@ -11014,8 +11014,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         symbolic_score(solver->symbolic) <= 1.0e5 &&
         kls_column_pair_work(solver->n, solver->col_ptr) <= 5.0e5;
       if (solver->n >= 512 &&
-          getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-          1) {
+          getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
         /* same contract as the main path's deferral below: engine and
            solve preps only pay off across repeated refactors, so run
            them from the first refactorization's consult instead (the
@@ -12106,8 +12105,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->symbolic->est_flops <= 1.0e6 &&
       symbolic_score(solver->symbolic) <= 1.0e5 &&
       kls_column_pair_work(solver->n, solver->col_ptr) <= 5.0e5;
-    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL &&
-        1) {
+    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
       /* Engine/solve preps (row patterns, solve transpose plans, pts
          trials, panel sorts: ~23% of memchip's factor CPU, ~20% of
          rajat25's) only pay off across repeated refactors; run them
@@ -12374,10 +12372,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_trace_consult =
       getenv("KLS_TRACE_PREP_CONSULT") != NULL;
 
-    const int kls_direct_forced_row_prep =
-      (getenv("KLS_DIRECT_FORCED_ROW_PREP") != NULL &&
-       (kls_row_refactor_env_enabled() ||
-        solver->prestatic_dense_spiked_match));
     double kls_pc_t = kls_trace_consult ? kls_now_seconds() : 0.0;
 #define KLS_PC_MARK(name)     if (kls_trace_consult) {       const double tn = kls_now_seconds();       fprintf(stderr, "KLS consult %s %.3fms\n", name, 1e3 * (tn - kls_pc_t));       kls_pc_t = tn;     }
     /* sync exit order: snode panels must precede anything that builds
@@ -12393,9 +12387,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       free_refactor_schedule(solver);
     }
     KLS_PC_MARK("frees")
-    const int kls_skip_forced_row_column_preps =
-      kls_direct_forced_row_prep &&
-      getenv("KLS_DIRECT_FORCED_ROW_SKIP_COLUMN_PREPS") != NULL;
     pthread_t kls_snode_prep_thread;
     pthread_t kls_map_prep_thread;
     pthread_t kls_schedule_prep_thread;
@@ -12408,12 +12399,9 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     const int kls_generic_prep_overlap =
       solver->options.threads > 1 &&
       solver->n >= 4000u && solver->common.flops >= 5.0e6;
-    if (!kls_skip_forced_row_column_preps) {
+    {
       const int kls_overlap_snode =
-        !kls_direct_forced_row_prep &&
-        (kls_generic_prep_overlap ||
-         getenv("KLS_ENABLE_DEFERRED_SNODE_OVERLAP") != NULL) &&
-        getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL &&
+        kls_generic_prep_overlap &&
         kls_prepare_snode_sort_for_overlap(solver, &preps_elapsed);
       if (kls_overlap_snode) {
         kls_snode_prep_job.solver = solver;
@@ -12426,12 +12414,9 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       if (!kls_snode_prep_active) {
         kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
       }
-    } else
+    }
     KLS_PC_MARK("snode_start")
-    if (!kls_direct_forced_row_prep &&
-        (kls_generic_prep_overlap ||
-         getenv("KLS_ENABLE_DEFERRED_PREP_OVERLAP") != NULL) &&
-        getenv("KLS_DISABLE_LARGE_SPARSE_PREP_OVERLAP") == NULL) {
+    if (kls_generic_prep_overlap) {
       /* Panel census, map construction, dependency scheduling, and the
          compact solve/PTS build only read the now-sorted numeric and publish
          disjoint retained structures.  Overlap their memory walks instead of
@@ -12451,12 +12436,9 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
                          &kls_schedule_prep_job) == 0;
       }
     }
-    if (!kls_direct_forced_row_prep) {
-      (void)kls_i32_solve_ready(solver);
-    } else
+    (void)kls_i32_solve_ready(solver);
     KLS_PC_MARK("i32")
-    if (!kls_direct_forced_row_prep &&
-        !solver->spral_matching_selected) {
+    if (!solver->spral_matching_selected) {
       /* the spral-matched prestatic class never paid the pts trial
          inline and it stalls against 74M-entry factors (pre2) */
       /* the pts chain's historical calling convention is mutable
@@ -12476,64 +12458,23 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       pthread_join(kls_snode_prep_thread, NULL);
     }
     KLS_PC_MARK("prep_join")
-    if (!kls_skip_forced_row_column_preps) {
-      kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
-    }
+    kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
     KLS_PC_MARK("snb")
-    /* An explicitly requested row refactor builds the complete L/U row
-       mirrors below, and its finisher derives the solve partition from those
-       same arrays.  Building the solve-only mirrors here first merely makes
-       a second transpose that free_row_refactor_pattern() discards.  Keep
-       this behind a development switch until the union-wide solve audit has
-       confirmed that every forced-row class reaches the full preparation. */
-    if (!kls_direct_forced_row_prep &&
-        !(getenv("KLS_SKIP_DEFERRED_ROW_SOLVE_SEED_FOR_ROW") != NULL &&
-          kls_row_refactor_env_enabled())) {
-      kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
-    }
+    kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
     KLS_PC_MARK("seed_row")
-    if (!kls_direct_forced_row_prep) {
-      maybe_prepare_refactor_map(solver, &preps_elapsed);
-      if (kls_pts_direct_user_values_enabled(solver) ||
-          kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
-        (void)kls_build_refactor_user_input_pos32(solver);
-      }
+    maybe_prepare_refactor_map(solver, &preps_elapsed);
+    if (kls_pts_direct_user_values_enabled(solver) ||
+        kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
+      (void)kls_build_refactor_user_input_pos32(solver);
     }
     KLS_PC_MARK("map")
-    if (!kls_direct_forced_row_prep &&
-        !(kls_symmetric_partial_diagonal_match_factor_cycle(solver) &&
+    if (!(kls_symmetric_partial_diagonal_match_factor_cycle(solver) &&
           (kls_pts_refactor_ready(solver)))) {
       maybe_prepare_refactor_schedule(solver, &preps_elapsed);
     }
     KLS_PC_MARK("schedule")
-    if (kls_direct_forced_row_prep) {
-      const double row_start = kls_now_seconds();
-      if (getenv("KLS_DIRECT_FORCED_ROW_PATTERN_ONLY") != NULL) {
-        /* The immediately following forced row refactor overwrites every
-           row-factor value.  Preparing only the retained structure avoids a
-           full numeric-to-row value copy whose contents would never be
-           consumed.  The numeric kernel marks the resulting row values ready
-           before the first solve. */
-        kls_reset_auto_row_refactor_prepare_stats(solver);
-        if (kls_build_row_refactor_pattern(solver, 0)) {
-          solver->row_refactor_auto_enabled = 1;
-          solver->row_refactor_auto_native_row_panel =
-            kls_auto_row_refactor_native_panel_allows(solver) ? 1 : 0;
-          solver->row_refactor_values_ready = 0;
-          solver->row_refactor_solve_direct_ready = 0;
-          solver->row_refactor_solve_validated = 0;
-        } else {
-          solver->row_refactor_auto_enabled = 0;
-          solver->row_refactor_auto_pattern_build_failed = 1;
-        }
-      } else {
-        (void)kls_prepare_auto_row_refactor_from_numeric(solver);
-      }
-      preps_elapsed += kls_now_seconds() - row_start;
-    } else {
-      kls_maybe_prepare_model_row_refactor_from_numeric(solver,
-                                                        &preps_elapsed);
-    }
+    kls_maybe_prepare_model_row_refactor_from_numeric(solver,
+                                                      &preps_elapsed);
     KLS_PC_MARK("model_row")
 #undef KLS_PC_MARK
   }
