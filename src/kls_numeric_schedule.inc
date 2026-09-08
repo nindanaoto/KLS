@@ -2270,13 +2270,6 @@ static void kls_build_padded_panels(kls_solver *solver) {
     solver->padded_run_of = run_of;
     free(mark);
     free(ulist);
-    if (getenv("KLS_TRACE_SNODE") != NULL) {
-      fprintf(stderr,
-              "KLS padded panels: z=%ld runs=%ld unions=%ld slots=%ld"
-              " panel_doubles=%.3g\n",
-              (long)z, (long)nruns, (long)union_total, (long)slot_total,
-              ppos);
-    }
     return;
   }
 fail_arrays:
@@ -2309,11 +2302,6 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
       solver->numeric->LUbx == NULL || solver->symbolic->R == NULL ||
       solver->n < 4000u || solver->common.flops < 5.0e6 ||
       kls_snode_panel_env_disabled()) {
-    if (solver != NULL && getenv("KLS_TRACE_SNODE") != NULL) {
-      fprintf(stderr,
-              "KLS snode: prep declined A prepared=%d flops=%.3g\n",
-              solver->snode_prepared, solver->common.flops);
-    }
     return;
   }
   /* Sorting reorders every L/U column's packed storage, so no
@@ -2325,17 +2313,6 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
       solver->row_refactor_group_count != 0u ||
       solver->row_refactor_values_ready ||
       solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
-    if (getenv("KLS_TRACE_SNODE") != NULL) {
-      fprintf(stderr,
-              "KLS snode: prep declined B map=%d lvl=%d l32=%d rowg=%ld "
-              "rowv=%d path=%d\n",
-              solver->refactor_col_ptr != NULL,
-              solver->refactor_level_ptr != NULL,
-              solver->refactor_l_indices32 != NULL,
-              (long)solver->row_refactor_group_count,
-              solver->row_refactor_values_ready,
-              (int)solver->stats.last_factor_path);
-    }
     return;
   }
   const double start = kls_now_seconds();
@@ -2402,10 +2379,6 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
     solver->snode_run_end = run_end;
   }
   kls_build_padded_panels(solver);
-  if (getenv("KLS_TRACE_SNODE") != NULL) {
-    fprintf(stderr, "KLS snode: sorted=1 covered_cols=%ld accepted=%d\n",
-            (long)covered, solver->snode_run_end != NULL);
-  }
   *elapsed += kls_now_seconds() - start;
 }
 

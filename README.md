@@ -670,8 +670,7 @@ every producer in it is already published). The panel update is only used
 when the batched work amortizes the staging, and the hot loop is
 multi-versioned so an AVX2/FMA clone is selected at load time on capable
 hosts. Set `KLS_DISABLE_SNODE_PANEL_REFACTOR=1` to keep the numeric unsorted
-and stay on the scalar per-producer updates; `KLS_TRACE_SNODE=1` reports run
-coverage and batch counters.
+and stay on the scalar per-producer updates.
 
 Use `--threads N` to enable KLS-owned parallel work where it is currently
 available. The first threaded path is repeated numeric refactorization across
