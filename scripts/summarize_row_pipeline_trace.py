@@ -13,6 +13,7 @@ scalar L-entry count duplicated scalar_deps.
 Producer rejection-reason counters are also retained only for archived logs.
 Producer probe/ready-root/underfilled/low-saved-stream counts are archived-only;
 the retired producer_probe_lookahead counter was never incremented.
+Candidate-target and rejected-work entry counts are also archived-only.
 """
 
 from __future__ import annotations
