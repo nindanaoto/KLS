@@ -1845,8 +1845,6 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long producer_batch_targets;
   UF_long producer_batch_stream_u_entries;
   UF_long producer_batch_target_u_entries;
-  UF_long producer_batch_internal_entries;
-  UF_long producer_batch_output_entries;
   UF_long producer_candidate_targets;
   UF_long producer_candidate_target_u_entries;
   UF_long producer_underfilled_target_u_entries;
@@ -1956,10 +1954,6 @@ static void kls_row_first_pipeline_trace_add(
                           source->producer_batch_stream_u_entries);
   kls_row_first_stats_add(&target->producer_batch_target_u_entries,
                           source->producer_batch_target_u_entries);
-  kls_row_first_stats_add(&target->producer_batch_internal_entries,
-                          source->producer_batch_internal_entries);
-  kls_row_first_stats_add(&target->producer_batch_output_entries,
-                          source->producer_batch_output_entries);
   kls_row_first_stats_add(&target->producer_candidate_targets,
                           source->producer_candidate_targets);
   kls_row_first_stats_add(&target->producer_candidate_target_u_entries,
@@ -6329,11 +6323,7 @@ static int kls_row_first_pipeline_apply_scalar_producer_targets(
   UF_long dep,
   const UF_long *row_cols,
   const double *row_values,
-  UF_long row_entries,
-  UF_long *internal_entries_out,
-  UF_long *output_entries_out) {
-  KLS_SET_OPTIONAL_OUTPUT(internal_entries_out, 0u);
-  KLS_SET_OPTIONAL_OUTPUT(output_entries_out, 0u);
+  UF_long row_entries) {
   if (shared == NULL || targets == NULL || target_count == 0u ||
       shared->ctx == NULL || row_cols == NULL || row_values == NULL ||
       dep >= shared->ctx->nk) {
@@ -6367,8 +6357,6 @@ static int kls_row_first_pipeline_apply_scalar_producer_targets(
     worker->workspace.x[dep] = 0.0;
   }
 
-  UF_long internal_entries = 0u;
-  UF_long output_entries = 0u;
   for (UF_long up = 0u; up < row_entries; ++up) {
     const UF_long col = row_cols[up];
     if (col <= dep || col >= shared->ctx->nk) {
@@ -6398,20 +6386,9 @@ static int kls_row_first_pipeline_apply_scalar_producer_targets(
         x[col] = 0.0;
       }
       x[col] -= targets[t].lij * uvalue;
-      if (col < state->row) {
-        kls_row_first_stats_add(&internal_entries, 1u);
-      } else {
-        kls_row_first_stats_add(&output_entries, 1u);
-      }
     }
   }
 
-  if (internal_entries_out != NULL) {
-    *internal_entries_out = internal_entries;
-  }
-  if (output_entries_out != NULL) {
-    *output_entries_out = output_entries;
-  }
   return 1;
 }
 
@@ -6560,8 +6537,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
     return 1;
   }
 
-  UF_long internal_entries = 0u;
-  UF_long output_entries = 0u;
   if (active_target_count == target_count) {
     if (target_count >
           (UF_long)(SIZE_MAX / sizeof(*shared->batch_targets)) ||
@@ -6603,8 +6578,7 @@ static int kls_row_first_pipeline_apply_producer_batch(
     pthread_mutex_unlock(&shared->lock);
     const int ok = kls_row_first_pipeline_apply_scalar_producer_targets(
       shared, detached_targets, target_count, dep,
-      detached_cols, detached_values, row_entries,
-      &internal_entries, &output_entries);
+      detached_cols, detached_values, row_entries);
     pthread_mutex_lock(&shared->lock);
     for (UF_long t = 0; t < target_count; ++t) {
       kls_row_first_pipeline_worker *worker = detached_targets[t].worker;
@@ -6627,8 +6601,7 @@ static int kls_row_first_pipeline_apply_producer_batch(
   } else if (!kls_row_first_pipeline_apply_scalar_producer_targets(
                shared, shared->batch_targets, target_count, dep,
                shared->u_entries->col + row_begin,
-               shared->u_entries->value + row_begin, row_entries,
-               &internal_entries, &output_entries)) {
+               shared->u_entries->value + row_begin, row_entries)) {
     return 0;
   }
 
@@ -6642,10 +6615,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
       kls_row_first_stats_add(&producer_trace->producer_batch_target_u_entries,
                               row_entries);
     }
-    kls_row_first_stats_add(&producer_trace->producer_batch_internal_entries,
-                            internal_entries);
-    kls_row_first_stats_add(&producer_trace->producer_batch_output_entries,
-                            output_entries);
   }
   return 1;
 }
@@ -6674,8 +6643,6 @@ static void kls_row_first_pipeline_trace_print(
           " producer_targets=%" PRIu64
           " producer_stream_u_entries=%" PRIu64
           " producer_target_u_entries=%" PRIu64
-          " producer_u_internal=%" PRIu64
-          " producer_u_output=%" PRIu64
           " producer_candidate_targets=%" PRIu64
           " producer_candidate_target_u_entries=%" PRIu64
           " producer_underfilled_target_u_entries=%" PRIu64
@@ -6694,8 +6661,6 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->producer_batch_targets,
           (uint64_t)trace->producer_batch_stream_u_entries,
           (uint64_t)trace->producer_batch_target_u_entries,
-          (uint64_t)trace->producer_batch_internal_entries,
-          (uint64_t)trace->producer_batch_output_entries,
           (uint64_t)trace->producer_candidate_targets,
           (uint64_t)trace->producer_candidate_target_u_entries,
           (uint64_t)trace->producer_underfilled_target_u_entries,
