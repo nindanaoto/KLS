@@ -6784,13 +6784,6 @@ static double row_match_stored_weight(const kls_row_match_graph *graph,
   return -DBL_MAX;
 }
 
-static double row_match_log_weight(const kls_row_match_graph *graph,
-                                   UF_long row,
-                                   UF_long col) {
-  const double stored = row_match_stored_weight(graph, row, col);
-  return graph->weights_are_raw && stored != -DBL_MAX ? log(stored) : stored;
-}
-
 static int exact_weighted_match_is_affordable(UF_long n, UF_long nnz) {
   if (n <= 0 || nnz <= 0 || n > 4000u || nnz > 75000u) {
     return 0;
@@ -7681,166 +7674,6 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
   free(current_log_weight);
 }
 
-static int weighted_path_contains_row(const UF_long *rows,
-                                      UF_long len,
-                                      UF_long row) {
-  for (UF_long i = 0; i < len; ++i) {
-    if (rows[i] == row) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-static void weighted_path_record_best(kls_weighted_path_search *search,
-                                      UF_long len,
-                                      double gain) {
-  if (search == NULL || len == 0 || len > KLS_MATCH_PATH_MAX_DEPTH ||
-      gain <= search->best_gain + 1.0e-12) {
-    return;
-  }
-  search->best_gain = gain;
-  search->best_len = len;
-  for (UF_long i = 0; i < len; ++i) {
-    search->best_rows[i] = search->path_rows[i];
-    search->best_cols[i] = search->path_cols[i];
-    search->best_weights[i] = search->path_weights[i];
-  }
-}
-
-static void search_weighted_match_cycle(kls_weighted_path_search *search,
-                                        UF_long depth,
-                                        double gain_so_far) {
-  if (search == NULL || search->graph == NULL ||
-      depth >= search->max_depth ||
-      depth >= KLS_MATCH_PATH_MAX_DEPTH) {
-    return;
-  }
-
-  const kls_row_match_graph *graph = search->graph;
-  const UF_long row = search->path_rows[depth];
-  const UF_long current_col = search->row_perm[row];
-  const UF_long start_col = search->row_perm[search->path_rows[0]];
-  const double current_weight = search->current_log_weight[row];
-  UF_long candidates = 0;
-  for (UF_long p = graph->row_ptr[row];
-       p < graph->row_ptr[row + 1u] &&
-       candidates < search->max_candidates_per_row;
-       ++p, ++candidates) {
-    const UF_long col = graph->col_idx[p];
-    if (col == current_col) {
-      continue;
-    }
-    const double gain =
-      gain_so_far + graph->log_weight[p] - current_weight;
-    search->path_cols[depth] = col;
-    search->path_weights[depth] = graph->log_weight[p];
-    if (col == start_col) {
-      if (depth > 0) {
-        weighted_path_record_best(search, depth + 1u, gain);
-      }
-      continue;
-    }
-
-    const UF_long owner = search->col_match[col];
-    if (owner == KLS_KLU_EMPTY ||
-        weighted_path_contains_row(search->path_rows, depth + 1u, owner) ||
-        depth + 1u >= search->max_depth ||
-        depth + 1u >= KLS_MATCH_PATH_MAX_DEPTH) {
-      continue;
-    }
-
-    search->path_rows[depth + 1u] = owner;
-    search_weighted_match_cycle(search, depth + 1u, gain);
-  }
-}
-
-static void improve_numeric_row_match_by_paths(UF_long n,
-                                               const kls_row_match_graph *graph,
-                                               UF_long *row_perm,
-                                               UF_long *col_match) {
-  if (n < 3u || graph == NULL || row_perm == NULL || col_match == NULL) {
-    return;
-  }
-  /* Larger static-pivot cases are fill-sensitive: local weight cycles improved
-     pivot counts but raised fill/flops in same-session twotone/rajat25 checks. */
-  if (n > 50000u) {
-    return;
-  }
-
-  double *current_weight =
-    (double *)malloc((size_t)n * sizeof(*current_weight));
-  if (current_weight == NULL) {
-    return;
-  }
-  for (UF_long row = 0; row < n; ++row) {
-    if (row_perm[row] == KLS_KLU_EMPTY) {
-      free(current_weight);
-      return;
-    }
-    current_weight[row] = row_match_log_weight(graph, row, row_perm[row]);
-    if (current_weight[row] == -DBL_MAX) {
-      free(current_weight);
-      return;
-    }
-  }
-
-  const UF_long max_candidates =
-    n >= 20000u ? 8u : 12u;
-  const UF_long max_depth = KLS_MATCH_PATH_MAX_DEPTH;
-  const int max_rounds = 2;
-  const UF_long max_changes =
-    n >= 20000u ? 1024u : 4096u;
-  const UF_long max_roots = n;
-
-  for (int round = 0; round < max_rounds; ++round) {
-    UF_long changes = 0;
-    UF_long roots = 0;
-    for (UF_long row = 0; row < n; ++row) {
-      if (roots >= max_roots || changes >= max_changes) {
-        break;
-      }
-      if (graph->row_ptr[row] >= graph->row_ptr[row + 1u]) {
-        continue;
-      }
-      if (graph->log_weight[graph->row_ptr[row]] <=
-          current_weight[row] + 1.0e-12) {
-        continue;
-      }
-      roots++;
-
-      kls_weighted_path_search search;
-      memset(&search, 0, sizeof(search));
-      search.graph = graph;
-      search.row_perm = row_perm;
-      search.col_match = col_match;
-      search.current_log_weight = current_weight;
-      search.max_candidates_per_row = max_candidates;
-      search.max_depth = max_depth;
-      search.path_rows[0] = row;
-      search.best_gain = 0.0;
-      search_weighted_match_cycle(&search, 0u, 0.0);
-      if (search.best_len == 0 || search.best_gain <= 1.0e-12) {
-        continue;
-      }
-
-      for (UF_long i = 0; i < search.best_len; ++i) {
-        const UF_long matched_row = search.best_rows[i];
-        const UF_long matched_col = search.best_cols[i];
-        row_perm[matched_row] = matched_col;
-        col_match[matched_col] = matched_row;
-        current_weight[matched_row] = search.best_weights[i];
-      }
-      changes++;
-    }
-    if (changes == 0) {
-      break;
-    }
-  }
-
-  free(current_weight);
-}
-
 #ifdef KLS_HAVE_SPRAL_SCALING
 static int build_spral_hungarian_row_match_scaling(
   UF_long n,
@@ -8524,17 +8357,6 @@ static int build_greedy_numeric_row_match(UF_long n,
         if (!kls_low_work_symmetric_partial_diagonal_pts_ctx &&
             getenv("KLS_MATCH_SKIP_PAIR_SWAPS") == NULL) {
           improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
-        }
-        if (n > 20000u && getenv("KLS_MATCH_SKIP_PATHS") == NULL &&
-            getenv("KLS_ENABLE_GENERIC_MATCH_PATHS") != NULL) {
-          /* The cycle-path search costs a quarter of a small matrix's
-             whole initialization; the downstream acceptance comparison
-             guards match quality either way (a weaker match that loses
-             just keeps the baseline factor).  Generic AUTO therefore keeps
-             the inexpensive cardinality augmentation and pair swaps.  This
-             explicit diagnostic opt-in exercises the full path pass; actual
-             factor and solve checks remain the acceptance authority. */
-          improve_numeric_row_match_by_paths(n, &graph, row_perm, col_match);
         }
       }
 #ifdef KLS_HAVE_SPRAL_SCALING
@@ -10609,19 +10431,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     solver->compact_missing_diagonal_match_candidate =
       compact_missing_diagonal_matcher;
   }
-  /* A static row match changes the numeric coordinate frame.  Under a
-     recurring changed-value contract, keeping that frame unscaled requires
-     every later value consumer to preserve the exact matched coordinates.
-     That is a stronger invariant than a successful first factor proves.
-     Prefer the ordinary matched equilibration for generic AUTO, which has
-     the same representation contract on every value generation.  The
-     unscaled form remains available for explicit experiments. */
-  int prefer_unscaled_static_match =
-    getenv("KLS_STATIC_MATCH_SCALED") != NULL
-      ? 0
-      : getenv("KLS_STATIC_MATCH_UNSCALED") != NULL
-          ? 1
-          : 0;
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr,
             "KLS pre-static: weak count done %.3fms weak=%ld missing=%ld "
@@ -10945,9 +10754,9 @@ matching_attempt:;
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr,
             "KLS pre-static: n=%ld weak=%ld missing=%ld large=%d "
-            "prefer_unscaled=%d match_status=%d matched=%ld spral=%d\n",
+            "match_status=%d matched=%ld spral=%d\n",
             (long)solver->n, (long)weak, (long)missing_diagonal,
-            (int)use_large_spral_match, prefer_unscaled_static_match,
+            (int)use_large_spral_match,
             status, (long)matched, spral_matching);
   }
   if (status != KLS_OK || 1000u * matched < 995u * solver->n) {
@@ -11006,8 +10815,7 @@ matching_attempt:;
       trial_col_scale = match_col_scale;
       match_row_scale = NULL;
       match_col_scale = NULL;
-    } else if ((prefer_unscaled_static_match ||
-                getenv("KLS_DISABLE_LOW_WORK_MATCH_SCALE_DEFER") == NULL) &&
+    } else if (getenv("KLS_DISABLE_LOW_WORK_MATCH_SCALE_DEFER") == NULL &&
                isfinite(matched_column_pair_work) &&
                matched_column_pair_work <= 1.0e7 &&
                kls_repeated_update_workload(&trial_options)) {
@@ -11390,15 +11198,13 @@ matching_attempt:;
 #endif
 
   trial_common.scale =
-    trial_options.scale == KLS_SCALE_AUTO && prefer_unscaled_static_match
-      ? -1
-      : choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
+    choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
                                        trial_row_idx, &trial_options,
                                        trial_values);
   const int preapplied_matching_equilibration =
     (getenv("KLS_PRESTATIC_PREAPPLY_MATCH_SCALE") != NULL ||
      solver->medium_partial_static_metis_path) &&
-    trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
+    trial_options.scale == KLS_SCALE_AUTO &&
     trial_row_scale != NULL && trial_col_scale != NULL;
   if (preapplied_matching_equilibration) {
     /* The ordinary path first factors KLU's internally equilibrated values,
@@ -11554,7 +11360,7 @@ matching_attempt:;
      generic_single_block_parallel_first ||
      getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL);
   if (skip_trial_factor_requested &&
-      trial_options.scale == KLS_SCALE_AUTO && !prefer_unscaled_static_match &&
+      trial_options.scale == KLS_SCALE_AUTO &&
       trial_row_scale != NULL && trial_col_scale != NULL) {
     /* The trial path applies the matching equilibration inside its own
        numeric comparison; the skip path must scale the adopted values
@@ -11565,16 +11371,6 @@ matching_attempt:;
                         trial_row_scale, trial_col_scale, trial_values);
   }
   if (skip_trial_factor_requested) {
-    if (prefer_unscaled_static_match) {
-      /* The generic unscaled baseline has not factored the matching
-         equilibration.  Do not publish unverified scale arrays alongside
-         the unscaled values; the retained permutation alone is the candidate
-         proven by the post-match diagonal check below. */
-      free(trial_row_scale);
-      free(trial_col_scale);
-      trial_row_scale = NULL;
-      trial_col_scale = NULL;
-    }
     /* Experimental: when the matched, scaled diagonal is statically
        strong (the block trial's criterion), adopt without the serial
        pivoted trial factor and let the predicted parallel first factor

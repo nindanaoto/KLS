@@ -555,90 +555,6 @@ static int kls_egraph_refactor_wait_done(
   return 1;
 }
 
-static int kls_egraph_refactor_try_skip_claimed_column(
-  kls_egraph_refactor_worker *worker,
-  UF_long col) {
-  if (worker == NULL || worker->shared == NULL) {
-    return 0;
-  }
-  kls_egraph_refactor_shared *shared = worker->shared;
-  if (shared->pipeline_claimed == NULL ||
-      shared->pipeline_claim_generation == 0u) {
-    return 0;
-  }
-  if (shared->solver == NULL || col >= shared->solver->n) {
-    kls_egraph_refactor_record_invalid(shared);
-    return -1;
-  }
-  const unsigned int owner =
-    atomic_load_explicit(&shared->pipeline_claimed[col],
-                         memory_order_acquire);
-  if (owner != shared->pipeline_claim_generation &&
-      (shared->pipeline_lease_generation == 0u ||
-       owner != shared->pipeline_lease_generation)) {
-    return 0;
-  }
-
-  if (shared->pipeline_done == NULL || shared->pipeline_generation == 0u) {
-    kls_egraph_refactor_record_invalid(shared);
-    return -1;
-  }
-  if (atomic_load_explicit(&shared->pipeline_done[col],
-                           memory_order_acquire) !=
-      shared->pipeline_generation) {
-
-    unsigned spin = 0u;
-    while (atomic_load_explicit(&shared->pipeline_done[col],
-                                memory_order_acquire) !=
-           shared->pipeline_generation) {
-             kls_cpu_relax();
-
-      if ((spin++ & 1023u) == 0u &&
-          kls_egraph_refactor_should_stop(shared)) {
-        return -1;
-      }
-      kls_egraph_pipeline_pause(&spin);
-    }
-  }
-  return 1;
-}
-
-static int kls_egraph_refactor_try_lease_pipeline_column(
-  kls_egraph_refactor_worker *worker,
-  UF_long col) {
-  if (worker == NULL || worker->shared == NULL) {
-    return 0;
-  }
-  kls_egraph_refactor_shared *shared = worker->shared;
-  if (shared->pipeline_claimed == NULL ||
-      shared->pipeline_claim_generation == 0u ||
-      shared->pipeline_lease_generation == 0u) {
-    return 1;
-  }
-  if (shared->solver == NULL || col >= shared->solver->n) {
-    kls_egraph_refactor_record_invalid(shared);
-    return -1;
-  }
-
-  for (;;) {
-    unsigned int owner =
-      atomic_load_explicit(&shared->pipeline_claimed[col],
-                           memory_order_acquire);
-    if (owner == shared->pipeline_claim_generation ||
-        owner == shared->pipeline_lease_generation) {
-      return kls_egraph_refactor_try_skip_claimed_column(worker, col) > 0
-        ? 0
-        : -1;
-    }
-    if (atomic_compare_exchange_weak_explicit(
-          &shared->pipeline_claimed[col], &owner,
-          shared->pipeline_lease_generation,
-          memory_order_acq_rel, memory_order_acquire)) {
-      return 1;
-    }
-  }
-}
-
 static void kls_atomic_update_max_ulong(atomic_ulong *target,
                                         UF_long value) {
   if (target == NULL) {
@@ -4046,7 +3962,7 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
      per column (claim lookup, load-before-publish, and run-group lookup).
      A release publication is still required for the later pipeline levels. */
   atomic_uint *const direct_cluster_done =
-    (shared->pipeline_done != NULL && shared->pipeline_claimed == NULL)
+    (shared->pipeline_done != NULL)
       ? shared->pipeline_done : NULL;
   const unsigned int direct_cluster_generation = shared->pipeline_generation;
   const int use_alpha4_separator =
@@ -4204,16 +4120,6 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           for (UF_long pos = parts[worker->tid];
                pos < parts[worker->tid + 1]; ++pos) {
             const UF_long col = solver->refactor_level_cols[pos];
-            if (direct_cluster_done == NULL) {
-              const int claimed_status =
-                kls_egraph_refactor_try_skip_claimed_column(worker, col);
-              if (claimed_status < 0) {
-                break;
-              }
-              if (claimed_status > 0) {
-                continue;
-              }
-            }
             if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
               break;
             }
@@ -4232,16 +4138,6 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           for (UF_long pos = begin + (UF_long)worker->tid;
                pos < end; pos += (UF_long)shared->thread_count) {
             const UF_long col = solver->refactor_level_cols[pos];
-            if (direct_cluster_done == NULL) {
-              const int claimed_status =
-                kls_egraph_refactor_try_skip_claimed_column(worker, col);
-              if (claimed_status < 0) {
-                break;
-              }
-              if (claimed_status > 0) {
-                continue;
-              }
-            }
             if (!kls_egraph_refactor_dispatch_column(worker, col, 0)) {
               break;
             }
@@ -4323,21 +4219,8 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           }
           UF_long got[KLS_SNODE_MAX_FUSE];
           int ng = 0;
-          int bail = 0;
           for (UF_long w = 0; w < nqp; ++w) {
-            const UF_long qc = solver->refactor_level_cols[qp[w]];
-            const int ls =
-              kls_egraph_refactor_try_lease_pipeline_column(worker, qc);
-            if (ls < 0) {
-              bail = 1;
-              break;
-            }
-            if (ls > 0) {
-              got[ng++] = qc;
-            }
-          }
-          if (bail) {
-            break;
+            got[ng++] = solver->refactor_level_cols[qp[w]];
           }
           int ok2 = 1;
           if (ng >= 2) {
@@ -4382,10 +4265,6 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
             break;
           }
 
-          for (int g = 0; g < ng; ++g) {
-
-          }
-
           continue;
         }
         const UF_long pos =
@@ -4396,22 +4275,8 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
           break;
         }
         const UF_long col = solver->refactor_level_cols[pos];
-        const int lease_status =
-          kls_egraph_refactor_try_lease_pipeline_column(worker, col);
-        if (lease_status < 0) {
-          break;
-        }
-        int lease2 = 0;
-        UF_long col2 = 0u;
         if (try_pair && pos + 1u < shared->pipeline_pos_end) {
-          col2 = solver->refactor_level_cols[pos + 1u];
-          lease2 = kls_egraph_refactor_try_lease_pipeline_column(worker,
-                                                                 col2);
-          if (lease2 < 0) {
-            break;
-          }
-        }
-        if (lease_status > 0 && lease2 > 0) {
+          const UF_long col2 = solver->refactor_level_cols[pos + 1u];
           const int pair_status =
             kls_egraph_refactor_dispatch_pair(worker, col, col2);
           if (pair_status == 0) {
@@ -4439,17 +4304,13 @@ static void kls_egraph_refactor_worker_run(kls_egraph_refactor_worker *worker) {
 
           continue;
         }
-        if (lease_status == 0 && lease2 == 0) {
-          continue;
-        }
-        const UF_long single_col = lease_status > 0 ? col : col2;
-        if (!kls_egraph_refactor_dispatch_column(worker, single_col, 1)) {
+        if (!kls_egraph_refactor_dispatch_column(worker, col, 1)) {
           if (!kls_egraph_refactor_should_stop(shared)) {
             kls_egraph_refactor_record_invalid(shared);
           }
           break;
         }
-        kls_egraph_refactor_mark_done(shared, single_col);
+        kls_egraph_refactor_mark_done(shared, col);
 
       }
     } else {
@@ -7454,7 +7315,7 @@ static int kls_egraph_cluster_premark_dispatch(
   }
 
   if (shared->pipeline_done == NULL || shared->pipeline_generation == 0u ||
-      shared->pipeline_claimed != NULL || shared->cluster_level_count == 0u ||
+      shared->cluster_level_count == 0u ||
       shared->cluster_level_count > solver->refactor_level_count ||
       solver->refactor_level_ptr == NULL ||
       solver->refactor_level_cols == NULL) {
@@ -8040,8 +7901,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_egraph_cluster_level_dispatch(solver, check_pivots);
   atomic_uint *pipeline_done = NULL;
   unsigned int pipeline_generation = 0;
-  atomic_uint *pipeline_claimed = NULL;
-  unsigned int pipeline_claim_generation = 0;
 
   if (solver->refactor_cluster_level_count < solver->refactor_level_count &&
        solver->refactor_pipeline_column_count >= (UF_long)(2 * thread_count) &&
@@ -8182,13 +8041,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->numerical_rank = UF_long_max;
   shared->singular_col = KLS_KLU_EMPTY;
   shared->pipeline_done = pipeline_done;
-  shared->pipeline_claimed = pipeline_claimed;
   shared->pipeline_generation = pipeline_generation;
   shared->cluster_level_count =
     pipeline_done != NULL ? cluster_level_count : solver->refactor_level_count;
-  shared->pipeline_claim_generation = pipeline_claim_generation;
-  shared->pipeline_lease_generation =
-    0u;
   shared->separator_private = separator_private;
   shared->btf_scalar_run_exec =
     (btf_scalar_run_exec_requested &&
@@ -8359,9 +8214,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
   shared->udiag_recip = NULL;
 
-  shared->pipeline_claimed = NULL;
-  shared->pipeline_claim_generation = 0u;
-  shared->pipeline_lease_generation = 0u;
   shared->separator_private = 0;
 
   shared->btf_scalar_run_exec = 0;

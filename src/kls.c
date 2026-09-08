@@ -1439,9 +1439,6 @@ struct kls_solver {
   const UF_long *lean_grouped_profitability_rows;
   int lean_grouped_profitability_thread_count;
   int lean_grouped_profitability_decision;
-  atomic_uint *egraph_pipeline_claimed;
-  UF_long egraph_pipeline_claimed_size;
-  unsigned int egraph_pipeline_claim_generation;
 
   kls_input_format input_format;
   kls_orientation orientation;
@@ -1861,10 +1858,7 @@ typedef struct kls_egraph_refactor_shared {
   double trial_deadline_seconds;   /* 0 = disarmed; wall deadline */
   _Atomic int trial_deadline_hit;
   atomic_uint *pipeline_done;
-  atomic_uint *pipeline_claimed;
   unsigned int pipeline_generation;
-  unsigned int pipeline_claim_generation;
-  unsigned int pipeline_lease_generation;
   atomic_ulong next_pipeline_pos;
 
   int btf_scalar_run_exec;
@@ -2496,25 +2490,6 @@ static int kls_parallel_prepare_permuted_values(
   kls_solver *solver,
   const double *values);
 static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker);
-
-#define KLS_MATCH_PATH_MAX_DEPTH 4u
-
-typedef struct kls_weighted_path_search {
-  const struct kls_row_match_graph *graph;
-  const UF_long *row_perm;
-  const UF_long *col_match;
-  const double *current_log_weight;
-  UF_long max_candidates_per_row;
-  UF_long max_depth;
-  UF_long path_rows[KLS_MATCH_PATH_MAX_DEPTH];
-  UF_long path_cols[KLS_MATCH_PATH_MAX_DEPTH];
-  double path_weights[KLS_MATCH_PATH_MAX_DEPTH];
-  UF_long best_rows[KLS_MATCH_PATH_MAX_DEPTH];
-  UF_long best_cols[KLS_MATCH_PATH_MAX_DEPTH];
-  double best_weights[KLS_MATCH_PATH_MAX_DEPTH];
-  UF_long best_len;
-  double best_gain;
-} kls_weighted_path_search;
 
 typedef struct kls_row_match_graph {
   UF_long *row_ptr;
@@ -6184,16 +6159,6 @@ static atomic_uint *ensure_egraph_pipeline_done(
   return solver->egraph_pipeline_done;
 }
 
-static void free_egraph_pipeline_claimed(kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-  free(solver->egraph_pipeline_claimed);
-  solver->egraph_pipeline_claimed = NULL;
-  solver->egraph_pipeline_claimed_size = 0;
-  solver->egraph_pipeline_claim_generation = 0;
-}
-
 static void kls_record_singular_status(kls_solver *solver,
                                        int *singular,
                                        UF_long *recorded_rank,
@@ -9622,7 +9587,6 @@ static void free_numeric(kls_solver *solver) {
   destroy_egraph_refactor_pool(solver);
   free_egraph_worker_scratch(solver);
   free_egraph_pipeline_done(solver);
-  free_egraph_pipeline_claimed(solver);
 
   free_row_refactor_pattern(solver);
   solver->row_refactor_auto_enabled = 0;
@@ -9948,7 +9912,6 @@ static void clear_matrix(kls_solver *solver) {
   free_numeric(solver);
   free_egraph_worker_scratch(solver);
   free_egraph_pipeline_done(solver);
-  free_egraph_pipeline_claimed(solver);
 
   free_symbolic(solver);
   free(solver->col_ptr);
