@@ -45,3 +45,29 @@ Corpus directory: `build/resumed-corpus-chhiOV/`:
 `build/prep-trim-repair-dBcoha/producer-add32-stopcheck*`.
 The original screen and these controls total 444 valid launches. Exact
 commands, binary hashes, build provenance and empty source diffs are saved.
+
+## Second flag and revised corpus method
+
+The resumed segment `producer-corpus1` completed cases 24-40, then paused
+on `hcircuit`, CPUs 8-15. Its initial three-pair screen measured +3.02%;
+the 12-pair repeat measured +3.08% lifecycle and +7.19% steady refactor,
+with all 12 pairs slower. A separate 24-pair shared-executable-path check
+measured only +0.08%, with all launches valid. Its runner and artifacts are
+`scan-hcircuit-equal.py` and `producer-hcircuit-equal-repeat-*` in the corpus
+directory. This second flag also does not establish a source regression.
+
+Two resolved flags show that separate executable paths are a material
+confound for this checkpoint. Restart the full 186-case comparison using
+`scan-producer-equal.py`, tag `producer-equal0`, from case 0. This is a
+deliberate method correction after terminal review pauses, not a restart
+caused by an observation timeout. Rechecking earlier cases is necessary
+because launch effects can conceal slowdowns as well as create flags.
+
+Before each sequential launch, copy the chosen frozen input binary to
+`corpus-equal-path-kls_bench` and verify its SHA-256. Both sides execute at
+that same path with the same arguments. Copies and hashes happen before
+the benchmark process starts, outside its lifecycle timer. Input binaries
+remain untouched. The manifest, two CPU domains, H100 workload, numerical
+verification, limits and repeat rule remain unchanged. The new metadata
+records the execution-copy policy. Further source deletions stay paused
+until this corrected checkpoint is resolved.
