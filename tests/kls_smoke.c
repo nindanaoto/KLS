@@ -14046,7 +14046,8 @@ static int test_deferred_sort_rebuilds_compact_solve(void) {
     "KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC",
     "KLS_SYNC_FACTOR_PREPS",
     "KLS_DISABLE_I32_SOLVE",
-    "KLS_DISABLE_SNB_REFACTOR"
+    "KLS_DISABLE_SNB_REFACTOR",
+    "KLS_SNB_WMAX"
   };
   enum { env_count = (int)(sizeof(env_names) / sizeof(env_names[0])) };
   char *saved[env_count];
@@ -14077,7 +14078,8 @@ static int test_deferred_sort_rebuilds_compact_solve(void) {
        setenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC", "0", 1) != 0 ||
        unsetenv("KLS_SYNC_FACTOR_PREPS") != 0 ||
        unsetenv("KLS_DISABLE_I32_SOLVE") != 0 ||
-       unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0)) {
+       unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0 ||
+       setenv("KLS_SNB_WMAX", "4", 1) != 0)) {
     perror("configure deferred-sort compact-solve test");
     ok = 0;
   }
@@ -14104,7 +14106,10 @@ static int test_deferred_sort_rebuilds_compact_solve(void) {
       const int32_t first = block * block_size;
       ap[col] = (int32_t)pos;
       expected[col] = 1.0 + 0.001 * (double)(col % 29);
-      /* Deliberately permute input rows.  KLU accepts unsorted CSC input and
+      /* Four-column SNB panels split each dense block across 16 producers,
+         exercising first/interior/last producer and subcolumn lookups in
+         both packed-U writeback and input scatter construction.
+         Deliberately permute input rows.  KLU accepts unsorted CSC input and
          its packed factors therefore give the deferred sort real work. */
       for (int32_t q = 0; q < block_size; ++q) {
         const int32_t local_row = (17 * q + 7 * local_col) % block_size;
@@ -14188,6 +14193,23 @@ static int test_deferred_sort_rebuilds_compact_solve(void) {
       fprintf(stderr, "post-sort compact solve mismatch at %d: %.17g\n",
               (int)i, x[i]);
       ok = 0;
+    }
+  }
+
+  if (ok) {
+    memset(b, 0, (size_t)n * sizeof(*b));
+    for (int32_t col = 0; col < n; ++col) {
+      for (int32_t p2 = ap[col]; p2 < ap[col + 1]; ++p2) {
+        b[col] += ax[p2] * expected[ai[p2]];
+      }
+    }
+    if (!require_ok(kls_solve_transpose(solver, 1, b, 0, x, 0),
+                    "post-sort transpose solve")) ok = 0;
+    for (int32_t i = 0; ok && i < n; ++i) {
+      if (fabs(x[i] - expected[i]) > 1.0e-8) {
+        fprintf(stderr, "post-sort transpose mismatch at %d\n", (int)i);
+        ok = 0;
+      }
     }
   }
 

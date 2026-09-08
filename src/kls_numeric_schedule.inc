@@ -50,6 +50,38 @@ static int kls_snb_trace_enabled(void) {
   return value != NULL && value[0] == '1';
 }
 
+/* Edge construction sorts the U-row union, and supernodes partition
+ * consecutive columns.  Producer IDs and each producer's subcolumns are
+ * therefore strictly increasing.  Locate a panel row without rescanning
+ * every earlier producer for each packed-U or input entry. */
+static int32_t kls_snb_upper_panel_row(const kls_snb_block *blk,
+                                      const kls_snb_snode *sn,
+                                      UF_long row) {
+  const int32_t producer = blk->col2snode[row];
+  const kls_snb_edge *edges = blk->edges + sn->edges_off;
+  int32_t lo = 0, hi = sn->edge_count;
+  while (lo < hi) {
+    const int32_t mid = lo + (hi - lo) / 2;
+    if (edges[mid].producer < producer) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo == sn->edge_count || edges[lo].producer != producer) {
+    return -1;
+  }
+  const kls_snb_edge *edge = &edges[lo];
+  const int32_t *sub = blk->subcols + edge->sub_off;
+  const int32_t want = (int32_t)(row - blk->snodes[producer].start);
+  lo = 0;
+  hi = edge->sub_count;
+  while (lo < hi) {
+    const int32_t mid = lo + (hi - lo) / 2;
+    if (sub[mid] < want) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < edge->sub_count && sub[lo] == want
+    ? edge->u_start + lo : -1;
+}
+
 /* Build the supernodal structures from the sorted numeric.  Returns 1 on
  * success; on failure or decline the solver is marked so we never retry. */
 static int kls_snb_prepare(kls_solver *solver) {
@@ -443,22 +475,7 @@ static int kls_snb_prepare(kls_solver *solver) {
           if (row >= (UF_long)sn->start) {
             lr = sn->uw + (int32_t)(row - sn->start);
           } else {
-            const int32_t prod = blk->col2snode[row];
-            const kls_snb_edge *edges = blk->edges + sn->edges_off;
-            for (int32_t e2 = 0; e2 < sn->edge_count; ++e2) {
-              if (edges[e2].producer == prod) {
-                const int32_t *sub = blk->subcols + edges[e2].sub_off;
-                const int32_t want = (int32_t)(row - blk->snodes[prod].start);
-                int32_t lo = 0, hi = edges[e2].sub_count - 1;
-                while (lo <= hi) {
-                  const int32_t mid = (lo + hi) >> 1;
-                  if (sub[mid] < want) lo = mid + 1;
-                  else if (sub[mid] > want) hi = mid - 1;
-                  else { lr = edges[e2].u_start + mid; break; }
-                }
-                break;
-              }
-            }
+            lr = kls_snb_upper_panel_row(blk, sn, row);
           }
           if (lr < 0) { ok = 0; break; }
           blk->writeback[wb++] = (int32_t)((int64_t)c * sn->height + lr);
@@ -747,23 +764,7 @@ static int kls_snb_prepare(kls_solver *solver) {
                   else { lr = sn->uw + sn->width + mid; break; }
                 }
               } else {
-                const int32_t prod = blk->col2snode[newrow];
-                const kls_snb_edge *edges = blk->edges + sn->edges_off;
-                for (int32_t e2 = 0; e2 < sn->edge_count; ++e2) {
-                  if (edges[e2].producer == prod) {
-                    const int32_t *sub = blk->subcols + edges[e2].sub_off;
-                    const int32_t want =
-                      (int32_t)(newrow - blk->snodes[prod].start);
-                    int32_t lo = 0, hi = edges[e2].sub_count - 1;
-                    while (lo <= hi) {
-                      const int32_t mid = (lo + hi) >> 1;
-                      if (sub[mid] < want) lo = mid + 1;
-                      else if (sub[mid] > want) hi = mid - 1;
-                      else { lr = edges[e2].u_start + mid; break; }
-                    }
-                    break;
-                  }
-                }
+                lr = kls_snb_upper_panel_row(blk, sn, newrow);
               }
               if (lr < 0) { ok = 0; break; }
               dst = sn->panel + (int64_t)c * sn->height + lr;
