@@ -5364,10 +5364,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   if (thread_count < 2) {
     return -1;
   }
-  const int trace_setup =
-    getenv("KLS_TRACE_LEAN_PARALLEL_SETUP") != NULL;
-  const double trace_begin = trace_setup ? kls_now_seconds() : 0.0;
-
   double **scratch =
     ensure_egraph_worker_scratch(solver, thread_count, solver->n);
   unsigned int generation = 0u;
@@ -5378,7 +5374,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   if (scratch == NULL || done == NULL || generation == 0u || pool == NULL) {
     return -1;
   }
-  const double trace_resources = trace_setup ? kls_now_seconds() : 0.0;
   if (getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
       kls_packed_row_worker_representation_capable(solver)) {
     if (pool->worker_spin_iters < 200000u) {
@@ -5413,7 +5408,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   if (solver->lean_snode_run != NULL) {
     (void)kls_prepare_lean_snode_wait_masks(solver, thread_count, rows);
   }
-  const double trace_schedule = trace_setup ? kls_now_seconds() : 0.0;
   const int deferred_value_prep =
     solver->lean_deferred_value_prep_active && rs == NULL &&
     kls_deferred_lean_value_prep_capable(solver);
@@ -5744,16 +5738,16 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   }
   const int time_generic_packed_sample =
     generic_packed_capable && solver->lean_generic_packed_choice == 0;
-  const double trace_dispatch =
-    (trace_setup || time_generic_packed_sample) ? kls_now_seconds() : 0.0;
+  const double packed_sample_begin =
+    time_generic_packed_sample ? kls_now_seconds() : 0.0;
 
   /* This path targets factors whose entire numeric phase is measured in
      microseconds.  The generic dispatcher puts the caller through a
      condition-variable wait; keep the caller spinning alongside the already
      spinning persistent workers instead. */
   kls_egraph_pool_dispatch_and_spin_wait(pool, shared, thread_count);
-  const double trace_complete =
-    (trace_setup || time_generic_packed_sample) ? kls_now_seconds() : 0.0;
+  const double packed_sample_end =
+    time_generic_packed_sample ? kls_now_seconds() : 0.0;
   const int invalid = shared->invalid;
   const int singular = shared->singular;
   const UF_long numerical_rank = shared->numerical_rank;
@@ -5765,7 +5759,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       ? solver->lean_generic_packed_candidate_seconds
       : solver->lean_generic_packed_legacy_seconds;
     if (slot < 8u) {
-      samples[slot] = trace_complete - trace_dispatch;
+      samples[slot] = packed_sample_end - packed_sample_begin;
       solver->lean_generic_packed_sample_count = sample + 1u;
     }
     if (solver->lean_generic_packed_sample_count == 16u) {
@@ -5830,19 +5824,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->lean_rows = NULL;
   shared->pipeline_generation = 0u;
   pthread_mutex_unlock(&shared->lock);
-  if (trace_setup) {
-    fprintf(stderr,
-            "KLS lean parallel setup: resources=%.3f schedule=%.3f "
-            "configure=%.3f numeric=%.3f total=%.3f ms threads=%d "
-            "generic_packed_choice=%d samples=%u\n",
-            1e3 * (trace_resources - trace_begin),
-            1e3 * (trace_schedule - trace_resources),
-            1e3 * (trace_dispatch - trace_schedule),
-            1e3 * (trace_complete - trace_dispatch),
-            1e3 * (trace_complete - trace_begin), thread_count,
-            solver->lean_generic_packed_choice,
-            solver->lean_generic_packed_sample_count);
-  }
 
   if (invalid) {
     solver->common.status = TRILINOS_KLU_INVALID;
@@ -17140,26 +17121,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   if (thread_count < 2) {
     return -1;
   }
-  const int trace_refactor_phases =
-    getenv("KLS_TRACE_REFACTOR_PHASES") != NULL;
-  const double trace_refactor_begin =
-    trace_refactor_phases ? kls_now_seconds() : 0.0;
-
-  double trace_refactor_schedule_mark = trace_refactor_begin;
-
-#define KLS_REFACTOR_SCHEDULE_MARK(name)                                \
-  do {                                                                  \
-    if (trace_refactor_phases) {                                        \
-      const double trace_now = kls_now_seconds();                       \
-      fprintf(stderr, "KLS row schedule %-18s %.3fms total %.3fms\n", \
-              (name), 1e3 * (trace_now - trace_refactor_schedule_mark),  \
-              1e3 * (trace_now - trace_refactor_begin));                \
-      trace_refactor_schedule_mark = trace_now;                         \
-    }                                                                   \
-  } while (0)
-  double trace_refactor_schedule_end = trace_refactor_begin;
-  double trace_refactor_prepare_end = trace_refactor_begin;
-  double trace_refactor_numeric_end = trace_refactor_begin;
   int use_group_pipeline = 0;
   UF_long pipeline_group_begin = 0;
   UF_long cluster_levels = 0;
@@ -17185,7 +17146,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
             !kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
     return -1;
   }
-  KLS_REFACTOR_SCHEDULE_MARK("initial slices");
 
   UF_long partial_supernode_groups = 0;
   UF_long partial_supernode_rows = 0;
@@ -17330,7 +17290,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
           &row_separator_flop_private_max_work);
     }
   }
-  KLS_REFACTOR_SCHEDULE_MARK("separator queue");
   if (separator_cache_enabled && !row_separator_plan_borrowed &&
       prepared_separator_flop_queue &&
       !prepared_separator_row_dep_queue &&
@@ -17498,7 +17457,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       row_private_group_count == 0u) {
     row_private_group_count = row_initial_ready_count;
   }
-  KLS_REFACTOR_SCHEDULE_MARK("private queues");
   if (use_row_ready_queue && row_separator_flop_queue &&
       !row_dep_ready_queue && row_private_groups != NULL &&
       row_private_thread_ptr != NULL && row_private_group_mask != NULL) {
@@ -17537,7 +17495,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       }
     }
   }
-  KLS_REFACTOR_SCHEDULE_MARK("private order");
   const char *row_solve_separator_env =
     getenv("KLS_ROW_SOLVE_SEPARATOR");
   const int build_row_solve_separator =
@@ -17559,7 +17516,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
               "KLS row-solve separator: no safe post-pivot partition\n");
     }
   }
-  KLS_REFACTOR_SCHEDULE_MARK("solve separator");
   {
     const char *steal_env =
       getenv("KLS_ROW_REFACTOR_STEAL_PRIVATE");
@@ -17627,11 +17583,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     free(row_private_external_wait_mask);
     return -1;
   }
-  KLS_REFACTOR_SCHEDULE_MARK("scratch pool");
-#undef KLS_REFACTOR_SCHEDULE_MARK
-  if (trace_refactor_phases) {
-    trace_refactor_schedule_end = kls_now_seconds();
-  }
 
   trilinos_klu_l_common *common = &solver->common;
   if (scaled &&
@@ -17652,9 +17603,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     free(row_private_group_mask);
     free(row_private_external_wait_mask);
     return 0;
-  }
-  if (trace_refactor_phases) {
-    trace_refactor_prepare_end = kls_now_seconds();
   }
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
@@ -17962,9 +17910,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
         telemetry->telemetry_segment_target_cleanup_entries;
     }
   }
-  if (trace_refactor_phases) {
-    trace_refactor_numeric_end = kls_now_seconds();
-  }
   const UF_long row_local_ready_groups =
     use_row_ready_queue
       ? (UF_long)atomic_load_explicit(
@@ -18158,24 +18103,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     solver, check_pivots, native_row_panel_state,
     native_row_panel_count_before, compact_supernode_update_count_before,
     partial_supernode_pipeline_count_before);
-  if (trace_refactor_phases) {
-    const double trace_refactor_end = kls_now_seconds();
-    fprintf(stderr,
-            "KLS row refactor phases: schedule=%.6f prepare=%.6f "
-            "numeric=%.6f post=%.6f total=%.6f groups=%" PRIu64
-            " private=%" PRIu64 " pipeline=%" PRIu64
-            " deferred=%d published=%d\n",
-            trace_refactor_schedule_end - trace_refactor_begin,
-            trace_refactor_prepare_end - trace_refactor_schedule_end,
-            trace_refactor_numeric_end - trace_refactor_prepare_end,
-            trace_refactor_end - trace_refactor_numeric_end,
-            trace_refactor_end - trace_refactor_begin,
-            (uint64_t)solver->row_refactor_group_count,
-            (uint64_t)row_private_group_count,
-            (uint64_t)row_ready_tail_count,
-            shared->row_refactor_defer_value_scatter,
-            published_for_solve);
-  }
   return 1;
 }
 

@@ -1393,11 +1393,6 @@ static int kls_parallel_i32_permute(kls_solver *solver,
   shared->solve_permute_map = map;
   shared->solve_permute_count = solver->n;
   shared->solve_permute_mode = 1;
-  if (getenv("KLS_TRACE_PARALLEL_I32_PERMUTE") != NULL) {
-    fprintf(stderr, "KLS parallel i32 %s: n=%" PRIu64 " threads=%d\n",
-            scatter ? "scatter" : "gather", (uint64_t)solver->n,
-            shared->thread_count);
-  }
   for (int tid = 0; tid < shared->thread_count; ++tid) {
     pool->workers[tid].shared = shared;
   }
