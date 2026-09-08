@@ -45,10 +45,6 @@ static int kls_auto_row_refactor_high_work_candidate(
 KLS_DEFINE_ENV_FLAG(kls_checked_row_refactor_env_enabled,
                     "KLS_ENABLE_CHECKED_ROW_REFACTOR")
 
-static int kls_checked_row_refactor_should_run(void) {
-  return kls_checked_row_refactor_env_enabled();
-}
-
 static int kls_partial_supernode_pipeline_env_state(void) {
   const char *value = getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
   if (value == NULL || value[0] == '\0') {
@@ -467,11 +463,6 @@ static double kls_row_refactor_total_group_work(const kls_solver *solver) {
     work += kls_row_refactor_group_work(solver, group);
   }
   return work;
-}
-
-static int kls_auto_row_refactor_native_panel_allows(
-  const kls_solver *solver) {
-  return kls_native_row_panel_structural_auto_allows(solver);
 }
 
 static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
@@ -1144,10 +1135,6 @@ static int kls_row_refactor_should_defer_value_scatter(
     return 1;
   }
   return solver != NULL && solver->row_refactor_dense_segment_count > 0u;
-}
-
-static int kls_row_refactor_should_lazy_value_scatter(int check_pivots) {
-  return !check_pivots;
 }
 
 /* Consume a complete suffix of a strict row supernode in one target-major
@@ -6621,7 +6608,7 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
   }
   solver->row_refactor_auto_enabled = 1;
   solver->row_refactor_auto_native_row_panel =
-    kls_auto_row_refactor_native_panel_allows(solver) ? 1 : 0;
+    kls_native_row_panel_structural_auto_allows(solver) ? 1 : 0;
   if (!kls_auto_row_refactor_cost_allows(solver)) {
     solver->row_refactor_auto_native_row_panel = 0;
     solver->row_refactor_values_ready = 0;
@@ -9488,8 +9475,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   common->nrealloc = 0;
   const int defer_value_scatter =
     kls_row_refactor_should_defer_value_scatter(solver, check_pivots);
-  const int lazy_value_scatter =
-    kls_row_refactor_should_lazy_value_scatter(check_pivots);
+  const int lazy_value_scatter = !check_pivots;
   const int native_row_panel_state =
     kls_native_row_panel_effective_state(solver);
   const UF_long native_row_panel_count_before =
@@ -17749,8 +17735,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_solve_work = NULL;
   shared->row_refactor_defer_value_scatter =
     kls_row_refactor_should_defer_value_scatter(solver, check_pivots);
-  shared->row_refactor_lazy_value_scatter =
-    kls_row_refactor_should_lazy_value_scatter(check_pivots);
+  shared->row_refactor_lazy_value_scatter = !check_pivots;
   shared->row_refactor_compact_supernode_trsv =
     kls_compact_supernode_trsv_env_state();
   shared->row_refactor_blocked_trailing_update =

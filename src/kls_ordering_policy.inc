@@ -1236,7 +1236,7 @@ static int kls_symmetric_partial_diagonal_match_symbolic_profile(
    require the retained unscaled AMD single block to prove balanced, bounded
    symbolic and measured work with almost no pivot detours. */
 __attribute__((noinline))
-static int kls_symmetric_partial_diagonal_match_factor_profile(
+static int kls_symmetric_partial_diagonal_match_factor_cycle(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->col_ptr == NULL || solver->row_perm == NULL ||
@@ -1280,11 +1280,6 @@ static int kls_symmetric_partial_diagonal_match_factor_profile(
       2.0 * (double)solver->numeric->unz &&
     (double)solver->numeric->unz <=
       2.0 * (double)solver->numeric->lnz;
-}
-
-static int kls_symmetric_partial_diagonal_match_factor_cycle(
-  const kls_solver *solver) {
-  return kls_symmetric_partial_diagonal_match_factor_profile(solver);
 }
 
 static int choose_auto_scale_from_pattern_impl(

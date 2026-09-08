@@ -8830,7 +8830,7 @@ static int kls_mapped_refactor(kls_solver *solver,
     }
   }
   if (solver->symbolic->nblocks == 1u) {
-    if (check_pivots && kls_checked_row_refactor_should_run()) {
+    if (check_pivots && kls_checked_row_refactor_env_enabled()) {
       if (solver->options.threads > 1) {
         const int parallel_row_status =
           kls_threaded_row_refactor_numeric(solver, numeric_values, 1);
