@@ -7732,15 +7732,8 @@ static int kls_checked_refactor_best_reject_candidate(
   return 1;
 }
 
-static UF_long kls_snode_trace_batched_producers = 0;
-static UF_long kls_snode_trace_decline_norun = 0;
-static UF_long kls_snode_trace_decline_short = 0;
-static UF_long kls_snode_trace_decline_work = 0;
 
-/* Every EGraph worker hits the consume declines millions of times per
-   refactor; unconditional writes to shared counters ping-pong the cache
-   line across threads (measured 6x on rajat31's refactor).  Resolve the
-   trace env once and skip the writes entirely when tracing is off. */
+/* Keep the numeric batching opt-out independent of diagnostic tracing. */
 static int kls_batch_consume_disabled(void) {
   static int cached = -1;
   if (cached < 0) {
@@ -7750,21 +7743,6 @@ static int kls_batch_consume_disabled(void) {
   return cached;
 }
 
-static int kls_snode_trace_enabled(void) {
-  static int cached = -1;
-  if (cached < 0) {
-    cached = getenv("KLS_TRACE_SNODE") != NULL;
-  }
-  return cached;
-}
-static UF_long kls_snode_trace_batched_tail_entries = 0;
-static UF_long kls_snode_trace_batches = 0;
-static UF_long kls_snode_trace_pair_batches = 0;
-static UF_long kls_snode_trace_pair_producers = 0;
-static UF_long kls_snode_trace_pair_columns = 0;
-static UF_long kls_snode_trace_t_hist[7];
-static UF_long kls_snode_trace_tlen_sum = 0;
-static UF_long kls_snode_trace_tlen_max = 0;
 
 /* Consume a batch of consecutive sorted-supernode producer columns from a
  * U column during a left-looking refactor.  Returns the number of producers
@@ -7792,9 +7770,6 @@ static UF_long kls_snode_batch_consume(
   const UF_long j = ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_norun++;
-    }
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -7809,9 +7784,6 @@ static UF_long kls_snode_batch_consume(
     t++;
   }
   if (t < KLS_SNODE_MIN_BATCH) {
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_short++;
-    }
     return 0;
   }
   UF_long *tli = NULL;
@@ -7822,9 +7794,6 @@ static UF_long kls_snode_batch_consume(
   if (t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
     /* Short shared tails lose to the scalar path; only pay the panel
        staging when the batched update amortizes it. */
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_work++;
-    }
     return 0;
   }
   double xs[KLS_SNODE_MAX_BATCH];
@@ -7891,17 +7860,6 @@ static UF_long kls_snode_batch_consume(
     }
     for (UF_long p = 0; p < pc; ++p) {
       x[tli[p0 + p]] -= acc[p];
-    }
-  }
-  if (kls_snode_trace_enabled()) {
-    kls_snode_trace_batched_producers += t;
-    kls_snode_trace_batched_tail_entries += t * tlen;
-    kls_snode_trace_batches++;
-    kls_snode_trace_t_hist[t >= 64 ? 6 : t >= 32 ? 5 : t >= 16 ? 4
-                           : t >= 8 ? 3 : t >= 4 ? 2 : 1]++;
-    kls_snode_trace_tlen_sum += tlen;
-    if ((UF_long)tlen > kls_snode_trace_tlen_max) {
-      kls_snode_trace_tlen_max = tlen;
     }
   }
   return t;

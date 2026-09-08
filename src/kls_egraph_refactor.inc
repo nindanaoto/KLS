@@ -1005,19 +1005,6 @@ static UF_long kls_snode_batch_consume_cached_apply(
     }
     p0 += pc;
   }
-  if (kls_snode_trace_enabled()) {
-    kls_snode_trace_batched_producers += t;
-    kls_snode_trace_batched_tail_entries += t * tlen;
-    kls_snode_trace_batches++;
-    kls_snode_trace_tlen_sum += tlen;
-    if (tlen > kls_snode_trace_tlen_max) {
-      kls_snode_trace_tlen_max = tlen;
-    }
-    const unsigned int bucket =
-      t <= 1u ? 0u : t <= 3u ? 1u : t <= 7u ? 2u : t <= 15u ? 3u
-      : t <= 31u ? 4u : t <= 63u ? 5u : 6u;
-    kls_snode_trace_t_hist[bucket]++;
-  }
   return t;
 }
 
@@ -1039,9 +1026,6 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
   const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_norun++;
-    }
     return 0;
   }
   UF_long tmax = run_end - (k1 + j);
@@ -1062,9 +1046,6 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
     }
   }
   if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_short++;
-    }
     return 0;
   }
   if (wait_for_dependencies) {
@@ -1084,9 +1065,6 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
   if (tli == NULL || t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
     /* Short shared tails lose to the 32-bit-index scalar path; only pay the
        panel staging when the batched update amortizes it. */
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_decline_work++;
-    }
     return 0;
   }
   return kls_snode_batch_consume_cached_apply(
@@ -1215,12 +1193,6 @@ static UF_long kls_snode_batch_consume_cached_pair(
       xa[row] -= acca[p];
       xb[row] -= accb[p];
     }
-  }
-  if (kls_snode_trace_enabled()) {
-    kls_snode_trace_batched_producers += 2u * t;
-    kls_snode_trace_batched_tail_entries += 2u * t * tlen;
-    kls_snode_trace_pair_batches += 1u;
-    kls_snode_trace_pair_producers += t;
   }
   return t;
 }
@@ -1351,10 +1323,6 @@ static UF_long kls_snode_batch_consume_cached_multi(
         xv[c][row] -= acc[c][p];
       }
     }
-  }
-  if (kls_snode_trace_enabled()) {
-    kls_snode_trace_batched_producers += (UF_long)nc * t;
-    kls_snode_trace_batched_tail_entries += (UF_long)nc * t * tlen;
   }
   return t;
 }
@@ -2771,9 +2739,6 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
               kls_scatter_subtract_pair(xa, xb, l_indices[dep_global], lx,
                                         lcol_len, ua, ub);
             }
-            if (kls_snode_trace_enabled()) {
-              kls_snode_trace_pair_producers += 1u;
-            }
           }
           upa++;
           upb++;
@@ -3822,9 +3787,6 @@ static int kls_egraph_refactor_dispatch_pair(
     const UF_long block = solver->refactor_col_block[col];
     if (symbolic->R[block + 1u] - symbolic->R[block] <= 1u) {
       return -1;
-    }
-    if (kls_snode_trace_enabled()) {
-      kls_snode_trace_pair_columns += 2u;
     }
     return kls_egraph_refactor_btf_unscaled_column_pair(worker, col, col2);
   }
