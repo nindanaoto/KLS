@@ -1138,6 +1138,11 @@ static UF_long kls_snb_refactor_epilogue(kls_solver *solver) {
   return 1;
 }
 
+/* Keep this hot, inlined numeric body on a stable instruction-cache boundary
+ * when unrelated code changes size. This changes placement, not arithmetic. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((aligned(64)))
+#endif
 static UF_long kls_snb_refactor(kls_solver *solver,
                                 const double *numeric_values) {
   kls_snb_state *st = solver->snb;
