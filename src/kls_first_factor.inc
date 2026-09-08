@@ -1841,13 +1841,6 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long scalar_run_calls;
   UF_long scalar_run_rows;
   UF_long scalar_run_u_entries;
-  UF_long producer_batch_calls;
-  UF_long producer_batch_targets;
-  UF_long producer_batch_stream_u_entries;
-  UF_long producer_batch_target_u_entries;
-  UF_long producer_active_catchup_attempts;
-  UF_long producer_active_catchup_deps;
-  UF_long producer_active_catchup_targets;
 
   UF_long panel_update_groups;
   UF_long panel_update_rows;
@@ -1879,20 +1872,6 @@ static void kls_row_first_pipeline_trace_add(
                           source->scalar_run_rows);
   kls_row_first_stats_add(&target->scalar_run_u_entries,
                           source->scalar_run_u_entries);
-  kls_row_first_stats_add(&target->producer_batch_calls,
-                          source->producer_batch_calls);
-  kls_row_first_stats_add(&target->producer_batch_targets,
-                          source->producer_batch_targets);
-  kls_row_first_stats_add(&target->producer_batch_stream_u_entries,
-                          source->producer_batch_stream_u_entries);
-  kls_row_first_stats_add(&target->producer_batch_target_u_entries,
-                          source->producer_batch_target_u_entries);
-  kls_row_first_stats_add(&target->producer_active_catchup_attempts,
-                          source->producer_active_catchup_attempts);
-  kls_row_first_stats_add(&target->producer_active_catchup_deps,
-                          source->producer_active_catchup_deps);
-  kls_row_first_stats_add(&target->producer_active_catchup_targets,
-                          source->producer_active_catchup_targets);
 
   kls_row_first_stats_add(&target->panel_update_groups,
                           source->panel_update_groups);
@@ -6013,8 +5992,6 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
     return 1;
   }
 
-  kls_row_first_pipeline_trace *producer_trace =
-    shared->trace_enabled ? &current_worker->trace_current : NULL;
   UF_long target_count = 0u;
   for (int tid = 0; tid < shared->worker_count; ++tid) {
     kls_row_first_pipeline_worker *worker = shared->workers + tid;
@@ -6034,10 +6011,6 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
     target_count++;
   }
 
-  const UF_long candidate_target_u_entries =
-    target_count != 0u && run_entries > UF_long_max / target_count
-      ? UF_long_max
-      : run_entries * target_count;
   if (target_count < 2u) {
     return 1;
   }
@@ -6112,15 +6085,6 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
     return 0;
   }
 
-  if (producer_trace != NULL) {
-    kls_row_first_stats_add(&producer_trace->producer_batch_calls, 1u);
-    kls_row_first_stats_add(&producer_trace->producer_batch_targets,
-                            target_count);
-    kls_row_first_stats_add(&producer_trace->producer_batch_stream_u_entries,
-                            run_entries);
-    kls_row_first_stats_add(&producer_trace->producer_batch_target_u_entries,
-                            candidate_target_u_entries);
-  }
   return 1;
 }
 
@@ -6221,9 +6185,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
     return 1;
   }
   const UF_long row_entries = row_end - row_begin;
-  kls_row_first_pipeline_trace *producer_trace =
-    shared->trace_enabled && current_worker != NULL
-      ? &current_worker->trace_current : NULL;
 
   UF_long target_count = 0;
   for (int tid = 0; tid < shared->worker_count; ++tid) {
@@ -6246,11 +6207,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
             worker->active_state->generation &&
           worker->active_state->dep_heap_size > 0u &&
           worker->workspace.dep_heap[0] < dep) {
-        if (producer_trace != NULL) {
-          kls_row_first_stats_add(
-            &producer_trace->producer_active_catchup_attempts, 1u);
-        }
-        const UF_long before_l_count = worker->l_entries.count;
         if (!kls_row_first_partial_apply_ready_until(
               shared->ctx, &worker->workspace, &worker->l_entries,
               shared->u_entries, shared->udiag_values,
@@ -6268,22 +6224,12 @@ static int kls_row_first_pipeline_apply_producer_batch(
               NULL)) {
           return 0;
         }
-        if (producer_trace != NULL &&
-            worker->l_entries.count > before_l_count) {
-          kls_row_first_stats_add(
-            &producer_trace->producer_active_catchup_deps,
-            worker->l_entries.count - before_l_count);
-        }
         retry_after_catchup = 1;
       }
       if (!retry_after_catchup ||
           !kls_row_first_pipeline_worker_scalar_batch_candidate(
             shared, worker, dep, NULL)) {
         continue;
-      }
-      if (producer_trace != NULL) {
-        kls_row_first_stats_add(
-          &producer_trace->producer_active_catchup_targets, 1u);
       }
     }
     if (target_count >= (UF_long)shared->batch_target_capacity) {
@@ -6371,17 +6317,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
     free(detached_targets);
   }
 
-  if (producer_trace != NULL) {
-    kls_row_first_stats_add(&producer_trace->producer_batch_calls, 1u);
-    kls_row_first_stats_add(&producer_trace->producer_batch_targets,
-                            target_count);
-    kls_row_first_stats_add(&producer_trace->producer_batch_stream_u_entries,
-                            row_entries);
-    for (UF_long t = 0; t < target_count; ++t) {
-      kls_row_first_stats_add(&producer_trace->producer_batch_target_u_entries,
-                              row_entries);
-    }
-  }
   return 1;
 }
 
@@ -6404,28 +6339,14 @@ static void kls_row_first_pipeline_trace_print(
           "/%" PRIu64 " begin=%" PRIu64 " end=%" PRIu64
           " scalar_deps=%" PRIu64 " scalar_u_entries=%" PRIu64
           " scalar_runs=%" PRIu64 " scalar_run_rows=%" PRIu64
-          " scalar_run_u_entries=%" PRIu64
-          " producer_batches=%" PRIu64
-          " producer_targets=%" PRIu64
-          " producer_stream_u_entries=%" PRIu64
-          " producer_target_u_entries=%" PRIu64
-          " producer_active_catchup_attempts=%" PRIu64
-          " producer_active_catchup_deps=%" PRIu64
-          " producer_active_catchup_targets=%" PRIu64,
+          " scalar_run_u_entries=%" PRIu64,
           event, (uint64_t)completed, (uint64_t)total,
           (uint64_t)shared->begin, (uint64_t)shared->end,
           (uint64_t)trace->scalar_dep_calls,
           (uint64_t)trace->scalar_dep_u_entries,
           (uint64_t)trace->scalar_run_calls,
           (uint64_t)trace->scalar_run_rows,
-          (uint64_t)trace->scalar_run_u_entries,
-          (uint64_t)trace->producer_batch_calls,
-          (uint64_t)trace->producer_batch_targets,
-          (uint64_t)trace->producer_batch_stream_u_entries,
-          (uint64_t)trace->producer_batch_target_u_entries,
-          (uint64_t)trace->producer_active_catchup_attempts,
-          (uint64_t)trace->producer_active_catchup_deps,
-          (uint64_t)trace->producer_active_catchup_targets);
+          (uint64_t)trace->scalar_run_u_entries);
 
   fprintf(stderr,
           " panel_updates=%" PRIu64 " panel_update_rows=%" PRIu64
