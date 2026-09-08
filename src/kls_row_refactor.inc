@@ -11237,26 +11237,6 @@ static int kls_row_refactor_try_compact_supernode_update_cblas(
 #endif
 }
 
-static int kls_compact_supernode_trsv_auto_allows(UF_long run_rows,
-                                                  UF_long trailing_len) {
-  (void)run_rows;
-  (void)trailing_len;
-  return 0;
-}
-
-static int kls_compact_supernode_trsv_should_run(
-  const kls_egraph_refactor_shared *shared,
-  UF_long run_rows,
-  UF_long trailing_len) {
-  if (shared == NULL || shared->row_refactor_compact_supernode_trsv < 0) {
-    return 0;
-  }
-  if (shared->row_refactor_compact_supernode_trsv > 0) {
-    return 1;
-  }
-  return kls_compact_supernode_trsv_auto_allows(run_rows, trailing_len);
-}
-
 typedef struct {
   UF_long group;
   UF_long len;
@@ -11497,7 +11477,7 @@ static int kls_row_refactor_try_compact_supernode_update(
   int use_blocked_trailing = 0;
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*supernode_workspace));
-  if (kls_compact_supernode_trsv_should_run(shared, run_rows, trailing_len) &&
+  if (shared != NULL && shared->row_refactor_compact_supernode_trsv > 0 &&
       run_rows <= max_workspace_entries &&
       trailing_len <= max_workspace_entries - run_rows) {
     const UF_long workspace_entries = run_rows + trailing_len;
