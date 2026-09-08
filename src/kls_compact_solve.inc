@@ -1688,17 +1688,6 @@ static UF_long kls_i32_solve(kls_solver *solver,
               pts->solve_probe_min[1] < 0.98 * pts->solve_probe_min[0]
                 ? 1 : -1;
           }
-          if (pts->solve_decision != 0 &&
-              getenv("KLS_TRACE_PTS") != NULL) {
-            fprintf(stderr,
-                    "KLS pts solve: %s (serial %.3f ms, PTS %.3f ms,"
-                    " samples %d/%d)\n",
-                    pts->solve_decision > 0 ? "adopt" : "decline",
-                    1e3 * pts->solve_probe_min[0],
-                    1e3 * pts->solve_probe_min[1],
-                    pts->solve_probe_samples[0],
-                    pts->solve_probe_samples[1]);
-          }
         }
       }
     }

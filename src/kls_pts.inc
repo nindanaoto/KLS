@@ -199,8 +199,7 @@ static double kls_pts_cut_lifecycle_score(
   const double *subtree_flops,
   double total_flops,
   const kls_options *options,
-  int64_t *nchunks_out,
-  int trace) {
+  int64_t *nchunks_out) {
   if (nk == 0u || nthreads < 2 || !(total > 0.0) ||
       !(cut_multiplier > 0.0) || parent == NULL || tin == NULL ||
       tout == NULL || swork == NULL || subtree_flops == NULL ||
@@ -306,18 +305,6 @@ static double kls_pts_cut_lifecycle_score(
       : serial_refactor_cost;
     score = solves * solve_cost + refactors * refactor_cost;
   }
-  if (trace) {
-    fprintf(stderr,
-            "KLS pts cut %.2fx: chunks=%ld top=%.2f%%/%.2f%% "
-            "critical=%.2f%%/%.2f%% top-cols=%ld "
-            "certificates=%d/%d score=%.4e\n",
-            cut_multiplier, (long)nchunks, 100.0 * top_work / total,
-            total_flops > 0.0 ? 100.0 * top_flops / total_flops : 0.0,
-            100.0 * (top_work + max_bin) / total,
-            total_flops > 0.0
-              ? 100.0 * (top_flops + max_bin_flops) / total_flops : 0.0,
-            (long)ntop, solve_ok, refactor_ok, score);
-  }
   return isfinite(score) ? score : DBL_MAX;
 }
 
@@ -408,16 +395,6 @@ static void kls_pts_try_build(kls_solver *solver) {
   }
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
-  const int trace = getenv("KLS_TRACE_PTS") != NULL;
-  double trace_phase_start = kls_now_seconds();
-#define KLS_PTS_BUILD_PHASE(label) do {                                  \
-    if (trace) {                                                         \
-      const double trace_phase_now = kls_now_seconds();                  \
-      fprintf(stderr, "KLS pts phase %-12s %.3fms\n", label,           \
-              1e3 * (trace_phase_now - trace_phase_start));              \
-      trace_phase_start = trace_phase_now;                               \
-    }                                                                    \
-  } while (0)
   const int measured_matched_factor =
     kls_symmetric_partial_diagonal_match_factor_cycle(solver);
   int nthreads = (int)solver->options.threads;
@@ -466,13 +443,6 @@ static void kls_pts_try_build(kls_solver *solver) {
       factor_entries <= 12u * nk && solver->common.flops > 0.0 &&
       solver->common.flops <= 8.0 * (double)factor_entries;
     if (deep_low_intensity_factor) {
-      if (trace) {
-        fprintf(stderr,
-                "KLS pts settle: deep low-intensity factor "
-                "depth=%ld/%ld entries=%ld flops=%.3e\n",
-                (long)solver->stats.factor_etree_levels, (long)nk,
-                (long)factor_entries, solver->common.flops);
-      }
       return;
     }
   }
@@ -483,7 +453,6 @@ static void kls_pts_try_build(kls_solver *solver) {
   const int32_t *i32l = solver->i32solve_l;
   const int32_t *i32u = solver->i32solve_u;
 
-  const char *reject_stage = "none";
   int32_t *parent = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
   int32_t *head = (int32_t *)malloc(((size_t)nk + 1u) * sizeof(int32_t));
   int32_t *next = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
@@ -534,7 +503,6 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = li[p];
         if (i <= (int32_t)k || i >= (int32_t)nk) {
           ok = 0;
-          reject_stage = "L-range";
           break;
         }
         if (i <= prev) streams_ordered = 0;
@@ -549,7 +517,6 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = ui[p];
         if (i < 0 || i >= (int32_t)k) {
           ok = 0;
-          reject_stage = "U-range";
           break;
         }
         if (i <= prev) streams_ordered = 0;
@@ -559,7 +526,6 @@ static void kls_pts_try_build(kls_solver *solver) {
       column_flops[k] = flops;
     }
   }
-  KLS_PTS_BUILD_PHASE("validate/flop");
   if (ok) {
     /* group L entries by row via counting sort, storing source columns */
     if (ok) {
@@ -616,7 +582,6 @@ static void kls_pts_try_build(kls_solver *solver) {
   free(lrow_ptr);
   free(lrow_col);
 
-  KLS_PTS_BUILD_PHASE("forest");
   /* children lists, then iterative DFS: Euler intervals + subtree work */
   if (ok) {
     for (UF_long k = 0; k <= nk; ++k) {
@@ -659,7 +624,6 @@ static void kls_pts_try_build(kls_solver *solver) {
     ok = counter == (int32_t)nk;
   }
 
-  KLS_PTS_BUILD_PHASE("dfs");
   double total_refactor_flops = 0.0;
   if (ok) {
     for (int32_t root = head[nk]; root != -1; root = next[root]) {
@@ -675,7 +639,6 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = li[p];
         if (!(tin[i] <= tin[k] && tin[k] < tout[i])) {
           ok = 0;
-          reject_stage = "L-anc";
           break;
         }
       }
@@ -685,14 +648,12 @@ static void kls_pts_try_build(kls_solver *solver) {
         const int32_t i = ui[p];
         if (!(tin[k] <= tin[i] && tin[i] < tout[k])) {
           ok = 0;
-          reject_stage = "U-desc";
           break;
         }
       }
     }
   }
 
-  KLS_PTS_BUILD_PHASE("verify");
   /* maximal subtree cuts, LPT bin packing, owners via DFS intervals */
   int64_t ntop = 0;
   double total = 0.0;
@@ -740,7 +701,7 @@ static void kls_pts_try_build(kls_solver *solver) {
         const double candidate_score = kls_pts_cut_lifecycle_score(
           nk, nthreads, total, candidates[candidate], parent, tin, tout,
           swork, subtree_flops, total_refactor_flops, &solver->options,
-          &candidate_chunks[candidate], trace);
+          &candidate_chunks[candidate]);
         candidate_scores[candidate] = candidate_score;
         if (candidate_score < best_cut_score) {
           best_cut_score = candidate_score;
@@ -761,11 +722,6 @@ static void kls_pts_try_build(kls_solver *solver) {
           candidate_scores[0] <= 1.05 * best_cut_score &&
           candidate_chunks[0] >= 16 * (int64_t)nthreads) {
         cut_multiplier = candidates[0];
-      }
-      if (trace) {
-        fprintf(stderr,
-                "KLS pts cut portfolio: selected %.2fx (score %.4e)\n",
-                cut_multiplier, best_cut_score);
       }
     }
     const double cut_max =
@@ -867,19 +823,7 @@ static void kls_pts_try_build(kls_solver *solver) {
            top_work <= (allow_very_wide_top ? 0.60 :
                        (allow_wide_top ? 0.45 : 0.40)) * total &&
            max_bin <= 0.6 * total;
-      if (trace) {
-        fprintf(stderr,
-                "KLS pts build block=%ld nk=%ld chunks=%ld ntop=%ld"
-                " topw=%.2f%% maxbin=%.2f%% balanced-wide=%d/%d/%d -> %s\n",
-                (long)best, (long)nk, (long)nchunks, (long)ntop,
-                100.0 * top_work / total, 100.0 * max_bin / total,
-                balanced_wide_solve_plan, balanced_runtime_solve_plan,
-                balanced_very_wide_solve_plan, ok ? "adopt" : "decline");
-      }
     }
-  } else if (trace) {
-    fprintf(stderr, "KLS pts build block=%ld nk=%ld -> tree reject (%s)\n",
-            (long)best, (long)nk, reject_stage);
   }
 
   /* assemble the persistent partition */
@@ -940,14 +884,6 @@ static void kls_pts_try_build(kls_solver *solver) {
           critical_refactor_flops <= 0.50 * total_flops));
       pts->refactor_top_flops = top_flops;
       pts->refactor_total_flops = total_flops;
-      if (trace) {
-        fprintf(stderr,
-                "KLS pts flop-topw %.1f%% critical %.1f%% -> refactor %s\n",
-                total_flops > 0.0 ? 100.0 * top_flops / total_flops : 0.0,
-                total_flops > 0.0
-                  ? 100.0 * critical_refactor_flops / total_flops : 0.0,
-                pts->refactor_ok ? "eligible" : "gated off");
-      }
     }
     pts->block = best;
     pts->k1 = k1;
@@ -1055,11 +991,6 @@ static void kls_pts_try_build(kls_solver *solver) {
          balance proof.  Keep the old class verdicts only for sub-16K plans,
          where dispatch overhead still needs a separate economic reason. */
       pts->solve_decision = 1;
-      if (trace && verified_large_pts_solve) {
-        fprintf(stderr,
-                "KLS pts solve: direct verified large plan (nk=%ld)\n",
-                (long)pts->nk);
-      }
     }
     if ((measured_matched_factor) &&
         pts->refactor_ok &&
@@ -1072,7 +1003,6 @@ static void kls_pts_try_build(kls_solver *solver) {
     }
     pts = NULL;
   }
-  KLS_PTS_BUILD_PHASE("cuts/material");
   if (pts != NULL) {
     free(pts->tcols);
     free(pts->top_cols);
@@ -1100,7 +1030,6 @@ static void kls_pts_try_build(kls_solver *solver) {
   free(owner);
   free(croot);
   free(chunks);
-#undef KLS_PTS_BUILD_PHASE
 }
 
 static void *kls_pts_deferred_build_main(void *arg) {
@@ -1596,15 +1525,6 @@ static UF_long kls_pts_egraph_terminal_candidate(kls_solver *solver) {
   pts->egraph_terminal_decision =
     work >= 0.99 * solver->refactor_dependency_max_column_work ? 1 : -1;
   pts->egraph_terminal_col = k;
-  if (getenv("KLS_TRACE_PTS") != NULL) {
-    fprintf(stderr,
-            "KLS pts egraph terminal: %s nk=%" PRIu64
-            " ulen=%" PRIu64 " ntop=%" PRId64
-            " work=%.0f max=%.0f\n",
-            pts->egraph_terminal_decision > 0 ? "adopt" : "reject",
-            (uint64_t)pts->nk, (uint64_t)numeric->Ulen[k], pts->ntop,
-            work, solver->refactor_dependency_max_column_work);
-  }
   return pts->egraph_terminal_decision > 0 ? k : KLS_KLU_EMPTY;
 }
 
@@ -1645,8 +1565,6 @@ static int kls_pts_recompute_egraph_terminal(kls_solver *solver,
     solver->refactor_block_start[k], solver->refactor_col_ptr[k + 1u]);
 
   double *lu = (double *)numeric->LUbx[block];
-  const double trace_begin = getenv("KLS_TRACE_PTS") != NULL
-    ? kls_now_seconds() : 0.0;
   if (lu == NULL || !kls_pts_block_pool(
         solver, workspace, lu, numeric->Lip + k1, numeric->Llen + k1,
         numeric->Uip + k1, numeric->Ulen + k1,
@@ -1674,10 +1592,6 @@ static int kls_pts_recompute_egraph_terminal(kls_solver *solver,
   workspace[local_k] = 0.0;
   if (pivot == 0.0 || !isfinite(pivot)) return 0;
   ((double *)numeric->Udiag)[k] = pivot;
-  if (trace_begin != 0.0) {
-    fprintf(stderr, "KLS pts egraph terminal run: %.3f ms\n",
-            1e3 * (kls_now_seconds() - trace_begin));
-  }
   return 1;
 }
 
@@ -2159,13 +2073,7 @@ static int kls_pts_mapped_refactor_pool(
   for (int tid = 0; tid < nthreads; ++tid) {
     pool->workers[tid].shared = pool_shared;
   }
-  const double pts_dispatch_start = getenv("KLS_TRACE_PTS") != NULL
-    ? kls_now_seconds() : 0.0;
   kls_egraph_pool_dispatch_and_spin_wait(pool, pool_shared, nthreads);
-  if (pts_dispatch_start != 0.0) {
-    fprintf(stderr, "KLS pts refactor dispatch %.3f ms\n",
-            1e3 * (kls_now_seconds() - pts_dispatch_start));
-  }
   pool_shared->pts_refactor_mode = 0;
   pool_shared->pts_refactor_job = NULL;
   pthread_mutex_unlock(&pool_shared->lock);
@@ -2189,17 +2097,11 @@ static int kls_pts_mapped_refactor_pool(
   /* The separator top depends on every subtree bin.  When it is too small to
      amortize a second synchronization phase, retain its serial order. */
   if (!job.pipe_top && !failed && !invalid && pts->ntop > 0) {
-    const double pts_finish_start = getenv("KLS_TRACE_PTS") != NULL
-      ? kls_now_seconds() : 0.0;
     if (job.two_stage_top) {
       kls_pts_finish_two_stage_top(&workers[0], pts);
     } else {
       kls_pts_refactor_block_cols(&workers[0], pts->block,
                                   pts->top_cols, pts->ntop);
-    }
-    if (pts_finish_start != 0.0) {
-      fprintf(stderr, "KLS pts refactor finish %.3f ms\n",
-              1e3 * (kls_now_seconds() - pts_finish_start));
     }
     invalid = workers[0].invalid;
     if (workers[0].singular &&
@@ -2257,13 +2159,6 @@ static int kls_pts_mapped_refactor_pool(
       pts->two_stage_refactor_decision =
         pts->two_stage_refactor_min[1] <
           0.98 * pts->two_stage_refactor_min[0] ? 1 : -1;
-      if (getenv("KLS_TRACE_PTS") != NULL) {
-        fprintf(stderr,
-                "KLS pts two-stage: %s (serial %.3f ms, staged %.3f ms)\n",
-                pts->two_stage_refactor_decision > 0 ? "adopt" : "decline",
-                1e3 * pts->two_stage_refactor_min[0],
-                1e3 * pts->two_stage_refactor_min[1]);
-      }
     }
   }
   return 1;
@@ -2642,15 +2537,6 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
     solver->pts_ref_trial_seconds = 0.0;
   } else {
     solver->pts_ref_decision = -1;
-  }
-  if (getenv("KLS_TRACE_PTS") != NULL) {
-    fprintf(stderr,
-            "KLS pts refactor acceptance incumbent %.3fms pts %.3fms"
-            " reaudit=%d -> %s\n",
-            incumbent_seconds * 1e3, t * 1e3,
-            solver->pts_ref_reaudit,
-            solver->pts_ref_decision > 0 ? "adopted" :
-              solver->pts_ref_decision < 0 ? "rejected" : "repeat");
   }
   if (repeated_generic && solver->pts_ref_decision <= 0 &&
       getenv("KLS_DISABLE_GENERIC_PTS_EGRAPH_TRIAL_RESET") == NULL) {
