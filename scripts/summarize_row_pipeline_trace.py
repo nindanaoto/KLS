@@ -8,6 +8,8 @@ for comparing first-factor tail experiments.
 Owner-surface, compact-window, producer state-union, and per-long-row counters
 are retained here for archived traces. Current KLS no longer emits them;
 missing counters are treated as zero.
+Scalar internal/output touch counters are likewise archived-only; the removed
+scalar L-entry count duplicated scalar_deps.
 """
 
 from __future__ import annotations

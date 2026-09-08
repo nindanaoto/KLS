@@ -1838,12 +1838,9 @@ static void kls_row_first_factor_row_failure_clear(
 typedef struct kls_row_first_pipeline_trace {
   UF_long scalar_dep_calls;
   UF_long scalar_dep_u_entries;
-  UF_long scalar_dep_l_entries;
   UF_long scalar_run_calls;
   UF_long scalar_run_rows;
   UF_long scalar_run_u_entries;
-  UF_long scalar_u_internal_entries;
-  UF_long scalar_u_output_entries;
   UF_long producer_batch_calls;
   UF_long producer_batch_targets;
   UF_long producer_batch_stream_u_entries;
@@ -1945,18 +1942,12 @@ static void kls_row_first_pipeline_trace_add(
                           source->scalar_dep_calls);
   kls_row_first_stats_add(&target->scalar_dep_u_entries,
                           source->scalar_dep_u_entries);
-  kls_row_first_stats_add(&target->scalar_dep_l_entries,
-                          source->scalar_dep_l_entries);
   kls_row_first_stats_add(&target->scalar_run_calls,
                           source->scalar_run_calls);
   kls_row_first_stats_add(&target->scalar_run_rows,
                           source->scalar_run_rows);
   kls_row_first_stats_add(&target->scalar_run_u_entries,
                           source->scalar_run_u_entries);
-  kls_row_first_stats_add(&target->scalar_u_internal_entries,
-                          source->scalar_u_internal_entries);
-  kls_row_first_stats_add(&target->scalar_u_output_entries,
-                          source->scalar_u_output_entries);
   kls_row_first_stats_add(&target->producer_batch_calls,
                           source->producer_batch_calls);
   kls_row_first_stats_add(&target->producer_batch_targets,
@@ -4741,23 +4732,13 @@ static int kls_row_first_partial_apply_one_dep(
   }
   if (trace != NULL) {
     kls_row_first_stats_add(&trace->scalar_dep_calls, 1u);
-    kls_row_first_stats_add(&trace->scalar_dep_l_entries, 1u);
     kls_row_first_stats_add(&trace->scalar_dep_u_entries,
                             u_row_end[dep] - u_row_ptr[dep]);
   }
-  UF_long trace_internal_entries = 0u;
-  UF_long trace_output_entries = 0u;
   for (UF_long up = u_row_ptr[dep]; up < u_row_end[dep]; ++up) {
     const UF_long col = published_u_entries->col[up];
     if (col <= dep || col >= ctx->nk) {
       return 0;
-    }
-    if (trace != NULL) {
-      if (col < state->row) {
-        trace_internal_entries++;
-      } else {
-        trace_output_entries++;
-      }
     }
     if (mark[col] != state->generation) {
       mark[col] = state->generation;
@@ -4768,12 +4749,6 @@ static int kls_row_first_partial_apply_one_dep(
       x[col] = 0.0;
     }
     x[col] -= lij * published_u_entries->value[up];
-  }
-  if (trace != NULL) {
-    kls_row_first_stats_add(&trace->scalar_u_internal_entries,
-                            trace_internal_entries);
-    kls_row_first_stats_add(&trace->scalar_u_output_entries,
-                            trace_output_entries);
   }
   return 1;
 }
@@ -4810,8 +4785,6 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
   const unsigned int generation = state->generation;
   UF_long run_rows = 0;
   UF_long run_u_entries = 0;
-  UF_long trace_internal_entries = 0u;
-  UF_long trace_output_entries = 0u;
   if (!kls_row_first_entries_reserve_append(
         local_l_entries, dep_end - dep_begin + 1u)) {
     return 0;
@@ -4851,13 +4824,6 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
       if (col <= dep || col >= ctx->nk) {
         return 0;
       }
-      if (trace != NULL) {
-        if (col < state->row) {
-          trace_internal_entries++;
-        } else {
-          trace_output_entries++;
-        }
-      }
       if (mark[col] != generation) {
         mark[col] = generation;
         pattern[state->pattern_count++] = col;
@@ -4874,10 +4840,6 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
     kls_row_first_stats_add(&trace->scalar_run_calls, 1u);
     kls_row_first_stats_add(&trace->scalar_run_rows, run_rows);
     kls_row_first_stats_add(&trace->scalar_run_u_entries, run_u_entries);
-    kls_row_first_stats_add(&trace->scalar_u_internal_entries,
-                            trace_internal_entries);
-    kls_row_first_stats_add(&trace->scalar_u_output_entries,
-                            trace_output_entries);
   }
   if (run_rows_out != NULL) {
     *run_rows_out = run_rows;
@@ -6706,11 +6668,8 @@ static void kls_row_first_pipeline_trace_print(
           "KLS row-pipeline trace: event=%s completed=%" PRIu64
           "/%" PRIu64 " begin=%" PRIu64 " end=%" PRIu64
           " scalar_deps=%" PRIu64 " scalar_u_entries=%" PRIu64
-          " scalar_l_entries=%" PRIu64
           " scalar_runs=%" PRIu64 " scalar_run_rows=%" PRIu64
           " scalar_run_u_entries=%" PRIu64
-          " scalar_u_internal=%" PRIu64
-          " scalar_u_output=%" PRIu64
           " producer_batches=%" PRIu64
           " producer_targets=%" PRIu64
           " producer_stream_u_entries=%" PRIu64
@@ -6728,12 +6687,9 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)shared->begin, (uint64_t)shared->end,
           (uint64_t)trace->scalar_dep_calls,
           (uint64_t)trace->scalar_dep_u_entries,
-          (uint64_t)trace->scalar_dep_l_entries,
           (uint64_t)trace->scalar_run_calls,
           (uint64_t)trace->scalar_run_rows,
           (uint64_t)trace->scalar_run_u_entries,
-          (uint64_t)trace->scalar_u_internal_entries,
-          (uint64_t)trace->scalar_u_output_entries,
           (uint64_t)trace->producer_batch_calls,
           (uint64_t)trace->producer_batch_targets,
           (uint64_t)trace->producer_batch_stream_u_entries,
@@ -9156,14 +9112,6 @@ static int kls_try_row_first_etree_ready_tail_repair(
   UF_long *supernode_panel_update_rows_out,
   UF_long *pivot_tail_rows_out,
   UF_long *pivot_restarts_out) {
-  const int trace_timing =
-    getenv("KLS_TRACE_FAST_REJECT_REPAIR_TIMING") != NULL;
-  const double trace_begin = trace_timing ? kls_now_seconds() : 0.0;
-  double trace_alloc_done = trace_begin;
-  double trace_seed_done = trace_begin;
-  double trace_boundary_done = trace_begin;
-  double trace_ready_done = trace_begin;
-  double trace_publish_done = trace_begin;
   KLS_SET_OPTIONAL_OUTPUT(row_pipeline_ready_rows_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(row_pipeline_threads_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(row_pipeline_prefactor_rows_out, 0);
@@ -9231,9 +9179,6 @@ static int kls_try_row_first_etree_ready_tail_repair(
         &trial_panel_cache, nk)) {
     trial_workspace.supernode_panel_cache = &trial_panel_cache;
   }
-  if (trace_timing) {
-    trace_alloc_done = kls_now_seconds();
-  }
 
   double *saved_udiag = worker->udiag_values;
   worker->udiag_values = trial_udiag;
@@ -9244,9 +9189,6 @@ static int kls_try_row_first_etree_ready_tail_repair(
   worker->udiag_values = saved_udiag;
   if (!seed_ok) {
     goto cleanup;
-  }
-  if (trace_timing) {
-    trace_seed_done = kls_now_seconds();
   }
 
   unsigned char *ready_mask =
@@ -9282,9 +9224,6 @@ static int kls_try_row_first_etree_ready_tail_repair(
       trial_workspace.supernode_panel_cache = NULL;
     }
   }
-  if (trace_timing) {
-    trace_boundary_done = kls_now_seconds();
-  }
 
   UF_long ready_threads = 0;
   UF_long ready_rows = active_rows - 1u;
@@ -9313,9 +9252,6 @@ static int kls_try_row_first_etree_ready_tail_repair(
     goto cleanup;
   }
   free(ready_mask);
-  if (trace_timing) {
-    trace_ready_done = kls_now_seconds();
-  }
 
   memcpy(worker->u_row_ptr, trial_workspace.u_row_ptr,
          ((size_t)nk + 1u) * sizeof(*worker->u_row_ptr));
@@ -9363,9 +9299,6 @@ static int kls_try_row_first_etree_ready_tail_repair(
     *pivot_restarts_out = pivot_restarts;
   }
   ok = 1;
-  if (trace_timing) {
-    trace_publish_done = kls_now_seconds();
-  }
 
 cleanup:
   kls_row_first_entries_free(&trial_l_entries);
@@ -9376,22 +9309,6 @@ cleanup:
   kls_row_first_workspace_free(&trial_workspace);
   free(trial_udiag);
   free(trial_row_done);
-  if (trace_timing) {
-    const double trace_end = kls_now_seconds();
-    fprintf(stderr,
-            "KLS ETree repair timing: block=%" PRIu64
-            " active=%" PRIu64 " ok=%d alloc=%.3fms seed=%.3fms"
-            " boundary=%.3fms ready=%.3fms publish=%.3fms"
-            " cleanup=%.3fms total=%.3fms\n",
-            (uint64_t)block, (uint64_t)active_rows, ok,
-            1e3 * (trace_alloc_done - trace_begin),
-            1e3 * (trace_seed_done - trace_alloc_done),
-            1e3 * (trace_boundary_done - trace_seed_done),
-            1e3 * (trace_ready_done - trace_boundary_done),
-            1e3 * (trace_publish_done - trace_ready_done),
-            1e3 * (trace_end - trace_publish_done),
-            1e3 * (trace_end - trace_begin));
-  }
   return ok;
 }
 
