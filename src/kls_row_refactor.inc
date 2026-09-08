@@ -341,23 +341,6 @@ KLS_DEFINE_ENV_FLAG(kls_row_pipeline_supernode_producer_batch_env_enabled,
 KLS_DEFINE_ENV_FLAG(kls_row_first_strict_separator_pivot_scope_env_enabled,
                     "KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE")
 
-static UF_long kls_row_pipeline_long_row_trace_threshold(void) {
-  const char *value = getenv("KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES");
-  if (value == NULL || value[0] == '\0' ||
-      (value[0] == '0' && value[1] == '\0')) {
-    return 0;
-  }
-  errno = 0;
-  char *end = NULL;
-  const unsigned long long parsed = strtoull(value, &end, 10);
-  if (errno != 0 || end == value || (end != NULL && *end != '\0')) {
-    return 0;
-  }
-  const unsigned long long max_uf =
-    (unsigned long long)UF_long_max;
-  return parsed > max_uf ? UF_long_max : (UF_long)parsed;
-}
-
 static void kls_trace_first_factor_dominant_btf(
   const kls_solver *solver,
   UF_long block,

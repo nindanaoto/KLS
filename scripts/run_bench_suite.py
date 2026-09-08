@@ -178,14 +178,9 @@ def collect_trace_failure_diagnostic(
     env = os.environ.copy()
     env["KLS_TRACE_KLS_FIRST_FACTOR"] = "1"
     env["KLS_TRACE_ROW_PIPELINE"] = "1"
-    env["KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES"] = str(
-        args.failure_trace_long_row_entries
-    )
     env_overrides = {
         "KLS_TRACE_KLS_FIRST_FACTOR": env["KLS_TRACE_KLS_FIRST_FACTOR"],
         "KLS_TRACE_ROW_PIPELINE": env["KLS_TRACE_ROW_PIPELINE"],
-        "KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES":
-            env["KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES"],
     }
     try:
         proc = subprocess.run(
@@ -387,15 +382,6 @@ def main() -> int:
         help="timeout in seconds for row-pipeline failure trace diagnostics",
     )
     parser.add_argument(
-        "--failure-trace-long-row-entries",
-        type=int,
-        default=100000,
-        help=(
-            "KLS_TRACE_ROW_PIPELINE_LONG_ROW_ENTRIES threshold used by "
-            "row-pipeline failure trace diagnostics"
-        ),
-    )
-    parser.add_argument(
         "--failure-trace-dir",
         type=pathlib.Path,
         help=(
@@ -447,9 +433,6 @@ def main() -> int:
         return 1
     if args.failure_trace_timeout is not None and args.failure_trace_timeout <= 0:
         print("--failure-trace-timeout must be positive", file=sys.stderr)
-        return 1
-    if args.failure_trace_long_row_entries < 0:
-        print("--failure-trace-long-row-entries must be non-negative", file=sys.stderr)
         return 1
     if args.skip:
         matrices = matrices[args.skip :]

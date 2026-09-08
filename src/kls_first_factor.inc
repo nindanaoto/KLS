@@ -1879,10 +1879,6 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long panel_update_entries;
   UF_long panel_cache_appends;
   UF_long panel_cache_append_entries;
-  UF_long long_row_threshold;
-  UF_long long_row;
-  UF_long long_row_pos;
-  int long_row_emitted;
 } kls_row_first_pipeline_trace;
 
 typedef enum kls_row_first_pipeline_producer_reject {
@@ -2032,41 +2028,6 @@ static void kls_row_first_pipeline_trace_add(
                           source->panel_cache_appends);
   kls_row_first_stats_add(&target->panel_cache_append_entries,
                           source->panel_cache_append_entries);
-}
-
-static void kls_row_first_pipeline_trace_maybe_print_live_long_row(
-  kls_row_first_pipeline_trace *trace,
-  const kls_row_first_partial_row *state,
-  UF_long dep) {
-  if (trace == NULL || state == NULL ||
-      trace->long_row_threshold == 0u ||
-      trace->long_row_emitted ||
-      trace->scalar_dep_u_entries < trace->long_row_threshold) {
-    return;
-  }
-  fprintf(stderr,
-          "KLS row-pipeline live-long-row: row=%" PRIu64
-          " pos=%" PRIu64 " dep=%" PRIu64
-          " deps=%" PRIu64
-          " scalar_u_entries=%" PRIu64
-          " scalar_u_internal=%" PRIu64
-          " scalar_u_output=%" PRIu64
-          " scalar_runs=%" PRIu64
-          " scalar_run_rows=%" PRIu64
-          " scalar_run_u_entries=%" PRIu64
-          " pattern=%" PRIu64
-          " remaining_deps=%" PRIu64 "\n",
-          (uint64_t)trace->long_row, (uint64_t)trace->long_row_pos,
-          (uint64_t)dep, (uint64_t)trace->scalar_dep_calls,
-          (uint64_t)trace->scalar_dep_u_entries,
-          (uint64_t)trace->scalar_u_internal_entries,
-          (uint64_t)trace->scalar_u_output_entries,
-          (uint64_t)trace->scalar_run_calls,
-          (uint64_t)trace->scalar_run_rows,
-          (uint64_t)trace->scalar_run_u_entries,
-          (uint64_t)state->pattern_count,
-          (uint64_t)state->dep_heap_size);
-  trace->long_row_emitted = 1;
 }
 
 static UF_long kls_row_first_panel_cache_stored_entries(UF_long width,
@@ -4789,8 +4750,6 @@ static int kls_row_first_partial_apply_one_dep(
     kls_row_first_stats_add(&trace->scalar_dep_l_entries, 1u);
     kls_row_first_stats_add(&trace->scalar_dep_u_entries,
                             u_row_end[dep] - u_row_ptr[dep]);
-    kls_row_first_pipeline_trace_maybe_print_live_long_row(
-      trace, state, dep);
   }
   UF_long trace_internal_entries = 0u;
   UF_long trace_output_entries = 0u;
@@ -6024,7 +5983,6 @@ typedef struct kls_row_first_pipeline_shared {
   unsigned int trace_state_union_generation;
   UF_long pivot_tail_rows;
   UF_long pivot_restarts;
-  UF_long long_row_trace_threshold;
 
   int trace_enabled;
   int producer_batch_enabled;
@@ -7097,10 +7055,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
         worker->l_entries.count = 0;
         worker->u_entries.count = 0;
         memset(&worker->trace_current, 0, sizeof(worker->trace_current));
-        worker->trace_current.long_row_threshold =
-          shared->long_row_trace_threshold;
-        worker->trace_current.long_row = row;
-        worker->trace_current.long_row_pos = pos;
       }
       int blocked = 0;
       int begin_ok = 1;
@@ -7436,105 +7390,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
 
               }
               worker->rows++;
-              if (shared->trace_enabled &&
-                  shared->long_row_trace_threshold > 0u &&
-                  worker->trace_current.scalar_dep_u_entries >=
-                    shared->long_row_trace_threshold) {
-                fprintf(
-          stderr,
-          "KLS row-pipeline long-row: row=%" PRIu64
-                        " pos=%" PRIu64 " completed=%" PRIu64
-                        "/%" PRIu64 " deps=%" PRIu64
-                        " scalar_u_entries=%" PRIu64
-                        " scalar_u_internal=%" PRIu64
-                        " scalar_u_output=%" PRIu64
-                        " scalar_runs=%" PRIu64
-                        " scalar_run_rows=%" PRIu64
-                        " scalar_run_u_entries=%" PRIu64
-                        " producer_batches=%" PRIu64
-                        " producer_targets=%" PRIu64
-                        " producer_stream_u_entries=%" PRIu64
-                        " producer_target_u_entries=%" PRIu64
-                        " producer_state_rows=%" PRIu64
-                        " producer_unique_state_rows=%" PRIu64
-                        " producer_candidate_targets=%" PRIu64
-                        " producer_candidate_target_u_entries=%" PRIu64
-                        " producer_underfilled_target_u_entries=%" PRIu64
-                        " producer_low_saved_stream_target_u_entries=%" PRIu64
-                        " producer_active_catchup_attempts=%" PRIu64
-                        " producer_active_catchup_deps=%" PRIu64
-                        " producer_active_catchup_targets=%" PRIu64
-
-                        " producer_probe_workers=%" PRIu64
-                        " producer_probe_lookahead=%" PRIu64
-                        " producer_ready_roots=%" PRIu64
-                        " producer_underfilled=%" PRIu64
-                        " producer_underfilled_targets=%" PRIu64
-                        " producer_low_saved_stream=%" PRIu64
-                        " producer_reject_bad_state=%" PRIu64
-                        " producer_reject_epoch=%" PRIu64
-                        " producer_reject_claimed=%" PRIu64
-                        " producer_reject_dep_absent=%" PRIu64
-                        " producer_reject_not_root=%" PRIu64
-                        " producer_reject_not_ready=%" PRIu64
-                        " producer_reject_supernode=%" PRIu64
-                        " producer_reject_cached_panel=%" PRIu64
-                        " panel_updates=%" PRIu64
-                        " panel_update_rows=%" PRIu64
-                        " panel_update_entries=%" PRIu64
-                        " l_entries=%" PRIu64
-                        " u_entries=%" PRIu64
-                        " pattern=%" PRIu64
-                        " remaining_deps=%" PRIu64
-                        " pivoted=%d selected_col=%" PRIu64 "\n",
-          (uint64_t)row,
-          (uint64_t)pos,
-          (uint64_t)(shared->completed_pos - shared->begin),
-          (uint64_t)(shared->end - shared->begin),
-          (uint64_t)worker->trace_current.scalar_dep_calls,
-          (uint64_t)worker->trace_current.scalar_dep_u_entries,
-          (uint64_t)worker->trace_current.scalar_u_internal_entries,
-          (uint64_t)worker->trace_current.scalar_u_output_entries,
-          (uint64_t)worker->trace_current.scalar_run_calls,
-          (uint64_t)worker->trace_current.scalar_run_rows,
-          (uint64_t)worker->trace_current.scalar_run_u_entries,
-          (uint64_t)worker->trace_current.producer_batch_calls,
-          (uint64_t)worker->trace_current.producer_batch_targets,
-          (uint64_t)worker->trace_current.producer_batch_stream_u_entries,
-          (uint64_t)worker->trace_current.producer_batch_target_u_entries,
-          (uint64_t)worker->trace_current.producer_batch_state_rows,
-          (uint64_t)worker->trace_current.producer_batch_unique_state_rows,
-          (uint64_t)worker->trace_current.producer_candidate_targets,
-          (uint64_t)worker->trace_current.producer_candidate_target_u_entries,
-          (uint64_t)worker->trace_current.producer_underfilled_target_u_entries,
-          (uint64_t)worker->trace_current.producer_low_saved_stream_target_u_entries,
-          (uint64_t)worker->trace_current.producer_active_catchup_attempts,
-          (uint64_t)worker->trace_current.producer_active_catchup_deps,
-          (uint64_t)worker->trace_current.producer_active_catchup_targets,
-          (uint64_t)worker->trace_current.producer_probe_workers,
-          (uint64_t)worker->trace_current.producer_probe_lookahead,
-          (uint64_t)worker->trace_current.producer_probe_ready_roots,
-          (uint64_t)worker->trace_current.producer_probe_underfilled,
-          (uint64_t)worker->trace_current.producer_probe_underfilled_targets,
-          (uint64_t)worker->trace_current.producer_probe_low_saved_stream,
-          (uint64_t)worker->trace_current.producer_reject_bad_state,
-          (uint64_t)worker->trace_current.producer_reject_epoch,
-          (uint64_t)worker->trace_current.producer_reject_claimed,
-          (uint64_t)worker->trace_current.producer_reject_dep_absent,
-          (uint64_t)worker->trace_current.producer_reject_not_root,
-          (uint64_t)worker->trace_current.producer_reject_not_ready,
-          (uint64_t)worker->trace_current.producer_reject_supernode,
-          (uint64_t)worker->trace_current.producer_reject_cached_panel,
-          (uint64_t)worker->trace_current.panel_update_groups,
-          (uint64_t)worker->trace_current.panel_update_rows,
-          (uint64_t)worker->trace_current.panel_update_entries,
-          (uint64_t)worker->l_entries.count,
-          (uint64_t)worker->u_entries.count,
-          (uint64_t)state.pattern_count,
-          (uint64_t)state.dep_heap_size,
-          pivoted,
-          (uint64_t)selected_col);
-              }
               if (shared->trace_enabled) {
                 kls_row_first_pipeline_trace_add(
                   &shared->trace_committed, &worker->trace_current);
@@ -7748,9 +7603,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
   {
 
   }
-
-  shared.long_row_trace_threshold =
-    shared.trace_enabled ? kls_row_pipeline_long_row_trace_threshold() : 0u;
 
   atomic_init(&shared.next_pos, (unsigned long)begin);
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
