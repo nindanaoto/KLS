@@ -861,18 +861,6 @@ static void kls_selected_lean_reaudit_finish(kls_solver *solver) {
     : solver->lean_reaudit_column_min +
         (solve_pair_ready ? solver->lean_reaudit_column_solve_min : 0.0);
   const double margin = solve_pair_ready ? 0.98 : 0.95;
-  const int64_t measured_refactors =
-    (int64_t)solver->lean_reaudit_samples +
-    (int64_t)solver->lean_reaudit_column_samples;
-  const double remaining =
-    solver->options.expected_refactorizations > measured_refactors
-      ? (double)(solver->options.expected_refactorizations -
-                 measured_refactors)
-      : 0.0;
-  const double remaining_saving =
-    remaining * (row_cycle - column_cycle);
-  const double column_sample_work =
-    (double)solver->lean_reaudit_column_samples * column_cycle;
   if (row_cycle > 0.0 && column_cycle > 0.0 &&
       column_cycle < margin * row_cycle) {
     /* The challenger cycles replaced ordinary recurring work; they are not
@@ -888,12 +876,10 @@ static void kls_selected_lean_reaudit_finish(kls_solver *solver) {
   if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
     fprintf(stderr,
             "KLS selected lean lifecycle re-audit: ref %.3f/%.3f ms "
-            "solve %.3f/%.3f ms remaining %.3f/column-samples "
-            "%.3f ms -> %s\n",
+            "solve %.3f/%.3f ms -> %s\n",
             1e3 * row_ref, 1e3 * solver->lean_reaudit_column_min,
             1e3 * solver->lean_reaudit_row_solve_min,
             1e3 * solver->lean_reaudit_column_solve_min,
-            1e3 * remaining_saving, 1e3 * column_sample_work,
             solver->lean_choice < 0 ? "COLUMN" : "LEAN");
   }
 }
@@ -2351,37 +2337,6 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
   solver->row_refactor_u_ptr32 = uptr32;
   solver->row_refactor_input_ptr32 = input_ptr32;
   solver->row_refactor_level_rows16 = level_rows;
-  if (getenv("KLS_TRACE_LEAN_SOLVE_HIST") != NULL) {
-    UF_long lh[7] = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
-    UF_long uh[7] = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
-    UF_long lmax = 0u;
-    UF_long umax = 0u;
-    for (UF_long row = 0u; row < n; ++row) {
-      const UF_long llen = solver->row_refactor_l_ptr[row + 1u] -
-        solver->row_refactor_l_ptr[row];
-      const UF_long ulen = solver->row_refactor_u_ptr[row + 1u] -
-        solver->row_refactor_u_ptr[row];
-      const unsigned int lb = llen < 4u ? (unsigned int)llen
-        : llen < 8u ? 4u : llen < 16u ? 5u : 6u;
-      const unsigned int ub = ulen < 4u ? (unsigned int)ulen
-        : ulen < 8u ? 4u : ulen < 16u ? 5u : 6u;
-      lh[lb]++;
-      uh[ub]++;
-      lmax = lmax < llen ? llen : lmax;
-      umax = umax < ulen ? ulen : umax;
-    }
-    fprintf(stderr,
-            "KLS lean solve hist: L=%ld max=%ld"
-            " [0:%ld 1:%ld 2:%ld 3:%ld 4-7:%ld 8-15:%ld 16+:%ld]"
-            " U=%ld max=%ld"
-            " [0:%ld 1:%ld 2:%ld 3:%ld 4-7:%ld 8-15:%ld 16+:%ld]\n",
-            (long)lcount, (long)lmax,
-            (long)lh[0], (long)lh[1], (long)lh[2], (long)lh[3],
-            (long)lh[4], (long)lh[5], (long)lh[6],
-            (long)ucount, (long)umax,
-            (long)uh[0], (long)uh[1], (long)uh[2], (long)uh[3],
-            (long)uh[4], (long)uh[5], (long)uh[6]);
-  }
   return kls_build_lean_mixed_input_indices(solver);
 }
 

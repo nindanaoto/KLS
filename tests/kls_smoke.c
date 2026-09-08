@@ -14037,9 +14037,12 @@ static int run_sn_panel_factor_test(void) {
    changed refactorization, and that preparation sorts the packed LU columns.
    The sort must invalidate and rebuild the streams before the next solve. */
 static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
-                                                   int dense_updates) {
+                                                   int dense_updates,
+                                                   int cooperative) {
   enum { block_size = 64, block_count = 256, n = block_size * block_count };
-  const size_t nnz = (size_t)n * (block_size / (interleaved ? 2 : 1));
+  const size_t nnz = (size_t)n * (block_size / (interleaved ? 2 : 1)) +
+    (cooperative ? 2u * block_size * block_size +
+                   4u * (n - 2 * block_size) : 0u);
   const char *env_names[] = {
     "KLS_ENABLE_KLS_FIRST_FACTOR",
     "KLS_ENABLE_ROW_REFACTOR",
@@ -14050,7 +14053,8 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
     "KLS_DISABLE_SNB_REFACTOR",
     "KLS_SNB_WMAX",
     "KLS_SNB_ZETA",
-    "KLS_SNB_WNARROW"
+    "KLS_SNB_WNARROW",
+    "KLS_SNB_FORCE_TRIAL"
   };
   enum { env_count = (int)(sizeof(env_names) / sizeof(env_names[0])) };
   char *saved[env_count];
@@ -14086,6 +14090,8 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
        /* Run both sparse updates and the dense scratch-buffer product on
           the same panels, including the interleaved structural zeros. */
        setenv("KLS_SNB_WNARROW", dense_updates ? "1" : "8", 1) != 0 ||
+       (cooperative ? setenv("KLS_SNB_FORCE_TRIAL", "1", 1)
+                    : unsetenv("KLS_SNB_FORCE_TRIAL")) != 0 ||
        (interleaved ? setenv("KLS_SNB_ZETA", "2", 1)
                     : unsetenv("KLS_SNB_ZETA")) != 0)) {
     perror("configure deferred-sort compact-solve test");
@@ -14109,18 +14115,19 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
   if (ok) {
     size_t pos = 0u;
     for (int32_t col = 0; col < n; ++col) {
-      const int32_t block = col / block_size;
-      const int32_t local_col = col % block_size;
-      const int32_t first = block * block_size;
+      const int32_t width = cooperative && col < 2 * block_size
+                              ? 2 * block_size : block_size;
+      const int32_t local_col = col % width;
+      const int32_t first = col - local_col;
       ap[col] = (int32_t)pos;
       expected[col] = 1.0 + 0.001 * (double)(col % 29);
-      /* Four-column SNB panels split each dense block across 16 producers,
+      /* Four-column SNB panels split each dense block across many producers,
          exercising first/interior/last producer and subcolumn lookups in
          both packed-U writeback and input scatter construction.
          Deliberately permute input rows.  KLU accepts unsorted CSC input and
          its packed factors therefore give the deferred sort real work. */
-      for (int32_t q = 0; q < block_size; ++q) {
-        const int32_t local_row = (17 * q + 7 * local_col) % block_size;
+      for (int32_t q = 0; q < width; ++q) {
+        const int32_t local_row = (17 * q + 7 * local_col) % width;
         /* Interleaved even/odd dense subblocks give successive panel
            columns different U predecessors: union [0,2] with [1,3]
            exercises sorting, while the dense variant tests sorted unions. */
@@ -14133,6 +14140,16 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
                                               11 * local_col) % 11));
         ++pos;
       }
+      /* The first dense block is twice as long as the others. Its tall
+         panel at columns 68--71 is alone on a level after the shorter
+         blocks finish; its earlier producers have short tails. Exercise
+         the shared small-edge body inside the cooperative crew barrier. */
+      if (cooperative && col >= block_size + 4 && col < block_size + 8) {
+        for (int32_t row = 2 * block_size; row < n; ++row) {
+          ai[pos] = row;
+          ax[pos++] = 0.001 * (double)(1 + row % 7);
+        }
+      }
     }
     ap[n] = (int32_t)pos;
     if (pos != nnz) {
@@ -14144,7 +14161,7 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
   kls_options options;
   kls_default_options(&options);
   options.backend = KLS_BACKEND_AUTO;
-  options.threads = 1;
+  options.threads = cooperative ? 4 : 1;
   options.ordering = KLS_ORDERING_NATURAL;
   options.orientation = KLS_ORIENTATION_NORMAL;
   options.scale = -1;
@@ -14826,10 +14843,12 @@ int main(void) {
     perror("setenv KLS_DISABLE_UNCHANGED_REFACTOR=1");
     return EXIT_FAILURE;
   }
-  if (!test_deferred_sort_rebuilds_compact_solve(0, 0) ||
-      !test_deferred_sort_rebuilds_compact_solve(1, 0) ||
-      !test_deferred_sort_rebuilds_compact_solve(0, 1) ||
-      !test_deferred_sort_rebuilds_compact_solve(1, 1)) {
+  if (!test_deferred_sort_rebuilds_compact_solve(0, 0, 0) ||
+      !test_deferred_sort_rebuilds_compact_solve(1, 0, 0) ||
+      !test_deferred_sort_rebuilds_compact_solve(0, 1, 0) ||
+      !test_deferred_sort_rebuilds_compact_solve(1, 1, 0) ||
+      !test_deferred_sort_rebuilds_compact_solve(0, 0, 1) ||
+      !test_deferred_sort_rebuilds_compact_solve(0, 1, 1)) {
     return EXIT_FAILURE;
   }
 

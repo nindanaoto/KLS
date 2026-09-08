@@ -793,10 +793,6 @@ static int kls_snb_prepare(kls_solver *solver) {
                                                (UF_long)st->wmax);
       ok = st->ub_w[t] != NULL && st->gemm_w[t] != NULL;
     }
-    if (ok) {
-      st->ub = st->ub_w[0];
-      st->gemm_temp = st->gemm_w[0];
-    }
   }
 
   free(union_rows);
@@ -851,6 +847,112 @@ static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
   }
 }
 
+/* Serial edge arithmetic shared by ordinary and cooperative-small-edge
+ * execution. The caller owns dependency waits and crew barriers; scratch is
+ * private to the executing worker. Keep the same accumulation order and
+ * row-major dense product in both callers. */
+static KLS_ALWAYS_INLINE void kls_snb_update_edge(
+  const kls_snb_block *blk, const kls_snb_snode *sn,
+  const kls_snb_edge *edge, int wnarrow,
+  double *ub_scratch, double *gemm_scratch) {
+  const kls_snb_snode *ps = &blk->snodes[edge->producer];
+  const int32_t w = sn->width;
+  const int32_t H = sn->height;
+  double *W = blk->panels + sn->panel;
+  const int32_t ph = ps->below;
+  const int32_t sc = edge->sub_count;
+  const int32_t *sub = blk->subcols + edge->sub_off;
+  const int32_t *dsts = blk->edge_dsts + edge->dst_off;
+  const int32_t ustart = edge->u_start;
+  const int32_t pld = ps->height;
+  const double *Ldiag = blk->panels + ps->panel + ps->uw;
+  const double *Lbelow = Ldiag + ps->width;
+  if (sc < wnarrow) {
+    for (int32_t c = 0; c < w; ++c) {
+      double *Wc = W + (size_t)c * H;
+      for (int32_t i = 0; i < sc; ++i) {
+        const double u = Wc[ustart + i];
+        if (u == 0.0) continue;
+        {
+          const double *lcol = Ldiag + (size_t)sub[i] * pld;
+          for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+            Wc[ustart + i2] -= lcol[sub[i2]] * u;
+          }
+          const double *lb = Lbelow + (size_t)sub[i] * pld;
+          for (int32_t r = 0; r < ph; ++r) {
+            const int32_t dst = dsts[r];
+            if (dst >= 0) {
+              Wc[dst] -= lb[r] * u;
+            }
+          }
+        }
+      }
+    }
+    return;
+  }
+  double *B = ub_scratch;
+  for (int32_t c = 0; c < w; ++c) {
+    const double *Wc = W + (size_t)c * H + ustart;
+    double *Bc = B + (size_t)c * sc;
+    for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
+  }
+  for (int32_t i = 0; i < sc; ++i) {
+    {
+      const double *lcol = Ldiag + (size_t)sub[i] * pld;
+      for (int32_t c = 0; c < w; ++c) {
+        double *Bc = B + (size_t)c * sc;
+        const double u = Bc[i];
+        if (u == 0.0) continue;
+        for (int32_t i2 = i + 1; i2 < sc; ++i2) {
+          Bc[i2] -= lcol[sub[i2]] * u;
+        }
+      }
+    }
+  }
+  for (int32_t c = 0; c < w; ++c) {
+    double *Wc = W + (size_t)c * H + ustart;
+    const double *Bc = B + (size_t)c * sc;
+    for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
+  }
+  if (ph == 0) return;
+  double *Brow = ub_scratch + (size_t)sc * w;
+  for (int32_t c = 0; c < w; ++c) {
+    const double *Bc = B + (size_t)c * sc;
+    for (int32_t i = 0; i < sc; ++i) {
+      Brow[(size_t)i * w + c] = Bc[i];
+    }
+  }
+  double *T = gemm_scratch;
+  {
+    const double *lb = Lbelow + (size_t)sub[0] * pld;
+    const double *br = Brow;
+    for (int32_t r = 0; r < ph; ++r) {
+      const double l = lb[r];
+      double *tr = T + (size_t)r * w;
+      for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
+    }
+    for (int32_t i = 1; i < sc; ++i) {
+      const double *lbi = Lbelow + (size_t)sub[i] * pld;
+      const double *bri = Brow + (size_t)i * w;
+      for (int32_t r = 0; r < ph; ++r) {
+        const double l = lbi[r];
+        double *tr = T + (size_t)r * w;
+        for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
+      }
+    }
+  }
+  for (int32_t r = 0; r < ph; ++r) {
+    const int32_t dst = dsts[r];
+    const double *tr = T + (size_t)r * w;
+    if (dst >= 0) {
+      double *Wd = W + dst;
+      for (int32_t c = 0; c < w; ++c) {
+        Wd[(size_t)c * H] -= tr[c];
+      }
+    }
+  }
+}
+
 /* Process one supernode: panel compute (memset, A-scatter program, edge
  * updates, fused no-pivot getrf) followed by an immediate writeback of
  * its member columns into the packed numeric, so consumers that read
@@ -889,19 +991,9 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
   }
   const kls_snb_edge *edges = blk->edges + sn->edges_off;
   for (int32_t e = 0; e < sn->edge_count; ++e) {
-    const kls_snb_snode *ps = &blk->snodes[edges[e].producer];
-    const int32_t pw = ps->width;
-    const int32_t ph = ps->below;
-    const int32_t sc = edges[e].sub_count;
-    const int32_t *sub = blk->subcols + edges[e].sub_off;
-    const int32_t *dsts = blk->edge_dsts + edges[e].dst_off;
-    const int32_t ustart = edges[e].u_start;
-    const double *Lp = panels + ps->panel;
-    const int32_t pld = ps->height;
-    const double *Ldiag = Lp + ps->uw;
-    const double *Lbelow = Lp + ps->uw + pw;
-
     if (pipelined) {
+      const int32_t sc = edges[e].sub_count;
+      const int32_t *sub = blk->subcols + edges[e].sub_off;
       /* the producer publishes each getrf column right after its
          division; this edge only reads columns <= sub[sc-1] */
       const int32_t need = sub[sc - 1] + 1;
@@ -910,90 +1002,8 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
         kls_cpu_relax();
       }
     }
-    if (sc < wnarrow) {
-      for (int32_t c = 0; c < w; ++c) {
-        double *Wc = W + (size_t)c * H;
-        for (int32_t i = 0; i < sc; ++i) {
-          const double u = Wc[ustart + i];
-          if (u == 0.0) continue;
-          {
-            const double *lcol = Ldiag + (size_t)sub[i] * pld;
-            for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-              Wc[ustart + i2] -= lcol[sub[i2]] * u;
-            }
-            const double *lb = Lbelow + (size_t)sub[i] * pld;
-            for (int32_t r = 0; r < ph; ++r) {
-              const int32_t dst = dsts[r];
-              if (dst >= 0) {
-                Wc[dst] -= lb[r] * u;
-              }
-            }
-          }
-        }
-      }
-      continue;
-    }
-    double *B = ub_scratch;
-    for (int32_t c = 0; c < w; ++c) {
-      const double *Wc = W + (size_t)c * H + ustart;
-      double *Bc = B + (size_t)c * sc;
-      for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
-    }
-    for (int32_t i = 0; i < sc; ++i) {
-      {
-        const double *lcol = Ldiag + (size_t)sub[i] * pld;
-        for (int32_t c = 0; c < w; ++c) {
-          double *Bc = B + (size_t)c * sc;
-          const double u = Bc[i];
-          if (u == 0.0) continue;
-          for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-            Bc[i2] -= lcol[sub[i2]] * u;
-          }
-        }
-      }
-    }
-    for (int32_t c = 0; c < w; ++c) {
-      double *Wc = W + (size_t)c * H + ustart;
-      const double *Bc = B + (size_t)c * sc;
-      for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
-    }
-    if (ph == 0) continue;
-    double *Brow = ub_scratch + (size_t)sc * w;
-    for (int32_t c = 0; c < w; ++c) {
-      const double *Bc = B + (size_t)c * sc;
-      for (int32_t i = 0; i < sc; ++i) {
-        Brow[(size_t)i * w + c] = Bc[i];
-      }
-    }
-    double *T = gemm_scratch;
-    {
-      const double *lb = Lbelow + (size_t)sub[0] * pld;
-      const double *br = Brow;
-      for (int32_t r = 0; r < ph; ++r) {
-        const double l = lb[r];
-        double *tr = T + (size_t)r * w;
-        for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
-      }
-      for (int32_t i = 1; i < sc; ++i) {
-        const double *lbi = Lbelow + (size_t)sub[i] * pld;
-        const double *bri = Brow + (size_t)i * w;
-        for (int32_t r = 0; r < ph; ++r) {
-          const double l = lbi[r];
-          double *tr = T + (size_t)r * w;
-          for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-        }
-      }
-    }
-    for (int32_t r = 0; r < ph; ++r) {
-      const int32_t dst = dsts[r];
-      const double *tr = T + (size_t)r * w;
-      if (dst >= 0) {
-        double *Wd = W + dst;
-        for (int32_t c = 0; c < w; ++c) {
-          Wd[(size_t)c * H] -= tr[c];
-        }
-      }
-    }
+    kls_snb_update_edge(blk, sn, &edges[e], wnarrow,
+                        ub_scratch, gemm_scratch);
   }
   /* fused no-pivot getrf/TRSM */
   {
@@ -1246,89 +1256,8 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
     if (sc < wnarrow || (int64_t)ph * w < KLS_SNB_COOP_MIN_DOUBLES) {
       /* small edge: tid 0 runs the ordinary serial edge body */
       if (tid == 0) {
-        double *B = st->ub_w[0];
-        if (sc < wnarrow) {
-          for (int32_t c = 0; c < w; ++c) {
-            double *Wc = W + (size_t)c * H;
-            for (int32_t i = 0; i < sc; ++i) {
-              const double u = Wc[ustart + i];
-              if (u == 0.0) continue;
-              {
-                const double *lcol = Ldiag + (size_t)sub[i] * pld;
-                for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-                  Wc[ustart + i2] -= lcol[sub[i2]] * u;
-                }
-                const double *lb = Lbelow + (size_t)sub[i] * pld;
-                for (int32_t r = 0; r < ph; ++r) {
-                  const int32_t dst = dsts[r];
-                  if (dst >= 0) {
-                    Wc[dst] -= lb[r] * u;
-                  }
-                }
-              }
-            }
-          }
-        } else {
-          for (int32_t c = 0; c < w; ++c) {
-            const double *Wc = W + (size_t)c * H + ustart;
-            double *Bc = B + (size_t)c * sc;
-            for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
-          }
-          for (int32_t i = 0; i < sc; ++i) {
-            {
-              const double *lcol = Ldiag + (size_t)sub[i] * pld;
-              for (int32_t c = 0; c < w; ++c) {
-                double *Bc = B + (size_t)c * sc;
-                const double u = Bc[i];
-                if (u == 0.0) continue;
-                for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-                  Bc[i2] -= lcol[sub[i2]] * u;
-                }
-              }
-            }
-          }
-          for (int32_t c = 0; c < w; ++c) {
-            double *Wc = W + (size_t)c * H + ustart;
-            const double *Bc = B + (size_t)c * sc;
-            for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
-          }
-          double *Brow = st->ub_w[0] + (size_t)sc * w;
-          for (int32_t c = 0; c < w; ++c) {
-            const double *Bc = B + (size_t)c * sc;
-            for (int32_t i = 0; i < sc; ++i) {
-              Brow[(size_t)i * w + c] = Bc[i];
-            }
-          }
-          double *T = st->gemm_w[0];
-          {
-            const double *lb = Lbelow + (size_t)sub[0] * pld;
-            const double *br = Brow;
-            for (int32_t r = 0; r < ph; ++r) {
-              const double l = lb[r];
-              double *tr = T + (size_t)r * w;
-              for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
-            }
-            for (int32_t i = 1; i < sc; ++i) {
-              const double *lbi = Lbelow + (size_t)sub[i] * pld;
-              const double *bri = Brow + (size_t)i * w;
-              for (int32_t r = 0; r < ph; ++r) {
-                const double l = lbi[r];
-                double *tr = T + (size_t)r * w;
-                for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-              }
-            }
-          }
-          for (int32_t r = 0; r < ph; ++r) {
-            const int32_t dst = dsts[r];
-            const double *tr = T + (size_t)r * w;
-            if (dst >= 0) {
-              double *Wd = W + dst;
-              for (int32_t c = 0; c < w; ++c) {
-                Wd[(size_t)c * H] -= tr[c];
-              }
-            }
-          }
-        }
+        kls_snb_update_edge(blk, sn, &edges[e], wnarrow,
+                            st->ub_w[0], st->gemm_w[0]);
       }
       kls_snb_spin_barrier_wait(&ctx->coop, crew);
       continue;
@@ -2182,13 +2111,11 @@ static UF_long kls_padded_run_consume(const kls_solver *ps,
    bcircuit z=2 covers 79% of columns at +9.9%% pad. */
 static void kls_build_padded_panels(kls_solver *solver) {
   if (solver == NULL || solver->padded_run_of != NULL ||
-      (getenv("KLS_ENABLE_PADDED_PANELS") == NULL &&
-       !solver->padded_probe_build) ||
+      !solver->padded_probe_build ||
       solver->symbolic == NULL || solver->numeric == NULL) {
     return;
   }
-  const char *zenv = getenv("KLS_PADDED_Z");
-  const UF_long z = zenv != NULL ? (UF_long)atol(zenv) : 2u;
+  const UF_long z = 2u;
   const UF_long n = solver->n;
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -2267,11 +2194,7 @@ static void kls_build_padded_panels(kls_solver *solver) {
             }
             if (!over) {
               const UF_long len = k - s + 1u;
-              static UF_long min_work = 0;
-              if (min_work == 0u) {
-                const char *we = getenv("KLS_PADDED_MIN_WORK");
-                min_work = we != NULL ? (UF_long)atol(we) : 1024u;
-              }
+              const UF_long min_work = 1024u;
               /* materialize only runs whose consume work amortizes
                  the per-refactor panel refresh (the refresh tax
                  cancels scrap-coverage wins: bcircuit all-runs read
@@ -3906,16 +3829,11 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
-  if (!check_pivots &&
-      (solver->lean_probe_arm > 0 ||
-       getenv("KLS_ENABLE_LEAN_ROW_CONSUME") != NULL)) {
+  if (!check_pivots && solver->lean_probe_arm > 0) {
     /* A positive arm is an already-settled engine decision.  Dispatch it
        independently of the generic EGraph work floor: fused supernodes can
-       make the lean walk the faster high-flop engine as well (rajat03), and
-       forcing such a choice through the environment should mean what it
-       says. */
-    solver->lean_pair_active = solver->lean_probe_arm == 2 ||
-      getenv("KLS_LEAN_ROW_PAIR") != NULL;
+       make the lean walk the faster high-flop engine as well. */
+    solver->lean_pair_active = solver->lean_probe_arm == 2;
     const int lean = kls_lean_row_refactor_numeric(solver, numeric_values);
     if (lean >= 0) {
       kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);

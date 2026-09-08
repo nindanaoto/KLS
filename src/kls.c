@@ -531,10 +531,10 @@ struct kls_solver {
   UF_long *refactor_block_start;
   UF_long *refactor_col_block;
   UF_long *snode_run_end;
-  /* padded-supernode panels (B'-CORE stage 1, KLS_ENABLE_PADDED_PANELS):
+  /* Padded-supernode panels built by the automatic consumer trial:
      relaxed runs' union patterns, per-column slot maps, and panel value
-     storage refreshed by the mapped kernel at column finalize. Write-side
-     only until the stage-2 consume lands; numeric-lifetime state. */
+     storage refreshed by the mapped kernel at column finalize and read by
+     the accepted padded consumer; numeric-lifetime state. */
   UF_long padded_run_count;
   UF_long *padded_run_of;      /* per column: run id + 1, or 0 */
   UF_long *padded_run_start;   /* run -> first global column */

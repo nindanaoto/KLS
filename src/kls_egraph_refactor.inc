@@ -9442,8 +9442,6 @@ typedef struct kls_snb_state {
   kls_snb_entry *blk;      /* in-panel scatter entries */
   int64_t *col_off_ptr;    /* per global col: range in off[] */
   int64_t *col_blk_ptr;    /* per global col: range in blk[] */
-  double *ub;              /* worker-0 aliases */
-  double *gemm_temp;
   double **ub_w;           /* per-worker scratch */
   double **gemm_w;
   int nworkers;

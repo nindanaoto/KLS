@@ -6694,7 +6694,6 @@ typedef struct {
   unsigned char *needs_cleanup;
   UF_long cleanup_rows;
   UF_long cleanup_entries;
-  double seconds;
   int ok;
 } kls_row_input_cleanup_prep_job;
 
@@ -6703,12 +6702,10 @@ static void kls_row_input_cleanup_prep_run(
   if (job == NULL) {
     return;
   }
-  const double begin = kls_now_seconds();
   job->ok = kls_build_row_refactor_input_cleanup_flags(
     job->n, job->l_ptr, job->l_cols, job->u_ptr, job->u_cols,
     job->input_ptr, job->input_cols, &job->needs_cleanup,
     &job->cleanup_rows, &job->cleanup_entries);
-  job->seconds = kls_now_seconds() - begin;
 }
 
 typedef struct {
@@ -6720,7 +6717,6 @@ typedef struct {
   UF_long *level_rows;
   UF_long level_count;
   UF_long max_width;
-  double seconds;
   int ok;
 } kls_row_level_prep_job;
 
@@ -6729,7 +6725,6 @@ static void kls_row_level_prep_run(kls_row_level_prep_job *job) {
       (uint64_t)job->n > (uint64_t)(SIZE_MAX / sizeof(UF_long))) {
     return;
   }
-  const double begin = kls_now_seconds();
   const UF_long n = job->n;
   UF_long *levels = n > 0u
     ? (UF_long *)calloc((size_t)n, sizeof(*levels)) : NULL;
@@ -6799,7 +6794,6 @@ static void kls_row_level_prep_run(kls_row_level_prep_job *job) {
   job->level_rows = level_rows;
   job->level_count = level_count;
   job->max_width = max_width;
-  job->seconds = kls_now_seconds() - begin;
   job->ok = 1;
 }
 
@@ -9262,23 +9256,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   const UF_long l_nnz = l_ptr != NULL ? l_ptr[n] : 0u;
   const UF_long u_nnz = u_ptr != NULL ? u_ptr[n] : 0u;
   const UF_long input_nnz = input_ptr != NULL ? input_ptr[n] : 0u;
-  const int trace_finish =
-    getenv("KLS_TRACE_ROW_PATTERN_FINISH") != NULL;
-  const double trace_finish_begin =
-    trace_finish ? kls_now_seconds() : 0.0;
-
-  double trace_finish_mark = trace_finish_begin;
-
-#define KLS_ROW_FINISH_MARK(name)                                      \
-  do {                                                                 \
-    if (trace_finish) {                                                 \
-      const double trace_finish_now = kls_now_seconds();                \
-      fprintf(stderr, "KLS row finish %-18s %.3fms total %.3fms\n",   \
-              (name), 1e3 * (trace_finish_now - trace_finish_mark),     \
-              1e3 * (trace_finish_now - trace_finish_begin));           \
-      trace_finish_mark = trace_finish_now;                             \
-    }                                                                  \
-  } while (0)
   if (solver == NULL || l_ptr == NULL || u_ptr == NULL ||
       input_ptr == NULL || (n > 0u && next == NULL) ||
       (l_nnz > 0u &&
@@ -9354,7 +9331,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
       }
     }
   }
-  KLS_ROW_FINISH_MARK("successor counts");
 
   kls_row_input_cleanup_prep_job input_cleanup_job = {
     .n = n,
@@ -9402,12 +9378,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   if (!disable_scalar_row_batches) {
     kls_row_level_prep_run(&row_level_job);
   }
-  if (trace_finish) {
-    fprintf(stderr,
-            "KLS row finish prep jobs cleanup %.3fms levels %.3fms\n",
-            1e3 * input_cleanup_job.seconds,
-            1e3 * row_level_job.seconds);
-  }
   input_needs_cleanup = input_cleanup_job.needs_cleanup;
   input_cleanup_rows = input_cleanup_job.cleanup_rows;
   input_cleanup_entries = input_cleanup_job.cleanup_entries;
@@ -9431,7 +9401,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     free(row_level_job.level_rows);
     return 0;
   }
-  KLS_ROW_FINISH_MARK("successors+cleanup");
 
   solver->row_refactor_l_ptr = l_ptr;
   solver->row_refactor_l_cols = l_cols;
@@ -9456,7 +9425,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   solver->row_refactor_level_rows = row_level_job.level_rows;
   solver->row_refactor_level_count = level_count;
   solver->row_refactor_level_max_width = row_level_job.max_width;
-  KLS_ROW_FINISH_MARK("row levels");
 
   UF_long *row_group = n > 0u
     ? (UF_long *)malloc((size_t)n * sizeof(*row_group)) : NULL;
@@ -9547,7 +9515,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   }
   group_ptr[group_count] = n;
   free(levels);
-  KLS_ROW_FINISH_MARK("group formation");
 
   if (solver->refactor_level_ptr != NULL &&
       solver->refactor_dependency_work > 0.0 && group_count > 0u &&
@@ -9726,7 +9693,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
 
   free(group_dep_write);
   free(dep_marks);
-  KLS_ROW_FINISH_MARK("group dependencies");
   kls_dense_group_classification_run(&dense_classification_job);
   const UF_long segment_count = dense_classification_job.segment_count;
   const UF_long segment_rows = dense_classification_job.segment_rows;
@@ -9762,7 +9728,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long group_root_count = 0;
   UF_long group_leaf_count = 0;
   UF_long group_max_fanout = 0;
-  KLS_ROW_FINISH_MARK("dense classification");
 
   kls_group_successor_prep_job group_successor_job = {
     .group_count = group_count,
@@ -9881,7 +9846,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
   free(group_write_pos);
-  KLS_ROW_FINISH_MARK("group level plan");
   kls_group_successor_prep_run(&group_successor_job);
   group_successor_ptr = group_successor_job.successor_ptr;
   group_successor_groups = group_successor_job.successor_groups;
@@ -9912,7 +9876,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     return 0;
   }
   free(group_levels);
-  KLS_ROW_FINISH_MARK("group successors");
 
   /* Publish the group DAG before deriving its cached work estimates. */
   solver->row_refactor_group_ptr = group_ptr;
@@ -9965,11 +9928,9 @@ static int kls_finish_row_refactor_pattern_from_arrays(
       kls_build_group_work(solver, group_count);
     }
   }
-  KLS_ROW_FINISH_MARK("group work");
   if (getenv("KLS_SKIP_SUCCESSOR_SORT") == NULL) {
     kls_sort_row_refactor_successors_by_work(solver);
   }
-  KLS_ROW_FINISH_MARK("successor sort");
   kls_segment_input_target_prep_job segment_input_job = {
     .n = n,
     .input_ptr = input_ptr,
@@ -10006,7 +9967,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
       }
     }
   }
-  KLS_ROW_FINISH_MARK("compact storage");
 
   UF_long *dense_producer_run_ptr = NULL;
   UF_long *dense_producer_run_l_begin = NULL;
@@ -10030,7 +9990,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long dense_producer_target_pivot_count = 0;
   UF_long dense_producer_target_trailing_count = 0;
   kls_segment_input_target_prep_run(&segment_input_job);
-  KLS_ROW_FINISH_MARK("segment targets");
   kls_try_build_row_refactor_dense_producer_runs(
     n, l_ptr, l_cols, row_group, group_count, group_ptr, group_kind,
     group_compact_panel_begin, &dense_producer_run_ptr,
@@ -10042,7 +10001,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     &dense_producer_full_suffix_rows,
     &dense_producer_multi_run_rows,
     &dense_producer_fragmented_rows);
-  KLS_ROW_FINISH_MARK("producer runs");
   kls_try_build_row_refactor_dense_producer_target_maps(
     n, l_ptr, l_cols, l_internal_ptr, u_cols, row_group, group_count,
     group_ptr, group_kind, group_trailing_begin, group_trailing_len,
@@ -10054,7 +10012,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     &dense_producer_target_external_count,
     &dense_producer_target_dense_count, &dense_producer_target_pivot_count,
     &dense_producer_target_trailing_count);
-  KLS_ROW_FINISH_MARK("producer targets");
 
   UF_long group_single_count = 0u;
   UF_long group_batch_count = 0u;
@@ -10287,10 +10244,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
         break;
     }
   }
-  KLS_ROW_FINISH_MARK("group stats");
   kls_record_row_solve_partition(solver);
-  KLS_ROW_FINISH_MARK("solve partition");
-#undef KLS_ROW_FINISH_MARK
   return 1;
 }
 
@@ -10527,8 +10481,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
   const UF_long *l_cols = solver->row_refactor_l_cols;
   const UF_long *sn_end = solver->row_refactor_sn_end;
   const int only_width2 = getenv("KLS_LEAN_SNODE2_ONLY") != NULL;
-  UF_long run_count[17] = {0};
-  UF_long run_targets[17] = {0};
+  int has_width16 = 0;
   UF_long covered_entries = 0u;
   UF_long fused_runs = 0u;
 #if KLS_HAVE_AVX512_KERNELS
@@ -10556,13 +10509,12 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
       if (complete) {
         const UF_long dep_end = dep0 + run - 1u;
         runs[p] = (unsigned char)run;
-        run_count[run]++;
+        if (run == 16u) has_width16 = 1;
         covered_entries += run;
         fused_runs++;
         const UF_long target_length =
           solver->row_refactor_u_ptr[dep_end + 1u] -
           solver->row_refactor_u_ptr[dep_end];
-        run_targets[run] += target_length;
         if ((run == 8u || run == 16u) &&
             target_length >= KLS_LEAN_SNODE_AVX512_MIN_TARGETS) {
           solver->lean_snode_avx512_candidate = 1;
@@ -10573,7 +10525,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
       }
     }
   }
-  if (run_count[16] != 0u) {
+  if (has_width16) {
     solver->lean_snode_avx512_candidate = 2;
   }
   /* The accepted path has its own hoisted worker.  The established broad
@@ -10597,23 +10549,6 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
     runs = NULL;
   }
   solver->lean_snode_run = runs;
-  if (getenv("KLS_TRACE_LEAN_SNODE") != NULL) {
-    fprintf(stderr,
-            "KLS lean snode runs: 2=%ld/%ld 3=%ld/%ld 4=%ld/%ld"
-            " 5=%ld/%ld 6=%ld/%ld 7=%ld/%ld 8=%ld/%ld"
-            " 16=%ld/%ld coverage=%ld/%ld"
-            " work=%.0f/%.0f dense=%d eligible=%d\n",
-            (long)run_count[2], (long)run_targets[2],
-            (long)run_count[3], (long)run_targets[3],
-            (long)run_count[4], (long)run_targets[4],
-            (long)run_count[5], (long)run_targets[5],
-            (long)run_count[6], (long)run_targets[6],
-            (long)run_count[7], (long)run_targets[7],
-            (long)run_count[8], (long)run_targets[8],
-            (long)run_count[16], (long)run_targets[16],
-            (long)covered_entries, (long)l_nnz,
-            solver->common.flops, factor_entries, dense_work, eligible);
-  }
 }
 
 /* Rows owned by one pool worker are executed in increasing schedule-slot
@@ -10669,8 +10604,6 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
       ~KLS_LEAN_GROUPED_PUBLISH_FLAG;
   }
   int valid = 1;
-  UF_long wait_count = 0u;
-  UF_long publish_count = 0u;
   for (UF_long pos = 0u; pos < solver->n && valid; ++pos) {
     const UF_long row = rows[pos];
     if (row >= solver->n) {
@@ -10708,13 +10641,8 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
           if (encoded_slot > acquired_slot[consumer][owner]) {
             wait_slots[p] = encoded_slot;
             acquired_slot[consumer][owner] = encoded_slot;
-            if ((solver->lean_parallel_grouped_token[dep] &
-                 KLS_LEAN_GROUPED_PUBLISH_FLAG) == 0u) {
-              publish_count++;
-            }
             solver->lean_parallel_grouped_token[dep] |=
               KLS_LEAN_GROUPED_PUBLISH_FLAG;
-            wait_count++;
           }
         }
         p++;
@@ -10767,13 +10695,8 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
             mask |= (unsigned char)(1u << local);
             wait_slots[chunk_p + local] = encoded_slot;
             acquired_slot[consumer][owner] = encoded_slot;
-            if ((solver->lean_parallel_grouped_token[dep] &
-                 KLS_LEAN_GROUPED_PUBLISH_FLAG) == 0u) {
-              publish_count++;
-            }
             solver->lean_parallel_grouped_token[dep] |=
               KLS_LEAN_GROUPED_PUBLISH_FLAG;
-            wait_count++;
           }
         }
         masks[chunk_p] = mask;
@@ -10794,11 +10717,6 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
   solver->lean_snode_wait_slot = wait_slots;
   solver->lean_snode_wait_rows = rows;
   solver->lean_snode_wait_thread_count = thread_count;
-  if (getenv("KLS_TRACE_LEAN_SNODE") != NULL) {
-    fprintf(stderr,
-            "KLS lean snode synchronization: waits=%ld publishes=%ld/%ld\n",
-            (long)wait_count, (long)publish_count, (long)solver->n);
-  }
   return 1;
 }
 
