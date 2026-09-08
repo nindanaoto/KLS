@@ -929,6 +929,8 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
     for (int32_t r = 0; r < ph; ++r) {
       const double l = lb[r];
       double *tr = T + (size_t)r * w;
+      /* Scratch output is disjoint from the read-only product inputs. */
+#pragma omp simd
       for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
     }
     for (int32_t i = 1; i < sc; ++i) {
@@ -937,6 +939,8 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
       for (int32_t r = 0; r < ph; ++r) {
         const double l = lbi[r];
         double *tr = T + (size_t)r * w;
+        /* Scratch output is disjoint from the read-only product inputs. */
+#pragma omp simd
         for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
       }
     }
@@ -1307,6 +1311,8 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
           for (int32_t r = r0; r < r1; ++r) {
             const double l = lb[r];
             double *tr = T + (size_t)(r - r0) * w;
+            /* Scratch output is disjoint from the read-only product inputs. */
+#pragma omp simd
             for (int32_t c = 0; c < w; ++c) tr[c] = l * Brow[c];
           }
           for (int32_t i = 1; i < sc; ++i) {
@@ -1315,6 +1321,8 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
             for (int32_t r = r0; r < r1; ++r) {
               const double l = lbi[r];
               double *tr = T + (size_t)(r - r0) * w;
+              /* Scratch output is disjoint from the read-only product inputs. */
+#pragma omp simd
               for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
             }
           }

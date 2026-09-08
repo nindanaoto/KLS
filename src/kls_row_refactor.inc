@@ -6157,8 +6157,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     /* The coverage-selected descriptor is profitable in the hoisted pool
        executor, but its serial chain fallback adds more bookkeeping than it
        removes.  A resource failure or explicitly disabled pool therefore
-       falls back to the ordinary scalar row walk.  The explicit diagnostic
-       override retains its historical force semantics. */
+       falls back to the ordinary scalar row walk. */
     if (generic_supernode_values) {
       snode_runs = NULL;
     }
