@@ -1853,12 +1853,6 @@ typedef struct kls_row_first_pipeline_trace {
   UF_long producer_active_catchup_deps;
   UF_long producer_active_catchup_targets;
 
-  UF_long producer_probe_workers;
-  UF_long producer_probe_lookahead;
-  UF_long producer_probe_ready_roots;
-  UF_long producer_probe_underfilled;
-  UF_long producer_probe_underfilled_targets;
-  UF_long producer_probe_low_saved_stream;
   UF_long panel_update_groups;
   UF_long panel_update_rows;
   UF_long panel_update_entries;
@@ -1912,18 +1906,6 @@ static void kls_row_first_pipeline_trace_add(
   kls_row_first_stats_add(&target->producer_active_catchup_targets,
                           source->producer_active_catchup_targets);
 
-  kls_row_first_stats_add(&target->producer_probe_workers,
-                          source->producer_probe_workers);
-  kls_row_first_stats_add(&target->producer_probe_lookahead,
-                          source->producer_probe_lookahead);
-  kls_row_first_stats_add(&target->producer_probe_ready_roots,
-                          source->producer_probe_ready_roots);
-  kls_row_first_stats_add(&target->producer_probe_underfilled,
-                          source->producer_probe_underfilled);
-  kls_row_first_stats_add(&target->producer_probe_underfilled_targets,
-                          source->producer_probe_underfilled_targets);
-  kls_row_first_stats_add(&target->producer_probe_low_saved_stream,
-                          source->producer_probe_low_saved_stream);
   kls_row_first_stats_add(&target->panel_update_groups,
                           source->panel_update_groups);
   kls_row_first_stats_add(&target->panel_update_rows,
@@ -6051,15 +6033,9 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
     if (worker == current_worker) {
       continue;
     }
-    if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_workers, 1u);
-    }
     if (!kls_row_first_pipeline_worker_supernode_batch_candidate(
           shared, worker, dep_begin, dep_end)) {
       continue;
-    }
-    if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_ready_roots, 1u);
     }
     if (target_count >= (UF_long)shared->batch_target_capacity) {
       return 0;
@@ -6083,10 +6059,6 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
   }
   if (target_count < 2u) {
     if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_underfilled, 1u);
-      kls_row_first_stats_add(
-        &producer_trace->producer_probe_underfilled_targets,
-        target_count);
       kls_row_first_stats_add(
         &producer_trace->producer_underfilled_target_u_entries,
         candidate_target_u_entries);
@@ -6100,8 +6072,6 @@ static int kls_row_first_pipeline_apply_supernode_producer_batch(
       : run_entries * saved_targets;
   if (saved_stream < KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM) {
     if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_low_saved_stream,
-                              1u);
       kls_row_first_stats_add(
         &producer_trace->producer_low_saved_stream_target_u_entries,
         candidate_target_u_entries);
@@ -6290,9 +6260,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
     if (worker == current_worker) {
       continue;
     }
-    if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_workers, 1u);
-    }
     int not_root = 0;
     if (!kls_row_first_pipeline_worker_scalar_batch_candidate(
           shared, worker, dep, &not_root)) {
@@ -6348,9 +6315,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
           &producer_trace->producer_active_catchup_targets, 1u);
       }
     }
-    if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_ready_roots, 1u);
-    }
     if (target_count >= (UF_long)shared->batch_target_capacity) {
       return 0;
     }
@@ -6374,9 +6338,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
   }
   if (target_count < 2u) {
     if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_underfilled, 1u);
-      kls_row_first_stats_add(&producer_trace->producer_probe_underfilled_targets,
-                              target_count);
       kls_row_first_stats_add(
         &producer_trace->producer_underfilled_target_u_entries,
         candidate_target_u_entries);
@@ -6390,8 +6351,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
       : row_entries * saved_targets;
   if (saved_stream < KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM) {
     if (producer_trace != NULL) {
-      kls_row_first_stats_add(&producer_trace->producer_probe_low_saved_stream,
-                              1u);
       kls_row_first_stats_add(
         &producer_trace->producer_low_saved_stream_target_u_entries,
         candidate_target_u_entries);
@@ -6527,22 +6486,10 @@ static void kls_row_first_pipeline_trace_print(
           (uint64_t)trace->producer_active_catchup_targets);
 
   fprintf(stderr,
-          " producer_probe_workers=%" PRIu64
-          " producer_probe_lookahead=%" PRIu64
-          " producer_ready_roots=%" PRIu64
-          " producer_underfilled=%" PRIu64
-          " producer_underfilled_targets=%" PRIu64
-          " producer_low_saved_stream=%" PRIu64
           " panel_updates=%" PRIu64 " panel_update_rows=%" PRIu64
           " panel_update_entries=%" PRIu64
           " panel_appends=%" PRIu64 " panel_append_entries=%" PRIu64
           "\n",
-          (uint64_t)trace->producer_probe_workers,
-          (uint64_t)trace->producer_probe_lookahead,
-          (uint64_t)trace->producer_probe_ready_roots,
-          (uint64_t)trace->producer_probe_underfilled,
-          (uint64_t)trace->producer_probe_underfilled_targets,
-          (uint64_t)trace->producer_probe_low_saved_stream,
           (uint64_t)trace->panel_update_groups,
           (uint64_t)trace->panel_update_rows,
           (uint64_t)trace->panel_update_entries,
