@@ -7429,7 +7429,6 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
   UF_long open_panel_start = KLS_KLU_EMPTY;
   UF_long open_panel_end = KLS_KLU_EMPTY;
   while (cursor < active_rows) {
-    UF_long phase_pipeline_rows = 0;
     UF_long phase_threads = 0;
     UF_long phase_prefactor_rows = 0;
     UF_long phase_wait_partial_rows = 0;
@@ -7445,14 +7444,13 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
     if (kls_row_first_run_parallel_pipeline_phase(
           ctx, row_order, active_rank, cursor, active_rows,
           supernode_valid_begin, thread_count, workspace, l_entries,
-          u_entries, udiag_values, row_done, stats, &phase_pipeline_rows,
+          u_entries, udiag_values, row_done, stats, NULL,
           &phase_threads, &phase_prefactor_rows, &phase_wait_partial_rows,
           &phase_wait_partial_deps, &phase_supernode_update_groups,
           &phase_supernode_update_rows, &phase_supernode_panel_update_groups,
           &phase_supernode_panel_update_rows, &completed_pos,
           &pivot_tail_ready, &phase_pivot_tail_rows,
           &phase_pivot_restarts)) {
-      (void)phase_pipeline_rows;
       if (phase_threads > max_threads) {
         max_threads = phase_threads;
       }
@@ -7474,7 +7472,6 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
       free(active_rank);
       return 0;
     }
-    (void)phase_pipeline_rows;
     if (phase_threads > max_threads) {
       max_threads = phase_threads;
     }
@@ -9412,14 +9409,10 @@ static int kls_row_first_parallel_factor_block(
     row_pipeline_suffix_rows = use_active_mask
       ? nk - shared->block_pipeline_end
       : (separator_private_partial_active ? 0u : nk - pipeline_end);
-    UF_long pipeline_partial_rows = 0;
-    UF_long pipeline_wait_partial_rows = 0;
-    UF_long pipeline_wait_partial_deps = 0;
     UF_long pipeline_supernode_update_groups = 0;
     UF_long pipeline_supernode_update_rows = 0;
     UF_long pipeline_supernode_panel_update_groups = 0;
     UF_long pipeline_supernode_panel_update_rows = 0;
-    UF_long pipeline_pivot_serial_rows = 0;
     UF_long pipeline_etree_ready_rows = 0;
     UF_long pipeline_etree_prefactor_rows = 0;
     UF_long pipeline_etree_prefactor_wait_rows = 0;
@@ -9477,13 +9470,12 @@ static int kls_row_first_parallel_factor_block(
             shared->block_pipeline_thread_count,
             &row_workspace, &l_entries, &u_entries, worker->udiag_values,
             row_done, &row_stats, &row_pipeline_rows, &row_pipeline_threads,
-            &pipeline_partial_rows, &pipeline_wait_partial_rows,
-            &pipeline_wait_partial_deps, &pipeline_supernode_update_groups,
+            NULL, NULL, NULL, &pipeline_supernode_update_groups,
             &pipeline_supernode_update_rows,
             &pipeline_supernode_panel_update_groups,
             &pipeline_supernode_panel_update_rows,
             &row_pipeline_pivot_tail_rows,
-            &row_pipeline_pivot_restarts, &pipeline_pivot_serial_rows,
+            &row_pipeline_pivot_restarts, NULL,
             row_workspace.supernode_panel_cache != NULL
               ? &row_supernode_panel_cache : NULL,
             &open_panel_start, &open_panel_end);
@@ -9498,10 +9490,6 @@ static int kls_row_first_parallel_factor_block(
         }
       }
     }
-    (void)pipeline_partial_rows;
-    (void)pipeline_wait_partial_rows;
-    (void)pipeline_wait_partial_deps;
-    (void)pipeline_pivot_serial_rows;
     row_supernode_update_groups += pipeline_supernode_update_groups;
     row_supernode_update_rows += pipeline_supernode_update_rows;
     row_supernode_panel_update_groups +=

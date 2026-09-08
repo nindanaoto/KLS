@@ -13659,14 +13659,12 @@ static UF_long kls_compact_dense_group_ragged_supernode_end(
   }
 
   UF_long first_dep_group = KLS_KLU_EMPTY;
-  UF_long suffix_begin = 0;
   UF_long dep_rows = 0;
   if (!kls_compact_dense_group_single_producer_suffix(
         solver, group, row_begin, batch_begin, &first_dep_group,
-        &suffix_begin, &dep_rows)) {
+        NULL, &dep_rows)) {
     return batch_begin + 1u;
   }
-  (void)suffix_begin;
 
   const UF_long dep_trailing_len =
     solver->row_refactor_group_trailing_len[first_dep_group];
@@ -13677,15 +13675,13 @@ static UF_long kls_compact_dense_group_ragged_supernode_end(
   UF_long batch_end = batch_begin + 1u;
   while (batch_end < row_end) {
     UF_long dep_group = KLS_KLU_EMPTY;
-    UF_long row_suffix_begin = 0;
     UF_long row_dep_rows = 0;
     if (!kls_compact_dense_group_single_producer_suffix(
           solver, group, row_begin, batch_end, &dep_group,
-          &row_suffix_begin, &row_dep_rows) ||
+          NULL, &row_dep_rows) ||
         dep_group != first_dep_group) {
       break;
     }
-    (void)row_suffix_begin;
     work += 0.5 * (double)row_dep_rows * (double)(row_dep_rows - 1u) +
       (double)row_dep_rows * (double)dep_trailing_len;
     copied += (double)row_dep_rows + (double)dep_trailing_len;
@@ -15538,14 +15534,12 @@ static UF_long kls_batch_group_ragged_supernode_end(
   }
 
   UF_long first_dep_group = KLS_KLU_EMPTY;
-  UF_long suffix_begin = 0;
   UF_long dep_rows = 0;
   if (!kls_batch_group_single_producer_suffix(
-        solver, group, batch_begin, &first_dep_group, &suffix_begin,
+        solver, group, batch_begin, &first_dep_group, NULL,
         &dep_rows)) {
     return batch_begin + 1u;
   }
-  (void)suffix_begin;
 
   const UF_long dep_trailing_len =
     solver->row_refactor_group_trailing_len[first_dep_group];
@@ -15556,15 +15550,13 @@ static UF_long kls_batch_group_ragged_supernode_end(
   UF_long batch_end = batch_begin + 1u;
   while (batch_end < row_end) {
     UF_long dep_group = KLS_KLU_EMPTY;
-    UF_long row_suffix_begin = 0;
     UF_long row_dep_rows = 0;
     if (!kls_batch_group_single_producer_suffix(
-          solver, group, batch_end, &dep_group, &row_suffix_begin,
+          solver, group, batch_end, &dep_group, NULL,
           &row_dep_rows) ||
         dep_group != first_dep_group) {
       break;
     }
-    (void)row_suffix_begin;
     work += 0.5 * (double)row_dep_rows * (double)(row_dep_rows - 1u) +
       (double)row_dep_rows * (double)dep_trailing_len;
     copied += (double)row_dep_rows + (double)dep_trailing_len;
