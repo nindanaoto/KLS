@@ -2792,212 +2792,6 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
   }
 }
 
-static int kls_build_refactor_pipeline_graph(
-  kls_solver *solver,
-  const UF_long *levels,
-  UF_long cluster_levels,
-  UF_long level_count,
-  UF_long pipeline_columns,
-  UF_long **successor_ptr_out,
-  UF_long **successors_out,
-  UF_long **pred_count_out,
-  UF_long *edge_count_out,
-  UF_long **ready_cols_out,
-  atomic_uint **ready_slots_out,
-  atomic_ulong **remaining_preds_out) {
-  KLS_SET_OPTIONAL_OUTPUT(successor_ptr_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(successors_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(pred_count_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(edge_count_out, 0u);
-  KLS_SET_OPTIONAL_OUTPUT(ready_cols_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(ready_slots_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(remaining_preds_out, NULL);
-  if (solver == NULL || solver->symbolic == NULL ||
-      solver->numeric == NULL || levels == NULL ||
-      successor_ptr_out == NULL || successors_out == NULL ||
-      pred_count_out == NULL || edge_count_out == NULL ||
-      ready_cols_out == NULL || ready_slots_out == NULL ||
-      remaining_preds_out == NULL) {
-    return 0;
-  }
-  if (pipeline_columns == 0u || cluster_levels >= level_count) {
-    return 1;
-  }
-
-  UF_long *successor_counts =
-    (UF_long *)calloc((size_t)solver->n, sizeof(*successor_counts));
-  UF_long *pred_count =
-    (UF_long *)calloc((size_t)solver->n, sizeof(*pred_count));
-  UF_long *successor_ptr =
-    (UF_long *)calloc((size_t)solver->n + 1u, sizeof(*successor_ptr));
-  if (successor_counts == NULL || pred_count == NULL ||
-      successor_ptr == NULL) {
-    free(successor_counts);
-    free(pred_count);
-    free(successor_ptr);
-    return 0;
-  }
-
-  UF_long edge_count = 0u;
-  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
-    const UF_long k1 = solver->symbolic->R[block];
-    const UF_long k2 = solver->symbolic->R[block + 1u];
-    const UF_long nk = k2 - k1;
-    if (nk <= 1u) {
-      continue;
-    }
-    double *lu = (double *)solver->numeric->LUbx[block];
-    if (lu == NULL) {
-      free(successor_counts);
-      free(pred_count);
-      free(successor_ptr);
-      return 0;
-    }
-    const UF_long *uip = solver->numeric->Uip + k1;
-    const UF_long *ulen = solver->numeric->Ulen + k1;
-    for (UF_long k = 0; k < nk; ++k) {
-      const UF_long global_col = k1 + k;
-      if (levels[global_col] < cluster_levels) {
-        continue;
-      }
-      UF_long *ui = NULL;
-      double *ux = NULL;
-      UF_long ucol_len = 0;
-      kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
-      (void)ux;
-      if (ui == NULL && ucol_len > 0u) {
-        free(successor_counts);
-        free(pred_count);
-        free(successor_ptr);
-        return 0;
-      }
-      for (UF_long p = 0; p < ucol_len; ++p) {
-        const UF_long dep = ui[p];
-        if (dep >= k) {
-          free(successor_counts);
-          free(pred_count);
-          free(successor_ptr);
-          return 0;
-        }
-        const UF_long global_dep = k1 + dep;
-        if (levels[global_dep] < cluster_levels) {
-          continue;
-        }
-        pred_count[global_col]++;
-        successor_counts[global_dep]++;
-        edge_count++;
-      }
-    }
-  }
-
-  for (UF_long col = 0; col < solver->n; ++col) {
-    successor_ptr[col + 1u] = successor_ptr[col] + successor_counts[col];
-  }
-  if (successor_ptr[solver->n] != edge_count) {
-    free(successor_counts);
-    free(pred_count);
-    free(successor_ptr);
-    return 0;
-  }
-
-  UF_long *successors =
-    (UF_long *)malloc((size_t)(edge_count > 0u ? edge_count : 1u) *
-                      sizeof(*successors));
-  UF_long *cursor =
-    (UF_long *)malloc((size_t)solver->n * sizeof(*cursor));
-  UF_long *ready_cols =
-    (UF_long *)malloc((size_t)pipeline_columns * sizeof(*ready_cols));
-  atomic_uint *ready_slots =
-    (atomic_uint *)malloc((size_t)pipeline_columns * sizeof(*ready_slots));
-  atomic_ulong *remaining_preds =
-    (atomic_ulong *)malloc((size_t)solver->n * sizeof(*remaining_preds));
-  if (successors == NULL || cursor == NULL || ready_cols == NULL ||
-      ready_slots == NULL || remaining_preds == NULL) {
-    free(successor_counts);
-    free(pred_count);
-    free(successor_ptr);
-    free(successors);
-    free(cursor);
-    free(ready_cols);
-    free(ready_slots);
-    free(remaining_preds);
-    return 0;
-  }
-  for (UF_long col = 0; col < solver->n; ++col) {
-    cursor[col] = successor_ptr[col];
-    atomic_init(&remaining_preds[col], 0ul);
-  }
-  for (UF_long pos = 0; pos < pipeline_columns; ++pos) {
-    ready_cols[pos] = 0u;
-    atomic_init(&ready_slots[pos], 0u);
-  }
-
-  for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
-    const UF_long k1 = solver->symbolic->R[block];
-    const UF_long k2 = solver->symbolic->R[block + 1u];
-    const UF_long nk = k2 - k1;
-    if (nk <= 1u) {
-      continue;
-    }
-    double *lu = (double *)solver->numeric->LUbx[block];
-    const UF_long *uip = solver->numeric->Uip + k1;
-    const UF_long *ulen = solver->numeric->Ulen + k1;
-    for (UF_long k = 0; k < nk; ++k) {
-      const UF_long global_col = k1 + k;
-      if (levels[global_col] < cluster_levels) {
-        continue;
-      }
-      UF_long *ui = NULL;
-      double *ux = NULL;
-      UF_long ucol_len = 0;
-      kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
-      (void)ux;
-      for (UF_long p = 0; p < ucol_len; ++p) {
-        const UF_long global_dep = k1 + ui[p];
-        if (levels[global_dep] < cluster_levels) {
-          continue;
-        }
-        const UF_long dst = cursor[global_dep]++;
-        if (dst >= edge_count) {
-          free(successor_counts);
-          free(pred_count);
-          free(successor_ptr);
-          free(successors);
-          free(cursor);
-          free(ready_cols);
-          free(ready_slots);
-          free(remaining_preds);
-          return 0;
-        }
-        successors[dst] = global_col;
-      }
-    }
-  }
-  for (UF_long col = 0; col < solver->n; ++col) {
-    if (cursor[col] != successor_ptr[col + 1u]) {
-      free(successor_counts);
-      free(pred_count);
-      free(successor_ptr);
-      free(successors);
-      free(cursor);
-      free(ready_cols);
-      free(ready_slots);
-      free(remaining_preds);
-      return 0;
-    }
-  }
-
-  free(successor_counts);
-  free(cursor);
-  *successor_ptr_out = successor_ptr;
-  *successors_out = successors;
-  *pred_count_out = pred_count;
-  *edge_count_out = edge_count;
-  *ready_cols_out = ready_cols;
-  *ready_slots_out = ready_slots;
-  *remaining_preds_out = remaining_preds;
-  return 1;
-}
 
 typedef struct kls_refactor_separator_component_entry {
   unsigned int component;
@@ -3418,14 +3212,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
   const int build_separator_private =
     kls_egraph_separator_private_requested(solver);
-  const int need_pipeline_ready_graph =
-    kls_egraph_ready_queue_env_enabled();
 
   if (((solver->refactor_level_ptr != NULL &&
-      solver->refactor_supernode_pipeline_end != NULL &&
-      (!need_pipeline_ready_graph ||
-       solver->refactor_pipeline_column_count == 0u ||
-       solver->refactor_pipeline_successor_ptr != NULL))) &&
+      solver->refactor_supernode_pipeline_end != NULL)) &&
       (!build_separator_private ||
        (solver->refactor_separator_private_plan_attempted &&
         (solver->refactor_separator_private_cols == NULL ||
@@ -3468,13 +3257,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   UF_long separator_private_column_count_alpha4 = 0u;
   UF_long separator_cluster_tail_column_count_alpha4 = 0u;
   int separator_private_plan_attempted = 0;
-  UF_long *pipeline_successor_ptr = NULL;
-  UF_long *pipeline_successors = NULL;
-  UF_long *pipeline_pred_count = NULL;
-  UF_long pipeline_edge_count = 0u;
-  UF_long *pipeline_ready_cols = NULL;
-  atomic_uint *pipeline_ready_slots = NULL;
-  atomic_ulong *pipeline_remaining_preds = NULL;
   UF_long *supernode_pipeline_end = NULL;
 
 #define KLS_FREE_REFACTOR_SCHEDULE_TEMP() \
@@ -3499,12 +3281,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     free(separator_cluster_tail_cols_alpha4); \
     free(separator_cluster_tail_level_ptr_alpha4); \
     free(separator_cluster_tail_level_thread_ptr_alpha4); \
-    free(pipeline_successor_ptr); \
-    free(pipeline_successors); \
-    free(pipeline_pred_count); \
-    free(pipeline_ready_cols); \
-    free(pipeline_ready_slots); \
-    free(pipeline_remaining_preds); \
     free(supernode_pipeline_end); \
   } while (0)
 
@@ -3817,17 +3593,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     }
   }
 
-  if (need_pipeline_ready_graph) {
-    if (!kls_build_refactor_pipeline_graph(
-          solver, levels, cluster_levels, level_count, pipeline_columns,
-          &pipeline_successor_ptr, &pipeline_successors,
-          &pipeline_pred_count, &pipeline_edge_count,
-          &pipeline_ready_cols, &pipeline_ready_slots,
-          &pipeline_remaining_preds)) {
-      KLS_FREE_REFACTOR_SCHEDULE_TEMP();
-      return 0;
-    }
-  }
 
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
     const UF_long k1 = solver->symbolic->R[block];
@@ -3896,13 +3661,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     separator_cluster_tail_level_ptr_alpha4;
   solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4 =
     separator_cluster_tail_level_thread_ptr_alpha4;
-  solver->refactor_pipeline_successor_ptr = pipeline_successor_ptr;
-  solver->refactor_pipeline_successors = pipeline_successors;
-  solver->refactor_pipeline_pred_count = pipeline_pred_count;
-  solver->refactor_pipeline_edge_count = pipeline_edge_count;
-  solver->refactor_pipeline_ready_cols = pipeline_ready_cols;
-  solver->refactor_pipeline_ready_slots = pipeline_ready_slots;
-  solver->refactor_pipeline_remaining_preds = pipeline_remaining_preds;
   solver->refactor_supernode_pipeline_end = supernode_pipeline_end;
   solver->refactor_level_thread_count = thread_count;
   solver->refactor_separator_private_thread_count =
@@ -3953,12 +3711,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   separator_cluster_tail_cols_alpha4 = NULL;
   separator_cluster_tail_level_ptr_alpha4 = NULL;
   separator_cluster_tail_level_thread_ptr_alpha4 = NULL;
-  pipeline_successor_ptr = NULL;
-  pipeline_successors = NULL;
-  pipeline_pred_count = NULL;
-  pipeline_ready_cols = NULL;
-  pipeline_ready_slots = NULL;
-  pipeline_remaining_preds = NULL;
 
   supernode_pipeline_end = NULL;
   return 1;

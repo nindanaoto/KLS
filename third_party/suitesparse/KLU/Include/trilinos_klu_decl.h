@@ -51,9 +51,7 @@ typedef struct trilinos_klu_symbolic_struct
 			* deficient.  -1 if not computed.  n if the matrix has
 			* full structural rank */
 
-    /* KLS extension: an optional alternative maximum-matching ordering.  It
-     * is consumed by the first numeric factorization and never exposed as a
-     * second public Symbolic handle. */
+    /* Reserved KLS ABI fields: retired alternate matching, always NULL/zero. */
     struct trilinos_klu_symbolic_struct *kls_matching_alt ;
     size_t kls_matching_fingerprint ;
 
@@ -228,7 +226,7 @@ typedef struct trilinos_klu_common_struct
     const int *kls_btf_R ;
     int kls_btf_nblocks ;
     int kls_btf_structural_rank ;
-    int kls_btf_match_trial ;
+    int kls_btf_match_trial ; /* Reserved; ignored. */
     double kls_kernel_flops ;
     int kls_dense_panels ;
     double kls_static_perturb ;
@@ -267,8 +265,7 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
     const UF_long *kls_btf_R ;
     UF_long kls_btf_nblocks ;
     UF_long kls_btf_structural_rank ;
-    UF_long kls_btf_match_trial ; /* retain both cheap maximum matchings until
-                                     numeric fill can arbitrate them */
+    UF_long kls_btf_match_trial ; /* Reserved; ignored. */
 
     /* KLS extension: flop count accumulated by the factorization
        kernel at column assembly (same formula as TRILINOS_KLU_flops,

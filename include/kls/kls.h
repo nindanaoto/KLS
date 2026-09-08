@@ -478,6 +478,7 @@ typedef struct kls_stats {
   int64_t refactor_last_supernode_pipeline_columns;
   int64_t refactor_supernode_pipeline_task_count;
   int64_t refactor_supernode_pipeline_column_count;
+  /* Retired optional EGraph update/ready-queue counters: always zero. */
   int64_t refactor_last_supernode_update_runs;
   int64_t refactor_last_supernode_update_rows;
   int64_t refactor_last_supernode_update_entries;
@@ -726,6 +727,7 @@ typedef struct kls_stats {
   int row_refactor_auto_lower_bound_rejected;
   int row_refactor_auto_pattern_build_failed;
   int row_refactor_auto_value_copy_failed;
+  /* Retired optional EGraph panel-cache counters: always zero. */
   int64_t refactor_supernode_panel_count;
   int64_t refactor_supernode_panel_used_count;
   /* Retired consumer_plan fields throughout this struct are ABI-reserved,

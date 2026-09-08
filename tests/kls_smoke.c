@@ -6518,7 +6518,7 @@ static int test_batched_compact_supernode_subrange_update_probe(void) {
   return ok;
 }
 
-static int test_egraph_cached_supernode_blocked_update(void) {
+static int test_egraph_retired_supernode_switch(void) {
   const int32_t n = 15000;
   const int32_t panel_width = 16;
   const int32_t consumer_width = 32;
@@ -6671,8 +6671,8 @@ static int test_egraph_cached_supernode_blocked_update(void) {
   }
 
   /* The production EGraph work floor would route this small fixture to the
-     serial mapped path; pin it to zero so the forced supernode machinery
-     under test actually executes. */
+     serial mapped path; pin it to zero to exercise EGraph after retiring
+     the supernode switch. The old switch must no longer alter execution. */
   if (ok && setenv("KLS_EGRAPH_REFACTOR_FLOOR", "0", 1) != 0) {
     perror("setenv KLS_EGRAPH_REFACTOR_FLOOR=0");
     ok = 0;
@@ -6718,50 +6718,15 @@ static int test_egraph_cached_supernode_blocked_update(void) {
     ok = 0;
   }
 
-  if (ok &&
-      (stats.row_refactor_last_run != 0 ||
-       stats.refactor_supernode_candidate_count < 1 ||
-       stats.refactor_supernode_panel_count < 1 ||
-       stats.refactor_supernode_panel_used_count < 1 ||
-       stats.refactor_supernode_panel_used_count >
-         stats.refactor_supernode_panel_count ||
-       stats.refactor_last_supernode_update_runs < 1 ||
-       stats.refactor_last_supernode_update_rows < panel_width ||
-       stats.refactor_last_supernode_blocked_update_runs < 1 ||
-       stats.refactor_last_supernode_blocked_update_runs >
-         stats.refactor_last_supernode_update_runs ||
-       stats.refactor_last_supernode_blocked_update_rows < panel_width ||
-       stats.refactor_last_supernode_blocked_update_rows >
-         stats.refactor_last_supernode_update_rows ||
-       stats.refactor_last_supernode_blocked_update_entries <= 0 ||
-       stats.refactor_last_supernode_blocked_update_entries >
-         stats.refactor_last_supernode_update_entries ||
-       stats.refactor_supernode_blocked_update_run_count <
-         stats.refactor_last_supernode_blocked_update_runs ||
-       stats.refactor_last_supernode_cblas_update_runs != 0 ||
-       stats.refactor_supernode_update_disabled != 0 ||
-       stats.refactor_supernode_update_disable_count != 0)) {
-    fprintf(stderr,
-            "unexpected EGraph blocked stats: row=%d, candidates=%" PRId64
-            ", panels=%" PRId64 "/%" PRId64
-            ", updates=%" PRId64 "/%" PRId64 "/%" PRId64
-            ", blocked=%" PRId64 "/%" PRId64 "/%" PRId64
-            ", blocked_total=%" PRId64 ", cblas=%" PRId64
-            ", update_disabled=%d/%" PRId64 "\n",
-            stats.row_refactor_last_run,
-            stats.refactor_supernode_candidate_count,
-            stats.refactor_supernode_panel_used_count,
-            stats.refactor_supernode_panel_count,
-            stats.refactor_last_supernode_update_runs,
-            stats.refactor_last_supernode_update_rows,
-            stats.refactor_last_supernode_update_entries,
-            stats.refactor_last_supernode_blocked_update_runs,
-            stats.refactor_last_supernode_blocked_update_rows,
-            stats.refactor_last_supernode_blocked_update_entries,
-            stats.refactor_supernode_blocked_update_run_count,
-            stats.refactor_last_supernode_cblas_update_runs,
-            stats.refactor_supernode_update_disabled,
-            stats.refactor_supernode_update_disable_count);
+  if (ok && (stats.row_refactor_last_run != 0 ||
+             stats.refactor_supernode_panel_count != 0 ||
+             stats.refactor_supernode_panel_used_count != 0 ||
+             stats.refactor_last_supernode_update_runs != 0 ||
+             stats.refactor_last_supernode_blocked_update_runs != 0 ||
+             stats.refactor_last_supernode_cblas_update_runs != 0 ||
+             stats.refactor_supernode_cached_probe_attempt_count != 0 ||
+             stats.refactor_last_ready_queue_columns != 0)) {
+    fprintf(stderr, "retired EGraph engine statistics must remain zero\n");
     ok = 0;
   }
 
@@ -14955,7 +14920,7 @@ int main(void) {
   if (!test_batched_compact_supernode_subrange_update_probe()) {
     return EXIT_FAILURE;
   }
-  if (!test_egraph_cached_supernode_blocked_update()) {
+  if (!test_egraph_retired_supernode_switch()) {
     return EXIT_FAILURE;
   }
   if (!test_ragged_batched_compact_supernode_update_probe()) {

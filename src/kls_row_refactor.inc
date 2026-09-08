@@ -2134,195 +2134,6 @@ kls_lean_row_refactor_snode_step_i16_width_specialized(
 #undef KLS_LEAN_SNODE_I16_WIDTH_CASE
 }
 
-typedef struct {
-  const UF_long *source;
-  void *destination;
-  UF_long count;
-  int kind;
-  int ok;
-} kls_row_i32_copy_job;
-
-static void *kls_row_i32_copy_main(void *arg) {
-  kls_row_i32_copy_job *job = (kls_row_i32_copy_job *)arg;
-  if (job == NULL || job->source == NULL || job->destination == NULL) {
-    return NULL;
-  }
-  job->ok = 1;
-  if (job->kind == 0) {
-    int32_t *destination = (int32_t *)job->destination;
-    for (UF_long p = 0u; p < job->count; ++p) {
-      const UF_long value = job->source[p];
-      if (value > (UF_long)INT32_MAX) {
-        job->ok = 0;
-        break;
-      }
-      destination[p] = (int32_t)value;
-    }
-  } else {
-    uint32_t *destination = (uint32_t *)job->destination;
-    for (UF_long p = 0u; p < job->count; ++p) {
-      const UF_long value = job->source[p];
-      if (value > (UF_long)UINT32_MAX) {
-        job->ok = 0;
-        break;
-      }
-      destination[p] = (uint32_t)value;
-    }
-  }
-  return NULL;
-}
-
-typedef struct {
-  const kls_solver *solver;
-  uint32_t *destination;
-  int ok;
-} kls_row_i32_target_copy_job;
-
-static void *kls_row_i32_target_copy_main(void *arg) {
-  kls_row_i32_target_copy_job *job =
-    (kls_row_i32_target_copy_job *)arg;
-  if (job == NULL || job->solver == NULL || job->destination == NULL) {
-    return NULL;
-  }
-  const kls_solver *solver = job->solver;
-  job->ok = 1;
-  for (UF_long row = 0u; row < solver->n; ++row) {
-    if (solver->row_refactor_segment_input_row_ready != NULL &&
-        !solver->row_refactor_segment_input_row_ready[row]) {
-      continue;
-    }
-    for (UF_long p = solver->row_refactor_input_ptr[row];
-         p < solver->row_refactor_input_ptr[row + 1u]; ++p) {
-      const UF_long target =
-        solver->row_refactor_segment_input_target_pos[p];
-      if (target > (UF_long)UINT32_MAX) {
-        job->ok = 0;
-        return NULL;
-      }
-      job->destination[p] = (uint32_t)target;
-    }
-  }
-  return NULL;
-}
-
-static int kls_build_row_i32_indices(kls_solver *solver) {
-  if (solver == NULL || solver->n == 0u ||
-      solver->n > (UF_long)INT32_MAX + 1u ||
-      solver->row_refactor_l_ptr == NULL ||
-      solver->row_refactor_u_ptr == NULL ||
-      solver->row_refactor_input_ptr == NULL ||
-      solver->row_refactor_l_cols == NULL ||
-      solver->row_refactor_u_cols == NULL ||
-      solver->row_refactor_input_pos == NULL) {
-    return 0;
-  }
-  if (solver->row_refactor_l_cols32 != NULL &&
-      solver->row_refactor_u_cols32 != NULL &&
-      solver->row_refactor_input_pos32 != NULL &&
-      (solver->row_refactor_segment_input_target_pos == NULL ||
-       solver->row_refactor_segment_input_target_pos32 != NULL)) {
-    return 1;
-  }
-
-  const UF_long lcount = solver->row_refactor_l_ptr[solver->n];
-  const UF_long ucount = solver->row_refactor_u_ptr[solver->n];
-  const UF_long input_count =
-    solver->row_refactor_input_ptr[solver->n];
-  if (lcount > (UF_long)(SIZE_MAX / sizeof(int32_t)) ||
-      ucount > (UF_long)(SIZE_MAX / sizeof(int32_t)) ||
-      input_count > (UF_long)(SIZE_MAX / sizeof(uint32_t))) {
-    return 0;
-  }
-  int32_t *lcols = (int32_t *)malloc(
-    (size_t)(lcount > 0u ? lcount : 1u) * sizeof(*lcols));
-  int32_t *ucols = (int32_t *)malloc(
-    (size_t)(ucount > 0u ? ucount : 1u) * sizeof(*ucols));
-  uint32_t *input_pos = (uint32_t *)malloc(
-    (size_t)(input_count > 0u ? input_count : 1u) * sizeof(*input_pos));
-  uint32_t *target_pos =
-    solver->row_refactor_segment_input_target_pos != NULL
-      ? (uint32_t *)calloc(
-          (size_t)(input_count > 0u ? input_count : 1u) *
-          sizeof(*target_pos), 1u)
-      : NULL;
-  if (lcols == NULL || ucols == NULL || input_pos == NULL ||
-      (solver->row_refactor_segment_input_target_pos != NULL &&
-       target_pos == NULL)) {
-    free(lcols);
-    free(ucols);
-    free(input_pos);
-    free(target_pos);
-    return 0;
-  }
-  kls_row_i32_copy_job jobs[3] = {
-    { solver->row_refactor_l_cols, lcols, lcount, 0, 0 },
-    { solver->row_refactor_u_cols, ucols, ucount, 0, 0 },
-    { solver->row_refactor_input_pos, input_pos, input_count, 1, 0 }
-  };
-  kls_row_i32_target_copy_job target_job = {
-    solver, target_pos, target_pos == NULL
-  };
-  pthread_t threads[3];
-  unsigned char launched[3] = { 0u, 0u, 0u };
-  pthread_t target_thread;
-  int target_launched = 0;
-  const int parallel =
-    solver->options.threads >= 4 &&
-    (getenv("KLS_ENABLE_PARALLEL_ROW_I32_BUILD") != NULL ||
-     ((double)lcount + (double)ucount + (double)input_count >= 300000.0)) &&
-    input_count >= 100000u;
-  if (parallel) {
-    for (int kind = 1; kind < 3; ++kind) {
-      if (pthread_create(&threads[kind], NULL,
-                         kls_row_i32_copy_main, &jobs[kind]) == 0) {
-        launched[kind] = 1u;
-      } else {
-        (void)kls_row_i32_copy_main(&jobs[kind]);
-      }
-    }
-    if (target_pos != NULL &&
-        pthread_create(&target_thread, NULL,
-                       kls_row_i32_target_copy_main, &target_job) == 0) {
-      target_launched = 1;
-    } else if (target_pos != NULL) {
-      (void)kls_row_i32_target_copy_main(&target_job);
-    }
-    (void)kls_row_i32_copy_main(&jobs[0]);
-    for (int kind = 1; kind < 3; ++kind) {
-      if (launched[kind]) {
-        (void)pthread_join(threads[kind], NULL);
-      }
-    }
-    if (target_launched) {
-      (void)pthread_join(target_thread, NULL);
-    }
-  } else {
-    for (int kind = 0; kind < 3; ++kind) {
-      (void)kls_row_i32_copy_main(&jobs[kind]);
-    }
-    if (target_pos != NULL) {
-      (void)kls_row_i32_target_copy_main(&target_job);
-    }
-  }
-  if (!jobs[0].ok || !jobs[1].ok || !jobs[2].ok || !target_job.ok) {
-    free(lcols);
-    free(ucols);
-    free(input_pos);
-    free(target_pos);
-    return 0;
-  }
-
-  free(solver->row_refactor_l_cols32);
-  free(solver->row_refactor_u_cols32);
-  free(solver->row_refactor_input_pos32);
-  free(solver->row_refactor_segment_input_target_pos32);
-  solver->row_refactor_l_cols32 = lcols;
-  solver->row_refactor_u_cols32 = ucols;
-  solver->row_refactor_input_pos32 = input_pos;
-  solver->row_refactor_segment_input_target_pos32 = target_pos;
-  return 1;
-}
-
 static KLS_ALWAYS_INLINE UF_long kls_row_refactor_input_pos_at(
   const kls_solver *solver,
   UF_long pos) {
@@ -2334,9 +2145,7 @@ static KLS_ALWAYS_INLINE UF_long kls_row_refactor_input_pos_at(
 static KLS_ALWAYS_INLINE UF_long kls_row_refactor_input_target_pos_at(
   const kls_solver *solver,
   UF_long pos) {
-  return solver->row_refactor_segment_input_target_pos32 != NULL
-    ? (UF_long)solver->row_refactor_segment_input_target_pos32[pos]
-    : solver->row_refactor_segment_input_target_pos[pos];
+  return solver->row_refactor_segment_input_target_pos[pos];
 }
 
 /* Compact input coordinates need not have the same width.  Circuit factors
@@ -6908,13 +6717,6 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
   solver->row_refactor_auto_enabled = 1;
   solver->row_refactor_auto_native_row_panel =
     kls_auto_row_refactor_native_panel_allows(solver) ? 1 : 0;
-  if (getenv("KLS_ENABLE_ROW_I32_INDICES") != NULL) {
-    /* Keep the checked compact stream available as an explicit experiment.
-       Its O(fill) construction can dominate a finite repeated-update horizon
-       even when all indices are representable, so automatic candidates must
-       first justify that separate setup rather than receiving it eagerly. */
-    (void)kls_build_row_i32_indices(solver);
-  }
   if (!kls_auto_row_refactor_cost_allows(solver)) {
     solver->row_refactor_auto_native_row_panel = 0;
     solver->row_refactor_values_ready = 0;
@@ -10347,9 +10149,7 @@ kls_row_refactor_apply_compact_dense_target_decoded(
           pos >= solver->row_refactor_l_ptr[row + 1u]) {
         return 0;
       }
-      const UF_long col = solver->row_refactor_l_cols32 != NULL
-        ? (UF_long)solver->row_refactor_l_cols32[pos]
-        : solver->row_refactor_l_cols[pos];
+      const UF_long col = solver->row_refactor_l_cols[pos];
       if (col < row_begin || col >= row || col - row_begin >= width) {
         return 0;
       }
@@ -10513,29 +10313,6 @@ static int kls_parallel_row_refactor_load_compact_dense_input_row(
   if (!kls_row_refactor_input_multiplier(shared, row, &input_multiplier)) {
     kls_egraph_refactor_record_invalid(shared);
     return -1;
-  }
-  if (use_retained_targets && shared->row_refactor_scale_hoist &&
-      solver->row_refactor_input_pos32 != NULL &&
-      solver->row_refactor_segment_input_target_pos32 != NULL) {
-    const uint32_t *restrict input_pos32 = solver->row_refactor_input_pos32;
-    const uint32_t *restrict target_pos32 =
-      solver->row_refactor_segment_input_target_pos32;
-    const unsigned char *restrict target_kind =
-      solver->row_refactor_segment_input_target_kind;
-    const double *restrict values = shared->values;
-    for (UF_long p = input_begin; p < input_end; ++p) {
-      const double value = values[input_pos32[p]] * input_multiplier;
-      if (!kls_row_refactor_apply_compact_dense_target_decoded(
-            shared, x, row, row_begin, row_end, trailing_len,
-            row_dense_panel, row_panel, value, target_kind[p],
-            (UF_long)target_pos32[p])) {
-        kls_egraph_refactor_record_invalid(shared);
-        return -1;
-      }
-    }
-    kls_record_row_refactor_segment_target_input(solver);
-    kls_record_row_refactor_compact_dense_panel_direct_input(solver);
-    return 1;
   }
   for (UF_long p = input_begin; p < input_end; ++p) {
     const UF_long col = solver->row_refactor_input_cols[p];
@@ -10796,19 +10573,10 @@ static int kls_parallel_row_refactor_apply_scalar_dep(
     const UF_long u_begin = solver->row_refactor_u_ptr[dep];
     const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
     const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-    const int32_t *u_cols32 = solver->row_refactor_u_cols32 != NULL
-      ? solver->row_refactor_u_cols32 + u_begin : NULL;
     const double *u_values = solver->row_refactor_u_row_values + u_begin;
-    if (u_cols32 != NULL) {
-      kls_scatter_subtract_i32_scalar(
-        x, u_cols32, u_values, u_end - u_begin, lij);
-    } else if (shared->row_refactor_simple_scalar_update) {
-      if (shared->row_refactor_simple_scalar_update) {
-        for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-          x[u_cols[offset]] -= lij * u_values[offset];
-        }
-      } else {
-        kls_scatter_subtract(x, u_cols, u_values, u_end - u_begin, lij);
+    if (shared->row_refactor_simple_scalar_update) {
+      for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+        x[u_cols[offset]] -= lij * u_values[offset];
       }
     } else {
       kls_scatter_subtract(x, u_cols, u_values, u_end - u_begin, lij);
@@ -12080,29 +11848,6 @@ static int kls_parallel_row_refactor_load_dense_native_input_row(
     kls_egraph_refactor_record_invalid(shared);
     return -1;
   }
-  if (use_retained_targets && shared->row_refactor_scale_hoist &&
-      solver->row_refactor_input_pos32 != NULL &&
-      solver->row_refactor_segment_input_target_pos32 != NULL) {
-    const uint32_t *restrict input_pos32 = solver->row_refactor_input_pos32;
-    const uint32_t *restrict target_pos32 =
-      solver->row_refactor_segment_input_target_pos32;
-    const unsigned char *restrict target_kind =
-      solver->row_refactor_segment_input_target_kind;
-    const double *restrict values = shared->values;
-    for (UF_long p = input_begin; p < input_end; ++p) {
-      const double value = values[input_pos32[p]] * input_multiplier;
-      if (!kls_row_refactor_apply_segment_target_decoded(
-            shared, x, row, l_internal, l_end,
-            dense_len + trailing_len, row_u_values, udiag, value,
-            target_kind[p], (UF_long)target_pos32[p])) {
-        kls_egraph_refactor_record_invalid(shared);
-        return -1;
-      }
-    }
-    kls_record_row_refactor_segment_target_input(solver);
-    kls_record_row_refactor_dense_segment_direct_input(solver);
-    return 1;
-  }
   for (UF_long p = input_begin; p < input_end; ++p) {
     const UF_long col = solver->row_refactor_input_cols[p];
     double value = 0.0;
@@ -12271,28 +12016,6 @@ static int kls_parallel_row_refactor_load_targeted_input_row(
     kls_egraph_refactor_record_invalid(shared);
     return -1;
   }
-  if (shared->row_refactor_scale_hoist &&
-      solver->row_refactor_input_pos32 != NULL &&
-      solver->row_refactor_segment_input_target_pos32 != NULL) {
-    const uint32_t *restrict input_pos32 = solver->row_refactor_input_pos32;
-    const uint32_t *restrict target_pos32 =
-      solver->row_refactor_segment_input_target_pos32;
-    const unsigned char *restrict target_kind =
-      solver->row_refactor_segment_input_target_kind;
-    const double *restrict values = shared->values;
-    for (UF_long p = input_begin; p < input_end; ++p) {
-      const double value = values[input_pos32[p]] * input_multiplier;
-      if (!kls_row_refactor_apply_segment_target_decoded(
-            shared, x, row, l_begin, l_end, row_u_len,
-            row_u_values, udiag, value, target_kind[p],
-            (UF_long)target_pos32[p])) {
-        kls_egraph_refactor_record_invalid(shared);
-        return -1;
-      }
-    }
-    kls_record_row_refactor_segment_target_input(solver);
-    return 1;
-  }
   for (UF_long p = input_begin; p < input_end; ++p) {
     double value = 0.0;
     if (!kls_row_refactor_scaled_input_value(
@@ -12418,29 +12141,6 @@ static int kls_parallel_row_refactor_load_sparse_segment_input_row(
   if (!kls_row_refactor_input_multiplier(shared, row, &input_multiplier)) {
     kls_egraph_refactor_record_invalid(shared);
     return -1;
-  }
-  if (use_retained_targets && shared->row_refactor_scale_hoist &&
-      solver->row_refactor_input_pos32 != NULL &&
-      solver->row_refactor_segment_input_target_pos32 != NULL) {
-    const uint32_t *restrict input_pos32 = solver->row_refactor_input_pos32;
-    const uint32_t *restrict target_pos32 =
-      solver->row_refactor_segment_input_target_pos32;
-    const unsigned char *restrict target_kind =
-      solver->row_refactor_segment_input_target_kind;
-    const double *restrict values = shared->values;
-    for (UF_long p = input_begin; p < input_end; ++p) {
-      const double value = values[input_pos32[p]] * input_multiplier;
-      if (!kls_row_refactor_apply_segment_target_decoded(
-            shared, x, row, l_begin, l_end,
-            dense_len + trailing_len, row_u_values, udiag, value,
-            target_kind[p], (UF_long)target_pos32[p])) {
-        kls_egraph_refactor_record_invalid(shared);
-        return -1;
-      }
-    }
-    kls_record_row_refactor_segment_target_input(solver);
-    kls_record_row_refactor_sparse_segment_direct_input(solver);
-    return 1;
   }
   for (UF_long p = input_begin; p < input_end; ++p) {
     const UF_long col = solver->row_refactor_input_cols[p];
@@ -15420,17 +15120,11 @@ static int kls_row_refactor_assemble_compact_dense_row(
       const UF_long u_begin = solver->row_refactor_u_ptr[dep];
       const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
       const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
-      const int32_t *u_cols32 = solver->row_refactor_u_cols32 != NULL
-        ? solver->row_refactor_u_cols32 + u_begin : NULL;
       const double *u_values =
         solver->row_refactor_u_row_values + u_begin;
-      if (u_cols32 != NULL) {
-        kls_scatter_subtract_i32_scalar(
-          x, u_cols32, u_values, u_end - u_begin, lij);
-      } else {
-        for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-          x[u_cols[offset]] -= lij * u_values[offset];
-        }
+      for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
+        x[u_cols[offset]] -= lij * u_values[offset];
+
       }
     }
     lp++;

@@ -1124,44 +1124,13 @@ the reverse group graph and reports `row_refactor_group_dependency_edges`,
 `row_refactor_group_root_count`, `row_refactor_group_leaf_count`, and
 `row_refactor_group_max_fanout`, which are the row-segment task-graph counters
 needed by future private/pipeline partitioning and tail-restart schedulers.
-The column EGraph refactor path also has an opt-in paper probe behind
-`KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1`. It uses retained consecutive
-supernode-candidate ranges to solve a dependency run through a dense internal
-triangular panel and, only when the producer L columns share the same trailing
-row list, accumulates that trailing contribution in worker scratch before one
-scatter. Stats report `refactor_last_supernode_update_runs`,
-`refactor_last_supernode_update_rows`, `refactor_last_supernode_update_entries`,
-and cumulative `refactor_supernode_update_*` totals; CBLAS builds additionally
-report the BLAS-taken subset as `refactor_last_supernode_cblas_update_runs`,
-`refactor_last_supernode_cblas_update_rows`,
-`refactor_last_supernode_cblas_update_entries`, and cumulative
-`refactor_supernode_cblas_update_*` totals. Non-CBLAS or CBLAS-disabled runs
-use a portable blocked cached-panel update and report that subset as
-`refactor_last_supernode_blocked_update_runs`,
-`refactor_last_supernode_blocked_update_rows`,
-`refactor_last_supernode_blocked_update_entries`, and cumulative
-`refactor_supernode_blocked_update_*` totals. This path is intentionally off
-by default. It now builds persistent producer-side compact panels for
-eligible retained EGraph supernodes and publishes panel rows as producer
-columns finish, so later consumers reuse the dense/internal and shared trailing
-values instead of reconstructing that structure for every dependency run. The
-same cache can consume a published prefix or suffix of a retained panel, so a
-column inside a supernode no longer has to rebuild a temporary partial panel
-just to use already completed producer columns. The cached-panel consumer now
-also runs from the generic mapped EGraph refactor kernel, so scaled BTF and
-smaller BTF states can use the same retained producer panels instead of staying
-on the scalar dependency loop. CBLAS builds can also apply an eligible cached
-EGraph panel with a unit-diagonal `dtrsv` over the retained internal panel plus
-`dgemv` updates for the dense suffix and shared trailing rows. Focused runs
-show this removes the worst rebuild overhead, but the path is still slower than
-default KLS because the broad default path still needs coarser batched panel
-kernels.
-When dependency waiting is active, the cached-panel consumer follows the
-SubtreeLU large-supernode split rule: if a retained producer run has at least
-`2 * threads` rows, it may consume the completed prefix ending `threads` rows
-before the producer supernode tail and leave the tail for the next dependency
-iteration. Set `KLS_ENABLE_EGRAPH_SUPERNODE_SPLIT=0` to disable this split for
-A/B runs.
+The optional EGraph supernode-update modes (including cached-only and subtree
+splitting), EGraph ready queue, separate row L/U 32-bit mirrors, raced-METIS
+symbolic reuse, static-match AUTO-scale override, and alternate BTF matching
+trial have been removed. Their old environment switches have no effect.
+Public statistics for the retired executors remain reserved and zero. Normal
+cached-supernode batching, first-factor panels, the row/separator schedulers,
+and compact row-input maps remain supported.
 The retained consumer-plan diagnostics also report group-L batch candidate
 payoff counters:
 `refactor_supernode_consumer_plan_group_l_batch_candidate_advance_*` measures
@@ -1194,24 +1163,6 @@ raw per-current publish entries. Benchmark JSON reports
 `refactor_supernode_consumer_plan_shape_target_max_rows`. This does not change
 default numeric execution; it retains the sparse publish surface needed by a
 future CKTSO/SubtreeLU-style multi-current producer executor.
-Set `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=cached` to isolate only the durable
-cached-panel consumer and skip the per-consumer temporary panel reconstruction
-fallback used by the full `=1` experiment.
-Cached runs skip the heavier panel consumer unless the producer column belongs
-to a retained panel, and JSON reports
-`refactor_supernode_cached_probe_*` counters so profiling can distinguish panel
-misses, contiguous producer runs, work-gate acceptance, and applied cached
-updates.
-In cached-only mode, if one completed numeric pass probes retained panels but
-finds no work-gate-accepted cached updates, later passes with the same retained
-panel cache skip the cached probe; JSON reports
-`refactor_supernode_cached_probe_disabled` and
-`refactor_supernode_cached_probe_disable_count`.
-In the full `=1` experiment, if a clean numeric pass probes retained panels but
-accepts less than one amortizable supernode-update window, later passes skip the
-full supernode probe and report `refactor_supernode_update_disabled` plus
-`refactor_supernode_update_disable_count`. Productive cached-panel work remains
-eligible; this only trims the low-work full-probe case.
 For paper-gap diagnosis without changing execution, set
 `KLS_ENABLE_REFACTOR_SUPERNODE_CONSUMER_STATS=1`. Schedule construction then
 counts actual U-stream dependency runs that fall inside retained EGraph
@@ -1232,10 +1183,8 @@ producer-panel offset, and reports the retained shape through
 cached-panel executor consume that plan. This executor is intentionally
 off-by-default: focused CKTSO-gap runs show that the current completed-panel
 cache covers only a small fraction of retained rows, so the plan is primarily
-staging for a future producer/consumer row-major numeric task. When this flag
-is the only supernode update gate, KLS restricts cached-panel probing to
-retained plan hits; explicit `KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES` modes keep
-their broader opportunistic probes.
+staging for a future producer/consumer row-major numeric task. This consumer-plan executor and its broad EGraph update modes have since
+been retired; the description above records their historical purpose.
 `KLS_ENABLE_REFACTOR_SUPERNODE_ALGORITHM5_PAYOFF_EXEC=1` is a stricter
 Algorithm 5 probe: it builds the retained plan, selects payoff-positive
 producer-prefix subsets, materializes those prefixes as the existing ragged

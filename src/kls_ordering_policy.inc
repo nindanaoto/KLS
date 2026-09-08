@@ -2137,15 +2137,7 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
     common->memgrow = options->memory_growth;
   }
   common->halt_if_singular = options->halt_if_singular ? 1 : 0;
-  /* The primary BTF pass already computes an exact maximum matching.  A
-     second, equally valid matching is only an optional ordering portfolio:
-     building it for every orientation and then sometimes factoring both can
-     cost more than a complete repeated lifecycle.  Keep that experiment for
-     explicit A/B requests; generic AUTO instead spends
-     its portfolio budget on the retained ordering/partition candidates. */
-  common->kls_btf_match_trial =
-    getenv("KLS_DISABLE_BTF_MATCH_TRIAL") == NULL &&
-    getenv("KLS_ENABLE_BTF_MATCH_TRIAL") != NULL;
+  common->kls_btf_match_trial = 0; /* Reserved bundled-KLU ABI field. */
   {
     /* bounded-effort BTF matching: mac_econ's 89%-missing diagonal
        drives Duff's maxtrans into ~9s of augmenting-path work (of a
@@ -10315,7 +10307,7 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
     fprintf(stderr, "KLS pipe route: est=%.3e n=%.0f fill=%.3e\n",
             est, n, sym->lnz + sym->unz);
   }
-  if (getenv("KLS_KLU_PIPE_FORCE") == NULL && 1 &&
+  if (getenv("KLS_KLU_PIPE_FORCE") == NULL &&
       !(est > 5.0e9)) {
     /* the old est/n >= 1e5 companion guard existed to keep the pipe
        away from the cancellation classes (mac) whose accuracy it
@@ -10337,17 +10329,6 @@ static int kls_trace_pre_static_enabled(void) {
   const char *value = getenv("KLS_TRACE_PRESTATIC");
   return value != NULL && value[0] == '1';
 }
-
-/* Defined after the METIS-race object, whose analyze stage is launched from
-   kls_analyze before numeric values (and hence weighted matching) exist. */
-static int kls_prestatic_reuse_raced_metis_symbolic(
-  kls_solver *solver,
-  UF_long *col_ptr,
-  UF_long *row_idx,
-  const kls_options *options,
-  trilinos_klu_l_symbolic **symbolic_out,
-  trilinos_klu_l_common *common_out,
-  kls_separator_analysis *separator_out);
 
 static double kls_column_pair_work(UF_long n,
                                    const UF_long *col_ptr) {
@@ -11003,19 +10984,6 @@ matching_attempt:;
   if (status != KLS_OK) {
     goto done;
   }
-  if (
-      getenv("KLS_STATIC_MATCH_AUTO_SCALE") != NULL &&
-      solver->options.scale == KLS_SCALE_AUTO) {
-    /* Matching changes which numerical entries become diagonal, so the
-       original matrix's scale verdict is not evidence for the candidate's
-       value frame.  This optional experiment lets the ordinary value census
-       choose the first matched numeric; the default keeps the stable matched
-       equilibration chosen above. */
-    prefer_unscaled_static_match =
-      choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
-                                     trial_row_idx, &solver->options,
-                                     trial_values) <= 0;
-  }
   if (kls_trace_pre_static_enabled()) {
     fprintf(stderr, "KLS pre-static: pattern build done %.3fms\n",
             1e3 * (kls_now_seconds() - kls_ps_t0));
@@ -11032,8 +11000,7 @@ matching_attempt:;
       solver->medium_partial_static_metis_path) {
     trial_options.ordering = KLS_ORDERING_METIS;
   }
-  if (trial_options.scale == KLS_SCALE_AUTO &&
-      (1)) {
+  if (trial_options.scale == KLS_SCALE_AUTO) {
     if (match_row_scale != NULL && match_col_scale != NULL) {
       trial_row_scale = match_row_scale;
       trial_col_scale = match_col_scale;
@@ -11062,24 +11029,10 @@ matching_attempt:;
   }
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
-#ifdef KLS_HAVE_SPRAL_SCALING
 
-#endif
-
-  int reused_raced_metis_q = 0;
   int bounded_matched_amd = 0;
   int matched_low_pair_ordering_selected = 0;
-  if (getenv("KLS_PRESTATIC_REUSE_RACED_METIS_Q") != NULL) {
-    reused_raced_metis_q = kls_prestatic_reuse_raced_metis_symbolic(
-      solver, trial_col_ptr, trial_row_idx, &trial_options,
-      &trial_symbolic, &trial_common, &trial_separator);
-    if (reused_raced_metis_q) {
-      trial_ordering = KLS_ORDERING_METIS;
-      trial_score = symbolic_score(trial_symbolic);
-    }
-  }
-  if (!reused_raced_metis_q &&
-      bounded_exact_match_probe_attempted &&
+  if (bounded_exact_match_probe_attempted &&
       !bounded_exact_match_probe_rejected &&
       trial_options.ordering == KLS_ORDERING_AUTO &&
       kls_repeated_update_workload(&trial_options) &&
@@ -11140,7 +11093,7 @@ matching_attempt:;
     bounded_exact_match_probe_rejected = 1;
     goto matching_attempt;
   }
-  if (!reused_raced_metis_q && !bounded_matched_amd) {
+  if (!bounded_matched_amd) {
     /* CKTSO-style dense-spike startup: after weighted matching, run the
        ordinary auto chooser on the matched graph.  Keeping the prestatic
        legacy context here invokes its AMD/AMF competition instead and can
@@ -12268,7 +12221,6 @@ kls_adopt_unfactored:;
     trial_col_scale != NULL;
   solver->spral_matching_selected = spral_matching;
   solver->symbolic = trial_symbolic;
-  solver->prestatic_reused_raced_metis_symbolic = reused_raced_metis_q;
   solver->prestatic_dense_spiked_match = 0;
   kls_separator_analysis_move(&solver->separator, &trial_separator);
   kls_invalidate_factor_etree_stats(solver);
@@ -12396,11 +12348,6 @@ struct kls_metis_race_s {
   int scale_wanted;
   int scale_unscaled_only;  /* generic compact race: -1 and scale-1 arms */
   int giant_symmetric_scalar_fringe_metis_row;
-  int symbolic_only;         /* dense-tail class: the joiner wants the
-                                analyze only - skip the scale trials
-                                and the serial trial factor (ss1: an
-                                unabortable 26.8s klu trial held the
-                                take's join) */
   _Atomic int scale_done;
   int scale_count;
   int scale_cand[4];
@@ -12467,7 +12414,7 @@ static void *kls_metis_race_main(void *arg) {
 #ifdef KLS_HAVE_MTMETIS
     /* the symbolic-only (dense-tail class) joiner is on the one-shot
        critical path waiting for this analyze */
-    kls_det_ndp_requested = race->symbolic_only;
+    kls_det_ndp_requested = 0;
 #endif
     race->analyze_status = analyze_with_ordering(race->n, race->col_ptr,
                                                  race->row_idx,
@@ -12496,7 +12443,7 @@ static void *kls_metis_race_main(void *arg) {
       kls_cpu_relax();
     }
   }
-  if (stage2 != 1 || race->symbolic_only) {
+  if (stage2 != 1) {
     atomic_store_explicit(&race->scale_done, 1, memory_order_release);
     atomic_store_explicit(&race->finished, 1, memory_order_release);
     return NULL;
@@ -12649,91 +12596,6 @@ static void kls_metis_race_free(kls_metis_race *race) {
   kls_separator_analysis_clear(&race->separator);
   free(race->values_copy);
   free(race);
-}
-
-/* CKTSO-style static pivoting normally orders the row-matched matrix.  KLS's
-   split analyze/factor API cannot start the value-weighted match until factor
-   time, while its METIS race has already spent that interval ordering the
-   original pattern.  This experiment reuses the raced single-block symbolic
-   on the matched coordinates after making its row permutation equal to its
-   column order.  The predicted-first builder recomputes the exact LU pattern,
-   so the original symbolic estimates remain only conservative routing data.
-   Matching and NodeND overlap, and neither a second NodeND, another symbolic
-   pass, nor the race's serial numeric trial is required.  The predicted-first
-   pivot/residual checks remain the acceptance boundary. */
-static int kls_prestatic_reuse_raced_metis_symbolic(
-  kls_solver *solver,
-  UF_long *col_ptr,
-  UF_long *row_idx,
-  const kls_options *options,
-  trilinos_klu_l_symbolic **symbolic_out,
-  trilinos_klu_l_common *common_out,
-  kls_separator_analysis *separator_out) {
-  if (solver == NULL || col_ptr == NULL || row_idx == NULL ||
-      options == NULL || symbolic_out == NULL || common_out == NULL ||
-      separator_out == NULL || *symbolic_out != NULL ||
-      solver->metis_race == NULL ||
-      solver->metis_race->values_signaled) {
-    return 0;
-  }
-
-  const double begin = kls_now_seconds();
-  kls_metis_race *race = solver->metis_race;
-  /* Publish symbolic_only before stage2.  The worker's acquire load of
-     stage2 then sees the flag and exits immediately after NodeND. */
-  race->values_signaled = 1;
-  race->symbolic_only = 1;
-  atomic_store_explicit(&race->stage2, 1, memory_order_release);
-  race = kls_metis_race_take(solver, NULL);
-  if (race == NULL || race->analyze_status != KLS_OK ||
-      race->symbolic == NULL || race->symbolic->P == NULL ||
-      race->symbolic->Q == NULL || race->symbolic->R == NULL ||
-      race->symbolic->nblocks != 1u) {
-    kls_metis_race_free(race);
-    return 0;
-  }
-
-  (void)col_ptr;
-  (void)row_idx;
-  (void)options;
-  trilinos_klu_l_symbolic *given = race->symbolic;
-  race->symbolic = NULL;
-  for (UF_long k = 0; k < solver->n; ++k) {
-    given->P[k] = given->Q[k];
-  }
-  given->do_btf = 0;
-  given->nblocks = 1u;
-  given->maxblock = solver->n;
-  if (given->R != NULL) {
-    given->R[0] = 0u;
-    given->R[1] = solver->n;
-  }
-  const int ok = given->P != NULL && given->Q != NULL && given->R != NULL &&
-                 race->common.status >= TRILINOS_KLU_OK;
-  if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
-    fprintf(stderr,
-            "KLS pre-static: raced symbolic reuse %.3fms ok=%d "
-            "fill=%.3e\n",
-            1e3 * (kls_now_seconds() - begin), ok,
-            ok ? given->lnz + given->unz : -1.0);
-  }
-  if (!ok) {
-    race->symbolic = given;
-    kls_metis_race_free(race);
-    return 0;
-  }
-  *common_out = race->common;
-  /* The component labels are expressed in the raced Q-order, which is also
-     the coordinate order of the reused symmetric P=Q symbolic.  Row matching
-     can introduce dependencies that were not edges in the original graph;
-     the row scheduler's dependency-closure and cross-thread-promotion checks
-     conservatively move every such target to its pipeline before execution.
-     Retaining this tree therefore supplies useful ownership seeds without
-     assuming that its original components remain independent. */
-  kls_separator_analysis_move(separator_out, &race->separator);
-  kls_metis_race_free(race);
-  *symbolic_out = given;
-  return 1;
 }
 
 static void kls_metis_race_abandon(kls_solver *solver) {
@@ -13006,7 +12868,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   race->metis_wanted = 0;
   race->scale_wanted = scale_wanted;
   race->scale_unscaled_only = 1;
-  race->symbolic_only = 0;
   atomic_init(&race->scale_done, 0);
   atomic_init(&race->stage2, 0);
   race->analyze_status =
@@ -13049,10 +12910,6 @@ static void kls_signal_metis_race_values(kls_solver *solver,
     return;
   }
   race->values_signaled = 1;
-  if (race->symbolic_only) {
-    atomic_store_explicit(&race->stage2, 1, memory_order_release);
-    return;
-  }
 
   race->values_copy =
     (double *)malloc((size_t)solver->nnz * sizeof(*race->values_copy));
@@ -15550,7 +15407,6 @@ generic_ordering_tournament:;
       struct kls_amf_spec_job *spec = &amf_spec[spec_index];
       pthread_join(amf_spec_tid[spec_index], NULL);
       const int promotable =
-        (1) &&
         best_score < DBL_MAX &&
         isfinite(best_score) && best_score > 0.0;
       const int spec_valid =
@@ -18474,10 +18330,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     .refactor_last_supernode_algorithm5_payoff_suffix_advance_finished =
       0;
 
-  solver->stats.refactor_supernode_panel_count =
-    (int64_t)solver->refactor_supernode_panel_count;
-  solver->stats.refactor_supernode_panel_used_count =
-    (int64_t)solver->refactor_supernode_panel_used_count;
+  solver->stats.refactor_supernode_panel_count = 0;
+  solver->stats.refactor_supernode_panel_used_count = 0;
 
   solver->stats.refactor_map_index32_enabled =
     solver->refactor_map_index32_enabled;
@@ -18495,102 +18349,54 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_last_supernode_pipeline_columns = 0;
   solver->stats.refactor_supernode_pipeline_task_count = 0;
   solver->stats.refactor_supernode_pipeline_column_count = 0;
-  solver->stats.refactor_last_supernode_update_runs =
-    (int64_t)solver->refactor_last_supernode_update_runs;
-  solver->stats.refactor_last_supernode_update_rows =
-    (int64_t)solver->refactor_last_supernode_update_rows;
-  solver->stats.refactor_last_supernode_update_entries =
-    (int64_t)solver->refactor_last_supernode_update_entries;
-  solver->stats.refactor_supernode_update_run_count =
-    (int64_t)solver->refactor_supernode_update_run_count;
-  solver->stats.refactor_supernode_update_rows =
-    (int64_t)solver->refactor_supernode_update_rows;
-  solver->stats.refactor_supernode_update_entries =
-    (int64_t)solver->refactor_supernode_update_entries;
-  solver->stats.refactor_last_supernode_cblas_update_runs =
-    (int64_t)solver->refactor_last_supernode_cblas_update_runs;
-  solver->stats.refactor_last_supernode_cblas_update_rows =
-    (int64_t)solver->refactor_last_supernode_cblas_update_rows;
-  solver->stats.refactor_last_supernode_cblas_update_entries =
-    (int64_t)solver->refactor_last_supernode_cblas_update_entries;
-  solver->stats.refactor_supernode_cblas_update_run_count =
-    (int64_t)solver->refactor_supernode_cblas_update_run_count;
-  solver->stats.refactor_supernode_cblas_update_rows =
-    (int64_t)solver->refactor_supernode_cblas_update_rows;
-  solver->stats.refactor_supernode_cblas_update_entries =
-    (int64_t)solver->refactor_supernode_cblas_update_entries;
-  solver->stats.refactor_last_supernode_blocked_update_runs =
-    (int64_t)solver->refactor_last_supernode_blocked_update_runs;
-  solver->stats.refactor_last_supernode_blocked_update_rows =
-    (int64_t)solver->refactor_last_supernode_blocked_update_rows;
-  solver->stats.refactor_last_supernode_blocked_update_entries =
-    (int64_t)solver->refactor_last_supernode_blocked_update_entries;
-  solver->stats.refactor_supernode_blocked_update_run_count =
-    (int64_t)solver->refactor_supernode_blocked_update_run_count;
-  solver->stats.refactor_supernode_blocked_update_rows =
-    (int64_t)solver->refactor_supernode_blocked_update_rows;
-  solver->stats.refactor_supernode_blocked_update_entries =
-    (int64_t)solver->refactor_supernode_blocked_update_entries;
-  solver->stats.refactor_last_supernode_cached_probe_attempts =
-    (int64_t)solver->refactor_last_supernode_cached_probe_attempts;
-  solver->stats.refactor_last_supernode_cached_probe_panel_hits =
-    (int64_t)solver->refactor_last_supernode_cached_probe_panel_hits;
-  solver->stats.refactor_last_supernode_cached_probe_contiguous =
-    (int64_t)solver->refactor_last_supernode_cached_probe_contiguous;
-  solver->stats.refactor_last_supernode_cached_probe_allowed =
-    (int64_t)solver->refactor_last_supernode_cached_probe_allowed;
-  solver->stats.refactor_last_supernode_cached_probe_allowed_rows =
-    (int64_t)solver->refactor_last_supernode_cached_probe_allowed_rows;
-  solver->stats.refactor_last_supernode_cached_probe_applied =
-    (int64_t)solver->refactor_last_supernode_cached_probe_applied;
-  solver->stats.refactor_last_supernode_cached_probe_applied_rows =
-    (int64_t)solver->refactor_last_supernode_cached_probe_applied_rows;
-  solver->stats.refactor_last_supernode_cached_probe_shape_rejects =
-    (int64_t)solver->refactor_last_supernode_cached_probe_shape_rejects;
-  solver->stats.refactor_last_supernode_cached_probe_shape_reject_rows =
-    (int64_t)solver->refactor_last_supernode_cached_probe_shape_reject_rows;
-  solver->stats.refactor_last_supernode_cached_probe_stream_rejects =
-    (int64_t)solver->refactor_last_supernode_cached_probe_stream_rejects;
-  solver->stats.refactor_last_supernode_cached_probe_stream_reject_rows =
-    (int64_t)solver->refactor_last_supernode_cached_probe_stream_reject_rows;
-  solver->stats.refactor_last_supernode_cached_probe_work_rejects =
-    (int64_t)solver->refactor_last_supernode_cached_probe_work_rejects;
-  solver->stats.refactor_last_supernode_cached_probe_work_reject_rows =
-    (int64_t)solver->refactor_last_supernode_cached_probe_work_reject_rows;
-  solver->stats.refactor_last_supernode_cached_probe_workspace_rejects =
-    (int64_t)solver->refactor_last_supernode_cached_probe_workspace_rejects;
-  solver->stats.refactor_last_supernode_cached_probe_workspace_reject_rows =
-    (int64_t)solver->refactor_last_supernode_cached_probe_workspace_reject_rows;
-  solver->stats.refactor_supernode_cached_probe_attempt_count =
-    (int64_t)solver->refactor_supernode_cached_probe_attempt_count;
-  solver->stats.refactor_supernode_cached_probe_panel_hits =
-    (int64_t)solver->refactor_supernode_cached_probe_panel_hits;
-  solver->stats.refactor_supernode_cached_probe_contiguous =
-    (int64_t)solver->refactor_supernode_cached_probe_contiguous;
-  solver->stats.refactor_supernode_cached_probe_allowed =
-    (int64_t)solver->refactor_supernode_cached_probe_allowed;
-  solver->stats.refactor_supernode_cached_probe_allowed_rows =
-    (int64_t)solver->refactor_supernode_cached_probe_allowed_rows;
-  solver->stats.refactor_supernode_cached_probe_applied =
-    (int64_t)solver->refactor_supernode_cached_probe_applied;
-  solver->stats.refactor_supernode_cached_probe_applied_rows =
-    (int64_t)solver->refactor_supernode_cached_probe_applied_rows;
-  solver->stats.refactor_supernode_cached_probe_shape_rejects =
-    (int64_t)solver->refactor_supernode_cached_probe_shape_rejects;
-  solver->stats.refactor_supernode_cached_probe_shape_reject_rows =
-    (int64_t)solver->refactor_supernode_cached_probe_shape_reject_rows;
-  solver->stats.refactor_supernode_cached_probe_stream_rejects =
-    (int64_t)solver->refactor_supernode_cached_probe_stream_rejects;
-  solver->stats.refactor_supernode_cached_probe_stream_reject_rows =
-    (int64_t)solver->refactor_supernode_cached_probe_stream_reject_rows;
-  solver->stats.refactor_supernode_cached_probe_work_rejects =
-    (int64_t)solver->refactor_supernode_cached_probe_work_rejects;
-  solver->stats.refactor_supernode_cached_probe_work_reject_rows =
-    (int64_t)solver->refactor_supernode_cached_probe_work_reject_rows;
-  solver->stats.refactor_supernode_cached_probe_workspace_rejects =
-    (int64_t)solver->refactor_supernode_cached_probe_workspace_rejects;
-  solver->stats.refactor_supernode_cached_probe_workspace_reject_rows =
-    (int64_t)solver->refactor_supernode_cached_probe_workspace_reject_rows;
+  solver->stats.refactor_last_supernode_update_runs = 0;
+  solver->stats.refactor_last_supernode_update_rows = 0;
+  solver->stats.refactor_last_supernode_update_entries = 0;
+  solver->stats.refactor_supernode_update_run_count = 0;
+  solver->stats.refactor_supernode_update_rows = 0;
+  solver->stats.refactor_supernode_update_entries = 0;
+  solver->stats.refactor_last_supernode_cblas_update_runs = 0;
+  solver->stats.refactor_last_supernode_cblas_update_rows = 0;
+  solver->stats.refactor_last_supernode_cblas_update_entries = 0;
+  solver->stats.refactor_supernode_cblas_update_run_count = 0;
+  solver->stats.refactor_supernode_cblas_update_rows = 0;
+  solver->stats.refactor_supernode_cblas_update_entries = 0;
+  solver->stats.refactor_last_supernode_blocked_update_runs = 0;
+  solver->stats.refactor_last_supernode_blocked_update_rows = 0;
+  solver->stats.refactor_last_supernode_blocked_update_entries = 0;
+  solver->stats.refactor_supernode_blocked_update_run_count = 0;
+  solver->stats.refactor_supernode_blocked_update_rows = 0;
+  solver->stats.refactor_supernode_blocked_update_entries = 0;
+  solver->stats.refactor_last_supernode_cached_probe_attempts = 0;
+  solver->stats.refactor_last_supernode_cached_probe_panel_hits = 0;
+  solver->stats.refactor_last_supernode_cached_probe_contiguous = 0;
+  solver->stats.refactor_last_supernode_cached_probe_allowed = 0;
+  solver->stats.refactor_last_supernode_cached_probe_allowed_rows = 0;
+  solver->stats.refactor_last_supernode_cached_probe_applied = 0;
+  solver->stats.refactor_last_supernode_cached_probe_applied_rows = 0;
+  solver->stats.refactor_last_supernode_cached_probe_shape_rejects = 0;
+  solver->stats.refactor_last_supernode_cached_probe_shape_reject_rows = 0;
+  solver->stats.refactor_last_supernode_cached_probe_stream_rejects = 0;
+  solver->stats.refactor_last_supernode_cached_probe_stream_reject_rows = 0;
+  solver->stats.refactor_last_supernode_cached_probe_work_rejects = 0;
+  solver->stats.refactor_last_supernode_cached_probe_work_reject_rows = 0;
+  solver->stats.refactor_last_supernode_cached_probe_workspace_rejects = 0;
+  solver->stats.refactor_last_supernode_cached_probe_workspace_reject_rows = 0;
+  solver->stats.refactor_supernode_cached_probe_attempt_count = 0;
+  solver->stats.refactor_supernode_cached_probe_panel_hits = 0;
+  solver->stats.refactor_supernode_cached_probe_contiguous = 0;
+  solver->stats.refactor_supernode_cached_probe_allowed = 0;
+  solver->stats.refactor_supernode_cached_probe_allowed_rows = 0;
+  solver->stats.refactor_supernode_cached_probe_applied = 0;
+  solver->stats.refactor_supernode_cached_probe_applied_rows = 0;
+  solver->stats.refactor_supernode_cached_probe_shape_rejects = 0;
+  solver->stats.refactor_supernode_cached_probe_shape_reject_rows = 0;
+  solver->stats.refactor_supernode_cached_probe_stream_rejects = 0;
+  solver->stats.refactor_supernode_cached_probe_stream_reject_rows = 0;
+  solver->stats.refactor_supernode_cached_probe_work_rejects = 0;
+  solver->stats.refactor_supernode_cached_probe_work_reject_rows = 0;
+  solver->stats.refactor_supernode_cached_probe_workspace_rejects = 0;
+  solver->stats.refactor_supernode_cached_probe_workspace_reject_rows = 0;
 
   solver->stats.refactor_last_btf_scalar_run_exec_runs =
     (int64_t)solver->refactor_last_btf_scalar_run_exec_runs;
@@ -18609,18 +18415,12 @@ static void fill_numeric_stats(kls_solver *solver) {
   solver->stats.refactor_btf_scalar_run_exec_max_rows =
     (int64_t)solver->refactor_btf_scalar_run_exec_max_rows;
 
-  solver->stats.refactor_supernode_cached_probe_disabled =
-    solver->refactor_supernode_cached_probe_disabled;
-  solver->stats.refactor_supernode_cached_probe_disable_count =
-    (int64_t)solver->refactor_supernode_cached_probe_disable_count;
-  solver->stats.refactor_supernode_update_disabled =
-    solver->refactor_supernode_update_disabled;
-  solver->stats.refactor_supernode_update_disable_count =
-    (int64_t)solver->refactor_supernode_update_disable_count;
-  solver->stats.refactor_last_ready_queue_columns =
-    (int64_t)solver->refactor_last_ready_queue_columns;
-  solver->stats.refactor_ready_queue_run_count =
-    (int64_t)solver->refactor_ready_queue_run_count;
+  solver->stats.refactor_supernode_cached_probe_disabled = 0;
+  solver->stats.refactor_supernode_cached_probe_disable_count = 0;
+  solver->stats.refactor_supernode_update_disabled = 0;
+  solver->stats.refactor_supernode_update_disable_count = 0;
+  solver->stats.refactor_last_ready_queue_columns = 0;
+  solver->stats.refactor_ready_queue_run_count = 0;
   solver->stats.row_refactor_group_count =
     (int64_t)solver->row_refactor_group_count;
   solver->stats.row_refactor_group_single_count =
