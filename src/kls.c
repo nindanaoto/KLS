@@ -676,7 +676,6 @@ struct kls_solver {
   double row_publish_probe_seconds; /* measured row-to-column publication
                                        cost for the pending solve-route
                                        experiment */
-  int row_snode_census_done;       /* KLS_TRACE_ROW_SNODE printed once */
   int eg_tt_choice;   /* egraph steady thread trial: 0 undecided, else the
                          adopted dispatch width (thread count is timing-only
                          for the checkless refactor - results identical) */
@@ -771,10 +770,8 @@ struct kls_solver {
   double lean_reaudit_pending_ref_seconds;
   int lean_reaudit_column_cycle_samples;
   double lean_reaudit_column_cycle_min;
-  double lean_reaudit_column_cycle_max;
   int lean_reaudit_row_cycle_samples;
   double lean_reaudit_row_cycle_min;
-  double lean_reaudit_row_cycle_max;
   int lean_user_values_active;
   int lean_deferred_value_prep_active;
   int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
@@ -3502,7 +3499,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_producer_target_kind = NULL;
   solver->row_refactor_dense_producer_target_pos = NULL;
   solver->row_refactor_pattern_n = 0;
-  solver->row_snode_census_done = 0;
   solver->row_refactor_group_count = 0;
   solver->row_refactor_group_single_count = 0;
   solver->row_refactor_group_batch_count = 0;
@@ -9832,10 +9828,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->lean_reaudit_pending_ref_seconds = 0.0;
   solver->lean_reaudit_column_cycle_samples = 0;
   solver->lean_reaudit_column_cycle_min = 0.0;
-  solver->lean_reaudit_column_cycle_max = 0.0;
   solver->lean_reaudit_row_cycle_samples = 0;
   solver->lean_reaudit_row_cycle_min = 0.0;
-  solver->lean_reaudit_row_cycle_max = 0.0;
   solver->padded_choice = 0;
   solver->padded_pending = 0;
   solver->padded_probe_build = 0;
@@ -14256,10 +14250,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
           solver->lean_reaudit_pending_ref_seconds = 0.0;
           solver->lean_reaudit_column_cycle_samples = 0;
           solver->lean_reaudit_column_cycle_min = 0.0;
-          solver->lean_reaudit_column_cycle_max = 0.0;
           solver->lean_reaudit_row_cycle_samples = 0;
           solver->lean_reaudit_row_cycle_min = 0.0;
-          solver->lean_reaudit_row_cycle_max = 0.0;
         }
         if (scaled_small_packed_row_model_admitted &&
             solver->lean_choice <= 0) {

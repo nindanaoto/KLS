@@ -939,9 +939,7 @@ static int kls_lean_reaudit_try_decisive(kls_solver *solver) {
       solver->lean_reaudit_column_cycle_samples < 2 ||
       solver->lean_reaudit_row_cycle_samples < 2 ||
       solver->lean_reaudit_column_cycle_min <= 0.0 ||
-      solver->lean_reaudit_column_cycle_max <= 0.0 ||
-      solver->lean_reaudit_row_cycle_min <= 0.0 ||
-      solver->lean_reaudit_row_cycle_max <= 0.0) {
+      solver->lean_reaudit_row_cycle_min <= 0.0) {
     return 0;
   }
   const int selected_row = solver->lean_choice > 0;
@@ -971,12 +969,10 @@ static int kls_lean_reaudit_try_decisive(kls_solver *solver) {
   solver->lean_reaudit_state = 5;
   if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
     fprintf(stderr,
-            "KLS decisive lean lifecycle audit: row %.3f..%.3f ms "
-            "column %.3f..%.3f ms -> %s\n",
+            "KLS decisive lean lifecycle audit: row %.3f ms "
+            "column %.3f ms -> %s\n",
             1e3 * solver->lean_reaudit_row_cycle_min,
-            1e3 * solver->lean_reaudit_row_cycle_max,
             1e3 * solver->lean_reaudit_column_cycle_min,
-            1e3 * solver->lean_reaudit_column_cycle_max,
             choice > 0 ? "LEAN" : "COLUMN");
   }
   return 1;
@@ -1006,10 +1002,6 @@ static void kls_lean_reaudit_record_solve(kls_solver *solver,
         cycle < solver->lean_reaudit_column_cycle_min) {
       solver->lean_reaudit_column_cycle_min = cycle;
     }
-    if (solver->lean_reaudit_column_cycle_samples == 0 ||
-        cycle > solver->lean_reaudit_column_cycle_max) {
-      solver->lean_reaudit_column_cycle_max = cycle;
-    }
     solver->lean_reaudit_column_cycle_samples++;
   } else if (side == 2) {
     if (solver->lean_reaudit_row_solve_samples == 0 ||
@@ -1020,10 +1012,6 @@ static void kls_lean_reaudit_record_solve(kls_solver *solver,
     if (solver->lean_reaudit_row_cycle_samples == 0 ||
         cycle < solver->lean_reaudit_row_cycle_min) {
       solver->lean_reaudit_row_cycle_min = cycle;
-    }
-    if (solver->lean_reaudit_row_cycle_samples == 0 ||
-        cycle > solver->lean_reaudit_row_cycle_max) {
-      solver->lean_reaudit_row_cycle_max = cycle;
     }
     solver->lean_reaudit_row_cycle_samples++;
   }
@@ -5949,15 +5937,11 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   }
   const int generic_supernode_candidate =
     kls_generic_hoisted_snode_worker_candidate(solver);
-  const int forced_supernode_values =
-    getenv("KLS_ENABLE_LEAN_SNODE") != NULL;
-  if (forced_supernode_values || generic_supernode_candidate) {
+  if (generic_supernode_candidate) {
     kls_lean_row_refactor_ensure_snode_runs(solver);
   }
   const int generic_supernode_values =
     kls_generic_hoisted_snode_worker_capable(solver);
-  const int supernode_values =
-    forced_supernode_values || generic_supernode_values;
   const int generic_i16_capable =
     solver->n <= (UF_long)UINT16_MAX &&
     solver->nnz <= (UF_long)UINT16_MAX &&
@@ -6109,7 +6093,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   if (l_val == NULL || u_val == NULL || l_lu == NULL || u_lu == NULL) {
     return -1;
   }
-  const unsigned char *snode_runs = supernode_values
+  const unsigned char *snode_runs = generic_supernode_values
     ? solver->lean_snode_run : NULL;
   const double *rs = scaled ? numeric->Rs : NULL;
   const UF_long *pnum = numeric->Pnum;
@@ -6175,7 +6159,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
        removes.  A resource failure or explicitly disabled pool therefore
        falls back to the ordinary scalar row walk.  The explicit diagnostic
        override retains its historical force semantics. */
-    if (generic_supernode_values && !forced_supernode_values) {
+    if (generic_supernode_values) {
       snode_runs = NULL;
     }
     if ((parallel_direct_offdiag || generic_parallel_offdiag) &&

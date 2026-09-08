@@ -3069,28 +3069,6 @@ static int kls_build_refactor_separator_private_plan(
     }
   }
 
-  if (getenv("KLS_TRACE_EGRAPH_SEPARATOR_PRIVATE") != NULL) {
-    double min_work = thread_work[0];
-    double max_work = thread_work[0];
-    for (int tid = 1; tid < thread_count; ++tid) {
-      if (thread_work[tid] < min_work) {
-        min_work = thread_work[tid];
-      }
-      if (thread_work[tid] > max_work) {
-        max_work = thread_work[tid];
-      }
-    }
-    fprintf(stderr,
-            "KLS EGraph separator-private plan: cluster=%" PRIu64
-            " private=%" PRIu64 " tail=%" PRIu64
-            " components=%" PRIu64 " unsafe=%" PRIu64
-            " work_imbalance=%.3f\n",
-            (uint64_t)cluster_columns, (uint64_t)private_column_count,
-            (uint64_t)tail_column_count, (uint64_t)private_component_count,
-            (uint64_t)unsafe_component_count,
-            min_work > 0.0 ? max_work / min_work : 0.0);
-  }
-
   *private_cols_out = private_cols;
   *thread_ptr_out = thread_ptr;
   *tail_cols_out = tail_cols;

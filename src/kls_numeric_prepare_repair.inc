@@ -7950,7 +7950,6 @@ typedef struct {
   UF_long root_count;
   UF_long leaf_count;
   UF_long max_fanout;
-  double seconds;
   int ok;
 } kls_group_successor_prep_job;
 
@@ -7958,13 +7957,11 @@ static void kls_group_successor_prep_run(kls_group_successor_prep_job *job) {
   if (job == NULL) {
     return;
   }
-  const double begin = kls_now_seconds();
   job->ok = kls_build_row_refactor_group_successors(
     job->group_count, job->row_group, job->group_dep_ptr,
     job->group_dep_rows, &job->successor_ptr, &job->successor_groups,
     &job->pred_count, &job->root_groups, &job->edge_count,
     &job->root_count, &job->leaf_count, &job->max_fanout);
-  job->seconds = kls_now_seconds() - begin;
 }
 
 static int kls_row_refactor_u_row_extends_next(const UF_long *u_ptr,
@@ -9068,7 +9065,6 @@ typedef struct {
   UF_long target_entries;
   UF_long cleanup_rows;
   UF_long cleanup_entries;
-  double seconds;
 } kls_segment_input_target_prep_job;
 
 static void kls_segment_input_target_prep_run(
@@ -9076,7 +9072,6 @@ static void kls_segment_input_target_prep_run(
   if (job == NULL) {
     return;
   }
-  const double begin = kls_now_seconds();
   kls_try_build_row_refactor_segment_input_targets(
     job->n, job->input_ptr, job->input_cols, job->input_needs_cleanup,
     job->l_ptr, job->l_cols, job->u_ptr, job->u_cols, job->row_group,
@@ -9085,7 +9080,6 @@ static void kls_segment_input_target_prep_run(
     &job->target_kind, &job->target_pos, &job->cleanup_ptr,
     &job->cleanup_cols, &job->target_rows, &job->target_entries,
     &job->cleanup_rows, &job->cleanup_entries);
-  job->seconds = kls_now_seconds() - begin;
 }
 
 typedef struct {
@@ -9114,7 +9108,6 @@ typedef struct {
   UF_long compact_dense_panel_eligible_rows;
   double compact_dense_panel_update_work;
   double compact_dense_panel_entries;
-  double seconds;
 } kls_dense_group_classification_job;
 
 static void kls_dense_group_classification_run(
@@ -9122,7 +9115,6 @@ static void kls_dense_group_classification_run(
   if (job == NULL) {
     return;
   }
-  const double begin = kls_now_seconds();
   for (UF_long group = 0; group < job->group_count; ++group) {
     const UF_long row_begin = job->group_ptr[group];
     const UF_long row_end = job->group_ptr[group + 1u];
@@ -9212,7 +9204,6 @@ static void kls_dense_group_classification_run(
         kls_row_refactor_dense_group_panel_entries(width, trailing_len);
     }
   }
-  job->seconds = kls_now_seconds() - begin;
 }
 
 static int kls_row_refactor_private_thread_order_valid(
@@ -10248,124 +10239,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   return 1;
 }
 
-/* Diagnostic census of SubtreeLU-style strict row-supernodes over the
-   row engine's U row patterns (KLS_TRACE_ROW_SNODE=1): consecutive rows
-   where row i's U pattern equals row i-1's minus its leading entry i
-   (diagonal-chain shift). Also measures dependency-segment coverage —
-   how many of each row's L-dep updates arrive as complete supernode
-   segments, i.e. the dense-consume batching a supernodal kernel gets. */
-static void kls_row_snode_census(const kls_solver *solver) {
-  const UF_long n = solver->n;
-  const UF_long *up = solver->row_refactor_u_ptr;
-  const UF_long *uc = solver->row_refactor_u_cols;
-  const UF_long *lp = solver->row_refactor_l_ptr;
-  const UF_long *lc = solver->row_refactor_l_cols;
-  if (n == 0u || up == NULL || uc == NULL || lp == NULL || lc == NULL) {
-    return;
-  }
-  UF_long *sn_of = (UF_long *)malloc((size_t)n * sizeof(*sn_of));
-  UF_long *sn_end = (UF_long *)malloc((size_t)n * sizeof(*sn_end));
-  if (sn_of == NULL || sn_end == NULL) {
-    free(sn_of);
-    free(sn_end);
-    return;
-  }
-  UF_long unsorted = 0, diag_first = 0;
-  for (UF_long i = 0; i < n; ++i) {
-    UF_long b = up[i], e = up[i + 1u];
-    if (e > b && uc[b] == i) {
-      diag_first++;
-    }
-    for (UF_long p = b + 1u; p < e; ++p) {
-      if (uc[p] <= uc[p - 1u]) {
-        unsorted++;
-        break;
-      }
-    }
-  }
-  UF_long nsn = 0, rows_in = 0, max_h = 0, u_in = 0, u_total = 0;
-  UF_long start = 0;
-  for (UF_long i = 0; i <= n; ++i) {
-    int joins = 0;
-    if (i > 0u && i < n) {
-      const UF_long pb = up[i - 1u], pe = up[i];
-      const UF_long cb = up[i], ce = up[i + 1u];
-      const UF_long plen = pe - pb, clen = ce - cb;
-      joins = plen == clen + 1u && plen > 0u && uc[pb] == i &&
-              (clen == 0u ||
-               memcmp(uc + pb + 1u, uc + cb,
-                      (size_t)clen * sizeof(*uc)) == 0);
-    }
-    if (!joins && i > 0u) {
-      const UF_long h = i - start;
-      if (h >= 2u) {
-        nsn++;
-        rows_in += h;
-        if (h > max_h) {
-          max_h = h;
-        }
-        for (UF_long r = start; r < i; ++r) {
-          u_in += up[r + 1u] - up[r];
-        }
-      }
-      for (UF_long r = start; r < i; ++r) {
-        sn_of[r] = start;
-        sn_end[r] = i - 1u;
-      }
-      start = i;
-    }
-  }
-  u_total = up[n];
-  /* dependency-segment coverage: consume calls now (one per dep row)
-     vs with supernode segments (one per maximal in-supernode run) */
-  double dep_entries = 0.0, dep_in_runs = 0.0;
-  double calls_now = 0.0, calls_sn = 0.0;
-  for (UF_long i = 0; i < n; ++i) {
-    const UF_long b = lp[i], e = lp[i + 1u];
-    UF_long p = b;
-    while (p < e) {
-      const UF_long k = lc[p];
-      UF_long q = p + 1u;
-      if (k < n && sn_end[k] > k) {
-        while (q < e && lc[q] == lc[q - 1u] + 1u && lc[q] <= sn_end[k] &&
-               sn_of[lc[q]] == sn_of[k]) {
-          q++;
-        }
-      }
-      const UF_long run = q - p;
-      double seg_entries = 0.0;
-      for (UF_long t = p; t < q; ++t) {
-        if (lc[t] < n) {
-          seg_entries += (double)(up[lc[t] + 1u] - up[lc[t]]);
-        }
-      }
-      dep_entries += seg_entries;
-      calls_now += (double)run;
-      calls_sn += 1.0;
-      if (run >= 2u) {
-        dep_in_runs += seg_entries;
-      }
-      p = q;
-    }
-  }
-  fprintf(stderr,
-          "KLS row-snode census: n=%ld usn=%ld rows_in=%ld (%.1f%%)"
-          " mean_h=%.2f max_h=%ld u_in=%.1f%% of %ld |"
-          " deps: entries=%.3g in_runs=%.1f%% calls %.3g->%.3g (%.2fx)"
-          " | unsorted=%ld diag_first=%ld\n",
-          (long)n, (long)nsn, (long)rows_in,
-          n > 0u ? 100.0 * (double)rows_in / (double)n : 0.0,
-          nsn > 0u ? (double)rows_in / (double)nsn : 0.0, (long)max_h,
-          u_total > 0u ? 100.0 * (double)u_in / (double)u_total : 0.0,
-          (long)u_total, dep_entries,
-          dep_entries > 0.0 ? 100.0 * dep_in_runs / dep_entries : 0.0,
-          calls_now, calls_sn,
-          calls_sn > 0.0 ? calls_now / calls_sn : 0.0,
-          (long)unsorted, (long)diag_first);
-  free(sn_of);
-  free(sn_end);
-}
-
 /* Strict U-row supernode map for the light-run consume: rows i-1 and i
    share a supernode when row i's U pattern equals row i-1's minus its
    leading entry i (diagonal-chain shift, the SubtreeLU/NICSLU strict
@@ -10480,12 +10353,11 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
   const UF_long *l_ptr = solver->row_refactor_l_ptr;
   const UF_long *l_cols = solver->row_refactor_l_cols;
   const UF_long *sn_end = solver->row_refactor_sn_end;
-  const int only_width2 = getenv("KLS_LEAN_SNODE2_ONLY") != NULL;
   int has_width16 = 0;
   UF_long covered_entries = 0u;
   UF_long fused_runs = 0u;
 #if KLS_HAVE_AVX512_KERNELS
-  const int width16_enabled = !only_width2 && kls_avx512_scatter_enabled();
+  const int width16_enabled = kls_avx512_scatter_enabled();
 #else
   const int width16_enabled = 0;
 #endif
@@ -10505,7 +10377,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
          live across two width-eight arithmetic groups.  Partial tiles retain
          the established 2--8 kernels, avoiding a dynamic-width hot loop. */
       const UF_long run = span == 16u ? 16u : (span < 8u ? span : 8u);
-      const int complete = run >= 2u && (!only_width2 || run == 2u);
+      const int complete = run >= 2u;
       if (complete) {
         const UF_long dep_end = dep0 + run - 1u;
         runs[p] = (unsigned char)run;
@@ -10544,7 +10416,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
     (covered_entries >= broad_coverage ||
      (dense_work && covered_entries >= dense_coverage)) ? 1 : -1;
   solver->lean_snode_worker_eligible = eligible;
-  if (eligible < 0 && getenv("KLS_ENABLE_LEAN_SNODE") == NULL) {
+  if (eligible < 0) {
     free(runs);
     runs = NULL;
   }
@@ -11263,9 +11135,6 @@ static int kls_build_lean_row_refactor_pattern_parallel(
   kls_solver *solver,
   int direct_numeric,
   int lean_only) {
-  const int trace_pattern =
-    getenv("KLS_TRACE_DIRECT_ROW_PATTERN") != NULL;
-  const double trace_begin = trace_pattern ? kls_now_seconds() : 0.0;
   if (solver == NULL || solver->options.threads < 2 || solver->n == 0u ||
       solver->symbolic == NULL || solver->numeric == NULL ||
       (direct_numeric &&
@@ -11426,20 +11295,11 @@ static int kls_build_lean_row_refactor_pattern_parallel(
     }                                                                     \
   } while (0)
 
-  const double trace_dispatch_begin =
-    trace_pattern ? kls_now_seconds() : 0.0;
-  double trace_l_count = trace_dispatch_begin;
-  double trace_l_fill = trace_dispatch_begin;
-  double trace_u_count = trace_dispatch_begin;
-  double trace_u_fill = trace_dispatch_begin;
-  double trace_input_count = trace_dispatch_begin;
-  double trace_input_fill = trace_dispatch_begin;
   UF_long l_nnz = 0u;
   UF_long u_nnz = 0u;
   UF_long input_nnz = 0u;
   if (combined_pattern) {
     KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_COUNT_ALL);
-    trace_l_count = trace_pattern ? kls_now_seconds() : 0.0;
     if (ok) {
       ok = kls_lean_pattern_prepare_offsets(
         scratch, thread_count, n, l_ptr) &&
@@ -11489,13 +11349,9 @@ static int kls_build_lean_row_refactor_pattern_parallel(
     job.all_input_pos = input_pos;
     job.all_input_capacity = input_nnz;
     job.packed_input = packed_input;
-    trace_l_fill = trace_u_count = trace_u_fill = trace_input_count =
-      trace_pattern ? kls_now_seconds() : 0.0;
     KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_FILL_ALL);
-    trace_input_fill = trace_pattern ? kls_now_seconds() : 0.0;
   } else {
   KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_COUNT_L);
-  trace_l_count = trace_pattern ? kls_now_seconds() : 0.0;
   if (ok) {
     ok = kls_lean_pattern_prepare_offsets(scratch, thread_count, n, l_ptr);
   }
@@ -11512,10 +11368,8 @@ static int kls_build_lean_row_refactor_pattern_parallel(
   job.input_pos = NULL;
   job.capacity = l_nnz;
   KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_FILL_L);
-  trace_l_fill = trace_pattern ? kls_now_seconds() : 0.0;
 
   KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_COUNT_U);
-  trace_u_count = trace_pattern ? kls_now_seconds() : 0.0;
   if (ok) {
     ok = kls_lean_pattern_prepare_offsets(scratch, thread_count, n, u_ptr);
   }
@@ -11531,10 +11385,8 @@ static int kls_build_lean_row_refactor_pattern_parallel(
   job.input_pos = NULL;
   job.capacity = u_nnz;
   KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_FILL_U);
-  trace_u_fill = trace_pattern ? kls_now_seconds() : 0.0;
 
   KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_COUNT_INPUT);
-  trace_input_count = trace_pattern ? kls_now_seconds() : 0.0;
   if (ok) {
     ok = kls_lean_pattern_prepare_offsets(scratch, thread_count, n,
                                           input_ptr);
@@ -11561,7 +11413,6 @@ static int kls_build_lean_row_refactor_pattern_parallel(
   job.capacity = input_nnz;
   job.packed_input = packed_input;
   KLS_LEAN_PATTERN_DISPATCH(KLS_LEAN_PATTERN_FILL_INPUT);
-  trace_input_fill = trace_pattern ? kls_now_seconds() : 0.0;
   }
 #undef KLS_LEAN_PATTERN_DISPATCH
 
@@ -11613,22 +11464,6 @@ static int kls_build_lean_row_refactor_pattern_parallel(
   }
   free(offdiag_input_pos16);
   free(offdiag_input_pos32);
-  if (trace_pattern) {
-    const double trace_end = kls_now_seconds();
-    fprintf(stderr,
-            "KLS direct row pattern: setup=%.3f Lcount=%.3f Lfill=%.3f"
-            " Ucount=%.3f Ufill=%.3f Icount=%.3f Ifill=%.3f"
-            " finish=%.3f total=%.3f ms\n",
-            1e3 * (trace_dispatch_begin - trace_begin),
-            1e3 * (trace_l_count - trace_dispatch_begin),
-            1e3 * (trace_l_fill - trace_l_count),
-            1e3 * (trace_u_count - trace_l_fill),
-            1e3 * (trace_u_fill - trace_u_count),
-            1e3 * (trace_input_count - trace_u_fill),
-            1e3 * (trace_input_fill - trace_input_count),
-            1e3 * (trace_end - trace_input_fill),
-            1e3 * (trace_end - trace_begin));
-  }
   return finished;
 }
 
@@ -11675,8 +11510,6 @@ static int kls_direct_numeric_lean_pattern_capable(
 
 static int kls_build_row_refactor_pattern(kls_solver *solver,
                                           int lean_only) {
-  const int trace_prep = getenv("KLS_TRACE_LEAN_PREP") != NULL;
-  const double trace_begin = trace_prep ? kls_now_seconds() : 0.0;
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->symbolic->nblocks == 0u || solver->symbolic->R == NULL) {
     return 0;
@@ -11724,23 +11557,11 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
       (solver->row_refactor_segment_input_cleanup_entries == 0u ||
        (solver->row_refactor_segment_input_cleanup_ptr != NULL &&
         solver->row_refactor_segment_input_cleanup_cols != NULL))) {
-    if (!solver->row_snode_census_done &&
-        getenv("KLS_TRACE_ROW_SNODE") != NULL) {
-      solver->row_snode_census_done = 1;
-      kls_row_snode_census(solver);
-    }
     return 1;
   }
   if (lean_only &&
       (kls_direct_numeric_lean_pattern_capable(solver)) &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 1, 1)) {
-    if (trace_prep) {
-      const double trace_end = kls_now_seconds();
-      fprintf(stderr,
-              "KLS lean prep: direct numeric pattern=%.3f total=%.3f ms\n",
-              1e3 * (trace_end - trace_begin),
-              1e3 * (trace_end - trace_begin));
-    }
     return 1;
   }
   if (!lean_only && solver->options.threads > 1 &&
@@ -11752,14 +11573,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
        row transpose needs: Pinv maps input rows and LUbx supplies stable L/U
        value addresses.  Building the generic permuted CSC map and a second
        LU pointer cache first is redundant one-time work on large factors. */
-    if (trace_prep) {
-      const double trace_end = kls_now_seconds();
-      fprintf(stderr,
-              "KLS full row prep: direct-numeric-pattern=%.3f"
-              " total=%.3f ms\n",
-              1e3 * (trace_end - trace_begin),
-              1e3 * (trace_end - trace_begin));
-    }
     return 1;
   }
   if (!lean_only && solver->row_refactor_auto_lower_bound_rejected) {
@@ -11772,30 +11585,16 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
   if (!kls_build_refactor_map(solver)) {
     return 0;
   }
-  const double trace_map = trace_prep ? kls_now_seconds() : 0.0;
   if (!kls_build_refactor_lu_pointer_cache(solver)) {
     return 0;
   }
-  const double trace_lu = trace_prep ? kls_now_seconds() : 0.0;
   if (!kls_row_refactor_pattern_is_eligible(solver)) {
     return 0;
   }
-  const double trace_eligible = trace_prep ? kls_now_seconds() : 0.0;
 
   if (!lean_only && solver->options.threads > 1 &&
       getenv("KLS_ENABLE_PARALLEL_ROW_PATTERN") != NULL &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 0, 0)) {
-    if (trace_prep) {
-      const double trace_end = kls_now_seconds();
-      fprintf(stderr,
-              "KLS full row prep: map=%.3f lu=%.3f eligible=%.3f"
-              " parallel-pattern=%.3f total=%.3f ms\n",
-              1e3 * (trace_map - trace_begin),
-              1e3 * (trace_lu - trace_map),
-              1e3 * (trace_eligible - trace_lu),
-              1e3 * (trace_end - trace_eligible),
-              1e3 * (trace_end - trace_begin));
-    }
     return 1;
   }
   if (!lean_only && solver->row_refactor_auto_lower_bound_rejected) {
@@ -11811,17 +11610,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
        (getenv("KLS_DISABLE_GENERIC_PARALLEL_LEAN_PATTERN") == NULL &&
         getenv("KLS_ENABLE_GENERIC_PARALLEL_LEAN_PATTERN") != NULL)) &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 0, 1)) {
-    if (trace_prep) {
-      const double trace_end = kls_now_seconds();
-      fprintf(stderr,
-              "KLS lean prep: map=%.3f lu=%.3f eligible=%.3f"
-              " pattern=%.3f total=%.3f ms\n",
-              1e3 * (trace_map - trace_begin),
-              1e3 * (trace_lu - trace_map),
-              1e3 * (trace_eligible - trace_lu),
-              1e3 * (trace_end - trace_eligible),
-              1e3 * (trace_end - trace_begin));
-    }
     return 1;
   }
 
