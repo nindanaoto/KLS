@@ -2070,12 +2070,6 @@ static KLS_ALWAYS_INLINE UF_long kls_row_refactor_input_pos_at(
     : solver->row_refactor_input_pos[pos];
 }
 
-static KLS_ALWAYS_INLINE UF_long kls_row_refactor_input_target_pos_at(
-  const kls_solver *solver,
-  UF_long pos) {
-  return solver->row_refactor_segment_input_target_pos[pos];
-}
-
 /* Compact input coordinates need not have the same width.  Circuit factors
    commonly keep row-local columns below 2^16 after their value positions
    have crossed that boundary, so retain two dense streams instead of
@@ -9239,7 +9233,7 @@ static int kls_numeric_rowwise_u_pivots_pass_threshold_from_block(
   return 1;
 }
 
-static int kls_checked_refactor_accepts_rowwise_u_from_block(
+static int kls_checked_refactor_accepts_rowwise_u(
   kls_solver *solver,
   UF_long start_block) {
   if (solver == NULL) {
@@ -9280,10 +9274,6 @@ static int kls_checked_refactor_accepts_rowwise_u_from_block(
                                 rejected_row_max_abs);
   solver->common.status = TRILINOS_KLU_OK;
   return 0;
-}
-
-static int kls_checked_refactor_accepts_rowwise_u(kls_solver *solver) {
-  return kls_checked_refactor_accepts_rowwise_u_from_block(solver, 0u);
 }
 
 static int kls_row_refactor_u_row_abs_max_from_direct(
@@ -9802,7 +9792,7 @@ static int kls_parallel_row_refactor_load_batch_input_row_targets(
   for (UF_long p = input_begin; p < input_end; ++p) {
     const unsigned char target =
       solver->row_refactor_segment_input_target_kind[p];
-    const UF_long pos = kls_row_refactor_input_target_pos_at(solver, p);
+    const UF_long pos = solver->row_refactor_segment_input_target_pos[p];
     switch ((kls_row_segment_input_target_kind)target) {
       case KLS_ROW_SEGMENT_INPUT_TARGET_L:
         if (pos < l_begin || pos >= l_end || pos - l_begin >= dep_count) {
@@ -9848,7 +9838,7 @@ static int kls_parallel_row_refactor_load_batch_input_row_targets(
     }
     const unsigned char target =
       solver->row_refactor_segment_input_target_kind[p];
-    const UF_long pos = kls_row_refactor_input_target_pos_at(solver, p);
+    const UF_long pos = solver->row_refactor_segment_input_target_pos[p];
     switch ((kls_row_segment_input_target_kind)target) {
       case KLS_ROW_SEGMENT_INPUT_TARGET_L:
         dep_values[pos - l_begin] = value;
@@ -10096,7 +10086,7 @@ static int kls_row_refactor_apply_compact_dense_input_target(
   const unsigned char target =
     solver->row_refactor_segment_input_target_kind[input_pos];
   const UF_long pos =
-    kls_row_refactor_input_target_pos_at(solver, input_pos);
+    solver->row_refactor_segment_input_target_pos[input_pos];
   switch ((kls_row_segment_input_target_kind)target) {
     case KLS_ROW_SEGMENT_INPUT_TARGET_EXTERNAL:
       if (pos >= solver->n) {
@@ -11772,7 +11762,7 @@ static int kls_row_refactor_apply_segment_input_target(
   const unsigned char target =
     solver->row_refactor_segment_input_target_kind[input_pos];
   const UF_long pos =
-    kls_row_refactor_input_target_pos_at(solver, input_pos);
+    solver->row_refactor_segment_input_target_pos[input_pos];
   switch ((kls_row_segment_input_target_kind)target) {
     case KLS_ROW_SEGMENT_INPUT_TARGET_EXTERNAL:
       if (pos >= solver->n) {

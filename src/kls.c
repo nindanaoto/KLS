@@ -8578,8 +8578,6 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
 
   const UF_long k1 = r[block];
   const UF_long k2 = r[block + 1u];
-  const UF_long nk = k2 - k1;
-
   const int single_block_map = symbolic->nblocks == 1u && block == 0u &&
     k1 == 0u && k2 == shared->n;
   const int fast_direct_map32 = fused_direct_values &&
@@ -8686,7 +8684,6 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
     }
     return;
   }
-  (void)nk;
   for (int64_t kq = 0; kq < ncols; ++kq) {
     const UF_long k = (UF_long)cols[kq];
     const UF_long global_col = k + k1;
