@@ -385,6 +385,17 @@ static KLS_ALWAYS_INLINE void kls_pts_scatter_top_runs(
   }
 }
 
+/* Private accumulators must not share a cache line, even when ntop is not
+   a cache-line multiple. Keep ntop as the logical reduction length. */
+static size_t kls_pts_accumulator_stride(int64_t ntop) {
+  const size_t entries_per_line = 64u / sizeof(double);
+  if (ntop < 0 || (uintmax_t)ntop > SIZE_MAX - (entries_per_line - 1u)) {
+    return 0u;
+  }
+  const size_t count = ntop > 0 ? (size_t)ntop : 1u;
+  return (count + entries_per_line - 1u) & ~(entries_per_line - 1u);
+}
+
 static void kls_pts_try_build(kls_solver *solver) {
   kls_pts_free(solver);
   {
@@ -897,8 +908,13 @@ static void kls_pts_try_build(kls_solver *solver) {
       (size_t)(ntop > 0 ? ntop : 1) * sizeof(int32_t));
     pts->top_map = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
     pts->lsplit = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
-    pts->top_acc = (double *)calloc(
-      (size_t)nthreads * (size_t)(ntop > 0 ? ntop : 1), sizeof(double));
+    const size_t acc_stride = kls_pts_accumulator_stride(ntop);
+    const size_t acc_count = acc_stride <= SIZE_MAX / (size_t)nthreads
+      ? acc_stride * (size_t)nthreads : 0u;
+    pts->top_acc = kls_aligned_double_values(acc_count);
+    if (pts->top_acc != NULL) {
+      memset(pts->top_acc, 0, acc_count * sizeof(double));
+    }
     ok = pts->tcols != NULL && pts->top_cols != NULL &&
          pts->top_map != NULL && pts->lsplit != NULL &&
          pts->top_acc != NULL;
@@ -1085,7 +1101,8 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
   kls_pts *pts = a->pts;
   const int64_t b0 = pts->tcols_off[a->tid];
   const int64_t b1 = pts->tcols_off[a->tid + 1];
-  double *acc = pts->top_acc + (int64_t)a->tid * pts->ntop;
+  const size_t acc_stride = kls_pts_accumulator_stride(pts->ntop);
+  double *acc = pts->top_acc + (size_t)a->tid * acc_stride;
   double *Xb = a->Xb;
   /* forward L over the own subtrees; fringe rows accumulate privately */
   for (int64_t q = b0; q < b1; ++q) {
@@ -1113,7 +1130,7 @@ static void kls_pts_worker_body(kls_pts_arg *a) {
     const int64_t ntop = pts->ntop;
     const int32_t *top_cols = pts->top_cols;
     for (int t = 0; t < pts->nthreads; ++t) {
-      double *at = pts->top_acc + (int64_t)t * ntop;
+      double *at = pts->top_acc + (size_t)t * acc_stride;
       for (int64_t j = 0; j < ntop; ++j) {
         Xb[top_cols[j]] -= at[j];
         at[j] = 0.0;

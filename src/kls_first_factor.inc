@@ -15795,7 +15795,7 @@ typedef struct kls_pts_s {
   int64_t ntop;
   int32_t *top_map;                 /* nk: compact top slot or -1 */
   int32_t *lsplit;                  /* nk: in-chunk L stream prefix */
-  double *top_acc;                  /* nthreads * ntop, kept zeroed */
+  double *top_acc;                  /* cache-line-padded thread slices, zeroed */
   double *xwork;                    /* nthreads * nk, lazy, kept zeroed */
   double *refactor_top_x;           /* ntop * nk two-stage workspaces */
   int solve_ok;                     /* tight top gate for the solve */

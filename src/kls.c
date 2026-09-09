@@ -1642,21 +1642,13 @@ struct kls_solver {
   int sparse_partial_diagonal_amd_btf_cycle; /* symbolic-guarded direct AMD */
   int dense_reciprocal_hub_metis_cycle; /* guarded retained NodeNDP order */
   int sparse_symmetric_fragmented_metis_cycle; /* guarded sparse NodeNDP */
-  int sparse_symmetric_fragmented_metis_numeric_eligible; /* -1/0/1 */
   int sparse_spiked_predicted_candidate; /* cached public input topology */
-  int sparse_spiked_predicted_numeric_eligible; /* -1/0/1 */
   int sparse_full_diagonal_metis_row_candidate; /* cached topology proposal */
-  int sparse_full_diagonal_metis_row_numeric_eligible; /* -1/0/1 */
   int giant_symmetric_scalar_fringe_metis_row_candidate; /* topology proposal */
-  int giant_symmetric_scalar_fringe_metis_row_numeric_eligible; /* -1/0/1 */
-  int hybrid_huge_single_egraph_numeric_eligible; /* -1/0/1 */
   int symmetric_scalar_fringe_amd_lean_cycle; /* guarded transpose AMD/BTF */
-  int symmetric_scalar_fringe_numeric_eligible; /* -1 reject, 0 unknown, 1 */
   const trilinos_klu_l_symbolic *symmetric_scalar_fringe_symbolic_identity;
   int pivoted_high_work_single_block_symbolic_cycle;
-  int pivoted_high_work_single_block_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *pivoted_high_work_single_block_identity;
-  int low_work_many_fringe_btf_pts_numeric_eligible; /* -1/0/1 */
   int low_work_hubbed_scalar_fringe_input_class;
   int nearly_missing_diagonal_early_match_selected;
   int compact_missing_diagonal_match_candidate;
@@ -1667,7 +1659,6 @@ struct kls_solver {
   int symmetric_partial_diagonal_match_symbolic_rejected;
   int symmetric_partial_diagonal_low_work_class;
   int high_work_tiny_scalar_fringe_amd_symbolic_cycle;
-  int high_work_tiny_scalar_fringe_amd_numeric_eligible; /* -1/0/1 */
   const trilinos_klu_l_symbolic *
     high_work_tiny_scalar_fringe_amd_symbolic_identity;
   /* Cold staged state for the asymmetric bounded-degree direct-METIS
@@ -1677,19 +1668,16 @@ struct kls_solver {
   int asymmetric_bounded_degree_direct_metis_symbolic_eligible;
   const trilinos_klu_l_symbolic *
     asymmetric_bounded_degree_direct_metis_symbolic_identity;
-  int asymmetric_bounded_degree_direct_metis_numeric_eligible; /* -1/0/1 */
   /* Staged state for the near-symmetric mega-hub direct-AMD capability. */
   int near_symmetric_mega_hub_amd_candidate;
   int near_symmetric_mega_hub_amd_symbolic_eligible;
   const trilinos_klu_l_symbolic *
     near_symmetric_mega_hub_amd_symbolic_identity;
-  int near_symmetric_mega_hub_amd_numeric_eligible; /* -1/0/1 */
   /* Staged state for the giant dominant-hub METIS dense-tail capability. */
   int giant_dominant_hub_metis_dense_tail_candidate;
   int giant_dominant_hub_metis_dense_tail_symbolic_eligible;
   const trilinos_klu_l_symbolic *
     giant_dominant_hub_metis_dense_tail_symbolic_identity;
-  int giant_dominant_hub_metis_dense_tail_numeric_eligible; /* -1/0/1 */
   /* Cold solve-accuracy policy state.  Keep it at the tail so adding
      observability does not move the established factor/refactor hot fields. */
   int promoted_tolerance_l2_recovery_required;
@@ -9323,18 +9311,6 @@ static void free_numeric(kls_solver *solver) {
   solver->low_rcond_solve_contract_state = 0;
   solver->verified_rhs_valid = 0;
   solver->compact_amf_two_block_exact_recip_fresh = 0;
-  solver->symmetric_scalar_fringe_numeric_eligible = 0;
-  solver->pivoted_high_work_single_block_numeric_eligible = 0;
-  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
-  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
-  solver->sparse_spiked_predicted_numeric_eligible = 0;
-  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
-  solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
-  solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
-  solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
-  solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
-  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
-  solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* deferral flags are solver-level intent (the consult re-validates);
      mid-factor numeric replacements must not wipe them */
   if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
@@ -9458,15 +9434,6 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->generic_btf_unscaled_recovery_scale = 0;
   solver->generic_btf_unscaled_rcond_floor = 0.0;
   solver->verified_rhs_valid = 0;
-  solver->symmetric_scalar_fringe_numeric_eligible = 0;
-  solver->pivoted_high_work_single_block_numeric_eligible = 0;
-  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
-  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
-  solver->sparse_spiked_predicted_numeric_eligible = 0;
-  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
-  solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
-  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
-  solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
   free(solver->solve_refine_values);
@@ -9757,21 +9724,13 @@ static void clear_matrix(kls_solver *solver) {
   solver->sparse_partial_diagonal_amd_btf_cycle = 0;
   solver->dense_reciprocal_hub_metis_cycle = 0;
   solver->sparse_symmetric_fragmented_metis_cycle = 0;
-  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
   solver->sparse_spiked_predicted_candidate = 0;
-  solver->sparse_spiked_predicted_numeric_eligible = 0;
   solver->sparse_full_diagonal_metis_row_candidate = 0;
-  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
   solver->giant_symmetric_scalar_fringe_metis_row_candidate = 0;
-  solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
-  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_amd_lean_cycle = 0;
-  solver->symmetric_scalar_fringe_numeric_eligible = 0;
   solver->symmetric_scalar_fringe_symbolic_identity = NULL;
   solver->pivoted_high_work_single_block_symbolic_cycle = 0;
-  solver->pivoted_high_work_single_block_numeric_eligible = 0;
   solver->pivoted_high_work_single_block_identity = NULL;
-  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
   solver->low_work_hubbed_scalar_fringe_input_class = 0;
   solver->nearly_missing_diagonal_early_match_selected = 0;
   solver->compact_missing_diagonal_match_candidate = 0;
@@ -9782,20 +9741,16 @@ static void clear_matrix(kls_solver *solver) {
   solver->symmetric_partial_diagonal_match_symbolic_rejected = 0;
   solver->symmetric_partial_diagonal_low_work_class = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_cycle = 0;
-  solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   solver->high_work_tiny_scalar_fringe_amd_symbolic_identity = NULL;
   solver->asymmetric_bounded_degree_direct_metis_class = 0;
   solver->asymmetric_bounded_degree_direct_metis_symbolic_eligible = 0;
   solver->asymmetric_bounded_degree_direct_metis_symbolic_identity = NULL;
-  solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
   solver->near_symmetric_mega_hub_amd_candidate = 0;
   solver->near_symmetric_mega_hub_amd_symbolic_eligible = 0;
   solver->near_symmetric_mega_hub_amd_symbolic_identity = NULL;
-  solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
   solver->giant_dominant_hub_metis_dense_tail_candidate = 0;
   solver->giant_dominant_hub_metis_dense_tail_symbolic_eligible = 0;
   solver->giant_dominant_hub_metis_dense_tail_symbolic_identity = NULL;
-  solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;
@@ -10422,18 +10377,6 @@ int kls_factor(kls_solver *solver, const double *values) {
        A guarded recovery factor sets this state again only after it succeeds. */
     solver->promoted_tolerance_l2_recovery_required = 0;
   }
-  solver->symmetric_scalar_fringe_numeric_eligible = 0;
-  solver->pivoted_high_work_single_block_numeric_eligible = 0;
-  solver->low_work_many_fringe_btf_pts_numeric_eligible = 0;
-  solver->sparse_symmetric_fragmented_metis_numeric_eligible = 0;
-  solver->sparse_spiked_predicted_numeric_eligible = 0;
-  solver->sparse_full_diagonal_metis_row_numeric_eligible = 0;
-  solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = 0;
-  solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = 0;
-  solver->near_symmetric_mega_hub_amd_numeric_eligible = 0;
-  solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = 0;
-  solver->hybrid_huge_single_egraph_numeric_eligible = 0;
-  solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = 0;
   /* A repeated factor call may update Udiag through an in-place fast path
      while retaining the solve-index streams.  Drop the optional reciprocal
      mirror up front so no later solve can consume pivots from the preceding

@@ -17144,24 +17144,6 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 }
 
 static void fill_numeric_stats(kls_solver *solver) {
-  {
-    /* A numeric-stat refresh is an observability operation.  It must not
-       silently classify the retained factor and arm a benchmark-family
-       kernel for the next refactor/solve.  Use -1 (known ineligible), not
-       zero (unknown), because deprecated policy fields must remain inert. */
-    solver->symmetric_scalar_fringe_numeric_eligible = -1;
-    solver->pivoted_high_work_single_block_numeric_eligible = -1;
-    solver->low_work_many_fringe_btf_pts_numeric_eligible = -1;
-    solver->sparse_symmetric_fragmented_metis_numeric_eligible = -1;
-    solver->sparse_spiked_predicted_numeric_eligible = -1;
-    solver->sparse_full_diagonal_metis_row_numeric_eligible = -1;
-    solver->giant_symmetric_scalar_fringe_metis_row_numeric_eligible = -1;
-    solver->asymmetric_bounded_degree_direct_metis_numeric_eligible = -1;
-    solver->near_symmetric_mega_hub_amd_numeric_eligible = -1;
-    solver->giant_dominant_hub_metis_dense_tail_numeric_eligible = -1;
-    solver->hybrid_huge_single_egraph_numeric_eligible = -1;
-    solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = -1;
-  }
   fill_build_stats(&solver->stats);
   solver->stats.refactor_lean_choice = solver->lean_choice;
   solver->stats.egraph_worker_spin_iters = solver->egraph_pool != NULL
