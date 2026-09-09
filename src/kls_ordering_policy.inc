@@ -4029,41 +4029,6 @@ static int kls_mtmetis_nd(UF_long n, const idx_t *xadj, const idx_t *adjncy,
         opts[MTMETIS_OPTION_NRUNS] = (double)atoi(nr);
       }
     }
-    if (getenv("KLS_MT_ND_TRACE") != NULL) {
-      UF_long bad = 0, j;
-      for (j = 0; j < n; ++j) {
-        if (xadj[j] > xadj[j + 1]) bad++;
-      }
-      for (j = 0; j < (UF_long)nz; ++j) {
-        if (adjncy[j] < 0 || adjncy[j] >= (idx_t)n) bad++;
-      }
-      {
-        UF_long iso = 0;
-        for (j = 0; j < n; ++j) {
-          if (xadj[j] == xadj[j + 1]) iso++;
-        }
-        fprintf(stderr,
-                "KLS mtnd: n=%ld nz=%zu bad=%ld iso=%ld threads=%d\n",
-                (long)n, nz, (long)bad, (long)iso, threads);
-        {
-          const char *dump = getenv("KLS_MT_ND_DUMP");
-          if (dump != NULL) {
-            FILE *f = fopen(dump, "w");
-            if (f != NULL) {
-              UF_long v, q;
-              fprintf(f, "%ld %zu\n", (long)n, nz / 2u);
-              for (v = 0; v < n; ++v) {
-                for (q = xadj[v]; q < xadj[v + 1]; ++q) {
-                  fprintf(f, "%ld ", (long)adjncy[q] + 1);
-                }
-                fputc('\n', f);
-              }
-              fclose(f);
-            }
-          }
-        }
-      }
-    }
     {
       mtmetis_vtx_type mn = (mtmetis_vtx_type)n;
       pthread_mutex_lock(&kls_mtmetis_lock);
