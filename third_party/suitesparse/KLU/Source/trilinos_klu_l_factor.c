@@ -225,12 +225,6 @@ static void factor2
 	    if (IS_ZERO (s))
 	    {
 		/* singular singleton */
-		if (getenv ("KLS_KLU_ROW_PROF") != NULL)
-		{
-		    fprintf (stderr, "KLS factor2: singular singleton"
-			     " k1=%ld oldcol=%ld\n", (long) k1,
-			     (long) oldcol) ;
-		}
 		Common->status = TRILINOS_KLU_SINGULAR ;
 		Common->numerical_rank = k1 ;
 		Common->singular_col = oldcol ;
