@@ -1764,7 +1764,6 @@ typedef struct kls_egraph_refactor_shared {
   const struct kls_dense_help_ctx *_Atomic dense_help_ctx;
   _Atomic int dense_help_fail;
   _Atomic int dense_help_owner_lock;
-  _Atomic int dense_help_large_waiters;
   _Atomic int dense_help_idle_inflight;
   long dense_help_epoch_seq;   /* owner-lock protected session counter */
   double trial_deadline_seconds;   /* 0 = disarmed; wall deadline */

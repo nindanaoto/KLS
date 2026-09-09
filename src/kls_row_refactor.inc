@@ -12346,79 +12346,6 @@ static int kls_row_refactor_assemble_compact_dense_row(
   int wait_for_dependencies,
   UF_long row);
 
-static int kls_dense_help_enabled(void) {
-  static int cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("KLS_DENSE_HELP");
-    cached = (env == NULL || *env == '\0') ? 1 : (atoi(env) != 0);
-  }
-  return cached;
-}
-
-static int kls_dense_help_wait_large_enabled(void) {
-  static int cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("KLS_DENSE_HELP_WAIT_LARGE");
-    cached = env != NULL && *env != '\0' && atoi(env) != 0;
-  }
-  return cached;
-}
-
-static UF_long kls_dense_help_wait_large_width(void) {
-  static UF_long cached;
-  static int initialized;
-  if (!initialized) {
-    cached = 160u;
-    const char *env = getenv("KLS_DENSE_HELP_WAIT_LARGE_WIDTH");
-    if (env != NULL && *env != '\0') {
-      char *end = NULL;
-      const unsigned long long parsed = strtoull(env, &end, 10);
-      if (end != env && *end == '\0' && parsed >= 8u &&
-          parsed <= (unsigned long long)UF_long_max) {
-        cached = (UF_long)parsed;
-      }
-    }
-    initialized = 1;
-  }
-  return cached;
-}
-
-static UF_long kls_dense_help_wait_large_min_entries(void) {
-  static UF_long cached;
-  static int initialized;
-  if (!initialized) {
-    const char *env = getenv("KLS_DENSE_HELP_WAIT_LARGE_MIN_ENTRIES");
-    if (env != NULL && *env != '\0') {
-      char *end = NULL;
-      const unsigned long long parsed = strtoull(env, &end, 10);
-      if (end != env && *end == '\0' &&
-          parsed <= (unsigned long long)UF_long_max) {
-        cached = (UF_long)parsed;
-      }
-    }
-    initialized = 1;
-  }
-  return cached;
-}
-
-static double kls_dense_help_wait_large_seconds(void) {
-  static double cached;
-  static int initialized;
-  if (!initialized) {
-    cached = 0.004;
-    const char *env = getenv("KLS_DENSE_HELP_WAIT_LARGE_SECONDS");
-    if (env != NULL && *env != '\0') {
-      char *end = NULL;
-      const double parsed = strtod(env, &end);
-      if (end != env && *end == '\0' && isfinite(parsed) &&
-          parsed >= 0.0 && parsed <= 1.0) {
-        cached = parsed;
-      }
-    }
-    initialized = 1;
-  }
-  return cached;
-}
 
 /* Claim the next work index of the current help session. The cursor
    packs (epoch << 32 | index); a claim succeeds only when the caller's
@@ -12508,7 +12435,7 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
      and a hung drain). */
   struct kls_dense_help_ctx panel_step_ctx;
   struct kls_dense_help_ctx panel_tail_ctx;
-  if (shared->thread_count > 1 && width >= 16 && kls_dense_help_enabled()) {
+  if (shared->thread_count > 1 && width >= 16) {
     int expected = 0;
     if (atomic_compare_exchange_strong_explicit(
           &shared->dense_help_owner_lock, &expected, 1,
@@ -14509,46 +14436,12 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
 
   {
     int coop = 0;
-    if (shared->thread_count > 1 && width >= 8 && kls_dense_help_enabled()) {
-      const int wait_large_enabled =
-        kls_dense_help_wait_large_enabled();
-      const UF_long large_width = kls_dense_help_wait_large_width();
-      const UF_long large_min_entries = kls_dense_help_wait_large_min_entries();
-      const int large_waiter = wait_large_enabled &&
-        (width >= large_width ||
-         (large_min_entries > 0u && panel_entries >= large_min_entries));
+    if (shared->thread_count > 1 && width >= 8) {
       int expected = 0;
-      if ((!wait_large_enabled || large_waiter ||
-           atomic_load_explicit(&shared->dense_help_large_waiters,
-                                memory_order_acquire) == 0) &&
-          atomic_compare_exchange_strong_explicit(
+      if (atomic_compare_exchange_strong_explicit(
             &shared->dense_help_owner_lock, &expected, 1,
             memory_order_acq_rel, memory_order_relaxed)) {
         coop = 1;
-      }
-      if (!coop && large_waiter) {
-        atomic_fetch_add_explicit(&shared->dense_help_large_waiters, 1,
-                                  memory_order_acq_rel);
-        const double wait_deadline = kls_now_seconds() +
-          (kls_dense_help_wait_large_seconds());
-        unsigned spin = 0u;
-        while (!coop) {
-          expected = 0;
-          if (atomic_compare_exchange_weak_explicit(
-                &shared->dense_help_owner_lock, &expected, 1,
-                memory_order_acq_rel, memory_order_relaxed)) {
-            coop = 1;
-            break;
-          }
-          (void)kls_dense_help_try(shared, (long)row_begin, 0);
-          if ((++spin & 255u) == 0u &&
-              kls_now_seconds() >= wait_deadline) {
-            break;
-          }
-          kls_cpu_relax();
-        }
-        atomic_fetch_sub_explicit(&shared->dense_help_large_waiters, 1,
-                                  memory_order_acq_rel);
       }
     }
     if (coop) {
@@ -17085,8 +16978,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_native_row_panel_state = native_row_panel_state;
   shared->row_refactor_native_row_panel_active = 0;
 
-  atomic_store_explicit(&shared->dense_help_large_waiters, 0,
-                        memory_order_relaxed);
   solver->row_refactor_native_row_panel_enabled =
     kls_native_row_panel_enabled_for_run(
       solver, native_row_panel_state, check_pivots);
