@@ -301,56 +301,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
   }
   solver->i16solve_p_identity_prefix = p_identity_prefix;
   solver->i16solve_q_identity_prefix = q_identity_prefix;
-  if (getenv("KLS_TRACE_I16_CACHE") != NULL) {
-    UF_long p_identity = 0u;
-    UF_long q_identity = 0u;
-    UF_long singleton_blocks = 0u;
-    UF_long singleton_prefix = 0u;
-    UF_long singleton_suffix = 0u;
-    UF_long nontrivial_blocks = 0u;
-    UF_long current_singleton_run = 0u;
-    UF_long max_singleton_run = 0u;
-    for (UF_long k = 0u; k < n; ++k) {
-      p_identity += (UF_long)(pnum[k] == k);
-      q_identity += (UF_long)(q[k] == k);
-    }
-    for (UF_long block = 0u; block < nblocks; ++block) {
-      const int singleton = symbolic->R[block + 1u] ==
-        symbolic->R[block] + 1u;
-      singleton_blocks += (UF_long)singleton;
-      nontrivial_blocks += (UF_long)!singleton;
-      if (singleton) {
-        current_singleton_run++;
-        if (current_singleton_run > max_singleton_run) {
-          max_singleton_run = current_singleton_run;
-        }
-      } else {
-        current_singleton_run = 0u;
-      }
-    }
-    while (singleton_prefix < nblocks &&
-           symbolic->R[singleton_prefix + 1u] ==
-             symbolic->R[singleton_prefix] + 1u) {
-      singleton_prefix++;
-    }
-    while (singleton_suffix < nblocks &&
-           symbolic->R[nblocks - singleton_suffix] ==
-             symbolic->R[nblocks - singleton_suffix - 1u] + 1u) {
-      singleton_suffix++;
-    }
-    fprintf(stderr,
-            "KLS i16 cache: n=%ld L=%ld U=%ld off=%ld offcols=%ld"
-            " blocks=%ld singleton=%ld runmax=%ld cached=%d"
-            " prefix=%ld suffix=%ld nontrivial=%ld"
-            " Pid=%ld/%ld Qid=%ld/%ld source=%s\n",
-            (long)n, (long)lcount, (long)ucount, (long)offcount,
-            (long)offcol_count, (long)nblocks, (long)singleton_blocks,
-            (long)max_singleton_run, singleton_run != NULL,
-            (long)singleton_prefix, (long)singleton_suffix,
-            (long)nontrivial_blocks, (long)p_identity,
-            (long)p_identity_prefix, (long)q_identity,
-            (long)q_identity_prefix, direct ? "direct" : "i32");
-  }
   lrows = NULL;
   urows = NULL;
   loff = NULL;
@@ -939,13 +889,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
           max_run >= 32768u) {
         solver->i32solve_singleton_run = singleton_run;
         singleton_run = NULL;
-      }
-      if (getenv("KLS_TRACE_I32_SINGLETON_RUN") != NULL) {
-        fprintf(stderr,
-                "KLS i32 singleton runs: blocks=%ld singleton=%ld"
-                " max=%u -> %s\n",
-                (long)symbolic->nblocks, (long)singleton_count, max_run,
-                solver->i32solve_singleton_run != NULL ? "adopt" : "decline");
       }
       free(singleton_run);
     }
@@ -1827,11 +1770,6 @@ static int kls_serial_scaled_pivots_preferred(const kls_solver *solver,
   }
   free(row_max);
   free(pinv);
-  if (getenv("KLS_TRACE_SERIAL_SCALE_PIVOTS") != NULL) {
-    fprintf(stderr,
-            "KLS serial scale pivots: improve=%ld harm=%ld prefer=%d\n",
-            (long)improved, (long)harmed, improved > harmed);
-  }
   return improved > harmed;
 }
 
