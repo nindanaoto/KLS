@@ -11827,10 +11827,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_choice = 1;
     solver->lean_reaudit_state = 5;
   }
-  if (getenv(
-        "KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR") == NULL &&
-      getenv("KLS_DISABLE_SETTLED_LEAN_DIRECT_REFACTOR") == NULL &&
-      solver->lean_choice > 0 &&
+  if (solver->lean_choice > 0 &&
       (!generic_lean_reaudit || solver->lean_reaudit_state == 0 ||
        solver->lean_reaudit_state == 5) &&
       solver->solve_contract_probe >= 1 &&
@@ -11901,18 +11898,15 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const int direct_low_work_public_btf =
     solver->direct_klu_choice == 2 ||
     (solver->direct_klu_choice == 0 &&
-     getenv("KLS_DISABLE_LOW_WORK_BTF_PUBLIC_DIRECT_REFACTOR") == NULL &&
      kls_low_work_btf_public_klu_capable(solver) &&
      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FIRST &&
      kls_direct_klu_public_frame_capable(solver));
   const int settled_direct_klu =
     solver->direct_klu_choice == 2 ||
     (solver->direct_klu_choice > 0 &&
-     getenv("KLS_DISABLE_SETTLED_DIRECT_KLU_REFACTOR") == NULL &&
      kls_direct_klu_public_frame_capable(solver));
   if ((settled_direct_klu ||
-       (getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_DIRECT_REFACTOR") == NULL &&
-        kls_low_work_single_block_direct_public_capable(solver)) ||
+       kls_low_work_single_block_direct_public_capable(solver) ||
        direct_low_work_public_btf) &&
       solver->solve_contract_probe >= 1 &&
       solver->unchanged_refactor_state < 0 &&
@@ -11998,9 +11992,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
     return KLS_OK;
   }
-  if (getenv("KLS_DISABLE_LOW_WORK_BTF_DIRECT_REFACTOR") == NULL &&
-      getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_FAST_REFACTOR") == NULL &&
-      direct_low_work_btf_map32 &&
+  if (direct_low_work_btf_map32 &&
       solver->solve_contract_probe == 1 &&
       solver->refactor_input_user_pos32 != NULL &&
       solver->lean_btf_off_user_pos != NULL &&
@@ -12071,7 +12063,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     compact_match_maps_ready &&
     solver->row_scale == NULL &&
     solver->col_scale == NULL &&
-    getenv("KLS_DISABLE_COMPACT_MATCH_DIRECT_VALUES") == NULL &&
     /* The builder proves a bijection from every retained row and BTF
        off-diagonal position back to the caller's CSC value stream.  Consume
        that complete coordinate contract directly instead of gathering the
@@ -12081,8 +12072,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     !compact_match_direct_values && solver->lean_choice > 0 &&
     (!generic_lean_reaudit || solver->lean_reaudit_state == 0 ||
      solver->lean_reaudit_state == 5) &&
-    kls_deferred_lean_value_prep_capable(solver) &&
-    getenv("KLS_DISABLE_DEFERRED_LEAN_VALUE_PREP") == NULL;
+    kls_deferred_lean_value_prep_capable(solver);
   const int pts_direct_values =
     kls_pts_refactor_ready(solver) &&
     solver->lean_choice < 0 && solver->pts != NULL &&
@@ -12100,7 +12090,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
      match.  AUTO uses only the installed permutation/map/scaling capabilities
      and the caller-declared repeated lifecycle. */
   const int symmetric_partial_diagonal_direct_values =
-    getenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES") == NULL &&
     (kls_repeated_update_workload(&solver->options) &&
       solver->row_perm != NULL) &&
     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED &&
@@ -12115,8 +12104,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     !solver->prestatic_deferred && !solver->rowmatch_deferred &&
     !solver->factor_preps_deferred;
   const int low_work_btf_direct_values =
-    getenv("KLS_DISABLE_LOW_WORK_BTF_DIRECT_VALUES") == NULL &&
-    getenv("KLS_DISABLE_COMPACT_DENSE_SPIKE_DIRECT_VALUES") == NULL &&
     kls_low_work_btf_map32_policy_enabled(solver) &&
     solver->input_to_csc != NULL && solver->row_scale == NULL &&
     solver->col_scale == NULL && solver->numeric->Rs == NULL &&

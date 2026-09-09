@@ -19546,8 +19546,9 @@ one-block and general mapped scatters now use the inverse public-input map,
 apply the prepared row/column scale for each internal position, and refresh the
 owned internal-frame mirror.  Sixteen independently solved generations on the
 fallback topology fail immediately without this fix and pass with it.  The
-stage can be isolated with
-`KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES=1` while the master
+stage could then be isolated with
+`KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES=1` (that diagnostic
+override was later removed in the direct-route control cleanup), while the master
 `KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY=1` disables the complete
 policy.
 
