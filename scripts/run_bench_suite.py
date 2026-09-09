@@ -176,10 +176,8 @@ def collect_trace_failure_diagnostic(
         cmd.extend(["--kls-first-factor", args.failure_trace_kls_first_factor])
 
     env = os.environ.copy()
-    env["KLS_TRACE_KLS_FIRST_FACTOR"] = "1"
     env["KLS_TRACE_ROW_PIPELINE"] = "1"
     env_overrides = {
-        "KLS_TRACE_KLS_FIRST_FACTOR": env["KLS_TRACE_KLS_FIRST_FACTOR"],
         "KLS_TRACE_ROW_PIPELINE": env["KLS_TRACE_ROW_PIPELINE"],
     }
     try:

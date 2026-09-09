@@ -1778,36 +1778,6 @@ static int kls_row_first_pivot_failure_col_state(
   return -1;
 }
 
-static const char *kls_row_first_factor_row_failure_name(
-  kls_row_first_factor_row_failure reason) {
-  switch (reason) {
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_NONE:
-      return "none";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP:
-      return "setup";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_INPUT:
-      return "input";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_VALUE:
-      return "value";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_DEPENDENCY:
-      return "dependency";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_UPDATE:
-      return "update";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_SCOPE:
-      return "pivot-scope";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_REJECT:
-      return "pivot-reject";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_OWNER:
-      return "pivot-owner";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_EXCHANGE:
-      return "pivot-exchange";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_VERIFY:
-      return "pivot-verify";
-    case KLS_ROW_FIRST_FACTOR_ROW_FAIL_APPEND:
-      return "append";
-  }
-  return "unknown";
-}
 
 static void kls_row_first_factor_row_failure_set(
   kls_row_first_factor_row_failure_info *failure,
@@ -2556,9 +2526,7 @@ typedef struct kls_row_first_private_worker {
   UF_long begin;
   UF_long end;
   UF_long completed_rows;
-  UF_long failed_pos;
   UF_long failed_row;
-  UF_long failed_global_row;
   int tid;
   int ok;
 } kls_row_first_private_worker;
@@ -2681,9 +2649,7 @@ static void *kls_row_first_private_worker_main(void *arg) {
   const UF_long nk = worker->ctx->nk;
   worker->ok = 0;
   worker->completed_rows = 0;
-  worker->failed_pos = KLS_KLU_EMPTY;
   worker->failed_row = KLS_KLU_EMPTY;
-  worker->failed_global_row = KLS_KLU_EMPTY;
   kls_row_first_factor_row_failure_clear(&worker->failure, KLS_KLU_EMPTY,
                                          worker->tid);
   kls_row_first_supernode_panel_cache panel_cache;
@@ -2711,8 +2677,6 @@ static void *kls_row_first_private_worker_main(void *arg) {
     const UF_long u_count_before = worker->u_entries.count;
     if (global_row < worker->ctx->k1 ||
         global_row >= worker->ctx->k1 + nk) {
-      worker->failed_pos = pos;
-      worker->failed_global_row = global_row;
       (void)kls_row_first_entries_truncate(&worker->l_entries,
                                            l_count_before);
       (void)kls_row_first_entries_truncate(&worker->u_entries,
@@ -2725,9 +2689,7 @@ static void *kls_row_first_private_worker_main(void *arg) {
     const UF_long row = global_row - worker->ctx->k1;
     const UF_long pivots_before = worker->stats.dynamic_column_pivots;
     if (worker->row_owner[row] != worker->tid) {
-      worker->failed_pos = pos;
       worker->failed_row = row;
-      worker->failed_global_row = global_row;
       (void)kls_row_first_entries_truncate(&worker->l_entries,
                                            l_count_before);
       (void)kls_row_first_entries_truncate(&worker->u_entries,
@@ -2745,9 +2707,7 @@ static void *kls_row_first_private_worker_main(void *arg) {
           &worker->u_entries, worker->udiag_values, row,
           worker->row_owner, worker->tid, NULL, &worker->stats,
           &worker->failure)) {
-      worker->failed_pos = pos;
       worker->failed_row = row;
-      worker->failed_global_row = global_row;
       (void)kls_row_first_entries_truncate(&worker->l_entries,
                                            l_count_before);
       (void)kls_row_first_entries_truncate(&worker->u_entries,
@@ -3150,53 +3110,6 @@ static int kls_row_first_run_parallel_private_phase(
     }
     if (thread_commit_rows > 0u) {
       commit_thread_rows++;
-    }
-  }
-  if (!ok && kls_first_factor_trace_env_enabled()) {
-    for (int tid = 0; tid < thread_count; ++tid) {
-      const UF_long rows =
-        plan->thread_ptr[tid + 1] - plan->thread_ptr[tid];
-      if (rows == 0u || workers[tid].ok) {
-        continue;
-      }
-      const kls_row_first_factor_row_failure_info *failure =
-        &workers[tid].failure;
-      fprintf(stderr,
-              "KLS first-factor separator-private failure:"
-              " tid=%d thread_begin=%" PRIu64
-              " thread_end=%" PRIu64
-              " failed_pos=%" PRIu64
-              " failed_row=%" PRIu64
-              " failed_global_row=%" PRIu64
-              " reason=%s related_col=%" PRIu64
-              " owner=%d actual_owner=%d"
-              " dynamic_pivots=%" PRIu64
-              " separator_pivots=%" PRIu64
-              " separator_extent_pivots=%" PRIu64
-              " separator_fallbacks=%" PRIu64
-              " separator_rejects=%" PRIu64
-              " completed_rows=%" PRIu64
-              " l_entries=%" PRIu64
-              " u_entries=%" PRIu64 "\n",
-              tid, (uint64_t)plan->thread_ptr[tid],
-              (uint64_t)plan->thread_ptr[tid + 1],
-              (uint64_t)workers[tid].failed_pos,
-              (uint64_t)workers[tid].failed_row,
-              (uint64_t)workers[tid].failed_global_row,
-              kls_row_first_factor_row_failure_name(failure->reason),
-              (uint64_t)failure->related_col, failure->owner,
-              failure->actual_owner,
-              (uint64_t)workers[tid].stats.dynamic_column_pivots,
-              (uint64_t)workers[tid].stats.separator_dynamic_column_pivots,
-              (uint64_t)
-                workers[tid].stats.separator_extent_dynamic_column_pivots,
-              (uint64_t)
-                workers[tid].stats.separator_dynamic_column_fallbacks,
-              (uint64_t)workers[tid].stats.separator_dynamic_column_rejects,
-              (uint64_t)workers[tid].completed_rows,
-              (uint64_t)workers[tid].l_entries.count,
-              (uint64_t)workers[tid].u_entries.count);
-      break;
     }
   }
 
@@ -7208,17 +7121,6 @@ static int kls_row_first_run_restartable_pipeline_suffix(
         !kls_row_first_factor_one_row(
           ctx, workspace, l_entries, u_entries, udiag_values, pivot_row,
           NULL, -1, row_done, stats, &pivot_failure)) {
-      if (kls_first_factor_trace_env_enabled()) {
-        fprintf(stderr,
-                "KLS first-factor row-pipeline pivot-tail failure:"
-                " pos=%" PRIu64 " row=%" PRIu64
-                " reason=%s related_col=%" PRIu64
-                " actual_owner=%d active_rank=%d\n",
-                (uint64_t)completed_pos, (uint64_t)pivot_row,
-                kls_row_first_factor_row_failure_name(pivot_failure.reason),
-                (uint64_t)pivot_failure.related_col,
-                pivot_failure.actual_owner, active_rank != NULL ? 1 : 0);
-      }
       return 0;
     }
     if (stats != NULL && stats->dynamic_column_pivots != pivots_before) {
@@ -8952,7 +8854,6 @@ static int kls_row_first_parallel_factor_block(
     int have_separator_plan = kls_build_first_separator_queue_plan(
       solver, k1, k2, shared->block_pipeline_thread_count,
       &separator_plan);
-    const int initial_separator_plan = have_separator_plan;
     const int initial_separator_partitioned =
       have_separator_plan && separator_plan.partitioned;
     int initial_separator_ownership_valid =
@@ -8970,26 +8871,6 @@ static int kls_row_first_parallel_factor_block(
         kls_build_first_separator_queue_plan_legacy_from_counts(
           solver, k1, k2, shared->block_pipeline_thread_count,
           worker->row_counts, &separator_plan);
-    }
-    if (kls_first_factor_trace_env_enabled()) {
-      fprintf(stderr,
-              "KLS first-factor separator-queue decision:"
-              " block=%" PRIu64 " rows=%" PRIu64
-              " initial_plan=%d initial_partitioned=%d"
-              " initial_ownership_valid=%d final_plan=%d"
-              " final_partitioned=%d final_private_rows=%" PRIu64
-              " final_pipeline_rows=%" PRIu64
-              " final_nonempty_threads=%" PRIu64 "\n",
-              (uint64_t)block, (uint64_t)nk,
-              initial_separator_plan, initial_separator_partitioned,
-              initial_separator_ownership_valid, have_separator_plan,
-              have_separator_plan ? separator_plan.partitioned : 0,
-              (uint64_t)(have_separator_plan
-                           ? separator_plan.private_rows_count : 0u),
-              (uint64_t)(have_separator_plan
-                           ? separator_plan.pipeline_rows_count : 0u),
-              (uint64_t)(have_separator_plan
-                           ? separator_plan.nonempty_threads : 0u));
     }
     if (have_separator_plan) {
       row_order = (UF_long *)malloc((size_t)nk * sizeof(*row_order));
@@ -9377,23 +9258,6 @@ static int kls_row_first_parallel_factor_block(
           row_pipeline_separator_private_threads = 0;
           row_pipeline_separator_partitioned = 0;
           row_pipeline_separator_split_components = 0;
-        }
-        if (kls_first_factor_trace_env_enabled()) {
-          fprintf(stderr,
-                  "KLS first-factor separator-private decision:"
-                  " block=%" PRIu64 " rows=%" PRIu64
-                  " use_order=%d owner_valid=%d run_ok=%d"
-                  " executed=%d complete=%d partial_active=%d"
-                  " private_rows=%" PRIu64
-                  " pipeline_begin=%" PRIu64
-                  " pipeline_end=%" PRIu64 "\n",
-                  (uint64_t)block, (uint64_t)nk,
-                  use_separator_row_order, separator_private_owner_valid,
-                  separator_private_run_ok, separator_private_executed,
-                  separator_private_complete,
-                  separator_private_partial_active,
-                  (uint64_t)row_pipeline_separator_private_rows,
-                  (uint64_t)pipeline_begin, (uint64_t)pipeline_end);
         }
       }
     }
@@ -10432,8 +10296,6 @@ static int kls_try_first_factor_row_uplooking_blocks_parallel(
     if (!dominant_has_separator) {
       solver->kls_first_dominant_btf_pipeline_without_separator_count++;
     }
-    kls_trace_first_factor_dominant_btf(
-      solver, dominant_pipeline_block, block_rows, dominant_has_separator);
     shared.force_block_pipeline = 1;
     shared.block_pipeline_thread_count = solver->options.threads;
     shared.block_pipeline_target_block = dominant_pipeline_block;

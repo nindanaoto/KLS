@@ -317,9 +317,6 @@ static int kls_first_factor_env_disabled(void) {
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
-KLS_DEFINE_ENV_FLAG(kls_first_factor_trace_env_enabled,
-                    "KLS_TRACE_KLS_FIRST_FACTOR")
-
 KLS_DEFINE_ENV_FLAG(kls_row_pipeline_trace_env_enabled,
                     "KLS_TRACE_ROW_PIPELINE")
 
@@ -337,25 +334,6 @@ KLS_DEFINE_ENV_FLAG(kls_row_pipeline_supernode_producer_batch_env_enabled,
 
 KLS_DEFINE_ENV_FLAG(kls_row_first_strict_separator_pivot_scope_env_enabled,
                     "KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE")
-
-static void kls_trace_first_factor_dominant_btf(
-  const kls_solver *solver,
-  UF_long block,
-  UF_long rows,
-  int has_separator) {
-  if (!kls_first_factor_trace_env_enabled()) {
-    return;
-  }
-  const UF_long nblocks =
-    solver != NULL && solver->symbolic != NULL ? solver->symbolic->nblocks : 0;
-  const UF_long n = solver != NULL ? solver->n : 0;
-  fprintf(stderr,
-          "KLS first-factor dominant-BTF pipeline: block=%" PRIu64
-          " rows=%" PRIu64 " n=%" PRIu64 " nblocks=%" PRIu64
-          " separator=%d\n",
-          (uint64_t)block, (uint64_t)rows, (uint64_t)n,
-          (uint64_t)nblocks, has_separator);
-}
 
 static int kls_auto_first_factor_has_separator_parallel_row_up(
   const kls_solver *solver) {
