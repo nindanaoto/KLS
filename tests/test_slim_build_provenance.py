@@ -1,4 +1,5 @@
 """Synthetic Makefiles build evidence: no real compilation or benchmark needed."""
+import hashlib
 import os
 import pathlib
 import sys
@@ -63,6 +64,33 @@ class BuildProvenanceTests(unittest.TestCase):
             (directory / "link.txt").write_text(command)
             (build / artifact).write_bytes(b"artifact")
         return build / "kls_bench"
+
+    def test_reviewed_dependency_patch_is_explicit_and_fail_closed(self):
+        binary = self.build("patched")
+        patch_text = "reviewed binary diff"
+        expected = hashlib.sha256(patch_text.encode()).hexdigest()
+
+        def changed_output(command, cwd=None):
+            if command[:3] == ["git", "diff", "--name-only"]:
+                return "third_party/klu.c"
+            if "--binary" in command:
+                return patch_text
+            return self.command_output(command, cwd)
+
+        with patch.object(provenance, "output", side_effect=changed_output):
+            with self.assertRaisesRegex(ValueError, "dirty dependency"):
+                provenance.collect_build_provenance(binary)
+            with self.assertRaisesRegex(ValueError, "reviewed SHA-256"):
+                provenance.collect_build_provenance(
+                    binary, dependency_patch_sha256="0" * 64)
+            proof = provenance.collect_build_provenance(
+                binary, dependency_patch_sha256=expected)
+            self.assertEqual(proof["dependency_patch_sha256"], expected)
+            self.assertIn("dependency_tree", proof)
+            with self.assertRaisesRegex(ValueError, "dirty dependency"):
+                provenance.require_matching_builds({"before": binary, "after": binary})
+        with self.assertRaisesRegex(ValueError, "patch is missing"):
+            provenance.collect_build_provenance(binary, dependency_patch_sha256=expected)
 
     def test_matching_builds_and_different_roots(self):
         proof = provenance.require_matching_builds(

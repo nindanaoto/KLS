@@ -29,7 +29,14 @@ def normalize(text: str, source: pathlib.Path, build: pathlib.Path) -> str:
     return text.replace(str(build), "<BUILD>").replace(str(source), "<SOURCE>")
 
 
-def collect_build_provenance(binary: pathlib.Path) -> dict:
+def collect_build_provenance(
+        binary: pathlib.Path, *, dependency_patch_sha256: str | None = None) -> dict:
+    """Collect evidence, optionally recording an explicitly reviewed dependency patch.
+
+    The opt-in hash covers output()'s stripped UTF-8 git binary diff. It does
+    not make changed dependencies equivalent: the returned proof records it,
+    and require_matching_builds continues to reject dirty dependencies.
+    """
     binary = binary.resolve(strict=True)
     build = binary.parent
     cache = (build / "CMakeCache.txt").read_text()
@@ -138,9 +145,19 @@ def collect_build_provenance(binary: pathlib.Path) -> dict:
     changed = output(["git", "diff", "--name-only", "HEAD", "--", "third_party"], source)
     # Historical worktrees may symlink their gitlinks to the identical clean
     # dependency checkout. Check those actual revisions above, not link text.
+    dependency_patch = {}
     if set(changed.splitlines()) - submodules.keys():
-        raise ValueError("dirty dependency sources; cannot certify paired builds")
-    return {"schema": 1, "generator": settings["CMAKE_GENERATOR"],
+        if dependency_patch_sha256 is None:
+            raise ValueError("dirty dependency sources; cannot certify paired builds")
+        patch = output(["git", "diff", "--no-ext-diff", "--no-textconv",
+                        "--binary", "HEAD", "--", "third_party"], source)
+        actual = hashlib.sha256(patch.encode("utf-8")).hexdigest()
+        if not patch or actual != dependency_patch_sha256:
+            raise ValueError("dependency patch does not match reviewed SHA-256")
+        dependency_patch = {"dependency_patch_sha256": actual}
+    elif dependency_patch_sha256 is not None:
+        raise ValueError("expected dependency patch is missing")
+    return {**dependency_patch, "schema": 1, "generator": settings["CMAKE_GENERATOR"],
             "build_type": settings.get("CMAKE_BUILD_TYPE", ""),
             "compilers": compilers, "targets": compiled,
             "dependency_tree": tree, "submodules": submodules, "external_objects": external,
