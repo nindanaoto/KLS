@@ -5825,7 +5825,6 @@ static void kls_free_refactor_l_sorted_cache(kls_solver *solver) {
   solver->refactor_l_sorted_values = NULL;
   solver->refactor_l_sorted_values_storage = NULL;
   solver->refactor_l_sorted_enabled = 0;
-  solver->refactor_l_sorted_entries = 0u;
 }
 
 static int kls_ensure_refactor_l_sorted_cache(kls_solver *solver) {
@@ -6031,7 +6030,6 @@ static int kls_ensure_refactor_l_sorted_cache(kls_solver *solver) {
   solver->refactor_l_sorted_pos32_storage = pos_storage;
   solver->refactor_l_sorted_values = sorted_values;
   solver->refactor_l_sorted_values_storage = value_storage;
-  solver->refactor_l_sorted_entries = l_entries;
   solver->refactor_l_sorted_enabled = 1;
   return 1;
 }

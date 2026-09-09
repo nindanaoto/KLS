@@ -1782,7 +1782,6 @@ static int kls_serial_factor(kls_solver *solver,
   const double start = kls_now_seconds();
   free_numeric(solver);
   solver->factor_preps_deferred = 0;
-  solver->numeric_from_pipe = 0;
   int auto_scale_policy = solver->options.scale;
   int auto_scale_policy_known =
     solver->options.scale != KLS_SCALE_AUTO;

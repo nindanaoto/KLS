@@ -2171,7 +2171,6 @@ static void kls_build_padded_panels(kls_solver *solver) {
     if (nruns == 0u) {
       goto fail;
     }
-    solver->padded_run_count = nruns;
     solver->padded_run_start =
       (UF_long *)malloc((size_t)nruns * sizeof(UF_long));
     solver->padded_run_len =
@@ -2287,7 +2286,6 @@ fail_arrays:
   solver->padded_slots = NULL;
   solver->padded_panel_ptr = NULL;
   solver->padded_panel_values = NULL;
-  solver->padded_run_count = 0;
 fail:
   free(run_of);
   free(slot_ptr);

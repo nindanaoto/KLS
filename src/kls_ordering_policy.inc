@@ -7968,7 +7968,6 @@ static int build_compact_numeric_row_match(
   }
   *row_perm_out = row_perm;
   *matched_out = matched;
-#undef KLS_FREE_GREEDY_MATCH
   return KLS_OK;
 }
 
@@ -9868,10 +9867,6 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
        and the flops floor alone decides profitability. */
     return 0;
   }
-  /* full configuration (dense + batched consume): one-shot draws
-     measured e-16..e-9 on mac, and with fp64 refactors (the
-     numeric_from_pipe gate) the end-to-end contract holds; the
-     deterministic-scalar pin predates those fixes */
   kls_klu_pipe_det = 0;
   return kls_pipe_scale_threads(solver->options.threads, est);
 }

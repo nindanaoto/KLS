@@ -534,7 +534,6 @@ struct kls_solver {
      relaxed runs' union patterns, per-column slot maps, and panel value
      storage refreshed by the mapped kernel at column finalize and read by
      the accepted padded consumer; numeric-lifetime state. */
-  UF_long padded_run_count;
   UF_long *padded_run_of;      /* per column: run id + 1, or 0 */
   UF_long *padded_run_start;   /* run -> first global column */
   UF_long *padded_run_len;
@@ -843,7 +842,6 @@ struct kls_solver {
   int block_order_deferred;
   UF_long *block_order_perm;  /* pattern-validated proposal carried from
                                  the selected analyze candidate */
-  int numeric_from_pipe;
   int factor_preps_deferred;
   int block_trial_active;
   int numeric_needs_refinement;
@@ -919,7 +917,6 @@ struct kls_solver {
 
   UF_long refactor_map_indices32_count;
   UF_long refactor_l_indices32_count;
-  UF_long refactor_l_sorted_entries;
   UF_long refactor_u_indices32_count;
   UF_long *row_refactor_l_ptr;
   uint32_t *row_refactor_l_ptr32;
@@ -3014,7 +3011,6 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_sorted_enabled = 0;
 
   solver->refactor_l_indices32_count = 0;
-  solver->refactor_l_sorted_entries = 0;
   solver->refactor_u_indices32_count = 0;
 
   solver->refactor_l_index32_enabled = 0;
@@ -9189,7 +9185,6 @@ static void free_snode_panels(kls_solver *solver) {
   solver->padded_slots = NULL;
   solver->padded_panel_ptr = NULL;
   solver->padded_panel_values = NULL;
-  solver->padded_run_count = 0;
   solver->snode_prepared = 0;
   solver->snode_numeric_pre_sorted = 0;
 }
@@ -10959,7 +10954,6 @@ int kls_factor(kls_solver *solver, const double *values) {
               solver->numeric = race->numeric;
               race->numeric = NULL;
               solver->common = race->common;
-              solver->numeric_from_pipe = 0;
               kls_numeric_replaced_invalidate(solver);
               kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLU_FIRST);
             }
@@ -11221,7 +11215,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       if (lean_prewarm_active) {
         pthread_join(lean_prewarm_thread, NULL);
       }
-      solver->numeric_from_pipe = kls_klu_pipe_threads > 0;
       kls_klu_pipe_threads = 0;
       kls_klu_pipe_det = 0;
       kls_klu_dense_tail = 0;
@@ -12290,7 +12283,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (solver->block_order_deferred) {
     solver->block_order_deferred = 0;
-  solver->numeric_from_pipe = 0;
     double bo_elapsed = 0.0;
     maybe_select_block_structured_ordering(solver, &bo_elapsed,
                                            numeric_values);
@@ -12304,7 +12296,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver->prestatic_deferred) {
     solver->prestatic_deferred = 0;
   solver->block_order_deferred = 0;
-  solver->numeric_from_pipe = 0;
     double prestatic_elapsed = 0.0;
     maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
                                       numeric_values, 1);
@@ -13866,7 +13857,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->padded_slots = NULL;
         solver->padded_panel_ptr = NULL;
         solver->padded_panel_values = NULL;
-        solver->padded_run_count = 0;
       }
     }
   }
