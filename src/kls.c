@@ -11133,10 +11133,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           kls_cpu_relax();
           kls_egraph_pipeline_pause(&spin);
         }
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr, "KLS race symbolic join wait %.3fs status=%d\n",
-                  kls_now_seconds() - sym_wait0, race->analyze_status);
-        }
         elapsed += kls_now_seconds() - sym_wait0;
         if (race->analyze_status == KLS_OK && race->symbolic != NULL) {
           race = kls_metis_race_take(solver, &elapsed); /* aborts factor */
@@ -11168,9 +11164,6 @@ int kls_factor(kls_solver *solver, const double *values) {
               kls_klu_dense_tail = 4096;
               kls_klu_pipe_threads =
                 solver->options.threads > 16 ? 16 : solver->options.threads;
-              if (getenv("KLS_TRACE_DENSE_TAIL") != NULL) {
-                fprintf(stderr, "KLS dense tail: routed\n");
-              }
             } else if (kls_predicted_pattern_first_factor(
                          solver, numeric_values, &elapsed)) {
               kls_set_last_factor_path(solver,
@@ -11179,10 +11172,6 @@ int kls_factor(kls_solver *solver, const double *values) {
                 /* same post-probe corruption net as the first-attempt
                    site */
                 solver->row_solve_self_check = 1;
-              }
-              if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-                fprintf(stderr,
-                        "KLS race symbolic join: predicted built\n");
               }
             }
             if (solver->numeric == NULL && race->numeric != NULL &&
