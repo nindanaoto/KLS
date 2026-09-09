@@ -3936,14 +3936,6 @@ static int kls_measured_full_factor_beats_repair(
     4.0 * checked_seconds * repair_fraction;
   const int rebuild =
     projected_repair_seconds >= 0.90 * solver->numeric_full_factor_seconds;
-  if (getenv("KLS_TRACE_FAST_FACTOR_BUDGET") != NULL) {
-    fprintf(stderr,
-            "KLS fast-factor budget: checked=%.6f repair_work=%.3e"
-            " total_work=%.3e projected=%.6f rebuild=%.6f choose=%s\n",
-            checked_seconds, repair_work, total_work,
-            projected_repair_seconds, solver->numeric_full_factor_seconds,
-            rebuild ? "rebuild" : "repair");
-  }
   return rebuild;
 }
 

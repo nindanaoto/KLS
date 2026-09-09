@@ -17237,15 +17237,9 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       use_row_ready_queue && row_private_groups != NULL &&
       row_private_thread_ptr != NULL && row_private_group_mask != NULL) {
     solver->row_solve_separator_schedule_attempted = 1;
-    const int separator_plan_ready =
-      kls_update_row_solve_separator_plan_from_row_schedule(
+    (void)kls_update_row_solve_separator_plan_from_row_schedule(
         solver, row_private_groups, row_private_thread_ptr,
         row_private_group_mask, thread_count);
-    if (!separator_plan_ready &&
-        getenv("KLS_TRACE_ROW_SOLVE_SEPARATOR") != NULL) {
-      fprintf(stderr,
-              "KLS row-solve separator: no safe post-pivot partition\n");
-    }
   }
   {
     const char *steal_env =

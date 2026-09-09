@@ -4861,14 +4861,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   const int prefer_row_pipeline_block_repair =
     allow_partial_repair && allow_row_pipeline &&
     solver->options.threads > 1 && nk > 1u;
-  if (getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
-    fprintf(stderr,
-            "KLS rejected-block repair dispatch: mode=%d threads=%d nk=%ld"
-            " row_pipeline=%d masked_tail=%d restart_end=%ld\n",
-            (int)repair_mode, solver->options.threads, (long)nk,
-            prefer_row_pipeline_block_repair, can_try_masked_tail,
-            (long)preferred_restart_end);
-  }
   if (prefer_row_pipeline_block_repair) {
     kls_row_first_block_rebuild_tried = 1;
     if (kls_try_row_first_rebuild_rejected_block(
@@ -9530,15 +9522,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     row_task_floor += 96.0 * (double)group_count;
     const int reject =
       row_task_floor > 1.05 * solver->refactor_dependency_work;
-    if (getenv("KLS_TRACE_ROW_TASK_FLOOR") != NULL) {
-      fprintf(stderr,
-              "KLS row task floor: work=%.6g groups=%ld floor=%.6g "
-              "column=%.6g -> %s\n",
-              row_task_floor - 96.0 * (double)group_count,
-              (long)group_count, row_task_floor,
-              solver->refactor_dependency_work,
-              reject ? "reject" : "continue");
-    }
     if (reject) {
       free(row_group);
       free(group_ptr);
@@ -13340,21 +13323,6 @@ static int kls_install_row_refactor_component_calibration(
   solver->row_refactor_separator_component_scale = component_scale;
   solver->row_refactor_separator_component_scale_count = component_count;
   solver->row_refactor_separator_component_calibrated = 1;
-  if (getenv("KLS_TRACE_ROW_COMPONENT_CALIBRATION") != NULL) {
-    fprintf(stderr,
-            "KLS row component calibration: measured %ld/%ld, "
-            "global %.9g seconds/work\n",
-            (long)measured, (long)component_count, global_scale);
-    for (UF_long component = 0; component < component_count; ++component) {
-      if (component_seconds[component] > 0.0) {
-        fprintf(stderr,
-                "KLS row component calibration id %ld seconds %.6f "
-                "scale %.9g\n",
-                (long)component, component_seconds[component],
-                component_scale[component]);
-      }
-    }
-  }
   return 1;
 }
 
@@ -14150,14 +14118,6 @@ static int kls_update_row_solve_separator_plan_from_row_schedule(
   solver->row_solve_separator_plan.partitioned = 1;
   solver->row_solve_separator_thread_count = thread_count;
 
-  if (getenv("KLS_TRACE_ROW_SOLVE_SEPARATOR") != NULL) {
-    fprintf(stderr,
-            "KLS row-solve separator: private_rows=%" PRIu64
-            " pipeline_rows=%" PRIu64 " threads=%" PRIu64
-            " removed_groups=%" PRIu64 "\n",
-            (uint64_t)private_row_count, (uint64_t)pipeline_row_count,
-            (uint64_t)nonempty_threads, (uint64_t)remove_tail);
-  }
   free(group_thread);
   free(remove_queue);
   free(private_keep);
