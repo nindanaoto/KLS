@@ -6395,13 +6395,6 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
        Materialize the scheduling metadata if a later factor asks for the
        parallel row solver. */
     kls_build_row_solve_transpose_plans(solver);
-  } else if (solver->row_solve_ut_plan.ptr == NULL &&
-      solver->row_solve_lt_plan.ptr == NULL &&
-      getenv("KLS_DEFER_ROW_TRANSPOSE_PLANS") != NULL) {
-    /* Normal solves should not pay to materialize both transposed row
-       graphs.  Preserve the transpose API by constructing them on its first
-       actual use; this work is then charged to the operation that needs it. */
-    kls_build_row_solve_transpose_plans(solver);
   }
 
   const kls_row_solve_transpose_plan *ut = &solver->row_solve_ut_plan;

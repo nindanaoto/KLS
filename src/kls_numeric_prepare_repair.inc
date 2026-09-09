@@ -7568,13 +7568,9 @@ static void kls_record_row_solve_partition(kls_solver *solver) {
 
   solver->row_solve_partition_ready = 1;
   solver->row_solve_partition_slices = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
-  const int defer_transpose =
-    getenv("KLS_DEFER_ROW_TRANSPOSE_PLANS") != NULL;
   kls_build_one_row_solve_partition(solver, 0);
   kls_build_one_row_solve_partition(solver, 1);
-  if (!defer_transpose) {
-    kls_build_row_solve_transpose_plans(solver);
-  }
+  kls_build_row_solve_transpose_plans(solver);
 }
 
 static int kls_build_row_solve_pattern(kls_solver *solver) {
@@ -9239,15 +9235,13 @@ static int kls_finish_row_refactor_pattern_from_arrays(
 
   UF_long *successor_ptr =
     (UF_long *)calloc((size_t)n + 1u, sizeof(*successor_ptr));
-  const int defer_row_successors =
-    getenv("KLS_DEFER_ROW_SUCCESSORS") != NULL;
-  UF_long *successor_rows = l_nnz > 0u && !defer_row_successors
+  UF_long *successor_rows = l_nnz > 0u
     ? (UF_long *)malloc((size_t)l_nnz * sizeof(*successor_rows)) : NULL;
   unsigned char *input_needs_cleanup = NULL;
   UF_long input_cleanup_rows = 0;
   UF_long input_cleanup_entries = 0;
   if (successor_ptr == NULL ||
-      (l_nnz > 0u && !defer_row_successors && successor_rows == NULL)) {
+      (l_nnz > 0u && successor_rows == NULL)) {
     free(l_ptr);
     free(u_ptr);
     free(input_ptr);
@@ -9264,30 +9258,28 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     free(successor_rows);
     return 0;
   }
-  if (!defer_row_successors) {
-    for (UF_long row = 0; row < n; ++row) {
-      for (UF_long p = l_ptr[row]; p < l_ptr[row + 1u]; ++p) {
-        const UF_long dep = l_cols[p];
-        if (dep >= row || dep >= n) {
-          free(l_ptr);
-          free(u_ptr);
-          free(input_ptr);
-          free(next);
-          free(l_cols);
-          free(l_values);
-          free(l_row_values);
-          free(u_cols);
-          free(u_values);
-          free(u_row_values);
-          free(input_cols);
-          free(input_pos);
-          free(successor_ptr);
-          free(successor_rows);
-          free(input_needs_cleanup);
-          return 0;
-        }
-        successor_ptr[dep + 1u]++;
+  for (UF_long row = 0; row < n; ++row) {
+    for (UF_long p = l_ptr[row]; p < l_ptr[row + 1u]; ++p) {
+      const UF_long dep = l_cols[p];
+      if (dep >= row || dep >= n) {
+        free(l_ptr);
+        free(u_ptr);
+        free(input_ptr);
+        free(next);
+        free(l_cols);
+        free(l_values);
+        free(l_row_values);
+        free(u_cols);
+        free(u_values);
+        free(u_row_values);
+        free(input_cols);
+        free(input_pos);
+        free(successor_ptr);
+        free(successor_rows);
+        free(input_needs_cleanup);
+        return 0;
       }
+      successor_ptr[dep + 1u]++;
     }
   }
 
@@ -9300,43 +9292,24 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     .input_ptr = input_ptr,
     .input_cols = input_cols
   };
-  const int defer_input_cleanup =
-    getenv("KLS_DEFER_ROW_INPUT_CLEANUP") != NULL;
-  if (defer_input_cleanup) {
-    input_cleanup_job.needs_cleanup =
-      (unsigned char *)calloc((size_t)(n > 0u ? n : 1u),
-                              sizeof(*input_cleanup_job.needs_cleanup));
-    input_cleanup_job.ok = input_cleanup_job.needs_cleanup != NULL;
-  }
   kls_row_level_prep_job row_level_job = {
     .n = n,
     .l_ptr = l_ptr,
     .l_cols = l_cols
   };
-  const int disable_scalar_row_batches =
-    getenv("KLS_DISABLE_SCALAR_ROW_BATCH_GROUPS") != NULL;
-  if (disable_scalar_row_batches) {
-    row_level_job.ok = 1;
+  for (UF_long row = 0; row < n; ++row) {
+    successor_ptr[row + 1u] += successor_ptr[row];
   }
-  if (!defer_row_successors) {
-    for (UF_long row = 0; row < n; ++row) {
-      successor_ptr[row + 1u] += successor_ptr[row];
-    }
-    memcpy(next, successor_ptr, (size_t)n * sizeof(*next));
-    for (UF_long row = 0; row < n; ++row) {
-      for (UF_long p = l_ptr[row]; p < l_ptr[row + 1u]; ++p) {
-        const UF_long dep = l_cols[p];
-        successor_rows[next[dep]++] = row;
-      }
+  memcpy(next, successor_ptr, (size_t)n * sizeof(*next));
+  for (UF_long row = 0; row < n; ++row) {
+    for (UF_long p = l_ptr[row]; p < l_ptr[row + 1u]; ++p) {
+      const UF_long dep = l_cols[p];
+      successor_rows[next[dep]++] = row;
     }
   }
   free(next);
-  if (!defer_input_cleanup) {
-    kls_row_input_cleanup_prep_run(&input_cleanup_job);
-  }
-  if (!disable_scalar_row_batches) {
-    kls_row_level_prep_run(&row_level_job);
-  }
+  kls_row_input_cleanup_prep_run(&input_cleanup_job);
+  kls_row_level_prep_run(&row_level_job);
   input_needs_cleanup = input_cleanup_job.needs_cleanup;
   input_cleanup_rows = input_cleanup_job.cleanup_rows;
   input_cleanup_entries = input_cleanup_job.cleanup_entries;
@@ -9422,7 +9395,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     /* Coarsen only long scalar runs that live on the same dependency level.
        That trims ready-queue/task overhead without hiding useful small-width
        parallelism or delaying low-level rows behind later dependencies. */
-    if (!segment && !disable_scalar_row_batches) {
+    if (!segment) {
       int stop_recorded = 0;
       group_scalar_candidate_count++;
       while (end < n && end - row < KLS_ROW_REFACTOR_BATCH_MAX_ROWS) {
@@ -9878,9 +9851,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
       kls_build_group_work(solver, group_count);
     }
   }
-  if (getenv("KLS_SKIP_SUCCESSOR_SORT") == NULL) {
-    kls_sort_row_refactor_successors_by_work(solver);
-  }
+  kls_sort_row_refactor_successors_by_work(solver);
   kls_segment_input_target_prep_job segment_input_job = {
     .n = n,
     .input_ptr = input_ptr,
@@ -11439,7 +11410,6 @@ static int kls_direct_numeric_lean_pattern_capable(
   if (solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->options.threads <= 1 ||
       !kls_repeated_update_workload(&solver->options) ||
-      getenv("KLS_DISABLE_DIRECT_NUMERIC_LEAN_PATTERN") != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       solver->user_col_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->pivot_nudge_count != 0u ||
@@ -11524,9 +11494,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
     return 1;
   }
   if (!lean_only && solver->options.threads > 1 &&
-      ((getenv("KLS_ENABLE_PARALLEL_ROW_PATTERN") != NULL &&
-        getenv("KLS_ENABLE_DIRECT_NUMERIC_ROW_PATTERN") != NULL) ||
-       (kls_direct_numeric_lean_pattern_capable(solver))) &&
+      kls_direct_numeric_lean_pattern_capable(solver) &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 1, 0)) {
     /* For a single BTF block, the numeric already contains every object the
        row transpose needs: Pinv maps input rows and LUbx supplies stable L/U
@@ -11551,11 +11519,6 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
     return 0;
   }
 
-  if (!lean_only && solver->options.threads > 1 &&
-      getenv("KLS_ENABLE_PARALLEL_ROW_PATTERN") != NULL &&
-      kls_build_lean_row_refactor_pattern_parallel(solver, 0, 0)) {
-    return 1;
-  }
   if (!lean_only && solver->row_refactor_auto_lower_bound_rejected) {
     return 0;
   }
@@ -11564,10 +11527,7 @@ static int kls_build_row_refactor_pattern(kls_solver *solver,
   const int generic_parallel_lean_pattern =
     solver->options.threads > 1 &&
     solver->n >= 4096u && factor_entries >= 200000u;
-  if (lean_only &&
-      (generic_parallel_lean_pattern ||
-       (getenv("KLS_DISABLE_GENERIC_PARALLEL_LEAN_PATTERN") == NULL &&
-        getenv("KLS_ENABLE_GENERIC_PARALLEL_LEAN_PATTERN") != NULL)) &&
+  if (lean_only && generic_parallel_lean_pattern &&
       kls_build_lean_row_refactor_pattern_parallel(solver, 0, 1)) {
     return 1;
   }
