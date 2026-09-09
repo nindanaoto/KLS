@@ -65,14 +65,10 @@ static KLS_ALWAYS_INLINE void kls_cpu_relax(void) {
 }
 
 static int kls_defer_cycle_trials_enabled(void) {
-  if (getenv("KLS_PRESTATIC_DEFER") != NULL) {
-    return 1;
-  }
   /* Exact unchanged-input reuse makes refactor-payoff trials unnecessary
      until a caller actually supplies changed values.  Keep the historical
      synchronous behavior when that cache is explicitly disabled. */
-  return getenv("KLS_DISABLE_UNCHANGED_REFACTOR") == NULL &&
-         getenv("KLS_DISABLE_CYCLE_TRIAL_DEFERRAL") == NULL;
+  return getenv("KLS_DISABLE_UNCHANGED_REFACTOR") == NULL;
 }
 
 /* A recurring numeric workload can favor a representation that avoids a
@@ -10607,8 +10603,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     if (solver->generic_nd_portfolio_selected &&
         solver->options.scale == KLS_SCALE_AUTO && selected_scale > 0 &&
-        symbolic_score(solver->symbolic) < DBL_MAX / 4.0 &&
-        getenv("KLS_DISABLE_GENERIC_ND_UNSCALED_FIRST") == NULL) {
+        symbolic_score(solver->symbolic) < DBL_MAX / 4.0) {
       /* ND was admitted for a long repeated lifecycle, where row scaling is
          another complete input stream on every refactor and solve.  Try the
          standard unscaled KLU factor first; retain the value-selected scale
@@ -10697,7 +10692,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
-      if (getenv("KLS_DISABLE_PREDICTED_FULL_FACTOR_BUDGET_SEED") == NULL) {
+      {
         /* The predicted builder is a complete, measured numeric
            construction for this exact pattern and value frame.  Publish its
            cost to the existing checked-refactor repair budget just as the
@@ -10741,8 +10736,7 @@ int kls_factor(kls_solver *solver, const double *values) {
           !solver->generic_nd_bounded_symmetric_union &&
           !solver->generic_nd_lifecycle_near_tie &&
           provisional_fill >= DBL_MAX / 4.0 &&
-          solver->generic_nd_fallback_fill > 0.0 &&
-          getenv("KLS_DISABLE_UNBOUNDED_GENERIC_ND_NUMERIC_TRIAL") == NULL;
+          solver->generic_nd_fallback_fill > 0.0;
         if (!bounded_scored_candidate && !unbounded_numeric_candidate) {
           /* An unscored ordering gives no bound after static prediction
              rejects unless the portfolio explicitly admitted its unbounded
@@ -10759,11 +10753,9 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->symbolic != NULL && solver->n >= 50000 &&
         solver->symbolic->est_flops >= 2.0e5 * (double)solver->n &&
         solver->col_ptr != NULL &&
-        solver->col_ptr[solver->n] < 8 * solver->n &&
-        getenv("KLS_DISABLE_DENSE_TAIL") == NULL;
+        solver->col_ptr[solver->n] < 8 * solver->n;
       if (!had_numeric && solver->metis_race != NULL &&
           solver->symbolic != NULL && solver->symbolic->est_flops >= 1.0e8 &&
-          getenv("KLS_RACE_FULL_JOIN") == NULL &&
           !solver->metis_race->giant_symmetric_scalar_fringe_metis_row) {
         /* Join only when the serial first factor on the current symbolic
            would dwarf the NodeND wait (mac_econ-class); small raced
@@ -10844,11 +10836,9 @@ int kls_factor(kls_solver *solver, const double *values) {
           }
         }
       } else if (!had_numeric && solver->metis_race != NULL &&
-                 (getenv("KLS_RACE_FULL_JOIN") != NULL ||
-                  solver->symbolic == NULL ||
+                 (solver->symbolic == NULL ||
                   solver->symbolic->est_flops >= 1.0e8)) {
-        /* full join (KLS_RACE_FULL_JOIN=1, or the giant-class fallback
-           when the predicted build failed): take the worker's numeric.
+        /* Full join for the fallback class: take the worker's numeric.
            Small raced matrices skip both joins; the deferred consult at
            the first refactorization arbitrates with timed acceptance. */
         kls_metis_race *race = kls_metis_race_take(solver, &elapsed);
@@ -10916,7 +10906,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->symbolic->lnz + solver->symbolic->unz <=
           2.0 * (double)UINT16_MAX;
       const int generic_repeated_lean_prewarm =
-                getenv("KLS_DISABLE_GENERIC_LEAN_PREWARM") == NULL &&
         kls_repeated_update_workload(&solver->options) &&
         /* Pool threads, scratch, and completion slots contain no numeric
            indices or values.  Prewarming them therefore applies equally to
@@ -11233,7 +11222,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     kls_repeated_update_workload(&solver->options);
   const int representation_trial_precedes_tight_pivot =
     allow_deferred_generic_tight_pivot &&
-    getenv("KLS_DISABLE_GENERIC_TIGHT_PIVOT_DEFERRAL") == NULL &&
     (solver->prestatic_deferred || solver->rowmatch_deferred ||
      solver->metis_race_deferred || solver->block_order_deferred);
   int early_tight_pivot_attempted = 0;
@@ -11348,13 +11336,12 @@ int kls_factor(kls_solver *solver, const double *values) {
   int compact_solve_active = 0;
   double compact_pattern_overlap_start = 0.0;
   double compact_pattern_elapsed_before_overlap = 0.0;
-  if ( solver->common.status >= TRILINOS_KLU_OK &&
+  if (solver->common.status >= TRILINOS_KLU_OK &&
       solver->common.status != TRILINOS_KLU_SINGULAR &&
       (kls_compact_direct_numeric_row_pattern_capable(solver) ||
        (kls_direct_user_value_maps_capable(solver) &&
         (kls_moderate_work_single_block_lean_policy_enabled(solver) ||
-         kls_moderate_work_fragmented_btf_lean_policy_enabled(solver)))) &&
-      getenv("KLS_DISABLE_OVERLAPPED_COMPACT_PATTERN") == NULL) {
+         kls_moderate_work_fragmented_btf_lean_policy_enabled(solver))))) {
     /* A retained-factor work contract has already selected this optional
        row representation.  Build it beside independent diagnostics and
        solve-index preparation even when it exceeds the fully packed
@@ -11373,8 +11360,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         !(kls_repeated_update_workload(&solver->options) &&
           solver->options.threads > 1 && solver->symbolic != NULL &&
           solver->n <= (UF_long)UINT16_MAX &&
-          solver->symbolic->maxblock >= 2048u) &&
-        getenv("KLS_DISABLE_OVERLAPPED_COMPACT_SOLVE") == NULL) {
+          solver->symbolic->maxblock >= 2048u)) {
       /* The compact solve mirror and direct row pattern are disjoint,
          read-only derivations of the retained packed numeric.  A compact
          refactor forest is excluded because its canonical sort mutates that
@@ -11561,16 +11547,11 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
                                           const double *numeric_values) {
   if (solver->factor_preps_deferred) {
     solver->factor_preps_deferred = 0;
-    if (
-        getenv("KLS_DISABLE_LOW_WORK_DIRECT_DEFERRED_PREP_SKIP") == NULL &&
-        kls_low_work_single_block_direct_public_capable(solver)) {
-      /* This factor enters the vendor/compact refactor tournament directly.
-         Its vendor-first preflight now rejects before map construction when
-         the complete incumbent is below the tournament's absolute saving
-         floor.  The native low-work triangular solve needs no i32 mirror,
-         while a compact challenger that remains viable builds its map at
-         its first actual sample.  Therefore none of the generic deferred
-         map, schedule, panel, or solve preparations has a consumer here. */
+    if (kls_low_work_single_block_direct_public_capable(solver)) {
+      /* The direct refactor route constructs its own maps as needed, and
+         the native low-work triangular solve needs no i32 mirror. Generic
+         deferred map, schedule, panel and solve preparation has no consumer
+         on this route. */
       return;
     }
 
@@ -11588,8 +11569,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       const int direct_lean_is_settled =
         kls_moderate_work_single_block_lean_policy_enabled(solver) ||
         kls_moderate_work_fragmented_btf_lean_policy_enabled(solver);
-      if (direct_lean_is_settled &&
-          getenv("KLS_DISABLE_DIRECT_LEAN_PREP_OVERLAP") == NULL) {
+      if (direct_lean_is_settled) {
         /* The selected row mirror becomes the normal solve representation
            as soon as this first changed numeric is published.  Building the
            independent column-solve transpose here duplicated a full sort
