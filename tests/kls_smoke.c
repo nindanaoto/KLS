@@ -14419,6 +14419,35 @@ static int removed_shape_stats_are_zero(const kls_stats *stats) {
     stats->bounded_degree_amf_no_btf_symbolic_eligible == 0;
 }
 
+static int check_retired_stats_compatibility(kls_solver *solver) {
+  kls_stats full;
+  memset(&full, 0xa5, sizeof(full));
+  full.struct_size = sizeof(full);
+  if (!require_ok(kls_get_stats(solver, &full), "poisoned full stats") ||
+      !removed_shape_stats_are_zero(&full)) return 0;
+  for (size_t size = sizeof(full.struct_size); size <= sizeof(full); ++size) {
+    kls_stats partial;
+    memset(&partial, 0xa5, sizeof(partial));
+    partial.struct_size = size;
+    if (!require_ok(kls_get_stats(solver, &partial), "truncated stats") ||
+        partial.struct_size != sizeof(full)) return 0;
+    const unsigned char *bytes = (const unsigned char *)&partial;
+    for (size_t i = size; i < sizeof(partial); ++i) {
+      if (bytes[i] != 0xa5) {
+        fprintf(stderr, "stats wrote beyond requested size %zu\n", size);
+        return 0;
+      }
+    }
+    /* No computed overlays follow this retired-field boundary. Check even
+       partially copied fields against the full, zero-initialized snapshot. */
+    const size_t tail = offsetof(kls_stats, medium_spike_minfill_candidate);
+    if (size > tail && memcmp(bytes + tail,
+                             (const unsigned char *)&full + tail,
+                             size - tail) != 0) return 0;
+  }
+  return 1;
+}
+
 static int test_scaled_update_refactor(void) {
   const int32_t ap[] = {0, 3, 6, 9};
   const int32_t ai[] = {0, 1, 2, 0, 1, 2, 0, 1, 2};
@@ -14433,10 +14462,13 @@ static int test_scaled_update_refactor(void) {
     options.orientation = mode % 2 ? KLS_ORIENTATION_TRANSPOSE
                                    : KLS_ORIENTATION_NORMAL;
     int ok = require_ok(kls_create(&solver), "create scaled-update solver");
+    if (ok) ok = check_retired_stats_compatibility(solver);
     if (ok) ok = require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3,
                                            ap, ai, 0, &options),
                             "analyze scaled-update solver");
+    if (ok) ok = check_retired_stats_compatibility(solver);
     if (ok) ok = require_ok(kls_factor(solver, base), "factor scaled-update base");
+    if (ok) ok = check_retired_stats_compatibility(solver);
     for (int update = 0; ok && update < 4; ++update) {
       double ax[9];
       for (int col = 0; col < 3; ++col) {
@@ -14448,6 +14480,7 @@ static int test_scaled_update_refactor(void) {
       /* Alternate separable scaling and ordinary entrywise changes. */
       if (update % 2) ax[1] += 0.125;
       ok = require_ok(kls_refactor(solver, ax), "refactor scaled update");
+      if (ok) ok = check_retired_stats_compatibility(solver);
       for (int transpose = 0; ok && transpose < 2; ++transpose) {
         double rhs[6] = {0};
         for (int j = 0; j < 2; ++j) {
@@ -14472,6 +14505,7 @@ static int test_scaled_update_refactor(void) {
         }
       }
       kls_stats stats = {0};
+      if (ok) ok = check_retired_stats_compatibility(solver);
       stats.struct_size = sizeof(stats);
       if (ok) ok = require_ok(kls_get_stats(solver, &stats), "scaled-update stats");
       if (ok && (!removed_shape_stats_are_zero(&stats) ||
@@ -14483,6 +14517,10 @@ static int test_scaled_update_refactor(void) {
         ok = 0;
       }
     }
+    if (ok) ok = require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3,
+                                           ap, ai, 0, &options),
+                            "reanalyze stats compatibility solver");
+    if (ok) ok = check_retired_stats_compatibility(solver);
     kls_destroy(solver);
     if (!ok) return 0;
   }
