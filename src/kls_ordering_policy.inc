@@ -3103,7 +3103,7 @@ static UF_long kls_metis_refine_components_with_camd(
     : (UF_long)-1;
 }
 
-static UF_long kls_metis_order_inner(UF_long n, UF_long *col_ptr,
+static UF_long kls_metis_order(UF_long n, UF_long *col_ptr,
                                      UF_long *row_idx, UF_long *perm_out,
                                      trilinos_klu_l_common *common);
 
@@ -3113,20 +3113,6 @@ static UF_long kls_metis_order_inner(UF_long n, UF_long *col_ptr,
    selections that need measured option sets (1: fragmented low-degree,
    2: dense reciprocal mega-hub, 3: sparse symmetric scalar fringe). */
 static _Thread_local int kls_fragmented_metis_tuning_ctx;
-
-static UF_long kls_metis_order(UF_long n,
-                               UF_long *col_ptr,
-                               UF_long *row_idx,
-                               UF_long *perm_out,
-                               trilinos_klu_l_common *common) {
-  const double t0 = kls_now_seconds();
-  UF_long r = kls_metis_order_inner(n, col_ptr, row_idx, perm_out, common);
-  if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
-    fprintf(stderr, "KLS metis: user_order total n=%ld %.3fs\n",
-            (long)n, kls_now_seconds() - t0);
-  }
-  return r;
-}
 
 /* The retained proposal must expose a nearly spanning BTF core whose small
    fringe is substantially represented by separate components.  Symbolic fill
@@ -4262,7 +4248,7 @@ static int kls_metis_parallel_nd(idx_t nvtxs, const idx_t *xadj,
   return ok;
 }
 
-static UF_long kls_metis_order_inner(UF_long n,
+static UF_long kls_metis_order(UF_long n,
                                UF_long *col_ptr,
                                UF_long *row_idx,
                                UF_long *perm_out,
@@ -5027,8 +5013,6 @@ static int analyze_with_ordering(UF_long n,
     kls_spiked_ndp_class = 0;
 #endif
   }
-  const double kls_awo_t0 =
-    getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
   trilinos_klu_l_common common;
   int status = apply_options_to_common(&common, options);
   if (status != KLS_OK) {
@@ -5061,15 +5045,9 @@ static int analyze_with_ordering(UF_long n,
     metis_context.separator = separator_out;
     metis_context_active = 1;
     common.ordering = 3;
-    common.user_order = kls_metis_order;  /* timing wrapper */
+    common.user_order = kls_metis_order;
     common.user_data = &metis_context;
-    const double kls_aa_t0 =
-      getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
-    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
-      fprintf(stderr, "KLS awo: klu_analyze %.3fs\n",
-              kls_now_seconds() - kls_aa_t0);
-    }
     common.user_data = NULL;
   } else if (ordering == KLS_ORDERING_SCOTCH) {
 #ifdef KLS_HAVE_SCOTCH
@@ -5139,14 +5117,8 @@ static int analyze_with_ordering(UF_long n,
     trilinos_amd_l2_amf = 0;
     trilinos_amd_l2_amf_power = 1.0;
   } else {
-    const double kls_ad_t0 =
-      getenv("KLS_TRACE_ANALYZE_STAGES") != NULL ? kls_now_seconds() : 0.0;
     common.ordering = (ordering == KLS_ORDERING_COLAMD) ? 1 : 0;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
-    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
-      fprintf(stderr, "KLS awo: amd_analyze %.3fs\n",
-              kls_now_seconds() - kls_ad_t0);
-    }
   }
   if (symbolic == NULL || common.status < 0) {
     if (symbolic != NULL) {
@@ -5160,11 +5132,6 @@ static int analyze_with_ordering(UF_long n,
   }
 
   if (metis_context_active) {
-    const double kls_sep_t0 = kls_now_seconds();
-    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
-      fprintf(stderr, "KLS metis: pre-forest %.3fs\n",
-              kls_sep_t0 - kls_awo_t0);
-    }
     if (!kls_build_metis_separator_forest(symbolic, &metis_context,
                                           separator_out)) {
       kls_metis_order_context_move_largest_separator(&metis_context,
@@ -5172,18 +5139,9 @@ static int analyze_with_ordering(UF_long n,
       kls_finalize_separator_global_range(symbolic, separator_out);
     }
     kls_metis_order_context_clear(&metis_context);
-    if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
-      fprintf(stderr, "KLS metis: forest %.3fs\n",
-              kls_now_seconds() - kls_sep_t0);
-    }
   } else
   {
     kls_finalize_separator_global_range(symbolic, separator_out);
-  }
-  if (getenv("KLS_TRACE_ANALYZE_STAGES") != NULL) {
-    fprintf(stderr, "KLS awo: ord=%d btf=%d n=%ld %.3fs\n",
-            (int)ordering, options != NULL && options->use_btf ? 1 : 0,
-            (long)n, kls_now_seconds() - kls_awo_t0);
   }
   *symbolic_out = symbolic;
   *common_out = common;
