@@ -6,12 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import pathlib
 import subprocess
 import sys
-
-from summarize_row_pipeline_trace import summarize as summarize_row_pipeline_trace
 
 
 def spice_cycle_seconds(row: dict[str, object]) -> float:
@@ -147,96 +144,12 @@ def collect_analyze_failure_diagnostic(
     return diagnostic
 
 
-def failure_trace_path(args: argparse.Namespace, matrix: pathlib.Path) -> pathlib.Path:
-    trace_dir = args.failure_trace_dir
-    if trace_dir is None:
-        if args.jsonl is not None:
-            trace_dir = args.jsonl.parent / f"{args.jsonl.stem}.failure-traces"
-        else:
-            trace_dir = pathlib.Path("build") / "failure-traces"
-    trace_dir.mkdir(parents=True, exist_ok=True)
-    return trace_dir / f"{matrix.stem}.stderr"
-
-
-def collect_trace_failure_diagnostic(
-    args: argparse.Namespace, matrix: pathlib.Path
-) -> dict[str, object]:
-    trace_path = failure_trace_path(args, matrix)
-    cmd = [
-        str(args.kls_bench),
-        str(matrix),
-        "--repeat",
-        str(args.repeat),
-        "--refactor-repeat",
-        str(args.refactor_repeat),
-        "--json",
-    ]
-    append_solver_options(cmd, args)
-    if args.failure_trace_kls_first_factor != "env":
-        cmd.extend(["--kls-first-factor", args.failure_trace_kls_first_factor])
-
-    env = os.environ.copy()
-    env["KLS_TRACE_ROW_PIPELINE"] = "1"
-    env_overrides = {
-        "KLS_TRACE_ROW_PIPELINE": env["KLS_TRACE_ROW_PIPELINE"],
-    }
-    try:
-        proc = subprocess.run(
-            cmd,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=args.failure_trace_timeout,
-            env=env,
-        )
-        stdout = completed_text(proc.stdout)
-        stderr = completed_text(proc.stderr)
-        status = "ok" if proc.returncode == 0 else "failed"
-        returncode: int | None = proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        stdout = completed_text(exc.stdout)
-        stderr = completed_text(exc.stderr)
-        status = "timeout"
-        returncode = None
-
-    trace_path.write_text(stderr, encoding="utf-8")
-    diagnostic: dict[str, object] = {
-        "kind": "row-pipeline-trace",
-        "status": status,
-        "timeout_seconds": args.failure_trace_timeout,
-        "returncode": returncode,
-        "stderr_path": str(trace_path),
-        "command": cmd,
-        "env": env_overrides,
-    }
-    if stdout.strip():
-        try:
-            diagnostic["row"] = json.loads(stdout)
-        except json.JSONDecodeError:
-            diagnostic["stdout"] = clipped_text(stdout.strip())
-    if status == "failed":
-        diagnostic["stderr"] = clipped_text(stderr.strip())
-    try:
-        diagnostic["summary"] = summarize_row_pipeline_trace(trace_path)
-    except OSError as exc:
-        diagnostic["summary_error"] = str(exc)
-    return diagnostic
-
-
 def collect_failure_diagnostic(
     args: argparse.Namespace, matrix: pathlib.Path
 ) -> dict[str, object] | None:
     if args.failure_diagnostics == "none":
         return None
-    if args.failure_diagnostics == "analyze":
-        return collect_analyze_failure_diagnostic(args, matrix)
-    if args.failure_diagnostics == "trace":
-        return collect_trace_failure_diagnostic(args, matrix)
-    return {
-        "kind": "combined",
-        "analyze": collect_analyze_failure_diagnostic(args, matrix),
-        "trace": collect_trace_failure_diagnostic(args, matrix),
-    }
+    return collect_analyze_failure_diagnostic(args, matrix)
 
 
 def read_manifest(path: pathlib.Path) -> list[str]:
@@ -360,11 +273,10 @@ def main() -> int:
     parser.add_argument("--require-spral-scaling", action="store_true")
     parser.add_argument(
         "--failure-diagnostics",
-        choices=["none", "analyze", "trace", "all"],
+        choices=["none", "analyze"],
         default="analyze",
         help=(
-            "attach diagnostics when every sample fails: analyze-only, "
-            "row-pipeline trace, or both"
+            "attach analyze-only diagnostics when every sample fails"
         ),
     )
     parser.add_argument(
@@ -372,29 +284,6 @@ def main() -> int:
         type=float,
         default=30.0,
         help="timeout in seconds for failure diagnostics",
-    )
-    parser.add_argument(
-        "--failure-trace-timeout",
-        type=float,
-        default=45.0,
-        help="timeout in seconds for row-pipeline failure trace diagnostics",
-    )
-    parser.add_argument(
-        "--failure-trace-dir",
-        type=pathlib.Path,
-        help=(
-            "directory for row-pipeline failure trace stderr files; defaults "
-            "to a sibling directory named after --jsonl, or build/failure-traces"
-        ),
-    )
-    parser.add_argument(
-        "--failure-trace-kls-first-factor",
-        choices=["env", "off", "on"],
-        default="env",
-        help=(
-            "trace-only override for --kls-first-factor; use 'on' when a "
-            "timeout needs KLS-owned row-pipeline evidence"
-        ),
     )
     args = parser.parse_args()
 
@@ -428,9 +317,6 @@ def main() -> int:
         return 1
     if args.failure_diagnostic_timeout is not None and args.failure_diagnostic_timeout <= 0:
         print("--failure-diagnostic-timeout must be positive", file=sys.stderr)
-        return 1
-    if args.failure_trace_timeout is not None and args.failure_trace_timeout <= 0:
-        print("--failure-trace-timeout must be positive", file=sys.stderr)
         return 1
     if args.skip:
         matrices = matrices[args.skip :]

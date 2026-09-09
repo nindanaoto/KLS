@@ -317,9 +317,6 @@ static int kls_first_factor_env_disabled(void) {
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
-KLS_DEFINE_ENV_FLAG(kls_row_pipeline_trace_env_enabled,
-                    "KLS_TRACE_ROW_PIPELINE")
-
 KLS_DEFINE_ENV_FLAG(kls_row_pipeline_producer_batch_env_disabled,
                     "KLS_DISABLE_ROW_PIPELINE_PRODUCER_BATCH")
 

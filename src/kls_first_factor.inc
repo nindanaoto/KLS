@@ -5579,7 +5579,6 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long pivot_tail_rows;
   UF_long pivot_restarts;
 
-  int trace_enabled;
   int producer_batch_enabled;
   int active_catchup_batch_enabled;
 
@@ -6088,26 +6087,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
   return 1;
 }
 
-static void kls_row_first_pipeline_trace_print(
-  const kls_row_first_pipeline_shared *shared,
-  const char *event) {
-  if (shared == NULL || !shared->trace_enabled || shared->ctx == NULL ||
-      event == NULL) {
-    return;
-  }
-  const UF_long completed =
-    shared->completed_pos >= shared->begin
-      ? shared->completed_pos - shared->begin
-      : 0u;
-  const UF_long total =
-    shared->end >= shared->begin ? shared->end - shared->begin : 0u;
-  fprintf(stderr,
-          "KLS row-pipeline trace: event=%s completed=%" PRIu64
-          "/%" PRIu64 " begin=%" PRIu64 " end=%" PRIu64 "\n",
-          event, (uint64_t)completed, (uint64_t)total,
-          (uint64_t)shared->begin, (uint64_t)shared->end);
-
-}
 
 static void kls_row_first_pipeline_mark_failed(
   kls_row_first_pipeline_shared *shared,
@@ -6621,13 +6600,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
 
               }
               worker->rows++;
-              if (shared->trace_enabled) {
-                if (((shared->completed_pos - shared->begin) %
-                       KLS_ROW_FIRST_PIPELINE_TRACE_INTERVAL) == 0u ||
-                    shared->completed_pos == shared->end) {
-                  kls_row_first_pipeline_trace_print(shared, "progress");
-                }
-              }
             }
           }
         }
@@ -6798,8 +6770,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
 
   shared.order_epoch = 0;
 
-  shared.trace_enabled =
-    (kls_row_pipeline_trace_env_enabled());
   shared.workers = workers;
 
   shared.batch_targets = batch_targets;
@@ -6857,7 +6827,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
     return 0;
   }
 
-  kls_row_first_pipeline_trace_print(&shared, "start");
 
   int created = 0;
   for (int tid = 0; tid < worker_count; ++tid) {
@@ -6909,10 +6878,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
     shared.completed_pos >= begin &&
     shared.completed_pos < end &&
     processed_rows == shared.completed_pos - begin;
-  if (shared.trace_enabled) {
-    kls_row_first_pipeline_trace_print(
-      &shared, ok ? "done" : (pivot_tail_ready ? "pivot-tail" : "failed"));
-  }
   if (completed_pos_out != NULL) {
     *completed_pos_out = shared.completed_pos;
   }
