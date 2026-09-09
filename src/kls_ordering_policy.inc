@@ -3285,21 +3285,6 @@ static _Thread_local int kls_amf3_span_variant_selected;
    its own internal thread team. */
 static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* callers that measured a win from the deterministic parallel NodeNDP
-   set this around their analyze (currently the pre-static METIS
-   refinement); everything else keeps serial NodeNDP's forest, which
-   the separator-pipeline refactor engines are structure-sensitive to
-   (pre2: 5x refactor loss under the parallel splitter's forest) */
-static _Thread_local int kls_det_ndp_requested;
-
-/* pattern-classified det-ndp routing, refreshed per analyze call.
-   v12 measured the refine-only det-ndp scoping reverting v11's broad
-   one-shot wins (Freescale1 0.886->1.477, circuit5M_dc 0.962->1.650,
-   memchip 1.535->1.908): det-ndp routes for every analyze EXCEPT the
-   legacy-RNG large-spral class (pre2), whose separator-pipeline
-   engine needs the serial-NodeNDP legacy forests (cycle 0.787 with
-   the containment vs 1.76 without). */
-static _Thread_local int kls_detndp_class_ok;
 /* Giant symmetric scalar-fringe systems use a seven-leaf deterministic
    forest: eight leaves shorten cold ordering slightly but leave a slower
    critical row-refactor chain, while the serial fourteen-leaf forest adds
@@ -4415,9 +4400,7 @@ static UF_long kls_metis_order(UF_long n,
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 &&
       (force_det_ndp ||
-       (kls_metis_order_threads >= (int)metis_ndp_npes &&
-        (kls_det_ndp_requested ||
-         kls_detndp_class_ok))) &&
+       kls_metis_order_threads >= (int)metis_ndp_npes) &&
       getenv("KLS_DISABLE_DET_NDP") == NULL) {
     /* deterministic parallel NodeNDP: serial METIS separators with
        the leaves ordered by concurrent serial NodeND.  Deterministic
@@ -4871,9 +4854,6 @@ static int analyze_with_ordering(UF_long n,
        gate uses. */
     extern void gk_set_legacy_rand(int enable);
     gk_set_legacy_rand(0);
-#ifdef KLS_HAVE_MTMETIS
-    kls_detndp_class_ok = 1;
-#endif
   }
   trilinos_klu_l_common common;
   int status = apply_options_to_common(&common, options);
@@ -11582,11 +11562,6 @@ static void *kls_metis_race_main(void *arg) {
     kls_giant_symmetric_scalar_fringe_metis_ctx =
       race->giant_symmetric_scalar_fringe_metis_row;
 #endif
-#ifdef KLS_HAVE_MTMETIS
-    /* the symbolic-only (dense-tail class) joiner is on the one-shot
-       critical path waiting for this analyze */
-    kls_det_ndp_requested = 0;
-#endif
     race->analyze_status = analyze_with_ordering(race->n, race->col_ptr,
                                                  race->row_idx,
                                                  &race->options,
@@ -11595,7 +11570,6 @@ static void *kls_metis_race_main(void *arg) {
                                                  &race->common,
                                                  &race->separator);
 #ifdef KLS_HAVE_MTMETIS
-    kls_det_ndp_requested = 0;
     kls_giant_symmetric_scalar_fringe_metis_ctx =
       saved_giant_symmetric_scalar_fringe_metis_ctx;
 #endif
@@ -13787,23 +13761,10 @@ static int kls_choose_symbolic_inner(UF_long n,
     trilinos_klu_l_common m_common;
     kls_separator_analysis m_sep;
     memset(&m_sep, 0, sizeof(m_sep));
-#ifdef KLS_HAVE_MTMETIS
-    /* deterministic parallel NodeNDP for the class's choose-stage
-       METIS: serial METIS separators with concurrent fresh-thread
-       leaves, deterministic regardless of what ran before (the
-       mt-metis mode-0 bridge measured call-order-dependent forests:
-       its internal thread streams carry across calls, and the
-       first-call forest scored 1.343e8 vs the class AMD's 1.337e8,
-       losing the margin the same input won at 1.011e8 second-call). */
-    kls_det_ndp_requested = getenv("KLS_DISABLE_PS_MTND") == NULL;
-#endif
     const int m_status = analyze_with_ordering(n, col_ptr, row_idx,
                                                symbolic_options,
                                                KLS_ORDERING_METIS, &m_sym,
                                                &m_common, &m_sep);
-#ifdef KLS_HAVE_MTMETIS
-    kls_det_ndp_requested = 0;
-#endif
     if (amd_sp) pthread_join(amd_tid, NULL);
     if (amf_sp) pthread_join(amf_tid, NULL);
     trilinos_klu_l_symbolic *b_sym = NULL;
