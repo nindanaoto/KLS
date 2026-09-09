@@ -101,6 +101,10 @@ additional launches pass; the original slowdowns do not reproduce:
 
 ### Same-executable ablation
 
+Historical result: the disable override below was subsequently removed in
+the solve-control cleanup; the default dispatch and test-used force control
+remain. See `solve_control_trim.md`.
+
 Alternate the final executable's default dispatch against the existing
 `KLS_DISABLE_GENERIC_PARALLEL_CONTRACT_RESIDUAL=1` control, using 12 pairs
 per CPU set. All 48 launches pass. Default dispatch is 8.69% faster on CPUs

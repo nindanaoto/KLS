@@ -14164,13 +14164,6 @@ static int kls_generic_contract_residual_thread_count(
          solver->n < (UF_long)512u * (UF_long)threads) {
     threads--;
   }
-  const char *env = getenv("KLS_GENERIC_CONTRACT_THREADS");
-  if (env != NULL && env[0] != '\0') {
-    const int parsed = atoi(env);
-    if (parsed >= 2 && parsed <= pool->thread_count) {
-      threads = parsed;
-    }
-  }
   return threads;
 }
 
@@ -14181,8 +14174,7 @@ static int kls_prepare_parallel_refine_csr(kls_solver *solver) {
   kls_egraph_refactor_pool *pool = solver->egraph_pool;
   const int generic_candidate =
     kls_repeated_update_workload(&solver->options) &&
-    solver->options.expected_solves >= 16 &&
-    getenv("KLS_DISABLE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") == NULL;
+    solver->options.expected_solves >= 16;
   if (!generic_candidate || pool == NULL ||
       pool->thread_count < 2 || pool->thread_count > 8 ||
       pool->created_count != pool->thread_count - 1 ||
@@ -14308,8 +14300,7 @@ static int kls_generic_contract_residual_parallel_dispatch(
   kls_solver *solver) {
   if (solver == NULL ||
       !kls_repeated_update_workload(&solver->options) ||
-      solver->options.expected_solves < 16 ||
-      getenv("KLS_DISABLE_GENERIC_PARALLEL_CONTRACT_RESIDUAL") != NULL) {
+      solver->options.expected_solves < 16) {
     return 0;
   }
   solver->contract_residual_pending = 0;
@@ -14438,8 +14429,7 @@ static int kls_generic_plain_contract_vector_stats_ready(
   const kls_solver *solver) {
   if (solver == NULL ||
       !kls_repeated_update_workload(&solver->options) ||
-      solver->options.expected_solves < 16 ||
-      getenv("KLS_DISABLE_GENERIC_PARALLEL_CONTRACT_STATS") != NULL) {
+      solver->options.expected_solves < 16) {
     return 0;
   }
   const kls_egraph_refactor_pool *pool = solver->egraph_pool;
@@ -15212,7 +15202,6 @@ static int solve_impl(kls_solver *solver,
   const int serial_mapped_vendor_solve =
     kls_serial_mapped_prefers_vendor_solve(solver);
   const int fused_compact_match_rhs =
-    getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
     solver->row_perm != NULL && !kernel_transpose && nrhs == 1 &&
     !has_row_scale && solver->numeric->Rs == NULL &&
     solver->lean_compact_match_row_factor_active &&
@@ -15225,7 +15214,6 @@ static int solve_impl(kls_solver *solver,
     !serial_mapped_vendor_solve && kls_i32_solve_ready(solver) &&
     solver->i16solve_rhs_perm != NULL;
   const int fused_general_i32_rhs =
-    getenv("KLS_DISABLE_GENERAL_FUSED_RHS") == NULL &&
     solver->plain_solve_choice >= 0 &&
     solver->row_perm == NULL && !kernel_transpose && nrhs == 1 &&
     !has_row_scale && b != x &&
@@ -15244,7 +15232,6 @@ static int solve_impl(kls_solver *solver,
     kls_i32_solve_ready(solver) &&
     kls_lean_single_block_prepared_solve_ready(solver);
   const int fused_matched_i32_rhs =
-    getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL &&
     solver->row_perm != NULL &&
     !kernel_transpose && nrhs == 1 &&
     solver->numeric->Rs == NULL && b != x &&
@@ -15401,8 +15388,7 @@ static int solve_impl(kls_solver *solver,
          (solver->n >= 65536u && factor_entries >= 4u * solver->n)) &&
         solver->n <= UF_long_max / 10u &&
         factor_entries >= 4u * solver->n &&
-        factor_entries <= 10u * solver->n &&
-        getenv("KLS_DISABLE_PLAIN_SOLVE_TOURNAMENT") == NULL;
+        factor_entries <= 10u * solver->n;
       if (plain_solve_tournament) {
         /* The compact index stream is not uniformly faster than KLU's
            retained packed columns once both exceed cache.  Compare the two

@@ -127,8 +127,7 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
       singleton_run[block] = run;
     }
   }
-  if (getenv("KLS_DISABLE_COMPACT_MATCH_FUSED_RHS_PERM") == NULL &&
-      solver->row_perm != NULL) {
+  if (solver->row_perm != NULL) {
     uint16_t *row_inverse = (uint16_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
     rhs_perm = (uint16_t *)malloc(
@@ -796,8 +795,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
   }
   if (solver->i16solve_rhs_perm == NULL && solver->row_perm != NULL &&
-      n <= (UF_long)UINT16_MAX &&
-      getenv("KLS_DISABLE_GENERAL_FUSED_MATCHED_RHS") == NULL) {
+      n <= (UF_long)UINT16_MAX) {
     uint16_t *row_inverse = (uint16_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
     uint16_t *rhs_perm = (uint16_t *)malloc(
