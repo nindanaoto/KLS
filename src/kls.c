@@ -10562,18 +10562,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   solver->stats.row_refactor_auto_model_attempted = 0;
   solver->stats.row_refactor_auto_model_accepted = 0;
   double *numeric_values = NULL;
-  const int kls_trace_entry = getenv("KLS_TRACE_FACTOR_PHASES") != NULL;
-  double kls_entry_ph = kls_now_seconds();
-#define KLS_ENTRY_PHASE(tag)                                              \
-  if (kls_trace_entry) {                                                  \
-    const double t_now = kls_now_seconds();                               \
-    fprintf(stderr, "KLS entry phase %-12s %.3fs @%.3f num=%p ud0=%.17g\n", \
-            tag, t_now - kls_entry_ph,                                    \
-            t_now - solver->snb_factor_start, (void *)solver->numeric,    \
-            solver->numeric != NULL                                       \
-              ? ((const double *)solver->numeric->Udiag)[0] : -1.0);      \
-    kls_entry_ph = t_now;                                                 \
-  }
   int status = prepare_numeric_values(solver, values, &numeric_values);
   if (status != KLS_OK) {
     return status;
@@ -10641,7 +10629,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->predicted_entry_values_captured = 1;
     }
   }
-  KLS_ENTRY_PHASE("prep_values")
 
   double elapsed = kls_now_seconds() - solver->snb_factor_start;
   if (solver->generic_amf3_span_variant_selected) {
@@ -10771,7 +10758,6 @@ int kls_factor(kls_solver *solver, const double *values) {
                 kls_now_seconds() - redo_start, (int)redo_ord, redo_status);
       }
     }
-    KLS_ENTRY_PHASE("prestatic")
     if (solver->numeric == NULL && solver->prestatic_adopted_unfactored &&
         solver->values != NULL) {
       /* Adoption replaced the pattern and values; the deferred numeric
@@ -11016,7 +11002,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     kls_signal_metis_race_values(solver, numeric_values);
   }
-  KLS_ENTRY_PHASE("auto_scale")
   int kls_first_factor_used = !had_numeric &&
     maybe_factor_generic_btf_value_alternative(
       solver, numeric_values, &elapsed);
@@ -11035,7 +11020,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     elapsed += kls_now_seconds() - start;
   }
-  KLS_ENTRY_PHASE("kls_first")
   if (!kls_first_factor_used) {
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (!had_numeric && solver->numeric == NULL) {
@@ -11050,7 +11034,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         maybe_select_block_structured_ordering(solver, &elapsed,
                                                numeric_values);
       }
-      KLS_ENTRY_PHASE("block_order")
       if (solver->numeric != NULL) {
         /* adoption replaced the prepared values buffer */
         numeric_values = solver->values;
@@ -11080,24 +11063,6 @@ int kls_factor(kls_solver *solver, const double *values) {
            4.0e6) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
-      if (kls_trace_entry) {
-        fprintf(stderr, "KLS predicted accepted status=%ld\n",
-                (long)solver->common.status);
-        const double *ud = (const double *)solver->numeric->Udiag;
-        long zc = 0;
-        for (UF_long zk = 0; zk < solver->n; ++zk) {
-          if (ud[zk] == 0.0) {
-            if (zc < 6) {
-              fprintf(stderr, "KLS predicted: zero udiag at %ld\n",
-                      (long)zk);
-            }
-            zc++;
-          }
-        }
-        fprintf(stderr, "KLS predicted: zero udiag count %ld of %ld\n",
-                zc, (long)solver->n);
-      }
-      KLS_ENTRY_PHASE("predicted")
       kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
       if (getenv("KLS_DISABLE_PREDICTED_FULL_FACTOR_BUDGET_SEED") == NULL) {
         /* The predicted builder is a complete, measured numeric
@@ -11571,20 +11536,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           solver->dense_tail_block = hit_block;
         }
       }
-      if (kls_trace_entry && solver->numeric != NULL) {
-        fprintf(stderr,
-                "KLS klu_first: lnz=%ld unz=%ld nblocks=%ld maxblock=%ld "
-                "noffdiag=%ld nrealloc=%ld scale=%ld tol=%g initmem=%g "
-                "t=%.3fms\n",
-                (long)solver->numeric->lnz, (long)solver->numeric->unz,
-                (long)solver->symbolic->nblocks,
-                (long)solver->symbolic->maxblock,
-                (long)solver->common.noffdiag,
-                (long)solver->common.nrealloc,
-                (long)solver->common.scale, solver->common.tol,
-                solver->common.initmem_amd,
-                1e3 * (kls_now_seconds() - start));
-      }
       if (solver->common.kls_dense_panels) {
         /* dense within-panel pivoting is a reduced-stability regime;
            refinement recovers the contract at one extra solve/iter.  The
@@ -11594,7 +11545,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->numeric_needs_refinement = 1;
       }
       elapsed += kls_now_seconds() - start;
-      KLS_ENTRY_PHASE("klu_factor")
       }
     }
   }
@@ -11619,7 +11569,6 @@ int kls_factor(kls_solver *solver, const double *values) {
                                                           : KLS_ERR_FACTOR_FAILED;
   }
   kls_update_numeric_diagnostics(solver, 1);
-  KLS_ENTRY_PHASE("num_diag")
   if ((solver->numeric_needs_refinement ||
        getenv("KLS_ENABLE_SOLVE_REFINEMENT") != NULL) &&
       numeric_values != NULL &&
@@ -11635,8 +11584,6 @@ int kls_factor(kls_solver *solver, const double *values) {
              (size_t)solver->nnz * sizeof(*numeric_values));
     }
   }
-  KLS_ENTRY_PHASE("refine_keep")
-  KLS_ENTRY_PHASE("diag_full")
   int diagnostics_have_flops = 1;
   int diagnostics_have_rcond = 1;
   int promoted_numeric = 0;
@@ -11657,7 +11604,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
-  KLS_ENTRY_PHASE("auto_rowmatch")
   solver->metis_promotion_validated = 0;
   const int kls_oneshot_lean = kls_defer_cycle_trials_enabled();
   if (solver->generic_nd_numeric_validated) {
@@ -11693,7 +11639,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
-  KLS_ENTRY_PHASE("metis_promo")
   const int allow_deferred_generic_tight_pivot =
     kls_oneshot_lean &&
     kls_repeated_update_workload(&solver->options);
@@ -11755,17 +11700,11 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
     }
   }
-  if (kls_trace_entry) {
-    fprintf(stderr, "KLS scale now %d (adopted=%d)\n",
-            (int)solver->common.scale, promoted_numeric);
-  }
-  KLS_ENTRY_PHASE("auto_rescale")
   if (!diagnostics_have_flops || !diagnostics_have_rcond) {
     kls_update_numeric_diagnostics(solver, 1);
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
-  KLS_ENTRY_PHASE("auto_metis")
   if (!kls_oneshot_lean &&
       maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
     kls_first_factor_used = 0;
@@ -11783,7 +11722,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
-  KLS_ENTRY_PHASE("auto_pivtol")
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (solver->generic_nd_numeric_validated) {
     /* Matching is retained as failure recovery, not another startup arm. */
@@ -11803,7 +11741,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_rcond = 1;
   }
 #endif
-  KLS_ENTRY_PHASE("auto_spralhun")
   if (promoted_numeric && !kls_first_factor_used &&
       kls_should_try_first_factor(solver)) {
     if (kls_try_rebuild_current_numeric_with_kls_first(solver, numeric_values,
@@ -11814,7 +11751,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       diagnostics_have_rcond = 0;
     }
   }
-  KLS_ENTRY_PHASE("rebuild_first")
   pthread_t compact_pattern_thread;
   kls_lean_prewarm_job compact_pattern_job;
   int compact_pattern_active = 0;
