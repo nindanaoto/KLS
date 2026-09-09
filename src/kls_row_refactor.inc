@@ -1912,7 +1912,6 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
   const UF_long ucount = solver->row_refactor_u_ptr[n];
   const UF_long input_count = solver->row_refactor_input_ptr[n];
   const int compact_ptrs =
-    getenv("KLS_DISABLE_LEAN_I16_PTRS") == NULL &&
     lcount <= (UF_long)UINT16_MAX &&
     ucount <= (UF_long)UINT16_MAX &&
     input_count <= (UF_long)UINT16_MAX;
@@ -1921,8 +1920,7 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
     kls_repeated_update_workload(&solver->options) &&
     lcount <= (UF_long)UINT32_MAX &&
     ucount <= (UF_long)UINT32_MAX &&
-    input_count <= (UF_long)UINT32_MAX &&
-    getenv("KLS_DISABLE_SCALED_LEAN_U32_PTRS") == NULL;
+    input_count <= (UF_long)UINT32_MAX;
   uint16_t *lcols = (uint16_t *)malloc(
     (size_t)(lcount > 0u ? lcount : 1u) * sizeof(*lcols));
   uint16_t *ucols = (uint16_t *)malloc(
@@ -1940,7 +1938,7 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
   uint32_t *input_ptr32 = compact_ptrs32 ? (uint32_t *)malloc(
     ((size_t)n + 1u) * sizeof(*input_ptr32)) : NULL;
   uint16_t *level_rows =
-    compact_ptrs && getenv("KLS_DISABLE_LEAN_I16_ROWS") == NULL
+    compact_ptrs
       ? (uint16_t *)malloc((size_t)n * sizeof(*level_rows)) : NULL;
   if (lcols == NULL || ucols == NULL ||
       (compact_ptrs && (lptr == NULL || uptr == NULL ||
@@ -2307,7 +2305,7 @@ static int kls_build_compact_match_direct_value_maps(kls_solver *solver) {
     }
   }
   free(inverse);
-  if (getenv("KLS_DISABLE_COMPACT_MATCH_PACKED_INPUT") == NULL) {
+  {
     uint32_t *packed = (uint32_t *)malloc(
       (size_t)(row_count > 0u ? row_count : 1u) * sizeof(*packed));
     if (packed != NULL) {
@@ -2427,12 +2425,6 @@ static int kls_lean_parallel_refresh_offdiag_worker(
 }
 
 static int kls_parallel_offdiag_is_profitable(kls_solver *solver) {
-  if (getenv("KLS_DISABLE_GENERIC_PARALLEL_OFFDIAG") != NULL) {
-    return 0;
-  }
-  if (getenv("KLS_ENABLE_GENERIC_PARALLEL_OFFDIAG") != NULL) {
-    return 1;
-  }
   if (solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->numeric->Offp == NULL ||
       solver->symbolic->nblocks <= 1u || solver->options.threads < 2) {
@@ -4675,13 +4667,7 @@ static void kls_lean_parallel_worker_run(
   }
   const int symmetric_scalar_fringe_lean_class =
     shared->lean_symmetric_scalar_fringe_mode;
-  const int clean_scratch_disabled =
-    getenv("KLS_DISABLE_LEAN_CLEAN_SCRATCH") != NULL ||
-    (shared->lean_compact_match_mode &&
-     getenv("KLS_DISABLE_COMPACT_MATCH_CLEAN_SCRATCH") != NULL) ||
-    (symmetric_scalar_fringe_lean_class &&
-     getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_CLEAN_SCRATCH") != NULL);
-  if (!solver->lean_parallel_scratch_clean || clean_scratch_disabled) {
+  if (!solver->lean_parallel_scratch_clean) {
     memset(worker->x, 0, (size_t)solver->n * sizeof(*worker->x));
   }
   if (shared->value_prep_input != NULL &&
@@ -4737,7 +4723,6 @@ static void kls_lean_parallel_worker_run(
     ? shared->lean_rows : solver->row_refactor_level_rows;
   const UF_long stride = (UF_long)shared->thread_count;
   const int symmetric_scalar_fringe_hoisted_worker =
-    getenv("KLS_DISABLE_SYMMETRIC_SCALAR_FRINGE_HOISTED_WORKER") == NULL &&
     symmetric_scalar_fringe_lean_class && shared->rs == NULL &&
     solver->row_refactor_input_ptr != NULL &&
     solver->row_refactor_input_cols != NULL &&
@@ -4793,14 +4778,9 @@ static void kls_lean_parallel_worker_run(
     }
     return;
   }
-  const int scaled_generic_hoisted_worker =
-    shared->rs != NULL &&
-    getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL;
   const int generic_hoisted_worker =
-    getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
     !shared->lean_compact_match_mode &&
     !symmetric_scalar_fringe_lean_class &&
-    (shared->rs == NULL || scaled_generic_hoisted_worker) &&
     solver->lean_snode_run == NULL &&
     solver->row_refactor_input_ptr != NULL &&
     solver->row_refactor_input_cols != NULL &&
@@ -4815,7 +4795,7 @@ static void kls_lean_parallel_worker_run(
     solver->numeric != NULL && solver->numeric->Udiag != NULL &&
     (shared->rs == NULL || solver->numeric->Pnum != NULL);
   if (generic_hoisted_worker) {
-    if (scaled_generic_hoisted_worker) {
+    if (shared->rs != NULL) {
       if (shared->lean_generic_packed_mode &&
           solver->lean_scalar_btf_prefix == 0u &&
           solver->lean_generic_packed_rows32 != NULL &&
@@ -4942,7 +4922,6 @@ static void kls_lean_parallel_worker_run(
   }
   if (shared->lean_compact_match_mode) {
     const int hoisted_worker =
-      getenv("KLS_DISABLE_COMPACT_MATCH_HOISTED_WORKER") == NULL &&
       solver->lean_user_values_active &&
       shared->lean_grouped_done_mode && shared->lean_row_values_mode &&
       solver->row_refactor_input_user_pos != NULL &&
@@ -5146,13 +5125,8 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     shared->lean_compact_match_mode ||
     (!symmetric_scalar_fringe_lean_mode &&
      solver->lean_snode_run == NULL);
-  const int scaled_generic_grouped_done =
-    rs != NULL &&
-    getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL &&
-    getenv("KLS_DISABLE_SCALED_GENERIC_GROUPED_DONE") == NULL;
   const int generic_grouped_done =
     grouped_done_ready &&
-    (rs == NULL || scaled_generic_grouped_done) &&
     generic_grouped_done_consumer &&
     kls_lean_grouped_done_is_profitable(solver, thread_count, rows);
   shared->lean_grouped_done_mode =
@@ -5164,23 +5138,17 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
              producer phase; combining them can publish a numerically
              incomplete dependency generation despite a successful return.
              Keep both optimizations independently, but never compose them. */
-          !deferred_value_prep &&
-          getenv("KLS_DISABLE_GENERIC_HOISTED_WORKER") == NULL &&
-          getenv("KLS_DISABLE_GENERIC_GROUPED_DONE") == NULL);
+          !deferred_value_prep);
   const UF_long factor_entries =
     solver->numeric->lnz + solver->numeric->unz;
   const int generic_scaled_row_values =
     rs != NULL && factor_entries > 0u &&
     solver->common.flops >= 4.0 * (double)factor_entries;
   shared->lean_row_values_mode =
-    (shared->lean_compact_match_mode ||
-     ((rs == NULL ||
-       generic_scaled_row_values ||
-       getenv("KLS_ENABLE_SCALED_LEAN_ROW_FACTOR") != NULL) &&
+    shared->lean_compact_match_mode ||
+     ((rs == NULL || generic_scaled_row_values) &&
       solver->i16solve_l != NULL && solver->i16solve_u != NULL &&
-      solver->i16solve_loff != NULL && solver->i16solve_uoff != NULL &&
-      getenv("KLS_DISABLE_GENERIC_LEAN_ROW_FACTOR") == NULL)) &&
-    getenv("KLS_DISABLE_COMPACT_MATCH_ROW_FACTOR") == NULL;
+      solver->i16solve_loff != NULL && solver->i16solve_uoff != NULL);
   shared->lean_forward_solve_work =
     solver->fused_refactor_solve_requested &&
       solver->symbolic != NULL && solver->symbolic->nblocks == 1u &&
@@ -5237,8 +5205,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->lean_parallel_grouped_token != NULL &&
     solver->lean_parallel_grouped_done != NULL &&
     (solver->i32solve_rhs_perm32 != NULL ||
-     solver->i16solve_rhs_perm != NULL) &&
-    getenv("KLS_DISABLE_GENERIC_GROUPED_RECIP_WORKER") == NULL;
+     solver->i16solve_rhs_perm != NULL);
   int generic_i16ptr_grouped_recip_worker = 0;
 
   shared->lean_refactor_mode = 1;
@@ -5252,7 +5219,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->singular_col = KLS_KLU_EMPTY;
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   solver->lean_scalar_btf_prefix = 0u;
-  if (getenv("KLS_DISABLE_LEAN_SCALAR_PREFIX") == NULL && rs == NULL &&
+  if (rs == NULL &&
       !shared->lean_compact_match_mode &&
       !symmetric_scalar_fringe_lean_mode &&
       solver->lean_snode_run == NULL && solver->symbolic != NULL &&
@@ -5404,8 +5371,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->solve_refine_values != NULL &&
     solver->solve_refine_values != numeric_values &&
     (solver->nnz >= (UF_long)(16384 * thread_count) ||
-     compact_parallel_refine_copy) &&
-    getenv("KLS_DISABLE_PARALLEL_REFINE_COPY") == NULL;
+     compact_parallel_refine_copy);
   shared->refine_copy_input =
     parallel_refine_copy ? numeric_values : NULL;
   shared->refine_copy_output =
@@ -5565,13 +5531,9 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   const int scaled_hoisted_i16_capable =
     scaled && !generic_supernode_values &&
     kls_repeated_update_workload(&solver->options) &&
-    solver->n <= (UF_long)UINT16_MAX + 1u &&
-    getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL &&
-    getenv("KLS_DISABLE_SCALED_LEAN_I16_INDICES") == NULL;
-  if (getenv("KLS_DISABLE_LEAN_I16_INDICES") == NULL &&
-      (generic_i16_capable || generic_snode_i16_capable ||
-       scaled_hoisted_i16_capable ||
-       getenv("KLS_ENABLE_LEAN_I16_INDICES") != NULL)) {
+    solver->n <= (UF_long)UINT16_MAX + 1u;
+  if (generic_i16_capable || generic_snode_i16_capable ||
+      scaled_hoisted_i16_capable) {
     (void)kls_build_lean_row_i16_indices(solver);
   }
   if (solver->input_to_csc != NULL && solver->values != NULL &&
@@ -5618,7 +5580,6 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
       solver->row_refactor_input_ptr[n] == solver->nnz &&
       solver->nnz >=
         (UF_long)4096u * (UF_long)solver->options.threads &&
-      getenv("KLS_DISABLE_SCALED_GENERIC_HOISTED_WORKER") == NULL &&
       getenv("KLS_DISABLE_SCALED_FUSED_SCALE") == NULL;
     if (fused_scale_mode &&
         getenv("KLS_DISABLE_SCALED_FUSED_DIRECT_RS") == NULL) {

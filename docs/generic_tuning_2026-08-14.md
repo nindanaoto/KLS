@@ -348,8 +348,9 @@ column streams is one O(L+U) pass.  Measured H16/H24/H32 geometric ratios were
 and H100 were 0.992 and 0.989.  One-thread measurements were neutral apart from
 the same setup cost, so automatic construction is confined to parallel
 lifecycles.  Allocation or range-check failure retains the established 64-bit
-worker, and `KLS_DISABLE_LEAN_I16_INDICES=1` remains the existing diagnostic
-fallback.
+worker. At the time of this experiment, `KLS_DISABLE_LEAN_I16_INDICES=1`
+provided a diagnostic fallback; that override was later removed in the
+lean-worker control cleanup, without removing the allocation/range fallback.
 
 The decisive comparison used one final executable on both sides, with compact
 indices enabled normally versus disabled by that diagnostic control.  Ten

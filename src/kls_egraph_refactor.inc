@@ -7650,8 +7650,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     !solver->parallel_refine_values_copied &&
     solver->solve_refine_values != NULL &&
     solver->solve_refine_values != numeric_values &&
-    solver->nnz >= (UF_long)(16384 * thread_count) &&
-    getenv("KLS_DISABLE_PARALLEL_REFINE_COPY") == NULL;
+    solver->nnz >= (UF_long)(16384 * thread_count);
   shared->refine_copy_input =
     parallel_refine_copy ? numeric_values : NULL;
   shared->refine_copy_output =

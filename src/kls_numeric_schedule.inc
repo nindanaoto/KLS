@@ -3406,8 +3406,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       (!kls_uses_structural_initial_pivot_tolerance(solver)) &&
       solver->row_perm == NULL && solver->row_scale == NULL &&
       solver->col_scale == NULL && numeric_values != NULL &&
-      solver->nnz >= (UF_long)(16384 * solver->options.threads) &&
-      getenv("KLS_DISABLE_PARALLEL_REFINE_COPY") == NULL) {
+      solver->nnz >= (UF_long)(16384 * solver->options.threads)) {
     solver->solve_refine_values = (double *)malloc(
       (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
   }
