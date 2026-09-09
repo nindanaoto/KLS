@@ -6277,32 +6277,15 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
         const UF_long *q = solver->symbolic->Q;
         const double *rs = solver->numeric->Rs;
         double *work = (double *)solver->numeric->Xwork;
-        const int trace_row_solve_phases =
-          getenv("KLS_TRACE_ROW_SOLVE_PHASES") != NULL;
-        const double trace_row_solve_begin = trace_row_solve_phases
-          ? kls_now_seconds() : 0.0;
-        double trace_row_solve_mark = trace_row_solve_begin;
-#define KLS_ROW_SOLVE_PHASE_MARK(name)                                  \
-        do {                                                            \
-          if (trace_row_solve_phases) {                                 \
-            const double trace_now = kls_now_seconds();                 \
-            fprintf(stderr, "KLS row solve %-12s %.3fms total %.3fms\n", \
-                    (name), 1e3 * (trace_now - trace_row_solve_mark),    \
-                    1e3 * (trace_now - trace_row_solve_begin));          \
-            trace_row_solve_mark = trace_now;                           \
-          }                                                             \
-        } while (0)
         for (UF_long k = 0; k < n; ++k) {
           const double rhs_value = x[pnum[k]];
           work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
         }
-        KLS_ROW_SOLVE_PHASE_MARK("input");
 
         const kls_first_separator_queue_plan *plan =
           &solver->row_solve_separator_plan;
         int ok = kls_run_parallel_row_solve_separator_private(
           solver, pool, thread_count, &l_view, work);
-        KLS_ROW_SOLVE_PHASE_MARK("private L");
         if (ok) {
           for (UF_long pos = 0; pos < plan->pipeline_rows_count; ++pos) {
             const UF_long row = plan->pipeline_rows[pos];
@@ -6313,7 +6296,6 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
             kls_row_solve_view_row(solver, &l_view, work, row);
           }
         }
-        KLS_ROW_SOLVE_PHASE_MARK("pipeline L");
         if (ok) {
           for (UF_long pos = plan->pipeline_rows_count; pos > 0u; --pos) {
             const UF_long row = plan->pipeline_rows[pos - 1u];
@@ -6324,22 +6306,17 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
             kls_row_solve_view_row(solver, &u_view, work, row);
           }
         }
-        KLS_ROW_SOLVE_PHASE_MARK("pipeline U");
         if (ok) {
           ok = kls_run_parallel_row_solve_separator_private(
             solver, pool, thread_count, &u_view, work);
         }
-        KLS_ROW_SOLVE_PHASE_MARK("private U");
         if (ok) {
           for (UF_long k = 0; k < n; ++k) {
             x[q[k]] = work[k];
           }
-          KLS_ROW_SOLVE_PHASE_MARK("output");
-#undef KLS_ROW_SOLVE_PHASE_MARK
           kls_record_row_solve_parallel_run(solver, 0u, 0u, 1u, 1u);
           return 1;
         }
-#undef KLS_ROW_SOLVE_PHASE_MARK
       }
     }
   }
@@ -7874,17 +7851,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->btf_unscaled_plain =
     selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
     kls_egraph_btf_plain_cluster_allowed(shared);
-  if (getenv("KLS_TRACE_PLAIN_SINGLE_UNSCALED_EGRAPH") != NULL) {
-    fprintf(stderr,
-            "KLS plain single unscaled EGraph: active=%d kernel=%d "
-            "check=%d padded=%d snode=%d pair=%d/%d stream=%d/%d "
-            "\n",
-            shared->single_unscaled_plain, (int)selected_kernel,
-            shared->check_pivots, solver->padded_active,
-            shared->snode_run_end != NULL, solver->eg_pair_choice,
-            solver->eg_pair_pending, solver->eg_stream_choice,
-            solver->eg_stream_pending);
-  }
 
   atomic_store_explicit(&shared->btf_scalar_run_exec_runs, 0ul,
                         memory_order_release);
