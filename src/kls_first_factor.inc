@@ -1666,7 +1666,6 @@ typedef struct kls_row_first_block_context {
   int scale;
   int use_separator_for_block;
   int use_pivot_col_limit;
-  int strict_separator_pivot_scope;
   double tol;
 } kls_row_first_block_context;
 
@@ -2139,7 +2138,6 @@ static int kls_row_first_collect_pivot_choice(
       const int exact_component = col_component == pivot_component;
       if (within_limit &&
           separator_pos <= pivot_component_last &&
-          (!ctx->strict_separator_pivot_scope || exact_component) &&
           abs_value > scoped_best_abs) {
         scoped_best_abs = abs_value;
         choice->scoped_abs = abs_value;
@@ -5520,8 +5518,6 @@ typedef struct kls_row_first_pipeline_shared {
   int active_catchup_batch_enabled;
 
   int pivot_supernode_rebase_enabled;
-  int supernode_producer_batch_enabled;
-  int supernode_producer_batch_active;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
@@ -5612,186 +5608,6 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   return 1;
 }
 
-static int kls_row_first_pipeline_worker_supernode_batch_candidate(
-  const kls_row_first_pipeline_shared *shared,
-  const kls_row_first_pipeline_worker *worker,
-  UF_long dep_begin,
-  UF_long dep_end) {
-  if (shared == NULL || worker == NULL || worker->active_state == NULL ||
-      worker->workspace.x == NULL || worker->workspace.mark == NULL ||
-      worker->workspace.dep_heap == NULL ||
-      shared->row_done == NULL || shared->ctx == NULL ||
-      dep_begin > dep_end || dep_end >= shared->ctx->nk) {
-    return 0;
-  }
-  const kls_row_first_partial_row *state = worker->active_state;
-  if (worker->active_order_epoch != shared->order_epoch) {
-    return 0;
-  }
-
-  if (worker->external_update_active) {
-    return 0;
-  }
-  if (state->row >= shared->ctx->nk || dep_end >= state->row ||
-      state->dep_heap_size == 0u) {
-    return 0;
-  }
-  if (worker->workspace.mark[dep_begin] != state->generation) {
-    return 0;
-  }
-  if (worker->workspace.dep_heap[0] != dep_begin) {
-    return 0;
-  }
-  if (!kls_row_first_dependency_ready(shared->row_done,
-                                      shared->active_rank,
-                                      shared->completed_pos,
-                                      dep_begin)) {
-    return 0;
-  }
-  const UF_long ready_end =
-    kls_row_first_ready_supernode_end(
-      shared->supernode_start, shared->supernode_end, shared->row_done,
-      shared->active_rank, shared->ctx->nk, shared->supernode_valid_begin,
-      shared->completed_pos, state->row, dep_begin);
-  if (ready_end < dep_end) {
-    return 0;
-  }
-  return 1;
-}
-
-static int kls_row_first_pipeline_apply_supernode_producer_batch(
-  kls_row_first_pipeline_shared *shared,
-  kls_row_first_pipeline_worker *current_worker,
-  UF_long dep_begin,
-  UF_long dep_end) {
-  if (shared == NULL || current_worker == NULL ||
-      !shared->producer_batch_enabled ||
-      !shared->supernode_producer_batch_enabled ||
-      shared->workers == NULL || shared->batch_targets == NULL ||
-      shared->batch_target_capacity <= 1 || shared->ctx == NULL ||
-      shared->u_entries == NULL || shared->workspace == NULL ||
-      shared->workspace->u_row_ptr == NULL ||
-      shared->workspace->u_row_end == NULL ||
-      shared->udiag_values == NULL ||
-      dep_begin >= dep_end || dep_end >= shared->ctx->nk) {
-    return 1;
-  }
-  if (shared->supernode_start == NULL || shared->supernode_end == NULL ||
-      dep_begin < shared->supernode_valid_begin ||
-      shared->supernode_start[dep_begin] != dep_begin ||
-      shared->supernode_end[dep_begin] < dep_end) {
-    return 1;
-  }
-
-  const UF_long run_rows = dep_end - dep_begin + 1u;
-  UF_long run_entries = 0u;
-  for (UF_long dep = dep_begin; dep <= dep_end; ++dep) {
-    const UF_long row_begin = shared->workspace->u_row_ptr[dep];
-    const UF_long row_end = shared->workspace->u_row_end[dep];
-    if (row_begin > row_end || row_end > shared->u_entries->count ||
-        shared->udiag_values[dep] == 0.0) {
-      return 1;
-    }
-    kls_row_first_stats_add(&run_entries, row_end - row_begin);
-  }
-  if (run_entries == 0u) {
-    return 1;
-  }
-
-  UF_long target_count = 0u;
-  for (int tid = 0; tid < shared->worker_count; ++tid) {
-    kls_row_first_pipeline_worker *worker = shared->workers + tid;
-    if (worker == current_worker) {
-      continue;
-    }
-    if (!kls_row_first_pipeline_worker_supernode_batch_candidate(
-          shared, worker, dep_begin, dep_end)) {
-      continue;
-    }
-    if (target_count >= (UF_long)shared->batch_target_capacity) {
-      return 0;
-    }
-    shared->batch_targets[target_count].worker = worker;
-    shared->batch_targets[target_count].state = worker->active_state;
-    shared->batch_targets[target_count].lij = 0.0;
-    target_count++;
-  }
-
-  if (target_count < 2u) {
-    return 1;
-  }
-  const UF_long saved_targets = target_count - 1u;
-  const UF_long saved_stream =
-    saved_targets != 0u && run_entries > UF_long_max / saved_targets
-      ? UF_long_max
-      : run_entries * saved_targets;
-  if (saved_stream < KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM) {
-    return 1;
-  }
-
-  /*
-   * The opt-in supernode producer can be expensive; claim target states and
-   * run it outside the pipeline mutex while owner threads wait on the gate.
-   */
-  shared->supernode_producer_batch_active = 1;
-  for (UF_long t = 0; t < target_count; ++t) {
-    kls_row_first_pipeline_worker *worker =
-      shared->batch_targets[t].worker;
-    worker->external_update_active = 1;
-  }
-
-  pthread_mutex_unlock(&shared->lock);
-  int ok = 1;
-  for (UF_long t = 0; t < target_count; ++t) {
-    kls_row_first_pipeline_worker *worker =
-      shared->batch_targets[t].worker;
-    kls_row_first_partial_row *state = shared->batch_targets[t].state;
-    UF_long applied_rows = 0u;
-    if (!kls_row_first_entries_reserve_append(&worker->l_entries,
-                                              run_rows)) {
-      ok = 0;
-      break;
-    }
-    const int compact_status =
-      kls_row_first_partial_apply_supernode_run_compact(
-        shared->ctx, &worker->workspace, &worker->l_entries,
-        shared->u_entries, shared->udiag_values,
-        shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-        state, dep_begin, dep_end, &applied_rows);
-    if (compact_status < 0) {
-      ok = 0;
-      break;
-    }
-    if (compact_status == 0 &&
-        !kls_row_first_partial_apply_supernode_run_scalar(
-          shared->ctx, &worker->workspace, &worker->l_entries,
-          shared->u_entries, shared->udiag_values,
-          shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-          state, dep_begin, dep_end, &applied_rows)) {
-      ok = 0;
-      break;
-    }
-    if (applied_rows != run_rows) {
-      ok = 0;
-      break;
-    }
-    worker->pipeline_supernode_update_groups++;
-    worker->pipeline_supernode_update_rows += run_rows;
-  }
-  pthread_mutex_lock(&shared->lock);
-  for (UF_long t = 0; t < target_count; ++t) {
-    kls_row_first_pipeline_worker *worker =
-      shared->batch_targets[t].worker;
-    worker->external_update_active = 0;
-  }
-  shared->supernode_producer_batch_active = 0;
-  pthread_cond_broadcast(&shared->cond);
-  if (!ok) {
-    return 0;
-  }
-
-  return 1;
-}
 
 static int kls_row_first_pipeline_apply_scalar_producer_targets(
   const kls_row_first_pipeline_shared *shared,
@@ -6179,15 +5995,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
     }
 
     pthread_mutex_lock(&shared->lock);
-    while (!shared->failed &&
-           shared->supernode_producer_batch_active) {
-      if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
-        kls_row_first_pipeline_mark_failed(
-          shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
-        pthread_cond_broadcast(&shared->cond);
-        break;
-      }
-    }
     if (!shared->failed) {
       {
         adopted_lookahead =
@@ -6276,8 +6083,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
       pthread_mutex_lock(&shared->lock);
       int wait_partial = 0;
       while (!shared->failed && shared->completed_pos != pos) {
-        if (shared->supernode_producer_batch_active ||
-            worker->external_update_active) {
+        if (worker->external_update_active) {
           if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
             kls_row_first_pipeline_mark_failed(
               shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
@@ -6329,8 +6135,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
         retry_row = 1;
       }
       while (!retry_row && !shared->failed &&
-             (shared->supernode_producer_batch_active ||
-              worker->external_update_active)) {
+             worker->external_update_active) {
         if (pthread_cond_wait(&shared->cond, &shared->lock) != 0) {
           kls_row_first_pipeline_mark_failed(
             shared, KLS_ROW_FIRST_PIPELINE_FAIL_THREAD);
@@ -6497,20 +6302,6 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               kls_row_first_pipeline_publish_completed_panel(shared, row);
 
               shared->completed_pos = pos + 1u;
-              if (!pivoted &&
-                  shared->supernode_start != NULL &&
-                  row < shared->ctx->nk) {
-                const UF_long supernode_dep =
-                  shared->supernode_start[row];
-                if (supernode_dep < row &&
-                    supernode_dep >= shared->supernode_valid_begin &&
-                    shared->supernode_end[supernode_dep] >= row &&
-                    !kls_row_first_pipeline_apply_supernode_producer_batch(
-                      shared, worker, supernode_dep, row)) {
-                  kls_row_first_pipeline_mark_failed(
-                    shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
-                }
-              }
               if (!pivoted &&
                   !kls_row_first_pipeline_apply_producer_batch(
                     shared, worker, row)) {
@@ -6723,13 +6514,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
 
   shared.pivot_supernode_rebase_enabled =
     !kls_row_pipeline_pivot_supernode_rebase_env_disabled();
-  shared.supernode_producer_batch_enabled =
-    shared.producer_batch_enabled &&
-    kls_row_pipeline_supernode_producer_batch_env_enabled();
-
-  {
-
-  }
 
   atomic_init(&shared.next_pos, (unsigned long)begin);
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {
@@ -8969,8 +8753,6 @@ static int kls_row_first_parallel_factor_block(
   row_ctx.scaled = shared->scaled;
   row_ctx.scale = shared->scale;
   row_ctx.use_separator_for_block = use_separator_for_block;
-  row_ctx.strict_separator_pivot_scope =
-    kls_row_first_strict_separator_pivot_scope_env_enabled();
   row_ctx.tol = shared->tol;
 
   kls_row_first_row_stats row_stats;
@@ -10935,8 +10717,6 @@ static int kls_try_first_factor_row_uplooking_blocks_impl(
     row_ctx.scaled = scaled;
     row_ctx.scale = (int)common->scale;
     row_ctx.use_separator_for_block = use_separator_for_block;
-    row_ctx.strict_separator_pivot_scope =
-      kls_row_first_strict_separator_pivot_scope_env_enabled();
     row_ctx.tol = tol;
 
     kls_row_first_workspace row_workspace;

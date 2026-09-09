@@ -16354,6 +16354,9 @@ first 65536-row progress checkpoint in 45s. This rejects strict adjacent
 claim-run ownership as the missing mechanism even with incremental output
 streaming; the next owner must not be tied to adjacent compact claim runs.
 
+Historical note: the strict-scope experiment below was subsequently removed
+in `producer_experiment_trim.md`; default retained-extent pivoting remains.
+
 The next paper-gap check isolated SubtreeLU's component-local pivoting rule
 from the wider row/panel owner work. `KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE=1`
 keeps normal behavior off by default but, when enabled, filters

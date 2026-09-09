@@ -296,12 +296,6 @@ KLS_DEFINE_ENV_FLAG(kls_row_pipeline_active_catchup_env_enabled,
 KLS_DEFINE_ENV_FLAG(kls_row_pipeline_pivot_supernode_rebase_env_disabled,
                     "KLS_DISABLE_ROW_PIPELINE_PIVOT_SUPERNODE_REBASE")
 
-KLS_DEFINE_ENV_FLAG(kls_row_pipeline_supernode_producer_batch_env_enabled,
-                    "KLS_ENABLE_ROW_PIPELINE_SUPERNODE_PRODUCER_BATCH")
-
-KLS_DEFINE_ENV_FLAG(kls_row_first_strict_separator_pivot_scope_env_enabled,
-                    "KLS_ENABLE_ROW_FIRST_STRICT_SEPARATOR_PIVOT_SCOPE")
-
 static int kls_auto_first_factor_has_separator_parallel_row_up(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
