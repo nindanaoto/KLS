@@ -12797,12 +12797,6 @@ static int kls_generic_predicted_diagonal_values_capable(
   free(pinv);
   const int capable = valid &&
     (pressured == 0u || recovered >= pressured - pressured / 4u);
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr,
-            "KLS predicted lifecycle value census: valid=%d pressure="
-            "%ld recovered=%ld capable=%d\n",
-            valid, (long)pressured, (long)recovered, capable);
-  }
   return capable;
 }
 
@@ -12828,10 +12822,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       solver->options.threads <= 1 ||
       (solver->n < 20000 && !solver->block_trial_active) ||
       solver->options.pivot_tolerance <= 0.0) {
-    if (solver != NULL && solver->block_trial_active &&
-        getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS block: predicted gate1\n");
-    }
     return 0;
   }
   if (solver->common.scale > 0 &&
@@ -12847,10 +12837,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   const UF_long *Q = symbolic->Q;
   const UF_long *R = symbolic->R;
   if (P == NULL || Q == NULL || R == NULL || maxblock < 2) {
-    if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS block: predicted gate2 maxblock=%ld nblocks=%ld\n",
-              (long)maxblock, (long)nblocks);
-    }
     return 0;
   }
   /* The KLU first factorization only becomes pattern-discovery bound at
@@ -12919,10 +12905,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
        promotion will replace: the parallel predicted fill is far
        cheaper than a serial KLU first factorization, and a predicted
        numeric also keeps the unmeasured scale re-trials off. */
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: skipped n=%ld est_lnz=%.3e\n",
-              (long)n, symbolic->lnz);
-    }
     return 0;
   }
 
@@ -12958,11 +12940,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       free(pinv_probe);
       if (missing * 4u > (UF_long)n &&
           getenv("KLS_PREDICTED_TRY_SCALED") == NULL) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS predicted: skipped, structural diagonal missing "
-                  "%ld of %ld\n", (long)missing, (long)n);
-        }
         return 0;
       }
     }
@@ -13081,10 +13058,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
          numeric->Llen != NULL && numeric->Ulen != NULL &&
          numeric->LUsize != NULL && numeric->LUbx != NULL &&
          numeric->Udiag != NULL && numeric->Work != NULL;
-    if (!ok && getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: skeleton alloc failed status=%d\n",
-              (int)common->status);
-    }
     if (ok) {
       for (UF_long block = 0; block < nblocks; ++block) {
         numeric->LUbx[block] = NULL;
@@ -13108,10 +13081,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         const UF_long newrow = pinv[solver->row_idx[p]];
         if (newrow < k1) {
           if (poff >= symbolic->nzoff) {
-            if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-              fprintf(stderr, "KLS predicted: off overflow at col %ld\n",
-                      (long)k);
-            }
             ok = 0;
             break;
           }
@@ -13119,32 +13088,16 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
     }
-    if (ok && getenv("KLS_TRACE_PREDICTED") != NULL &&
-        solver->block_trial_active) {
-      fprintf(stderr, "KLS predicted: off section done\n");
-    }
     if (ok) {
       numeric->Offp[n] = poff;
       ok = poff == symbolic->nzoff;
-      if (!ok && getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS predicted: off count %ld != nzoff %ld\n",
-                (long)poff, (long)symbolic->nzoff);
-      }
     }
   }
 
-  double kls_bp_union = 0.0, kls_bp_p1 = 0.0, kls_bp_lay = 0.0,
-         kls_bp_p2 = 0.0;
   for (UF_long block = 0; block < nblocks && ok; ++block) {
     const UF_long k1 = R[block];
     const UF_long k2 = R[block + 1u];
     const UF_long nk = k2 - k1;
-    double kls_bp_t = kls_now_seconds();
-    if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL &&
-        nk >= 2) {
-      fprintf(stderr, "KLS predicted: constructing block %ld nk=%ld\n",
-              (long)block, (long)nk);
-    }
     if (nk < 2) {
       if (!generic_nd_fill_only) {
         numeric->Lip[k1] = 0;
@@ -13218,10 +13171,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
       if (diag_present != nk && !solver->block_trial_active) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr, "KLS predicted: diag precheck %ld/%ld\n",
-                  (long)diag_present, (long)nk);
-        }
         ok = 0;
         break;
       }
@@ -13320,13 +13269,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         diag_seen = nk;
       }
       if (diag_seen != nk || out > 2u * bnz + nk) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS predicted: block reject nk=%ld diag=%ld/%ld union=%ld"
-                  " bound=%ld\n",
-                  (long)nk, (long)diag_seen, (long)nk, (long)out,
-                  (long)(2u * bnz + nk));
-        }
         free(ucol_ptr);
         free(urows);
         ok = 0;
@@ -13357,8 +13299,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
     }
-    kls_bp_union += kls_now_seconds() - kls_bp_t;
-    kls_bp_t = kls_now_seconds();
     /* Pass 1: row reach counts give Ulen (row pattern length) and column
        counts give Llen.  Large blocks run the byte-identical parallel
        build (reach walks and the pass-2 L-scatter are DRAM-latency-bound
@@ -13443,10 +13383,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       block_lnz += len;
     }
     }
-    if (solver->block_trial_active && getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: block %ld exact lnz=%ld\n",
-              (long)block, (long)block_lnz);
-    }
     if (solver->block_trial_active &&
         block_lnz > 16 * (UF_long)solver->nnz) {
       /* The blocked ordering only pays when the bound stays near the
@@ -13454,8 +13390,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       ok = 0;
       break;
     }
-    kls_bp_p1 += kls_now_seconds() - kls_bp_t;
-    kls_bp_t = kls_now_seconds();
     if (generic_nd_fill_only) {
       UF_long block_unz = 0;
       for (UF_long k = 0; k < nk; ++k) {
@@ -13495,8 +13429,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       ok = 0;
       break;
     }
-    kls_bp_lay += kls_now_seconds() - kls_bp_t;
-    kls_bp_t = kls_now_seconds();
     /* Pass 2: fill sorted index areas.  U column k receives the sorted row
        reach of k directly; L columns receive k appended in ascending order
        as rows are visited. */
@@ -13602,15 +13534,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
       for (UF_long k = 0; !pb_used && k < nk && ok; ++k) {
         if (rowpat_ptr[k] != (UF_long)numeric->Llen[k1 + k]) {
-          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-            fprintf(stderr, "KLS predicted: rowpat mismatch col %ld\n",
-                    (long)(k1 + k));
-          }
           ok = 0;
         }
       }
     }
-    kls_bp_p2 += kls_now_seconds() - kls_bp_t;
     total_lnz += block_lnz + nk;
     {
       UF_long block_unz = 0;
@@ -13627,11 +13554,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
   }
 
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr,
-            "KLS predicted: build phases union=%.2f p1=%.2f layout=%.2f"
-            " p2=%.2f\n", kls_bp_union, kls_bp_p1, kls_bp_lay, kls_bp_p2);
-  }
   free(work_rows);
   free(bcol_ptr);
   free(parent);
@@ -13661,20 +13583,10 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     if ((est_total > 0.0 &&
          exact_total > 2.0 * est_total + (double)n) ||
         generic_nd_fill_reject) {
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr,
-                "KLS predicted: fill reject exact=%.3e est=%.3e "
-                "fallback=%.3e provisional_nd=%d\n",
-                exact_total, est_total, solver->generic_nd_fallback_fill,
-                provisional_nd);
-      }
       ok = 0;
     }
   }
   if (!ok) {
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: construction rejected\n");
-    }
     solver->common.scale = saved_scale;
     if (numeric_adopted) {
       /* the local aliases solver->numeric; failure paths inside the
@@ -13686,24 +13598,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       numeric = NULL;
     }
     if (numeric != NULL) {
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr,
-                "KLS predicted reject dump: n=%ld nzoff=%ld nblocks=%ld"
-                " Pnum=%p Offp=%p Offi=%p Offx=%p Lip=%p LUsize=%p"
-                " LUbx=%p Udiag=%p Rs=%p Pinv=%p Work=%p\n",
-                (long)numeric->n, (long)numeric->nzoff,
-                (long)numeric->nblocks, (void *)numeric->Pnum,
-                (void *)numeric->Offp, (void *)numeric->Offi,
-                (void *)numeric->Offx, (void *)numeric->Lip,
-                (void *)numeric->LUsize, (void *)numeric->LUbx,
-                (void *)numeric->Udiag, (void *)numeric->Rs,
-                (void *)numeric->Pinv, (void *)numeric->Work);
-        for (UF_long b2 = 0; b2 < numeric->nblocks && b2 < 8; ++b2) {
-          fprintf(stderr, "KLS predicted reject blk %ld LUbx=%p size=%zu\n",
-                  (long)b2, numeric->LUbx ? numeric->LUbx[b2] : NULL,
-                  numeric->LUsize ? numeric->LUsize[b2] : 0u);
-        }
-      }
       trilinos_klu_l_free_numeric(&numeric, common);
     }
     *elapsed += kls_now_seconds() - start;
@@ -13732,11 +13626,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
        above supplies the missing fill bound; now let ordinary pivoted KLU
        validate the scaled numeric once under the realized-fill rollback. */
     solver->common.scale = saved_scale;
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr,
-              "KLS predicted: fill-only certificate %.0f+%.0f\n",
-              symbolic->lnz, symbolic->unz);
-    }
     *elapsed += kls_now_seconds() - start;
     return 0;
   }
@@ -13762,22 +13651,11 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   /* The routing gates below need the factor work estimate, which KLU
      computes from the pattern alone. */
   kls_update_numeric_diagnostics(solver, 0);
-  const double build_done = kls_now_seconds();
   kls_maybe_prepare_snode_panels(solver, elapsed);
   kls_snb_maybe_accept(solver, numeric_values, elapsed);
   (void)kls_i32_solve_ready(solver);
-  const double snode_done = kls_now_seconds();
   maybe_prepare_refactor_map(solver, elapsed);
-  const double map_done = kls_now_seconds();
   maybe_prepare_refactor_schedule(solver, elapsed);
-  const double sched_done = kls_now_seconds();
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr,
-            "KLS predicted: preps snode=%.2fs map=%.2fs sched=%.2fs"
-            " fill=%ld+%ld\n",
-            snode_done - build_done, map_done - snode_done,
-            sched_done - map_done, (long)total_lnz, (long)total_unz);
-  }
   UF_long refactor_ok = 0;
   int saw_singular = 0;
   if (getenv("KLS_FORCE_PIVOT_FILL") != NULL || solver->block_trial_active) {
@@ -13836,7 +13714,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     /* forced-fill path set above: skip the value rounds */
   } else
   for (UF_long fill_round = 0; fill_round < fill_round_cap; ++fill_round) {
-    const double first_values_t0 = kls_now_seconds();
     if (solver->zero_pivot_collect != NULL) {
       atomic_store_explicit(&solver->zero_pivot_collect_count, 0,
                             memory_order_relaxed);
@@ -13850,12 +13727,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
          verdict */
       refactor_ok = 0;
       common->status = TRILINOS_KLU_SINGULAR;
-    }
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr,
-              "KLS predicted: value pass %.2fs path=%d ok=%ld\n",
-              kls_now_seconds() - first_values_t0,
-              (int)solver->stats.last_refactor_path, (long)refactor_ok);
     }
     UF_long k = KLS_KLU_EMPTY;
     if (refactor_ok && common->status >= TRILINOS_KLU_OK &&
@@ -13876,10 +13747,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       int batch_failed = 0;
       if (getenv("KLS_PREDICTED_THRESHOLD_WAIVE") != NULL ||
           kls_predicted_probe_first_threshold_shape(solver)) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS predicted: threshold deferred, probe arbitrates\n");
-        }
         break;
       }
       /* Front-first: violations cascade downstream, so fix only the
@@ -13988,18 +13855,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         break;
       }
       if (batch_nudged == 0) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS predicted: threshold waived, probe arbitrates\n");
-        }
         break;
-      }
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr,
-                "KLS predicted: batch nudged %ld columns (total %ld)"
-                " round=%ld\n",
-                (long)batch_nudged, (long)solver->pivot_nudge_count,
-                (long)fill_round);
       }
       if (fill_round >= 1u &&
           (UF_long)batch_nudged >= kls_prev_batch_nudged) {
@@ -14008,9 +13864,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
            reject anyway) - the class pivots numerically and the
            diagonal replay cannot hold; reject now instead of paying
            the remaining rounds and the fill check */
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr, "KLS predicted: nudge divergence reject\n");
-        }
         refactor_ok = 0;
         break;
       }
@@ -14033,13 +13886,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
          refactorization factors the same nudged matrix, and the solve probe
          below still measures the residual against the original values. */
       if (common->status != TRILINOS_KLU_SINGULAR) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS predicted: pass failed status=%d path=%d "
-                  "round=%ld (not singular)\n",
-                  (int)common->status,
-                  (int)solver->stats.last_refactor_path, (long)fill_round);
-        }
         break;
       }
       saw_singular = 1;
@@ -14056,10 +13902,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                       memory_order_relaxed);
       if (zp_count > solver->zero_pivot_collect_cap) {
         zp_count = solver->zero_pivot_collect_cap;
-      }
-      if (zp_count > 1 && getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS predicted: zp batch %ld zeros round=%ld\n",
-                zp_count, (long)fill_round);
       }
     }
     int zp_fatal = 0;
@@ -14085,24 +13927,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
     }
     if (diag_pos == KLS_KLU_EMPTY) {
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr,
-                "KLS predicted: zp diag missing k=%ld oldcol=%ld "
-                "symP[k]=%ld Pnum[k]=%ld collen=%ld\n",
-                (long)k, (long)oldcol, (long)symbolic->P[k],
-                (long)numeric->Pnum[k],
-                (long)(solver->col_ptr[oldcol + 1u] -
-                       solver->col_ptr[oldcol]));
-        for (UF_long p = solver->col_ptr[oldcol];
-             p < solver->col_ptr[oldcol + 1u] &&
-             p < solver->col_ptr[oldcol] + 8; ++p) {
-          fprintf(stderr,
-                  "KLS predicted:   row %ld pinv %ld val %.3e\n",
-                  (long)solver->row_idx[p],
-                  (long)numeric->Pinv[solver->row_idx[p]],
-                  numeric_values[p]);
-        }
-      }
       zp_fatal = 1;
       break;
     }
@@ -14133,14 +13957,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     if (existing != KLS_KLU_EMPTY) {
       solver->pivot_nudge_sigma[existing] *= 32.0;
       if (!(fabs(solver->pivot_nudge_sigma[existing]) <= base)) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS predicted: zp escalation exhausted k=%ld "
-                  "sigma=%.3e base=%.3e udiag=%.6e a_kk=%.6e\n",
-                  (long)k, solver->pivot_nudge_sigma[existing], base,
-                  ((const double *)numeric->Udiag)[k],
-                  numeric_values[diag_pos]);
-        }
         zp_fatal = 1;
         break;
       }
@@ -14164,15 +13980,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       solver->pivot_nudge_sigma[solver->pivot_nudge_count] = tol_sigma;
       solver->pivot_nudge_count++;
     }
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr,
-              "KLS predicted: nudge col=%ld sigma=%.3e round=%ld\n",
-              (long)k,
-              solver->pivot_nudge_sigma[existing != KLS_KLU_EMPTY
-                                          ? existing
-                                          : solver->pivot_nudge_count - 1u],
-              (long)fill_round);
-    }
     }
     if (zp_fatal) {
       break;
@@ -14188,19 +13995,9 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     solver->zero_pivot_collect = NULL;
     solver->zero_pivot_collect_cap = 0;
   }
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr, "KLS predicted: build=%.2fs first_values=%.2fs\n",
-            build_done - start, kls_now_seconds() - build_done);
-  }
   int pivot_fill_used = 0;
   if (!refactor_ok || common->status < TRILINOS_KLU_OK ||
       common->status == TRILINOS_KLU_SINGULAR) {
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr,
-              "KLS predicted: fill reject ok=%ld status=%d singular_col=%ld\n",
-              (long)refactor_ok, (int)common->status,
-              (long)common->singular_col);
-    }
     const int rescue_worthwhile =
       common->status == TRILINOS_KLU_SINGULAR || saw_singular;
     common->status = TRILINOS_KLU_OK;
@@ -14209,10 +14006,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     free_pivot_nudges(solver);
     if (!rescue_worthwhile ||
         !kls_predicted_pivot_rescue(solver, numeric_values, elapsed)) {
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS predicted: pivoting fill reject status=%d\n",
-                (int)common->status);
-      }
       free_numeric(solver);
       common->status = TRILINOS_KLU_OK;
       common->scale = saved_scale;
@@ -14220,9 +14013,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       return 0;
     }
     pivot_fill_used = 1;
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: pivoting fill accepted structurally\n");
-    }
     free_refactor_map(solver);
     free_refactor_schedule(solver);
     maybe_prepare_refactor_map(solver, elapsed);
@@ -14335,20 +14125,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
     free(probe_r);
     free(probe_b);
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: probe_residual=%.3e refine_iters=%d\n",
-              residual, refine_iters);
-    }
     if (!(residual < 1e-9)) {
       if ((getenv("KLS_ENABLE_PIVOT_FILL") != NULL ||
            solver->block_trial_active) &&
           probe_attempt == 0 && !pivot_fill_used &&
           kls_predicted_pivot_rescue(solver, numeric_values, elapsed)) {
         pivot_fill_used = 1;
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS predicted: probe retry after pivoting fill\n");
-        }
         free_refactor_map(solver);
         free_refactor_schedule(solver);
         maybe_prepare_refactor_map(solver, elapsed);
@@ -14748,10 +14530,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
        getenv("KLS_PREDICTED_PIVOT_FILL_LARGE") == NULL) ||
       common->scale > 0 ||
       numeric->Rs != NULL) {
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: pivot fill gate1 maxblock=%ld\n",
-              symbolic != NULL ? (long)symbolic->maxblock : -1L);
-    }
     return 0;
   }
   if (!kls_build_refactor_map(solver) ||
@@ -14759,13 +14537,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
       (symbolic->nblocks > 1u && solver->refactor_block_start == NULL) ||
       solver->refactor_row_idx == NULL ||
       solver->refactor_input_pos == NULL) {
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: pivot fill gate2 map=%d %d %d %d\n",
-              solver->refactor_col_ptr != NULL,
-              solver->refactor_block_start != NULL,
-              solver->refactor_row_idx != NULL,
-              solver->refactor_input_pos != NULL);
-    }
     return 0;
   }
   const UF_long *map_block_start =
@@ -14795,8 +14566,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
   }
 
   int ok = 1;
-  UF_long swap_count = 0;
-  UF_long veto_count = 0;
   for (UF_long block = 0; block < nblocks && ok; ++block) {
     const UF_long k1 = R[block];
     const UF_long k2 = R[block + 1u];
@@ -15007,7 +14776,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
           }
         }
         if (vetoed) {
-          veto_count++;
           if (span_hot != NULL && solver->snode_run_end != NULL) {
             /* mark the span so the targeted closure can open it fully */
             UF_long ss = k;
@@ -15121,7 +14889,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
           }
         }
         ukk = x[k];
-        swap_count++;
       }
       x[k] = 0.0;
       if (ukk == 0.0) {
@@ -15169,11 +14936,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
           solver->pivot_nudge_sigma[solver->pivot_nudge_count] = sigma;
           solver->pivot_nudge_count++;
           ukk = sigma;
-          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-            fprintf(stderr,
-                    "KLS predicted: pivot fill nudge col=%ld sigma=%.3e\n",
-                    (long)gk, sigma);
-          }
         } else {
           common->status = TRILINOS_KLU_SINGULAR;
           common->numerical_rank = gk;
@@ -15194,10 +14956,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
   free(row_cols_ptr);
   free(cand_tried);
   free(row_cols);
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr, "KLS predicted: pivot fill swaps=%ld vetoes=%ld ok=%d\n",
-            (long)swap_count, (long)veto_count, ok);
-  }
   if (!ok) {
     return 0;
   }
@@ -15540,10 +15298,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     *elapsed += kls_now_seconds() - start;
     return;
   }
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr, "KLS block: structure detected %.2fs\n",
-            kls_now_seconds() - start);
-  }
 
   const UF_long n = solver->n;
   const UF_long nnz = solver->nnz;
@@ -15645,10 +15399,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     }
     free(sp_match);
     if (matched < n - n / 50u) {
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS block: match failed (%ld/%ld)\n",
-                (long)matched, (long)n);
-      }
       goto done;
     }
     if (matched != n) {
@@ -15711,10 +15461,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       free(col_matched);
       free(new_perm);
       free(pos_map);
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS block: %ld starved columns moved to tail\n",
-                (long)(n - matched));
-      }
     }
   }
 
@@ -15787,22 +15533,10 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
   trial_col_perm = block_perm;
   block_perm = NULL;
 
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr, "KLS block: match+build done %.2fs\n",
-            kls_now_seconds() - start);
-  }
   trial_symbolic = trilinos_klu_l_analyze_given(n, trial_col_ptr,
                                                 trial_row_idx, NULL, NULL,
                                                 &trial_common);
-  if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr, "KLS block: analyze done %.2fs\n",
-            kls_now_seconds() - start);
-  }
   if (trial_symbolic == NULL || trial_common.status < TRILINOS_KLU_OK) {
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS block: analyze failed status=%d\n",
-              (int)trial_common.status);
-    }
     goto done;
   }
   trial_common.scale = -1;
@@ -15820,12 +15554,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     /* The trial's own symbolic bound already dwarfs the baseline estimate;
        factoring it just to reject on exact fill wastes seconds.  Real fill
        runs below the bound, so keep a generous margin. */
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr,
-              "KLS block: trial skipped, est=%.3g > 4x base est=%.3g\n",
-              trial_symbolic->lnz + trial_symbolic->unz,
-              solver->symbolic->lnz + solver->symbolic->unz);
-    }
     goto done;
   }
 
@@ -15877,7 +15605,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
         }
       }
       if (weak <= weak_cap) {
-        const double plain_start = kls_now_seconds();
         trilinos_klu_l_numeric *plain =
           trilinos_klu_l_factor(trial_col_ptr, trial_row_idx, trial_values,
                                 solver->symbolic, &solver->common);
@@ -15887,20 +15614,7 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
           solver->numeric = plain;
           solver->numeric_is_predicted = 0;
           factored = 1;
-          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-            fprintf(stderr,
-                    "KLS block: plain KLU trial lnz=%ld unz=%ld %.2fs\n",
-                    (long)plain->lnz, (long)plain->unz,
-                    kls_now_seconds() - plain_start);
-          }
         } else {
-          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-            fprintf(stderr,
-                    "KLS block: plain KLU trial rejected status=%d "
-                    "fill=%ld\n",
-                    (int)solver->common.status,
-                    plain != NULL ? (long)(plain->lnz + plain->unz) : -1L);
-          }
           if (plain != NULL) {
             trilinos_klu_l_free_numeric(&plain, &solver->common);
           }
@@ -15913,10 +15627,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
         kls_predicted_pattern_first_factor(solver, trial_values, elapsed);
     }
     solver->block_trial_active = 0;
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS block: trial factor done %.2fs\n",
-              kls_now_seconds() - start);
-    }
 
     if (factored && solver->numeric != NULL) {
       /* Acceptance guard: the baseline ordering's symbolic estimate is the
@@ -15931,11 +15641,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       const double trial_fill =
         (double)(solver->numeric->lnz + solver->numeric->unz);
       if (base_est > 0.0 && trial_fill > base_est) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr,
-                  "KLS block: adoption rejected fill=%.3g > base est=%.3g\n",
-                  trial_fill, base_est);
-        }
         trilinos_klu_l_free_numeric(&solver->numeric, &solver->common);
         solver->numeric = NULL;
         kls_numeric_replaced_invalidate(solver);
@@ -15972,9 +15677,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       trial_col_perm = NULL;
       trial_symbolic = NULL;
       accepted = 1;
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS block: ordering adopted\n");
-      }
     } else {
       solver->col_ptr = old_col_ptr;
       solver->row_idx = old_row_idx;
@@ -16046,17 +15748,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
     if (est_total > 0.0 &&
         (double)(solver->numeric->lnz + solver->numeric->unz) >
           1.6 * est_total) {
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr,
-                "KLS predicted: closure fill reject %.3e vs est %.3e\n",
-                (double)(solver->numeric->lnz + solver->numeric->unz),
-                est_total);
-      }
       return 0;
-    }
-    if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-      fprintf(stderr, "KLS predicted: closed fill=%ld+%ld\n",
-              (long)solver->numeric->lnz, (long)solver->numeric->unz);
     }
   }
   /* The fill must pivot within the very spans the closure guaranteed, so
@@ -16081,32 +15773,13 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
       /* Weak pivots survive behind structural vetoes: open the veto-hot
          spans fully - the minimal closure that legalizes their swaps -
          and refill once. */
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        UF_long hot_count = 0;
-        for (UF_long k = 0; k < solver->n; ++k) {
-          hot_count += span_hot[k];
-        }
-        fprintf(stderr,
-                "KLS predicted: opening %ld veto-hot spans fully\n",
-                (long)hot_count);
-      }
       free_refactor_lu_pointer_cache(solver);
       free_refactor_map(solver);
       free_refactor_schedule(solver);
       if (kls_predicted_suffix_close_numeric_mode(solver, span_hot)) {
-        if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-          fprintf(stderr, "KLS predicted: reclosed fill=%ld+%ld\n",
-                  (long)solver->numeric->lnz, (long)solver->numeric->unz);
-        }
         if (est_total > 0.0 &&
             (double)(solver->numeric->lnz + solver->numeric->unz) >
               1.6 * est_total) {
-          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-            fprintf(stderr,
-                    "KLS predicted: reclose fill reject %.3e vs est %.3e\n",
-                    (double)(solver->numeric->lnz + solver->numeric->unz),
-                    est_total);
-          }
           filled = 0;
         } else {
           filled = kls_predicted_pivoting_fill_hot(solver, numeric_values, NULL);
