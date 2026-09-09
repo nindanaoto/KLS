@@ -779,7 +779,6 @@ static void kls_declined_lean_reaudit_finish(kls_solver *solver) {
    Close outcomes retain the established audit unchanged. */
 static int kls_lean_reaudit_try_decisive(kls_solver *solver) {
   if (solver == NULL ||
-      getenv("KLS_DISABLE_DECISIVE_LEAN_LIFECYCLE_AUDIT") != NULL ||
       solver->lean_reaudit_column_cycle_samples < 2 ||
       solver->lean_reaudit_row_cycle_samples < 2 ||
       solver->lean_reaudit_column_cycle_min <= 0.0 ||
@@ -3378,11 +3377,7 @@ static void kls_scaled_generic_packed_row_worker_run(
       if (row_scale == 0.0) {
         row_scale = 1.0;
       }
-      if (fused_scale_mode > 1) {
-        rs[row] = row_scale;
-      } else {
-        rs[pnum[row]] = row_scale;
-      }
+      rs[row] = row_scale;
       const double row_rs_inv = 1.0 / row_scale;
       for (UF_long p = input_begin; p < input_end; ++p) {
         const UF_long col = in_packed != NULL
@@ -4419,11 +4414,7 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
       if (row_scale == 0.0) {
         row_scale = 1.0;
       }
-      if (fused_scale_mode > 1) {
-        rs[row] = row_scale;
-      } else {
-        rs[pnum[row]] = row_scale;
-      }
+      rs[row] = row_scale;
       const double row_rs_inv = 1.0 / row_scale;
       if (in_packed != NULL) {
         for (UF_long p = input_begin; p < input_end; ++p) {
@@ -5007,16 +4998,9 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     return -1;
   }
   int thread_count = solver->options.threads;
-  const char *threads_env = getenv("KLS_LEAN_PARALLEL_THREADS");
-  if (threads_env != NULL && threads_env[0] != '\0') {
-    const int requested = atoi(threads_env);
-    if (requested >= 2 && requested < thread_count) {
-      thread_count = requested;
-    }
-  } else if (kls_packed_row_worker_representation_capable(solver)) {
+  if (kls_packed_row_worker_representation_capable(solver)) {
     thread_count = kls_packed_row_worker_thread_count(solver, thread_count);
-  } else
-  if ((UF_long)thread_count > solver->row_refactor_level_max_width) {
+  } else if ((UF_long)thread_count > solver->row_refactor_level_max_width) {
     thread_count = (int)solver->row_refactor_level_max_width;
   }
   if (thread_count < 2) {
@@ -5559,32 +5543,22 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   trilinos_klu_l_common *common = &solver->common;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const UF_long n = solver->n;
-  const char *parallel_env = getenv("KLS_ENABLE_LEAN_PARALLEL");
-  int parallel_wanted =
+  const int parallel_wanted =
     solver->options.threads > 1 && solver->n >= 800u &&
     solver->common.flops >= 100000.0 &&
     solver->row_refactor_level_max_width >=
       (UF_long)(2 * solver->options.threads);
-  if (parallel_env != NULL && parallel_env[0] != '\0') {
-    parallel_wanted =
-      !(parallel_env[0] == '0' && parallel_env[1] == '\0');
-  }
   int fused_scale_mode = 0;
   if (scaled) {
     const int scale_cached =
       kls_lean_scale_input_is_unchanged(solver, numeric_values);
     fused_scale_mode =
-      !scale_cached && solver->lean_scale_input_state < 0 &&
+      (!scale_cached && solver->lean_scale_input_state < 0 &&
       parallel_wanted && !generic_supernode_values &&
       solver->lean_snode_run == NULL &&
       solver->row_refactor_input_ptr[n] == solver->nnz &&
       solver->nnz >=
-        (UF_long)4096u * (UF_long)solver->options.threads &&
-      getenv("KLS_DISABLE_SCALED_FUSED_SCALE") == NULL;
-    if (fused_scale_mode &&
-        getenv("KLS_DISABLE_SCALED_FUSED_DIRECT_RS") == NULL) {
-      fused_scale_mode = 2;
-    }
+        (UF_long)4096u * (UF_long)solver->options.threads) ? 2 : 0;
     if (!scale_cached && !fused_scale_mode &&
         !kls_scale_from_row_refactor_stream(solver, numeric_values)) {
       if (!trilinos_klu_l_scale((UF_long)common->scale, n,
@@ -5597,7 +5571,6 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
       kls_arm_lean_scale_input_cache(solver, numeric_values);
     }
   }
-  const char *parallel_gate = getenv("KLS_ENABLE_LEAN_PARALLEL");
   const int parallel_direct_offdiag =
     (solver->lean_deferred_value_prep_active ||
      (solver->lean_user_values_active &&
@@ -5605,18 +5578,14 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     solver->options.threads > 1 &&
     solver->n >= 800u && solver->common.flops >= 100000.0 &&
     solver->row_refactor_level_max_width >=
-      (UF_long)(2 * solver->options.threads) &&
-    !(parallel_gate != NULL && parallel_gate[0] == '0' &&
-      parallel_gate[1] == '\0');
+      (UF_long)(2 * solver->options.threads);
   const int generic_parallel_offdiag =
     !solver->lean_user_values_active &&
     kls_parallel_offdiag_is_profitable(solver) &&
     solver->options.threads > 1 &&
     solver->n >= 800u && solver->common.flops >= 100000.0 &&
     solver->row_refactor_level_max_width >=
-      (UF_long)(2 * solver->options.threads) &&
-    !(parallel_gate != NULL && parallel_gate[0] == '0' &&
-      parallel_gate[1] == '\0');
+      (UF_long)(2 * solver->options.threads);
   if (!parallel_direct_offdiag && !generic_parallel_offdiag &&
       !kls_refresh_row_refactor_offdiag_values(solver, numeric_values)) {
     common->status = TRILINOS_KLU_INVALID;
@@ -5709,7 +5678,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     }
     /* The coverage-selected descriptor is profitable in the hoisted pool
        executor, but its serial chain fallback adds more bookkeeping than it
-       removes.  A resource failure or explicitly disabled pool therefore
+       removes.  A resource failure or unselected pool therefore
        falls back to the ordinary scalar row walk. */
     if (generic_supernode_values) {
       snode_runs = NULL;
@@ -16164,8 +16133,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   }
 
   if (have_group_dag && cluster_levels > 0u &&
-      getenv("KLS_DEFER_ROW_GROUP_THREAD_SLICES") == NULL &&
-            !kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
+      !kls_build_row_refactor_group_thread_slices(solver, thread_count)) {
     return -1;
   }
 
@@ -16219,7 +16187,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   int prepared_separator_flop_queue = 0;
   int prepared_separator_row_dep_queue = 0;
   if (have_group_dag &&
-      getenv("KLS_DISABLE_ROW_REFACTOR_SEPARATOR_FLOP_QUEUE") == NULL &&
       kls_prepare_row_refactor_separator_flop_ready_queue(
         solver, thread_count, &row_ready_groups, &row_ready_slots,
         &row_remaining_preds, &row_tail_groups, &row_owned_private_groups,
