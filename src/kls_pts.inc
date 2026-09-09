@@ -2423,9 +2423,8 @@ static void kls_reset_unsettled_egraph_trials_after_pts(
   }
   if (solver->eg_tt_choice == 0) {
     solver->eg_tt_pending = 0;
-    memset(solver->eg_tt_counts, 0, sizeof(solver->eg_tt_counts));
-    memset(solver->eg_tt_samples, 0, sizeof(solver->eg_tt_samples));
-    memset(solver->eg_tt_min, 0, sizeof(solver->eg_tt_min));
+    solver->eg_tt_samples = 0;
+    solver->eg_tt_min = 0.0;
   }
   if (solver->eg_pair_choice == 0) {
     solver->eg_pair_pending = 0;

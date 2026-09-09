@@ -661,14 +661,10 @@ struct kls_solver {
   double row_publish_probe_seconds; /* measured row-to-column publication
                                        cost for the pending solve-route
                                        experiment */
-  int eg_tt_choice;   /* egraph steady thread trial: 0 undecided, else the
-                         adopted dispatch width (thread count is timing-only
-                         for the checkless refactor - results identical) */
-  int eg_tt_pending;  /* 0 none, 1 full-width sample out, 2 narrow */
-  int eg_tt_counts[2];
-  int eg_tt_samples[2]; /* full width includes one unscored warm-up before
-                           the timed full/half comparison */
-  double eg_tt_min[2];
+  int eg_tt_choice;   /* 0 unset, otherwise the caller's full dispatch width */
+  int eg_tt_pending;  /* full-width baseline sample outstanding */
+  int eg_tt_samples;  /* includes one unscored first-touch warm-up */
+  double eg_tt_min;
   int eg_pair_choice;   /* fused dispatch: 0 undecided (probed after the
                            width verdict), 1 pair, 2 quad, -1 off */
   int eg_pair_pending;  /* probe refactor out: 1 pair arm, 2 quad arm */
@@ -9355,9 +9351,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->row_publish_probe_seconds = 0.0;
   solver->eg_tt_choice = 0;
   solver->eg_tt_pending = 0;
-  memset(solver->eg_tt_counts, 0, sizeof(solver->eg_tt_counts));
-  memset(solver->eg_tt_samples, 0, sizeof(solver->eg_tt_samples));
-  memset(solver->eg_tt_min, 0, sizeof(solver->eg_tt_min));
+  solver->eg_tt_samples = 0;
+  solver->eg_tt_min = 0.0;
   solver->eg_pair_choice = 0;
   solver->eg_pair_pending = 0;
   memset(solver->eg_fuse_min, 0, sizeof(solver->eg_fuse_min));

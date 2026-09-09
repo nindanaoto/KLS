@@ -16962,7 +16962,9 @@ The width-margin sensitivity pass (KLS_EGRAPH_WIDTH_MARGIN override,
 0.90 vs 0.93, two interleaved passes over the stall class): trans5
 gains ~6% at 0.93 and rajat25 leans that way, but dc1 loses ~6%
 symmetric and rajat20/onetone2 wash — no uniform margin improvement
-exists, the 0.9 default stands, and the override stays as a diagnostic.
+exists; the 0.9 default and diagnostic override were retained at that time.
+The later width-trial cleanup removed the opt-in full/half-width experiment
+and its margin override while retaining the full-width fusion baseline.
 The per-row structure (some rows' narrow arm is genuinely 5-10% better,
 others' full width is) would need a second trial sample to separate,
 which is exactly the probe-cost trade the 0.9 margin was set to avoid.

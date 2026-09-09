@@ -6684,13 +6684,8 @@ static kls_egraph_refactor_kernel kls_egraph_refactor_kernel_for(
   return KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
 }
 
-/* Optional steady dispatch-width trial for the pipelined EGraph refactor.
-   Width is timing-only for the checkless refactor: results are identical.
-   The generalized executor now prepartitions level work for the complete
-   caller team; current development/holdout audits, including the former
-   half-width winners, all favor full width while a losing narrow probe costs
-   one complete numeric update.  Use the caller's full team by default and
-   retain the consultation for explicit sensitivity testing. */
+/* Keep the caller's full team. Once the separator layout settles, record
+   a warmed baseline for the independent pair/quad pipeline-fusion trial. */
 static int kls_egraph_steady_thread_count(kls_solver *solver,
                                           int thread_count,
                                           int check_pivots) {
@@ -6698,112 +6693,23 @@ static int kls_egraph_steady_thread_count(kls_solver *solver,
   if (check_pivots) {
     return thread_count;
   }
-  if (thread_count < 4 ||
-      getenv("KLS_DISABLE_EGRAPH_THREAD_TRIAL") != NULL ||
-      (
-       getenv("KLS_ENABLE_EGRAPH_THREAD_TRIAL") == NULL)) {
-    /* The retained plan already partitions work for the complete caller
-       team, so keep full width without paying for a narrow consultation.
-       Pipeline fusion is an independent executor choice: once the separator
-       layout has settled, a tail-dominated dependency graph may consult its
-       existing measured pair/quad tournament on either the ordinary or the
-       private schedule. */
-    solver->eg_tt_choice = thread_count;
-    solver->eg_tt_counts[0] = thread_count;
-    const int separator_settled = solver->eg_separator_choice != 0 &&
-      !solver->eg_separator_pending;
-    const int pipeline_fusion_trial = separator_settled &&
-      thread_count >= 4 &&
-      kls_egraph_pipeline_fusion_trial_worthwhile(solver);
-    if (pipeline_fusion_trial) {
-      if (solver->eg_tt_samples[0] < 2) {
-        solver->eg_tt_pending = 1;
-      } else if (solver->eg_pair_choice == 0 &&
-                 !solver->eg_pair_pending) {
-        solver->eg_pair_pending = 1;
-      }
-    } else if (separator_settled) {
-      solver->eg_pair_choice = -1;
-    }
-    return thread_count;
-  }
-  if (kls_egraph_separator_private_requested(solver) &&
-      solver->eg_separator_choice == 0) {
-    /* Hold width and fusion constant while the two schedule layouts are
-       compared.  Once that verdict settles, their independent timing
-       consultations resume on the retained executor. */
-    return thread_count;
-  }
-  if (solver->generic_nd_numeric_validated &&
-      solver->symbolic != NULL && solver->symbolic->do_btf &&
-      solver->refactor_separator_private_cols != NULL &&
-      solver->refactor_separator_private_thread_ptr != NULL &&
-      solver->refactor_separator_private_thread_count == thread_count &&
-      solver->refactor_separator_private_column_count >=
-        (UF_long)(2 * thread_count) &&
-       solver->refactor_separator_cluster_tail_column_count <=
-        solver->refactor_separator_private_column_count /
-          (UF_long)thread_count + 1u) {
-    /* The constructed separator plan has already partitioned the private
-       domains across the complete caller team and proved that only a bounded
-       tail remains.  Halving or fusing that schedule can only discard exposed
-       parallelism, so settle the timing-only choices from the realized plan. */
-    solver->eg_tt_choice = thread_count;
-    solver->eg_tt_counts[0] = thread_count;
-    if (kls_egraph_pipeline_fusion_trial_worthwhile(solver)) {
-      /* Record one warm full-width baseline after the common first-touch
-         pass, then measure pair and quad decks on the identical retained
-         factor.  Prefix columns keep the same private executor throughout;
-         only the expensive dependency tail changes dispatch granularity. */
-      if (solver->eg_tt_samples[0] < 2) {
-        solver->eg_tt_pending = 1;
-      } else if (solver->eg_pair_choice == 0 &&
-                 !solver->eg_pair_pending) {
-        solver->eg_pair_pending = 1;
-      }
-    } else {
-      solver->eg_pair_choice = -1;
-    }
-    return thread_count;
-  }
-  if (
-      getenv("KLS_ENABLE_EGRAPH_THREAD_TRIAL") == NULL &&
-      solver->eg_tt_choice == 0) {
-    solver->eg_tt_choice = thread_count;
-    solver->eg_tt_counts[0] = thread_count;
-    solver->eg_tt_pending = 1;
-    return thread_count;
-  }
-
-  if (solver->eg_tt_choice > 0) {
-    if (
-        getenv("KLS_ENABLE_EGRAPH_THREAD_TRIAL") == NULL &&
-        solver->eg_tt_samples[0] < 2) {
+  solver->eg_tt_choice = thread_count;
+  const int separator_settled = solver->eg_separator_choice != 0 &&
+    !solver->eg_separator_pending;
+  const int pipeline_fusion_trial = separator_settled &&
+    thread_count >= 4 &&
+    kls_egraph_pipeline_fusion_trial_worthwhile(solver);
+  if (pipeline_fusion_trial) {
+    if (solver->eg_tt_samples < 2) {
       solver->eg_tt_pending = 1;
-      return solver->eg_tt_choice <= thread_count ? solver->eg_tt_choice
-                                                  : thread_count;
-    }
-    if (solver->eg_pair_choice == 0 && !solver->eg_pair_pending) {
-      /* width settled: spend one refactor probing fused pair dispatch
-         (rajat25 -31%, g2_circuit -11% measured; dc1 +39% - per-matrix
-         verdicts only) */
+    } else if (solver->eg_pair_choice == 0 &&
+               !solver->eg_pair_pending) {
       solver->eg_pair_pending = 1;
     }
-    return solver->eg_tt_choice <= thread_count ? solver->eg_tt_choice
-                                                : thread_count;
+  } else if (separator_settled) {
+    solver->eg_pair_choice = -1;
   }
-  /* Compare actual widths for every retained schedule.  Block count is not
-     a predictor of dependency stalls; the measured trial produces identical
-     values and settles the choice for the numeric lifecycle.  The first
-     EGraph pass can still fault/initialize deferred metadata outside the
-     timed kernel.  Give full width one unscored warm-up before comparing it
-     with the narrow arm; otherwise every later implementation appears to
-     beat a cold incumbent merely by running second. */
-  const int half = thread_count / 2 < 2 ? 2 : thread_count / 2;
-  const int side = solver->eg_tt_samples[0] < 2 ? 0 : 1;
-  solver->eg_tt_pending = side + 1;
-  solver->eg_tt_counts[side] = side ? half : thread_count;
-  return solver->eg_tt_counts[side];
+  return thread_count;
 }
 
 static void kls_egraph_release_unused_quad_scratch(kls_solver *solver) {
@@ -6884,12 +6790,6 @@ static int kls_egraph_cluster_premark_dispatch(
     return 0;
   }
   solver->eg_premark_pending = 0;
-  const char *forced = getenv("KLS_PREMARK_EGRAPH_CLUSTER");
-  if (forced != NULL && forced[0] != '\0') {
-    solver->eg_premark_choice =
-      (forced[0] == '0' && forced[1] == '\0') ? -1 : 1;
-    return solver->eg_premark_choice > 0;
-  }
   if (check_pivots) {
     return 0;
   }
@@ -7151,15 +7051,12 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
       }
       solver->eg_fuse_min[probe - 1] = seconds;
       if (probe == 1) {
-        const int side =
-          solver->eg_tt_choice == solver->eg_tt_counts[1] ? 1 : 0;
-        const double none = solver->eg_tt_min[side];
+        const double none = solver->eg_tt_min;
         const double pairm = solver->eg_fuse_min[0];
         const double dominated_pair_ratio =
           kls_egraph_pipeline_fusion_trial_worthwhile(solver) ? 1.01 :
           1.10;
-        if (none > 0.0 && pairm > dominated_pair_ratio * none &&
-            getenv("KLS_DISABLE_EGRAPH_DOMINATED_QUAD_SKIP") == NULL) {
+        if (none > 0.0 && pairm > dominated_pair_ratio * none) {
           /* Pair fusion and quad fusion share the same cross-column
              synchronization and extra SPAs.  For the tail-only consultation
              even a measured 1% pair loss is enough to avoid spending another
@@ -7177,9 +7074,7 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
         solver->eg_pair_pending = 2;
         return;
       }
-      const int side =
-        solver->eg_tt_choice == solver->eg_tt_counts[1] ? 1 : 0;
-      const double none = solver->eg_tt_min[side];
+      const double none = solver->eg_tt_min;
       const double pairm = solver->eg_fuse_min[0];
       const double quadm = solver->eg_fuse_min[1];
       const double fusion_margin =
@@ -7202,57 +7097,19 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
     }
     return;
   }
-  const int side = solver->eg_tt_pending - 1;
+  const int pending = solver->eg_tt_pending;
   solver->eg_tt_pending = 0;
-  if (side >= 0 && side <= 1 && solver->eg_tt_choice > 0 &&
-      solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH) {
-    solver->eg_tt_samples[side]++;
-    if (side == 0 && solver->eg_tt_samples[side] == 1) {
-      return;
-    }
-    if (solver->eg_tt_min[side] <= 0.0 ||
-        seconds < solver->eg_tt_min[side]) {
-      solver->eg_tt_min[side] = seconds;
-    }
-    return;
-  }
-  if (side < 0 || solver->eg_tt_choice != 0 ||
+  if (!pending || solver->eg_tt_choice <= 0 ||
       solver->stats.last_refactor_path != KLS_REFACTOR_PATH_EGRAPH) {
     return;
   }
-  solver->eg_tt_samples[side]++;
-  if (side == 0 && solver->eg_tt_samples[side] == 1) {
-    /* Deliberately unscored: first-touch and deferred-prep work is common to
-       the numeric lifecycle but is not evidence about dispatch width. */
+  solver->eg_tt_samples++;
+  if (solver->eg_tt_samples == 1) {
+    /* Do not score the first-touch warm-up as the fusion baseline. */
     return;
   }
-  if (solver->eg_tt_min[side] <= 0.0 || seconds < solver->eg_tt_min[side]) {
-    solver->eg_tt_min[side] = seconds;
-  }
-  if (solver->eg_tt_samples[0] >= 2 && solver->eg_tt_samples[1] >= 1) {
-    /* One warm sample per side after the common full-width warm-up.  The
-       narrow probe is the trial's whole cost (an ASIC-class narrow refactor
-       can run 1.7x), so deviate from full width only on a decisive margin.
-       KLS_EGRAPH_WIDTH_MARGIN remains an explicit sensitivity override. */
-    double width_margin = 0.9;
-    {
-      static int margin_cached = 0;
-      static double margin_value = 0.9;
-      if (!margin_cached) {
-        const char *env = getenv("KLS_EGRAPH_WIDTH_MARGIN");
-        if (env != NULL && env[0] != '\0') {
-          const double parsed = atof(env);
-          if (parsed > 0.0 && parsed < 1.0) {
-            margin_value = parsed;
-          }
-        }
-        margin_cached = 1;
-      }
-      width_margin = margin_value;
-    }
-    solver->eg_tt_choice =
-      solver->eg_tt_min[1] < width_margin * solver->eg_tt_min[0]
-        ? solver->eg_tt_counts[1] : solver->eg_tt_counts[0];
+  if (solver->eg_tt_min <= 0.0 || seconds < solver->eg_tt_min) {
+    solver->eg_tt_min = seconds;
   }
 }
 
