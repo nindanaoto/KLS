@@ -12808,32 +12808,13 @@ static int kls_generic_predicted_diagonal_values_capable(
 
 static int kls_predicted_probe_first_threshold_shape(
   const kls_solver *solver) {
-  {
-    /* Threshold violations describe a multiplier bound, not an inaccurate
-       solution.  For a lifecycle-funded generic trial, probe the exact
-       unmodified numeric first; accepting still requires the ordinary true
-       residual below, while a failure discards the trial and returns to KLU.
-       This avoids value-dependent diagonal nudges becoming an implicit input
-       classifier. */
-    return kls_generic_repeated_predicted_lifecycle_candidate(solver);
-  }
-
-  if (solver == NULL || solver->symbolic == NULL || solver->n < 100000u ||
-      solver->n > 150000u || solver->nnz > 10u * solver->n ||
-      solver->symbolic->nblocks < 2u ||
-      solver->symbolic->nblocks > 64u ||
-      solver->symbolic->maxblock < 100000u ||
-      solver->common.scale > 0 || solver->common.flops < 2.0e7 ||
-      solver->common.flops >= 1.0e8) {
-    return 0;
-  }
-  /* A nearly whole-matrix BTF block with modest work can carry a handful of
-     large-but-benign multipliers.  Diagonal nudges made that numeric less
-     accurate on the dc/trans cohort, whereas the unmodified factor passed
-     the mandatory true-residual probe and repeated changing-value checks.
-     Let the probe arbitrate this narrow structural class first. */
-  return 1000.0 * (double)solver->symbolic->maxblock >=
-         995.0 * (double)solver->n;
+  /* Threshold violations describe a multiplier bound, not an inaccurate
+     solution.  For a lifecycle-funded generic trial, probe the exact
+     unmodified numeric first; accepting still requires the ordinary true
+     residual below, while a failure discards the trial and returns to KLU.
+     This avoids value-dependent diagonal nudges becoming an implicit input
+     classifier. */
+  return kls_generic_repeated_predicted_lifecycle_candidate(solver);
 }
 
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
