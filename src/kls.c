@@ -11567,7 +11567,7 @@ static void *kls_deferred_prep_main(void *arg) {
   job->elapsed = 0.0;
   if (job->kind == KLS_DEFERRED_PREP_MAP) {
     maybe_prepare_refactor_map(job->solver, &job->elapsed);
-    if (kls_pts_direct_user_values_enabled(job->solver) ||
+    if (kls_pts_refactor_ready(job->solver) ||
         kls_symmetric_partial_diagonal_match_factor_cycle(job->solver)) {
       (void)kls_build_refactor_user_input_pos32(job->solver);
     }
@@ -11756,7 +11756,7 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
     kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
     maybe_prepare_refactor_map(solver, &preps_elapsed);
-    if (kls_pts_direct_user_values_enabled(solver) ||
+    if (kls_pts_refactor_ready(solver) ||
         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
       (void)kls_build_refactor_user_input_pos32(solver);
     }
@@ -12128,7 +12128,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_deferred_lean_value_prep_capable(solver) &&
     getenv("KLS_DISABLE_DEFERRED_LEAN_VALUE_PREP") == NULL;
   const int pts_direct_values =
-    kls_pts_direct_user_values_enabled(solver) &&
+    kls_pts_refactor_ready(solver) &&
     solver->lean_choice < 0 && solver->pts != NULL &&
     (solver->pts->refactor_ok) &&
     solver->common.scale <= 0 &&

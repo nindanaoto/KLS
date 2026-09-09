@@ -2202,7 +2202,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   if (!kls_build_refactor_map(solver)) {
     return -1;
   }
-  if (kls_pts_direct_user_values_enabled(solver) ||
+  if (kls_pts_refactor_ready(solver) ||
       kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
   }

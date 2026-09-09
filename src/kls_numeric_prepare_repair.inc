@@ -82,11 +82,7 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
   if (solver->values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-  const int generic_fused_value_prep =
-    kls_repeated_update_workload(&solver->options) &&
-    getenv("KLS_DISABLE_GENERIC_FUSED_VALUE_PREP") == NULL;
-  if ((getenv("KLS_ENABLE_FUSED_VALUE_PREP") != NULL ||
-       generic_fused_value_prep) &&
+  if (kls_repeated_update_workload(&solver->options) &&
       (solver->row_scale != NULL || solver->col_scale != NULL) &&
       kls_build_prepared_value_scale(solver)) {
     const double *restrict scale = solver->prepared_value_scale;
@@ -95,9 +91,7 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
       for (UF_long p = 0u; p < solver->nnz; ++p) {
         prepared[p] = values[p] * scale[p];
       }
-    } else if ((getenv("KLS_ENABLE_GATHER_FUSED_VALUE_PREP") != NULL ||
-                generic_fused_value_prep) &&
-               kls_build_prepared_value_input_pos(solver)) {
+    } else if (kls_build_prepared_value_input_pos(solver)) {
       const UF_long *restrict input_pos =
         solver->prepared_value_input_pos;
       for (UF_long target = 0u; target < solver->nnz; ++target) {
@@ -267,8 +261,7 @@ static void kls_arm_lean_scale_input_cache(kls_solver *solver,
       solver->numeric->Rs == NULL) {
     return;
   }
-  if (getenv("KLS_DISABLE_LEAN_SCALE_CACHE") != NULL ||
-      solver->nnz > (UF_long)(SIZE_MAX / sizeof(double)) ||
+  if (solver->nnz > (UF_long)(SIZE_MAX / sizeof(double)) ||
       solver->n > (UF_long)(SIZE_MAX / sizeof(double))) {
     solver->lean_scale_input_state = -1;
     return;
@@ -5238,16 +5231,7 @@ static int kls_refactor_map_is_eligible(const kls_solver *solver) {
   return solver->numeric->Pinv != NULL;
 }
 
-static int kls_refactor_map_index32_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_MAP_INDEX32");
-  return value == NULL || value[0] == '\0' ||
-         !(value[0] == '0' && value[1] == '\0');
-}
-
 static int kls_build_refactor_map_index32(kls_solver *solver) {
-  if (!kls_refactor_map_index32_env_enabled()) {
-    return 1;
-  }
   if (solver != NULL && !solver->compact_map32_probe_active &&
       getenv("KLS_ENABLE_SETTLED_COMPACT_MAP32_REFACTOR") == NULL &&
       (kls_moderate_work_single_block_lean_policy_enabled(solver) ||
@@ -5593,28 +5577,7 @@ static int kls_build_refactor_user_input_pos32(kls_solver *solver) {
   return 1;
 }
 
-static int kls_pts_direct_user_values_enabled(const kls_solver *solver) {
-  return kls_pts_refactor_ready(solver) ||
-    getenv("KLS_ENABLE_PTS_DIRECT_USER_VALUES") != NULL;
-}
-
-static int kls_refactor_l_index32_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_L_INDEX32");
-  return value == NULL || value[0] == '\0' ||
-         !(value[0] == '0' && value[1] == '\0');
-}
-
-static int kls_refactor_u_index32_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_U_INDEX32");
-  return value == NULL || value[0] == '\0' ||
-         !(value[0] == '0' && value[1] == '\0');
-}
-
 static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
-  if (!kls_refactor_l_index32_env_enabled()) {
-    return 1;
-  }
-
   if (solver == NULL || solver->numeric == NULL ||
       solver->symbolic == NULL || solver->symbolic->R == NULL ||
       solver->numeric->Llen == NULL ||
@@ -5699,10 +5662,6 @@ static int kls_ensure_refactor_l_index32_cache(kls_solver *solver) {
 }
 
 static int kls_ensure_refactor_u_index32_cache(kls_solver *solver) {
-  if (!kls_refactor_u_index32_env_enabled()) {
-    return 1;
-  }
-
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Ulen == NULL ||
       solver->refactor_lu_pointer_count != solver->n ||
@@ -6281,11 +6240,9 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   const int record_l_sorted =
     (kls_refactor_btf_scalar_run_exec_enabled(solver));
   const int build_l_index32 =
-    (kls_refactor_l_index32_env_enabled() &&
-    solver->n <= (UF_long)INT32_MAX);
+    solver->n <= (UF_long)INT32_MAX;
   const int build_u_index32 =
-    (kls_refactor_u_index32_env_enabled() &&
-    solver->n <= (UF_long)INT32_MAX);
+    solver->n <= (UF_long)INT32_MAX;
   UF_long l_index32_entries = 0;
   UF_long u_index32_entries = 0;
 

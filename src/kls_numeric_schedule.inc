@@ -3790,9 +3790,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       solver->refactor_col_ptr == NULL) {
     (void)kls_build_refactor_map(solver);
   }
-  if ((kls_refactor_l_index32_env_enabled() ||
-       kls_refactor_u_index32_env_enabled()) &&
-      solver->n <= (UF_long)INT32_MAX) {
+  if (solver->n <= (UF_long)INT32_MAX) {
     (void)kls_build_refactor_lu_pointer_cache(solver);
   }
 
