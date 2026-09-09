@@ -1883,7 +1883,6 @@ typedef struct kls_egraph_refactor_shared {
 
   int row_refactor_shared_telemetry;
   int row_refactor_trace_dense_help;
-  int row_refactor_trace_worker_times;
   int row_refactor_simple_scalar_update;
   int row_solve_mode;
   int row_publish_mode;
@@ -2016,14 +2015,6 @@ typedef struct kls_egraph_refactor_worker {
   UF_long telemetry_segment_target_input_rows;
   UF_long telemetry_segment_target_cleanup_rows;
   UF_long telemetry_segment_target_cleanup_entries;
-  double telemetry_row_private_seconds;
-  double telemetry_row_pipeline_seconds;
-  double telemetry_row_pipeline_compute_seconds;
-  double telemetry_row_pipeline_max_task_seconds;
-  UF_long telemetry_row_pipeline_max_task_group;
-  UF_long telemetry_row_pipeline_task_count;
-  double telemetry_row_pipeline_max_group_seconds;
-  UF_long telemetry_row_pipeline_max_group;
 } kls_egraph_refactor_worker;
 
 static _Thread_local kls_egraph_refactor_worker *kls_dense_help_self;

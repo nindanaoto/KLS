@@ -16663,20 +16663,9 @@ static int kls_row_refactor_process_ready_group_with_local_tail(
     }
     const int wait_for_dependencies =
       worker->shared->row_pipeline_row_dep_ready_queue ? 1 : 0;
-    const int time_group =
-      worker->shared->row_refactor_trace_worker_times;
-    const double group_start = time_group ? kls_now_seconds() : 0.0;
     if (!kls_parallel_row_refactor_process_group(
           worker, group, wait_for_dependencies)) {
       return 0;
-    }
-    if (time_group) {
-      const double group_seconds = kls_now_seconds() - group_start;
-      if (group_seconds > worker->telemetry_row_pipeline_max_group_seconds) {
-        worker->telemetry_row_pipeline_max_group_seconds = group_seconds;
-        worker->telemetry_row_pipeline_max_group = group;
-      }
-
     }
     kls_parallel_row_refactor_mark_group_done(worker->shared,
                                              worker->shared->solver,
@@ -16694,10 +16683,6 @@ static int kls_row_refactor_process_ready_group_with_local_tail(
 
 static void kls_row_refactor_worker_run_ready_pipeline(
   kls_egraph_refactor_worker *worker) {
-  const int trace_worker_times =
-    getenv("KLS_TRACE_ROW_WORKER_TIMES") != NULL;
-  const double private_start =
-    trace_worker_times ? kls_now_seconds() : 0.0;
   if (worker != NULL && worker->shared != NULL &&
       worker->shared->row_pipeline_private_groups != NULL) {
     kls_egraph_refactor_shared *shared = worker->shared;
@@ -16715,10 +16700,6 @@ static void kls_row_refactor_worker_run_ready_pipeline(
         unsigned int calibration_component = UINT_MAX;
         double calibration_component_start =
           calibrate_components ? kls_now_seconds() : 0.0;
-        unsigned int trace_component = UINT_MAX;
-        UF_long trace_component_groups = 0u;
-        double trace_component_work = 0.0;
-        double trace_component_start = private_start;
         for (UF_long pos = begin; pos < end; ++pos) {
           if (kls_egraph_refactor_should_stop(shared)) {
             return;
@@ -16741,31 +16722,6 @@ static void kls_row_refactor_worker_run_ready_pipeline(
               calibration_component_start = now;
             }
           }
-          if (trace_worker_times) {
-            unsigned int component = UINT_MAX;
-            if (!kls_row_refactor_group_separator_component(
-                  shared->solver, group, &component)) {
-              component = UINT_MAX;
-            }
-            if (component != trace_component) {
-              if (trace_component != UINT_MAX) {
-                fprintf(stderr,
-                        "KLS row component %d id %u groups %ld"
-                        " work %.0f seconds %.6f\n",
-                        worker->tid, trace_component,
-                        (long)trace_component_groups,
-                        trace_component_work,
-                        kls_now_seconds() - trace_component_start);
-              }
-              trace_component = component;
-              trace_component_groups = 0u;
-              trace_component_work = 0.0;
-              trace_component_start = kls_now_seconds();
-            }
-            trace_component_groups++;
-            trace_component_work +=
-              kls_row_refactor_group_work(shared->solver, group);
-          }
           int ok = 0;
           if (shared->row_pipeline_ordered_private) {
             ok = shared->row_pipeline_ordered_private != 2 ||
@@ -16786,14 +16742,6 @@ static void kls_row_refactor_worker_run_ready_pipeline(
           if (!ok) {
             return;
           }
-        }
-        if (trace_worker_times && trace_component != UINT_MAX) {
-          fprintf(stderr,
-                  "KLS row component %d id %u groups %ld"
-                  " work %.0f seconds %.6f\n",
-                  worker->tid, trace_component,
-                  (long)trace_component_groups, trace_component_work,
-                  kls_now_seconds() - trace_component_start);
         }
         if (calibrate_components && calibration_component != UINT_MAX) {
           shared->row_refactor_component_seconds[calibration_component] +=
@@ -16839,37 +16787,15 @@ static void kls_row_refactor_worker_run_ready_pipeline(
     }
   }
 
-  if (trace_worker_times && worker != NULL) {
-    worker->telemetry_row_private_seconds =
-      kls_now_seconds() - private_start;
-  }
-  const double pipeline_start =
-    trace_worker_times ? kls_now_seconds() : 0.0;
-
   for (;;) {
     UF_long group = KLS_KLU_EMPTY;
     if (!kls_row_refactor_pop_ready_group(worker, &group)) {
       break;
     }
-    const double task_start =
-      trace_worker_times ? kls_now_seconds() : 0.0;
     if (!kls_row_refactor_process_ready_group_with_local_tail(worker,
                                                              group)) {
       break;
     }
-    if (trace_worker_times) {
-      const double task_seconds = kls_now_seconds() - task_start;
-      worker->telemetry_row_pipeline_compute_seconds += task_seconds;
-      worker->telemetry_row_pipeline_task_count++;
-      if (task_seconds > worker->telemetry_row_pipeline_max_task_seconds) {
-        worker->telemetry_row_pipeline_max_task_seconds = task_seconds;
-        worker->telemetry_row_pipeline_max_task_group = group;
-      }
-    }
-  }
-  if (trace_worker_times && worker != NULL) {
-    worker->telemetry_row_pipeline_seconds =
-      kls_now_seconds() - pipeline_start;
   }
 }
 
@@ -17661,8 +17587,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_trace_dense_help =
     getenv("KLS_TRACE_DENSE_HELP") != NULL ||
     getenv("KLS_ROW_DENSE_HELP_STATS") != NULL;
-  shared->row_refactor_trace_worker_times =
-    getenv("KLS_TRACE_ROW_WORKER_TIMES") != NULL;
   atomic_store_explicit(&shared->dense_help_large_waiters, 0,
                         memory_order_relaxed);
   shared->row_refactor_simple_scalar_update =
@@ -17772,39 +17696,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     kls_record_row_refactor_defer_value_scatter_run(solver);
   }
 
-  if (getenv("KLS_TRACE_ROW_WORKER_TIMES") != NULL &&
-      row_private_groups != NULL && row_private_thread_ptr != NULL) {
-    for (int tid = 0; tid < thread_count; ++tid) {
-      const UF_long begin = row_private_thread_ptr[tid];
-      const UF_long end = row_private_thread_ptr[tid + 1];
-      UF_long kind_groups[4] = {0u, 0u, 0u, 0u};
-      UF_long kind_rows[4] = {0u, 0u, 0u, 0u};
-      double kind_work[4] = {0.0, 0.0, 0.0, 0.0};
-      for (UF_long pos = begin; pos < end; ++pos) {
-        const UF_long group = row_private_groups[pos];
-        unsigned kind = solver->row_refactor_group_kind != NULL
-          ? (unsigned)solver->row_refactor_group_kind[group] : 0u;
-        if (kind > 3u) {
-          kind = 0u;
-        }
-        kind_groups[kind]++;
-        kind_rows[kind] += solver->row_refactor_group_ptr[group + 1u] -
-                           solver->row_refactor_group_ptr[group];
-        kind_work[kind] += kls_row_refactor_group_work(solver, group);
-      }
-      fprintf(stderr,
-              "KLS row plan %d groups %ld work %.0f"
-              " single %ld/%ld/%.0f generic %ld/%ld/%.0f"
-              " dense %ld/%ld/%.0f batch %ld/%ld/%.0f\n",
-              tid, (long)(end - begin),
-              kind_work[0] + kind_work[1] + kind_work[2] + kind_work[3],
-              (long)kind_groups[0], (long)kind_rows[0], kind_work[0],
-              (long)kind_groups[1], (long)kind_rows[1], kind_work[1],
-              (long)kind_groups[2], (long)kind_rows[2], kind_work[2],
-              (long)kind_groups[3], (long)kind_rows[3], kind_work[3]);
-    }
-  }
-
   for (int i = 0; i < thread_count; ++i) {
     pool->workers[i].shared = shared;
     pool->workers[i].x = scratch[i];
@@ -17815,14 +17706,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     pool->workers[i].telemetry_segment_target_input_rows = 0u;
     pool->workers[i].telemetry_segment_target_cleanup_rows = 0u;
     pool->workers[i].telemetry_segment_target_cleanup_entries = 0u;
-    pool->workers[i].telemetry_row_private_seconds = 0.0;
-    pool->workers[i].telemetry_row_pipeline_seconds = 0.0;
-    pool->workers[i].telemetry_row_pipeline_compute_seconds = 0.0;
-    pool->workers[i].telemetry_row_pipeline_max_task_seconds = 0.0;
-    pool->workers[i].telemetry_row_pipeline_max_task_group = KLS_KLU_EMPTY;
-    pool->workers[i].telemetry_row_pipeline_task_count = 0u;
-    pool->workers[i].telemetry_row_pipeline_max_group_seconds = 0.0;
-    pool->workers[i].telemetry_row_pipeline_max_group = KLS_KLU_EMPTY;
   }
 
   kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
@@ -17833,22 +17716,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       kls_install_row_refactor_component_calibration(
         solver, row_private_groups, row_private_group_count,
         component_seconds, solver->separator.component_count);
-  }
-  if (getenv("KLS_TRACE_ROW_WORKER_TIMES") != NULL) {
-    for (int i = 0; i < thread_count; ++i) {
-      fprintf(stderr,
-              "KLS row worker %d private %.6fs pipeline %.6fs"
-              " compute %.6fs tasks %ld max-task %.6fs root %ld"
-              " max-group %.6fs group %ld\n",
-              i, pool->workers[i].telemetry_row_private_seconds,
-              pool->workers[i].telemetry_row_pipeline_seconds,
-              pool->workers[i].telemetry_row_pipeline_compute_seconds,
-              (long)pool->workers[i].telemetry_row_pipeline_task_count,
-              pool->workers[i].telemetry_row_pipeline_max_task_seconds,
-              (long)pool->workers[i].telemetry_row_pipeline_max_task_group,
-              pool->workers[i].telemetry_row_pipeline_max_group_seconds,
-              (long)pool->workers[i].telemetry_row_pipeline_max_group);
-    }
   }
   if (!shared->row_refactor_shared_telemetry) {
     for (int i = 0; i < thread_count; ++i) {
