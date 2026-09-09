@@ -2163,12 +2163,6 @@ static int kls_tiny_singleton_solve_ready(kls_solver *solver) {
      block or a different triangular executor.  Retaining that proposal made
      each tiny unchanged update re-enter the adaptive preflight. */
   solver->rowmatch_deferred = 0;
-  if (getenv("KLS_TRACE_TINY_SINGLETON_SOLVE") != NULL) {
-    fprintf(stderr,
-            "KLS tiny singleton solve ready: n=%lu off=%lu scale=%d\n",
-            (unsigned long)solver->n, (unsigned long)offcount,
-            solver->numeric->Rs != NULL);
-  }
   return 1;
 }
 
@@ -16144,7 +16138,6 @@ static int solve_impl(kls_solver *solver,
 
   UF_long ok = 0;
   int fixed_col_scale_post_applied = 0;
-  const int trace_solve_path = getenv("KLS_TRACE_SOLVE_PATH") != NULL;
   const int trace_x = solver->n <= 8 && getenv("KLS_TRACE_X") != NULL;
   if (getenv("KLS_TRACK_NUMERIC_FREE") != NULL && solver->numeric != NULL) {
     kls_numeric_free_check(solver->numeric, solver->numeric->Lip,
@@ -16186,21 +16179,6 @@ static int solve_impl(kls_solver *solver,
       }
     }
   }
-  if (getenv("KLS_TRACE_SOLVE_PATH") != NULL) {
-    fprintf(stderr, "KLS burst gate: dec=%d pend=%d ready=%d direct=%d"
-            " s0=%d/%.3f s1=%d/%.3f\n",
-            solver->row_accept_decision, solver->row_accept_pending_side,
-            solver->row_refactor_values_ready,
-            kls_row_refactor_solve_uses_direct_values(solver),
-            solver->row_accept_solve_samples[0],
-            solver->row_accept_solve_samples[0] > 0
-              ? solver->row_accept_solve_seconds[0] /
-                solver->row_accept_solve_samples[0] : -1.0,
-            solver->row_accept_solve_samples[1],
-            solver->row_accept_solve_samples[1] > 0
-              ? solver->row_accept_solve_seconds[1] /
-                solver->row_accept_solve_samples[1] : -1.0);
-  }
   if (solver->row_refactor_values_ready &&
       !kls_row_refactor_solve_uses_direct_values(solver) &&
       (solver->row_accept_decision < 0 ||
@@ -16225,51 +16203,26 @@ static int solve_impl(kls_solver *solver,
     solver->common.status = TRILINOS_KLU_OK;
     ok = kls_i32_solve(solver, b, x, solver->i16solve_rhs_perm,
                        NULL, NULL, 0);
-    if (trace_solve_path) {
-      fprintf(stderr, "KLS solve path: fused compact-match rhs\n");
-    }
   } else if (!kernel_transpose && nrhs == 1 &&
              kls_try_fused_refactor_upper_solve(solver, x)) {
     ok = 1;
-    if (trace_solve_path) {
-      fprintf(stderr, "KLS solve path: fused refactor forward + upper\n");
-    }
   } else if (prepared_single_block_row_solve) {
     solver->common.status = TRILINOS_KLU_OK;
     ok = kls_lean_single_block_prepared_solve(solver, b, x);
     solver->row_refactor_last_row_solve = ok ? 1 : 0;
     solver->stats.row_refactor_last_row_solve =
       solver->row_refactor_last_row_solve;
-    if (trace_solve_path) {
-      fprintf(stderr, "KLS solve path: prepared single-block row\n");
-    }
   } else if (kernel_transpose && nrhs == 1 &&
              kls_try_dirty_row_transpose_plan_solve_one_rhs(solver, x)) {
     ok = 1;
-    if (trace_solve_path) {
-      fprintf(stderr, "KLS solve path: dirty-row transpose plan\n");
-    }
   } else if (kls_try_row_refactor_solve(solver, kernel_transpose, nrhs,
                                          x, ldx)) {
     ok = 1;
-    if (trace_solve_path) {
-      fprintf(stderr, "KLS solve path: row t=%d\n", kernel_transpose);
-    }
   } else {
     const int lean_compact_match_direct_solve =
       solver->lean_compact_match_row_factor_active && !kernel_transpose &&
       nrhs == 1 && !serial_mapped_vendor_solve &&
       kls_i32_solve_ready(solver);
-    if (trace_solve_path) {
-      fprintf(stderr,
-              "KLS solve path: column i32=%d i16=%d vendor=%d dirty=%d"
-              " ready=%d t=%d\n",
-              solver->i32solve_state,
-              solver->i16solve_l != NULL && solver->i16solve_u != NULL,
-              serial_mapped_vendor_solve,
-              solver->row_refactor_values_dirty,
-              solver->row_refactor_values_ready, kernel_transpose);
-    }
     if (!lean_compact_match_direct_solve &&
         !kls_publish_row_refactor_values(solver)) {
       solver->stats.solve_seconds = kls_now_seconds() - start;
@@ -17185,12 +17138,6 @@ static int solve_impl(kls_solver *solver,
               sparse_refinement_rhs = 1;
             }
           }
-        }
-        if (getenv("KLS_TRACE_REFINE_SUPPORT") != NULL &&
-            sparse_refinement_rhs) {
-          fprintf(stderr, "KLS sparse refinement RHS: support=%lu/%lu\n",
-                  (unsigned long)sparse_refinement_support,
-                  (unsigned long)nloc);
         }
         solver->sparse_refinement_rhs_active = sparse_refinement_rhs;
         solver->in_solve_refinement = 1;
