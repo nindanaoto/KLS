@@ -6580,18 +6580,6 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
        fill).  b2383 class: serial steady 240-305ms, measured row
        acceptance 156ms — the deferred-consult wipe used to strand it
        on serial with no re-prepare. */
-    if (getenv("KLS_TRACE_ROW_MODEL_GATE") != NULL) {
-      fprintf(stderr,
-              "KLS row-model gate: levels=NULL groups=%ld egraph=%d "
-              "fill=%ld -> %s\n",
-              (long)solver->row_refactor_group_count,
-              kls_egraph_refactor_is_eligible(solver),
-              (long)(solver->numeric->lnz + solver->numeric->unz),
-              (solver->row_refactor_group_count > 0 ||
-               kls_egraph_refactor_is_eligible(solver) ||
-               solver->numeric->lnz + solver->numeric->unz < 2000000)
-                ? "skip" : "ADMIT");
-    }
     if (solver->row_refactor_group_count > 0 ||
         kls_egraph_refactor_is_eligible(solver) ||
         solver->numeric->lnz + solver->numeric->unz < 2000000) {
