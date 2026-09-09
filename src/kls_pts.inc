@@ -1771,8 +1771,7 @@ static void kls_pts_prepare_top_private(
   const int32_t *map_user = solver->refactor_input_user_pos32;
   const int32_t *map_internal = solver->refactor_input_pos32;
   const double *prepared_scale = solver->prepared_value_scale;
-  const int skip_mirror = solver->solve_contract_probe == 1 &&
-    getenv("KLS_DISABLE_LARGE_WEAK_PTS_VALUE_MIRROR_ELISION") == NULL;
+  const int skip_mirror = solver->solve_contract_probe == 1;
   UF_long out = numeric->Offp[global];
   for (UF_long p = s->map_col_ptr[global];
        p < s->map_block_start[global]; ++p) {

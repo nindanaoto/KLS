@@ -7,7 +7,9 @@ counters and the cached trace predicate used exclusively to update them.
 
 The deletion covers ordinary, cached, paired, and multi-column batch paths
 in `kls.c` and `kls_egraph_refactor.inc`. Actual batching, admission thresholds,
-numeric updates and `KLS_DISABLE_BATCH_CONSUME` retain their original behavior.
+numeric updates and `KLS_DISABLE_BATCH_CONSUME` retained their original behavior
+in this change. The batching override was later removed in the batch/map
+control cleanup; default batching remains.
 General `KLS_TRACE_SNODE` preparation messages remain. No solver fields or
 public statistics are changed. Net source reduction: 80 lines.
 

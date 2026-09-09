@@ -1562,7 +1562,7 @@ static int kls_egraph_refactor_single_unscaled_column(
   UF_long up = 0;
 
   const int snode_batches_allowed =
-    (!kls_batch_consume_disabled() && shared->snode_run_end != NULL);
+    shared->snode_run_end != NULL;
 
   while (up < ucol_len) {
 
@@ -2167,7 +2167,7 @@ static int kls_egraph_refactor_single_scaled_column(
   UF_long up = 0;
 
   const int snode_batches_allowed =
-    (!kls_batch_consume_disabled() && shared->snode_run_end != NULL);
+    shared->snode_run_end != NULL;
 
   while (up < ucol_len) {
 
@@ -2328,7 +2328,7 @@ static int kls_egraph_refactor_btf_unscaled_plain_cluster_column(
   const UF_long ucol_len = numeric->Ulen[k];
   const UF_long *restrict llen = numeric->Llen + k1;
   const int snode_batches_allowed =
-    !kls_batch_consume_disabled() && shared->snode_run_end != NULL;
+    shared->snode_run_end != NULL;
 
   kls_egraph_scatter_btf_unscaled_input(
     solver, shared->values, x, k1, solver->refactor_block_start[k],
@@ -2459,7 +2459,7 @@ static int kls_egraph_refactor_btf_unscaled_column(
   UF_long ucol_len = numeric->Ulen[k];
 
   const int snode_batches_allowed =
-    !kls_batch_consume_disabled() && shared->snode_run_end != NULL;
+    shared->snode_run_end != NULL;
   const UF_long *llen = numeric->Llen + k1;
 
   UF_long up = 0;
@@ -3202,7 +3202,7 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   UF_long up = 0u;
 
   const int snode_batches_allowed =
-    (!kls_batch_consume_disabled() && shared->snode_run_end != NULL);
+    shared->snode_run_end != NULL;
 
   while (up < ucol_len) {
 
@@ -3731,9 +3731,7 @@ static int kls_egraph_pair_dispatch_allowed(
          (shared->kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED ||
           kls_egraph_kernel_is_btf_unscaled(shared->kernel)) &&
          !shared->check_pivots &&
-         shared->solver != NULL &&
-         shared->snode_run_end != NULL &&
-         !kls_batch_consume_disabled();
+         shared->snode_run_end != NULL;
 }
 
 /* Route a leased/popped column pair to the kernel-matched pair walk.
@@ -6096,29 +6094,15 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
        : 0u) +
     l_sparse_cluster_levels +
     u_sparse_cluster_levels;
-  const char *force_parallel_env = getenv("KLS_ROW_SOLVE_FORCE_PARALLEL");
-  const int force_parallel =
-    force_parallel_env != NULL && force_parallel_env[0] != '\0' &&
-    !(force_parallel_env[0] == '0' && force_parallel_env[1] == '\0');
-  if (!force_parallel &&
-      (active_parallel_entries == 0u ||
-       active_parallel_entries * 5u < total_solve_entries * 2u ||
-       sync_count == 0u ||
-       active_parallel_entries / sync_count <
-         KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC)) {
+  if (active_parallel_entries == 0u ||
+      active_parallel_entries * 5u < total_solve_entries * 2u ||
+      sync_count == 0u ||
+      active_parallel_entries / sync_count <
+        KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC) {
     return 0;
   }
   if (!kls_build_row_solve_thread_bounds(solver, thread_count)) {
     return 0;
-  }
-  const char *disable_sparse_parallel_env =
-    getenv("KLS_ROW_SOLVE_DISABLE_SPARSE_PARALLEL");
-  if (disable_sparse_parallel_env != NULL &&
-      disable_sparse_parallel_env[0] != '\0' &&
-      !(disable_sparse_parallel_env[0] == '0' &&
-        disable_sparse_parallel_env[1] == '\0')) {
-    solver->row_solve_l_sparse_cluster_levels = 0u;
-    solver->row_solve_u_sparse_cluster_levels = 0u;
   }
   kls_row_solve_factor_view l_view;
   kls_row_solve_factor_view u_view;
@@ -7383,7 +7367,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->single_unscaled_plain =
     selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_SINGLE_UNSCALED &&
     !shared->check_pivots && !solver->padded_active &&
-    shared->snode_run_end != NULL && !kls_batch_consume_disabled() &&
+    shared->snode_run_end != NULL &&
     solver->eg_pair_choice < 0 && !solver->eg_pair_pending &&
     !solver->eg_stream_pending;
   /* All inputs to the plain-BTF capability test are immutable for one

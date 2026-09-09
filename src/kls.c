@@ -2005,8 +2005,7 @@ static int kls_tiny_singleton_solve_ready(kls_solver *solver) {
   if (solver->tiny_singleton_solve_state != 0) {
     return solver->tiny_singleton_solve_state > 0;
   }
-  if (getenv("KLS_DISABLE_TINY_SINGLETON_SOLVE") != NULL ||
-      solver->symbolic == NULL || solver->numeric == NULL ||
+  if (solver->symbolic == NULL || solver->numeric == NULL ||
       solver->n == 0u || solver->n > 64u ||
       !solver->symbolic->do_btf ||
       solver->symbolic->nblocks != solver->n ||
@@ -7399,17 +7398,6 @@ static int kls_checked_refactor_best_reject_candidate(
 }
 
 
-/* Keep the numeric batching opt-out independent of diagnostic tracing. */
-static int kls_batch_consume_disabled(void) {
-  static int cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("KLS_DISABLE_BATCH_CONSUME");
-    cached = env != NULL && env[0] == '1' && env[1] == '\0';
-  }
-  return cached;
-}
-
-
 /* Consume a batch of consecutive sorted-supernode producer columns from a
  * U column during a left-looking refactor.  Returns the number of producers
  * consumed (0 when no batch applies at position up).  Storage must be the
@@ -7539,8 +7527,7 @@ static void kls_build_lean_btf_off_runs(kls_solver *solver,
                                         int direct_user_values,
                                         const uint32_t *map,
                                         UF_long offcount) {
-  if (solver == NULL || map == NULL || offcount == 0u ||
-      getenv("KLS_DISABLE_LEAN_BTF_CONTIGUOUS_OFF_RUNS") != NULL) {
+  if (solver == NULL || map == NULL || offcount == 0u) {
     return;
   }
   uint32_t **runs_slot = direct_user_values
@@ -7682,8 +7669,7 @@ static int kls_lean_btf_map32_refactor(kls_solver *solver,
   double *restrict offx = (double *)numeric->Offx;
   double *restrict udiag = (double *)numeric->Udiag;
   double *restrict x = (double *)numeric->Xwork;
-  if (getenv("KLS_DISABLE_LEAN_BTF_FLAT_OFF_MAP") != NULL ||
-      !kls_build_lean_btf_off_map(solver, direct_user_values)) {
+  if (!kls_build_lean_btf_off_map(solver, direct_user_values)) {
     return -1;
   }
   const uint32_t *restrict off_input = direct_user_values
@@ -7846,8 +7832,7 @@ static int kls_lean_btf_map32_refactor(kls_solver *solver,
 static int kls_mapped_native_short_l_enabled(const kls_solver *solver) {
   return solver != NULL && solver->refactor_l_indices32 != NULL &&
     solver->n <= UF_long_max / 4u &&
-    solver->refactor_l_indices32_count <= 4u * solver->n &&
-    getenv("KLS_DISABLE_MAPPED_NATIVE_SHORT_L") == NULL;
+    solver->refactor_l_indices32_count <= 4u * solver->n;
 }
 
 static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
@@ -8089,7 +8074,7 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
     UF_long up = 0;
     while (up < ucol_len) {
       const UF_long j = ui[up];
-      if (snode_run_end != NULL && !kls_batch_consume_disabled()) {
+      if (snode_run_end != NULL) {
         const UF_long consumed = kls_snode_batch_consume(
           lu, lip, llen, ui, ux, ucol_len, up, x, k1, snode_run_end);
         if (consumed != 0u) {
@@ -8256,8 +8241,7 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
      avoid a second random write for every input entry while the PTS scatter
      already writes the factor workspace. */
   const int skip_certified_value_mirror =
-    fast_direct_map32 && solver->solve_contract_probe == 1 &&
-    getenv("KLS_DISABLE_LARGE_WEAK_PTS_VALUE_MIRROR_ELISION") == NULL;
+    fast_direct_map32 && solver->solve_contract_probe == 1;
   const double *prepared_scale = solver->prepared_value_scale;
   double *owned_values = solver->values;
 
@@ -8469,7 +8453,7 @@ static void kls_pts_refactor_block_cols(kls_parallel_refactor_worker *worker,
     UF_long up = 0;
     while (up < ucol_len) {
       const UF_long j = ui[up];
-      if (snode_run_end != NULL && !kls_batch_consume_disabled()) {
+      if (snode_run_end != NULL) {
         const UF_long consumed = kls_snode_batch_consume(
           lu, lip, llen, ui, ux, ucol_len, up, x, k1, snode_run_end);
         if (consumed != 0u) {
