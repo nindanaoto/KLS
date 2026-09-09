@@ -11789,8 +11789,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
      reuse the verdict. */
   solver->solve_contract_verified = 0;
   const int generic_lean_reaudit =
-    getenv("KLS_LEAN_CHOICE") == NULL &&
-    getenv("KLS_DISABLE_LEAN_STEADY_REAUDIT") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
     /* A short dependency schedule cannot repay four row/column lifecycle
        samples after the initial timed consultation.  Retain the audit for a
@@ -11798,22 +11796,19 @@ int kls_refactor(kls_solver *solver, const double *values) {
        protects the established EGraph lifecycle from a cold representation
        handoff.  These are realized factor/schedule bounds, not matrix IDs. */
     (solver->n > 131072u || solver->refactor_dependency_work >= 1.0e8);
-  const int generic_declined_lean_reaudit =
-    generic_lean_reaudit &&
-    getenv("KLS_DISABLE_DECLINED_LEAN_STEADY_REAUDIT") == NULL;
   /* Normally the following solve completes the final sampled cycle and
      settles the verdict immediately.  A refactor-only caller supplies no
      solve term, so settle from the guarded four-refactor comparison before
      starting another numeric instead of leaving the audit half-armed. */
   if (generic_lean_reaudit && solver->lean_reaudit_state == 6) {
     kls_selected_lean_reaudit_finish(solver);
-  } else if (generic_declined_lean_reaudit &&
+  } else if (generic_lean_reaudit &&
              solver->lean_reaudit_state == 15) {
     kls_declined_lean_reaudit_finish(solver);
   }
   const int direct_low_work_btf_map32 =
     kls_low_work_btf_map32_policy_enabled(solver);
-  if (solver->lean_choice == 0 && getenv("KLS_LEAN_CHOICE") == NULL &&
+  if (solver->lean_choice == 0 &&
       kls_moderate_work_single_block_lean_policy_enabled(solver)) {
     /* This retained-factor certificate already excludes transformed,
        scaled, pivot-repaired, high-fill, and one-shot numerics.  It was
@@ -12207,14 +12202,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
   int generic_hoisted_snode_lean_predicted = 0;
   int generic_low_intensity_column_preselected = 0;
   double generic_lean_setup_seconds = 0.0;
-  /* Development/selection hook: choose the already-implemented lean row walk
-     without paying the production timing consultation (which can execute up
-     to seven complete numeric passes in the first public refactor).  This is
-     intentionally an exact engine override rather than a benchmark shortcut:
-     the selected lean engine still builds its metadata and performs the full
-     numeric refactorization in this call.  Values 1 and 2 select the scalar
-     and paired walks; 0 leaves automatic selection unchanged; any negative
-     value permanently selects the incumbent column route for this numeric. */
   if (solver->lean_choice == 0 &&
       (kls_symmetric_partial_diagonal_match_factor_cycle(solver))) {
     /* The accepted sparse-spike predicted factors amortize direct EGraph over
@@ -12222,15 +12209,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
        numerics.  Matching replaces public coordinates, so this decision uses
        the cached input proposal plus the measured retained factor. */
     solver->lean_choice = -1;
-  }
-  if (solver->lean_choice == 0) {
-    const char *lean_choice_env = getenv("KLS_LEAN_CHOICE");
-    if (lean_choice_env != NULL && lean_choice_env[0] != '\0') {
-      const int requested = atoi(lean_choice_env);
-      if (requested == 1 || requested == 2 || requested < 0) {
-        solver->lean_choice = requested < 0 ? -1 : requested;
-      }
-    }
   }
   if (solver->lean_choice == 0 &&
       solver->input_format == KLS_INPUT_CSC &&
@@ -12545,7 +12523,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
      (memplus: lean-pair 244us vs incumbent 493, under CKTSO; mimo-class
      keeps the incumbent).  Runs after the floor probe settles so the
      incumbent arm samples its final configuration. */
-  if (generic_declined_lean_reaudit && solver->lean_choice < 0 &&
+  if (generic_lean_reaudit && solver->lean_choice < 0 &&
       solver->lean_reaudit_state == 10 &&
       solver->lean_reaudit_candidate_row_seconds > 0.0 &&
       solver->lean_reaudit_column_min > 0.0 &&
@@ -12574,7 +12552,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_probe_arm = 0;
     solver->lean_reaudit_state =
       solver->lean_reaudit_state == 1 ? 2 : 4;
-  } else if (generic_declined_lean_reaudit && solver->lean_choice < 0 &&
+  } else if (generic_lean_reaudit && solver->lean_choice < 0 &&
              solver->lean_reaudit_row_arm > 0 &&
              (solver->lean_reaudit_state == 11 ||
               solver->lean_reaudit_state == 13)) {
@@ -12590,7 +12568,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->lean_choice > 0 ? solver->lean_choice : 0;
   }
   const int automatic_lean_attempt =
-    solver->lean_probe_arm > 0 && getenv("KLS_LEAN_CHOICE") == NULL;
+    solver->lean_probe_arm > 0;
   int moderate_btf_row_preflight = 0;
   if (solver->lean_choice == 0 &&
       kls_moderate_btf_map32_trial_capable(solver)) {
@@ -12774,7 +12752,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       !solver->numeric_needs_refinement &&
       !solver->tight_tol_refine && solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u &&
-      getenv("KLS_DISABLE_DIRECT_KLU_TOURNAMENT") == NULL &&
       direct_klu_column_challenger) {
     const int incumbent_path = (int)solver->stats.last_refactor_path;
     if (incumbent_path == KLS_REFACTOR_PATH_KLU) {
@@ -12928,7 +12905,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
      beyond first-touch noise while keeping the audit repayable for a modest
      H100 row win.  Cold admission and the final measured-cycle margin remain
      deliberately stricter safeguards against publishing a noisy row arm. */
-  if (generic_declined_lean_reaudit && solver->lean_choice < 0 && ok &&
+  if (generic_lean_reaudit && solver->lean_choice < 0 && ok &&
       solver->common.status >= 0 && solver->lean_reaudit_row_arm > 0) {
     if (solver->lean_reaudit_state == 10 &&
         solver->stats.last_refactor_path != KLS_REFACTOR_PATH_ROW) {
@@ -12976,28 +12953,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->solve_contract_probe == 0 &&
       kls_low_work_btf_map32_policy_enabled(solver) &&
       solver->refactor_input_user_pos32 != NULL) {
-    const char *prewarm_env =
-      getenv("KLS_LOW_WORK_BTF_DIRECT_PREWARM");
-    if (prewarm_env == NULL) {
-      prewarm_env = getenv("KLS_COMPACT_DENSE_SPIKE_DIRECT_PREWARM");
-    }
     /* One charged direct pass validates the just-built user-position and
        Offx maps and leaves their compact streams hot.  The low-work policy
        bounds this setup by the same factor-work limit used by the kernel;
        further passes only move steady work into first-call preparation. */
-    int prewarm = prewarm_env != NULL ? atoi(prewarm_env) : 1;
-    if (prewarm < 0) {
-      prewarm = 0;
-    } else if (prewarm > 8) {
-      prewarm = 8;
-    }
     solver->refactor_direct_user_values_active = 1;
-    for (int pass = 0; pass < prewarm; ++pass) {
-      if (kls_lean_btf_map32_refactor(solver, (double *)values) <= 0 ||
-          solver->common.status < 0) {
-        break;
-      }
-    }
+    (void)kls_lean_btf_map32_refactor(solver, (double *)values);
     solver->refactor_direct_user_values_active = 0;
     elapsed = kls_now_seconds() - start;
   }
@@ -13094,8 +13055,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
          pre-settling mapped refactors and then went egraph anyway —
          +51% cycle for a declined trial; the rajat16/18 class (n~94K,
          fill ~760K, lean -14%) sits inside these caps */
-      solver->lean_wait++ == 0 &&
-      getenv("KLS_DISABLE_LEAN_PROBE") == NULL) {
+      solver->lean_wait++ == 0) {
     const double ordinary_lean_consult_start = kls_now_seconds();
     const double scaled_small_consult_start =
       scaled_small_packed_row_model_admitted ? kls_now_seconds() : 0.0;
@@ -13200,8 +13160,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
         if (solver->common.scale == -1 &&
             best_row_seconds > 0.0 && t_inc > 0.0 &&
             best_row_seconds < 0.95 * t_inc &&
-            !kls_packed_row_worker_representation_capable(solver) &&
-            getenv("KLS_DISABLE_LEAN_COLUMN_CONFIRMATION") == NULL) {
+            !kls_packed_row_worker_representation_capable(solver)) {
           /* A row arm runs after its mirror/preparation pass, while the
              incumbent's first refresh can still be paying deferred map and
              cache setup.  Confirm an apparent row win with one more
@@ -13377,7 +13336,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
           solver->common.singular_col = KLS_KLU_EMPTY;
           (void)kls_parallel_refactor(solver, numeric_values, 0);
         }
-        if (generic_declined_lean_reaudit && solver->lean_choice < 0 &&
+        if (generic_lean_reaudit && solver->lean_choice < 0 &&
             lean_ok > 0 && pair_ok > 0 &&
             t_lean > 0.0 && t_pair > 0.0 &&
             (best_row_seconds <= 1.05 * t_inc ||
@@ -13711,8 +13670,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
       } else if (valid_low_sample &&
                  solver->floor_reaudit == 0 &&
                  elapsed <= 1.10 * solver->mapped_steady_min &&
-                 kls_repeated_update_workload(&solver->options) &&
-                 getenv("KLS_DISABLE_BATCH_FLOOR_CLOSE_REAUDIT") == NULL) {
+                 kls_repeated_update_workload(&solver->options)) {
         /* A close first low-floor sample may still carry worker warm-up.
            Keep that minimum and issue one adjacent sample rather than
            turning a noisy five-percent boundary into a permanent default
