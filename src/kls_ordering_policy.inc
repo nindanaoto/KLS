@@ -285,12 +285,6 @@ static int kls_low_work_single_block_direct_public_capable(
     solver->common.scale == -1;
 }
 
-enum {
-  KLS_BALANCED_MODERATE_HUB_NONE = 0,
-  KLS_BALANCED_MODERATE_HUB_DOMINANT_BTF = 1,
-  KLS_BALANCED_MODERATE_HUB_COARSE_FRINGE_NO_BTF = 2
-};
-
 /* Degree-balanced sparse systems with a moderate two-way hub have two useful
    AMD regimes.  A nearly spanning SCC retains BTF, while a 75--90% core plus
    a bounded number of coarse fringe SCCs exposes substantially more repeated
@@ -516,20 +510,6 @@ static int is_medium_sparse_high_degree_diagonal_pattern(UF_long n,
          100.0 * (double)diagonal_count < 99.0 * (double)n;
 }
 
-enum {
-  KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE = 0,
-  KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_COARSE_FRINGE = 1,
-  KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_THIN_FRINGE = 2
-};
-
-/* Candidate analysis is compiled independently of the optional ordering
-   backend.  Keep its scoped bookkeeping available even when METIS is not. */
-static _Thread_local int
-  kls_asymmetric_bounded_degree_direct_metis_analyze_class;
-static _Thread_local int
-  kls_asymmetric_bounded_degree_direct_metis_analyze_selected;
-static _Thread_local int kls_near_symmetric_mega_hub_amd_analyze_path;
-static _Thread_local int kls_near_symmetric_mega_hub_amd_analyze_selected;
 
 static int is_large_very_low_degree_full_diagonal_pattern(UF_long n,
                                                           const UF_long *col_ptr,
@@ -3204,13 +3184,6 @@ static UF_long kls_metis_camd_group_size(UF_long n,
     }
     return n >= 200000u ? 4096u : 0u;
   }
-  if (kls_asymmetric_bounded_degree_direct_metis_analyze_class ==
-      KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_THIN_FRINGE) {
-    /* Thin-fringe dominant-SCC systems pair their fourteen-leaf forest with
-       moderately narrow constrained-AMD windows.  Wider defaults retain
-       more fill in the row factor; narrower windows add ordering overhead. */
-    return 3072u;
-  }
   if (kls_sparse_full_diagonal_metis_row_ctx == 2) {
     /* The higher-fill resource class needs wider windows to preserve the
        useful NodeNDP forest.  Keep roughly 37 windows per worker under the
@@ -4262,18 +4235,6 @@ static UF_long kls_metis_order(UF_long n,
       ? (idx_t)atol(npes_env) : 7;
   } else
 #endif
-  if (kls_asymmetric_bounded_degree_direct_metis_analyze_class) {
-    /* A coarser SCC fringe favors eight leaves for row-refactor throughput.
-       Thin-fringe systems retain fourteen: that forest's P/Q layout cuts
-       their packed solve substantially. */
-    const char *npes_env = getenv(
-      "KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NDP_NPES");
-    metis_ndp_npes = npes_env != NULL && npes_env[0] != '\0'
-      ? (idx_t)atol(npes_env)
-      : (kls_asymmetric_bounded_degree_direct_metis_analyze_class ==
-           KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_THIN_FRINGE
-           ? 14 : 8);
-  } else
   if (kls_fragmented_metis_tuning_ctx == 3) {
     const char *npes_env =
       getenv("KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES");
@@ -4481,8 +4442,7 @@ static UF_long kls_metis_order(UF_long n,
   const int force_det_ndp =
     getenv("KLS_FORCE_DET_NDP") != NULL ||
     kls_medium_partial_static_metis_ctx ||
-    kls_generic_metis_tuning_ctx ||
-    kls_asymmetric_bounded_degree_direct_metis_analyze_class;
+    kls_generic_metis_tuning_ctx;
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 &&
       (force_det_ndp || kls_spiked_ndp_class ||
@@ -13695,40 +13655,7 @@ static int kls_choose_symbolic_inner(UF_long n,
     return status;
   }
 
-  if (kls_near_symmetric_mega_hub_amd_analyze_path) {
-    kls_options amd_opts = *options;
-    amd_opts.ordering = KLS_ORDERING_AMD;
-    int status = analyze_with_ordering(n, col_ptr, row_idx, &amd_opts,
-                                       KLS_ORDERING_AMD, symbolic_out,
-                                       common_out, separator_out);
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_AMD;
-      *score_out = symbolic_score(*symbolic_out);
-      kls_near_symmetric_mega_hub_amd_analyze_selected = 1;
-      return KLS_OK;
-    }
-    /* Retain the generic AUTO tournament as the allocation-failure path. */
-  }
 
-  if (!kls_analyze_defer_nd &&
-      kls_asymmetric_bounded_degree_direct_metis_analyze_class !=
-        KLS_ASYMMETRIC_BOUNDED_DEGREE_DIRECT_METIS_NONE) {
-    /* Select the proposed retained ordering once.  The generic giant path
-       first factors AMD, then repeats NodeND and a full factor during the
-       first changed-value call.  The caller validates the resulting BTF and
-       separator before accepting it; rejection resumes the AUTO tournament. */
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
-                                       KLS_ORDERING_METIS, symbolic_out,
-                                       common_out, separator_out);
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_METIS;
-      *score_out = symbolic_score(*symbolic_out);
-      kls_asymmetric_bounded_degree_direct_metis_analyze_selected = 1;
-      return KLS_OK;
-    }
-    /* Preserve the ordinary AUTO recovery tournament on allocation or
-       ordering failure. */
-  }
 
   if (options->threads == 8 &&
       getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
