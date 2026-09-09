@@ -12777,10 +12777,6 @@ static _Thread_local long kls_dense_help_row_floor;
    helper runs on a private scratch vector so the caller's in-progress
    row accumulation in worker->x stays intact. Returns nonzero when at
    least one row was assembled. */
-static _Atomic long kls_dense_help_stat_active;
-static _Atomic long kls_dense_help_stat_self;
-static _Atomic long kls_dense_help_stat_bound;
-static _Atomic long kls_dense_help_stat_enter;
 
 static int kls_compact_dense_panel_factor_blocked_unchecked(
   kls_egraph_refactor_worker *worker,
@@ -13477,16 +13473,8 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
                             memory_order_acquire)) {
     return 0;
   }
-  if (shared->row_refactor_trace_dense_help) {
-    atomic_fetch_add_explicit(&kls_dense_help_stat_active, 1,
-                              memory_order_relaxed);
-  }
   kls_egraph_refactor_worker *self = kls_dense_help_self;
   if (self == NULL || self->shared != shared || kls_dense_help_busy) {
-    if (shared->row_refactor_trace_dense_help) {
-      atomic_fetch_add_explicit(&kls_dense_help_stat_self, 1,
-                                memory_order_relaxed);
-    }
     return 0;
   }
   {
@@ -13495,10 +13483,6 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
     if (peek == NULL ||
         (peek->kind == KLS_DENSE_HELP_ASSEMBLE &&
          (long)peek->row_end > row_bound)) {
-      if (shared->row_refactor_trace_dense_help) {
-        atomic_fetch_add_explicit(&kls_dense_help_stat_bound, 1,
-                                  memory_order_relaxed);
-      }
       return 0;
     }
     if (peek != NULL && peek->kind == KLS_DENSE_HELP_ASSEMBLE &&
@@ -13512,10 +13496,6 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
         return 0;
       }
     }
-  }
-  if (shared->row_refactor_trace_dense_help) {
-    atomic_fetch_add_explicit(&kls_dense_help_stat_enter, 1,
-                              memory_order_relaxed);
   }
   int did = 0;
   atomic_fetch_add_explicit(&shared->dense_help_inflight, 1,
@@ -14910,7 +14890,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
                             memory_order_relaxed);
       atomic_store_explicit(&shared->dense_help_active, 1,
                             memory_order_release);
-      long owner_rows = 0;
       for (;;) {
         if (atomic_load_explicit(&shared->dense_help_fail,
                                  memory_order_acquire)) {
@@ -14927,7 +14906,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
           (UF_long)claim);
         atomic_fetch_add_explicit(&shared->dense_help_done, 1,
                                   memory_order_release);
-        owner_rows++;
         if (!ok) {
           atomic_store_explicit(&shared->dense_help_fail, 1,
                                 memory_order_release);
@@ -14954,21 +14932,6 @@ static int kls_parallel_row_refactor_process_dense_group_compact(
         &shared->dense_help_fail, memory_order_relaxed);
       atomic_store_explicit(&shared->dense_help_owner_lock, 0,
                             memory_order_release);
-      if (getenv("KLS_TRACE_DENSE_HELP") != NULL) {
-        fprintf(stderr,
-                "DH group=%ld width=%ld owner=%ld helped=%ld%s"
-                " act=%ld self=%ld bound=%ld enter=%ld\n",
-                (long)group, (long)width, owner_rows,
-                (long)width - owner_rows, final_failed ? " FAIL" : "",
-                atomic_load_explicit(&kls_dense_help_stat_active,
-                                     memory_order_relaxed),
-                atomic_load_explicit(&kls_dense_help_stat_self,
-                                     memory_order_relaxed),
-                atomic_load_explicit(&kls_dense_help_stat_bound,
-                                     memory_order_relaxed),
-                atomic_load_explicit(&kls_dense_help_stat_enter,
-                                     memory_order_relaxed));
-      }
       if (final_failed) {
         return 0;
       }
@@ -17453,9 +17416,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
 
   shared->row_refactor_shared_telemetry =
     getenv("KLS_ROW_TELEMETRY_SHARED") != NULL;
-  shared->row_refactor_trace_dense_help =
-    getenv("KLS_TRACE_DENSE_HELP") != NULL ||
-    getenv("KLS_ROW_DENSE_HELP_STATS") != NULL;
   atomic_store_explicit(&shared->dense_help_large_waiters, 0,
                         memory_order_relaxed);
   shared->row_refactor_simple_scalar_update =
@@ -18186,12 +18146,6 @@ static int kls_try_compact_map32_klu_tournament(
     solver->compact_map32_choice = -1;
     *ok_out = (UF_long)arm_ok;
     *compact_used_out = 0;
-    if (getenv("KLS_TRACE_SETTLED_COMPACT_MAP32_REFACTOR") != NULL) {
-      fprintf(stderr,
-              "KLS compact map32 preflight: vendor %.3f ms cannot clear "
-              "the 30us preflight floor -> KLU\n",
-              1e3 * arm_seconds);
-    }
     return 1;
   }
 
@@ -18227,15 +18181,6 @@ static int kls_try_compact_map32_klu_tournament(
             2.0 * solver->compact_map32_trial_overhead) {
         solver->compact_map32_trial_probe_ok = 1;
         solver->compact_map32_choice = 1;
-        if (getenv("KLS_TRACE_SETTLED_COMPACT_MAP32_REFACTOR") != NULL) {
-          fprintf(stderr,
-                  "KLS compact map32 early verdict: compact %.3f ms "
-                  "vendor %.3f ms overhead %.3f ms projected %.3f ms "
-                  "valid=%d -> COMPACT\n",
-                  1e3 * compact_seconds, 1e3 * vendor_seconds,
-                  1e3 * solver->compact_map32_trial_overhead,
-                  1e3 * projected_saving, probe_ok);
-        }
         *ok_out = (UF_long)arm_ok;
         *compact_used_out = 1;
         return 1;
@@ -18273,15 +18218,6 @@ static int kls_try_compact_map32_klu_tournament(
         projected_saving >
           2.0 * solver->compact_map32_trial_overhead) {
       solver->compact_map32_choice = 1;
-      if (getenv("KLS_TRACE_SETTLED_COMPACT_MAP32_REFACTOR") != NULL) {
-        fprintf(stderr,
-                "KLS compact map32 two-pair verdict: compact %.3f ms "
-                "vendor %.3f ms overhead %.3f ms projected %.3f ms "
-                "-> COMPACT\n",
-                1e3 * compact_seconds, 1e3 * vendor_seconds,
-                1e3 * solver->compact_map32_trial_overhead,
-                1e3 * projected_saving);
-      }
       *ok_out = (UF_long)arm_ok;
       *compact_used_out = 1;
       return 1;
@@ -18322,16 +18258,6 @@ static int kls_try_compact_map32_klu_tournament(
       projected_saving >
         2.0 * solver->compact_map32_trial_overhead;
     solver->compact_map32_choice = adopt_compact ? 1 : -1;
-    if (getenv("KLS_TRACE_SETTLED_COMPACT_MAP32_REFACTOR") != NULL) {
-      fprintf(stderr,
-              "KLS compact map32 tournament: compact %.3f ms vendor %.3f "
-              "ms overhead %.3f ms projected %.3f ms valid=%d -> %s\n",
-              1e3 * compact_seconds, 1e3 * vendor_seconds,
-              1e3 * solver->compact_map32_trial_overhead,
-              1e3 * projected_saving,
-              solver->compact_map32_trial_probe_ok,
-              adopt_compact ? "COMPACT" : "KLU");
-    }
   }
   return 1;
 }

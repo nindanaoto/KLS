@@ -1882,7 +1882,6 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_native_row_panel_active;
 
   int row_refactor_shared_telemetry;
-  int row_refactor_trace_dense_help;
   int row_refactor_simple_scalar_update;
   int row_solve_mode;
   int row_publish_mode;
