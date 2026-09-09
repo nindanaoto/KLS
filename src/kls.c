@@ -16881,7 +16881,7 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
       offsetof(kls_stats, compact_solve_singleton_run_eligible) +
         sizeof(stats->compact_solve_singleton_run_eligible)) {
     stats->compact_solve_singleton_run_eligible =
-      kls_compact_singleton_run_solve_profile(solver, NULL, NULL);
+      kls_compact_singleton_run_solve_profile(solver);
   }
   if (copy_size >=
       offsetof(kls_stats, promoted_tolerance_l2_recovery_eligible) +

@@ -4041,12 +4041,10 @@ static int kls_pivot_tail_plan_local_range(
   UF_long *begin_out,
   UF_long *end_out,
   UF_long *columns_out,
-  int *contiguous_out,
   int *suffix_exact_out) {
   KLS_SET_OPTIONAL_OUTPUT(begin_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(end_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(columns_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(contiguous_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(suffix_exact_out, 0);
   if (solver == NULL || local_reject >= nk ||
       solver->stats.fast_rejected_pivoting_tail_columns <= 0 ||
@@ -4081,10 +4079,6 @@ static int kls_pivot_tail_plan_local_range(
   }
   if (columns_out != NULL) {
     *columns_out = columns;
-  }
-  if (contiguous_out != NULL) {
-    *contiguous_out =
-      solver->stats.fast_rejected_pivoting_tail_contiguous ? 1 : 0;
   }
   if (suffix_exact_out != NULL) {
     *suffix_exact_out =
@@ -4840,7 +4834,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   const int have_retained_tail_plan =
     kls_pivot_tail_plan_local_range(
       solver, k1, nk, local_reject, &tail_plan_begin, &tail_plan_end,
-      NULL, NULL, &tail_plan_suffix_exact);
+      NULL, &tail_plan_suffix_exact);
   UF_long preferred_restart_end =
     kls_preferred_pivot_tail_restart_end(solver, k1, nk, local_reject);
   const int can_try_masked_tail =

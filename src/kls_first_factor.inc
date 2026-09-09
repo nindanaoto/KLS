@@ -9577,7 +9577,7 @@ static int kls_try_row_first_rebuild_rejected_block(
   if (shared.force_block_pipeline &&
       kls_pivot_tail_plan_local_range(
         solver, k1, nk, local_reject, &tail_begin, &tail_end,
-        &tail_columns, NULL, &tail_suffix_exact) &&
+        &tail_columns, &tail_suffix_exact) &&
       (!separator_covers_rejected_block || tail_suffix_exact)) {
     const size_t nk_size = (size_t)nk;
     if ((UF_long)nk_size == nk) {

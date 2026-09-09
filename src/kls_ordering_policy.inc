@@ -1532,15 +1532,7 @@ static int choose_auto_scale_from_values(kls_solver *solver,
    over repeated solves.  The bounds are representation/cost limits rather
    than an input dimension or nonzero fingerprint. */
 static int kls_compact_singleton_run_solve_profile(
-  const kls_solver *solver,
-  UF_long *singleton_blocks_out,
-  UF_long *max_run_out) {
-  if (singleton_blocks_out != NULL) {
-    *singleton_blocks_out = 0u;
-  }
-  if (max_run_out != NULL) {
-    *max_run_out = 0u;
-  }
+  const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || !solver->symbolic->do_btf ||
       solver->n == 0u || solver->n > (UF_long)UINT16_MAX ||
@@ -1571,12 +1563,6 @@ static int kls_compact_singleton_run_solve_profile(
     } else {
       run = 0u;
     }
-  }
-  if (singleton_blocks_out != NULL) {
-    *singleton_blocks_out = singleton_blocks;
-  }
-  if (max_run_out != NULL) {
-    *max_run_out = max_run;
   }
   return singleton_blocks * 4u >= nblocks * 3u && max_run >= 256u;
 }

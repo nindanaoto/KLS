@@ -37,7 +37,7 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
   uint16_t *rptr = nblocks <= (UF_long)UINT16_MAX
     ? (uint16_t *)malloc(((size_t)nblocks + 1u) * sizeof(*rptr)) : NULL;
   const int compact_singleton_runs =
-    kls_compact_singleton_run_solve_profile(solver, NULL, NULL);
+    kls_compact_singleton_run_solve_profile(solver);
   /* This table is optional: allocation failure retains the ordinary compact
      mirror instead of rejecting all of its larger, already allocated data. */
   uint16_t *singleton_run = compact_singleton_runs

@@ -9198,7 +9198,6 @@ static int kls_row_refactor_group_trailing_slice(
   const kls_solver *solver,
   UF_long group,
   UF_long row_end,
-  UF_long *begin_out,
   UF_long *len_out,
   const UF_long **cols_out);
 static int kls_row_refactor_segment_input_targets_available(
@@ -10265,7 +10264,7 @@ static int kls_parallel_row_refactor_prefactor_compact_supernode_update(
     ? dense_panel + dense_panel_entries : NULL;
   const UF_long *trailing_cols = NULL;
   if (!kls_row_refactor_group_trailing_slice(
-        solver, dep_group, group_end, NULL, NULL, &trailing_cols)) {
+        solver, dep_group, group_end, NULL, &trailing_cols)) {
     kls_egraph_refactor_record_invalid(shared);
     return -1;
   }
@@ -11095,7 +11094,7 @@ static int kls_row_refactor_try_compact_supernode_update(
     ? dense_panel + dense_panel_entries : NULL;
   const UF_long *trailing_cols = NULL;
   if (!kls_row_refactor_group_trailing_slice(
-        solver, dep_group, group_end, NULL, NULL, &trailing_cols)) {
+        solver, dep_group, group_end, NULL, &trailing_cols)) {
     kls_egraph_refactor_record_invalid(shared);
     return -1;
   }
@@ -13651,7 +13650,7 @@ static int kls_compact_dense_group_try_batched_supernode_update(
       ? dep_dense_panel + dep_dense_entries : NULL;
     const UF_long *dep_trailing_cols = NULL;
     if (!kls_row_refactor_group_trailing_slice(
-          solver, dep_group, dep_group_end, NULL, NULL,
+          solver, dep_group, dep_group_end, NULL,
           &dep_trailing_cols)) {
       kls_egraph_refactor_record_invalid(shared);
       status = -1;
@@ -14140,7 +14139,7 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
     ? dep_dense_panel + dep_dense_entries : NULL;
   const UF_long *dep_trailing_cols = NULL;
   if (!kls_row_refactor_group_trailing_slice(
-        solver, dep_group, dep_group_end, NULL, NULL,
+        solver, dep_group, dep_group_end, NULL,
         &dep_trailing_cols)) {
     kls_egraph_refactor_record_invalid(shared);
     return -1;
@@ -15278,7 +15277,7 @@ static int kls_batch_group_try_ragged_supernode_update(
     ? dep_dense_panel + dep_dense_entries : NULL;
   const UF_long *dep_trailing_cols = NULL;
   if (!kls_row_refactor_group_trailing_slice(
-        solver, dep_group, dep_group_end, NULL, NULL,
+        solver, dep_group, dep_group_end, NULL,
         &dep_trailing_cols)) {
     kls_egraph_refactor_record_invalid(shared);
     return -1;
@@ -15574,10 +15573,8 @@ static int kls_row_refactor_group_trailing_slice(
   const kls_solver *solver,
   UF_long group,
   UF_long row_end,
-  UF_long *begin_out,
   UF_long *len_out,
   const UF_long **cols_out) {
-  KLS_SET_OPTIONAL_OUTPUT(begin_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(len_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(cols_out, NULL);
   if (solver == NULL || group >= solver->row_refactor_group_count ||
@@ -15609,9 +15606,6 @@ static int kls_row_refactor_group_trailing_slice(
     return 0;
   }
 
-  if (begin_out != NULL) {
-    *begin_out = begin;
-  }
   if (len_out != NULL) {
     *len_out = len;
   }
@@ -15687,7 +15681,7 @@ static int kls_parallel_row_refactor_process_group(
   UF_long trailing_len = 0;
   const UF_long *trailing_cols = NULL;
   if (!kls_row_refactor_group_trailing_slice(
-        solver, group, row_end, NULL, &trailing_len, &trailing_cols)) {
+        solver, group, row_end, &trailing_len, &trailing_cols)) {
     kls_egraph_refactor_record_invalid(shared);
     return 0;
   }
