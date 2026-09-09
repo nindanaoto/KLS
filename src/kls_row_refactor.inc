@@ -16066,46 +16066,15 @@ static void kls_row_refactor_worker_run_ready_pipeline(
       const UF_long end =
         shared->row_pipeline_private_thread_ptr[worker->tid + 1];
       if (begin <= end && end <= shared->row_pipeline_private_count) {
-        const int calibrate_components =
-          shared->row_refactor_component_seconds != NULL &&
-          shared->row_refactor_component_seconds_count ==
-            shared->solver->separator.component_count;
-        unsigned int calibration_component = UINT_MAX;
-        double calibration_component_start =
-          calibrate_components ? kls_now_seconds() : 0.0;
         for (UF_long pos = begin; pos < end; ++pos) {
           if (kls_egraph_refactor_should_stop(shared)) {
             return;
           }
           const UF_long group = shared->row_pipeline_private_groups[pos];
-          if (calibrate_components) {
-            unsigned int component = UINT_MAX;
-            if (!kls_row_refactor_group_separator_component_fast(
-                  shared->solver, group, &component)) {
-              component = UINT_MAX;
-            }
-            if (component != calibration_component) {
-              const double now = kls_now_seconds();
-              if (calibration_component != UINT_MAX) {
-                shared->row_refactor_component_seconds[
-                  calibration_component] +=
-                    now - calibration_component_start;
-              }
-              calibration_component = component;
-              calibration_component_start = now;
-            }
-          }
           int ok = 0;
           if (shared->row_pipeline_ordered_private) {
-            ok = shared->row_pipeline_ordered_private != 2 ||
-                 shared->row_pipeline_private_external_wait_mask == NULL ||
-                 !shared->row_pipeline_private_external_wait_mask[group] ||
-                 kls_parallel_row_refactor_wait_group_dependencies(
-                   worker, group);
-            if (ok) {
-              ok = kls_row_refactor_process_ordered_private_group(worker,
-                                                                 group);
-            }
+            ok = kls_row_refactor_process_ordered_private_group(worker,
+                                                               group);
           } else if (shared->row_pipeline_private_group_mask != NULL) {
             ok = kls_row_refactor_process_private_group(worker, group);
           } else {
@@ -16115,10 +16084,6 @@ static void kls_row_refactor_worker_run_ready_pipeline(
           if (!ok) {
             return;
           }
-        }
-        if (calibrate_components && calibration_component != UINT_MAX) {
-          shared->row_refactor_component_seconds[calibration_component] +=
-            kls_now_seconds() - calibration_component_start;
         }
       } else {
         kls_egraph_refactor_record_invalid(shared);
@@ -16138,15 +16103,8 @@ static void kls_row_refactor_worker_run_ready_pipeline(
         const UF_long group = shared->row_pipeline_private_groups[pos];
         int ok = 0;
         if (shared->row_pipeline_ordered_private) {
-          ok = shared->row_pipeline_ordered_private != 2 ||
-               shared->row_pipeline_private_external_wait_mask == NULL ||
-               !shared->row_pipeline_private_external_wait_mask[group] ||
-               kls_parallel_row_refactor_wait_group_dependencies(
-                 worker, group);
-          if (ok) {
-            ok = kls_row_refactor_process_ordered_private_group(worker,
-                                                               group);
-          }
+          ok = kls_row_refactor_process_ordered_private_group(worker,
+                                                             group);
         } else if (shared->row_pipeline_private_group_mask != NULL) {
           ok = kls_row_refactor_process_private_group(worker, group);
         } else {
@@ -16452,8 +16410,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   double row_separator_flop_private_min_work = 0.0;
   double row_separator_flop_private_max_work = 0.0;
   int row_ordered_private_queue = 0;
-  unsigned char *row_private_external_wait_mask = NULL;
-  UF_long row_private_external_wait_targets = 0u;
   /* Preserve the retained separator-tree private/pipeline queue when it covers
      the row-group DAG.  When the separator schedule is pipeline-heavy and a
      work-significant dependent producer is present, wrap its pipeline side in
@@ -16686,26 +16642,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       kls_row_refactor_private_thread_order_valid(
         solver, row_private_groups, row_private_thread_ptr,
         row_private_group_mask, thread_count);
-    const char *external_wait_env =
-      getenv("KLS_ROW_REFACTOR_ORDER_PRIVATE_WITH_EXTERNAL_WAITS");
-    const int order_with_external_waits =
-      external_wait_env != NULL && external_wait_env[0] != '\0' &&
-      !(external_wait_env[0] == '0' && external_wait_env[1] == '\0');
-    if (!row_ordered_private_queue && order_with_external_waits) {
-      row_private_external_wait_mask =
-        kls_row_refactor_private_external_wait_mask(
-          solver, row_private_groups, row_private_thread_ptr,
-          row_private_group_mask, thread_count,
-          &row_private_external_wait_targets);
-      if (row_private_external_wait_mask != NULL &&
-          row_private_external_wait_targets > 0u) {
-        row_ordered_private_queue = 2;
-      } else {
-        free(row_private_external_wait_mask);
-        row_private_external_wait_mask = NULL;
-        row_private_external_wait_targets = 0u;
-      }
-    }
   }
   const char *row_solve_separator_env =
     getenv("KLS_ROW_SOLVE_SEPARATOR");
@@ -16722,43 +16658,9 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
         solver, row_private_groups, row_private_thread_ptr,
         row_private_group_mask, thread_count);
   }
-  {
-    const char *steal_env =
-      getenv("KLS_ROW_REFACTOR_STEAL_PRIVATE");
-    const int steal_private =
-      steal_env != NULL && steal_env[0] != '\0' &&
-      !(steal_env[0] == '0' && steal_env[1] == '\0');
-    if (steal_private && use_row_ready_queue &&
-        row_owned_private_groups != NULL &&
-        row_private_group_mask != NULL &&
-        row_private_group_count > 0u) {
-      /* All group ids are topological.  Publishing the retained private
-         groups in id order lets the existing atomic cursor distribute one
-         component across idle workers while the dependency counters keep
-         each claimed group safe.  The static separator ownership has
-         already been copied into the optional solve plan above. */
-      UF_long write = 0u;
-      for (UF_long group = 0u;
-           group < solver->row_refactor_group_count; ++group) {
-        if (row_private_group_mask[group]) {
-          if (write >= row_private_group_count) {
-            write = 0u;
-            break;
-          }
-          row_owned_private_groups[write++] = group;
-        }
-      }
-      if (write == row_private_group_count) {
-        free(row_private_thread_ptr);
-        row_private_thread_ptr = NULL;
-        row_ordered_private_queue = 0;
-      }
-    }
-  }
   atomic_uint *pipeline_done = NULL;
   unsigned int pipeline_generation = 0;
   if (check_pivots || row_dep_ready_queue ||
-      row_ordered_private_queue == 2 ||
       (use_group_pipeline && !use_row_ready_queue)) {
     pipeline_done =
       ensure_egraph_pipeline_done(solver, &pipeline_generation);
@@ -16766,7 +16668,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       free(row_owned_private_groups);
       free(row_private_thread_ptr);
       free(row_private_group_mask);
-      free(row_private_external_wait_mask);
       return -1;
     }
   }
@@ -16777,7 +16678,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     free(row_owned_private_groups);
     free(row_private_thread_ptr);
     free(row_private_group_mask);
-    free(row_private_external_wait_mask);
     return -1;
   }
   kls_egraph_refactor_pool *pool =
@@ -16786,7 +16686,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     free(row_owned_private_groups);
     free(row_private_thread_ptr);
     free(row_private_group_mask);
-    free(row_private_external_wait_mask);
     return -1;
   }
 
@@ -16799,7 +16698,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     free(row_owned_private_groups);
     free(row_private_thread_ptr);
     free(row_private_group_mask);
-    free(row_private_external_wait_mask);
     return 0;
   }
   if (!kls_refresh_row_refactor_offdiag_values(solver, numeric_values)) {
@@ -16807,7 +16705,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     free(row_owned_private_groups);
     free(row_private_thread_ptr);
     free(row_private_group_mask);
-    free(row_private_external_wait_mask);
     return 0;
   }
   common->status = TRILINOS_KLU_OK;
@@ -16823,26 +16720,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   const UF_long partial_supernode_pipeline_count_before =
     solver->row_refactor_partial_supernode_pipeline_run_count;
 
-  double *component_seconds = NULL;
-  const char *component_calibration_env =
-    getenv("KLS_ROW_REFACTOR_CALIBRATE_COMPONENTS");
-  const int calibrate_components =
-    component_calibration_env != NULL &&
-    component_calibration_env[0] != '\0' &&
-    !(component_calibration_env[0] == '0' &&
-      component_calibration_env[1] == '\0') &&
-    !solver->row_refactor_separator_component_calibrated &&
-    row_separator_flop_queue && row_private_groups != NULL &&
-    row_private_thread_ptr != NULL && row_private_group_count > 0u &&
-    solver->separator.component_count > 1u &&
-    solver->separator.component_count <=
-      (UF_long)(SIZE_MAX / sizeof(double));
-  if (calibrate_components) {
-    component_seconds = (double *)calloc(
-      (size_t)solver->separator.component_count,
-      sizeof(*component_seconds));
-  }
-
   kls_egraph_refactor_shared *shared = &pool->shared;
   pthread_mutex_lock(&shared->lock);
   if (pool->active_workers != 0) {
@@ -16850,8 +16727,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     free(row_owned_private_groups);
     free(row_private_thread_ptr);
     free(row_private_group_mask);
-    free(row_private_external_wait_mask);
-    free(component_seconds);
     return -1;
   }
 
@@ -16863,9 +16738,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->kernel = KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 1;
-  shared->row_refactor_component_seconds = component_seconds;
-  shared->row_refactor_component_seconds_count = component_seconds != NULL
-    ? solver->separator.component_count : 0u;
   shared->trial_deadline_seconds =
     solver->row_trial_deadline > 0.0
       ? kls_now_seconds() + solver->row_trial_deadline
@@ -16916,8 +16788,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     use_row_ready_queue ? row_private_thread_ptr : NULL;
   shared->row_pipeline_private_group_mask =
     use_row_ready_queue ? row_private_group_mask : NULL;
-  shared->row_pipeline_private_external_wait_mask =
-    use_row_ready_queue ? row_private_external_wait_mask : NULL;
   shared->row_pipeline_private_count =
     use_row_ready_queue && row_private_groups != NULL
       ? row_private_group_count : 0u;
@@ -17002,12 +16872,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   }
 
   kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
-  if (component_seconds != NULL && !shared->invalid &&
-      !shared->pivot_rejected && !shared->singular) {
-    (void)kls_install_row_refactor_component_calibration(
-        solver, row_private_groups, row_private_group_count,
-        component_seconds, solver->separator.component_count);
-  }
   for (int i = 0; i < thread_count; ++i) {
     const kls_egraph_refactor_worker *telemetry = &pool->workers[i];
     solver->row_refactor_last_compact_dense_panel_direct_input_rows +=
@@ -17070,17 +16934,12 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_pipeline_private_groups = NULL;
   shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_group_mask = NULL;
-  shared->row_pipeline_private_external_wait_mask = NULL;
   shared->row_pipeline_private_count = 0;
   shared->row_pipeline_ordered_private = 0;
-  shared->row_refactor_component_seconds = NULL;
-  shared->row_refactor_component_seconds_count = 0u;
-  free(component_seconds);
   pthread_mutex_unlock(&shared->lock);
   free(row_owned_private_groups);
   free(row_private_thread_ptr);
   free(row_private_group_mask);
-  free(row_private_external_wait_mask);
   if (use_row_ready_queue) {
     kls_record_row_refactor_local_ready_groups(solver,
                                                row_local_ready_groups);

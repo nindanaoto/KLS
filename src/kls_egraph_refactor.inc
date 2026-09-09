@@ -5563,7 +5563,6 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.row_pipeline_ready_tail, 0ul);
   atomic_init(&pool->shared.row_pipeline_completed_groups, 0ul);
   pool->shared.row_pipeline_private_group_mask = NULL;
-  pool->shared.row_pipeline_private_external_wait_mask = NULL;
   pool->shared.row_pipeline_ordered_private = 0;
   pool->caller_affinity_cpu = -1;
 
@@ -5751,7 +5750,6 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
   shared->row_pipeline_private_groups = NULL;
   shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_group_mask = NULL;
-  shared->row_pipeline_private_external_wait_mask = NULL;
   shared->row_pipeline_private_count = 0;
   shared->row_pipeline_ordered_private = 0;
   shared->pipeline_done = NULL;
@@ -5821,7 +5819,6 @@ static int kls_run_parallel_row_solve_separator_private(
   shared->row_pipeline_private_groups = NULL;
   shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_group_mask = NULL;
-  shared->row_pipeline_private_external_wait_mask = NULL;
   shared->row_pipeline_private_count = 0;
   shared->row_pipeline_ordered_private = 0;
   shared->pipeline_done = NULL;
@@ -5919,7 +5916,6 @@ static int kls_run_parallel_row_solve_sparse_block(
   shared->row_pipeline_private_groups = NULL;
   shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_group_mask = NULL;
-  shared->row_pipeline_private_external_wait_mask = NULL;
   shared->row_pipeline_private_count = 0;
   shared->row_pipeline_ordered_private = 0;
   shared->pipeline_done = NULL;
@@ -7810,7 +7806,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->row_pipeline_private_groups = NULL;
   shared->row_pipeline_private_thread_ptr = NULL;
   shared->row_pipeline_private_group_mask = NULL;
-  shared->row_pipeline_private_external_wait_mask = NULL;
   shared->row_pipeline_private_count = 0;
   shared->row_pipeline_ordered_private = 0;
   atomic_store_explicit(&shared->stop, 0, memory_order_release);

@@ -983,9 +983,6 @@ struct kls_solver {
   atomic_ulong *row_refactor_remaining_preds;
   unsigned char *row_refactor_ready_tail_groups;
   UF_long row_refactor_ready_queue_capacity;
-  double *row_refactor_separator_component_scale;
-  UF_long row_refactor_separator_component_scale_count;
-  int row_refactor_separator_component_calibrated;
   UF_long *row_refactor_group_level_thread_ptr;
   int row_refactor_group_level_thread_count;
   UF_long *row_refactor_l_internal_ptr;
@@ -1811,7 +1808,6 @@ typedef struct kls_egraph_refactor_shared {
   const UF_long *row_pipeline_private_groups;
   const UF_long *row_pipeline_private_thread_ptr;
   const unsigned char *row_pipeline_private_group_mask;
-  const unsigned char *row_pipeline_private_external_wait_mask;
   UF_long row_pipeline_private_count;
   int row_pipeline_ordered_private;
   atomic_ulong row_pipeline_private_pos;
@@ -1868,8 +1864,6 @@ typedef struct kls_egraph_refactor_shared {
   const double *refine_copy_input;
   double *refine_copy_output;
   UF_long refine_copy_nnz;
-  double *row_refactor_component_seconds;
-  UF_long row_refactor_component_seconds_count;
 } kls_egraph_refactor_shared;
 
 static KLS_ALWAYS_INLINE void kls_egraph_store_udiag(
@@ -3152,7 +3146,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_ready_slots);
   free(solver->row_refactor_remaining_preds);
   free(solver->row_refactor_ready_tail_groups);
-  free(solver->row_refactor_separator_component_scale);
   free(solver->row_refactor_group_level_thread_ptr);
   free(solver->row_refactor_l_internal_ptr);
   free(solver->row_refactor_etree_parent);
@@ -3242,9 +3235,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_remaining_preds = NULL;
   solver->row_refactor_ready_tail_groups = NULL;
   solver->row_refactor_ready_queue_capacity = 0;
-  solver->row_refactor_separator_component_scale = NULL;
-  solver->row_refactor_separator_component_scale_count = 0;
-  solver->row_refactor_separator_component_calibrated = 0;
   solver->row_refactor_group_level_thread_ptr = NULL;
   solver->row_refactor_group_level_thread_count = 0;
   solver->row_refactor_l_internal_ptr = NULL;
