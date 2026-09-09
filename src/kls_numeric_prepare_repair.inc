@@ -5233,7 +5233,6 @@ static int kls_refactor_map_is_eligible(const kls_solver *solver) {
 
 static int kls_build_refactor_map_index32(kls_solver *solver) {
   if (solver != NULL && !solver->compact_map32_probe_active &&
-      getenv("KLS_ENABLE_SETTLED_COMPACT_MAP32_REFACTOR") == NULL &&
       (kls_moderate_work_single_block_lean_policy_enabled(solver) ||
        ((solver->lean_choice > 0 || solver->lean_probe_arm > 0) &&
         kls_moderate_work_fragmented_btf_lean_policy_enabled(solver)))) {
@@ -9406,8 +9405,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   free(levels);
 
   if (solver->refactor_level_ptr != NULL &&
-      solver->refactor_dependency_work > 0.0 && group_count > 0u &&
-      getenv("KLS_DISABLE_ROW_TASK_FLOOR") == NULL) {
+      solver->refactor_dependency_work > 0.0 && group_count > 0u) {
     /* Before constructing the remaining group DAG, account for the minimum
        work of the row executor that is already proven by these transposed
        streams.  Each scheduled group necessarily performs a ready/claim,
@@ -10136,8 +10134,7 @@ static void kls_row_refactor_ensure_sn_end(kls_solver *solver) {
   }
   if (solver->row_refactor_sn_end != NULL ||
       solver->row_refactor_u_ptr == NULL ||
-      solver->row_refactor_u_cols == NULL || solver->n == 0u ||
-      getenv("KLS_DISABLE_ROW_LIGHT_SNODE") != NULL) {
+      solver->row_refactor_u_cols == NULL || solver->n == 0u) {
     return;
   }
   const UF_long n = solver->n;
@@ -10176,7 +10173,6 @@ static void kls_row_refactor_ensure_sn_end(kls_solver *solver) {
 static int kls_generic_hoisted_snode_worker_candidate(
   const kls_solver *solver) {
   if (solver == NULL ||
-      getenv("KLS_DISABLE_GENERIC_HOISTED_SNODE_WORKER") != NULL ||
       solver->symbolic == NULL || solver->numeric == NULL ||
       !kls_repeated_update_workload(&solver->options) ||
       solver->options.threads < 2 || solver->common.scale > 0 ||
@@ -11218,7 +11214,6 @@ static int kls_build_lean_row_refactor_pattern_parallel(
         (size_t)input_nnz * sizeof(*input_pos));
       ok = input_cols != NULL && input_pos != NULL;
       if (ok && lean_only &&
-          getenv("KLS_DISABLE_LEAN_PACKED_INPUT") == NULL &&
           kls_lean_packed_input_is_profitable(solver, input_nnz) &&
           solver->n <= (UF_long)UINT16_MAX + 1u &&
           solver->nnz <= (UF_long)UINT16_MAX + 1u) {
@@ -11286,7 +11281,6 @@ static int kls_build_lean_row_refactor_pattern_parallel(
       (UF_long *)malloc((size_t)input_nnz * sizeof(*input_pos));
     ok = input_cols != NULL && input_pos != NULL;
     if (ok && lean_only &&
-        getenv("KLS_DISABLE_LEAN_PACKED_INPUT") == NULL &&
         kls_lean_packed_input_is_profitable(solver, input_nnz) &&
         solver->n <= (UF_long)UINT16_MAX + 1u &&
         solver->nnz <= (UF_long)UINT16_MAX + 1u) {

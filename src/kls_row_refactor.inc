@@ -8043,8 +8043,6 @@ static int kls_try_row_refactor_solve_one_rhs(kls_solver *solver,
 static int kls_try_dirty_row_transpose_plan_solve_one_rhs(
   kls_solver *solver,
   double *x) {
-  const int force =
-    getenv("KLS_ENABLE_DIRTY_ROW_TRANSPOSE_PLAN_SOLVE") != NULL;
   if (solver == NULL || x == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL ||
       !solver->lean_compact_match_row_factor_active ||
@@ -8058,12 +8056,10 @@ static int kls_try_dirty_row_transpose_plan_solve_one_rhs(
       solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
       solver->numeric->Pnum == NULL || solver->numeric->Udiag == NULL ||
       solver->numeric->Xwork == NULL ||
-      getenv("KLS_DISABLE_DIRTY_ROW_TRANSPOSE_PLAN_SOLVE") != NULL ||
-      (!force &&
-       (solver->options.expected_solves < 16 ||
-        solver->n > (UF_long)UINT16_MAX + 1u ||
-        solver->row_refactor_l_ptr[solver->n] > (UF_long)UINT16_MAX ||
-        solver->row_refactor_u_ptr[solver->n] > (UF_long)UINT16_MAX))) {
+      solver->options.expected_solves < 16 ||
+      solver->n > (UF_long)UINT16_MAX + 1u ||
+      solver->row_refactor_l_ptr[solver->n] > (UF_long)UINT16_MAX ||
+      solver->row_refactor_u_ptr[solver->n] > (UF_long)UINT16_MAX) {
     return 0;
   }
 
@@ -17171,13 +17167,10 @@ static int kls_try_compact_map32_klu_tournament(
     return 0;
   }
 
-  const int force_compact =
-    getenv("KLS_ENABLE_SETTLED_COMPACT_MAP32_REFACTOR") != NULL;
   const int settled_low_work_compact =
-    getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_COMPACT_MAP32_POLICY") == NULL &&
     kls_low_work_single_block_policy_enabled(solver) &&
     kls_repeated_update_workload(&solver->options);
-  if (!force_compact && solver->compact_map32_choice == 0 &&
+  if (solver->compact_map32_choice == 0 &&
       settled_low_work_compact) {
     /* In this cache-resident regime the compact walk performs the same
        fixed-pivot arithmetic as KLU while replacing the hot 64-bit input
@@ -17190,14 +17183,12 @@ static int kls_try_compact_map32_klu_tournament(
        numeric before the later direct lifecycle can use it. */
     solver->compact_map32_choice = 1;
   }
-  if (!force_compact &&
-      (solver->compact_map32_choice < 0 ||
-       getenv("KLS_DISABLE_COMPACT_MAP32_TOURNAMENT") != NULL ||
-       !kls_repeated_update_workload(&solver->options))) {
+  if (solver->compact_map32_choice < 0 ||
+      !kls_repeated_update_workload(&solver->options)) {
     return 0;
   }
 
-  if (force_compact || solver->compact_map32_choice > 0) {
+  if (solver->compact_map32_choice > 0) {
     solver->compact_map32_probe_active = 1;
     const int compact_ok =
       kls_lean_single_block_map32_refactor(solver, numeric_values);
@@ -17207,17 +17198,12 @@ static int kls_try_compact_map32_klu_tournament(
       *compact_used_out = 1;
       return 1;
     }
-    if (!force_compact) {
-      solver->compact_map32_choice = -1;
-    }
+    solver->compact_map32_choice = -1;
     return 0;
   }
 
   const int state = solver->compact_map32_trial_state;
-  const int vendor_first =
-    getenv("KLS_DISABLE_COMPACT_MAP32_VENDOR_PREFLIGHT") == NULL &&
-    kls_low_work_single_block_policy_enabled(solver);
-  if ((!vendor_first && state == 0) || (vendor_first && state == 1)) {
+  if (state == 0) {
     const double prep_start = kls_now_seconds();
     solver->compact_map32_probe_active = 1;
     const int map_ready = kls_build_refactor_map(solver);
@@ -17230,18 +17216,8 @@ static int kls_try_compact_map32_klu_tournament(
     }
   }
 
-  /* Measure the zero-setup incumbent before constructing the compact map.
-     The retained compact arm is required to save at least one timer-stable
-     microsecond per update below.  If the complete zero-setup vendor numeric
-     is no slower than 30 microseconds, even the whole expected-horizon gain
-     is comparable to the map/probe cost and to cache-state bias from
-     alternating representations.  Settle that incumbent before allocating
-     or timing the challenger.  Larger candidates retain the same median-of-
-     three comparison and expected-horizon payback proof, merely ordered
-     vendor/compact so the preflight is available before map preparation. */
-  const int compact_arm = vendor_first
-    ? (state & 1) != 0
-    : (state & 1) == 0;
+  /* Low-work cases settle above; remaining trials alternate compact/vendor. */
+  const int compact_arm = (state & 1) == 0;
   solver->common.status = TRILINOS_KLU_OK;
   const double arm_start = kls_now_seconds();
   int arm_ok = 0;
@@ -17265,86 +17241,12 @@ static int kls_try_compact_map32_klu_tournament(
   const int arm = compact_arm ? 0 : 1;
   solver->compact_map32_trial_samples[arm][state / 2] = arm_seconds;
 
-  if (vendor_first && state == 0 && arm_seconds <= 30.0e-6) {
-    solver->compact_map32_choice = -1;
-    *ok_out = (UF_long)arm_ok;
-    *compact_used_out = 0;
-    return 1;
-  }
-
-  if (vendor_first && state == 1 &&
-      getenv("KLS_DISABLE_COMPACT_MAP32_EARLY_VERDICT") == NULL) {
-    const double vendor_seconds =
-      solver->compact_map32_trial_samples[1][0];
-    const double compact_seconds =
-      solver->compact_map32_trial_samples[0][0];
-    /* Sequentially stop a clear compact win instead of spending four more
-       public updates merely to tighten an already lifecycle-decisive timing
-       estimate.  Both kernels have now run once on adjacent generations,
-       the vendor arm ran first (so a cold compact cache cannot create a
-       false win), and the absolute delta is kept above timer-scale noise.
-       Ambiguous pairs retain the counterbalanced median-of-three tournament
-       below.  The residual certificate and two-times overhead payback make
-       this a measured executor verdict, not a factor-shape shortcut. */
-    const int timing_decisive =
-      compact_seconds > 0.0 && vendor_seconds > 0.0 &&
-      compact_seconds < 0.95 * vendor_seconds &&
-      vendor_seconds - compact_seconds >= 2.0e-6;
-    if (timing_decisive) {
-      const double probe_start = kls_now_seconds();
-      const int probe_ok =
-        kls_direct_klu_numeric_residual_probe(solver, numeric_values);
-      solver->compact_map32_trial_overhead +=
-        kls_now_seconds() - probe_start;
-      const double remaining =
-        (double)(solver->options.expected_refactorizations - 2);
-      const double projected_saving =
-        remaining * (vendor_seconds - compact_seconds);
-      if (probe_ok && projected_saving >
-            2.0 * solver->compact_map32_trial_overhead) {
-        solver->compact_map32_trial_probe_ok = 1;
-        solver->compact_map32_choice = 1;
-        *ok_out = (UF_long)arm_ok;
-        *compact_used_out = 1;
-        return 1;
-      }
-    }
-  }
-
-  if (state == (vendor_first ? 3 : 2)) {
+  if (state == 2) {
     const double probe_start = kls_now_seconds();
     solver->compact_map32_trial_probe_ok =
       kls_direct_klu_numeric_residual_probe(solver, numeric_values);
     solver->compact_map32_trial_overhead +=
       kls_now_seconds() - probe_start;
-  }
-  if (vendor_first && state == 3 &&
-      getenv("KLS_DISABLE_COMPACT_MAP32_EARLY_VERDICT") == NULL) {
-    const double compact_seconds = fmin(
-      solver->compact_map32_trial_samples[0][0],
-      solver->compact_map32_trial_samples[0][1]);
-    const double vendor_seconds = fmin(
-      solver->compact_map32_trial_samples[1][0],
-      solver->compact_map32_trial_samples[1][1]);
-    const double remaining =
-      (double)(solver->options.expected_refactorizations - 4);
-    const double projected_saving =
-      remaining * (vendor_seconds - compact_seconds);
-    /* A second alternating pair supplies a warmed observation of both
-       kernels.  Stop here when even their per-arm minima retain a material
-       compact advantage and the already-computed residual/payback contract
-       accepts it; otherwise collect the third pair for the robust median. */
-    if (solver->compact_map32_trial_probe_ok && compact_seconds > 0.0 &&
-        vendor_seconds > 0.0 &&
-        compact_seconds < 0.98 * vendor_seconds &&
-        vendor_seconds - compact_seconds >= 1.0e-6 &&
-        projected_saving >
-          2.0 * solver->compact_map32_trial_overhead) {
-      solver->compact_map32_choice = 1;
-      *ok_out = (UF_long)arm_ok;
-      *compact_used_out = 1;
-      return 1;
-    }
   }
   solver->compact_map32_trial_state = state + 1;
   *ok_out = (UF_long)arm_ok;
