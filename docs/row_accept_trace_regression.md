@@ -1,5 +1,9 @@
 # Slimming stop: row-acceptance diagnostic removal
 
+Follow-up: [the compact solve alignment fix](i32_solve_alignment_fix.md)
+recovers this regression while retaining the rejected diagnostic removal.
+The account below records the original experiment and stopping decision.
+
 Accepted source baseline: `12bc310`; resumed-pass baseline: `372f9d1`.
 
 An experimental removal of `KLS_TRACE_ROW_ACCEPT` messages deleted 119
@@ -18,7 +22,7 @@ in 18/24 incremental pairs. Both runs exceed the established 2.5% review
 threshold. No further rerun was used to seek a passing result.
 
 In confirmation, median lifecycle times were 6.404 ms for the accepted
-version and 6.586 ms for the candidate. Median steady refactor/solve time
+version and 6.586 ms for the candidate. Median steady solve-after-refactor time
 rose from 10.908 us to 12.421 us; median analysis and initial factor times
 did not increase. This points to recurring numerical execution, not just
 initialization, as the affected portion. These are per-version medians;

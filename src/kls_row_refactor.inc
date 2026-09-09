@@ -637,23 +637,6 @@ static void kls_row_refactor_acceptance_try_decide(kls_solver *solver) {
       solver->row_accept_ref_min[1] < solver->row_accept_ref_min[0] * 0.75
         ? 1 : -1;
   }
-  if (solver->row_accept_decision != 0 &&
-      getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-    fprintf(stderr,
-            "KLS row-accept: %s (ref %.3f/%.3f ms over %d/%d,"
-            " solve %.3f/%.3f ms over %d/%d)\n",
-            solver->row_accept_decision > 0 ? "ROW" : "COLUMN",
-            col_refs > 0
-              ? 1e3 * solver->row_accept_ref_seconds[0] / col_refs : 0.0,
-            row_refs > 0
-              ? 1e3 * solver->row_accept_ref_seconds[1] / row_refs : 0.0,
-            col_refs, row_refs,
-            col_solves > 0
-              ? 1e3 * solver->row_accept_solve_seconds[0] / col_solves : 0.0,
-            row_solves > 0
-              ? 1e3 * solver->row_accept_solve_seconds[1] / row_solves : 0.0,
-            col_solves, row_solves);
-  }
 }
 
 static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
@@ -707,15 +690,6 @@ static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
       } else if (solver->row_reaudit_state == 5) {
         solver->row_reaudit_state = 6;
       }
-      if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-        fprintf(stderr,
-                "KLS row-accept steady re-audit: %s (column %.3f ms vs"
-                " row steady %.3f ms, state %d)\n",
-                solver->row_accept_decision < 0 ? "REVERT to COLUMN"
-                                                : "pair pending",
-                1e3 * seconds, 1e3 * solver->row_steady_ref_min,
-                solver->row_reaudit_state);
-      }
     }
     return;
   }
@@ -724,11 +698,6 @@ static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
   }
   const int side =
     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW ? 1 : 0;
-  if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-    fprintf(stderr, "KLS row-accept sample: %s ref %.3f ms (path %d)\n",
-            side ? "row" : "column", 1e3 * seconds,
-            (int)solver->stats.last_refactor_path);
-  }
   solver->row_accept_ref_seconds[side] += seconds;
   solver->row_accept_ref_samples[side]++;
   if (solver->row_accept_ref_samples[side] == 1 ||
@@ -781,14 +750,6 @@ static void kls_row_refactor_acceptance_record_solve(kls_solver *solver,
        can win this comparison.  The omitted row solve itself supplies the
        noise cushion, so the strict inequality needs no tuned margin. */
     solver->row_accept_decision = -1;
-    if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-      fprintf(stderr,
-              "KLS row-accept lower bound: COLUMN (row ref %.3f ms vs "
-              "column ref+solve %.3f ms)\n",
-              1e3 * solver->row_accept_ref_min[1],
-              1e3 * (solver->row_accept_ref_min[0] +
-                      solver->row_accept_solve_min[0]));
-    }
     return;
   }
   kls_row_refactor_acceptance_try_decide(solver);
@@ -999,7 +960,6 @@ static void kls_row_solve_steady_audit(kls_solver *solver, double seconds) {
       kls_row_refactor_env_enabled()) {
     return;
   }
-  const int trace = getenv("KLS_TRACE_ROW_ACCEPT") != NULL;
   if (solver->row_reaudit_state == 3 ||
       solver->row_reaudit_state == 6) {
     /* This solve follows one of the forced column refreshes above.  Compare
@@ -1029,18 +989,6 @@ static void kls_row_solve_steady_audit(kls_solver *solver, double seconds) {
           solver->row_accept_decision = -1;
         }
         solver->row_reaudit_state = 7;
-        if (trace) {
-          fprintf(stderr,
-                  "KLS row-accept steady cycle re-audit: %s "
-                  "(column %.3f + %.3f ms vs row %.3f + %.3f + %.3f ms)\n",
-                  solver->row_accept_decision < 0 ? "REVERT to COLUMN"
-                                                  : "row stands",
-                  1e3 * solver->row_accept_ref_min[0],
-                  1e3 * solver->row_accept_solve_min[0],
-                  1e3 * solver->row_steady_ref_min,
-                  1e3 * row_publication,
-                  1e3 * solver->row_steady_cycle_solve_min);
-        }
       }
       return;
     }
@@ -1077,25 +1025,8 @@ static void kls_row_solve_steady_audit(kls_solver *solver, double seconds) {
         solver->row_accept_publish_preferred = 1;
       }
       solver->row_publish_experiment = 3;
-      if (trace) {
-        fprintf(stderr,
-                "KLS row-solve audit: %s (row steady %.3f ms over %d,"
-                " column trial %.3f ms)\n",
-                solver->row_accept_publish_preferred
-                  ? "PUBLISH" : "row stands",
-                1e3 * solver->row_steady_solve_min,
-                solver->row_steady_solve_samples,
-                1e3 * solver->row_accept_solve_min[0]);
-      }
     } else {
       solver->row_publish_experiment = 1;
-      if (trace) {
-        fprintf(stderr,
-                "KLS row-solve audit: probing column route"
-                " (row steady %.3f ms over %d, no column samples)\n",
-                1e3 * solver->row_steady_solve_min,
-                solver->row_steady_solve_samples);
-      }
     }
     } else if (solver->row_publish_experiment == 2) {
     /* this solve ran the column route off the published values */
@@ -1112,15 +1043,6 @@ static void kls_row_solve_steady_audit(kls_solver *solver, double seconds) {
         solver->row_steady_cycle_solve_min = seconds;
         solver->row_steady_cycle_solve_samples++;
       }
-      if (trace) {
-      fprintf(stderr,
-              "KLS row-solve audit: %s (publish %.3f + column %.3f ms"
-              " vs row steady %.3f ms)\n",
-              solver->row_accept_publish_preferred
-                ? "PUBLISH" : "row stands",
-              1e3 * solver->row_publish_probe_seconds,
-              1e3 * seconds, 1e3 * solver->row_steady_solve_min);
-    }
   }
 }
 
@@ -6606,19 +6528,6 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
      representation cannot become the default merely as a setup side effect. */
   if (solver->numeric_is_predicted) {
     return;
-  }
-
-  if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL &&
-      solver->refactor_level_ptr != NULL && solver->n > 0u) {
-    fprintf(stderr,
-            "KLS row-accept egraph gate: eligible=%d dep=%.3e pipe=%.3e "
-            "width=%lld cols=%lld n=%lld\n",
-            kls_egraph_refactor_is_eligible(solver),
-            solver->refactor_dependency_work,
-            solver->refactor_pipeline_work,
-            (long long)solver->refactor_level_max_width,
-            (long long)solver->refactor_pipeline_column_count,
-            (long long)solver->n);
   }
 
   if (solver->refactor_level_ptr != NULL && solver->n > 0u &&
@@ -17847,9 +17756,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     solver->row_refactor_solve_validated = 0;
     solver->egraph_worker_scratch_dirty = 1;
     common->status = TRILINOS_KLU_OK;
-    if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-      fprintf(stderr, "KLS row-accept: trial deadline hit -> COLUMN\n");
-    }
     return -1;
   }
   if (shared->invalid) {

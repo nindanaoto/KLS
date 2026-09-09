@@ -1283,6 +1283,11 @@ static UF_long kls_lean_single_block_prepared_solve(
 }
 
 /* One-rhs solve with klu_l_solve semantics over the i32 streams. */
+/* Keep this recurring sparse kernel's placement stable when unrelated
+   diagnostics or setup code change earlier in the translation unit. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((aligned(64)))
+#endif
 static UF_long kls_i32_solve(kls_solver *solver,
                              const double *rhs,
                              double *out,

@@ -14432,14 +14432,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
         elapsed = column_seconds;
       }
       solver->adaptive_refactor_seconds = elapsed;
-      if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-        fprintf(stderr,
-                "KLS row-accept first consult: %s (column %.3f ms,"
-                " row %.3f ms)\n",
-                solver->row_accept_decision > 0 ? "ROW" :
-                  solver->row_accept_decision < 0 ? "COLUMN" : "continue",
-                1e3 * column_seconds, 1e3 * row_seconds);
-      }
     }
   }
   if (solver->padded_pending > 0 && solver->padded_choice == 0) {
@@ -14457,14 +14449,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
             solver->padded_probe_min <
               0.98 * solver->padded_probe_min_off
           ? 1 : -1;
-      if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-        fprintf(stderr,
-                "KLS padded probe: %s (padded %.3f ms vs unpadded"
-                " %.3f ms)\n",
-                solver->padded_choice > 0 ? "ADOPT" : "decline+teardown",
-                1e3 * solver->padded_probe_min,
-                1e3 * solver->padded_probe_min_off);
-      }
       if (solver->padded_choice < 0) {
         free(solver->padded_run_of);
         free(solver->padded_run_start);
@@ -14526,15 +14510,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
             ? 1 : -1;
       } else {
         solver->floor_choice = -1;
-      }
-      if (getenv("KLS_TRACE_ROW_ACCEPT") != NULL) {
-        fprintf(stderr,
-                "KLS batch-floor probe: %s (low %.3f ms vs steady min"
-                " %.3f ms, reaudit %d)\n",
-                solver->floor_choice > 0 ? "LOW" :
-                  solver->floor_choice < 0 ? "default" : "repeat",
-                1e3 * elapsed, 1e3 * solver->mapped_steady_min,
-                solver->floor_reaudit);
       }
     }
   } else if (ok && solver->common.status >= 0 &&
