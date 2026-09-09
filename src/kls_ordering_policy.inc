@@ -2097,10 +2097,6 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
   return KLS_OK;
 }
 
-/* The medium partial-diagonal path is identified before its row permutation
-   replaces the original pattern.  Carry that decision through matching and
-   METIS ordering without re-identifying the now-full matched diagonal. */
-static _Thread_local int kls_medium_partial_static_metis_ctx;
 
 /* Generic nested-dissection portfolio variants.  Context five is the uniform
    two-leaves-per-worker, coarse-refinement proposal.  Context six retains the
@@ -2124,16 +2120,7 @@ static _Thread_local int kls_generic_metis_scale_hint;
    not change one another's resource choice. */
 static _Thread_local int kls_metis_ndp_npes_override;
 
-/* The raw one-block PTS class is identified before row matching rewrites
-   the diagonal.  Carry its deterministic matching policy through the
-   weight sort and augmentation helpers. */
-static _Thread_local int kls_low_work_symmetric_partial_diagonal_pts_ctx;
 
-/* Large weak-diagonal matrices are identified before weighted row matching
-   makes their diagonal structurally complete.  Preserve that raw-pattern
-   verdict through the matched METIS analyze so its NodeNDP leaf count can be
-   selected from the workload that the retained numeric factor will execute. */
-static _Thread_local int kls_large_weak_diagonal_static_metis_ctx;
 
 typedef struct kls_metis_separator_capture {
   UF_long order_call_index;
@@ -3312,14 +3299,7 @@ static _Thread_local int kls_det_ndp_requested;
    legacy-RNG large-spral class (pre2), whose separator-pipeline
    engine needs the serial-NodeNDP legacy forests (cycle 0.787 with
    the containment vs 1.76 without). */
-static _Thread_local int kls_lowdeg_ndp_class;
 static _Thread_local int kls_detndp_class_ok;
-/* Nearly diagonal, high-fill spiked systems also benefit from the
-   separator-preserving splitter even though they share the legacy-RNG size
-   envelope.  The sparse half retains nxp1's row-refactor forest; the dense
-   half (rajat30) keeps its original 4096-wide CAMD refinement and compact
-   matching route while removing roughly 1.6 seconds of NodeNDP work. */
-static _Thread_local int kls_spiked_ndp_class;
 /* Giant symmetric scalar-fringe systems use a seven-leaf deterministic
    forest: eight leaves shorten cold ordering slightly but leave a slower
    critical row-refactor chain, while the serial fourteen-leaf forest adds
@@ -4240,18 +4220,17 @@ static UF_long kls_metis_order(UF_long n,
       getenv("KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES");
     metis_ndp_npes =
       npes_env != NULL && npes_env[0] != '\0' ? (idx_t)atol(npes_env) : 8;
-  } else if (kls_medium_partial_static_metis_ctx ||
-             kls_generic_metis_tuning_ctx) {
+  } else if (kls_generic_metis_tuning_ctx) {
     /* A complete no-BTF graph exposes two deterministic leaves per numeric
        worker; BTF representations use one leaf per worker because their SCC
        structure supplies the outer decomposition.  Matched coordinates use
        their measured separator economics through the generic tuning context. */
     const char *generic_npes_env =
       getenv("KLS_GENERIC_METIS_NDP_NPES");
-    if (kls_generic_metis_tuning_ctx && generic_npes_env != NULL &&
+    if (generic_npes_env != NULL &&
         generic_npes_env[0] != '\0') {
       metis_ndp_npes = (idx_t)atol(generic_npes_env);
-    } else if (kls_generic_metis_tuning_ctx) {
+    } else {
       int requested_leaves =
         kls_generic_metis_tuning_ctx == 2 ||
         kls_generic_metis_tuning_ctx == 3 ||
@@ -4266,16 +4245,7 @@ static UF_long kls_metis_order(UF_long n,
         requested_leaves = 64;
       }
       metis_ndp_npes = (idx_t)requested_leaves;
-    } else {
-      metis_ndp_npes = 6;
     }
-  } else if (kls_large_weak_diagonal_static_metis_ctx) {
-    /* The two-leaf forest substantially reduces fill on this statically
-       matched class.  On the audited 659K-row case it cuts modeled numeric
-       work from 124.7B to 101.3B flops and the 8-thread steady refactor from
-       about 1.53s to 1.05s.  A wider forest creates extra U fill even though
-       it exposes more separator components. */
-    metis_ndp_npes = 2;
   } else {
     const char *npes_env = getenv("KLS_METIS_NDP_NPES");
     if (npes_env != NULL && npes_env[0] != '\0') {
@@ -4441,13 +4411,12 @@ static UF_long kls_metis_order(UF_long n,
 #ifdef KLS_HAVE_MTMETIS
   const int force_det_ndp =
     getenv("KLS_FORCE_DET_NDP") != NULL ||
-    kls_medium_partial_static_metis_ctx ||
     kls_generic_metis_tuning_ctx;
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 &&
-      (force_det_ndp || kls_spiked_ndp_class ||
+      (force_det_ndp ||
        (kls_metis_order_threads >= (int)metis_ndp_npes &&
-        (kls_det_ndp_requested || kls_lowdeg_ndp_class ||
+        (kls_det_ndp_requested ||
          kls_detndp_class_ok))) &&
       getenv("KLS_DISABLE_DET_NDP") == NULL) {
     /* deterministic parallel NodeNDP: serial METIS separators with
@@ -4480,8 +4449,7 @@ static UF_long kls_metis_order(UF_long n,
   }
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
-    UF_long camd_group_size = kls_medium_partial_static_metis_ctx
-      ? 768u : kls_metis_camd_group_size(n, col_ptr, row_idx);
+    UF_long camd_group_size = kls_metis_camd_group_size(n, col_ptr, row_idx);
     if (kls_generic_metis_tuning_ctx) {
       const char *generic_group_env =
         getenv("KLS_GENERIC_METIS_CAMD_GROUP_SIZE");
@@ -4904,9 +4872,7 @@ static int analyze_with_ordering(UF_long n,
     extern void gk_set_legacy_rand(int enable);
     gk_set_legacy_rand(0);
 #ifdef KLS_HAVE_MTMETIS
-    kls_lowdeg_ndp_class = 0;
     kls_detndp_class_ok = 1;
-    kls_spiked_ndp_class = 0;
 #endif
   }
   trilinos_klu_l_common common;
@@ -6188,8 +6154,7 @@ static void kls_sort_match_entries_desc_full_radix(
          KLS_MATCH_RADIX_MAX_SIZE = 1 << KLS_MATCH_RADIX_MAX_BITS };
   size_t buckets[KLS_MATCH_RADIX_MAX_SIZE];
   const unsigned int radix_bits =
-    getenv("KLS_MATCH_RADIX16") != NULL ||
-        kls_medium_partial_static_metis_ctx
+    getenv("KLS_MATCH_RADIX16") != NULL
       ? 16u : 11u;
   kls_match_entry *src = entries;
   kls_match_entry *dst = scratch;
@@ -6274,8 +6239,7 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
     return;
   }
 
-  if (getenv("KLS_MATCH_FULL_RADIX") != NULL ||
-      kls_medium_partial_static_metis_ctx) {
+  if (getenv("KLS_MATCH_FULL_RADIX") != NULL) {
     kls_sort_match_entries_desc_full_radix(entries, count, scratch);
     free(scratch);
     return;
@@ -6292,8 +6256,7 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
            1 << KLS_MATCH_HIGH_RADIX_MAX_BITS };
   size_t buckets[KLS_MATCH_HIGH_RADIX_MAX_SIZE];
   const unsigned int radix_bits =
-    getenv("KLS_MATCH_HIGH_RADIX16") != NULL ||
-        kls_low_work_symmetric_partial_diagonal_pts_ctx
+    getenv("KLS_MATCH_HIGH_RADIX16") != NULL
       ? 16u : 8u;
   const unsigned int digit_count = 1u << radix_bits;
   const uint64_t mask = (UINT64_C(1) << radix_bits) - UINT64_C(1);
@@ -6330,8 +6293,7 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
   }
   free(scratch);
 
-  if (getenv("KLS_MATCH_SKIP_LOW_SORT") != NULL ||
-      kls_low_work_symmetric_partial_diagonal_pts_ctx) {
+  if (getenv("KLS_MATCH_SKIP_LOW_SORT") != NULL) {
     return;
   }
 
@@ -6484,8 +6446,7 @@ static int build_row_match_graph(UF_long n,
     ? (double *)malloc((size_t)entry_count * sizeof(*log_weight)) : NULL;
   const int raw_swap_weights =
     build_log_weights && n > 50000u &&
-    (getenv("KLS_MATCH_RAW_SWAP_WEIGHTS") != NULL ||
-     kls_medium_partial_static_metis_ctx);
+    getenv("KLS_MATCH_RAW_SWAP_WEIGHTS") != NULL;
   UF_long *next = (UF_long *)malloc((size_t)n * sizeof(*next));
   if (row_ptr == NULL || col_idx == NULL ||
       (build_log_weights && log_weight == NULL) || next == NULL) {
@@ -7345,7 +7306,7 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
      eight of them find the same improvement cycles at half the search
      breadth. */
   const UF_long max_candidates_per_row = 8u;
-  int max_rounds = kls_medium_partial_static_metis_ctx ? 1 : 5;
+  int max_rounds = 5;
   {
     const char *rounds_env = getenv("KLS_MATCH_SWAP_ROUNDS");
     if (rounds_env != NULL && rounds_env[0] != '\0') {
@@ -8061,7 +8022,6 @@ static int build_greedy_numeric_row_match(UF_long n,
     kls_row_match_graph graph;
     const int improve_weights =
       !compact_missing_diagonal_match &&
-      !kls_low_work_symmetric_partial_diagonal_pts_ctx &&
       getenv("KLS_MATCH_SKIP_SWAPS") == NULL;
     int status = build_row_match_graph(n, entry_count, entries,
                                        improve_weights, &graph);
@@ -8073,8 +8033,7 @@ static int build_greedy_numeric_row_match(UF_long n,
         matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
       }
       if (matched == n && improve_weights) {
-        if (!kls_low_work_symmetric_partial_diagonal_pts_ctx &&
-            getenv("KLS_MATCH_SKIP_PAIR_SWAPS") == NULL) {
+        if (getenv("KLS_MATCH_SKIP_PAIR_SWAPS") == NULL) {
           improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
         }
       }
@@ -10060,11 +10019,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     free_candidate(&normal);
   }
 
-  kls_medium_partial_static_metis_ctx =
-    0;
-  kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
-  kls_large_weak_diagonal_static_metis_ctx =
-    0;
   kls_prestatic_ordering_ctx = 1;
   UF_long missing_diagonal = 0;
   UF_long weak = 0u;
@@ -10190,9 +10144,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          exact-input reuse is disabled; the opt-out is deliberately local. */
       solver->prestatic_deferred = 1;
       kls_prestatic_ordering_ctx = 0;
-      kls_medium_partial_static_metis_ctx = 0;
-      kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
-      kls_large_weak_diagonal_static_metis_ctx = 0;
       *elapsed += kls_now_seconds() - start;
       return;
     }
@@ -10225,9 +10176,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          matched factor on the first update. */
       solver->prestatic_deferred = 1;
       kls_prestatic_ordering_ctx = 0;
-      kls_medium_partial_static_metis_ctx = 0;
-      kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
-      kls_large_weak_diagonal_static_metis_ctx = 0;
       return;
     }
     int use_medium_gate = 1;
@@ -10268,9 +10216,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
      */
     solver->prestatic_deferred = 1;
     kls_prestatic_ordering_ctx = 0;
-    kls_medium_partial_static_metis_ctx = 0;
-    kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
-    kls_large_weak_diagonal_static_metis_ctx = 0;
     *elapsed += kls_now_seconds() - start;
     return;
   }
@@ -11500,9 +11445,6 @@ done:
     unmatched_colamd_joined = 1;
   }
   kls_unmatched_colamd_discard(&unmatched_colamd_job);
-  kls_medium_partial_static_metis_ctx = 0;
-  kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
-  kls_large_weak_diagonal_static_metis_ctx = 0;
   kls_prestatic_ordering_ctx = 0;
   /* the speculative refinement/estimate analyses read the trial
      pattern arrays freed below: join and discard any pending runs */
