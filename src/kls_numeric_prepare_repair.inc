@@ -11935,46 +11935,14 @@ kls_row_refactor_group_separator_component_fast(
   return 1;
 }
 
-/* The separator partition needs a runtime proxy, not a FLOP count.  Dense
-   row groups execute their cubic work through compact blocked updates, so
-   raw symbolic work substantially overprices the largest components.  Keep
-   the established model as mode zero and expose compressed probes while the
-   paper-union calibration is being measured. */
+/* Dense-spiked separator chains also incur fixed per-group scheduling
+   overhead. Keep that default estimate alongside the symbolic work model. */
 static double kls_row_refactor_separator_schedule_work(
   const kls_solver *solver,
   UF_long group,
-  int model) {
+  int include_overhead) {
   const double work = kls_row_refactor_group_work(solver, group);
-  if (model == 1 && solver != NULL &&
-      solver->row_refactor_group_ptr != NULL &&
-      group < solver->row_refactor_group_count) {
-    return 1.0 +
-      (double)(solver->row_refactor_group_ptr[group + 1u] -
-               solver->row_refactor_group_ptr[group]);
-  }
-  if (model == 2) {
-    return sqrt(work > 1.0 ? work : 1.0);
-  }
-  if (model == 3) {
-    return cbrt(work > 1.0 ? work : 1.0);
-  }
-  if (model == 4) {
-    static double group_overhead = -1.0;
-    if (group_overhead < 0.0) {
-      group_overhead = 2000.0;
-      const char *env = getenv("KLS_ROW_REFACTOR_GROUP_OVERHEAD");
-      if (env != NULL && env[0] != '\0') {
-        char *end = NULL;
-        const double candidate = strtod(env, &end);
-        if (end != env && *end == '\0' && isfinite(candidate) &&
-            candidate >= 0.0 && candidate <= 1.0e9) {
-          group_overhead = candidate;
-        }
-      }
-    }
-    return work + group_overhead;
-  }
-  return work;
+  return include_overhead ? work + 2000.0 : work;
 }
 
 static int kls_sort_row_refactor_group_list_by_work(
@@ -12544,70 +12512,10 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
 
   const UF_long group_count = solver->row_refactor_group_count;
   const UF_long component_count = solver->separator.component_count;
-  int separator_work_model = 0;
-  {
-    const char *model_env =
-      getenv("KLS_ROW_REFACTOR_SEPARATOR_WORK_MODEL");
-    if (model_env != NULL) {
-      if (strcmp(model_env, "rows") == 0) {
-        separator_work_model = 1;
-      } else if (strcmp(model_env, "sqrt") == 0) {
-        separator_work_model = 2;
-      } else if (strcmp(model_env, "cbrt") == 0) {
-        separator_work_model = 3;
-      } else if (strcmp(model_env, "overhead") == 0) {
-        separator_work_model = 4;
-      }
-    } else if (solver->dense_spiked_original_pivot_path) {
-      /* Dense-spiked systems have a long separator chain whose
-         compact-group setup and dependency traffic dominate the nominal
-         flop estimate.  Charge each group its measured fixed scheduling
-         surface as well as its rows; this was consistently better on the
-         route's representative rajat30 shape.  Keep the environment knob
-         authoritative for experiments and for callers that need another
-         model. */
-      separator_work_model = 4;
-    }
-  }
-  double separator_balance_beta =
+  const int include_group_overhead =
+    solver->dense_spiked_original_pivot_path;
+  const double separator_balance_beta =
     KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA;
-  const char *separator_balance_beta_env =
-    getenv("KLS_ROW_REFACTOR_SEPARATOR_BETA");
-  if (separator_balance_beta_env != NULL &&
-      separator_balance_beta_env[0] != '\0') {
-    char *end = NULL;
-    const double candidate =
-      strtod(separator_balance_beta_env, &end);
-    if (end != separator_balance_beta_env && *end == '\0' &&
-        isfinite(candidate) && candidate >= 0.25 && candidate <= 4.0) {
-      separator_balance_beta = candidate;
-    }
-  }
-  const char *split_past_leaf_env =
-    getenv("KLS_ROW_REFACTOR_SPLIT_PAST_LEAF");
-  const int split_past_leaf =
-    split_past_leaf_env != NULL && split_past_leaf_env[0] != '\0' &&
-    !(split_past_leaf_env[0] == '0' && split_past_leaf_env[1] == '\0');
-  const char *promote_overweight_leaf_env =
-    getenv("KLS_ROW_REFACTOR_PROMOTE_OVERWEIGHT_LEAF");
-  const int promote_overweight_leaf =
-    promote_overweight_leaf_env != NULL &&
-    promote_overweight_leaf_env[0] != '\0' &&
-    !(promote_overweight_leaf_env[0] == '0' &&
-      promote_overweight_leaf_env[1] == '\0');
-  UF_long max_overweight_leaf_promotions = 1u;
-  const char *max_leaf_promotions_env =
-    getenv("KLS_ROW_REFACTOR_MAX_LEAF_PROMOTIONS");
-  if (max_leaf_promotions_env != NULL &&
-      max_leaf_promotions_env[0] != '\0') {
-    char *end = NULL;
-    const unsigned long candidate =
-      strtoul(max_leaf_promotions_env, &end, 10);
-    if (end != max_leaf_promotions_env && *end == '\0' &&
-        candidate > 0ul && candidate <= (unsigned long)component_count) {
-      max_overweight_leaf_promotions = (UF_long)candidate;
-    }
-  }
   const size_t group_count_size = (size_t)group_count;
   const size_t component_count_size = (size_t)component_count;
   const size_t thread_count_size = (size_t)thread_count;
@@ -12723,7 +12631,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     component_group_count[component]++;
     component_work[component] +=
       kls_row_refactor_separator_schedule_work(
-        solver, group, separator_work_model);
+        solver, group, include_group_overhead);
   }
 
   for (UF_long component = 0; component < component_count; ++component) {
@@ -12765,27 +12673,10 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   candidates[0] = root_component;
   double candidate_work_sum = subtree_work[root_component];
   UF_long pipeline_component_count = 0;
-  UF_long promoted_overweight_leaf_count = 0;
   while (candidate_count > 0u && candidate_work_sum > 0.0) {
     UF_long max_pos = KLS_KLU_EMPTY;
     double max_work = -1.0;
     for (UF_long pos = 0u; pos < candidate_count; ++pos) {
-      if (split_past_leaf) {
-        const UF_long component = candidates[pos];
-        const UF_long left =
-          solver->separator.component_left_child[component];
-        const UF_long right =
-          solver->separator.component_right_child[component];
-        const int split_left =
-          left != KLS_KLU_EMPTY && left < component_count &&
-          subtree_work[left] > 0.0;
-        const int split_right =
-          right != KLS_KLU_EMPTY && right < component_count &&
-          subtree_work[right] > 0.0;
-        if (!split_left && !split_right) {
-          continue;
-        }
-      }
       const double work = subtree_work[candidates[pos]];
       if (max_pos == KLS_KLU_EMPTY || work > max_work) {
         max_pos = pos;
@@ -12810,16 +12701,6 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
       right != KLS_KLU_EMPTY && right < component_count &&
       subtree_work[right] > 0.0;
     if (!split_left && !split_right) {
-      if (promote_overweight_leaf &&
-          promoted_overweight_leaf_count < max_overweight_leaf_promotions) {
-        candidates[max_pos] = candidates[candidate_count - 1u];
-        candidate_count--;
-        candidate_work_sum -= subtree_work[component];
-        component_pipeline[component] = 1u;
-        pipeline_component_count++;
-        promoted_overweight_leaf_count++;
-        continue;
-      }
       break;
     }
     candidates[max_pos] = candidates[candidate_count - 1u];
@@ -12976,7 +12857,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
         component_group_count[component]++;
         component_work[component] +=
           kls_row_refactor_separator_schedule_work(
-            solver, group, separator_work_model);
+            solver, group, include_group_overhead);
       }
       for (UF_long pos = 0; pos < retained_component_count; ++pos) {
         candidate_entries[pos].work =
@@ -13118,7 +12999,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     double tid_work = 0.0;
     for (UF_long pos = begin; pos < end; ++pos) {
       tid_work += kls_row_refactor_separator_schedule_work(
-        solver, private_groups[pos], separator_work_model);
+        solver, private_groups[pos], include_group_overhead);
     }
     const UF_long tid_groups = end - begin;
     if (private_threads == 0u || tid_groups < private_min_groups) {
