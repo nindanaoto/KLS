@@ -5160,28 +5160,6 @@ static int kls_row_first_partial_apply_supernode_run(
     u_row_ptr, u_row_end, state, dep_begin, dep_end, run_rows_out);
 }
 
-static int kls_row_first_partial_apply_ready_until(
-  const kls_row_first_block_context *ctx,
-  kls_row_first_workspace *workspace,
-  kls_row_first_entries *local_l_entries,
-  const kls_row_first_entries *published_u_entries,
-  const double *udiag_values,
-  const UF_long *u_row_ptr,
-  const UF_long *u_row_end,
-  const UF_long *supernode_start,
-  const UF_long *supernode_end,
-  UF_long supernode_valid_begin,
-  const unsigned char *row_done,
-  const UF_long *active_rank,
-  UF_long ready_limit,
-  kls_row_first_partial_row *state,
-  UF_long stop_dep,
-  UF_long *supernode_groups_out,
-  UF_long *supernode_rows_out,
-  UF_long *supernode_panel_groups_out,
-  UF_long *supernode_panel_rows_out,
-  kls_row_first_row_stats *stats,
-  int *blocked_out);
 
 static int kls_row_first_partial_apply_ready(
   const kls_row_first_block_context *ctx,
@@ -5204,37 +5182,6 @@ static int kls_row_first_partial_apply_ready(
   UF_long *supernode_panel_rows_out,
   kls_row_first_row_stats *stats,
   int *blocked_out) {
-  return kls_row_first_partial_apply_ready_until(
-    ctx, workspace, local_l_entries, published_u_entries, udiag_values,
-    u_row_ptr, u_row_end, supernode_start, supernode_end,
-    supernode_valid_begin, row_done, active_rank, ready_limit, state,
-    KLS_KLU_EMPTY, supernode_groups_out, supernode_rows_out,
-    supernode_panel_groups_out, supernode_panel_rows_out, stats,
-    blocked_out);
-}
-
-static int kls_row_first_partial_apply_ready_until(
-  const kls_row_first_block_context *ctx,
-  kls_row_first_workspace *workspace,
-  kls_row_first_entries *local_l_entries,
-  const kls_row_first_entries *published_u_entries,
-  const double *udiag_values,
-  const UF_long *u_row_ptr,
-  const UF_long *u_row_end,
-  const UF_long *supernode_start,
-  const UF_long *supernode_end,
-  UF_long supernode_valid_begin,
-  const unsigned char *row_done,
-  const UF_long *active_rank,
-  UF_long ready_limit,
-  kls_row_first_partial_row *state,
-  UF_long stop_dep,
-  UF_long *supernode_groups_out,
-  UF_long *supernode_rows_out,
-  UF_long *supernode_panel_groups_out,
-  UF_long *supernode_panel_rows_out,
-  kls_row_first_row_stats *stats,
-  int *blocked_out) {
   KLS_SET_OPTIONAL_OUTPUT(blocked_out, 0);
   if (ctx == NULL || workspace == NULL || local_l_entries == NULL ||
       published_u_entries == NULL || udiag_values == NULL ||
@@ -5250,9 +5197,6 @@ static int kls_row_first_partial_apply_ready_until(
   const UF_long i = state->row;
   while (state->dep_heap_size > 0u) {
     const UF_long peek = dep_heap[0];
-    if (stop_dep != KLS_KLU_EMPTY && peek >= stop_dep) {
-      return 1;
-    }
     if (!kls_row_first_dependency_ready(row_done, active_rank,
                                         ready_limit, peek)) {
       if (blocked_out != NULL) {
@@ -5269,9 +5213,6 @@ static int kls_row_first_partial_apply_ready_until(
       kls_row_first_ready_supernode_end(
         supernode_start, supernode_end, row_done, active_rank, ctx->nk,
         supernode_valid_begin, ready_limit, i, dep);
-    if (stop_dep != KLS_KLU_EMPTY && run_end >= stop_dep) {
-      run_end = stop_dep > 0u ? stop_dep - 1u : dep;
-    }
     UF_long run_rows = 1;
     int used_panel = 0;
     if (run_end > dep) {
@@ -5286,9 +5227,6 @@ static int kls_row_first_partial_apply_ready_until(
         kls_row_first_ready_cached_panel_end(
           workspace->supernode_panel_cache, row_done, active_rank,
           ctx->nk, supernode_valid_begin, ready_limit, i, dep);
-      if (stop_dep != KLS_KLU_EMPTY && cached_run_end >= stop_dep) {
-        cached_run_end = stop_dep > 0u ? stop_dep - 1u : dep;
-      }
       if (cached_run_end > dep) {
         const int cached_status =
           kls_row_first_partial_apply_supernode_run_cached(
@@ -5514,10 +5452,6 @@ typedef struct kls_row_first_pipeline_shared {
   UF_long pivot_tail_rows;
   UF_long pivot_restarts;
 
-  int producer_batch_enabled;
-  int active_catchup_batch_enabled;
-
-  int pivot_supernode_rebase_enabled;
   int failed;
   kls_row_first_pipeline_failure failure_reason;
 } kls_row_first_pipeline_shared;
@@ -5556,9 +5490,7 @@ static void kls_row_first_pipeline_worker_free(
 static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   const kls_row_first_pipeline_shared *shared,
   const kls_row_first_pipeline_worker *worker,
-  UF_long dep,
-  int *not_root_out) {
-  KLS_SET_OPTIONAL_OUTPUT(not_root_out, 0);
+  UF_long dep) {
   if (shared == NULL || worker == NULL || worker->active_state == NULL ||
       worker->workspace.x == NULL || worker->workspace.mark == NULL ||
       worker->workspace.dep_heap == NULL ||
@@ -5581,7 +5513,6 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
     return 0;
   }
   if (worker->workspace.dep_heap[0] != dep) {
-    KLS_SET_OPTIONAL_OUTPUT(not_root_out, 1);
     return 0;
   }
   if (!kls_row_first_dependency_ready(shared->row_done,
@@ -5690,7 +5621,6 @@ static int kls_row_first_pipeline_apply_producer_batch(
   kls_row_first_pipeline_worker *current_worker,
   UF_long dep) {
   if (shared == NULL || current_worker == NULL ||
-      !shared->producer_batch_enabled ||
       shared->workers == NULL || shared->batch_targets == NULL ||
       shared->batch_target_capacity <= 1 || shared->ctx == NULL ||
       shared->u_entries == NULL || shared->workspace == NULL ||
@@ -5713,44 +5643,9 @@ static int kls_row_first_pipeline_apply_producer_batch(
     if (worker == current_worker) {
       continue;
     }
-    int not_root = 0;
     if (!kls_row_first_pipeline_worker_scalar_batch_candidate(
-          shared, worker, dep, &not_root)) {
-      int retry_after_catchup = 0;
-      if (shared->active_catchup_batch_enabled &&
-          not_root &&
-          worker->active_state != NULL &&
-          worker->active_order_epoch == shared->order_epoch &&
-          worker->workspace.mark != NULL &&
-          worker->workspace.dep_heap != NULL &&
-          dep < worker->active_state->row &&
-          worker->workspace.mark[dep] ==
-            worker->active_state->generation &&
-          worker->active_state->dep_heap_size > 0u &&
-          worker->workspace.dep_heap[0] < dep) {
-        if (!kls_row_first_partial_apply_ready_until(
-              shared->ctx, &worker->workspace, &worker->l_entries,
-              shared->u_entries, shared->udiag_values,
-              shared->workspace->u_row_ptr, shared->workspace->u_row_end,
-              shared->supernode_start, shared->supernode_end,
-              shared->supernode_valid_begin, shared->row_done,
-              shared->active_rank, shared->completed_pos,
-              worker->active_state, dep,
-              &worker->pipeline_supernode_update_groups,
-              &worker->pipeline_supernode_update_rows,
-              &worker->pipeline_supernode_panel_update_groups,
-              &worker->pipeline_supernode_panel_update_rows,
-              shared->stats,
-              NULL)) {
-          return 0;
-        }
-        retry_after_catchup = 1;
-      }
-      if (!retry_after_catchup ||
-          !kls_row_first_pipeline_worker_scalar_batch_candidate(
-            shared, worker, dep, NULL)) {
-        continue;
-      }
+          shared, worker, dep)) {
+      continue;
     }
     if (target_count >= (UF_long)shared->batch_target_capacity) {
       return 0;
@@ -5873,8 +5768,7 @@ static void kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
   }
   shared->open_panel_start = KLS_KLU_EMPTY;
   shared->open_panel_end = KLS_KLU_EMPTY;
-  if (shared->pivot_supernode_rebase_enabled &&
-      shared->ctx != NULL &&
+  if (shared->ctx != NULL &&
       shared->supernode_start != NULL &&
       shared->supernode_end != NULL) {
     const UF_long floor =
@@ -6505,15 +6399,6 @@ static int kls_row_first_run_parallel_pipeline_phase(
   shared.worker_count = worker_count;
 
   shared.batch_target_capacity = batch_target_capacity;
-
-  shared.producer_batch_enabled =
-    !kls_row_pipeline_producer_batch_env_disabled();
-  shared.active_catchup_batch_enabled =
-    shared.producer_batch_enabled &&
-    kls_row_pipeline_active_catchup_env_enabled();
-
-  shared.pivot_supernode_rebase_enabled =
-    !kls_row_pipeline_pivot_supernode_rebase_env_disabled();
 
   atomic_init(&shared.next_pos, (unsigned long)begin);
   if (pthread_mutex_init(&shared.lock, NULL) != 0) {

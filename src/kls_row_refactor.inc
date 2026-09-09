@@ -287,15 +287,6 @@ static int kls_first_factor_env_disabled(void) {
   return value != NULL && value[0] == '0' && value[1] == '\0';
 }
 
-KLS_DEFINE_ENV_FLAG(kls_row_pipeline_producer_batch_env_disabled,
-                    "KLS_DISABLE_ROW_PIPELINE_PRODUCER_BATCH")
-
-KLS_DEFINE_ENV_FLAG(kls_row_pipeline_active_catchup_env_enabled,
-                    "KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH")
-
-KLS_DEFINE_ENV_FLAG(kls_row_pipeline_pivot_supernode_rebase_env_disabled,
-                    "KLS_DISABLE_ROW_PIPELINE_PIVOT_SUPERNODE_REBASE")
-
 static int kls_auto_first_factor_has_separator_parallel_row_up(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||

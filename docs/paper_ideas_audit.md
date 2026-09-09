@@ -15336,6 +15336,9 @@ persistent grouped-current row/supernode numeric owner for first-factor
 pivoting tails, rather than another timeout-policy, ordering-package, BLAS, or
 small lock-refactor change.
 
+Historical note: the catch-up experiment below and its stop-dependency
+plumbing were subsequently removed in `catchup_experiment_trim.md`.
+
 An active-current catch-up batching probe was added behind
 `KLS_ENABLE_ROW_PIPELINE_ACTIVE_CATCHUP_BATCH=1` and rejected as a default
 gap-closer. The idea directly tested whether KLS was missing CKTSO/SubtreeLU
