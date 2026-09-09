@@ -12164,11 +12164,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     }
 
     double preps_elapsed = 0.0;
-    const int kls_trace_consult =
-      getenv("KLS_TRACE_PREP_CONSULT") != NULL;
-
-    double kls_pc_t = kls_trace_consult ? kls_now_seconds() : 0.0;
-#define KLS_PC_MARK(name)     if (kls_trace_consult) {       const double tn = kls_now_seconds();       fprintf(stderr, "KLS consult %s %.3fms\n", name, 1e3 * (tn - kls_pc_t));       kls_pc_t = tn;     }
     /* sync exit order: snode panels must precede anything that builds
        position-retained structures (row groups tripped the sort guard).
        On a re-prep after a replacement, earlier consults' own retained
@@ -12181,7 +12176,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       free_refactor_map(solver);
       free_refactor_schedule(solver);
     }
-    KLS_PC_MARK("frees")
     pthread_t kls_snode_prep_thread;
     pthread_t kls_map_prep_thread;
     pthread_t kls_schedule_prep_thread;
@@ -12210,7 +12204,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
         kls_maybe_prepare_snode_panels(solver, &preps_elapsed);
       }
     }
-    KLS_PC_MARK("snode_start")
     if (kls_generic_prep_overlap) {
       /* Panel census, map construction, dependency scheduling, and the
          compact solve/PTS build only read the now-sorted numeric and publish
@@ -12232,7 +12225,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       }
     }
     (void)kls_i32_solve_ready(solver);
-    KLS_PC_MARK("i32")
     if (!solver->spral_matching_selected) {
       /* the spral-matched prestatic class never paid the pts trial
          inline and it stalls against 74M-entry factors (pre2) */
@@ -12242,7 +12234,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       kls_pts_maybe_trial(solver, (double *)(uintptr_t)numeric_values,
                           &preps_elapsed);
     }
-    KLS_PC_MARK("pts")
     if (kls_map_prep_active) {
       pthread_join(kls_map_prep_thread, NULL);
     }
@@ -12252,26 +12243,19 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     if (kls_snode_prep_active) {
       pthread_join(kls_snode_prep_thread, NULL);
     }
-    KLS_PC_MARK("prep_join")
     kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
-    KLS_PC_MARK("snb")
     kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
-    KLS_PC_MARK("seed_row")
     maybe_prepare_refactor_map(solver, &preps_elapsed);
     if (kls_pts_direct_user_values_enabled(solver) ||
         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
       (void)kls_build_refactor_user_input_pos32(solver);
     }
-    KLS_PC_MARK("map")
     if (!(kls_symmetric_partial_diagonal_match_factor_cycle(solver) &&
           (kls_pts_refactor_ready(solver)))) {
       maybe_prepare_refactor_schedule(solver, &preps_elapsed);
     }
-    KLS_PC_MARK("schedule")
     kls_maybe_prepare_model_row_refactor_from_numeric(solver,
                                                       &preps_elapsed);
-    KLS_PC_MARK("model_row")
-#undef KLS_PC_MARK
   }
 }
 
