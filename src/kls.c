@@ -347,12 +347,10 @@ typedef struct kls_row_solve_transpose_plan {
   UF_long sparse_level_max_width;
   UF_long dense_tail_start;
   UF_long dense_tail_rows;
-  UF_long dense_tail_entries;
   UF_long slice_max_entries;
   UF_long segmented_rows;
   UF_long rect_entries;
   UF_long tri_entries;
-  UF_long thread_max_rect_entries;
   int thread_count;
   int source_upper;
   int upper;

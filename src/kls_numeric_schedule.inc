@@ -555,7 +555,7 @@ static int kls_snb_prepare(kls_solver *solver) {
       free(levels);
     }
     if (st->slevel_ptr != NULL && st->slevel_count > 0) {
-      double coop = 0.0, wide = 0.0, total = 0.0;
+      double coop = 0.0, total = 0.0;
       for (int64_t l = 0; l < st->slevel_count; ++l) {
         const int64_t begin = st->slevel_ptr[l];
         const int64_t end = st->slevel_ptr[l + 1];
@@ -572,11 +572,8 @@ static int kls_snb_prepare(kls_solver *solver) {
         if (end - begin == 1 &&
             level_max >= (double)KLS_SNB_COOP_MIN_DOUBLES) {
           coop += level_work;
-        } else if (end - begin >= 4) {
-          wide += level_work;
         }
       }
-      st->par_work_share = total > 0.0 ? (coop + wide) / total : 0.0;
       st->coop_work_share = total > 0.0 ? coop / total : 0.0;
     }
     /* pipelined segments: split the topological task list at cooperative

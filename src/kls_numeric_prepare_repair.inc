@@ -7394,7 +7394,6 @@ static int kls_build_one_row_solve_transpose_plan_impl(
     kls_row_solve_dense_tail_start(n, plan->ptr, &tail_entries);
   plan->dense_tail_start = tail_start;
   plan->dense_tail_rows = tail_start < n ? n - tail_start : 0u;
-  plan->dense_tail_entries = tail_entries;
   (void)kls_build_row_solve_sparse_levels(
     n, plan->ptr, plan->cols, tail_start, plan->upper,
     &plan->sparse_level_ptr, &plan->sparse_level_rows,
@@ -7438,7 +7437,6 @@ static void kls_clear_row_solve_transpose_thread_bounds(
   free(plan->thread_bounds);
   plan->thread_bounds = NULL;
   plan->thread_count = 0;
-  plan->thread_max_rect_entries = 0;
   plan->sparse_cluster_levels = 0;
 }
 
@@ -7463,18 +7461,16 @@ static int kls_build_one_row_solve_transpose_thread_bounds(
 
   kls_clear_row_solve_transpose_thread_bounds(plan);
   UF_long *bounds = NULL;
-  UF_long max_rect = 0;
   if (have_dense &&
       !kls_build_one_row_solve_thread_bounds(
         n, plan->ptr, plan->segment_split, plan->slice_bounds,
-        plan->upper, thread_count, &bounds, &max_rect)) {
+        plan->upper, thread_count, &bounds, NULL)) {
     free(bounds);
     return 0;
   }
 
   plan->thread_bounds = bounds;
   plan->thread_count = thread_count;
-  plan->thread_max_rect_entries = max_rect;
   plan->sparse_cluster_levels =
     kls_row_solve_sparse_cluster_levels(plan->sparse_level_ptr,
                                         plan->sparse_level_count,

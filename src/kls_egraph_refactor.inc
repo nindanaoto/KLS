@@ -9100,8 +9100,6 @@ typedef struct kls_snb_state {
   unsigned char *seg_coop; /* segment is a single cooperative snode */
   _Atomic int64_t singular_rank; /* min singular pivot seen this refactor */
   _Atomic int failed;            /* halt_if_singular tripped */
-  double par_work_share; /* fraction of panel work the t4 executor can
-                            actually parallelize (coop + wide levels) */
   double coop_work_share; /* fraction in cooperative fat-chain snodes */
 } kls_snb_state;
 

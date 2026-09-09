@@ -10998,7 +10998,6 @@ static int kls_row_refactor_try_compact_supernode_update_cblas(
 typedef struct {
   UF_long group;
   UF_long len;
-  UF_long id;
 } kls_row_refactor_dense_producer_run;
 
 static int kls_row_refactor_find_dense_producer_run_at(
@@ -11009,7 +11008,6 @@ static int kls_row_refactor_find_dense_producer_run_at(
   if (run_out != NULL) {
     run_out->group = KLS_KLU_EMPTY;
     run_out->len = 0;
-    run_out->id = KLS_KLU_EMPTY;
   }
   if (solver == NULL || row >= solver->n ||
       solver->row_refactor_dense_producer_run_ptr == NULL ||
@@ -11034,7 +11032,6 @@ static int kls_row_refactor_find_dense_producer_run_at(
       if (run_out != NULL) {
         run_out->group = group;
         run_out->len = len;
-        run_out->id = mid;
       }
       return 1;
     }

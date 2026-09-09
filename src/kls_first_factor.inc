@@ -1756,53 +1756,14 @@ typedef enum kls_row_first_factor_row_failure {
 
 typedef struct kls_row_first_factor_row_failure_info {
   kls_row_first_factor_row_failure reason;
-  UF_long row;
-  UF_long related_col;
-  int owner;
-  int actual_owner;
 } kls_row_first_factor_row_failure_info;
-
-static int kls_row_first_pivot_failure_col_state(
-  const kls_row_first_block_context *ctx,
-  const int *row_owner,
-  UF_long col) {
-  if (col == KLS_KLU_EMPTY || ctx == NULL || col >= ctx->nk) {
-    return -1;
-  }
-  if (row_owner != NULL) {
-    return row_owner[col];
-  }
-  if (ctx->pivot_col_mask != NULL) {
-    return ctx->pivot_col_mask[col] ? 1 : 0;
-  }
-  return -1;
-}
-
 
 static void kls_row_first_factor_row_failure_set(
   kls_row_first_factor_row_failure_info *failure,
-  kls_row_first_factor_row_failure reason,
-  UF_long row,
-  UF_long related_col,
-  int owner,
-  int actual_owner) {
-  if (failure == NULL) {
-    return;
+  kls_row_first_factor_row_failure reason) {
+  if (failure != NULL) {
+    failure->reason = reason;
   }
-  failure->reason = reason;
-  failure->row = row;
-  failure->related_col = related_col;
-  failure->owner = owner;
-  failure->actual_owner = actual_owner;
-}
-
-static void kls_row_first_factor_row_failure_clear(
-  kls_row_first_factor_row_failure_info *failure,
-  UF_long row,
-  int owner) {
-  kls_row_first_factor_row_failure_set(
-    failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_NONE, row, KLS_KLU_EMPTY,
-    owner, -1);
 }
 
 static void kls_row_first_stats_add(UF_long *target, UF_long value) {
@@ -2255,7 +2216,8 @@ static int kls_row_first_factor_one_row(
   unsigned char *row_done,
   kls_row_first_row_stats *stats,
   kls_row_first_factor_row_failure_info *failure) {
-  kls_row_first_factor_row_failure_clear(failure, i, owner);
+  kls_row_first_factor_row_failure_set(
+    failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_NONE);
   if (ctx == NULL || workspace == NULL || l_entries == NULL ||
       u_entries == NULL || udiag_values == NULL ||
       workspace->x == NULL || workspace->mark == NULL ||
@@ -2266,15 +2228,13 @@ static int kls_row_first_factor_one_row(
       ctx->row_cols == NULL || ctx->row_input_pos == NULL ||
       ctx->q_order == NULL || ctx->col_pos == NULL || i >= ctx->nk) {
     kls_row_first_factor_row_failure_set(
-      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP, i, KLS_KLU_EMPTY,
-      owner, -1);
+      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP);
     return 0;
   }
   const unsigned int generation = (unsigned int)(i + 1u);
   if (generation == 0u) {
     kls_row_first_factor_row_failure_set(
-      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP, i, KLS_KLU_EMPTY,
-      owner, -1);
+      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP);
     return 0;
   }
 
@@ -2290,8 +2250,7 @@ static int kls_row_first_factor_one_row(
     if (oldcol >= ctx->n || ctx->col_pos[oldcol] >= ctx->nk ||
         ctx->row_input_pos[p] >= solver->nnz) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_INPUT, i, oldcol,
-        owner, -1);
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_INPUT);
       return 0;
     }
     const UF_long col = ctx->col_pos[oldcol];
@@ -2306,8 +2265,7 @@ static int kls_row_first_factor_one_row(
             ctx->scaled ? ctx->numeric->Rs : NULL,
             ctx->scale, ctx->row_input_pos[p], x + col)) {
         kls_row_first_factor_row_failure_set(
-          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_VALUE, i, col,
-          owner, -1);
+          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_VALUE);
         return 0;
       }
     } else {
@@ -2317,8 +2275,7 @@ static int kls_row_first_factor_one_row(
             ctx->scaled ? ctx->numeric->Rs : NULL,
             ctx->scale, ctx->row_input_pos[p], &value)) {
         kls_row_first_factor_row_failure_set(
-          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_VALUE, i, col,
-          owner, -1);
+          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_VALUE);
         return 0;
       }
       x[col] += value;
@@ -2339,8 +2296,7 @@ static int kls_row_first_factor_one_row(
         (row_owner != NULL && row_owner[dep] != owner) ||
         (row_done != NULL && !row_done[dep])) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_DEPENDENCY, i, dep,
-        owner, row_owner != NULL ? row_owner[dep] : -1);
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_DEPENDENCY);
       return 0;
     }
     const UF_long run_end =
@@ -2355,8 +2311,7 @@ static int kls_row_first_factor_one_row(
             workspace->u_row_ptr, workspace->u_row_end, &state, dep,
             run_end, &run_rows, &used_panel, stats)) {
         kls_row_first_factor_row_failure_set(
-          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_UPDATE, i, dep,
-          owner, row_owner != NULL ? row_owner[dep] : -1);
+          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_UPDATE);
         return 0;
       }
     } else if (!kls_row_first_partial_apply_one_dep(
@@ -2364,8 +2319,7 @@ static int kls_row_first_factor_one_row(
                  workspace->u_row_ptr, workspace->u_row_end, &state,
                  dep)) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_UPDATE, i, dep,
-        owner, row_owner != NULL ? row_owner[dep] : -1);
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_UPDATE);
       return 0;
     }
     if (run_rows > 1u && stats != NULL) {
@@ -2392,8 +2346,7 @@ static int kls_row_first_factor_one_row(
         ctx, pattern, pattern_count, x, i, row_owner, owner,
         &pivot_choice)) {
     kls_row_first_factor_row_failure_set(
-      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_SCOPE, i,
-      KLS_KLU_EMPTY, owner, -1);
+      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_SCOPE);
     return 0;
   }
   int pivot_needed = 0;
@@ -2408,25 +2361,18 @@ static int kls_row_first_factor_one_row(
       stats->separator_dynamic_column_rejects++;
     }
     kls_row_first_factor_row_failure_set(
-      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_REJECT, i,
-      pivot_choice.global_col, owner,
-      kls_row_first_pivot_failure_col_state(
-        ctx, row_owner, pivot_choice.global_col));
+      failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_REJECT);
     return 0;
   }
   if (pivot_needed) {
     if (selected_col == KLS_KLU_EMPTY) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_REJECT, i,
-        pivot_choice.global_col, owner,
-        kls_row_first_pivot_failure_col_state(
-          ctx, row_owner, pivot_choice.global_col));
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_REJECT);
       return 0;
     }
     if (row_owner != NULL && row_owner[selected_col] != owner) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_OWNER, i,
-        selected_col, owner, row_owner[selected_col]);
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_OWNER);
       return 0;
     }
     if (ctx->use_separator_for_block) {
@@ -2444,8 +2390,7 @@ static int kls_row_first_factor_one_row(
           stats->separator_dynamic_column_rejects++;
         }
         kls_row_first_factor_row_failure_set(
-          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_REJECT, i,
-          selected_col, owner, row_owner != NULL ? row_owner[selected_col] : -1);
+          failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_REJECT);
         return 0;
       }
     }
@@ -2453,8 +2398,7 @@ static int kls_row_first_factor_one_row(
           u_entries, ctx->q_order, ctx->col_pos, i, selected_col,
           ctx->nk, ctx->n)) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_EXCHANGE, i,
-        selected_col, owner, row_owner != NULL ? row_owner[selected_col] : -1);
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_EXCHANGE);
       return 0;
     }
     const double swapped_pivot = x[selected_col];
@@ -2480,9 +2424,7 @@ static int kls_row_first_factor_one_row(
           NULL, NULL) ||
         pivot_needed) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_VERIFY, i,
-        selected_col, owner,
-        row_owner != NULL && selected_col < ctx->nk ? row_owner[selected_col] : -1);
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_PIVOT_VERIFY);
       return 0;
     }
   }
@@ -2495,8 +2437,7 @@ static int kls_row_first_factor_one_row(
     const UF_long col = dep_heap[p];
     if (!kls_row_first_entries_append(u_entries, i, col, x[col])) {
       kls_row_first_factor_row_failure_set(
-        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_APPEND, i, col,
-        owner, -1);
+        failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_APPEND);
       return 0;
     }
   }
@@ -2650,8 +2591,8 @@ static void *kls_row_first_private_worker_main(void *arg) {
   worker->ok = 0;
   worker->completed_rows = 0;
   worker->failed_row = KLS_KLU_EMPTY;
-  kls_row_first_factor_row_failure_clear(&worker->failure, KLS_KLU_EMPTY,
-                                         worker->tid);
+  kls_row_first_factor_row_failure_set(
+    &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_NONE);
   kls_row_first_supernode_panel_cache panel_cache;
   memset(&panel_cache, 0, sizeof(panel_cache));
   UF_long open_panel_start = KLS_KLU_EMPTY;
@@ -2661,8 +2602,7 @@ static void *kls_row_first_private_worker_main(void *arg) {
       !kls_row_first_entries_enable_col_counts(&worker->u_entries, nk) ||
       !kls_row_first_entries_enable_col_links(&worker->u_entries, nk)) {
     kls_row_first_factor_row_failure_set(
-      &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP,
-      KLS_KLU_EMPTY, KLS_KLU_EMPTY, worker->tid, -1);
+      &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP);
     goto done;
   }
   (void)kls_row_first_workspace_enable_supernode_fit_cache(
@@ -2682,8 +2622,7 @@ static void *kls_row_first_private_worker_main(void *arg) {
       (void)kls_row_first_entries_truncate(&worker->u_entries,
                                            u_count_before);
       kls_row_first_factor_row_failure_set(
-        &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_INPUT,
-        KLS_KLU_EMPTY, global_row, worker->tid, -1);
+        &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_INPUT);
       goto done;
     }
     const UF_long row = global_row - worker->ctx->k1;
@@ -2698,8 +2637,7 @@ static void *kls_row_first_private_worker_main(void *arg) {
       worker->workspace.u_row_end[row] = 0u;
       worker->udiag_values[row] = 0.0;
       kls_row_first_factor_row_failure_set(
-        &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_DEPENDENCY,
-        row, row, worker->tid, worker->row_owner[row]);
+        &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_DEPENDENCY);
       goto done;
     }
     if (!kls_row_first_factor_one_row(
@@ -7065,7 +7003,8 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     const UF_long pivots_before =
       stats != NULL ? stats->dynamic_column_pivots : 0u;
     kls_row_first_factor_row_failure_info pivot_failure;
-    kls_row_first_factor_row_failure_clear(&pivot_failure, pivot_row, -1);
+    kls_row_first_factor_row_failure_set(
+      &pivot_failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_NONE);
     if (pivot_row >= ctx->nk ||
         !kls_row_first_factor_one_row(
           ctx, workspace, l_entries, u_entries, udiag_values, pivot_row,
