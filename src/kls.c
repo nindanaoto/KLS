@@ -13672,8 +13672,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
        internal-frame array, current for THIS call */
     if (solver->generic_btf_unscaled_recovery_scale > 0 &&
         solver->generic_btf_unscaled_rcond_floor > 0.0 &&
-        solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
-        getenv("KLS_DISABLE_GENERIC_UNSCALED_RCOND_GUARD") == NULL) {
+        solver->common.scale <= 0 && solver->numeric->Rs == NULL) {
       kls_update_numeric_rcond_guard(solver);
       if (!(solver->common.rcond >=
               solver->generic_btf_unscaled_rcond_floor) &&
@@ -14558,7 +14557,6 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
   enum { KLS_GMRES_RESTART = 4, KLS_GMRES_CYCLES = 2 };
   if (solver == NULL || a == NULL || b == NULL || x == NULL ||
       residual == NULL || !isfinite(bnorm2) || bnorm2 < 0.0 ||
-      getenv("KLS_DISABLE_GMRES_SOLVE_RECOVERY") != NULL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->row_perm != NULL || solver->user_col_perm != NULL ||
       solver->row_scale != NULL || solver->col_scale != NULL ||
@@ -14765,7 +14763,6 @@ static int kls_try_lsqr_solve_recovery(kls_solver *solver,
                                        double *residual) {
   if (solver == NULL || a == NULL || b == NULL || x == NULL ||
       residual == NULL || !isfinite(bnorm2) || bnorm2 < 0.0 ||
-      getenv("KLS_DISABLE_LSQR_SOLVE_RECOVERY") != NULL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->input_to_csc != NULL || solver->row_perm != NULL ||
       solver->user_col_perm != NULL || solver->row_scale != NULL ||
@@ -15490,14 +15487,12 @@ static int solve_impl(kls_solver *solver,
        digits.  Treat that measured numeric state exactly like the existing
        transformed/reduced-precision risks: certify its first public solve
        against the actual matrix instead of guessing from matrix shape. */
-    (getenv("KLS_DISABLE_RCOND_SOLVE_CONTRACT") == NULL &&
-     solver->common.rcond > 0.0 &&
+    (solver->common.rcond > 0.0 &&
      solver->common.rcond < sqrt(DBL_EPSILON));
   const int contract_probe_wanted = !solver->in_solve_refinement &&
     !transpose && nrhs == 1 && b != x &&
     solver->solve_contract_probe == 0 &&
-    contract_structural_risk &&
-    getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") == NULL;
+    contract_structural_risk;
   const int contract_armed = solver->solve_contract_probe == 2 &&
     !solver->in_solve_refinement && !transpose && nrhs == 1 && b != x;
   /* A selected pivot tolerance below the caller's request is an accuracy
@@ -15672,8 +15667,7 @@ static int solve_impl(kls_solver *solver,
         (solver->row_solve_self_check || contract_probe_wanted ||
          contract_armed) &&
         !promoted_tolerance_l2_contract &&
-        !repeated_rhs_raw_l2_contract &&
-        getenv("KLS_DISABLE_ORDINARY_SELF_CHECK_L2_CONTRACT") == NULL;
+        !repeated_rhs_raw_l2_contract;
       const int generic_parallel_contract_residual =
         ordinary_self_check_l2_contract &&
         kls_generic_contract_residual_parallel_dispatch(solver);
@@ -15917,8 +15911,7 @@ static int solve_impl(kls_solver *solver,
         if (repeated_rhs_raw_l2_contract && iter == 0 &&
             isfinite(bnorm2) && isfinite(rnorm2) &&
             rnorm2 > raw_l2_limit_squared * l2_scale &&
-            rnorm2 < 100.0e-18 * l2_scale &&
-            getenv("KLS_DISABLE_BOUNDED_PUBLIC_RAW_L2") == NULL) {
+            rnorm2 < 100.0e-18 * l2_scale) {
           double error_norm2 = 0.0;
           if (kls_run_compact_residual_error_bound(
                 solver, refine_a, brhs, xrhs, &error_norm2)) {
@@ -15971,9 +15964,7 @@ static int solve_impl(kls_solver *solver,
           solver->pivot_nudge_count == 0u &&
           solver->common.kls_perturb_count == 0u &&
           solver->row_perm == NULL && solver->user_col_perm == NULL &&
-          solver->row_scale == NULL && solver->col_scale == NULL &&
-          getenv("KLS_DISABLE_CERTIFIED_COMPACT_ROW_CONTRACT_SETTLE") ==
-            NULL;
+          solver->row_scale == NULL && solver->col_scale == NULL;
         const int settled_pts_raw_l2_ok =
           contract_armed && iter == 0 && ordinary_self_check_l2_contract &&
           kls_repeated_update_workload(&solver->options) &&
@@ -15983,7 +15974,6 @@ static int solve_impl(kls_solver *solver,
           solver->common.kls_perturb_count == 0u &&
           !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
           solver->row_scale == NULL && solver->col_scale == NULL &&
-          getenv("KLS_DISABLE_SETTLED_PTS_RAW_L2_CERTIFICATE") == NULL &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
           rnorm2 <= 1.0e-18 * l2_scale;
         const int verified_rhs_cache_ok =
@@ -16149,15 +16139,13 @@ static int solve_impl(kls_solver *solver,
             !solver->numeric_needs_refinement &&
             solver->common.tol < 1.0e-6 &&
             nrhs == 1 && solver->i16solve_l != NULL &&
-            solver->i16solve_u != NULL &&
-            getenv("KLS_DISABLE_SPARSE_REFINEMENT_RHS") == NULL) {
+            solver->i16solve_u != NULL) {
           /* All L2-contract paths have already formed (or reused) this
              exact RHS norm above.  Reuse it here instead of performing a
              second long-double reduction on every correction.  A caller
              that reaches the sparse correction only through the generic
              max-norm controller still computes the norm locally. */
           const int rhs_norm2_available =
-            getenv("KLS_DISABLE_SPARSE_REFINEMENT_NORM_REUSE") == NULL &&
             (verified_rhs_contract || promoted_tolerance_l2_contract ||
              ordinary_self_check_l2_contract ||
              certified_unscaled_transpose_l2_contract);
@@ -16169,17 +16157,8 @@ static int solve_impl(kls_solver *solver,
             }
           }
           const double rhs_norm = sqrt((double)sparse_rhs_norm2);
-          double sparse_drop_relative = 1.0e-9;
-          const char *sparse_drop_env =
-            getenv("KLS_SPARSE_REFINEMENT_DROP_RELATIVE");
-          if (sparse_drop_env != NULL && sparse_drop_env[0] != '\0') {
-            const double parsed = atof(sparse_drop_env);
-            if (parsed > 0.0 && parsed <= 1.0e-9 && isfinite(parsed)) {
-              sparse_drop_relative = parsed;
-            }
-          }
           const double drop_floor = nloc > 0u && isfinite(rhs_norm)
-            ? sparse_drop_relative * rhs_norm / sqrt((double)nloc) : 0.0;
+            ? 1.0e-9 * rhs_norm / sqrt((double)nloc) : 0.0;
           if (drop_floor > 0.0) {
             sparse_refinement_support = 0u;
             for (UF_long i = 0u; i < nloc; ++i) {
@@ -16219,8 +16198,7 @@ static int solve_impl(kls_solver *solver,
             (solver->solve_refine_single_shot ||
              solver->common.tol < 1.0e-6 ||
              (contract_armed && solver->solve_contract_verified &&
-              !tight_tol_selected &&
-              getenv("KLS_DISABLE_CONTRACT_SINGLE_SHOT") == NULL))) {
+              !tight_tol_selected))) {
           /* Intrinsically tight factors validate one correction with the
              adoption probe.  Armed contract numerics whose correction has
              been residual-verified once make the same single-shot trade,
