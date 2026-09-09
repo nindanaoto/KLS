@@ -14482,12 +14482,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
         getenv("KLS_DISABLE_GENERIC_UNSCALED_RCOND_GUARD") == NULL) {
       kls_update_numeric_rcond_guard(solver);
-      if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
-        fprintf(stderr,
-                "KLS generic unscaled refactor rcond %.3e floor %.3e\n",
-                solver->common.rcond,
-                solver->generic_btf_unscaled_rcond_floor);
-      }
       if (!(solver->common.rcond >=
               solver->generic_btf_unscaled_rcond_floor) &&
           !solver->solve_recovery_active) {
@@ -14506,12 +14500,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
         if (residual_retains_unscaled) {
           solver->generic_btf_unscaled_rcond_floor =
             fmax(DBL_MIN, 0.125 * guarded_rcond);
-          if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
-            fprintf(stderr,
-                    "KLS generic unscaled residual certified: "
-                    "new floor %.3e\n",
-                    solver->generic_btf_unscaled_rcond_floor);
-          }
         } else {
           const int recovery_scale =
             solver->generic_btf_unscaled_recovery_scale;
@@ -14522,11 +14510,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
           solver->options.scale = recovery_scale;
           solver->common.scale = recovery_scale;
           solver->full_factor_preferred = 1;
-          if (getenv("KLS_TRACE_GENERIC_UNSCALED_RCOND") != NULL) {
-            fprintf(stderr,
-                    "KLS generic unscaled refactor recovery: scale=%d\n",
-                    recovery_scale);
-          }
           const int recovery_status = kls_factor(solver, values);
           solver->options.scale = saved_option_scale;
           solver->full_factor_preferred = saved_full_factor_preferred;
@@ -15151,16 +15134,6 @@ static void kls_generic_contract_residual_record(kls_solver *solver,
     parallel < 0.95 * serial &&
         projected > 2.0 * solver->contract_residual_build_seconds
       ? 1 : -1;
-  if (getenv("KLS_TRACE_CONTRACT_RESIDUAL") != NULL) {
-    fprintf(stderr,
-            "KLS contract residual: CSC %.3f us CSR/%d %.3f us"
-            " build %.3f us projected %.3f us -> %s\n",
-            1e6 * serial, solver->solve_refine_csr32_threads,
-            1e6 * parallel,
-            1e6 * solver->contract_residual_build_seconds,
-            1e6 * projected,
-            solver->contract_residual_choice > 0 ? "CSR" : "CSC");
-  }
 }
 
 static int kls_run_parallel_refine_csr_residual(
