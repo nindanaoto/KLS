@@ -44,6 +44,10 @@ placement plans containing distinct CPUs wholly inside the allowed set. The
 same test on CPUs 8-15 with `KLS_DISABLE_COMPACT_LLC_AFFINITY=1` passes without
 any placement plan. Caller-affinity checks remain enabled in all three runs.
 
+Historical note: the disable override above was subsequently removed in
+`affinity_simd_control_trim.md`; automatic placement and caller-affinity
+checks remain.
+
 ## Performance protocol
 
 The before binary is committed `836b9d3`; after is that revision plus this fix.

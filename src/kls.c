@@ -222,14 +222,9 @@ static void kls_accumulate_scaled_dense_rows8(
 #define KLS_SNODE_TAIL_CHUNK 32
 #define KLS_SNODE_MIN_BATCH_WORK kls_snode_min_batch_work()
 
-/* Floors are env-tunable for kernel experiments: bcircuit's mapped
-   path declines 88% of consume events on these floors (850K on work,
-   963K on run length per 20 refactors) while its runs average t=122 -
-   the floors were tuned for big-factor panel staging economics and
-   may over-reject on cache-resident small factors. */
 /* Per-refactor floor overrides: written by the refactor driver before
    worker dispatch (single writer, constant during the parallel
-   region), read by the consume kernels. 0 = use env/default. */
+   region), read by the consume kernels. 0 = use default. */
 static UF_long kls_snode_floor_batch_override = 0;
 static UF_long kls_snode_floor_work_override = 0;
 
@@ -237,30 +232,14 @@ static UF_long kls_snode_min_batch(void) {
   if (kls_snode_floor_batch_override > 0) {
     return kls_snode_floor_batch_override;
   }
-  static UF_long cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("KLS_SNODE_MIN_BATCH_OVERRIDE");
-    cached = env != NULL ? (UF_long)atol(env) : 3;
-    if (cached < 2) {
-      cached = 2;
-    }
-  }
-  return cached;
+  return 3;
 }
 
 static UF_long kls_snode_min_batch_work(void) {
   if (kls_snode_floor_work_override > 0) {
     return kls_snode_floor_work_override;
   }
-  static UF_long cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("KLS_SNODE_MIN_BATCH_WORK_OVERRIDE");
-    cached = env != NULL ? (UF_long)atol(env) : 192;
-    if (cached < 1) {
-      cached = 1;
-    }
-  }
-  return cached;
+  return 192;
 }
 
 /* Re-measured 2026-07 with the busy-wait pool: the egraph now beats the
@@ -2562,32 +2541,13 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract(
    AVX2-only machines; a cached __builtin_cpu_supports check dispatches
    at runtime.  The row indices within one L column are distinct, so
    gather-modify-scatter over 8-lane blocks is exact.  Gathers only pay
-   on long columns, so the default cutoff is deliberately conservative;
-   KLS_AVX512_SCATTER=0 disables the path and
-   KLS_AVX512_SCATTER_MIN_LENGTH overrides the cutoff. */
+   on long columns, so the cutoff is deliberately conservative. */
 #if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
 #define KLS_HAVE_AVX512_KERNELS 1
 static KLS_ALWAYS_INLINE int kls_avx512_scatter_enabled(void) {
   static int cached = -1;
   if (cached < 0) {
-    const char *env = getenv("KLS_AVX512_SCATTER");
-    const int requested =
-      env == NULL || env[0] == '\0'
-        ? 1
-        : !(env[0] == '0' && env[1] == '\0');
-    cached = requested && __builtin_cpu_supports("avx512f") ? 1 : 0;
-  }
-  return cached;
-}
-
-static KLS_ALWAYS_INLINE UF_long kls_avx512_scatter_min_length(void) {
-  static UF_long cached = 0u;
-  if (cached == 0u) {
-    const char *env = getenv("KLS_AVX512_SCATTER_MIN_LENGTH");
-    cached = env != NULL && env[0] != '\0' ? (UF_long)atol(env) : 1024u;
-    if (cached < 8u) {
-      cached = 8u;
-    }
+    cached = __builtin_cpu_supports("avx512f") ? 1 : 0;
   }
   return cached;
 }
@@ -2650,7 +2610,7 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract_i32(
     return;
   }
 #if KLS_HAVE_AVX512_KERNELS
-  if (length >= kls_avx512_scatter_min_length() &&
+  if (length >= 1024u &&
       kls_avx512_scatter_enabled()) {
     kls_scatter_subtract_i32_avx512(x, rows, values, length, scale);
     return;
@@ -4804,8 +4764,7 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
     solver->numeric->lnz <= UF_long_max - solver->numeric->unz &&
     solver->common.flops >= 0.5 * (double)thread_count *
       (double)(solver->numeric->lnz + solver->numeric->unz) &&
-    kls_repeated_update_workload(&solver->options) &&
-    getenv("KLS_DISABLE_GENERIC_LEAN_AFFINITY") == NULL;
+    kls_repeated_update_workload(&solver->options);
   const int affinity_cycle =
     packed_affinity_cycle ||
     generic_affinity_cycle;
@@ -4952,9 +4911,8 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
       fmax(0.0, baseline_finish - ideal_finish);
     solver->lean_parallel_affinity_baseline_work = baseline_finish;
     if (!valid || baseline_finish <= 0.0 ||
-        ((ideal_finish > 0.98 * baseline_finish ||
-          maximum_projected_savings < 2.0 * comparison_work) &&
-         getenv("KLS_ENABLE_GENERIC_LEAN_AFFINITY") == NULL)) {
+        ideal_finish > 0.98 * baseline_finish ||
+        maximum_projected_savings < 2.0 * comparison_work) {
       free(schedule);
       free(finish);
       solver->lean_parallel_affinity_decision = -1;
@@ -5059,8 +5017,7 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
       projected_savings >= 2.0 * comparison_work;
     solver->lean_parallel_affinity_baseline_work = baseline_finish;
     solver->lean_parallel_affinity_candidate_work = affinity_finish;
-    if (!retain_generic_affinity &&
-        getenv("KLS_ENABLE_GENERIC_LEAN_AFFINITY") == NULL) {
+    if (!retain_generic_affinity) {
       valid = 0;
     }
   }
@@ -10018,8 +9975,7 @@ int kls_analyze_csc(kls_solver *solver,
   /* Topology discovery can require several sysfs reads.  Warm its process-
      wide cache before analysis timing and candidate trials begin; one-shot
      solvers never pay for information they cannot use. */
-  if (kls_repeated_update_workload(&normalized) ||
-      getenv("KLS_ENABLE_COMPACT_LLC_AFFINITY") != NULL) {
+  if (kls_repeated_update_workload(&normalized)) {
     kls_warm_topology_cache();
   }
 
@@ -10094,8 +10050,7 @@ int kls_analyze_csr(kls_solver *solver,
   if (status != KLS_OK) {
     return status;
   }
-  if (kls_repeated_update_workload(&normalized) ||
-      getenv("KLS_ENABLE_COMPACT_LLC_AFFINITY") != NULL) {
+  if (kls_repeated_update_workload(&normalized)) {
     kls_warm_topology_cache();
   }
 

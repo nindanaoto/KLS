@@ -291,8 +291,9 @@ must contain at least 32 targets, or four AVX-512 vectors.  The run census
 records whether any such work exists, and the dispatching thread resolves the
 existing AVX-512 feature gate once per refactor.  There is no matrix, size,
 corpus, ordering, or policy rule and no new environment selector.
-`KLS_AVX512_SCATTER=0` retains the existing diagnostic way to force the
-scalar fallback.
+At the time of this experiment, `KLS_AVX512_SCATTER=0` forced the scalar
+fallback. That diagnostic override was subsequently removed; runtime CPU
+detection and scalar fallbacks remain (see `affinity_simd_control_trim.md`).
 
 The AVX-512 width-eight step and its worker copy live in a separate
 `.text.kls_avx512` section.  This matters for generality as well as code

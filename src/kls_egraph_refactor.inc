@@ -5017,8 +5017,7 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
       thread_count < 2 || thread_count > CPU_SETSIZE) {
     return 0;
   }
-  if (!kls_repeated_update_workload(&solver->options) ||
-      getenv("KLS_DISABLE_COMPACT_LLC_AFFINITY") != NULL) {
+  if (!kls_repeated_update_workload(&solver->options)) {
     return 0;
   }
 
@@ -5054,12 +5053,10 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
      only when an entire physical-core crew fits there; otherwise preserve the
      existing LLC selection and the caller's requested parallelism. */
   uint64_t performance_frequency = 0u;
-  if (getenv("KLS_DISABLE_PERFORMANCE_CORE_AFFINITY") == NULL) {
-    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
-      if (CPU_ISSET(cpu, allowed_out) && valid[cpu] &&
-          max_frequency_khz[cpu] > performance_frequency) {
-        performance_frequency = max_frequency_khz[cpu];
-      }
+  for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+    if (CPU_ISSET(cpu, allowed_out) && valid[cpu] &&
+        max_frequency_khz[cpu] > performance_frequency) {
+      performance_frequency = max_frequency_khz[cpu];
     }
   }
 
