@@ -5208,13 +5208,6 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
         ((ideal_finish > 0.98 * baseline_finish ||
           maximum_projected_savings < 2.0 * comparison_work) &&
          getenv("KLS_ENABLE_GENERIC_LEAN_AFFINITY") == NULL)) {
-      if (getenv("KLS_TRACE_LEAN_AFFINITY") != NULL) {
-        fprintf(stderr,
-                "KLS generic lean affinity: baseline=%.0f lower=%.0f "
-                "maximum-savings=%.0f cost=%.0f -> reject\n",
-                baseline_finish, ideal_finish, maximum_projected_savings,
-                comparison_work);
-      }
       free(schedule);
       free(finish);
       solver->lean_parallel_affinity_decision = -1;
@@ -5319,16 +5312,6 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
       projected_savings >= 2.0 * comparison_work;
     solver->lean_parallel_affinity_baseline_work = baseline_finish;
     solver->lean_parallel_affinity_candidate_work = affinity_finish;
-    if (getenv("KLS_TRACE_LEAN_AFFINITY") != NULL) {
-      fprintf(stderr,
-              "KLS generic lean affinity: baseline=%.0f candidate=%.0f "
-              "ratio=%.4f savings=%.0f cost=%.0f -> %s\n",
-              baseline_finish, affinity_finish,
-              baseline_finish > 0.0
-                ? affinity_finish / baseline_finish : DBL_MAX,
-              projected_savings, comparison_work,
-              retain_generic_affinity ? "retain" : "reject");
-    }
     if (!retain_generic_affinity &&
         getenv("KLS_ENABLE_GENERIC_LEAN_AFFINITY") == NULL) {
       valid = 0;
