@@ -13292,14 +13292,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
        suppressing the warm paired audit. */
     solver->lean_reaudit_state = 5;
     solver->lean_reaudit_pending_side = 0;
-    if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-      fprintf(stderr,
-              "KLS declined lean lifecycle lower bound: row ref %.3f ms "
-              "vs column cycle %.3f ms -> COLUMN\n",
-              1e3 * solver->lean_reaudit_candidate_row_seconds,
-              1e3 * (solver->lean_reaudit_column_min +
-                      solver->lean_reaudit_column_solve_min));
-    }
   }
   if (generic_lean_reaudit && solver->lean_choice > 0 &&
       (solver->lean_reaudit_state == 1 ||
@@ -13463,16 +13455,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
     }
     elapsed = kls_now_seconds() - start;
-    if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-      fprintf(stderr,
-              "KLS moderate BTF warm row handoff: incumbent %.3f ms "
-              "row %.3f/%.3f/%.3f ms cost %.3f ms projected %.3f ms "
-              "-> %s\n",
-              1e3 * incumbent_seconds, 1e3 * row_samples[0],
-              1e3 * row_samples[1], 1e3 * row_samples[2],
-              1e3 * handoff_cost, 1e3 * projected_saving,
-              adopt_row ? "ROW" : "INCUMBENT");
-    }
   }
   if (deferred_lean_value_prep && solver->values != NULL) {
     /* The lean workers completed the deferred user->internal gather before
@@ -14185,32 +14167,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
           ok = kls_parallel_refactor(solver, numeric_values, 0);
           elapsed = kls_now_seconds() - restore_start;
         }
-        if (getenv("KLS_TRACE_LEAN_PROBE") != NULL &&
-            scaled_small_packed_row_model_admitted) {
-          fprintf(stderr,
-                  "KLS scaled compact row consult: best=%.3e column=%.3e "
-                  "consult=%.3e projected=%.3e -> %s\n",
-                  scaled_small_best_row, t_inc,
-                  scaled_small_consult_seconds,
-                  scaled_small_projected_saving,
-                  solver->lean_choice > 0 ? "ROW" : "COLUMN");
-        }
-        if (getenv("KLS_TRACE_LEAN_PROBE") != NULL &&
-            !scaled_small_packed_row_model_admitted) {
-          fprintf(stderr,
-                  "KLS generic lean payback: best=%.3e column=%.3e "
-                  "setup=%.3e consult=%.3e projected=%.3e -> %s\n",
-                  best_row_seconds, t_inc, generic_lean_setup_seconds,
-                  ordinary_lean_consult_seconds,
-                  ordinary_lean_projected_saving,
-                  solver->lean_choice > 0 ? "ROW" : "COLUMN");
-        }
       }
-    }
-    if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-      fprintf(stderr,
-              "KLS lean consult: inc=%.3e lean=%.3e pair=%.3e -> %d\n",
-              t_inc, t_lean, t_pair, solver->lean_choice);
     }
   }
   /* Engine consultations are one-time setup, not steady refactor work.  The

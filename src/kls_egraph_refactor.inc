@@ -8775,13 +8775,6 @@ static int kls_mapped_refactor(kls_solver *solver,
         solver->moderate_btf_mapped_seconds = mapped_seconds;
         solver->moderate_btf_compact_seconds = lean_seconds;
         solver->moderate_btf_trial_seconds = trial_seconds;
-        if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-          fprintf(stderr,
-                  "KLS moderate BTF block preflight: mapped %.3f ms"
-                  " lean %.3f ms trial %.3f ms\n",
-                  1e3 * mapped_seconds, 1e3 * lean_seconds,
-                  1e3 * trial_seconds);
-        }
         if (mapped < 0 || lean < 0) {
           solver->moderate_btf_lean_choice = -1;
         } else if (mapped == 0 || lean == 0) {
@@ -8802,11 +8795,6 @@ static int kls_mapped_refactor(kls_solver *solver,
              admitted row trial returns it directly. */
           solver->moderate_btf_lean_choice =
             lean_seconds <= 1.10 * mapped_seconds ? 2 : -1;
-          if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-            fprintf(stderr, "KLS moderate BTF row trial: %s\n",
-                    solver->moderate_btf_lean_choice == 2
-                      ? "admitted" : "vetoed");
-          }
           if (solver->moderate_btf_lean_choice == 2) return lean;
           return kls_serial_refactor_tail_from_block(
             solver, numeric_values, 0u, 0);

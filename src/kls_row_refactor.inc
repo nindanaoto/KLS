@@ -792,15 +792,6 @@ static void kls_selected_lean_reaudit_finish(kls_solver *solver) {
   }
   solver->lean_reaudit_pending_side = 0;
   solver->lean_reaudit_state = 5;
-  if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-    fprintf(stderr,
-            "KLS selected lean lifecycle re-audit: ref %.3f/%.3f ms "
-            "solve %.3f/%.3f ms -> %s\n",
-            1e3 * row_ref, 1e3 * solver->lean_reaudit_column_min,
-            1e3 * solver->lean_reaudit_row_solve_min,
-            1e3 * solver->lean_reaudit_column_solve_min,
-            solver->lean_choice < 0 ? "COLUMN" : "LEAN");
-  }
 }
 
 static void kls_declined_lean_reaudit_finish(kls_solver *solver) {
@@ -834,17 +825,6 @@ static void kls_declined_lean_reaudit_finish(kls_solver *solver) {
   }
   solver->lean_reaudit_pending_side = 0;
   solver->lean_reaudit_state = 5;
-  if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-    fprintf(stderr,
-            "KLS declined lean lifecycle re-audit: ref %.3f/%.3f ms "
-            "solve %.3f/%.3f ms over %d row samples -> %s\n",
-            1e3 * solver->lean_reaudit_column_min,
-            1e3 * solver->lean_reaudit_row_min,
-            1e3 * solver->lean_reaudit_column_solve_min,
-            1e3 * solver->lean_reaudit_row_solve_min,
-            solver->lean_reaudit_row_samples,
-            solver->lean_choice > 0 ? "LEAN" : "COLUMN");
-  }
 }
 
 /* Settle only a very wide complete-cycle separation before the ordinary
@@ -886,14 +866,6 @@ static int kls_lean_reaudit_try_decisive(kls_solver *solver) {
   solver->lean_reaudit_pending_side = 0;
   solver->lean_reaudit_pending_ref_seconds = 0.0;
   solver->lean_reaudit_state = 5;
-  if (getenv("KLS_TRACE_LEAN_PROBE") != NULL) {
-    fprintf(stderr,
-            "KLS decisive lean lifecycle audit: row %.3f ms "
-            "column %.3f ms -> %s\n",
-            1e3 * solver->lean_reaudit_row_cycle_min,
-            1e3 * solver->lean_reaudit_column_cycle_min,
-            choice > 0 ? "LEAN" : "COLUMN");
-  }
   return 1;
 }
 
