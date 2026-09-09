@@ -5849,8 +5849,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
    Returns 1 ok, 0 factor failure (status set), -1 decline. */
 static int kls_lean_row_refactor_numeric(kls_solver *solver,
                                          double *numeric_values) {
-  const int trace_phases = getenv("KLS_TRACE_LEAN_PHASES") != NULL;
-  const double trace_begin = trace_phases ? kls_now_seconds() : 0.0;
   if (solver == NULL || solver->numeric_is_predicted) {
     return -1;
   }
@@ -5897,26 +5895,15 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
        getenv("KLS_ENABLE_LEAN_I16_INDICES") != NULL)) {
     (void)kls_build_lean_row_i16_indices(solver);
   }
-  const double trace_pattern = trace_phases ? kls_now_seconds() : 0.0;
-  const int deferred_value_map_ready =
-    solver->input_to_csc != NULL && solver->values != NULL &&
-    solver->row_scale == NULL && solver->col_scale == NULL &&
-    !scaled && kls_repeated_update_workload(&solver->options) &&
-    kls_build_prepared_value_input_pos(solver);
-  const int direct_value_maps_ready =
-    (solver->lean_user_values_active ||
-     kls_direct_user_value_maps_capable(solver) ||
-     getenv("KLS_ENABLE_GENERIC_COMPACT_MATCH_DIRECT_VALUES") != NULL)
-      ? kls_build_compact_match_direct_value_maps(solver) : 0;
-  const double trace_ready = trace_phases ? kls_now_seconds() : 0.0;
-  if (trace_phases) {
-    fprintf(stderr,
-            "KLS lean direct maps: ready=%d deferred=%d input=%p offdiag=%p "
-            "generic_map=%p\n",
-            direct_value_maps_ready, deferred_value_map_ready,
-            (void *)solver->row_refactor_input_user_pos,
-            (void *)solver->compact_match_offdiag_user_pos,
-            (void *)solver->refactor_input_pos);
+  if (solver->input_to_csc != NULL && solver->values != NULL &&
+      solver->row_scale == NULL && solver->col_scale == NULL &&
+      !scaled && kls_repeated_update_workload(&solver->options)) {
+    (void)kls_build_prepared_value_input_pos(solver);
+  }
+  if (solver->lean_user_values_active ||
+      kls_direct_user_value_maps_capable(solver) ||
+      getenv("KLS_ENABLE_GENERIC_COMPACT_MATCH_DIRECT_VALUES") != NULL) {
+    (void)kls_build_compact_match_direct_value_maps(solver);
   }
   if (solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_cols == NULL ||
@@ -5996,7 +5983,6 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
-  const double trace_input = trace_phases ? kls_now_seconds() : 0.0;
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
@@ -6026,7 +6012,6 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     ? solver->lean_snode_run : NULL;
   const double *rs = scaled ? numeric->Rs : NULL;
   const UF_long *pnum = numeric->Pnum;
-  const double trace_numeric_begin = trace_phases ? kls_now_seconds() : 0.0;
   const int pair_mode = solver->lean_pair_active;
   solver->lean_parallel_last_used = 0;
   int parallel_status = -1;
@@ -6296,18 +6281,6 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
-  if (trace_phases) {
-    const double trace_end = kls_now_seconds();
-    fprintf(stderr,
-            "KLS lean phases: pattern=%.3f maps=%.3f input=%.3f setup=%.3f "
-            "numeric=%.3f total=%.3f ms pair=%d\n",
-            1e3 * (trace_pattern - trace_begin),
-            1e3 * (trace_ready - trace_pattern),
-            1e3 * (trace_input - trace_ready),
-            1e3 * (trace_numeric_begin - trace_input),
-            1e3 * (trace_end - trace_numeric_begin),
-            1e3 * (trace_end - trace_begin), pair_mode);
-  }
   return 1;
 }
 
