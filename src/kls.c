@@ -701,9 +701,7 @@ struct kls_solver {
   double eg_cluster_sum[3];
   int scalar_refactor_scatter; /* retained numeric prefers scalar indexed
                                   updates over AVX-512 gather/scatter */
-  int snode_tail_chunk128; /* 128-entry fused-tail accumulator */
-  int snode_tail_chunk144; /* 144-entry fused-tail accumulator */
-  int snode_tail_masked_remainder; /* one-pass masked 33--63 tail */
+  int snode_wide_tail; /* wider accumulators and masked 33--63 tail */
   int floor_choice;    /* batch-floor trial (mapped/egraph rows):
                           0 undecided, 1 low floors, -1 defaults */
   int floor_pending;   /* low-floor probe refactor outstanding */
@@ -9386,9 +9384,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
          sizeof(solver->eg_cluster_samples));
   memset(solver->eg_cluster_sum, 0, sizeof(solver->eg_cluster_sum));
   solver->scalar_refactor_scatter = 0;
-  solver->snode_tail_chunk128 = 0;
-  solver->snode_tail_chunk144 = 0;
-  solver->snode_tail_masked_remainder = 0;
+  solver->snode_wide_tail = 0;
   solver->floor_choice = 0;
   solver->floor_pending = 0;
   solver->floor_wait = 0;

@@ -675,15 +675,15 @@ static UF_long kls_snode_batch_consume_cached_apply(
 #if defined(__AVX512F__)
     const UF_long pc =
                        remaining >= 144u && solver != NULL &&
-                           solver->snode_tail_chunk144
+                           solver->snode_wide_tail
                          ? 144u
                        : remaining >= 128u && solver != NULL &&
-                           solver->snode_tail_chunk128
+                           solver->snode_wide_tail
                          ? 128u
                        : remaining >= 64u ? 64u
                        : remaining > KLS_SNODE_TAIL_CHUNK &&
                            solver != NULL &&
-                           solver->snode_tail_masked_remainder
+                           solver->snode_wide_tail
                          ? remaining
                        : remaining >= KLS_SNODE_TAIL_CHUNK
                          ? KLS_SNODE_TAIL_CHUNK : remaining;
@@ -6841,8 +6841,6 @@ static UF_long kls_egraph_cluster_level_dispatch(kls_solver *solver,
     return incumbent;
   }
   if (check_pivots ||
-      getenv("KLS_CLUSTER_WIDTH_ALPHA") != NULL ||
-      getenv("KLS_DISABLE_EGRAPH_CLUSTER_CUT_TRIAL") != NULL ||
       !kls_repeated_update_workload(&solver->options) ||
       (incumbent == alpha3 && incumbent == alpha4) ||
       alpha3 > incumbent || alpha4 > incumbent ||
@@ -7266,23 +7264,11 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
    do not benefit from the longer scalar/panel loops. */
 static void kls_egraph_select_stream_kernels(kls_solver *solver,
                                              int check_pivots) {
-  const int force_chunk128 =
-    getenv("KLS_EXPERIMENT_SNODE_TAIL_CHUNK128") != NULL;
-  const int force_chunk144 =
-    getenv("KLS_EXPERIMENT_SNODE_TAIL_CHUNK144") != NULL;
-  const int force_masked =
-    getenv("KLS_EXPERIMENT_SNODE_TAIL_MASKED_REMAINDER") != NULL;
-
   solver->eg_stream_pending = 0;
   solver->scalar_refactor_scatter = 0;
-  solver->snode_tail_chunk128 = force_chunk128;
-  solver->snode_tail_chunk144 = force_chunk144;
-  solver->snode_tail_masked_remainder = force_masked;
+  solver->snode_wide_tail = 0;
 
-  /* Explicit implementation experiments retain their former direct meaning
-     and do not feed a mixed timing verdict. */
-  if (force_chunk128 || force_chunk144 || force_masked || check_pivots ||
-      getenv("KLS_DISABLE_EGRAPH_STREAM_KERNEL_TRIAL") != NULL) {
+  if (check_pivots) {
     return;
   }
 
@@ -7315,9 +7301,7 @@ static void kls_egraph_select_stream_kernels(kls_solver *solver,
   if (use_wide_tail) {
     solver->scalar_refactor_scatter =
       use_scalar_scatter && indexed_scatter_applicable;
-    solver->snode_tail_chunk128 = wide_tail_applicable;
-    solver->snode_tail_chunk144 = wide_tail_applicable;
-    solver->snode_tail_masked_remainder = wide_tail_applicable;
+    solver->snode_wide_tail = wide_tail_applicable;
   }
 }
 
@@ -8106,8 +8090,7 @@ static UF_long kls_serial_klu_refactor_dense_tail(kls_solver *solver,
                                                   double *numeric_values,
                                                   int check_pivots) {
   const int dense_tail_route =
-    solver->dense_tail_cols > 0 && !check_pivots &&
-    getenv("KLS_DISABLE_DENSE_TAIL_REFACTOR") == NULL;
+    solver->dense_tail_cols > 0 && !check_pivots;
   if (dense_tail_route) {
     kls_klu_refactor_tail_skip = (long)solver->dense_tail_cols;
     kls_klu_refactor_tail_block = (long)solver->dense_tail_block;

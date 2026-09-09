@@ -1922,9 +1922,7 @@ static UF_long kls_parallel_lu_sort(kls_solver *solver) {
   kls_invalidate_i32_solve(solver);
   int nt = solver->options.threads;
   if (nt > 16) nt = 16;
-  if (nt < 2 ||
-      (solver->n < 100000u) ||
-      getenv("KLS_DISABLE_PARALLEL_SORT") != NULL) {
+  if (nt < 2 || solver->n < 100000u) {
     return trilinos_klu_l_sort(solver->symbolic, solver->numeric,
                                &solver->common);
   }
@@ -3087,21 +3085,8 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
      narrowing wave to the exact dependency pipeline a few levels earlier.
      This boundary depends only on available parallelism; the retained alpha-3
      and alpha-4 plans below still cover schedules with a different balance. */
-  double cluster_width_alpha = 2.5;
-  int explicit_cluster_width_alpha = 0;
-
-  {
-    const char *env = getenv("KLS_CLUSTER_WIDTH_ALPHA");
-    if (env != NULL && env[0] != '\0') {
-      const double parsed = atof(env);
-      if (parsed > 0.0) {
-        cluster_width_alpha = parsed;
-        explicit_cluster_width_alpha = 1;
-      }
-    }
-  }
   const double cluster_width_limit =
-    cluster_width_alpha * (double)solver->options.threads;
+    2.5 * (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];
     if (width > max_width) {
@@ -3114,7 +3099,7 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
   UF_long cluster_levels_alpha3 = cluster_levels;
   UF_long cluster_levels_alpha4 = cluster_levels;
-  if (!explicit_cluster_width_alpha) {
+  {
     cluster_levels_alpha3 = level_count;
     const double alpha3_limit = 3.0 * (double)solver->options.threads;
     for (UF_long level = 0u; level < level_count; ++level) {
@@ -3644,8 +3629,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (egraph >= 0) {
 #ifdef KLS_HAVE_CBLAS
     if (egraph > 0 && solver->dense_tail_cols > 0 &&
-        solver->common.status >= 0 &&
-        getenv("KLS_DISABLE_DENSE_TAIL_REFACTOR") == NULL) {
+        solver->common.status >= 0) {
       /* the egraph pass no-opped the dense-tail columns; rebuild them
          from the refreshed prefix (fallback: one full scalar walk) */
       if (!kls_dense_tail_refresh(solver, numeric_values)) {

@@ -16946,7 +16946,8 @@ consistently prefers a LATER pipeline split (a=8: 13.3-13.9 vs
 consistently prefers a=2 (3/3, a=8 loses 6-12%), onetone2/320ks/680ks
 are washes.  A per-matrix alpha probe would need schedule rebuilds per
 arm for a 1-2 row, ~5-8%, no-crossing gain — declined; the override
-stays as a diagnostic knob with zero default impact.  The pipeline
+was retained as a diagnostic knob with zero default impact at that time;
+it was later removed in the stream/schedule control cleanup.  The pipeline
 phase's lease/order design remains the phase-3 lever with real breadth.
 
 Width-trial observation on rajat25: the narrow arm beat full by 10.1%
