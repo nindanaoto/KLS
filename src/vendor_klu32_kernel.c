@@ -9,7 +9,6 @@
 #define KLS_SN_PANEL_FACTOR KLS32_SN_PANEL_FACTOR
 #define kls_construct_calls kls32_construct_calls
 #define kls_construct_entries kls32_construct_entries
-#define kls_construct_secs kls32_construct_secs
 #define kls_klu_dense_tail kls32_klu_dense_tail
 #define kls_klu_pipe_det kls32_klu_pipe_det
 #define kls_klu_pipe_nopanels kls32_klu_pipe_nopanels
@@ -20,7 +19,4 @@
 #define kls_pipe_madds kls32_pipe_madds
 #define kls_pipe_t_num kls32_pipe_t_num
 #define kls_pipe_t_sym kls32_pipe_t_sym
-#define kls_step_cc kls32_step_cc
-#define kls_step_num kls32_step_num
-#define kls_step_sym kls32_step_sym
 #include "../third_party/suitesparse/KLU/Source/trilinos_klu_l_kernel.c"

@@ -50,7 +50,6 @@ static _Thread_local long kls_pipe_scalar_src ;
 Int KLS_SN_PANEL_FACTOR (double *A, Int R, Int W, Int rowids [ ],
 			 const Int diagrows [ ], double tol) ;
 
-_Thread_local double kls_construct_secs ;
 _Thread_local long kls_pipe_inversions ;
 static FILE *kls_pipe_pivlog ;
 static Int kls_trace_row_a = -1, kls_trace_row_b = -1 ;
@@ -61,10 +60,8 @@ static _Thread_local unsigned long long kls_fin_fp_src ;
 static _Thread_local unsigned long long kls_fin_fp_full ;
 static Int kls_trace_colk = -1 ;
 #define KLS_TROW(r) ((r) == kls_trace_row_a || (r) == kls_trace_row_b)
-_Thread_local double kls_step_sym, kls_step_cc, kls_step_num ;
 _Thread_local long kls_construct_calls ;
 _Thread_local long kls_construct_entries ;
-static int kls_construct_prof ;
 
 static double kls_klu_now (void)
 {
@@ -298,7 +295,6 @@ static void construct_column
 {
     Entry aik ;
     Int i, p, pend, oldcol, kglobal, poff, oldrow ;
-    const double kls_cc_t0 = kls_construct_prof ? kls_klu_now () : 0.0 ;
 
     /* ---------------------------------------------------------------------- */
     /* Scale and scatter the column into X. */
@@ -356,12 +352,6 @@ static void construct_column
     }
 
     Offp [kglobal+1] = poff ;   /* start of the next col of off-diag part */
-    if (kls_construct_prof)
-    {
-	kls_construct_secs += kls_klu_now () - kls_cc_t0 ;
-	kls_construct_calls++ ;
-	kls_construct_entries += pend - Ap [oldcol] ;
-    }
 }
 
 
@@ -1256,27 +1246,13 @@ Int KLS_KLU_KERNEL_STEP
     Lip [k] = S->lup ;
     }
 
-    const int kls_sp = kls_construct_prof ;
-    double kls_sp_t = kls_sp ? kls_klu_now () : 0.0 ;
     top = lsolve_symbolic (n, k, S->Ap, S->Ai, S->Q, S->colptr, Pinv,
 		S->Stack, S->Flag, S->Lpend, S->Ap_pos, LU,
 		S->colptr != NULL ? 0 : S->lup, Llen, Lip, S->k1, S->PSinv) ;
 
-    if (kls_sp)
-    {
-	const double t2 = kls_klu_now () ;
-	kls_step_sym += t2 - kls_sp_t ;
-	kls_sp_t = t2 ;
-    }
     construct_column (k, S->Ap, S->Ai, S->Ax, S->Q, S->X,
 	S->k1, S->PSinv, S->Rs, S->scale, S->Offp, S->Offi, S->Offx) ;
 
-    if (kls_sp)
-    {
-	const double t2 = kls_klu_now () ;
-	kls_step_cc += t2 - kls_sp_t ;
-	kls_sp_t = t2 ;
-    }
     lsolve_numeric (Pinv, LU, S->colptr, S->Stack, Lip, top, n, Llen,
 		    S->X) ;
 
@@ -1284,12 +1260,6 @@ Int KLS_KLU_KERNEL_STEP
 
     if (S->diag_claim)
     {
-    if (kls_sp)
-    {
-	const double t2 = kls_klu_now () ;
-	kls_step_num += t2 - kls_sp_t ;
-	kls_sp_t = t2 ;
-    }
 	Int claim = kls_lpivot_diag_claim (diagrow, &pivrow, &pivot,
 					   &abs_pivot, S->tol, S->X, LU, Lip,
 					   Llen, k, n) ;
@@ -1468,14 +1438,6 @@ size_t KLS_KLU_KERNEL_FINISH   /* returns final LU size */
     KLS_KLU_KERNEL_STATE *S
 )
 {
-    if (kls_construct_prof)
-    {
-	fprintf (stderr, "KLS serial step prof: sym=%.4fs cc=%.4fs"
-		 " num=%.4fs construct=%.4fs/%ld\n", kls_step_sym,
-		 kls_step_cc, kls_step_num, kls_construct_secs,
-		 kls_construct_calls) ;
-    }
-
     Int p, i ;
     Int *Li ;
     size_t newlusize ;
@@ -3895,11 +3857,11 @@ static void *kls_klu_pipe_worker_main (void *arg)
     if (prof)
     {
 	fprintf (stderr, "KLS pipe prof tid=%d cols=%ld rounds=%ld "
-		 "work=%.2fs spin=%.2fs final=%.2fs construct=%.2fs/%ld/%ld"
+		 "work=%.2fs spin=%.2fs final=%.2fs construct=%ld/%ld"
 		 " sym=%.2fs num=%.2fs copyMB=%ld madds=%ld\n",
 		 W->tid, W->n_cols, W->n_rounds,
 		 W->t_work, W->t_spin, W->t_final,
-		 kls_construct_secs, kls_construct_calls,
+		 kls_construct_calls,
 		 kls_construct_entries,
 		 kls_pipe_t_sym, kls_pipe_t_num,
 		 kls_pipe_copy_bytes >> 20, kls_pipe_madds) ;
@@ -6385,7 +6347,6 @@ size_t TRILINOS_KLU_kernel   /* final size of LU on output */
     size_t final_size ;
 
     ASSERT (Common != NULL) ;
-    kls_construct_prof = getenv ("KLS_CONSTRUCT_PROF") != NULL ;
     kls_pipe_phase_prof = getenv ("KLS_KLU_PIPE_PHASES") != NULL ;
     kls_pipe_dense_panels = getenv ("KLS_KLU_PIPE_NODENSE") == NULL &&
 	!kls_klu_pipe_det ;
