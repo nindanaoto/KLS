@@ -2795,29 +2795,6 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract_refactor_l(
   kls_scatter_subtract(x, rows, values, length, scale);
 }
 
-static inline void kls_scatter_subtract_skip_range(
-  double *restrict x,
-  const UF_long *restrict rows,
-  const double *restrict values,
-  UF_long length,
-  double scale,
-  UF_long skip_begin,
-  UF_long skip_end,
-  UF_long *touched_out) {
-  UF_long touched = 0u;
-  for (UF_long p = 0; p < length; ++p) {
-    const UF_long row = rows[p];
-    if (row >= skip_begin && row < skip_end) {
-      continue;
-    }
-    x[row] -= values[p] * scale;
-    touched++;
-  }
-  if (touched_out != NULL) {
-    *touched_out += touched;
-  }
-}
-
 static inline uint64_t kls_mix_u64(uint64_t x) {
   x ^= x >> 33u;
   x *= UINT64_C(0xff51afd7ed558ccd);
