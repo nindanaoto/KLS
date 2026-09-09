@@ -10741,11 +10741,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         kls_separator_analysis_clear(&redo_sep);
       }
       elapsed += kls_now_seconds() - redo_start;
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr, "KLS pre-static: probe rejection redo %.3fs "
-                "ordering=%d status=%d\n",
-                kls_now_seconds() - redo_start, (int)redo_ord, redo_status);
-      }
     }
     if (solver->numeric == NULL && solver->prestatic_adopted_unfactored &&
         solver->values != NULL) {
@@ -12557,12 +12552,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
          factors a different matrix (v22: rajat25/twotone singular at
          the first refactor) */
       numeric_values = solver->values;
-    }
-    if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
-      fprintf(stderr, "KLS defer consult: values=%p row_perm=%p"
-              " numeric=%p status=%d\n",
-              (void *)solver->values, (void *)solver->row_perm,
-              (void *)solver->numeric, (int)solver->common.status);
     }
   }
   if (solver->rowmatch_deferred) {

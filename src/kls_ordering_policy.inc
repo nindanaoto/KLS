@@ -9078,18 +9078,6 @@ static void maybe_use_matching_equilibration(
 
   (void)trilinos_klu_l_flops(symbolic, scaled_numeric, &scaled_common);
   (void)trilinos_klu_l_rcond(symbolic, scaled_numeric, &scaled_common);
-  if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
-    fprintf(stderr,
-            "KLS pre-static: matching scale numeric base fill=%ld "
-            "work=%.3e pivots=%ld rcond=%.3e scaled fill=%ld "
-            "work=%.3e pivots=%ld rcond=%.3e\n",
-            (long)((*numeric_io)->lnz + (*numeric_io)->unz),
-            common_io->flops, (long)common_io->noffdiag,
-            common_io->rcond,
-            (long)(scaled_numeric->lnz + scaled_numeric->unz),
-            scaled_common.flops, (long)scaled_common.noffdiag,
-            scaled_common.rcond);
-  }
   if (!matching_equilibration_is_better(options, common_io, *numeric_io,
                                         &scaled_common, scaled_numeric)) {
     trilinos_klu_l_free_numeric(&scaled_numeric, &scaled_common);
@@ -10041,11 +10029,6 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
   return kls_pipe_scale_threads(solver->options.threads, est);
 }
 
-static int kls_trace_pre_static_enabled(void) {
-  const char *value = getenv("KLS_TRACE_PRESTATIC");
-  return value != NULL && value[0] == '1';
-}
-
 static double kls_column_pair_work(UF_long n,
                                    const UF_long *col_ptr) {
   if (col_ptr == NULL) {
@@ -10100,12 +10083,6 @@ static void *kls_unmatched_colamd_main(void *arg) {
     return NULL;
   }
   job->score = symbolic_score(job->symbolic);
-  if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
-    fprintf(stderr,
-            "KLS pre-static: unmatched COLAMD symbolic fill=%.4e "
-            "matched=%.4e\n",
-            job->score, job->matched_estimated_fill);
-  }
   /* COLAMD does not publish a fill estimate in every build.  Use an estimate
      when it exists, but do not turn an unavailable estimate into a rejection:
      the caller has already bounded the quotient-pair analysis work and the
@@ -10163,22 +10140,12 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
 
   const int forced_match = getenv("KLS_FORCE_STATIC_MATCH") != NULL;
 
-  const int trace_gates =
-    deferred && kls_trace_pre_static_enabled();
   if (!solver->options.static_pivoting ||
       (solver->numeric != NULL && !deferred) ||
       solver->row_perm != NULL ||
       solver->input_format != KLS_INPUT_CSC ||
       (solver->options.ordering != KLS_ORDERING_AUTO && !forced_match) ||
       (solver->n < 3000 && !forced_match)) {
-    if (trace_gates) {
-      fprintf(stderr,
-              "KLS pre-static defer: entry gate declined sp=%d perm=%d"
-              " fmt=%d ord=%d n=%ld\n",
-              solver->options.static_pivoting, solver->row_perm != NULL,
-              (int)solver->input_format, (int)solver->options.ordering,
-              (long)solver->n);
-    }
     return;
   }
 
@@ -10291,7 +10258,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     free_candidate(&normal);
   }
 
-  const double kls_ps_t0 = kls_now_seconds();
   kls_medium_partial_static_metis_ctx =
     0;
   kls_low_work_symmetric_partial_diagonal_pts_ctx = 0;
@@ -10325,17 +10291,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     solver->compact_missing_diagonal_match_candidate =
       compact_missing_diagonal_matcher;
   }
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr,
-            "KLS pre-static: weak count done %.3fms weak=%ld missing=%ld "
-            "live_offdiag=%ld live_fill=%ld live_work=%.3e\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0),
-            (long)weak, (long)missing_diagonal,
-            (long)(solver->numeric != NULL ? solver->common.noffdiag : 0),
-            (long)(solver->numeric != NULL
-              ? solver->numeric->lnz + solver->numeric->unz : 0),
-            solver->numeric != NULL ? solver->common.flops : 0.0);
-  }
   if (deferred && !forced_match &&
       solver->rowmatch_deferred &&
       getenv("KLS_DISABLE_GENERIC_SINGLE_EXACT_MATCH_TRIAL") == NULL &&
@@ -10358,12 +10313,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        pivot work to justify its ordering/factor trial; keep the measured
        incumbent.  This converts weak-diagonal structure into a proposal,
        with realized pivot behavior deciding whether the proposal advances. */
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr,
-              "KLS pre-static: incumbent pivot bound declines deferred "
-              "match offdiag=%ld cap=%ld\n",
-              (long)solver->common.noffdiag, (long)(weak / 20u + 16u));
-    }
     goto done;
   }
   if (deferred && !forced_match &&
@@ -10398,16 +10347,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          band: threshold pivoting commonly adds modest work without adding
          retained storage or slowing the recurring engine.  This gate uses
          numeric outcomes only; it contains no matrix-shape class. */
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr,
-                "KLS pre-static: stable incumbent declines deferred match "
-                "offdiag=%ld/%ld certified=%d settled=%d fill=%.3e/%.3e "
-                "work=%.3e/%.3e\n",
-                (long)solver->common.noffdiag, (long)modest_pivot_cap,
-                incumbent_solve_certified,
-                incumbent_beats_symbolic_economics, numeric_fill,
-                symbolic_fill, numeric_work, symbolic_work);
-      }
       goto done;
     }
   }
@@ -10551,11 +10490,6 @@ matching_admitted:;
     matched_column_pair_work =
       kls_column_pair_work(solver->n, base_col_ptr);
   }
-  if (kls_trace_pre_static_enabled() &&
-      isfinite(matched_column_pair_work)) {
-    fprintf(stderr, "KLS pre-static: column-pair-work=%.4e\n",
-            matched_column_pair_work);
-  }
   UF_long matched = 0;
   int exact_matching = 0;
   int exact_matching_scaling = 0;
@@ -10645,14 +10579,6 @@ matching_attempt:;
     spral_matching = status == KLS_OK;
   }
 #endif
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr,
-            "KLS pre-static: n=%ld weak=%ld missing=%ld large=%d "
-            "match_status=%d matched=%ld spral=%d\n",
-            (long)solver->n, (long)weak, (long)missing_diagonal,
-            (int)use_large_spral_match,
-            status, (long)matched, spral_matching);
-  }
   if (status != KLS_OK || 1000u * matched < 995u * solver->n) {
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (bounded_exact_match_probe_current) {
@@ -10667,16 +10593,9 @@ matching_attempt:;
       goto matching_attempt;
     }
 #endif
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr, "KLS pre-static: reject match coverage\n");
-    }
     goto done;
   }
 
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: match+gates done %.3fms\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0));
-  }
   status = build_sorted_row_permuted_pattern(solver->n, solver->nnz,
                                              base_col_ptr, base_row_idx,
                                              base_values, row_perm,
@@ -10686,10 +10605,6 @@ matching_attempt:;
                                              &trial_input_to_csc);
   if (status != KLS_OK) {
     goto done;
-  }
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: pattern build done %.3fms\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0));
   }
 
   kls_options trial_options = solver->options;
@@ -10930,31 +10845,13 @@ matching_attempt:;
          failed-factor rescue matches.  Declining here also avoids building a
          throwaway numeric.  This is a strict Pareto test over measured and
          analyzed costs, with no matrix dimensions or family detector. */
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr,
-                "KLS pre-static: incumbent Pareto declines deferred "
-                "candidate fill=%.3e/%.3e work=%.3e/%.3e\n",
-                best_est_fill, incumbent_fill, best_est_flops,
-                incumbent_flops);
-      }
       goto done;
     }
     if (incumbent_fill > 0.0 && incumbent_flops > 0.0 &&
         best_est_fill > 1.20 * incumbent_fill &&
         best_est_flops > 1.20 * incumbent_flops) {
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr,
-                "KLS pre-static: reject symbolically dominated deferred "
-                "candidate fill=%.3e/%.3e work=%.3e/%.3e\n",
-                best_est_fill, incumbent_fill, best_est_flops,
-                incumbent_flops);
-      }
       goto done;
     }
-  }
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: choose done %.3fms\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0));
   }
 #ifdef KLS_HAVE_SPRAL_SCALING
   if (use_large_spral_match && trial_ordering != KLS_ORDERING_METIS &&
@@ -11044,13 +10941,6 @@ matching_attempt:;
               candidate_score <= 0.995 * metis_score &&
               saved_fill > 0.0 &&
               saved_fill * numeric_horizon >= comparison_work;
-            if (kls_trace_pre_static_enabled()) {
-              fprintf(stderr,
-                      "KLS pre-static: matched ND width portfolio "
-                      "npes=%d score=%.3e incumbent=%.3e -> %s\n",
-                      candidate_npes, candidate_score, metis_score,
-                      candidate_wins ? "candidate" : "incumbent");
-            }
             if (candidate_wins) {
               trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
               kls_separator_analysis_clear(&metis_separator);
@@ -11069,11 +10959,6 @@ matching_attempt:;
           kls_separator_analysis_clear(&candidate_separator);
         }
         kls_metis_ndp_npes_override = saved_npes_override;
-      }
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr,
-                "KLS pre-static: ordering scores base=%.3e metis=%.3e\n",
-                trial_score, metis_score);
       }
       if (metis_score < DBL_MAX && metis_score < trial_score) {
         trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
@@ -11185,24 +11070,10 @@ matching_attempt:;
          over the requested cycle.  Stop at the cheap symbolic evidence.
          The 20% margin tolerates estimate error and is wider than every
          fill increase accepted by numeric_candidate_is_better(). */
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr,
-                "KLS pre-static: lifecycle dominance declines trial "
-                "fill=%.3e/%.3e work=%.3e/%.3e\n",
-                proposal_fill, incumbent_fill,
-                proposal_work, incumbent_work);
-      }
       goto done;
     }
   }
 
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr,
-            "KLS pre-static: trial factor start ordering=%d scale=%ld "
-            "tol=%g score=%.3e t=%.3fms\n",
-            (int)trial_ordering, (long)trial_common.scale, trial_common.tol,
-            trial_score, 1e3 * (kls_now_seconds() - kls_ps_t0));
-  }
   int skip_trial_factor = 0;
   const int generic_bounded_parallel_first =
     !deferred &&
@@ -11299,11 +11170,6 @@ matching_attempt:;
          contract remains the accuracy backstop. */
       trial_common.tol = 1.0e-5;
     }
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr,
-              "KLS pre-static: post-match weak=%ld cap=%ld skip=%d\n",
-              (long)post_weak, (long)weak_cap, skip_trial_factor);
-    }
   }
   if (!skip_trial_factor) {
   {
@@ -11372,13 +11238,6 @@ matching_attempt:;
     kls_repeated_update_workload(&solver->options) &&
     trial_est_flops >= 3.0e8 &&
     trial_est_flops >= 8192.0 * (double)solver->n;
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr,
-            "KLS pre-static: moderate-fragmented pipe=%d"
-            " trial-est=%.3e trial-fill=%.3e\n",
-            0,
-            trial_est_flops, trial_est_fill);
-  }
   const int generic_unmatched_colamd_proposal =
     !deferred && !forced_match &&
     getenv("KLS_DISABLE_GENERIC_UNMATCHED_COLAMD_CHALLENGER") == NULL &&
@@ -11488,13 +11347,6 @@ matching_attempt:;
       (void)trilinos_klu_l_rcond(trial_symbolic, trial_numeric,
                                  &trial_common);
     }
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr,
-              "KLS pre-static: tight matched rcond fallback tol=%.3g "
-              "valid=%d rcond=%.3e\n",
-              trial_common.tol, trial_numeric_ok,
-              trial_numeric_ok ? trial_common.rcond : -1.0);
-    }
   }
   if (alternate_symbolic != NULL) {
     alternate_common.scale = trial_common.scale;
@@ -11538,22 +11390,6 @@ matching_attempt:;
         numeric_candidate_is_better(&trial_common, trial_numeric,
                                     &alternate_common,
                                     alternate_numeric);
-    }
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr,
-              "KLS pre-static: numeric ordering trial primary=%d"
-              " fill=%ld work=%.3e alternate=%d fill=%ld work=%.3e"
-              " select=%d\n",
-              (int)trial_ordering,
-              trial_numeric_ok
-                ? (long)(trial_numeric->lnz + trial_numeric->unz) : -1L,
-              trial_numeric_ok ? trial_common.flops : -1.0,
-              (int)alternate_ordering,
-              alternate_numeric_ok
-                ? (long)(alternate_numeric->lnz + alternate_numeric->unz)
-                : -1L,
-              alternate_numeric_ok ? alternate_common.flops : -1.0,
-              select_alternate);
     }
     if (select_alternate) {
       if (trial_numeric != NULL) {
@@ -11622,24 +11458,6 @@ matching_attempt:;
       unmatched_colamd_job.common.flops <= 0.80 * trial_common.flops &&
       !(trial_common.rcond > 0.0 &&
         unmatched_colamd_job.common.rcond < 0.01 * trial_common.rcond);
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr,
-              "KLS pre-static: unmatched COLAMD fill=%.4e/%.4e "
-              "work=%.4e/%.4e pivots=%ld/%ld rcond=%.3e/%.3e "
-              "residual=%d -> %s\n",
-              unmatched_numeric_fill, matched_numeric_fill,
-              unmatched_numeric_ok
-                ? unmatched_colamd_job.common.flops : -1.0,
-              trial_numeric_ok ? trial_common.flops : -1.0,
-              unmatched_numeric_ok
-                ? (long)unmatched_colamd_job.common.noffdiag : -1L,
-              trial_numeric_ok ? (long)trial_common.noffdiag : -1L,
-              unmatched_numeric_ok
-                ? unmatched_colamd_job.common.rcond : -1.0,
-              trial_numeric_ok ? trial_common.rcond : -1.0,
-              unmatched_residual_ok,
-              unmatched_pareto ? "candidate" : "reject");
-    }
     UF_long *unmatched_col_ptr = NULL;
     UF_long *unmatched_row_idx = NULL;
     double *unmatched_values = NULL;
@@ -11714,29 +11532,11 @@ matching_attempt:;
     }
     kls_unmatched_colamd_discard(&unmatched_colamd_job);
   }
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: stage klu_factor done %.3fms"
-            " perturbed=%ld\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0),
-            (long)trial_common.kls_perturb_count);
-  }
   if (!trial_numeric_ok) {
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr, "KLS pre-static: reject trial factor status=%ld\n",
-              (long)trial_common.status);
-    }
     goto done;
   }
 
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: stage flops+rcond done %.3fms\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0));
-  }
 
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: stage metis_refine done %.3fms\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0));
-  }
   if (matching_equilibration_deferred) {
     const int low_work_safe_unscaled =
       getenv("KLS_DISABLE_LOW_WORK_MATCH_SCALE_DEFER") == NULL &&
@@ -11751,12 +11551,6 @@ matching_attempt:;
       if (status != KLS_OK) {
         goto done;
       }
-    } else if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr,
-              "KLS pre-static: skip low-work matched scale plan "
-              "rcond=%.3e work=%.3e sensitive=%ld\n",
-              trial_common.rcond, trial_symbolic->est_flops,
-              (long)matched_threshold_sensitive);
     }
     matching_equilibration_deferred = 0;
   }
@@ -11806,13 +11600,6 @@ matching_attempt:;
       solver->symbolic = saved_symbolic;
       solver->numeric = saved_numeric;
       solver->common = saved_common;
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr,
-                "KLS pre-static: resource-scaled native match "
-                "fill=%.3e/%.3e storage=%.3e/cache=%.3e residual=%d\n",
-                native_fill, trial_score, native_storage, aggregate_cache,
-                retain_resource_scaled_native_match);
-      }
     }
   }
   if (retain_resource_scaled_native_match) {
@@ -11829,22 +11616,9 @@ matching_attempt:;
                                      &trial_row_scale, &trial_col_scale,
                                      &trial_numeric, &trial_common);
   }
-  if (kls_trace_pre_static_enabled()) {
-    fprintf(stderr, "KLS pre-static: stages total-so-far %.3fms\n",
-            1e3 * (kls_now_seconds() - kls_ps_t0));
-    fprintf(stderr,
-            "KLS pre-static: trial numeric lnz=%ld unz=%ld noffdiag=%ld "
-            "rcond=%.3e flops=%.3e\n",
-            (long)trial_numeric->lnz, (long)trial_numeric->unz,
-            (long)trial_common.noffdiag, trial_common.rcond,
-            trial_common.flops);
-  }
   if ((!selected_unmatched_colamd &&
        trial_common.noffdiag > weak / 20u + 16u) ||
       trial_common.rcond <= 0.0) {
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr, "KLS pre-static: reject quality gate\n");
-    }
     goto done;
   }
   if (deferred && solver->numeric != NULL) {
@@ -11865,13 +11639,6 @@ matching_attempt:;
       incumbent_flops > 0.0 && challenger_flops > 0.0 &&
       challenger_flops > 2.0 * incumbent_flops;
     if (dominated_fill && dominated_work) {
-      if (kls_trace_pre_static_enabled()) {
-        fprintf(stderr,
-                "KLS pre-static: reject dominated deferred numeric "
-                "fill=%.3e/%.3e work=%.3e/%.3e\n",
-                challenger_fill, incumbent_fill, challenger_flops,
-                incumbent_flops);
-      }
       goto done;
     }
   }
@@ -14323,11 +14090,6 @@ static int kls_choose_symbolic_inner(UF_long n,
       if (analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
                                 KLS_ORDERING_AMD, &a_sym, &a_common,
                                 &a_sep) == KLS_OK && a_sym != NULL) {
-        if (kls_trace_pre_static_enabled()) {
-          fprintf(stderr,
-                  "KLS choose: light-column AMD-only score=%.4e\n",
-                  symbolic_score(a_sym));
-        }
         *symbolic_out = a_sym;
         *common_out = a_common;
         *selected_ordering_out = KLS_ORDERING_AMD;
@@ -14407,14 +14169,6 @@ static int kls_choose_symbolic_inner(UF_long n,
         trilinos_klu_l_free_symbolic(&amf_job.symbolic, &amf_job.common);
         kls_separator_analysis_clear(&amf_job.separator);
       }
-    }
-    if (kls_trace_pre_static_enabled()) {
-      fprintf(stderr,
-              "KLS choose: ps-par m_status=%d m_sym=%d m_score=%.4e "
-              "b_ok=%d b_ord=%d b_score=%.4e\n",
-              m_status, m_sym != NULL,
-              m_sym != NULL ? symbolic_score(m_sym) : -1.0,
-              b_ok, (int)b_ord, b_score);
     }
     if (m_status == KLS_OK && m_sym != NULL) {
       const double m_score = symbolic_score(m_sym);
@@ -15539,12 +15293,6 @@ static int choose_symbolic_for_pattern(UF_long n,
                               &probe_common, &probe_sep) == KLS_OK &&
         probe_sym != NULL) {
       if (probe_sym->maxblock * 4 >= n * 3) {
-        if (getenv("KLS_TRACE_PRESTATIC") != NULL) {
-          fprintf(stderr,
-                  "KLS choose: prestatic-bound probe adopted "
-                  "(maxblock=%ld)\n",
-                  (long)probe_sym->maxblock);
-        }
         *symbolic_out = probe_sym;
         *common_out = probe_common;
         *selected_ordering_out = KLS_ORDERING_NATURAL;
