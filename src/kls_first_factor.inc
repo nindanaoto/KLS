@@ -6579,14 +6579,8 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
               }
 
               kls_row_first_pipeline_publish_completed_panel(shared, row);
-              if (!pivoted) {
-
-              }
 
               shared->completed_pos = pos + 1u;
-              if (!pivoted && shared->trace_enabled) {
-
-              }
               if (!pivoted &&
                   shared->supernode_start != NULL &&
                   row < shared->ctx->nk) {

@@ -3371,9 +3371,7 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
     return;
   }
   const double start = kls_now_seconds();
-  if (kls_build_refactor_schedule(solver)) {
-
-  }
+  (void)kls_build_refactor_schedule(solver);
   *elapsed += kls_now_seconds() - start;
 }
 

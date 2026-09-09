@@ -13918,8 +13918,6 @@ static int kls_choose_symbolic_inner(UF_long n,
   symbolic_options = options;
   const int large_spiked_metis_no_btf =
     is_large_nearly_diagonal_spiked_metis_pattern(n, col_ptr, row_idx);
-  if (large_spiked_metis_no_btf && n <= 750000u && col_ptr[n] < 8u * n) {
-  }
   if (should_start_auto_without_btf(n, col_ptr, row_idx, options,
                                     large_spiked_metis_no_btf)) {
     auto_options.use_btf = 0;
