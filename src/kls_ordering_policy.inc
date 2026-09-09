@@ -17162,7 +17162,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->hybrid_huge_single_egraph_numeric_eligible = -1;
     solver->high_work_tiny_scalar_fringe_amd_numeric_eligible = -1;
   }
-  kls_dbg_snapshot_numeric(solver);
   fill_build_stats(&solver->stats);
   solver->stats.refactor_lean_choice = solver->lean_choice;
   solver->stats.egraph_worker_spin_iters = solver->egraph_pool != NULL

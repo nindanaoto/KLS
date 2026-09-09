@@ -1495,8 +1495,6 @@ struct kls_solver {
   UF_long *fast_reject_tail_cols;
   UF_long *fast_reject_tail_seed_cols;
   UF_long *fast_reject_tail_parent;
-  /* task #21: snapshot of numeric pointer fields at factor exit */
-  const void *dbg_numeric, *dbg_lip, *dbg_llen, *dbg_uip, *dbg_ulen;
   UF_long *fast_reject_tail_child_count;
   UF_long *fast_reject_tail_level;
   unsigned int *fast_reject_tail_marks;
@@ -2499,74 +2497,6 @@ static int transpose_candidate(const kls_pattern_candidate *source,
                                kls_orientation orientation,
                                kls_pattern_candidate *candidate);
 
-/* task #21: ring log of freed numeric array pointers + backtraces */
-#include <execinfo.h>
-typedef struct kls_nfree_rec {
-  const void *numeric, *lip, *llen, *uip, *ulen;
-  void *bt[14];
-  int bt_n;
-} kls_nfree_rec;
-static kls_nfree_rec kls_nfree_ring[128];
-static int kls_nfree_pos;
-void kls_numeric_free_log(const void *numeric, const void *lip,
-                          const void *llen, const void *uip,
-                          const void *ulen) {
-  kls_nfree_rec *r = &kls_nfree_ring[kls_nfree_pos++ & 127];
-  r->numeric = numeric;
-  r->lip = lip;
-  r->llen = llen;
-  r->uip = uip;
-  r->ulen = ulen;
-  r->bt_n = backtrace(r->bt, 14);
-}
-static void kls_numeric_free_check(const void *numeric, const void *lip,
-                                   const void *llen, const void *uip,
-                                   const void *ulen) {
-  for (int i = 0; i < 128; ++i) {
-    const kls_nfree_rec *r = &kls_nfree_ring[i];
-    if (r->numeric == NULL) continue;
-    if (r->numeric == numeric || r->lip == lip || r->llen == llen ||
-        r->uip == uip || r->ulen == ulen) {
-      fprintf(stderr,
-              "KLS STALE NUMERIC: live=%p matches freed rec %d"
-              " (numeric=%p lip match=%d llen=%d uip=%d ulen=%d); freed at:\n",
-              numeric, i, r->numeric, r->lip == lip, r->llen == llen,
-              r->uip == uip, r->ulen == ulen);
-      backtrace_symbols_fd((void *const *)r->bt, r->bt_n, 2);
-    }
-  }
-}
-
-static void kls_dbg_snapshot_numeric(kls_solver *solver) {
-  if (solver == NULL || solver->numeric == NULL ||
-      getenv("KLS_TRACK_NUMERIC_FREE") == NULL) {
-    return;
-  }
-  solver->dbg_numeric = solver->numeric;
-  solver->dbg_lip = solver->numeric->Lip;
-  solver->dbg_llen = solver->numeric->Llen;
-  solver->dbg_uip = solver->numeric->Uip;
-  solver->dbg_ulen = solver->numeric->Ulen;
-}
-static void kls_dbg_check_numeric(const kls_solver *solver, const char *where) {
-  if (solver == NULL || solver->numeric == NULL ||
-      getenv("KLS_TRACK_NUMERIC_FREE") == NULL ||
-      solver->dbg_numeric != solver->numeric) {
-    return;
-  }
-  if (solver->dbg_lip != solver->numeric->Lip ||
-      solver->dbg_llen != solver->numeric->Llen ||
-      solver->dbg_uip != solver->numeric->Uip ||
-      solver->dbg_ulen != solver->numeric->Ulen) {
-    fprintf(stderr,
-            "KLS NUMERIC STRUCT MUTATED (%s): Lip %p->%p Llen %p->%p"
-            " Uip %p->%p Ulen %p->%p\n", where,
-            solver->dbg_lip, (void *)solver->numeric->Lip,
-            solver->dbg_llen, (void *)solver->numeric->Llen,
-            solver->dbg_uip, (void *)solver->numeric->Uip,
-            solver->dbg_ulen, (void *)solver->numeric->Ulen);
-  }
-}
 
 static double kls_now_seconds(void) {
   /* KLS_FAKE_CLOCK: deterministic counter clock for flushing out
@@ -15774,12 +15704,6 @@ static int solve_impl(kls_solver *solver,
 
   UF_long ok = 0;
   int fixed_col_scale_post_applied = 0;
-  if (getenv("KLS_TRACK_NUMERIC_FREE") != NULL && solver->numeric != NULL) {
-    kls_numeric_free_check(solver->numeric, solver->numeric->Lip,
-                           solver->numeric->Llen, solver->numeric->Uip,
-                           solver->numeric->Ulen);
-    kls_dbg_check_numeric(solver, "solve entry");
-  }
   if (solver->row_refactor_values_ready &&
       !kls_row_refactor_solve_uses_direct_values(solver) &&
       (solver->row_accept_decision < 0 ||

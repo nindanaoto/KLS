@@ -25,17 +25,6 @@
 #define klu_free_symbolic trilinos_klu_free_symbolic
 #endif
 #define KLU_OUT_OF_MEMORY TRILINOS_KLU_OUT_OF_MEMORY
-/* The vendored KLU has an optional KLS debug callback in free_numeric.
-   Stock-baseline runs do not enable that tracking facility. */
-void kls_numeric_free_log(const void *numeric, const void *lip,
-                          const void *llen, const void *uip,
-                          const void *ulen) {
-  (void)numeric;
-  (void)lip;
-  (void)llen;
-  (void)uip;
-  (void)ulen;
-}
 #else
 #include "klu.h"
 #endif

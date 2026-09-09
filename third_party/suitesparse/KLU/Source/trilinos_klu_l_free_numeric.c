@@ -34,26 +34,6 @@ Int TRILINOS_KLU_free_numeric
 
     Numeric = *NumericHandle ;
 
-    /* task #21 free-tracking shim: record the freed numeric's array
-       pointers with a backtrace so a later solve on a stale numeric
-       can name the premature-free site (KLS_TRACK_NUMERIC_FREE) */
-    {
-	static int kls_track = -1 ;
-	if (kls_track == -1)
-	{
-	    kls_track = getenv ("KLS_TRACK_NUMERIC_FREE") != NULL ;
-	}
-	if (kls_track)
-	{
-	    extern void kls_numeric_free_log (const void *numeric,
-					      const void *lip,
-					      const void *llen,
-					      const void *uip,
-					      const void *ulen) ;
-	    kls_numeric_free_log (Numeric, Numeric->Lip, Numeric->Llen,
-				  Numeric->Uip, Numeric->Ulen) ;
-	}
-    }
 
     n = Numeric->n ;
     nzoff = Numeric->nzoff ;
