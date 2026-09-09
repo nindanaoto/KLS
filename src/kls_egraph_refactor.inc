@@ -3701,17 +3701,6 @@ static int kls_egraph_separator_private_dispatch(kls_solver *solver,
          matrix identity or dimension thresholds. */
       solver->eg_separator_choice = 1;
       solver->eg_separator_pending = 0;
-      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-        fprintf(stderr,
-                "KLS egraph separator settle: partial-private"
-                " (%d/%d substantial, private=%" PRIu64
-                ", tail=%" PRIu64 ", unsafe=%" PRIu64 ")\n",
-                substantial_threads, threads,
-                (uint64_t)solver->refactor_separator_private_column_count,
-                (uint64_t)solver->refactor_separator_cluster_tail_column_count,
-                (uint64_t)solver
-                  ->refactor_separator_private_unsafe_component_count);
-      }
       return 1;
     }
   }
@@ -5121,10 +5110,6 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     }
     allowed_count++;
   }
-  if (getenv("KLS_TRACE_AFFINITY") != NULL) {
-    fprintf(stderr, "KLS affinity census: allowed=%d requested=%d\n",
-            allowed_count, thread_count);
-  }
   if (allowed_count < thread_count) {
     return 0;
   }
@@ -5236,15 +5221,6 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
   if (best_cpu < 0 || smallest_eligible_bytes == UINT64_MAX ||
       (!selected_performance_only &&
        (eligible_group_count < 2 || best_bytes <= smallest_eligible_bytes))) {
-    if (getenv("KLS_TRACE_AFFINITY") != NULL) {
-      fprintf(stderr,
-              "KLS affinity declined: best=%d groups=%d bestMiB=%.1f "
-              "smallMiB=%.1f\n",
-              best_cpu, eligible_group_count,
-              (double)best_bytes / (1024.0 * 1024.0),
-              smallest_eligible_bytes == UINT64_MAX ? 0.0 :
-                (double)smallest_eligible_bytes / (1024.0 * 1024.0));
-    }
     return 0;
   }
   /* A repeated sparse pool exchanges completion words and producer columns
@@ -5283,16 +5259,6 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
   }
   if (selected != thread_count) {
     return 0;
-  }
-  if (getenv("KLS_TRACE_AFFINITY") != NULL) {
-    fprintf(stderr, "KLS affinity: %d threads, LLC %.1f MiB%s, CPUs",
-            thread_count,
-            (double)best_bytes / (1024.0 * 1024.0),
-            selected_performance_only ? " (performance cores)" : "");
-    for (int i = 0; i < selected; ++i) {
-      fprintf(stderr, " %d", cpus_out[i]);
-    }
-    fputc('\n', stderr);
   }
   return 1;
 }
@@ -7290,12 +7256,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
       if (alpha2_first > 0.0 && alpha4_first > 0.0 &&
           alpha4_first >= 0.98 * alpha2_first) {
         solver->eg_cluster_choice = -1;
-        if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-          fprintf(stderr,
-                  "KLS egraph cluster-cut probe: early alpha-2"
-                  " (alpha2 %.3f, alpha4 %.3f ms)\n",
-                  1e3 * alpha2_first, 1e3 * alpha4_first);
-        }
         kls_free_refactor_separator_alpha4_plan(solver);
         return;
       }
@@ -7327,14 +7287,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
           alpha4 < 0.99 * best) {
         solver->eg_cluster_choice = 2;
       }
-      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-        fprintf(stderr,
-                "KLS egraph cluster-cut probe: alpha-%d"
-                " (alpha2 %.3f, alpha3 %.3f, alpha4 %.3f ms)\n",
-                solver->eg_cluster_choice == 2 ? 4 :
-                  solver->eg_cluster_choice == 1 ? 3 : 2,
-                1e3 * alpha2, 1e3 * alpha3, 1e3 * alpha4);
-      }
       if (private_alpha4 && solver->eg_cluster_choice != 2) {
         kls_free_refactor_separator_alpha4_plan(solver);
       }
@@ -7364,13 +7316,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
         ordinary > 0.0 && premarked > 0.0 &&
             premarked < 0.995 * ordinary
           ? 1 : -1;
-      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-        fprintf(stderr,
-                "KLS egraph cluster-publication probe: %s"
-                " (ordinary %.3f, premarked %.3f ms)\n",
-                solver->eg_premark_choice > 0 ? "PREMARK" : "ordinary",
-                1e3 * ordinary, 1e3 * premarked);
-      }
     }
     return;
   }
@@ -7403,13 +7348,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
         ordinary > 0.0 && private_domains > 0.0 &&
             private_domains < 0.98 * ordinary
           ? 1 : -1;
-      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-        fprintf(stderr,
-                "KLS egraph separator probe: %s (ordinary %.3f,"
-                " private %.3f ms)\n",
-                solver->eg_separator_choice > 0 ? "PRIVATE" : "ordinary",
-                1e3 * ordinary, 1e3 * private_domains);
-      }
     }
     return;
   }
@@ -7429,13 +7367,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
         solver->eg_subset_min[0] > 0.0 &&
         solver->eg_subset_min[1] >= 0.995 * solver->eg_subset_min[0]) {
       solver->eg_subset_choice = -1;
-      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-        fprintf(stderr,
-                "KLS egraph quad-subset probe: early all-four"
-                " (all %.3f, subsets %.3f ms)\n",
-                1e3 * solver->eg_subset_min[0],
-                1e3 * solver->eg_subset_min[1]);
-      }
       return;
     }
     if (solver->eg_subset_samples[side] >= 2) {
@@ -7444,13 +7375,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
       solver->eg_subset_choice =
         ordinary > 0.0 && subsets > 0.0 && subsets < 0.995 * ordinary
           ? 1 : -1;
-      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-        fprintf(stderr,
-                "KLS egraph quad-subset probe: %s"
-                " (all %.3f, subsets %.3f ms)\n",
-                solver->eg_subset_choice > 0 ? "SUBSETS" : "all-four",
-                1e3 * ordinary, 1e3 * subsets);
-      }
     }
     return;
   }
@@ -7496,14 +7420,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
         (solver->eg_stream_choice < 0 || vector_wide < best)) {
       solver->eg_stream_choice = 2;
     }
-    if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-      fprintf(stderr,
-              "KLS egraph stream-kernel probe: %s (standard %.3f,"
-              " scalar/wide-tail %.3f, vector/wide-tail %.3f ms)\n",
-              solver->eg_stream_choice == 1 ? "SCALAR/WIDE" :
-              solver->eg_stream_choice == 2 ? "VECTOR/WIDE" : "standard",
-              1e3 * standard, 1e3 * scalar_wide, 1e3 * vector_wide);
-    }
     return;
   }
   if (solver->eg_pair_pending) {
@@ -7533,12 +7449,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
              Settle from realized timings and release the extra scratch. */
           solver->eg_pair_choice = -1;
           kls_egraph_release_unused_quad_scratch(solver);
-          if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-            fprintf(stderr,
-                    "KLS egraph fuse probe: early off"
-                    " (none %.3f, pair %.3f ms)\n",
-                    1e3 * none, 1e3 * pairm);
-          }
           return;
         }
         /* Quad probes next.  Both plain single-block and plain BTF kernels
@@ -7569,13 +7479,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
            pool is quiescent when the completed refactor reaches this
            recorder, so rejected extra SPAs can be released immediately. */
         kls_egraph_release_unused_quad_scratch(solver);
-      }
-      if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-        fprintf(stderr,
-                "KLS egraph fuse probe: %s (none %.3f, pair %.3f,"
-                " quad %.3f ms)\n",
-                choice == 2 ? "QUAD" : choice == 1 ? "PAIR" : "off",
-                1e3 * none, 1e3 * pairm, 1e3 * quadm);
       }
     }
     return;
@@ -7631,14 +7534,6 @@ static void kls_egraph_thread_trial_record(kls_solver *solver,
     solver->eg_tt_choice =
       solver->eg_tt_min[1] < width_margin * solver->eg_tt_min[0]
         ? solver->eg_tt_counts[1] : solver->eg_tt_counts[0];
-    if (getenv("KLS_TRACE_EGRAPH_THREADS") != NULL) {
-      fprintf(stderr,
-              "KLS egraph thread trial: %d (full %d: %.3f ms,"
-              " narrow %d: %.3f ms)\n",
-              solver->eg_tt_choice, solver->eg_tt_counts[0],
-              1e3 * solver->eg_tt_min[0], solver->eg_tt_counts[1],
-              1e3 * solver->eg_tt_min[1]);
-    }
   }
 }
 
