@@ -11805,19 +11805,9 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
   }
   {
-    const int trace_phases = getenv("KLS_TRACE_FACTOR_PHASES") != NULL;
-    double t_ph = kls_now_seconds();
-#define KLS_PHASE(tag)                                                    \
-    if (trace_phases) {                                                   \
-      const double t_now = kls_now_seconds();                             \
-      fprintf(stderr, "KLS factor phase %-10s %.3fs\n", tag,             \
-              t_now - t_ph);                                              \
-      t_ph = t_now;                                                       \
-    }
     if (!diagnostics_have_flops || !diagnostics_have_rcond) {
       kls_update_numeric_diagnostics(solver, 1);
     }
-    KLS_PHASE("diag")
     const int retained_direct_row_candidate =
       kls_direct_numeric_lean_pattern_capable(solver) &&
       solver->symbolic->nblocks == 1u &&
@@ -11845,14 +11835,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->factor_preps_deferred = 1;
       if (compact_refactor_forest_candidate) {
         const double forest_prep_start = kls_now_seconds();
-        double forest_prep_step = forest_prep_start;
-#define KLS_FOREST_PHASE(tag)                                             \
-        if (trace_phases) {                                               \
-          const double forest_now = kls_now_seconds();                    \
-          fprintf(stderr, "KLS forest phase %-8s %.3fms\n", tag,         \
-                  1e3 * (forest_now - forest_prep_step));                  \
-          forest_prep_step = forest_now;                                  \
-        }
         /* Amortize one canonical sort over larger repeated streams.  The
            bounded fragmented compact-match certificate above keeps its
            already mapped low-work stream in place. */
@@ -11878,25 +11860,21 @@ int kls_factor(kls_solver *solver, const double *values) {
             solver->snode_numeric_pre_sorted = 1;
           }
         }
-        KLS_FOREST_PHASE("sort")
         pthread_t refactor_map_thread;
         const int refactor_map_active = pthread_create(
           &refactor_map_thread, NULL, kls_pts_refactor_map_prep_main,
           solver) == 0;
         (void)kls_i32_solve_ready(solver);
-        KLS_FOREST_PHASE("i32")
         if (refactor_map_active) {
           pthread_join(refactor_map_thread, NULL);
         } else {
           (void)kls_build_refactor_map(solver);
         }
-        KLS_FOREST_PHASE("map")
         if (solver->pts != NULL && solver->pts->xwork == NULL) {
           solver->pts->xwork = (double *)calloc(
             (size_t)solver->pts->nthreads * (size_t)solver->pts->nk,
               sizeof(*solver->pts->xwork));
         }
-        KLS_FOREST_PHASE("xwork")
         if (solver->pts != NULL && solver->pts->refactor_ok &&
             solver->pts->refactor_top_x == NULL &&
             solver->pts->ntop >= 32 &&
@@ -11909,8 +11887,6 @@ int kls_factor(kls_solver *solver, const double *values) {
             kls_pts_parallel_touch(solver->pts);
           }
         }
-        KLS_FOREST_PHASE("top_x")
-#undef KLS_FOREST_PHASE
         elapsed += kls_now_seconds() - forest_prep_start;
       }
       goto factor_preps_deferred_exit;
@@ -11920,29 +11896,15 @@ int kls_factor(kls_solver *solver, const double *values) {
       (void)kls_prepare_auto_row_refactor_from_numeric(solver);
       elapsed += kls_now_seconds() - start;
     }
-    KLS_PHASE("row_auto")
     kls_maybe_prepare_snode_panels(solver, &elapsed);
-    KLS_PHASE("snode")
     kls_snb_maybe_accept(solver, numeric_values, &elapsed);
-    KLS_PHASE("snb")
     (void)kls_i32_solve_ready(solver);
     kls_pts_maybe_trial(solver, numeric_values, &elapsed);
-    KLS_PHASE("i32")
     kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
-    KLS_PHASE("row_seed")
     maybe_prepare_refactor_map(solver, &elapsed);
-    KLS_PHASE("map")
     maybe_prepare_refactor_schedule(solver, &elapsed);
-    KLS_PHASE("sched")
     kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
-    KLS_PHASE("row_model")
 factor_preps_deferred_exit:;
-#undef KLS_PHASE
-    if (trace_phases) {
-      fprintf(stderr, "KLS factor exit elapsed=%.3fs wall=%.3fs status=%ld\n",
-              elapsed, kls_now_seconds() - solver->snb_factor_start,
-              (long)solver->common.status);
-    }
   }
   if (solver->common.status >= TRILINOS_KLU_OK &&
       solver->common.status != TRILINOS_KLU_SINGULAR) {
