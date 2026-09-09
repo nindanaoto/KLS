@@ -2446,7 +2446,7 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
        numeric is large enough to dispatch and contains at least one pool's
        worth of fixed-pivot work.  Its measured schedule makes the final
        admission decision; no benchmark-family signature is needed here. */
-    return solver->n >= kls_egraph_refactor_size_floor() &&
+    return solver->n >= KLS_EGRAPH_REFACTOR_MIN_SIZE &&
            solver->common.flops >=
              KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
                (double)solver->options.threads;

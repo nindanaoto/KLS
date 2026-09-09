@@ -271,6 +271,7 @@ static UF_long kls_snode_min_batch_work(void) {
    serial mapped kernel down to ~1e6 total flops (rajat03 3.96e6: 803 ->
    595us; coupled 2.4e7: 2393 -> 1651us; add32 4.8e4 stays mapped). */
 #define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 2.5e5
+#define KLS_EGRAPH_REFACTOR_MIN_SIZE 5000u
 #define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
 /* EGraph's caller participates as worker zero. Background workers need only
    a short grace period to catch back-to-back SPICE refactors; the old 200K

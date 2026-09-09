@@ -3575,11 +3575,6 @@ static void kls_egraph_refactor_refresh_missing_prefix(
 }
 
 static int kls_egraph_separator_private_requested(const kls_solver *solver) {
-  const char *value = getenv("KLS_ENABLE_EGRAPH_SEPARATOR_PRIVATE");
-  if (value != NULL && value[0] != '\0') {
-    return !(value[0] == '0' && value[1] == '\0');
-  }
-
   return solver != NULL && solver->symbolic != NULL &&
     /* A separator plan is an executor capability, not an ordering verdict.
        A dominant block exposes its private domains directly even when the
@@ -3609,21 +3604,12 @@ static int kls_egraph_separator_private_dispatch(kls_solver *solver,
   if (solver == NULL) {
     return 0;
   }
-  const char *value = getenv("KLS_ENABLE_EGRAPH_SEPARATOR_PRIVATE");
-  if (value != NULL && value[0] != '\0') {
-    solver->eg_separator_choice =
-      (value[0] == '0' && value[1] == '\0') ? -1 : 1;
-    solver->eg_separator_pending = 0;
-    return solver->eg_separator_choice > 0;
-  }
-
   if (!kls_egraph_separator_private_requested(solver)) {
     solver->eg_separator_choice = -1;
     solver->eg_separator_pending = 0;
     return 0;
   }
-  if (getenv("KLS_DISABLE_COMPLETE_SEPARATOR_PRIVATE_SETTLE") == NULL &&
-      kls_repeated_update_workload(&solver->options) &&
+  if (kls_repeated_update_workload(&solver->options) &&
       solver->refactor_separator_private_thread_ptr != NULL &&
       solver->refactor_separator_private_thread_count >= 2 &&
       solver->refactor_separator_private_column_count >=
@@ -3657,8 +3643,7 @@ static int kls_egraph_separator_private_dispatch(kls_solver *solver,
       return 1;
     }
   }
-  if (getenv("KLS_DISABLE_COMPLETE_SEPARATOR_PRIVATE_SETTLE") == NULL &&
-      kls_repeated_update_workload(&solver->options) &&
+  if (kls_repeated_update_workload(&solver->options) &&
       solver->refactor_separator_private_thread_ptr != NULL &&
       solver->refactor_separator_private_thread_count >= 4 &&
       solver->refactor_separator_private_component_count >=
@@ -5586,9 +5571,6 @@ static int kls_parallel_prepare_permuted_values(
       solver->input_to_csc == NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->options.threads < 2 ||
       solver->nnz < 200000u ||
-      getenv("KLS_DISABLE_PARALLEL_PERMUTED_VALUE_PREP") != NULL ||
-      /* Historical name retained as a compatibility alias. */
-      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_PARALLEL_VALUE_PREP") != NULL ||
       !kls_build_prepared_value_input_pos(solver)) {
     return 0;
   }
@@ -6553,21 +6535,6 @@ static const UF_long *kls_refactor_snode_run_end(
     ? solver->snode_run_end : NULL;
 }
 
-static UF_long kls_egraph_refactor_size_floor(void) {
-  {
-    const char *env = getenv("KLS_EGRAPH_SIZE_FLOOR");
-    if (env != NULL && env[0] != '\0') {
-      return (UF_long)atol(env);
-    }
-  }
-  {
-    /* Schedule construction is linear in the retained factor.  The numeric
-       work gate below decides whether that cost can amortize; this floor only
-       excludes tiny problems where thread dispatch itself dominates. */
-    return 5000u;
-  }
-}
-
 static int kls_egraph_refactor_storage_is_eligible(
   const kls_solver *solver,
   int single_block) {
@@ -6605,7 +6572,6 @@ static int kls_egraph_refactor_storage_is_eligible(
 static int kls_egraph_pipeline_fusion_trial_worthwhile(
   const kls_solver *solver) {
   return solver != NULL &&
-    getenv("KLS_DISABLE_EGRAPH_PIPELINE_FUSION_TRIAL") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
     solver->options.threads >= 2 &&
     solver->refactor_dependency_work > 0.0 &&
@@ -6645,13 +6611,14 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
     /* One heavy dependency column limits ideal crew-wide speedup, but it
        does not serialize the remaining schedule.  Admit factors with enough
        independent work to keep at least half the requested crew useful;
-       the ordinary width/fusion trials still reduce an over-wide dispatch.
+       the measured fusion trial still selects dispatch granularity.
        This is a retained task-graph resource test, independent of input
        dimensions or matrix identity. */
     const double independence_workers =
-      (getenv("KLS_DISABLE_RELAXED_EGRAPH_INDEPENDENCE") != NULL
-         ? 1.0 : 0.5) * (double)solver->options.threads;
-    if (solver->n < kls_egraph_refactor_size_floor() ||
+      0.5 * (double)solver->options.threads;
+    /* The size floor excludes tiny problems dominated by thread dispatch;
+       the work checks decide whether schedule construction can amortize. */
+    if (solver->n < KLS_EGRAPH_REFACTOR_MIN_SIZE ||
         solver->refactor_level_cols == NULL ||
         solver->refactor_dependency_work < min_dependency_work ||
         (solver->refactor_dependency_max_column_work > 0.0 &&
@@ -7192,7 +7159,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   double **native_u_values = NULL;
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->options.threads <= 1 ||
-      solver->n < kls_egraph_refactor_size_floor()) {
+      solver->n < KLS_EGRAPH_REFACTOR_MIN_SIZE) {
     return -1;
   }
   if (solver->common.scale <= 0 && solver->numeric->Rs != NULL) {
@@ -7226,25 +7193,17 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     kls_refactor_btf_scalar_run_exec_enabled(solver);
 
   trilinos_klu_l_common *common = &solver->common;
-  const char *parallel_scale_env =
-    getenv("KLS_ENABLE_EGRAPH_PARALLEL_SCALE_ROWS");
   const int parallel_scale_requested =
-    parallel_scale_env != NULL && parallel_scale_env[0] != '\0'
-      ? strcmp(parallel_scale_env, "0") != 0
-      : kls_repeated_update_workload(&solver->options) &&
-        solver->n >= (UF_long)(4096 * thread_count) &&
-        solver->nnz >= (UF_long)(32768 * thread_count);
+    kls_repeated_update_workload(&solver->options) &&
+    solver->n >= (UF_long)(4096 * thread_count) &&
+    solver->nnz >= (UF_long)(32768 * thread_count);
   const int parallel_scale_rows =
     common->scale > 0 &&
     parallel_scale_requested &&
     kls_build_refactor_scale_rows(solver);
-  const char *parallel_permute_env =
-    getenv("KLS_ENABLE_EGRAPH_PARALLEL_SCALE_PERMUTE");
   const int parallel_permute_requested =
-    parallel_permute_env != NULL && parallel_permute_env[0] != '\0'
-      ? strcmp(parallel_permute_env, "0") != 0
-      : kls_repeated_update_workload(&solver->options) &&
-        solver->n >= (UF_long)(4096 * thread_count);
+    kls_repeated_update_workload(&solver->options) &&
+    solver->n >= (UF_long)(4096 * thread_count);
   int parallel_scale_permute =
     common->scale > 0 && parallel_permute_requested &&
     solver->n <= (UF_long)(SIZE_MAX / sizeof(double));
@@ -7426,8 +7385,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     !shared->check_pivots && !solver->padded_active &&
     shared->snode_run_end != NULL && !kls_batch_consume_disabled() &&
     solver->eg_pair_choice < 0 && !solver->eg_pair_pending &&
-    !solver->eg_stream_pending &&
-    getenv("KLS_DISABLE_PLAIN_SINGLE_UNSCALED_EGRAPH") == NULL;
+    !solver->eg_stream_pending;
   /* All inputs to the plain-BTF capability test are immutable for one
      refactor dispatch.  Cache it beside the corresponding single-block
      verdict instead of replaying the long advanced-surface predicate for
@@ -8026,8 +7984,7 @@ static int kls_mapped_refactor(kls_solver *solver,
     }
   }
   if (!check_pivots && !scaled &&
-      (kls_low_work_single_block_policy_enabled(solver) ||
-       getenv("KLS_ENABLE_LEAN_SINGLE_BLOCK_MAP32_REFACTOR") != NULL)) {
+      kls_low_work_single_block_policy_enabled(solver)) {
     const int lean_single =
       kls_lean_single_block_map32_refactor(solver, numeric_values);
     if (lean_single >= 0) {
@@ -8099,8 +8056,7 @@ static int kls_mapped_refactor(kls_solver *solver,
       }
       solver->moderate_btf_lean_choice = -1;
     }
-    if (getenv("KLS_ENABLE_LEAN_BTF_MAP32_REFACTOR") != NULL ||
-        kls_low_work_btf_map32_policy_enabled(solver)) {
+    if (kls_low_work_btf_map32_policy_enabled(solver)) {
       const int lean =
         kls_lean_btf_map32_refactor(solver, numeric_values);
       if (lean >= 0) {
