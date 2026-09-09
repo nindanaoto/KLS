@@ -10302,11 +10302,6 @@ static void kls_serialize_blas_once(void) {
   done = 1;
   if (openblas_set_num_threads != NULL) {
     openblas_set_num_threads(1);
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr, "KLS blas: openblas pool serialized\n");
-    }
-  } else if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS blas: openblas_set_num_threads unresolved\n");
   }
 }
 #endif
@@ -10472,15 +10467,9 @@ int kls_analyze_csr(kls_solver *solver,
     }
   }
 
-  const double kls_ana_sel_start = kls_now_seconds();
   status = select_candidate(normal.col_ptr == NULL ? NULL : &normal,
                             &transpose,
                             &normalized, &chosen);
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS analyze: select %.2fs (both=%d)\n",
-            kls_now_seconds() - kls_ana_sel_start,
-            normal.col_ptr != NULL);
-  }
   const double elapsed = kls_now_seconds() - start;
   if (status != KLS_OK) {
     free_candidate(&normal);
@@ -11216,10 +11205,6 @@ int kls_factor(kls_solver *solver, const double *values) {
               solver->numeric_from_pipe = 0;
               kls_numeric_replaced_invalidate(solver);
               kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLU_FIRST);
-              if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-                fprintf(stderr,
-                        "KLS race symbolic join: adopted completed numeric\n");
-              }
             }
             kls_metis_race_free(race);
             /* If neither prediction nor the raced numeric succeeded, the
@@ -11259,9 +11244,6 @@ int kls_factor(kls_solver *solver, const double *values) {
             (int64_t)solver->symbolic->structural_rank;
           solver->stats.estimated_flops = solver->symbolic->est_flops;
           kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PREDICTED_FIRST);
-          if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-            fprintf(stderr, "KLS race first factor adopted\n");
-          }
         }
         kls_metis_race_free(race);
       }
@@ -11404,17 +11386,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           }
           solver->auto_scale_checked = 1;
         }
-        if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-          fprintf(stderr,
-                  "KLS initial certified unscaled lifecycle: %s scale=%d "
-                  "fill=%ld/%ld offdiag=%ld cap=%ld\n",
-                  initial_certified_unscaled_recovery_scale > 0
-                    ? "adopt" : "recover",
-                  (int)solver->common.scale,
-                  solver->numeric != NULL ? (long)solver->numeric->lnz : -1L,
-                  solver->numeric != NULL ? (long)solver->numeric->unz : -1L,
-                  (long)solver->common.noffdiag, (long)pivot_cap);
-        }
       }
       if (!had_numeric && solver->generic_nd_portfolio_selected) {
         int candidate_ok =
@@ -11454,19 +11425,6 @@ int kls_factor(kls_solver *solver, const double *values) {
           bounded_numeric = candidate_ok &&
             solver->generic_nd_fallback_fill > 0.0 &&
             candidate_fill <= numeric_fill_cap;
-          if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-            fprintf(stderr,
-                    "KLS generic ND numeric: unscaled arm rejected; "
-                    "scale %d fill %.4e -> %s\n",
-                    generic_nd_robust_scale, candidate_fill,
-                    bounded_numeric ? "adopt" : "rollback");
-          }
-        }
-        if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-          fprintf(stderr,
-                  "KLS generic ND numeric: fill %.4e cap %.4e -> %s\n",
-                  candidate_fill, numeric_fill_cap,
-                  bounded_numeric ? "adopt" : "rollback");
         }
         if (bounded_numeric) {
           solver->generic_nd_portfolio_selected = 0;

@@ -3195,14 +3195,6 @@ static int kls_sparse_full_diagonal_hubbed_metis_core_refine_profile(
     }
     diagonal_columns += (UF_long)has_diagonal;
   }
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr,
-            "KLS metis: hubbed core proposal n=%ld nnz=%ld diag=%ld "
-            "scalar=%ld maxdeg=%ld lower=%ld upper=%ld\n",
-            (long)n, (long)nnz, (long)diagonal_columns,
-            (long)scalar_columns, (long)max_column_degree,
-            (long)lower_entries, (long)upper_entries);
-  }
   if (diagonal_columns != n || 1024u * scalar_columns > n ||
       512u * max_column_degree < n || 64u * max_column_degree > n ||
       4.0 * (double)lower_entries > 5.0 * (double)upper_entries ||
@@ -3333,12 +3325,6 @@ static UF_long kls_metis_camd_group_size(UF_long n,
     }
     if (group > 2304u) {
       group = 2304u;
-    }
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS metis: full-diagonal hubbed core refine n=%ld nnz=%ld "
-              "group=%ld\n",
-              (long)n, (long)col_ptr[n], (long)group);
     }
     return group;
   }
@@ -3937,7 +3923,6 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
   lopts[METIS_OPTION_NUMBERING] = 0;
   lopts[METIS_OPTION_SEED] = 0;
   C.lopts = lopts;
-  const double kls_mtnd_t0 = kls_now_seconds();
   if (serial_sep && getenv("KLS_MTND_SERIAL_SPLIT") == NULL) {
     /* task recursion: level-parallel separators + in-task leaves */
     struct kls_mtnd_task root;
@@ -3970,7 +3955,6 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
   if (!kls_mtnd_split(&C, 0, all, n)) {
     goto cleanup;
   }
-  const double kls_mtnd_t1 = kls_now_seconds();
   /* leaf orderings, concurrently (serial METIS is safe across calls) */
   {
     pthread_t tids[64];
@@ -3992,15 +3976,6 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
       ok = ok && C.leaves[i].status == METIS_OK;
     }
   }
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS mtnd: split %.3fs leaves %.3fs (ss=%d npes=%d)\n",
-            kls_mtnd_t1 - kls_mtnd_t0, kls_now_seconds() - kls_mtnd_t1,
-            serial_sep, (int)npes);
-  }
-  }
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS mtnd: total %.3fs (ss=%d npes=%d)\n",
-            kls_now_seconds() - kls_mtnd_t0, serial_sep, (int)npes);
   }
   if (ok) {
     /* compose the global order from the traversal segments */
@@ -4540,7 +4515,6 @@ static UF_long kls_metis_order_inner(UF_long n,
     }
   }
   idx_t nvtxs = (idx_t)n;
-  const double kls_metis_t0 = kls_now_seconds();
   int metis_status = METIS_ERROR;
   int par_nd_done = 0;
 #ifdef KLS_HAVE_MTMETIS
@@ -4621,11 +4595,6 @@ static UF_long kls_metis_order_inner(UF_long n,
                         metis_perm, metis_iperm, metis_ndp_sizes)
         : METIS_NodeND(&nvtxs, xadj, adjncy, NULL, options,
                        metis_perm, metis_iperm);
-  }
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS metis: NodeND %.3fs (ndp=%d par=%d tid=%ld)\n",
-            kls_now_seconds() - kls_metis_t0, (int)metis_ndp_npes,
-            (int)par_nd_done, (long)syscall(SYS_gettid));
   }
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
@@ -4735,7 +4704,6 @@ static UF_long kls_metis_order_inner(UF_long n,
          unknown estimate for the whole ordering. */
       camd_group_size = 1;
     }
-    const double kls_camd_t0 = kls_now_seconds();
     int pinned_count_ok = 0;
     if (camd_group_size == 1) {
       /* the fully-pinned "refinement" only produces an lnz estimate.
@@ -4790,17 +4758,6 @@ static UF_long kls_metis_order_inner(UF_long n,
                                           perm_out)
             : kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
                                          camd_group_size, perm_out);
-    }
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS metis: camd-refine %.3fs (n=%ld nnz=%ld groups=%s%ld)\n",
-              kls_now_seconds() - kls_camd_t0,
-              (long)n, (long)col_ptr[n],
-              skip_camd_refine ? "skipped/" :
-                (component_refine ? "components/" : ""),
-              skip_camd_refine ? 0l :
-                (component_refine ? (long)(2 * metis_ndp_npes - 1)
-                                  : (long)camd_group_size));
     }
     if (camd_lnz == 0) {
       for (UF_long i = 0; i < n; ++i) {
@@ -5445,14 +5402,6 @@ static void maybe_retry_without_btf(UF_long n,
     return;
   }
 
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr,
-            "KLS retry-no-btf: nblocks=%ld maxblock=%ld/%ld single=%d"
-            " dominant=%d inflated=%d fragmented=%d low_work=%d\n",
-            (long)(*symbolic)->nblocks, (long)(*symbolic)->maxblock, (long)n,
-            single_block, 0, 0,
-            0, 0);
-  }
   kls_options no_btf_options = *options;
   no_btf_options.use_btf = 0;
   trilinos_klu_l_symbolic *no_btf_symbolic = NULL;
@@ -5478,13 +5427,6 @@ static void maybe_retry_without_btf(UF_long n,
 
   const double no_btf_score = symbolic_score(no_btf_symbolic);
   const double current_score = *score;
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS retry-no-btf: score %.4e vs %.4e, "
-                    "flops %.4e vs %.4e (need 0.80x=%d)\n",
-            no_btf_score, current_score, no_btf_symbolic->est_flops,
-            (*symbolic)->est_flops,
-            no_btf_score <= 0.80 * current_score);
-  }
   const int current_score_known =
     isfinite(current_score) && current_score < DBL_MAX / 4.0;
   const int repeated_generic_comparison =
@@ -5802,7 +5744,6 @@ typedef struct kls_generic_nd_trial {
   kls_options options;
   int scale_hint;
   int status;
-  double seconds;
   trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_common common;
   kls_separator_analysis separator;
@@ -5813,7 +5754,6 @@ static void *kls_generic_nd_trial_main(void *arg) {
   const int saved_tuning_ctx = kls_generic_metis_tuning_ctx;
   const int saved_scale_hint = kls_generic_metis_scale_hint;
   const struct kls_btf_stash_s saved_btf_stash = kls_btf_stash;
-  const double start = kls_now_seconds();
   /* A complete no-BTF graph receives two deterministic separator leaves per
      worker.  A retained BTF already exposes SCC-level outer concurrency, so
      one leaf per worker preserves a coarser, lower-overhead forest inside its
@@ -5828,7 +5768,6 @@ static void *kls_generic_nd_trial_main(void *arg) {
     trial->n, trial->col_ptr, trial->row_idx, &trial->options,
     KLS_ORDERING_METIS, &trial->symbolic, &trial->common,
     &trial->separator);
-  trial->seconds = kls_now_seconds() - start;
   kls_generic_metis_tuning_ctx = saved_tuning_ctx;
   kls_generic_metis_scale_hint = saved_scale_hint;
   kls_btf_stash = saved_btf_stash;
@@ -5947,12 +5886,6 @@ static int kls_generic_nd_trial_start(
     return 0;
   }
   trial->active = 1;
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr,
-            "KLS generic ND: analyze overlap launched "
-            "(bytes=%.3e workers=%d btf=%d)\n",
-            pattern_bytes, options->threads, use_btf);
-  }
   return 1;
 }
 
@@ -6081,7 +6014,6 @@ static void kls_maybe_promote_selected_generic_nd(
       candidate->values, NULL, NULL);
   }
   int status = KLS_ERR_ANALYZE_FAILED;
-  double trial_seconds = 0.0;
   int used_precomputed = 0;
   kls_generic_nd_trial *precomputed_trial = trial_options.use_btf
     ? precomputed_btf_trial : precomputed_no_btf_trial;
@@ -6098,13 +6030,11 @@ static void kls_maybe_promote_selected_generic_nd(
       trial_common = precomputed_trial->common;
       kls_separator_analysis_move(&trial_separator,
                                   &precomputed_trial->separator);
-      trial_seconds = precomputed_trial->seconds;
       status = KLS_OK;
       used_precomputed = 1;
     }
   }
   if (!used_precomputed) {
-    const double trial_start = kls_now_seconds();
     kls_generic_metis_tuning_ctx = generic_nd_tuning_ctx;
     kls_generic_metis_scale_hint = scale_hint;
     if (trial_options.use_btf && candidate->symbolic->do_btf &&
@@ -6129,7 +6059,6 @@ static void kls_maybe_promote_selected_generic_nd(
     kls_generic_metis_tuning_ctx = saved_tuning_ctx;
     kls_generic_metis_scale_hint = saved_scale_hint;
     kls_btf_stash = saved_btf_stash;
-    trial_seconds = kls_now_seconds() - trial_start;
   }
   /* A diagnostic eager overlap can still use a coordinate different from the
      settled minimum-degree arm.  Do not discard that independently valid ND
@@ -6161,15 +6090,6 @@ static void kls_maybe_promote_selected_generic_nd(
         retained_coordinate_fill > 0.0 &&
         alternate_coordinate_fill <=
           0.98 * retained_coordinate_fill;
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr,
-                "KLS generic ND coordinates: fill %.4e/%.4e "
-                "btf=%d/%d -> %s\n",
-                alternate_coordinate_fill, retained_coordinate_fill,
-                alternate_coordinate_trial->symbolic->do_btf ? 1 : 0,
-                trial_symbolic->do_btf ? 1 : 0,
-                alternate_coordinate_wins ? "alternate" : "retained");
-      }
       if (alternate_coordinate_wins) {
         trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
         kls_separator_analysis_clear(&trial_separator);
@@ -6239,16 +6159,6 @@ static void kls_maybe_promote_selected_generic_nd(
       trial_flops <= 0.80 * incumbent_flops) ||
      (!work_estimate_available &&
       trial_fill <= 0.90 * incumbent_fill)));
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr,
-            "KLS generic ND portfolio: fill %.4e/%.4e "
-            "flops %.4e/%.4e "
-            "analyze %.3fs -> %s\n",
-            trial_fill, incumbent_fill, trial_flops, incumbent_flops,
-            trial_seconds,
-            lifecycle_near_tie ? "adopt-near-tie" :
-              (decisive_pareto_win ? "adopt" : "reject"));
-  }
   if (!decisive_pareto_win) {
     trilinos_klu_l_free_symbolic(&trial_symbolic, &trial_common);
     kls_separator_analysis_clear(&trial_separator);
@@ -6330,17 +6240,11 @@ static void kls_update_numeric_diagnostics(kls_solver *solver,
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
     return;
   }
-  const double t0 = kls_now_seconds();
   (void)trilinos_klu_l_flops(solver->symbolic, solver->numeric,
                              &solver->common);
-  const double t1 = kls_now_seconds();
   if (include_rcond) {
     (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric,
                                &solver->common);
-  }
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS diag: flops %.3fs rcond %.3fs\n", t1 - t0,
-            kls_now_seconds() - t1);
   }
 }
 
@@ -6348,13 +6252,8 @@ static void kls_update_numeric_rcond(kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
     return;
   }
-  const double t0 = kls_now_seconds();
   (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric,
                              &solver->common);
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS diag: flops 0.000s rcond %.3fs\n",
-            kls_now_seconds() - t0);
-  }
 }
 
 /* The lifecycle guard needs only KLU's documented diagonal ratio.  Keep the
@@ -12315,14 +12214,9 @@ static void *kls_metis_race_main(void *arg) {
        structurally admitted race; other heavy factors rely on wider panels. */
     kls_klu_pipe_nopanels =
       race->giant_symmetric_scalar_fringe_metis_row;
-    const double kls_rf_t0 = kls_now_seconds();
     race->numeric = trilinos_klu_l_factor(race->col_ptr, race->row_idx,
                                           race->values_copy, race->symbolic,
                                           &race->common);
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr, "KLS race trial factor %.3fs (pipe=%d)\n",
-              kls_now_seconds() - kls_rf_t0, kls_klu_pipe_threads);
-    }
     kls_klu_pipe_nopanels = saved_pipe_nopanels;
   }
   kls_klu_pipe_threads = 0;
@@ -12358,10 +12252,6 @@ static kls_metis_race *kls_metis_race_take(kls_solver *solver,
     race->active = 0;
     if (elapsed != NULL) {
       *elapsed += kls_now_seconds() - start;
-    }
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr, "KLS metis race join wait %.3fs\n",
-              kls_now_seconds() - start);
     }
   }
   return race;
@@ -12597,10 +12487,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       kls_build_block_structured_order(solver->n, solver->col_ptr,
                                        solver->row_idx, &bs_perm,
                                        &bs_comp);
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr, "KLS race gate: block detector=%d n=%ld\n",
-              bs_hit, (long)solver->n);
-    }
     if (bs_hit) {
       free(bs_perm);
       free(bs_comp);
@@ -12668,10 +12554,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   }
   race->active = 1;
   solver->metis_race = race;
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS race: launched (maybe_start) n=%ld\n",
-            (long)solver->n);
-  }
 }
 
 /* Giant-class early start: the pattern is fixed as soon as the
@@ -13107,14 +12989,6 @@ static int maybe_select_auto_scale(kls_solver *solver,
            axis and cannot be compared or published as a scale candidate.
            Recompute this one arm from the live Common; missing raced arms
            remain skipped, preserving the bounded generic race portfolio. */
-        if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-          fprintf(stderr,
-                  "KLS scale trial mode=%d stale raced controls"
-                  " tol=%.3e/%.3e static=%.3e/%.3e; refactor live\n",
-                  candidates[i], trial_common.tol, solver->common.tol,
-                  trial_common.kls_static_perturb,
-                  solver->common.kls_static_perturb);
-        }
         trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
         refactor_stale_raced_candidate = 1;
       }
@@ -13134,11 +13008,6 @@ static int maybe_select_auto_scale(kls_solver *solver,
                               (double *)numeric_values, solver->symbolic,
                               &trial_common);
       *elapsed += kls_now_seconds() - start;
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr, "KLS scale trial mode=%d factor=%.3fs status=%ld\n",
-                candidates[i], kls_now_seconds() - start,
-                (long)trial_common.status);
-      }
     }
     if (trial_numeric == NULL || trial_common.status < 0 ||
         trial_common.status == TRILINOS_KLU_SINGULAR) {
@@ -13274,26 +13143,6 @@ static int maybe_select_auto_scale(kls_solver *solver,
         !unscaled_overhead_candidate_is_better &&
         !certified_unscaled_overhead_candidate_is_better &&
         !unscaled_realized_candidate_is_better) {
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr,
-                "KLS scale trial mode=%d rejected fill=%ld/%ld "
-                "work=%.3e/%.3e offdiag=%ld/%ld rcond=%.3e/%.3e "
-                "overhead=%d relaxed=%d guarded=%d residual=%d "
-                "certified=%d realized=%d\n",
-                candidates[i],
-                (long)(trial_numeric->lnz + trial_numeric->unz),
-                (long)(solver->numeric->lnz + solver->numeric->unz),
-                trial_common.flops, solver->common.flops,
-                (long)trial_common.noffdiag,
-                (long)solver->common.noffdiag,
-                trial_common.rcond, solver->common.rcond,
-                unscaled_overhead_candidate_is_better,
-                relaxed_unscaled_lifecycle_economics,
-                residual_guarded_unscaled_trial,
-                unscaled_overhead_residual_ok,
-                certified_unscaled_overhead_candidate_is_better,
-                unscaled_realized_candidate_is_better);
-      }
       trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
       continue;
     }
@@ -13325,13 +13174,6 @@ static int maybe_select_auto_scale(kls_solver *solver,
         ? (int)old_common.scale : 0;
     trilinos_klu_l_free_numeric(&old_numeric, &old_common);
     accepted = 1;
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS scale trial mode=%d adopted fill=%ld work=%.3e\n",
-              candidates[i],
-              (long)(solver->numeric->lnz + solver->numeric->unz),
-              solver->common.flops);
-    }
     if (repeated_generic_scale_trial && solver->common.scale <= 0) {
       /* The unscaled candidate is the first arm.  Once its actual numeric
          dominates a scaled incumbent, continuing through two more scaled
@@ -13441,13 +13283,6 @@ static int maybe_select_auto_pivot_tolerance(kls_solver *solver,
          or a joint realized storage/work win before publishing that pivot
          order.  One-shot and correctness-recovery paths retain their
          existing quality rules. */
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr,
-                "KLS pivot trial: insufficient recurring evidence "
-                "fill=%.3e/%.3e work=%.3e/%.3e\n",
-                candidate_fill, incumbent_fill,
-                candidate_work, incumbent_work);
-      }
       trilinos_klu_l_free_numeric(&trial_numeric, &trial_common);
       return 0;
     }
@@ -13616,13 +13451,6 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
       }
     }
     probe_ok = bmax > 0.0 && rmax <= 1.0e-12 * bmax;
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS tight-tol: fill %.3e -> %.3e probe %.2e -> %s\n",
-              actual, (double)(trial_numeric->lnz + trial_numeric->unz),
-              bmax > 0.0 ? rmax / bmax : -1.0,
-              probe_ok ? "adopt" : "reject");
-    }
   }
   free(work);
   if (!probe_ok) {
@@ -13812,14 +13640,6 @@ static int maybe_promote_auto_metis(kls_solver *solver,
       kls_separator_analysis_clear(&metis_separator);
       return 0;
     }
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS metis symbolic: incumbent fill=%.4e work=%.4e; "
-              "candidate fill=%.4e work=%.4e\n",
-              (double)(solver->numeric->lnz + solver->numeric->unz),
-              solver->common.flops, symbolic_score(metis_symbolic),
-              metis_symbolic->est_flops);
-    }
     if (high_cost_promotion &&
         symbolic_score(metis_symbolic) >
           0.90 * (double)(solver->numeric->lnz + solver->numeric->unz)) {
@@ -13859,15 +13679,6 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   }
 
   (void)trilinos_klu_l_flops(metis_symbolic, metis_numeric, &metis_common);
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr,
-            "KLS metis numeric: incumbent fill=%lu flops=%.4e pivots=%lu; "
-            "candidate fill=%lu flops=%.4e pivots=%lu\n",
-            (unsigned long)(solver->numeric->lnz + solver->numeric->unz),
-            solver->common.flops, (unsigned long)solver->common.noffdiag,
-            (unsigned long)(metis_numeric->lnz + metis_numeric->unz),
-            metis_common.flops, (unsigned long)metis_common.noffdiag);
-  }
   if (!metis_numeric_is_better(solver, &metis_common, metis_numeric)) {
     trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     trilinos_klu_l_free_symbolic(&metis_symbolic, &metis_common);
@@ -13969,14 +13780,6 @@ static int maybe_promote_auto_metis(kls_solver *solver,
           ? (promoted_fill <= 0.95 * incumbent_fill &&
              dt < 0.97 * incumbent_ref_seconds)
         : dt < 1.05 * incumbent_ref_seconds);
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS metis promotion timed: incumbent %.3fs metis %.3fs "
-              "path=%d -> %s\n",
-              incumbent_ref_seconds, dt,
-              (int)solver->stats.last_refactor_path,
-              promoted_wins ? "adopt" : "revert");
-    }
     if (promoted_wins) {
       solver->metis_promotion_validated = 1;
     }
@@ -14414,9 +14217,6 @@ static int kls_choose_symbolic_inner(UF_long n,
          on; only shortcut where the analysis itself is the cost. */
       UF_long *bs_perm = NULL;
       UF_long *bs_comp = NULL;
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr, "KLS choose: bs-shortcut probe n=%ld\n", (long)n);
-      }
       if (kls_build_block_structured_order(n, col_ptr, row_idx, &bs_perm,
                                            &bs_comp)) {
         free(bs_perm);
@@ -14468,9 +14268,6 @@ static int kls_choose_symbolic_inner(UF_long n,
       : is_large_very_low_degree_full_diagonal_pattern(
           n, col_ptr, row_idx);
   if (!kls_analyze_defer_nd && large_very_low_degree_full_diagonal) {
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr, "KLS choose: low-degree METIS branch n=%ld\n", (long)n);
-    }
     kls_options metis_options = *options;
     metis_options.use_btf = 0;
     const int saved_sparse_full_diagonal_metis_row_ctx =
@@ -14678,10 +14475,6 @@ static int kls_choose_symbolic_inner(UF_long n,
         kls_analyze_nd_race_solver->metis_race != NULL) &&
       should_start_auto_with_metis(n, col_ptr, row_idx,
                                    large_spiked_metis_no_btf)) {
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr, "KLS choose: METIS-start branch n=%ld btf=%d\n",
-              (long)n, symbolic_options->use_btf);
-    }
     if (n <= 30000u &&
         is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
       /* Fused dense blocks behind spikes: deficiency ordering dominates
@@ -14927,9 +14720,6 @@ generic_ordering_tournament:;
                        &colamd_spec) == 0) {
       colamd_spec_spawned = 1;
     }
-  }
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr, "KLS choose: base loop n=%ld\n", (long)n);
   }
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   const size_t candidate_count = 1u;
@@ -15211,14 +15001,6 @@ generic_ordering_tournament:;
            reduction, with the narrower AMF3 refinement bounded separately.
            These confidence margins are independent of dimensions or family. */
         const double amf_ratio = 0.90;
-        if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-          fprintf(stderr,
-                  "KLS choose: %s score %.4e/flops %.4e vs "
-                  "%.4e/%.4e (need fill %.2fx)\n",
-                  kls_ordering_name(spec->ordering), spec->score,
-                  spec->symbolic->est_flops, best_score,
-                  best_symbolic->est_flops, amf_ratio);
-        }
         const int decisive_work_pareto =
           isfinite(spec->score) && spec->score <= best_score &&
           spec->symbolic->est_flops > 0.0 &&
@@ -15336,21 +15118,6 @@ generic_ordering_tournament:;
           spec->symbolic->est_flops <= 1.20 * best_symbolic->est_flops &&
           5.0 * (double)spec->etree_levels <=
             3.0 * (double)ordinary_amf3->etree_levels;
-        if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL &&
-            spec->amf3_span_variant) {
-          fprintf(stderr,
-                  "KLS choose: AMF3 span refinement fill %.4e/%.4e "
-                  "flops %.4e/%.4e levels %ld/%ld -> %s\n",
-                  spec->score, ordinary_amf3 != NULL
-                    ? ordinary_amf3->score : DBL_MAX,
-                  spec->symbolic->est_flops, ordinary_amf3 != NULL
-                    ? ordinary_amf3->est_flops : DBL_MAX,
-                  (long)spec->etree_levels,
-                  ordinary_amf3 != NULL
-                    ? (long)ordinary_amf3->etree_levels : 0L,
-                  (span_parallel_refinement ||
-                   matched_decisive_span_refinement) ? "adopt" : "reject");
-        }
         if ((isfinite(spec->score) &&
             spec->score <= amf_ratio * best_score) ||
             decisive_work_pareto ||
@@ -15458,16 +15225,6 @@ generic_ordering_tournament:;
       aligned_score <= captured_score &&
       aligned_symbolic->est_flops > 0.0 && captured_flops > 0.0 &&
       aligned_symbolic->est_flops <= captured_flops;
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS aligned BTF challenger: %s fill %.4e/%.4e "
-              "flops %.4e/%.4e -> %s\n",
-              kls_ordering_name(best_ordering), aligned_score,
-              captured_score,
-              aligned_symbolic != NULL
-                ? aligned_symbolic->est_flops : DBL_MAX,
-              captured_flops, aligned_pareto ? "retain" : "reject");
-    }
     if (aligned_pareto) {
       trilinos_klu_l_free_symbolic(
         &capture->generic_btf_value_symbolic,
@@ -15627,10 +15384,6 @@ static int choose_symbolic_for_pattern(UF_long n,
     direct_job.row_idx = row_idx;
     direct_job.ordering = KLS_ORDERING_AMD;
     direct_job.options = direct_options;
-    const int trace_low_pair =
-      getenv("KLS_TRACE_FACTOR_PHASES") != NULL;
-    const double low_pair_start =
-      trace_low_pair ? kls_now_seconds() : 0.0;
     /* A bounded compact match has already paid for a complete transversal.
        Below this fixed quotient-work budget, constructing a second no-BTF
        AMD graph costs a material fraction of the whole numeric lifecycle,
@@ -15646,8 +15399,6 @@ static int choose_symbolic_for_pattern(UF_long n,
     const int btf_status = analyze_with_ordering(
       n, col_ptr, row_idx, &btf_options, KLS_ORDERING_AMD,
       &btf_symbolic, &btf_common, &btf_separator);
-    const double low_pair_btf_done =
-      trace_low_pair ? kls_now_seconds() : 0.0;
     int direct_status = KLS_ERR_FACTOR_FAILED;
     if (direct_spawned) {
       pthread_join(direct_thread, NULL);
@@ -15661,8 +15412,6 @@ static int choose_symbolic_for_pattern(UF_long n,
         n, col_ptr, row_idx, &direct_options, KLS_ORDERING_AMD,
         &direct_symbolic, &direct_common, &direct_separator);
     }
-    const double low_pair_direct_done =
-      trace_low_pair ? kls_now_seconds() : 0.0;
     const int btf_valid = btf_status == KLS_OK && btf_symbolic != NULL;
     const int direct_valid =
       direct_status == KLS_OK && direct_symbolic != NULL;
@@ -15690,20 +15439,6 @@ static int choose_symbolic_for_pattern(UF_long n,
          (isfinite(btf_score) && btf_score <= direct_score &&
           btf_symbolic->est_flops <= 0.80 * direct_symbolic->est_flops));
       const int choose_btf = !direct_valid || btf_fragmented_pareto;
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr,
-                "KLS matched low-pair representation: btf %.4e/%.4e "
-                "blocks=%ld direct %.4e/%.4e -> %s "
-                "btf=%.3fms total=%.3fms\n",
-                btf_score,
-                btf_valid ? btf_symbolic->est_flops : -1.0,
-                btf_valid ? (long)btf_symbolic->nblocks : -1L,
-                direct_score,
-                direct_valid ? direct_symbolic->est_flops : -1.0,
-                choose_btf ? "btf" : "direct",
-                1e3 * (low_pair_btf_done - low_pair_start),
-                1e3 * (low_pair_direct_done - low_pair_start));
-      }
       if (choose_btf) {
         if (direct_valid) {
           trilinos_klu_l_free_symbolic(&direct_symbolic, &direct_common);
@@ -15933,16 +15668,6 @@ static int choose_symbolic_for_pattern(UF_long n,
               isfinite(projected_savings) &&
               isfinite(comparison_work) && comparison_work > 0.0 &&
               projected_savings >= 2.0 * comparison_work;
-            if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-              fprintf(stderr,
-                      "KLS bounded AMD BTF challenger: fill %.4e/%.4e "
-                      "flops %.4e/%.4e savings %.4e cost %.4e -> %s\n",
-                      btf_score, amd_score,
-                      btf_symbolic != NULL
-                        ? btf_symbolic->est_flops : DBL_MAX,
-                      amd_symbolic->est_flops, projected_savings,
-                      comparison_work, retain_btf ? "retain" : "reject");
-            }
             if (retain_btf) {
               capture->generic_btf_value_symbolic = btf_symbolic;
               capture->generic_btf_value_common = btf_common;
@@ -16445,11 +16170,6 @@ static int kls_identity_matching_single_scc(
       }
     }
     connected = reached == n;
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS identity SCC certificate: pass %d reached %ld/%ld\n",
-              pass, (long)reached, (long)n);
-    }
   }
 
   free(seen);
@@ -16528,10 +16248,6 @@ generic_orientation_comparison:
     kls_pattern_candidate *direct = normal->input_to_csc == NULL
       ? normal : (transpose->input_to_csc == NULL ? transpose : normal);
     int status = analyze_candidate(direct, options);
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS select: bounded symmetric union, single analyze\n");
-    }
     if (status == KLS_OK) {
       *chosen_out = direct;
       return KLS_OK;
@@ -16584,16 +16300,6 @@ generic_orientation_comparison:
       kls_candidate_lifecycle_score(transpose, options);
     *chosen_out = transpose_lifecycle < normal_lifecycle
       ? transpose : normal;
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS orientation lifecycle: normal %.4e transpose %.4e "
-              "(raw %.4e/%.4e, refactors=%lld) -> %s\n",
-              normal_lifecycle, transpose_lifecycle,
-              normal->score, transpose->score,
-              (long long)options->expected_refactorizations,
-              (*chosen_out)->orientation == KLS_ORIENTATION_NORMAL
-                ? "normal" : "transpose");
-    }
     return KLS_OK;
   }
   if (normal_status == KLS_OK) {
@@ -16668,10 +16374,6 @@ static int select_candidate(kls_pattern_candidate *normal,
       direct_options = *options;
       direct_options.use_btf = 0;
       generic_options = &direct_options;
-      if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-        fprintf(stderr,
-                "KLS select: identity matching + one SCC; skip BTF\n");
-      }
     }
     const int exact_pattern_symmetry =
       normal != NULL && transpose != NULL &&
@@ -16765,11 +16467,6 @@ static int select_candidate(kls_pattern_candidate *normal,
           kls_maybe_promote_selected_generic_nd(
             other, generic_options, bounded_symmetric_union,
             NULL, NULL);
-        } else if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-          fprintf(stderr,
-                  "KLS cross-orientation ND: skip unsupported second pass "
-                  "(chosen %.4e other %.4e)\n",
-                  chosen_lifecycle, other_lifecycle);
         }
         if (normal->symbolic != NULL && transpose->symbolic != NULL) {
           const double normal_lifecycle =
@@ -16778,14 +16475,6 @@ static int select_candidate(kls_pattern_candidate *normal,
             kls_candidate_lifecycle_score(transpose, generic_options);
           *chosen_out = transpose_lifecycle < normal_lifecycle
             ? transpose : normal;
-          if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-            fprintf(stderr,
-                    "KLS cross-orientation ND lifecycle: normal %.4e "
-                    "transpose %.4e -> %s\n",
-                    normal_lifecycle, transpose_lifecycle,
-                    (*chosen_out)->orientation == KLS_ORIENTATION_NORMAL
-                      ? "normal" : "transpose");
-          }
         }
       }
     } else {
@@ -16950,13 +16639,6 @@ static int kls_restore_generic_nd_fallback_symbolic(kls_solver *solver,
   solver->generic_nd_lifecycle_near_tie = 0;
   solver->auto_metis_checked = 1;
   trilinos_klu_l_free_symbolic(&nd_symbolic, &nd_common);
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL ||
-      getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr,
-            "KLS generic ND portfolio: predicted fill rejected; "
-            "restored %s\n",
-            kls_ordering_name(solver->stats.selected_ordering));
-  }
   return 1;
 }
 
@@ -17024,12 +16706,6 @@ static int kls_restore_generic_amf3_span_symbolic(kls_solver *solver,
   solver->stats.estimated_flops = solver->symbolic->est_flops;
   solver->generic_amf3_span_variant_selected = 0;
   trilinos_klu_l_free_symbolic(&span_symbolic, &span_common);
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL ||
-      getenv("KLS_TRACE_PREDICTED") != NULL) {
-    fprintf(stderr,
-            "KLS AMF3 span portfolio: numeric rejected; restored "
-            "ordinary power\n");
-  }
   return 1;
 }
 
@@ -17228,19 +16904,6 @@ static int maybe_factor_generic_btf_value_alternative(
   if (!decisive_value_strength && !repeated_symbolic_pareto_proposal &&
       !repeated_symbolic_storage_pareto_proposal &&
       !hoisted_row_executor_proposal) {
-    if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-      fprintf(stderr,
-              "KLS generic BTF values: missing=%ld/%ld "
-              "weak1e3=%ld/%ld weak1e2=%ld/%ld "
-              "symbolic_savings=%.4e/%.4e -> reject\n",
-              (long)candidate_profile.missing,
-              (long)incumbent_profile.missing,
-              (long)candidate_profile.weak_1e3,
-              (long)incumbent_profile.weak_1e3,
-              (long)candidate_profile.weak_1e2,
-              (long)incumbent_profile.weak_1e2,
-              projected_symbolic_savings, symbolic_trial_work);
-    }
     kls_discard_generic_btf_value_alternative(solver);
     *elapsed += kls_now_seconds() - decision_start;
     return 0;
@@ -17354,15 +17017,6 @@ static int maybe_factor_generic_btf_value_alternative(
     solver->common = incumbent_common;
   }
   candidate_ok = candidate_ok && residual_ok;
-  if (getenv("KLS_TRACE_FACTOR_PHASES") != NULL) {
-    fprintf(stderr,
-            "KLS generic BTF values: fill %.4e/%.4e flops %.4e/%.4e "
-            "pivots=%ld rcond=%.3e residual=%d -> %s\n",
-            candidate_fill, incumbent_estimated_fill,
-            candidate_common.flops, incumbent_estimated_flops,
-            (long)candidate_common.noffdiag, candidate_common.rcond,
-            residual_ok, candidate_ok ? "adopt" : "reject");
-  }
   if (!candidate_ok) {
     if (candidate_numeric != NULL) {
       trilinos_klu_l_free_numeric(&candidate_numeric, &candidate_common);
