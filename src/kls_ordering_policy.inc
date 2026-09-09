@@ -4406,12 +4406,9 @@ static UF_long kls_metis_order(UF_long n,
        the leaves ordered by concurrent serial NodeND.  Deterministic
        because KLS_GKRAND (default ON) gives each METIS call its own
        seeded thread-local MT19937 stream; the concurrent leaves
-       cannot perturb each other.  Scoped to callers that request it
-       (the pre-static METIS refinement, where it measured a win):
-       v11 measured pre2's separator-pipeline refactor 5x slower when
-       its analyze-time forest came from this splitter instead of
-       serial NodeNDP - the same structure-sensitivity that rejected
-       mt-metis forests there.  Ordering quality is arbitrated
+       cannot perturb each other.  Admit it when the requested thread
+       count covers the leaves or a tuning context forces the trial.
+       Ordering quality is arbitrated
        downstream by the candidate competition's measured fill/flops
        gates. */
     par_nd_done = kls_mtmetis_ndp(n, xadj, adjncy, metis_ndp_npes,
@@ -4845,13 +4842,7 @@ static int analyze_with_ordering(UF_long n,
   kls_metis_order_threads = options != NULL ? options->threads : 1;
 #endif
   {
-    /* the large-spral separator-pipeline class (pre2): its refactor
-       engine is structure-sensitive to the exact serial-NodeNDP
-       forests the pre-GKRAND libc RNG produced (v11: 0.17s -> 7-9.6s
-       refactor under MT19937 orderings), so this class keeps the
-       legacy RNG for its ordering calls.  Thread-local: set per
-       analyze call from the same pattern bounds the prestatic class
-       gate uses. */
+    /* Every ordering analysis uses GKlib's non-legacy random stream. */
     extern void gk_set_legacy_rand(int enable);
     gk_set_legacy_rand(0);
   }
@@ -10149,11 +10140,8 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          versus 0.15s for the AMD factor).  Exact-input reuse defers that bet
          until the first changed input.  The factor
          failure rescue below still runs this consult immediately.  Majority-
-         weak rows (onetone1/twotone) stay inline because the matched ordering
-         is their fast and reliable initial-factor path.  A forced large-weak
-         PTS match stays inline for the same reason: deferring it would factor
-         the known-losing unmatched numeric before building the retained
-         matched factor on the first update. */
+         weak rows stay inline because the matched ordering is their
+         reliable initial-factor path. */
       solver->prestatic_deferred = 1;
       kls_prestatic_ordering_ctx = 0;
       return;
@@ -10191,8 +10179,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        first refactorization.  A normalized nearly-missing-diagonal proposal
        is excluded by the policy flag above because its accepted matched
        factor repays matching in addition to avoiding the duplicate factor.
-       The medium-weak PTS policy is likewise mandatory: deferred
-       unfactored adoption cannot replace an already-live numeric safely.
      */
     solver->prestatic_deferred = 1;
     kls_prestatic_ordering_ctx = 0;
