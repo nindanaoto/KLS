@@ -14212,9 +14212,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
     }
     kls_solve_contract_classify(solver, numeric_values);
-#ifdef KLS_HAVE_CBLAS
-    kls_dense_tail_refactor_validate(solver, numeric_values);
-#endif
     if ((solver->solve_contract_probe == 2 ||
          (solver->numeric_is_predicted &&
           solver->row_solve_self_check) ||
