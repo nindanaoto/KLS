@@ -2227,32 +2227,6 @@ static int kls_build_compact_match_direct_value_maps(kls_solver *solver) {
     solver != NULL && solver->refactor_input_pos != NULL &&
     solver->refactor_col_ptr != NULL &&
     solver->refactor_block_start != NULL;
-  if (solver != NULL && solver->row_refactor_input_cols16 == NULL &&
-      getenv("KLS_ENABLE_COMPACT_MATCH_INPUT_COLS16") != NULL &&
-      solver->row_refactor_input_ptr != NULL &&
-      solver->row_refactor_input_cols != NULL &&
-      solver->n <= (UF_long)UINT16_MAX + 1u &&
-      (direct_capable)) {
-    const UF_long input_count =
-      solver->row_refactor_input_ptr[solver->n];
-    uint16_t *cols16 = (uint16_t *)malloc(
-      (size_t)(input_count > 0u ? input_count : 1u) * sizeof(*cols16));
-    if (cols16 != NULL) {
-      UF_long p = 0u;
-      for (; p < input_count; ++p) {
-        const UF_long col = solver->row_refactor_input_cols[p];
-        if (col > (UF_long)UINT16_MAX) {
-          break;
-        }
-        cols16[p] = (uint16_t)col;
-      }
-      if (p == input_count) {
-        solver->row_refactor_input_cols16 = cols16;
-      } else {
-        free(cols16);
-      }
-    }
-  }
   if (solver == NULL || solver->input_to_csc == NULL ||
       solver->row_scale != NULL || solver->col_scale != NULL ||
       solver->row_refactor_input_ptr == NULL ||
@@ -5606,8 +5580,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
     (void)kls_build_prepared_value_input_pos(solver);
   }
   if (solver->lean_user_values_active ||
-      kls_direct_user_value_maps_capable(solver) ||
-      getenv("KLS_ENABLE_GENERIC_COMPACT_MATCH_DIRECT_VALUES") != NULL) {
+      kls_direct_user_value_maps_capable(solver)) {
     (void)kls_build_compact_match_direct_value_maps(solver);
   }
   if (solver->row_refactor_l_ptr == NULL ||
@@ -7777,13 +7750,6 @@ static UF_long kls_row_refactor_compact_panel_solve_value_count(
 }
 
 static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
-  {
-    const char *env = getenv("KLS_ROW_SOLVE_CLAIM");
-    if (env != NULL && *env != '\0' && atoi(env) == 0) {
-      return 0;
-    }
-  }
-
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       (!solver->row_refactor_values_ready &&
        !kls_row_refactor_solve_uses_direct_values(solver)) ||
@@ -16327,10 +16293,6 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
    row solve.  Scale-free: keys on machinery availability. */
 static int kls_row_refactor_should_publish_for_solve(
   const kls_solver *solver) {
-  const char *env = getenv("KLS_ROW_REFACTOR_PUBLISH");
-  if (env != NULL && *env != '\0') {
-    return atoi(env) != 0;
-  }
   if (solver == NULL || solver->symbolic == NULL ||
       solver->options.threads <= 1) {
     return 0;
