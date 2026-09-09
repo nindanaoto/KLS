@@ -13018,15 +13018,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->lean_choice = -1;
       solver->lean_reaudit_state = 5;
     }
-    if (getenv("KLS_TRACE_GENERIC_SCALED_LEAN_PRESELECTION") != NULL) {
-      fprintf(stderr,
-              "KLS generic scaled lean preselection: work %.0f/flops %.0f "
-              "savings %.0f/cost %.0f affinity=%d -> %s\n",
-              modeled_row_work, solver->common.flops, projected_savings,
-              construction_work, solver->lean_parallel_affinity_decision,
-              solver->lean_choice > 0 ? "LEAN" :
-                (solver->lean_choice < 0 ? "COLUMN" : "measure"));
-    }
   }
   if (solver->lean_choice == 0 &&
       getenv("KLS_DISABLE_LOW_INTENSITY_COLUMN_PRESELECTION") == NULL &&
@@ -13111,14 +13102,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       /* Packed traffic bounds the factor kernel only; leave the selected
          representation provisional until solve traffic is measured too. */
       solver->lean_reaudit_state = 0;
-    }
-    if (getenv("KLS_TRACE_GENERIC_PACKED_LEAN_PRESELECTION") != NULL) {
-      fprintf(stderr,
-              "KLS generic packed lean preselection: work %.0f/flops %.0f "
-              "savings %.0f/cost %.0f -> %s\n",
-              modeled_row_work, solver->common.flops, projected_savings,
-              construction_work,
-              solver->lean_choice > 0 ? "LEAN" : "measure");
     }
   }
 
