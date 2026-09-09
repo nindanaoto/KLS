@@ -1802,7 +1802,6 @@ typedef struct kls_egraph_refactor_shared {
   UF_long lean_forward_solve_begin;
   const UF_long *lean_rows;
   int row_refactor_mode;
-  int row_refactor_scale_hoist;
   int row_refactor_defer_value_scatter;
   int row_refactor_lazy_value_scatter;
   int row_refactor_compact_supernode_trsv;
@@ -1810,8 +1809,6 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_native_row_panel_state;
   int row_refactor_native_row_panel_active;
 
-  int row_refactor_shared_telemetry;
-  int row_refactor_simple_scalar_update;
   int row_solve_mode;
   int row_publish_mode;
   /* Shared reduction scratch for the production solve/contract workers. */
@@ -6745,8 +6742,7 @@ static void kls_record_row_refactor_compact_dense_panel_direct_input(
   if (kls_dense_help_self != NULL &&
       kls_dense_help_self->shared != NULL &&
       kls_dense_help_self->shared->solver == solver &&
-      kls_dense_help_self->shared->row_refactor_mode &&
-      !kls_dense_help_self->shared->row_refactor_shared_telemetry) {
+      kls_dense_help_self->shared->row_refactor_mode) {
     kls_dense_help_self->telemetry_compact_dense_input_rows++;
     return;
   }
@@ -6762,8 +6758,7 @@ static void kls_record_row_refactor_dense_segment_direct_input(
   if (kls_dense_help_self != NULL &&
       kls_dense_help_self->shared != NULL &&
       kls_dense_help_self->shared->solver == solver &&
-      kls_dense_help_self->shared->row_refactor_mode &&
-      !kls_dense_help_self->shared->row_refactor_shared_telemetry) {
+      kls_dense_help_self->shared->row_refactor_mode) {
     kls_dense_help_self->telemetry_dense_segment_input_rows++;
     return;
   }
@@ -6779,8 +6774,7 @@ static void kls_record_row_refactor_sparse_segment_direct_input(
   if (kls_dense_help_self != NULL &&
       kls_dense_help_self->shared != NULL &&
       kls_dense_help_self->shared->solver == solver &&
-      kls_dense_help_self->shared->row_refactor_mode &&
-      !kls_dense_help_self->shared->row_refactor_shared_telemetry) {
+      kls_dense_help_self->shared->row_refactor_mode) {
     kls_dense_help_self->telemetry_sparse_segment_input_rows++;
     return;
   }
@@ -6795,8 +6789,7 @@ static void kls_record_row_refactor_batch_direct_input(kls_solver *solver) {
   if (kls_dense_help_self != NULL &&
       kls_dense_help_self->shared != NULL &&
       kls_dense_help_self->shared->solver == solver &&
-      kls_dense_help_self->shared->row_refactor_mode &&
-      !kls_dense_help_self->shared->row_refactor_shared_telemetry) {
+      kls_dense_help_self->shared->row_refactor_mode) {
     kls_dense_help_self->telemetry_batch_input_rows++;
     return;
   }
@@ -6812,8 +6805,7 @@ static void kls_record_row_refactor_segment_target_input(
   if (kls_dense_help_self != NULL &&
       kls_dense_help_self->shared != NULL &&
       kls_dense_help_self->shared->solver == solver &&
-      kls_dense_help_self->shared->row_refactor_mode &&
-      !kls_dense_help_self->shared->row_refactor_shared_telemetry) {
+      kls_dense_help_self->shared->row_refactor_mode) {
     kls_dense_help_self->telemetry_segment_target_input_rows++;
     return;
   }
@@ -6830,8 +6822,7 @@ static void kls_record_row_refactor_segment_target_cleanup(
   if (kls_dense_help_self != NULL &&
       kls_dense_help_self->shared != NULL &&
       kls_dense_help_self->shared->solver == solver &&
-      kls_dense_help_self->shared->row_refactor_mode &&
-      !kls_dense_help_self->shared->row_refactor_shared_telemetry) {
+      kls_dense_help_self->shared->row_refactor_mode) {
     kls_dense_help_self->telemetry_segment_target_cleanup_rows++;
     kls_dense_help_self->telemetry_segment_target_cleanup_entries += entries;
     return;

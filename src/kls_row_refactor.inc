@@ -4372,7 +4372,6 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
   int compact_ptrs,
   int row_values_mode,
   int grouped_done_mode,
-  int fused_update_mode,
   int fused_scale_mode,
   int sum_scale_mode,
   int branchless_update_mode) {
@@ -4525,11 +4524,7 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
         for (UF_long q = update_begin; q < update_end; ++q) {
           const UF_long col = compact_cols
             ? (UF_long)u_cols16[q] : u_cols[q];
-          if (fused_update_mode) {
-            x[col] = fma(-lik, u_val[q], x[col]);
-          } else {
-            x[col] -= lik * u_val[q];
-          }
+          x[col] = fma(-lik, u_val[q], x[col]);
         }
       }
     }
@@ -4581,7 +4576,7 @@ static void kls_scaled_generic_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 0, 0,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1,
+    worker->shared->lean_grouped_done_mode,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4597,7 +4592,7 @@ static void kls_scaled_generic_i16_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 0,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1,
+    worker->shared->lean_grouped_done_mode,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4613,7 +4608,7 @@ static void kls_scaled_generic_i16ptr_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 2,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1,
+    worker->shared->lean_grouped_done_mode,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4629,7 +4624,7 @@ static void kls_scaled_generic_i16_u32ptr_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 1,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1,
+    worker->shared->lean_grouped_done_mode,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4644,35 +4639,7 @@ static void kls_scaled_generic_i16_u32ptr_row_values_worker_run(
   UF_long stride) {
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 1, 1,
-    worker->shared->lean_grouped_done_mode, 1,
-    worker->shared->lean_fused_scale_mode,
-    worker->shared->solver->common.scale == 1, 0);
-}
-
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline, hot))
-#endif
-static void kls_scaled_generic_i16_u32ptr_row_values_grouped_worker_run(
-  kls_egraph_refactor_worker *worker,
-  unsigned int generation,
-  const UF_long *restrict rows,
-  UF_long stride) {
-  kls_scaled_generic_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 1, 1, 1, 1,
-    worker->shared->lean_fused_scale_mode,
-    worker->shared->solver->common.scale == 1, 0);
-}
-
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((noinline, hot))
-#endif
-static void kls_scaled_generic_i16_u32ptr_row_values_grouped_nonfused_worker_run(
-  kls_egraph_refactor_worker *worker,
-  unsigned int generation,
-  const UF_long *restrict rows,
-  UF_long stride) {
-  kls_scaled_generic_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 1, 1, 1, 0,
+    worker->shared->lean_grouped_done_mode,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4686,7 +4653,7 @@ static void kls_scaled_generic_i16_u32ptr_row_values_grouped_branchless_worker_r
   const UF_long *restrict rows,
   UF_long stride) {
   kls_scaled_generic_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 1, 1, 1, 1,
+    worker, generation, rows, stride, 1, 1, 1, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 1);
 }
@@ -4697,25 +4664,21 @@ static void kls_scaled_generic_i16_u32ptr_row_values_grouped_branchless_worker_r
 #define KLS_SCALED_EXACT_WORKER_ATTR
 #endif
 
-#define KLS_DEFINE_SCALED_EXACT_WORKER(name, sum_mode, branchless_mode) \
+#define KLS_DEFINE_SCALED_EXACT_WORKER(name, sum_mode) \
   KLS_SCALED_EXACT_WORKER_ATTR static void name(                       \
     kls_egraph_refactor_worker *worker,                                \
     unsigned int generation,                                          \
     const UF_long *restrict rows,                                      \
     UF_long stride) {                                                  \
     kls_scaled_generic_hoisted_worker_core(                            \
-      worker, generation, rows, stride, 1, 1, 1, 1, 1,            \
-      2, sum_mode, branchless_mode);                                   \
+      worker, generation, rows, stride, 1, 1, 1, 1,               \
+      2, sum_mode, 1);                                                 \
   }
 
 KLS_DEFINE_SCALED_EXACT_WORKER(
-  kls_scaled_exact_direct_max_worker_run, 0, 0)
+  kls_scaled_exact_direct_max_branchless_worker_run, 0)
 KLS_DEFINE_SCALED_EXACT_WORKER(
-  kls_scaled_exact_direct_max_branchless_worker_run, 0, 1)
-KLS_DEFINE_SCALED_EXACT_WORKER(
-  kls_scaled_exact_direct_sum_worker_run, 1, 0)
-KLS_DEFINE_SCALED_EXACT_WORKER(
-  kls_scaled_exact_direct_sum_branchless_worker_run, 1, 1)
+  kls_scaled_exact_direct_sum_branchless_worker_run, 1)
 
 #undef KLS_DEFINE_SCALED_EXACT_WORKER
 #undef KLS_SCALED_EXACT_WORKER_ATTR
@@ -4904,41 +4867,20 @@ static void kls_lean_parallel_worker_run(
           solver->row_refactor_u_ptr32 != NULL &&
           solver->row_refactor_input_ptr32 != NULL) {
         if (shared->lean_row_values_mode &&
-            shared->lean_grouped_done_mode &&
-            getenv("KLS_DISABLE_SCALED_ROW_VALUES_SPECIALIZATION") == NULL &&
-            getenv("KLS_DISABLE_SCALED_GROUPED_SPECIALIZATION") == NULL) {
-          if (getenv("KLS_DISABLE_SCALED_FMA_UPDATE") != NULL) {
-            kls_scaled_generic_i16_u32ptr_row_values_grouped_nonfused_worker_run(
-              worker, generation, rows, stride);
-          } else if (shared->lean_fused_scale_mode > 1 &&
-              getenv("KLS_DISABLE_SCALED_SCALE_SPECIALIZATION") == NULL) {
-            const int branchless =
-              getenv("KLS_DISABLE_SCALED_BRANCHLESS_UPDATE") == NULL;
+            shared->lean_grouped_done_mode) {
+          if (shared->lean_fused_scale_mode > 1) {
             if (solver->common.scale == 1) {
-              if (branchless) {
-                kls_scaled_exact_direct_sum_branchless_worker_run(
-                  worker, generation, rows, stride);
-              } else {
-                kls_scaled_exact_direct_sum_worker_run(
-                  worker, generation, rows, stride);
-              }
-            } else if (branchless) {
-              kls_scaled_exact_direct_max_branchless_worker_run(
+              kls_scaled_exact_direct_sum_branchless_worker_run(
                 worker, generation, rows, stride);
             } else {
-              kls_scaled_exact_direct_max_worker_run(
+              kls_scaled_exact_direct_max_branchless_worker_run(
                 worker, generation, rows, stride);
             }
-          } else if (
-              getenv("KLS_DISABLE_SCALED_BRANCHLESS_UPDATE") == NULL) {
+          } else {
             kls_scaled_generic_i16_u32ptr_row_values_grouped_branchless_worker_run(
               worker, generation, rows, stride);
-          } else {
-            kls_scaled_generic_i16_u32ptr_row_values_grouped_worker_run(
-              worker, generation, rows, stride);
           }
-        } else if (shared->lean_row_values_mode &&
-            getenv("KLS_DISABLE_SCALED_ROW_VALUES_SPECIALIZATION") == NULL) {
+        } else if (shared->lean_row_values_mode) {
           kls_scaled_generic_i16_u32ptr_row_values_worker_run(
             worker, generation, rows, stride);
         } else {
@@ -9198,8 +9140,6 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   shared.numerical_rank = UF_long_max;
   shared.singular_col = KLS_KLU_EMPTY;
   shared.row_refactor_mode = 1;
-  shared.row_refactor_scale_hoist =
-    getenv("KLS_DISABLE_ROW_SCALE_HOIST") == NULL;
   shared.row_refactor_defer_value_scatter = defer_value_scatter;
   shared.row_refactor_lazy_value_scatter = lazy_value_scatter;
   shared.row_refactor_compact_supernode_trsv =
@@ -9376,10 +9316,6 @@ static KLS_ALWAYS_INLINE int kls_row_refactor_input_multiplier(
       row >= shared->solver->n) {
     return 0;
   }
-  if (!shared->row_refactor_scale_hoist) {
-    *multiplier_out = 1.0;
-    return 1;
-  }
   if (shared->scale <= 0) {
     *multiplier_out = 1.0;
     return 1;
@@ -9405,11 +9341,6 @@ static KLS_ALWAYS_INLINE int kls_row_refactor_scaled_input_value(
   if (shared == NULL || shared->solver == NULL || shared->values == NULL ||
       value_out == NULL || input_pos >= shared->solver->nnz) {
     return 0;
-  }
-  if (!shared->row_refactor_scale_hoist) {
-    return kls_refactor_input_value(
-      shared->solver, shared->values, shared->rs, shared->scale,
-      input_pos, value_out);
   }
   *value_out = shared->values[input_pos] * multiplier;
   return 1;
@@ -10024,13 +9955,7 @@ static int kls_parallel_row_refactor_apply_scalar_dep(
     const UF_long u_end = solver->row_refactor_u_ptr[dep + 1u];
     const UF_long *u_cols = solver->row_refactor_u_cols + u_begin;
     const double *u_values = solver->row_refactor_u_row_values + u_begin;
-    if (shared->row_refactor_simple_scalar_update) {
-      for (UF_long offset = 0; offset < u_end - u_begin; ++offset) {
-        x[u_cols[offset]] -= lij * u_values[offset];
-      }
-    } else {
-      kls_scatter_subtract(x, u_cols, u_values, u_end - u_begin, lij);
-    }
+    kls_scatter_subtract(x, u_cols, u_values, u_end - u_begin, lij);
   }
   return 1;
 }
@@ -17139,8 +17064,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->kernel = KLS_EGRAPH_REFACTOR_KERNEL_GENERIC;
   shared->thread_count = thread_count;
   shared->row_refactor_mode = 1;
-  shared->row_refactor_scale_hoist =
-    getenv("KLS_DISABLE_ROW_SCALE_HOIST") == NULL;
   shared->row_refactor_component_seconds = component_seconds;
   shared->row_refactor_component_seconds_count = component_seconds != NULL
     ? solver->separator.component_count : 0u;
@@ -17162,12 +17085,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_native_row_panel_state = native_row_panel_state;
   shared->row_refactor_native_row_panel_active = 0;
 
-  shared->row_refactor_shared_telemetry =
-    getenv("KLS_ROW_TELEMETRY_SHARED") != NULL;
   atomic_store_explicit(&shared->dense_help_large_waiters, 0,
                         memory_order_relaxed);
-  shared->row_refactor_simple_scalar_update =
-    getenv("KLS_ROW_SCALAR_SIMPLE") != NULL;
   solver->row_refactor_native_row_panel_enabled =
     kls_native_row_panel_enabled_for_run(
       solver, native_row_panel_state, check_pivots);
@@ -17294,38 +17213,36 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
         solver, row_private_groups, row_private_group_count,
         component_seconds, solver->separator.component_count);
   }
-  if (!shared->row_refactor_shared_telemetry) {
-    for (int i = 0; i < thread_count; ++i) {
-      const kls_egraph_refactor_worker *telemetry = &pool->workers[i];
-      solver->row_refactor_last_compact_dense_panel_direct_input_rows +=
-        telemetry->telemetry_compact_dense_input_rows;
-      solver->row_refactor_compact_dense_panel_direct_input_rows +=
-        telemetry->telemetry_compact_dense_input_rows;
-      solver->row_refactor_last_dense_segment_direct_input_rows +=
-        telemetry->telemetry_dense_segment_input_rows;
-      solver->row_refactor_dense_segment_direct_input_rows +=
-        telemetry->telemetry_dense_segment_input_rows;
-      solver->row_refactor_last_sparse_segment_direct_input_rows +=
-        telemetry->telemetry_sparse_segment_input_rows;
-      solver->row_refactor_sparse_segment_direct_input_rows +=
-        telemetry->telemetry_sparse_segment_input_rows;
-      solver->row_refactor_last_batch_direct_input_rows +=
-        telemetry->telemetry_batch_input_rows;
-      solver->row_refactor_batch_direct_input_rows +=
-        telemetry->telemetry_batch_input_rows;
-      solver->row_refactor_last_segment_target_input_rows +=
-        telemetry->telemetry_segment_target_input_rows;
-      solver->row_refactor_segment_target_input_rows +=
-        telemetry->telemetry_segment_target_input_rows;
-      solver->row_refactor_last_segment_target_cleanup_rows +=
-        telemetry->telemetry_segment_target_cleanup_rows;
-      solver->row_refactor_segment_target_cleanup_rows +=
-        telemetry->telemetry_segment_target_cleanup_rows;
-      solver->row_refactor_last_segment_target_cleanup_entries +=
-        telemetry->telemetry_segment_target_cleanup_entries;
-      solver->row_refactor_segment_target_cleanup_entries +=
-        telemetry->telemetry_segment_target_cleanup_entries;
-    }
+  for (int i = 0; i < thread_count; ++i) {
+    const kls_egraph_refactor_worker *telemetry = &pool->workers[i];
+    solver->row_refactor_last_compact_dense_panel_direct_input_rows +=
+      telemetry->telemetry_compact_dense_input_rows;
+    solver->row_refactor_compact_dense_panel_direct_input_rows +=
+      telemetry->telemetry_compact_dense_input_rows;
+    solver->row_refactor_last_dense_segment_direct_input_rows +=
+      telemetry->telemetry_dense_segment_input_rows;
+    solver->row_refactor_dense_segment_direct_input_rows +=
+      telemetry->telemetry_dense_segment_input_rows;
+    solver->row_refactor_last_sparse_segment_direct_input_rows +=
+      telemetry->telemetry_sparse_segment_input_rows;
+    solver->row_refactor_sparse_segment_direct_input_rows +=
+      telemetry->telemetry_sparse_segment_input_rows;
+    solver->row_refactor_last_batch_direct_input_rows +=
+      telemetry->telemetry_batch_input_rows;
+    solver->row_refactor_batch_direct_input_rows +=
+      telemetry->telemetry_batch_input_rows;
+    solver->row_refactor_last_segment_target_input_rows +=
+      telemetry->telemetry_segment_target_input_rows;
+    solver->row_refactor_segment_target_input_rows +=
+      telemetry->telemetry_segment_target_input_rows;
+    solver->row_refactor_last_segment_target_cleanup_rows +=
+      telemetry->telemetry_segment_target_cleanup_rows;
+    solver->row_refactor_segment_target_cleanup_rows +=
+      telemetry->telemetry_segment_target_cleanup_rows;
+    solver->row_refactor_last_segment_target_cleanup_entries +=
+      telemetry->telemetry_segment_target_cleanup_entries;
+    solver->row_refactor_segment_target_cleanup_entries +=
+      telemetry->telemetry_segment_target_cleanup_entries;
   }
   const UF_long row_local_ready_groups =
     use_row_ready_queue
