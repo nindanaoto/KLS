@@ -4368,53 +4368,6 @@ static void kls_row_solve_sparse_worker_run(
   }
 }
 
-static void kls_row_solve_separator_private_worker_run(
-  kls_egraph_refactor_worker *worker) {
-  if (worker == NULL || worker->shared == NULL) {
-    return;
-  }
-  kls_egraph_refactor_shared *shared = worker->shared;
-  kls_solver *solver = shared->solver;
-  const kls_row_solve_factor_view *view = shared->row_solve_view;
-  if (solver == NULL || view == NULL || shared->row_solve_work == NULL ||
-      shared->thread_count <= 0 || worker->tid < 0 ||
-      worker->tid >= shared->thread_count ||
-      solver->row_solve_separator_thread_count != shared->thread_count) {
-    return;
-  }
-  const kls_first_separator_queue_plan *plan =
-    &solver->row_solve_separator_plan;
-  if (plan->private_rows == NULL || plan->thread_ptr == NULL ||
-      plan->thread_ptr[0] != 0u ||
-      plan->thread_ptr[shared->thread_count] != plan->private_rows_count) {
-    return;
-  }
-  const UF_long begin = plan->thread_ptr[worker->tid];
-  const UF_long end = plan->thread_ptr[worker->tid + 1];
-  if (begin > end || end > plan->private_rows_count) {
-    return;
-  }
-  double *work = shared->row_solve_work;
-  if (shared->row_solve_upper) {
-    for (UF_long pos = end; pos > begin; --pos) {
-      const UF_long row = plan->private_rows[pos - 1u];
-      if (row >= solver->n) {
-        kls_egraph_refactor_record_invalid(shared);
-        return;
-      }
-      kls_row_solve_view_row(solver, view, work, row);
-    }
-  } else {
-    for (UF_long pos = begin; pos < end; ++pos) {
-      const UF_long row = plan->private_rows[pos];
-      if (row >= solver->n) {
-        kls_egraph_refactor_record_invalid(shared);
-        return;
-      }
-      kls_row_solve_view_row(solver, view, work, row);
-    }
-  }
-}
 
 static void kls_compact_amf_two_block_residual_worker_run(
   kls_egraph_refactor_worker *worker) {
@@ -4690,10 +4643,6 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
   }
   if (shared->row_solve_mode == 2) {
     kls_row_solve_sparse_worker_run(worker);
-    return;
-  }
-  if (shared->row_solve_mode == 3) {
-    kls_row_solve_separator_private_worker_run(worker);
     return;
   }
   kls_solver *solver = shared->solver;
@@ -5775,74 +5724,6 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
   return ok;
 }
 
-static int kls_run_parallel_row_solve_separator_private(
-  kls_solver *solver,
-  kls_egraph_refactor_pool *pool,
-  int thread_count,
-  const kls_row_solve_factor_view *view,
-  double *work) {
-  if (solver == NULL || pool == NULL || thread_count < 2 ||
-      view == NULL || work == NULL || view->ptr == NULL ||
-      view->cols == NULL || !kls_row_solve_view_has_values(solver, view) ||
-      solver->row_solve_separator_thread_count != thread_count ||
-      solver->row_solve_separator_plan.private_rows == NULL ||
-      solver->row_solve_separator_plan.thread_ptr == NULL ||
-      solver->row_solve_separator_plan.private_rows_count == 0u ||
-      (view->diagonal && solver->numeric->Udiag == NULL)) {
-    return 0;
-  }
-
-  kls_egraph_refactor_shared *shared = &pool->shared;
-  pthread_mutex_lock(&shared->lock);
-  if (pool->active_workers != 0) {
-    pthread_mutex_unlock(&shared->lock);
-    return 0;
-  }
-
-  shared->solver = solver;
-  shared->thread_count = thread_count;
-  shared->row_refactor_mode = 0;
-  shared->row_solve_mode = 3;
-  shared->row_solve_upper = view->upper ? 1 : 0;
-  shared->row_solve_view = view;
-  shared->row_solve_work = work;
-  shared->row_refactor_defer_value_scatter = 0;
-  shared->row_refactor_lazy_value_scatter = 0;
-  shared->row_refactor_native_row_panel_active = 0;
-  shared->row_pipeline_ready_queue = 0;
-  shared->row_pipeline_row_dep_ready_queue = 0;
-  shared->row_pipeline_ready_groups = NULL;
-  shared->row_pipeline_ready_slots = NULL;
-  shared->row_pipeline_remaining_preds = NULL;
-  shared->row_pipeline_tail_groups = NULL;
-  shared->row_pipeline_tail_count = 0;
-  shared->row_pipeline_private_groups = NULL;
-  shared->row_pipeline_private_thread_ptr = NULL;
-  shared->row_pipeline_private_group_mask = NULL;
-  shared->row_pipeline_private_count = 0;
-  shared->row_pipeline_ordered_private = 0;
-  shared->pipeline_done = NULL;
-  shared->pipeline_generation = 0;
-  shared->pipeline_pos_end = 0;
-  shared->cluster_level_count = 0;
-  shared->invalid = 0;
-  shared->pivot_rejected = 0;
-  shared->singular = 0;
-  atomic_store_explicit(&shared->stop, 0, memory_order_release);
-
-  for (int i = 0; i < thread_count; ++i) {
-    pool->workers[i].shared = shared;
-  }
-
-  kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
-  const int ok = !shared->invalid &&
-                 !kls_egraph_refactor_should_stop(shared);
-  shared->row_solve_mode = 0;
-  shared->row_solve_view = NULL;
-  shared->row_solve_work = NULL;
-  pthread_mutex_unlock(&shared->lock);
-  return ok;
-}
 
 static int kls_run_parallel_row_solve_sparse_block(
   kls_solver *solver,
@@ -6134,65 +6015,6 @@ static void kls_make_transpose_row_solve_view(
   view->diagonal = plan->diagonal;
 }
 
-/* Execute only the diagonal-block row factors on an already prepared work
-   vector.  A dominant-BTF caller can surround this with the few serial
-   fringe blocks and Offx updates instead of publishing the complete row
-   numeric back to KLU's column storage before every solve. */
-static int kls_try_parallel_row_solve_diagonal_work(kls_solver *solver,
-                                                     double *work) {
-  if (solver == NULL || work == NULL || solver->options.threads <= 1 ||
-      solver->row_solve_partition_ready == 0) {
-    return 0;
-  }
-  const int thread_count = solver->options.threads;
-  if (solver->row_solve_separator_thread_count != thread_count ||
-      solver->row_solve_separator_plan.private_rows == NULL ||
-      solver->row_solve_separator_plan.thread_ptr == NULL) {
-    return 0;
-  }
-  kls_row_solve_factor_view l_view;
-  kls_row_solve_factor_view u_view;
-  kls_make_normal_row_solve_view(solver, 0, &l_view);
-  kls_make_normal_row_solve_view(solver, 1, &u_view);
-  if (!kls_row_solve_view_has_values(solver, &l_view) ||
-      !kls_row_solve_view_has_values(solver, &u_view)) {
-    return 0;
-  }
-  kls_egraph_refactor_pool *pool =
-    ensure_egraph_refactor_pool(solver, thread_count);
-  if (pool == NULL) {
-    return 0;
-  }
-  const kls_first_separator_queue_plan *plan =
-    &solver->row_solve_separator_plan;
-  int ok = kls_run_parallel_row_solve_separator_private(
-    solver, pool, thread_count, &l_view, work);
-  if (ok) {
-    for (UF_long pos = 0u; pos < plan->pipeline_rows_count; ++pos) {
-      const UF_long row = plan->pipeline_rows[pos];
-      if (row >= solver->n) {
-        ok = 0;
-        break;
-      }
-      kls_row_solve_view_row(solver, &l_view, work, row);
-    }
-  }
-  if (ok) {
-    for (UF_long pos = plan->pipeline_rows_count; pos > 0u; --pos) {
-      const UF_long row = plan->pipeline_rows[pos - 1u];
-      if (row >= solver->n) {
-        ok = 0;
-        break;
-      }
-      kls_row_solve_view_row(solver, &u_view, work, row);
-    }
-  }
-  if (ok) {
-    ok = kls_run_parallel_row_solve_separator_private(
-      solver, pool, thread_count, &u_view, work);
-  }
-  return ok;
-}
 
 static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   if (solver == NULL || x == NULL || solver->symbolic == NULL ||
@@ -6248,71 +6070,6 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   }
   if (thread_count < 2) {
     return 0;
-  }
-  const char *separator_solve_env = getenv("KLS_ROW_SOLVE_SEPARATOR");
-  const int separator_solve =
-    separator_solve_env != NULL && separator_solve_env[0] != '\0' &&
-    !(separator_solve_env[0] == '0' && separator_solve_env[1] == '\0');
-  if (separator_solve &&
-      solver->row_solve_separator_thread_count == thread_count &&
-      solver->row_solve_separator_plan.private_rows != NULL &&
-      solver->row_solve_separator_plan.thread_ptr != NULL) {
-    kls_row_solve_factor_view l_view;
-    kls_row_solve_factor_view u_view;
-    kls_make_normal_row_solve_view(solver, 0, &l_view);
-    kls_make_normal_row_solve_view(solver, 1, &u_view);
-    if (kls_row_solve_view_has_values(solver, &l_view) &&
-        kls_row_solve_view_has_values(solver, &u_view)) {
-      kls_egraph_refactor_pool *pool =
-        ensure_egraph_refactor_pool(solver, thread_count);
-      if (pool != NULL) {
-        const UF_long n = solver->n;
-        const UF_long *pnum = solver->numeric->Pnum;
-        const UF_long *q = solver->symbolic->Q;
-        const double *rs = solver->numeric->Rs;
-        double *work = (double *)solver->numeric->Xwork;
-        for (UF_long k = 0; k < n; ++k) {
-          const double rhs_value = x[pnum[k]];
-          work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
-        }
-
-        const kls_first_separator_queue_plan *plan =
-          &solver->row_solve_separator_plan;
-        int ok = kls_run_parallel_row_solve_separator_private(
-          solver, pool, thread_count, &l_view, work);
-        if (ok) {
-          for (UF_long pos = 0; pos < plan->pipeline_rows_count; ++pos) {
-            const UF_long row = plan->pipeline_rows[pos];
-            if (row >= n) {
-              ok = 0;
-              break;
-            }
-            kls_row_solve_view_row(solver, &l_view, work, row);
-          }
-        }
-        if (ok) {
-          for (UF_long pos = plan->pipeline_rows_count; pos > 0u; --pos) {
-            const UF_long row = plan->pipeline_rows[pos - 1u];
-            if (row >= n) {
-              ok = 0;
-              break;
-            }
-            kls_row_solve_view_row(solver, &u_view, work, row);
-          }
-        }
-        if (ok) {
-          ok = kls_run_parallel_row_solve_separator_private(
-            solver, pool, thread_count, &u_view, work);
-        }
-        if (ok) {
-          for (UF_long k = 0; k < n; ++k) {
-            x[q[k]] = work[k];
-          }
-          kls_record_row_solve_parallel_run(solver, 0u, 0u, 1u, 1u);
-          return 1;
-        }
-      }
-    }
   }
   const UF_long l_sparse_cluster_levels =
     kls_row_solve_sparse_cluster_levels(

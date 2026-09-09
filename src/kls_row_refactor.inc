@@ -7921,156 +7921,6 @@ static int kls_row_solve_serial_normal_block(kls_solver *solver,
   return 1;
 }
 
-#define KLS_ROW_SOLVE_HYBRID_BTF_MAX_FRINGE 1024u
-
-/* The hybrid BTF solve is a retained-plan capability, not an input-family
-   policy.  It is available whenever one diagonal block owns nearly all rows,
-   the two serial fringes fit the bounded solve workspace, and the row
-   separator plan can execute the diagonal work.  Keeping this test beside
-   the executor lets both refactor publication and solve dispatch make the
-   same representation-independent decision. */
-static int kls_hybrid_btf_row_solve_capable(const kls_solver *solver,
-                                            UF_long *giant_out,
-                                            UF_long *k1_out,
-                                            UF_long *k2_out) {
-  KLS_SET_OPTIONAL_OUTPUT(giant_out, 0u);
-  KLS_SET_OPTIONAL_OUTPUT(k1_out, 0u);
-  KLS_SET_OPTIONAL_OUTPUT(k2_out, 0u);
-  if (solver == NULL || solver->symbolic == NULL ||
-      solver->numeric == NULL || solver->options.threads <= 1 ||
-      solver->symbolic->nblocks <= 1u || solver->symbolic->R == NULL ||
-      solver->symbolic->R[0] != 0u ||
-      solver->symbolic->R[solver->symbolic->nblocks] != solver->n ||
-      solver->numeric->Xwork == NULL || solver->numeric->Pnum == NULL ||
-      solver->symbolic->Q == NULL || solver->numeric->Udiag == NULL ||
-      solver->numeric->Offp == NULL || solver->numeric->Offi == NULL ||
-      solver->numeric->Offx == NULL ||
-      solver->row_refactor_pattern_n != solver->n ||
-      solver->row_refactor_l_ptr == NULL ||
-      solver->row_refactor_u_ptr == NULL ||
-      solver->row_solve_partition_ready == 0 ||
-      solver->row_solve_separator_thread_count != solver->options.threads ||
-      solver->row_solve_separator_plan.private_rows == NULL ||
-      solver->row_solve_separator_plan.thread_ptr == NULL) {
-    return 0;
-  }
-
-  const UF_long n = solver->n;
-  const UF_long *r = solver->symbolic->R;
-  UF_long giant = 0u;
-  UF_long giant_size = 0u;
-  for (UF_long block = 0u; block < solver->symbolic->nblocks; ++block) {
-    if (r[block + 1u] < r[block] || r[block + 1u] > n) {
-      return 0;
-    }
-    const UF_long size = r[block + 1u] - r[block];
-    if (size > giant_size) {
-      giant = block;
-      giant_size = size;
-    }
-  }
-  const UF_long k1 = r[giant];
-  const UF_long k2 = r[giant + 1u];
-  const UF_long prefix_size = k1;
-  const UF_long suffix_size = n - k2;
-  if ((long double)giant_size < 0.99L * (long double)n ||
-      prefix_size > KLS_ROW_SOLVE_HYBRID_BTF_MAX_FRINGE ||
-      suffix_size > KLS_ROW_SOLVE_HYBRID_BTF_MAX_FRINGE) {
-    return 0;
-  }
-  if (giant_out != NULL) {
-    *giant_out = giant;
-  }
-  if (k1_out != NULL) {
-    *k1_out = k1;
-  }
-  if (k2_out != NULL) {
-    *k2_out = k2;
-  }
-  return 1;
-}
-
-/* A thin-fringe dominant BTF needs a hybrid solve.  A whole-matrix diagonal
-   solve misses Offx coupling, while a wholly serial BTF solve leaves the
-   giant block on one core.  Execute the tiny suffix, the giant diagonal
-   block, its Offx update, and the tiny prefix in serial BTF order while
-   parallelizing only the dominant block. */
-static int kls_try_thin_fringe_parallel_btf_row_solve(kls_solver *solver,
-                                                       double *x) {
-  if (x == NULL) {
-    return 0;
-  }
-
-  UF_long giant = 0u;
-  UF_long k1 = 0u;
-  UF_long k2 = 0u;
-  if (!kls_hybrid_btf_row_solve_capable(solver, &giant, &k1, &k2)) {
-    return 0;
-  }
-
-  const UF_long n = solver->n;
-  const UF_long nblocks = solver->symbolic->nblocks;
-  const UF_long prefix_size = k1;
-  const UF_long suffix_size = n - k2;
-
-  const UF_long *pnum = solver->numeric->Pnum;
-  const UF_long *q = solver->symbolic->Q;
-  const double *rs = solver->numeric->Rs;
-  double *work = (double *)solver->numeric->Xwork;
-  for (UF_long k = 0u; k < n; ++k) {
-    const double rhs_value = x[pnum[k]];
-    work[k] = rs != NULL ? rhs_value / rs[k] : rhs_value;
-  }
-
-  for (UF_long remaining = nblocks; remaining > giant + 1u; --remaining) {
-    if (!kls_row_solve_serial_normal_block(solver, remaining - 1u, work)) {
-      return 0;
-    }
-  }
-
-  double prefix_rhs[KLS_ROW_SOLVE_HYBRID_BTF_MAX_FRINGE];
-  double suffix_solution[KLS_ROW_SOLVE_HYBRID_BTF_MAX_FRINGE];
-  memcpy(prefix_rhs, work, (size_t)prefix_size * sizeof(*prefix_rhs));
-  memcpy(suffix_solution, work + k2,
-         (size_t)suffix_size * sizeof(*suffix_solution));
-
-  if (!kls_try_parallel_row_solve_diagonal_work(solver, work)) {
-    return 0;
-  }
-  memcpy(work, prefix_rhs, (size_t)prefix_size * sizeof(*prefix_rhs));
-  memcpy(work + k2, suffix_solution,
-         (size_t)suffix_size * sizeof(*suffix_solution));
-
-  if (giant > 0u) {
-    const UF_long *offp = solver->numeric->Offp;
-    const UF_long *offi = solver->numeric->Offi;
-    const double *offx = (const double *)solver->numeric->Offx;
-    if (offp == NULL || offi == NULL || offx == NULL) {
-      return 0;
-    }
-    for (UF_long k = k1; k < k2; ++k) {
-      const double wk = work[k];
-      for (UF_long p = offp[k]; p < offp[k + 1u]; ++p) {
-        const UF_long row = offi[p];
-        if (row >= k1) {
-          return 0;
-        }
-        work[row] -= offx[p] * wk;
-      }
-    }
-  }
-
-  for (UF_long remaining = giant; remaining > 0u; --remaining) {
-    if (!kls_row_solve_serial_normal_block(solver, remaining - 1u, work)) {
-      return 0;
-    }
-  }
-  for (UF_long k = 0u; k < n; ++k) {
-    x[q[k]] = work[k];
-  }
-  kls_record_row_solve_parallel_run(solver, 0u, 0u, 1u, 1u);
-  return 1;
-}
 
 static int kls_try_row_refactor_solve_one_rhs(kls_solver *solver,
                                               int kernel_transpose,
@@ -8088,9 +7938,6 @@ static int kls_try_row_refactor_solve_one_rhs(kls_solver *solver,
   double *work = (double *)solver->numeric->Xwork;
 
   if (!kernel_transpose) {
-    if (kls_try_thin_fringe_parallel_btf_row_solve(solver, x)) {
-      return 1;
-    }
     if (kls_try_parallel_row_solve_one_rhs(solver, x)) {
       return 1;
     }
@@ -16246,9 +16093,8 @@ static void kls_row_refactor_worker_run(kls_egraph_refactor_worker *worker) {
 
 /* Publish deferred row-major refactor values into the packed column
    factors when the follow-up solves are better served by the column
-   engine (pts/i32) than by the row-value solve.  Most multi-block factors
-   use the column route; dominant-BTF policies may provide an exact hybrid
-   row solve.  Scale-free: keys on machinery availability. */
+   engine (pts/i32) than by the row-value solve.  Multi-block factors can
+   use the column route when its machinery is available. */
 static int kls_row_refactor_should_publish_for_solve(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL ||
@@ -16267,13 +16113,6 @@ static int kls_row_refactor_should_publish_for_solve(
        an adoption that never measured its solves; keep publishing until
        that solve lands and concludes the probe */
     return 1;
-  }
-  if (kls_hybrid_btf_row_solve_capable(solver, NULL, NULL, NULL)) {
-    /* Retain the complete row numeric long enough to measure its hybrid
-       solve.  The steady solve audit above will request one published
-       column trial and permanently choose that representation if its
-       measured publish+solve lifecycle is cheaper. */
-    return 0;
   }
   if (solver->symbolic->nblocks == 1u && solver->row_solve_partition_ready) {
     return 0;
@@ -16640,21 +16479,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       row_private_thread_ptr != NULL && row_private_group_mask != NULL) {
     row_ordered_private_queue =
       kls_row_refactor_private_thread_order_valid(
-        solver, row_private_groups, row_private_thread_ptr,
-        row_private_group_mask, thread_count);
-  }
-  const char *row_solve_separator_env =
-    getenv("KLS_ROW_SOLVE_SEPARATOR");
-  const int build_row_solve_separator =
-    row_solve_separator_env != NULL && row_solve_separator_env[0] != '\0' &&
-    !(row_solve_separator_env[0] == '0' &&
-      row_solve_separator_env[1] == '\0');
-  if (build_row_solve_separator &&
-      !solver->row_solve_separator_schedule_attempted &&
-      use_row_ready_queue && row_private_groups != NULL &&
-      row_private_thread_ptr != NULL && row_private_group_mask != NULL) {
-    solver->row_solve_separator_schedule_attempted = 1;
-    (void)kls_update_row_solve_separator_plan_from_row_schedule(
         solver, row_private_groups, row_private_thread_ptr,
         row_private_group_mask, thread_count);
   }

@@ -1123,9 +1123,6 @@ struct kls_solver {
   UF_long *row_solve_l_sparse_level_rows;
   UF_long *row_solve_u_sparse_level_ptr;
   UF_long *row_solve_u_sparse_level_rows;
-  kls_first_separator_queue_plan row_solve_separator_plan;
-  int row_solve_separator_thread_count;
-  int row_solve_separator_schedule_attempted;
   kls_row_solve_transpose_plan row_solve_ut_plan;
   kls_row_solve_transpose_plan row_solve_lt_plan;
   UF_long row_refactor_work_ready_queue_run_count;
@@ -2246,8 +2243,6 @@ static double kls_row_refactor_dense_group_panel_entries(
   UF_long trailing_len);
 static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
                                                         UF_long trailing_len);
-static int kls_try_parallel_row_solve_diagonal_work(kls_solver *solver,
-                                                     double *work);
 static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x);
 static int kls_pts_solve_available(const kls_solver *solver);
 static int kls_pts_refactor_ready(const kls_solver *solver);
@@ -3015,13 +3010,6 @@ static void kls_clear_row_solve_partition(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->row_solve_separator_plan.private_rows);
-  free(solver->row_solve_separator_plan.pipeline_rows);
-  free(solver->row_solve_separator_plan.thread_ptr);
-  memset(&solver->row_solve_separator_plan, 0,
-         sizeof(solver->row_solve_separator_plan));
-  solver->row_solve_separator_thread_count = 0;
-  solver->row_solve_separator_schedule_attempted = 0;
   kls_clear_row_solve_transpose_plan(&solver->row_solve_ut_plan);
   kls_clear_row_solve_transpose_plan(&solver->row_solve_lt_plan);
   free(solver->row_solve_l_slice_bounds);

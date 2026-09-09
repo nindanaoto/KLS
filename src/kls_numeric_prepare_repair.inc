@@ -9186,12 +9186,6 @@ static int kls_row_refactor_private_thread_order_valid(
   const UF_long *private_thread_ptr,
   const unsigned char *private_group_mask,
   int thread_count);
-static int kls_update_row_solve_separator_plan_from_row_schedule(
-  kls_solver *solver,
-  const UF_long *private_groups,
-  const UF_long *private_thread_ptr,
-  const unsigned char *private_group_mask,
-  int thread_count);
 
 static void kls_build_group_work(kls_solver *solver, UF_long group_count) {
   if (solver == NULL || solver->row_refactor_group_work == NULL) {
@@ -12820,116 +12814,60 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
      imbalanced even though the pre-closure estimate was balanced.  Recompute
      component weights from the groups that actually remain private and run
      the same largest-first assignment again. */
-  {
-    const char *rebalance_env =
-      getenv("KLS_ROW_REFACTOR_REBALANCE_PRIVATE");
-    const int rebalance_private =
-      rebalance_env != NULL
-        ? (rebalance_env[0] != '\0' &&
-           !(rebalance_env[0] == '0' && rebalance_env[1] == '\0'))
-        : solver->dense_spiked_original_pivot_path;
-    if (rebalance_private) {
-      memset(component_group_count, 0,
-             component_count_size * sizeof(*component_group_count));
-      memset(component_work, 0,
-             component_count_size * sizeof(*component_work));
-      memset(thread_work, 0, thread_count_size * sizeof(*thread_work));
-      for (UF_long component = 0; component < component_count; ++component) {
-        component_thread[component] = -1;
-      }
-
-      UF_long retained_component_count = 0;
-      for (UF_long group = 0; group < group_count; ++group) {
-        if (!private_group_mask[group]) {
-          continue;
-        }
-        const unsigned int component = group_component[group];
-        if ((UF_long)component >= component_count) {
-          KLS_FREE_SEPARATOR_QUEUE_TEMP();
-          return 0;
-        }
-        if (component_group_count[component] == 0u) {
-          candidate_entries[retained_component_count].component = component;
-          candidate_entries[retained_component_count].kind = 0u;
-          candidate_entries[retained_component_count].work = 0.0;
-          retained_component_count++;
-        }
-        component_group_count[component]++;
-        component_work[component] +=
-          kls_row_refactor_separator_schedule_work(
-            solver, group, include_group_overhead);
-      }
-      for (UF_long pos = 0; pos < retained_component_count; ++pos) {
-        candidate_entries[pos].work =
-          component_work[candidate_entries[pos].component];
-      }
-      qsort(candidate_entries, (size_t)retained_component_count,
-            sizeof(*candidate_entries),
-            kls_compare_separator_component_work_desc);
-      for (UF_long pos = 0; pos < retained_component_count; ++pos) {
-        const unsigned int component = candidate_entries[pos].component;
-        int target = 0;
-        double target_work = thread_work[0];
-        for (int tid = 1; tid < thread_count; ++tid) {
-          if (thread_work[tid] < target_work) {
-            target = tid;
-            target_work = thread_work[tid];
-          }
-        }
-        component_thread[component] = target;
-        thread_work[target] += component_work[component];
-      }
-      assigned_component_count = retained_component_count;
+  if (solver->dense_spiked_original_pivot_path) {
+    memset(component_group_count, 0,
+           component_count_size * sizeof(*component_group_count));
+    memset(component_work, 0,
+           component_count_size * sizeof(*component_work));
+    memset(thread_work, 0, thread_count_size * sizeof(*thread_work));
+    for (UF_long component = 0; component < component_count; ++component) {
+      component_thread[component] = -1;
     }
-  }
 
-  /* A separator component is a good ownership seed, but numeric L edges can
-     still cross between two components assigned to different workers.  The
-     dependency-ready implementation tolerates those edges by spinning.  For
-     the static-private variant, promote each cross-thread target (and, in
-     the same topological pass, all of its descendants) to the pipeline.  Row
-     groups are numbered in factor order, so every successor is visited after
-     its predecessor and one linear pass is sufficient. */
-  const char *promote_cross_thread_env =
-    getenv("KLS_ROW_REFACTOR_PROMOTE_CROSS_THREAD_PRIVATE");
-  const int promote_cross_thread_private =
-    promote_cross_thread_env != NULL &&
-    promote_cross_thread_env[0] != '\0' &&
-    !(promote_cross_thread_env[0] == '0' &&
-      promote_cross_thread_env[1] == '\0');
-  if (promote_cross_thread_private) {
+    UF_long retained_component_count = 0;
     for (UF_long group = 0; group < group_count; ++group) {
-      const int source_private = private_group_mask[group] ? 1 : 0;
-      const int source_thread = source_private
-        ? component_thread[group_component[group]] : -1;
-      const UF_long begin = solver->row_refactor_group_successor_ptr[group];
-      const UF_long end =
-        solver->row_refactor_group_successor_ptr[group + 1u];
-      if (begin > end ||
-          end > solver->row_refactor_group_dependency_edges) {
+      if (!private_group_mask[group]) {
+        continue;
+      }
+      const unsigned int component = group_component[group];
+      if ((UF_long)component >= component_count) {
         KLS_FREE_SEPARATOR_QUEUE_TEMP();
         return 0;
       }
-      for (UF_long pos = begin; pos < end; ++pos) {
-        const UF_long successor =
-          solver->row_refactor_group_successor_groups[pos];
-        if (successor <= group || successor >= group_count) {
-          KLS_FREE_SEPARATOR_QUEUE_TEMP();
-          return 0;
-        }
-        if (!private_group_mask[successor]) {
-          continue;
-        }
-        const int successor_thread =
-          component_thread[group_component[successor]];
-        if (!source_private || source_thread != successor_thread) {
-          private_group_mask[successor] = 0u;
-          pipeline_group_count++;
-          closure_group_count++;
+      if (component_group_count[component] == 0u) {
+        candidate_entries[retained_component_count].component = component;
+        candidate_entries[retained_component_count].kind = 0u;
+        candidate_entries[retained_component_count].work = 0.0;
+        retained_component_count++;
+      }
+      component_group_count[component]++;
+      component_work[component] +=
+        kls_row_refactor_separator_schedule_work(
+          solver, group, include_group_overhead);
+    }
+    for (UF_long pos = 0; pos < retained_component_count; ++pos) {
+      candidate_entries[pos].work =
+        component_work[candidate_entries[pos].component];
+    }
+    qsort(candidate_entries, (size_t)retained_component_count,
+          sizeof(*candidate_entries),
+          kls_compare_separator_component_work_desc);
+    for (UF_long pos = 0; pos < retained_component_count; ++pos) {
+      const unsigned int component = candidate_entries[pos].component;
+      int target = 0;
+      double target_work = thread_work[0];
+      for (int tid = 1; tid < thread_count; ++tid) {
+        if (thread_work[tid] < target_work) {
+          target = tid;
+          target_work = thread_work[tid];
         }
       }
+      component_thread[component] = target;
+      thread_work[target] += component_work[component];
     }
+    assigned_component_count = retained_component_count;
   }
+
 
   UF_long private_group_count = 0;
   for (UF_long group = 0; group < group_count; ++group) {
@@ -13187,344 +13125,6 @@ static int kls_row_refactor_private_thread_order_valid(
 }
 
 
-/* Derive a triangular-solve partition from the row-refactor schedule's group
-   ownership.  Refactor workers may use dependency-ready waits, so their queue
-   order is not necessarily topological; solve queues are instead emitted in
-   factor-row order.  Remove every private group whose L-or-U predecessor is
-   in the pipeline or on another thread, then propagate that removal to its
-   successors.  The retained private queues are closed under both factor
-   graphs: L may run private-then-pipeline, while U may run pipeline-then-
-   private in reverse order without cross-thread races. */
-static int kls_update_row_solve_separator_plan_from_row_schedule(
-  kls_solver *solver,
-  const UF_long *private_groups,
-  const UF_long *private_thread_ptr,
-  const unsigned char *private_group_mask,
-  int thread_count) {
-  if (solver == NULL || private_groups == NULL ||
-      private_thread_ptr == NULL || private_group_mask == NULL ||
-      thread_count < 2 || solver->n == 0u ||
-      solver->row_refactor_group_count == 0u ||
-      solver->row_refactor_group_ptr == NULL ||
-      solver->row_refactor_row_group == NULL ||
-      solver->row_refactor_group_successor_ptr == NULL ||
-      solver->row_refactor_l_ptr == NULL ||
-      solver->row_refactor_l_cols == NULL ||
-      solver->row_refactor_u_ptr == NULL ||
-      solver->row_refactor_u_cols == NULL ||
-      (solver->row_refactor_group_dependency_edges > 0u &&
-       solver->row_refactor_group_successor_groups == NULL)) {
-    return 0;
-  }
-
-  const UF_long n = solver->n;
-  const UF_long group_count = solver->row_refactor_group_count;
-  const size_t group_count_size = (size_t)group_count;
-  if ((UF_long)group_count_size != group_count ||
-      group_count_size > SIZE_MAX / sizeof(int) ||
-      group_count_size > SIZE_MAX / sizeof(unsigned char) ||
-      private_thread_ptr[0] != 0u ||
-      private_thread_ptr[thread_count] > group_count ||
-      solver->row_refactor_group_ptr[0] != 0u ||
-      solver->row_refactor_group_ptr[group_count] != n) {
-    return 0;
-  }
-
-  int *group_thread =
-    (int *)malloc(group_count_size * sizeof(*group_thread));
-  UF_long *remove_queue =
-    (UF_long *)malloc(group_count_size * sizeof(*remove_queue));
-  unsigned char *private_keep =
-    (unsigned char *)malloc(group_count_size * sizeof(*private_keep));
-  if (group_thread == NULL || remove_queue == NULL || private_keep == NULL) {
-    free(group_thread);
-    free(remove_queue);
-    free(private_keep);
-    return 0;
-  }
-
-  for (UF_long group = 0; group < group_count; ++group) {
-    const UF_long row_begin = solver->row_refactor_group_ptr[group];
-    const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
-    if (row_begin > row_end || row_end > n) {
-      free(group_thread);
-      free(remove_queue);
-      free(private_keep);
-      return 0;
-    }
-    group_thread[group] = -1;
-    private_keep[group] = private_group_mask[group] ? 1u : 0u;
-  }
-  for (int tid = 0; tid < thread_count; ++tid) {
-    const UF_long begin = private_thread_ptr[tid];
-    const UF_long end = private_thread_ptr[tid + 1];
-    if (begin > end || end > private_thread_ptr[thread_count]) {
-      free(group_thread);
-      free(remove_queue);
-      free(private_keep);
-      return 0;
-    }
-    for (UF_long pos = begin; pos < end; ++pos) {
-      const UF_long group = private_groups[pos];
-      if (group >= group_count || !private_keep[group] ||
-          group_thread[group] >= 0) {
-        free(group_thread);
-        free(remove_queue);
-        free(private_keep);
-        return 0;
-      }
-      group_thread[group] = tid;
-    }
-  }
-  for (UF_long group = 0; group < group_count; ++group) {
-    if (private_keep[group] && group_thread[group] < 0) {
-      free(group_thread);
-      free(remove_queue);
-      free(private_keep);
-      return 0;
-    }
-  }
-
-  UF_long remove_head = 0u;
-  UF_long remove_tail = 0u;
-  for (UF_long group = 0; group < group_count; ++group) {
-    const UF_long begin = solver->row_refactor_group_successor_ptr[group];
-    const UF_long end =
-      solver->row_refactor_group_successor_ptr[group + 1u];
-    if (begin > end ||
-        end > solver->row_refactor_group_dependency_edges) {
-      remove_tail = group_count + 1u;
-      break;
-    }
-    for (UF_long pos = begin; pos < end; ++pos) {
-      const UF_long target_group =
-        solver->row_refactor_group_successor_groups[pos];
-      if (target_group >= group_count) {
-        remove_tail = group_count + 1u;
-        break;
-      }
-      if (private_keep[target_group] &&
-          (!private_keep[group] ||
-           group_thread[group] != group_thread[target_group] ||
-           group >= target_group)) {
-        private_keep[target_group] = 0u;
-        remove_queue[remove_tail++] = target_group;
-      }
-    }
-    if (remove_tail > group_count) {
-      break;
-    }
-  }
-  for (UF_long row = 0; row < n; ++row) {
-    const UF_long source_group = solver->row_refactor_row_group[row];
-    if (source_group >= group_count) {
-      remove_tail = group_count + 1u;
-      break;
-    }
-    const UF_long begin = solver->row_refactor_u_ptr[row];
-    const UF_long end = solver->row_refactor_u_ptr[row + 1u];
-    if (begin > end) {
-      remove_tail = group_count + 1u;
-      break;
-    }
-    for (UF_long pos = begin; pos < end; ++pos) {
-      const UF_long col = solver->row_refactor_u_cols[pos];
-      if (col <= row || col >= n) {
-        remove_tail = group_count + 1u;
-        break;
-      }
-      const UF_long target_group = solver->row_refactor_row_group[col];
-      if (target_group >= group_count) {
-        remove_tail = group_count + 1u;
-        break;
-      }
-      if (target_group == source_group || !private_keep[target_group]) {
-        continue;
-      }
-      if (!private_keep[source_group] ||
-          group_thread[source_group] != group_thread[target_group] ||
-          source_group >= target_group) {
-        private_keep[target_group] = 0u;
-        remove_queue[remove_tail++] = target_group;
-      }
-    }
-    if (remove_tail > group_count) {
-      break;
-    }
-  }
-  if (remove_tail > group_count) {
-    free(group_thread);
-    free(remove_queue);
-    free(private_keep);
-    return 0;
-  }
-
-  while (remove_head < remove_tail) {
-    const UF_long group = remove_queue[remove_head++];
-    const UF_long l_begin = solver->row_refactor_group_successor_ptr[group];
-    const UF_long l_end =
-      solver->row_refactor_group_successor_ptr[group + 1u];
-    if (l_begin > l_end ||
-        l_end > solver->row_refactor_group_dependency_edges) {
-      free(group_thread);
-      free(remove_queue);
-      free(private_keep);
-      return 0;
-    }
-    for (UF_long pos = l_begin; pos < l_end; ++pos) {
-      const UF_long successor =
-        solver->row_refactor_group_successor_groups[pos];
-      if (successor >= group_count) {
-        free(group_thread);
-        free(remove_queue);
-        free(private_keep);
-        return 0;
-      }
-      if (private_keep[successor]) {
-        private_keep[successor] = 0u;
-        remove_queue[remove_tail++] = successor;
-      }
-    }
-    const UF_long row_begin = solver->row_refactor_group_ptr[group];
-    const UF_long row_end = solver->row_refactor_group_ptr[group + 1u];
-    for (UF_long row = row_begin; row < row_end; ++row) {
-      for (UF_long pos = solver->row_refactor_u_ptr[row];
-           pos < solver->row_refactor_u_ptr[row + 1u]; ++pos) {
-        const UF_long col = solver->row_refactor_u_cols[pos];
-        if (col >= n) {
-          free(group_thread);
-          free(remove_queue);
-          free(private_keep);
-          return 0;
-        }
-        const UF_long successor = solver->row_refactor_row_group[col];
-        if (successor >= group_count) {
-          free(group_thread);
-          free(remove_queue);
-          free(private_keep);
-          return 0;
-        }
-        if (private_keep[successor]) {
-          private_keep[successor] = 0u;
-          remove_queue[remove_tail++] = successor;
-        }
-      }
-    }
-  }
-
-  UF_long private_row_count = 0u;
-  UF_long nonempty_threads = 0u;
-  UF_long max_thread_rows = 0u;
-  UF_long *thread_ptr =
-    (UF_long *)calloc((size_t)thread_count + 1u, sizeof(*thread_ptr));
-  if (thread_ptr == NULL) {
-    free(group_thread);
-    free(remove_queue);
-    free(private_keep);
-    return 0;
-  }
-  for (int tid = 0; tid < thread_count; ++tid) {
-    UF_long thread_rows = 0u;
-    for (UF_long group = 0; group < group_count; ++group) {
-      if (private_keep[group] && group_thread[group] == tid) {
-        thread_rows += solver->row_refactor_group_ptr[group + 1u] -
-                       solver->row_refactor_group_ptr[group];
-      }
-    }
-    if (thread_rows > 0u) {
-      nonempty_threads++;
-    }
-    if (thread_rows > max_thread_rows) {
-      max_thread_rows = thread_rows;
-    }
-    if (private_row_count > n - thread_rows) {
-      free(thread_ptr);
-      free(group_thread);
-      free(remove_queue);
-      free(private_keep);
-      return 0;
-    }
-    private_row_count += thread_rows;
-    thread_ptr[tid + 1] = private_row_count;
-  }
-  if (private_row_count == 0u || private_row_count > n ||
-      nonempty_threads < 2u) {
-    free(thread_ptr);
-    free(group_thread);
-    free(remove_queue);
-    free(private_keep);
-    return 0;
-  }
-  const UF_long pipeline_row_count = n - private_row_count;
-  UF_long *private_rows =
-    (UF_long *)malloc((size_t)private_row_count * sizeof(*private_rows));
-  UF_long *pipeline_rows = pipeline_row_count > 0u
-    ? (UF_long *)malloc((size_t)pipeline_row_count * sizeof(*pipeline_rows))
-    : NULL;
-  if (private_rows == NULL ||
-      (pipeline_row_count > 0u && pipeline_rows == NULL)) {
-    free(private_rows);
-    free(pipeline_rows);
-    free(thread_ptr);
-    free(group_thread);
-    free(remove_queue);
-    free(private_keep);
-    return 0;
-  }
-
-  UF_long private_pos = 0u;
-  for (int tid = 0; tid < thread_count; ++tid) {
-    for (UF_long group = 0; group < group_count; ++group) {
-      if (!private_keep[group] || group_thread[group] != tid) {
-        continue;
-      }
-      for (UF_long row = solver->row_refactor_group_ptr[group];
-           row < solver->row_refactor_group_ptr[group + 1u]; ++row) {
-        private_rows[private_pos++] = row;
-      }
-    }
-  }
-  UF_long pipeline_pos = 0u;
-  for (UF_long group = 0; group < group_count; ++group) {
-    if (private_keep[group]) {
-      continue;
-    }
-    for (UF_long row = solver->row_refactor_group_ptr[group];
-         row < solver->row_refactor_group_ptr[group + 1u]; ++row) {
-      pipeline_rows[pipeline_pos++] = row;
-    }
-  }
-  if (private_pos != private_row_count ||
-      pipeline_pos != pipeline_row_count) {
-    free(private_rows);
-    free(pipeline_rows);
-    free(thread_ptr);
-    free(group_thread);
-    free(remove_queue);
-    free(private_keep);
-    return 0;
-  }
-
-  free(solver->row_solve_separator_plan.private_rows);
-  free(solver->row_solve_separator_plan.pipeline_rows);
-  free(solver->row_solve_separator_plan.thread_ptr);
-  memset(&solver->row_solve_separator_plan, 0,
-         sizeof(solver->row_solve_separator_plan));
-  solver->row_solve_separator_plan.private_rows = private_rows;
-  solver->row_solve_separator_plan.pipeline_rows = pipeline_rows;
-  solver->row_solve_separator_plan.thread_ptr = thread_ptr;
-  solver->row_solve_separator_plan.private_rows_count = private_row_count;
-  solver->row_solve_separator_plan.pipeline_rows_count = pipeline_row_count;
-  solver->row_solve_separator_plan.nonempty_threads = nonempty_threads;
-  solver->row_solve_separator_plan.max_thread_rows = max_thread_rows;
-  solver->row_solve_separator_plan.partitioned = 1;
-  solver->row_solve_separator_thread_count = thread_count;
-
-  free(group_thread);
-  free(remove_queue);
-  free(private_keep);
-  return 1;
-}
 
 static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
   if (solver == NULL ||
