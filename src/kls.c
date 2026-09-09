@@ -601,20 +601,10 @@ struct kls_solver {
                                            pre-static METIS adoption */
   int dense_spiked_original_pivot_path; /* dense spike kept the incumbent
                                            pivoted METIS numeric */
-  int medium_spike_minfill_candidate; /* input proposed guarded AMMF/BTF */
   int medium_spike_minfill_path; /* full-diagonal medium spike selected the
                                     retained AMMF numeric */
-  int large_sparse_amf3_candidate; /* input proposed broad-column AMF3 */
-  int large_bounded_no_btf_amf_candidate; /* input proposed bounded AMF */
   int large_bounded_no_btf_amf_path; /* bounded-degree diagonal system
                                         passed the one-block AMF contract */
-  int partial_diagonal_many_block_no_btf_cycle; /* compact sparse fringe:
-                                                   one-block AMD + direct
-                                                   lean H100 horizon */
-  int sparse_diagonal_row_hub_no_btf_cycle; /* bounded diagonal-defect row
-                                               hubs use one-block AMD */
-  int large_reciprocal_hub_amd_btf_cycle; /* full-diagonal reciprocal hub
-                                             retained guarded AMD/BTF */
   int generic_nd_portfolio_selected; /* AUTO selected ND before numeric;
                                         predicted-fill rejection restores the
                                         recorded minimum-degree ordering */
@@ -1638,8 +1628,6 @@ struct kls_solver {
                                  -1 changed or declined for this numeric */
   /* Cold policy state stays at the tail so it does not shift the established
      alignment of hot refactor and solve fields above. */
-  int nearly_missing_diagonal_early_match_selected;
-  int compact_missing_diagonal_match_candidate;
   int compact_missing_diagonal_match_selected;
   /* Cold solve-accuracy policy state.  Keep it at the tail so adding
      observability does not move the established factor/refactor hot fields. */
@@ -9674,17 +9662,9 @@ static void clear_matrix(kls_solver *solver) {
   solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
   solver->dense_spiked_original_pivot_path = 0;
-  solver->medium_spike_minfill_candidate = 0;
   solver->medium_spike_minfill_path = 0;
-  solver->large_sparse_amf3_candidate = 0;
-  solver->large_bounded_no_btf_amf_candidate = 0;
   solver->large_bounded_no_btf_amf_path = 0;
-  solver->partial_diagonal_many_block_no_btf_cycle = 0;
-  solver->sparse_diagonal_row_hub_no_btf_cycle = 0;
-  solver->large_reciprocal_hub_amd_btf_cycle = 0;
   solver->value_tolerance_crossing_cycle = 0;
-  solver->nearly_missing_diagonal_early_match_selected = 0;
-  solver->compact_missing_diagonal_match_candidate = 0;
   solver->compact_missing_diagonal_match_selected = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;

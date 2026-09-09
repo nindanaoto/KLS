@@ -10132,12 +10132,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        and solve-quality acceptance gates below. */
     compact_missing_diagonal_matcher = 1;
   }
-  if (!deferred) {
-    solver->nearly_missing_diagonal_early_match_selected =
-      nearly_missing_diagonal_early_match;
-    solver->compact_missing_diagonal_match_candidate =
-      compact_missing_diagonal_matcher;
-  }
   if (deferred && !forced_match &&
       solver->rowmatch_deferred &&
       getenv("KLS_DISABLE_GENERIC_SINGLE_EXACT_MATCH_TRIAL") == NULL &&
@@ -11346,7 +11340,6 @@ matching_attempt:;
       exact_matching = 0;
       exact_matching_scaling = 0;
       spral_matching = 0;
-      solver->nearly_missing_diagonal_early_match_selected = 0;
       selected_unmatched_colamd = 1;
       /* This original-frame ordering has already won a complete numeric
          portfolio against the matched representation: both factors were
@@ -11513,14 +11506,8 @@ kls_adopt_unfactored:;
   kls_invalidate_factor_etree_stats(solver);
   solver->numeric = trial_numeric;
   kls_numeric_replaced_invalidate(solver);
-  /* Numeric replacement clears all value-derived policy state.  Republish
-     the input proposal and the representation actually adopted by this same
-     replacement after that invalidation, so preparation and public stats
-     observe the new factor rather than the discarded incumbent. */
-  solver->nearly_missing_diagonal_early_match_selected =
-    nearly_missing_diagonal_early_match;
-  solver->compact_missing_diagonal_match_candidate =
-    compact_missing_diagonal_matcher;
+  /* Republish the adopted representation after numeric invalidation so
+     preparation observes the new factor, not the discarded incumbent. */
   solver->compact_missing_diagonal_match_selected =
     compact_missing_diagonal_matcher && !selected_unmatched_colamd;
   if (solver->numeric != NULL && trial_factor_seconds > 0.0) {
