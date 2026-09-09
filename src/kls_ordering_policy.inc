@@ -13852,10 +13852,6 @@ static int kls_choose_symbolic_inner(UF_long n,
         if (status == KLS_OK) {
           *selected_ordering_out = KLS_ORDERING_AMD;
           *score_out = symbolic_score(*symbolic_out);
-          if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-            fprintf(stderr,
-                    "KLS block: analysis shortcut (AMD baseline)\n");
-          }
           return KLS_OK;
         }
       }
@@ -15317,10 +15313,6 @@ static int choose_symbolic_for_pattern(UF_long n,
          (case9: 20ms of a 23ms analyze at n=14K) and the block
          ordering supersedes the block-triangular form anyway */
       amd_opts.use_btf = 0;
-      if (getenv("KLS_TRACE_PREDICTED") != NULL) {
-        fprintf(stderr, "KLS choose: block structure detected -"
-                " AMD placeholder, no BTF, scoring skipped\n");
-      }
       return choose_symbolic_for_pattern(n, col_ptr, row_idx, &amd_opts,
                                          symbolic_out, common_out,
                                          selected_ordering_out, score_out,

@@ -2852,16 +2852,6 @@ static int kls_first_separator_private_ownership_valid(
         const int owner = row_owner[col];
         if (owner == -1 ||
             (post_rank[col] <= post_rank[row] && owner != tid)) {
-          if (getenv("KLS_TRACE_FIRST_SEPARATOR_OWNERSHIP") != NULL) {
-            fprintf(stderr,
-                    "KLS first separator ownership conflict:"
-                    " tid=%d row=%" PRIu64 " col=%" PRIu64
-                    " post_row=%" PRIu64 " post_col=%" PRIu64
-                    " owner=%d oldcol=%" PRIu64 "\n",
-                    tid, (uint64_t)row, (uint64_t)col,
-                    (uint64_t)post_rank[row], (uint64_t)post_rank[col], owner,
-                    (uint64_t)oldcol);
-          }
           ok = 0;
           break;
         }
