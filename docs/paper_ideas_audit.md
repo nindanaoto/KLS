@@ -13822,6 +13822,10 @@ direction: the slow tail has enough contiguous producer-run surface for a
 coarse row-major/current-state owner, and the missing piece is not another BLAS
 threshold, ready queue, or scalar scatter cleanup.
 
+Historical note: the executor later gained structural default selection.
+Its environment override was removed in `row_policy_control_trim.md`;
+the default executor and its safety checks remain.
+
 The first direct BTF scalar producer-run executor was implemented behind
 `KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` and kept default execution unchanged.
 The unsafe wait-mode mutation hazard was fixed before validation: the executor

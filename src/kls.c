@@ -2748,10 +2748,6 @@ static inline int kls_env_flag_enabled(const char *name) {
 
 static int kls_refactor_btf_scalar_run_exec_enabled(
   const kls_solver *solver) {
-  const char *value = getenv("KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC");
-  if (value != NULL && value[0] != '\0') {
-    return !(value[0] == '0' && value[1] == '\0');
-  }
   if (solver == NULL ||
       solver->symbolic == NULL || solver->symbolic->nblocks <= 1u ||
       solver->options.threads < 2 ||

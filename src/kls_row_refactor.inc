@@ -13,18 +13,6 @@ static int kls_row_refactor_env_disabled(void) {
 /* Predicted-pattern numerics retain their column refactor engines; the
    ordinary row-policy gates below exclude predicted numeric factors. */
 
-/* The row machinery is available for explicit experiments and for the
-   high-work candidates below, but should not be prepared indiscriminately:
-   its O(fill) metadata can dominate ordinary factors. */
-static int kls_auto_row_refactor_policy_enabled(void) {
-  if (kls_row_refactor_env_enabled()) {
-    return 1;
-  }
-  const char *value = getenv("KLS_ENABLE_AUTO_ROW_REFACTOR");
-  return value != NULL && value[0] != '\0' &&
-         !(value[0] == '0' && value[1] == '\0');
-}
-
 /* The row executor's setup is not worthwhile for ordinary sparse factors,
    but the column EGraph's irregular scatter stream becomes dominant for the
    very large dependency graphs.  These cases have enough repeated numeric
@@ -142,24 +130,6 @@ static int kls_cblas_supernode_env_enabled(void) {
      this build provides CBLAS and retain =0 for diagnostic fallback. */
   return value == NULL || value[0] == '\0' ||
          !(value[0] == '0' && value[1] == '\0');
-}
-
-static UF_long kls_cblas_panel_block_rows(void) {
-  static UF_long cached;
-  static int initialized;
-  if (!initialized) {
-    cached = KLS_ROW_REFACTOR_CBLAS_PANEL_BLOCK_ROWS;
-    const char *env = getenv("KLS_CBLAS_PANEL_BLOCK_ROWS");
-    if (env != NULL && *env != '\0') {
-      char *end = NULL;
-      const unsigned long long parsed = strtoull(env, &end, 10);
-      if (end != env && *end == '\0' && parsed >= 1u && parsed <= 256u) {
-        cached = (UF_long)parsed;
-      }
-    }
-    initialized = 1;
-  }
-  return cached;
 }
 
 static int kls_cblas_work_allows(double work, double copied_entries) {
@@ -424,7 +394,7 @@ static int kls_auto_row_refactor_cost_allows(const kls_solver *solver) {
 }
 
 static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
-  if (!kls_auto_row_refactor_policy_enabled() &&
+  if (!kls_row_refactor_env_enabled() &&
       !kls_auto_row_refactor_high_work_candidate(solver) &&
       (solver == NULL || solver->n > 64u)) {
     return 0;
@@ -447,7 +417,7 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
    the quantity a SPICE cycle actually pays. */
 static int kls_row_refactor_acceptance_structurally_ready(
   const kls_solver *solver) {
-  return (kls_auto_row_refactor_policy_enabled() ||
+  return (kls_row_refactor_env_enabled() ||
           kls_auto_row_refactor_high_work_candidate(solver) ||
           (solver != NULL &&
            (solver->n <= 64u))) &&
@@ -6178,7 +6148,7 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
   double *elapsed) {
   if (solver == NULL || elapsed == NULL ||
       kls_row_refactor_env_disabled() ||
-      (!kls_auto_row_refactor_policy_enabled() &&
+      (!kls_row_refactor_env_enabled() &&
        !kls_auto_row_refactor_high_work_candidate(solver)) ||
       solver->options.threads <= 1 ||
       solver->row_refactor_auto_enabled ||
@@ -11855,7 +11825,7 @@ static int kls_compact_dense_panel_factor_cblas_unchecked(
     dense_panel[i * width + i] = udiag[row_begin + i];
   }
 
-  const UF_long panel_block_rows = kls_cblas_panel_block_rows();
+  const UF_long panel_block_rows = KLS_ROW_REFACTOR_CBLAS_PANEL_BLOCK_ROWS;
   for (UF_long k = 0; k < width; k += panel_block_rows) {
     UF_long block = panel_block_rows;
     if (block > width - k) {
