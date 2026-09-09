@@ -8854,12 +8854,10 @@ static int kls_row_first_parallel_factor_block(
   UF_long row_pipeline_etree_prefactor_wait_deps = 0;
   UF_long open_panel_start = KLS_KLU_EMPTY;
   UF_long open_panel_end = KLS_KLU_EMPTY;
-  UF_long trace_active_rows = 0;
-  int trace_etree_attempted = 0;
-  int trace_etree_succeeded = 0;
-  int trace_seed_succeeded = 0;
-  int trace_pipeline_succeeded = 0;
-  int trace_commit_attempted = 0;
+  int repair_etree_attempted = 0;
+  int repair_etree_succeeded = 0;
+  int repair_seed_succeeded = 0;
+  int repair_pipeline_succeeded = 0;
   kls_row_first_supernode_panel_cache row_supernode_panel_cache;
   memset(&row_supernode_panel_cache, 0, sizeof(row_supernode_panel_cache));
   kls_row_first_workspace row_workspace;
@@ -9289,7 +9287,6 @@ static int kls_row_first_parallel_factor_block(
           active_rows > pipeline_end - pipeline_begin) {
         goto cleanup;
       }
-      trace_active_rows = active_rows;
       if (use_separator_for_block) {
         UF_long scoped_rows = 0;
         if (!kls_row_first_validate_tail_separator_scope(
@@ -9413,11 +9410,11 @@ static int kls_row_first_parallel_factor_block(
     UF_long pipeline_etree_prefactor_rows = 0;
     UF_long pipeline_etree_prefactor_wait_rows = 0;
     UF_long pipeline_etree_prefactor_wait_deps = 0;
-    trace_etree_attempted =
+    repair_etree_attempted =
       use_active_mask && active_rows > 1u &&
       shared->block_pipeline_etree_tail_order;
-    if (trace_etree_attempted) {
-      trace_etree_succeeded = kls_try_row_first_etree_ready_tail_repair(
+    if (repair_etree_attempted) {
+      repair_etree_succeeded = kls_try_row_first_etree_ready_tail_repair(
         worker, block, k1, nk, &row_ctx, row_order, active_mask,
         active_rows, shared->block_pipeline_begin,
         shared->block_pipeline_end, reserve_entries, &l_entries,
@@ -9433,7 +9430,7 @@ static int kls_row_first_parallel_factor_block(
         &row_pipeline_pivot_tail_rows,
         &row_pipeline_pivot_restarts);
     }
-    if (trace_etree_succeeded) {
+    if (repair_etree_succeeded) {
       row_pipeline_rows = active_rows;
       row_pipeline_threads = row_pipeline_etree_ready_threads;
       row_pipeline_etree_ready_rows = pipeline_etree_ready_rows;
@@ -9449,7 +9446,7 @@ static int kls_row_first_parallel_factor_block(
         &row_supernode_panel_cache, &row_workspace, nk, &open_panel_start,
         &open_panel_end);
       if (!separator_private_executed) {
-        trace_seed_succeeded = kls_row_first_parallel_seed_preserved_rows(
+        repair_seed_succeeded = kls_row_first_parallel_seed_preserved_rows(
               worker, block, k1, nk,
               use_active_mask ? shared->block_pipeline_begin : pipeline_begin,
               use_active_mask ? shared->block_pipeline_end : pipeline_end,
@@ -9457,11 +9454,11 @@ static int kls_row_first_parallel_factor_block(
               &l_entries, &u_entries,
               &row_workspace, row_done, &row_supernode_panel_cache,
               &open_panel_start, &open_panel_end);
-        if (!trace_seed_succeeded) {
+        if (!repair_seed_succeeded) {
           goto cleanup;
         }
       }
-      trace_pipeline_succeeded = kls_row_first_run_restartable_pipeline_suffix(
+      repair_pipeline_succeeded = kls_row_first_run_restartable_pipeline_suffix(
             &row_ctx, row_order, active_rank, pipeline_begin, pipeline_end,
             shared->block_pipeline_thread_count,
             &row_workspace, &l_entries, &u_entries, worker->udiag_values,
@@ -9475,7 +9472,7 @@ static int kls_row_first_parallel_factor_block(
             row_workspace.supernode_panel_cache != NULL
               ? &row_supernode_panel_cache : NULL,
             &open_panel_start, &open_panel_end);
-      if (!trace_pipeline_succeeded) {
+      if (!repair_pipeline_succeeded) {
         goto cleanup;
       }
       if (separator_private_executed) {
@@ -9560,7 +9557,6 @@ static int kls_row_first_parallel_factor_block(
   kls_row_first_stats_add(&active_rank_pivot_panel_rebuild_rows,
                           row_stats.active_rank_pivot_panel_rebuild_rows);
 
-  trace_commit_attempted = 1;
   ok = kls_row_first_parallel_commit_block(
     worker, block, k1, nk, worker->row_ptr, row_cols, row_input_pos,
     local_row_order, &l_entries, &u_entries, dynamic_column_pivots,
@@ -9590,17 +9586,6 @@ static int kls_row_first_parallel_factor_block(
     row_pipeline_separator_split_components);
 
 cleanup:
-  if (!ok && getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
-    fprintf(stderr,
-            "KLS row repair block stage: block=%ld active=%ld"
-            " etree=%d/%d seed=%d pipeline=%d commit=%d"
-            " L=%ld U=%ld pivots=%ld\n",
-            (long)block, (long)trace_active_rows, trace_etree_attempted,
-            trace_etree_succeeded, trace_seed_succeeded,
-            trace_pipeline_succeeded, trace_commit_attempted,
-            (long)l_entries.count, (long)u_entries.count,
-            (long)row_stats.dynamic_column_pivots);
-  }
   kls_row_first_supernode_panel_cache_free(&row_supernode_panel_cache);
   worker->supernode_workspace = row_workspace.supernode_workspace;
   worker->supernode_workspace_capacity =
@@ -9678,27 +9663,6 @@ static int kls_try_row_first_rebuild_rejected_block(
       (solver->common.scale <= 0 && solver->numeric->Rs != NULL) ||
       solver->numeric->lnz < old_lnz_block ||
       solver->numeric->unz < old_unz_block) {
-    if (getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
-      fprintf(stderr,
-              "KLS rejected-block row repair ineligible: block=%ld k1=%ld"
-              " nk=%ld reject=%ld n=%ld nblocks=%ld maxblock=%ld"
-              " scale=%ld Rs=%d lnz=%ld/%ld unz=%ld/%ld\n",
-              (long)block, (long)k1, (long)nk, (long)rejected_pivot,
-              (long)(solver != NULL ? solver->n : 0u),
-              (long)(solver != NULL && solver->symbolic != NULL
-                       ? solver->symbolic->nblocks : 0u),
-              (long)(solver != NULL && solver->symbolic != NULL
-                       ? solver->symbolic->maxblock : 0u),
-              (long)(solver != NULL ? solver->common.scale : 0L),
-              solver != NULL && solver->numeric != NULL &&
-                solver->numeric->Rs != NULL,
-              (long)(solver != NULL && solver->numeric != NULL
-                       ? solver->numeric->lnz : 0u),
-              (long)old_lnz_block,
-              (long)(solver != NULL && solver->numeric != NULL
-                       ? solver->numeric->unz : 0u),
-              (long)old_unz_block);
-    }
     return 0;
   }
 
@@ -10189,22 +10153,6 @@ static int kls_try_row_first_rebuild_rejected_block(
   return 1;
 
 fail:
-  if (getenv("KLS_TRACE_FAST_REJECT_REPAIR") != NULL) {
-    fprintf(stderr,
-            "KLS rejected-block row repair failed: block=%ld k1=%ld nk=%ld"
-            " reject=%ld status=%ld shared_failed=%d committed=%ld"
-            " lnz=%ld unz=%ld etree_mask=%d active_rows=%ld"
-            " pipeline_runs=%ld pivot_restarts=%ld\n",
-            (long)block, (long)k1, (long)nk, (long)rejected_pivot,
-            (long)(solver != NULL ? solver->common.status : -999L),
-            atomic_load_explicit(&shared.failed, memory_order_acquire),
-            (long)shared.committed_blocks, (long)shared.total_lnz,
-            (long)shared.total_unz,
-            shared.block_pipeline_active_mask != NULL,
-            (long)shared.block_pipeline_active_rows,
-            (long)shared.row_pipeline_runs,
-            (long)shared.row_pipeline_pivot_restarts);
-  }
   if (snapshot_ready) {
     Unit *current_lu = solver != NULL && solver->numeric != NULL &&
         solver->numeric->LUbx != NULL && block < solver->symbolic->nblocks
