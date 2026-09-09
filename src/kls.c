@@ -12510,11 +12510,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
     }
     fill_numeric_stats(solver);
-    if (getenv("KLS_TRACE_MODERATE_SINGLE_BLOCK_LEAN_DIRECT_REFACTOR") != NULL) {
-      fprintf(stderr,
-              "KLS settled lean direct refactor: n=%lu arm=%d\n",
-              (unsigned long)solver->n, solver->lean_choice);
-    }
     if (ok <= 0 || solver->common.status < 0) {
       return solver->common.status == TRILINOS_KLU_SINGULAR
         ? KLS_ERR_SINGULAR : KLS_ERR_REFACTOR_FAILED;
@@ -12533,22 +12528,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     (solver->direct_klu_choice > 0 &&
      getenv("KLS_DISABLE_SETTLED_DIRECT_KLU_REFACTOR") == NULL &&
      kls_direct_klu_public_frame_capable(solver));
-  if (getenv("KLS_TRACE_PUBLIC_DIRECT_GATE") != NULL) {
-    static _Thread_local int traced_public_direct_gate = 0;
-    if (traced_public_direct_gate++ < 3) {
-      fprintf(stderr,
-              "KLS public-direct gate: btf=%d frame=%d path=%d probe=%d "
-              "unchanged=%d deferred=%d/%d/%d/%d/%d scale=%ld blocks=%lu\n",
-              direct_low_work_public_btf,
-              kls_direct_klu_public_frame_capable(solver),
-              (int)solver->stats.last_factor_path,
-              solver->solve_contract_probe, solver->unchanged_refactor_state,
-              solver->factor_preps_deferred, solver->prestatic_deferred,
-              solver->rowmatch_deferred, solver->metis_race_deferred,
-              solver->auto_scale_deferred, solver->common.scale,
-              (unsigned long)solver->symbolic->nblocks);
-    }
-  }
   if ((settled_direct_klu ||
        (getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_DIRECT_REFACTOR") == NULL &&
         kls_low_work_single_block_direct_public_capable(solver)) ||
@@ -12631,12 +12610,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->stats.memory_bytes = solver->common.memusage;
       solver->stats.memory_peak_bytes = solver->common.mempeak;
     }
-    if (getenv("KLS_TRACE_LOW_WORK_SINGLE_BLOCK_DIRECT_REFACTOR") != NULL ||
-        getenv("KLS_TRACE_DIRECT_KLU_TOURNAMENT") != NULL) {
-      fprintf(stderr,
-              "KLS settled direct KLU refactor: n=%lu measured=%d\n",
-              (unsigned long)solver->n, settled_direct_klu);
-    }
     if (!ok || solver->common.status < 0) {
       return solver->common.status == TRILINOS_KLU_SINGULAR
         ? KLS_ERR_SINGULAR : KLS_ERR_REFACTOR_FAILED;
@@ -12672,11 +12645,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->adaptive_refactor_seconds = kls_now_seconds() - start;
     solver->stats.refactor_seconds = solver->adaptive_refactor_seconds;
     fill_numeric_stats(solver);
-    if (getenv("KLS_TRACE_LOW_WORK_BTF_DIRECT_REFACTOR") != NULL ||
-        getenv("KLS_TRACE_COMPACT_DENSE_SPIKE_FAST_REFACTOR") != NULL) {
-      fprintf(stderr, "KLS low-work BTF direct refactor: %.3fus\n",
-              1e6 * solver->stats.refactor_seconds);
-    }
     if (ok <= 0 || solver->common.status < 0) {
       return solver->common.status == TRILINOS_KLU_SINGULAR
         ? KLS_ERR_SINGULAR : KLS_ERR_REFACTOR_FAILED;
@@ -13582,15 +13550,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
         const double restore_start = kls_now_seconds();
         ok = kls_parallel_refactor(solver, numeric_values, 0);
         elapsed = kls_now_seconds() - restore_start;
-      }
-      if (getenv("KLS_TRACE_DIRECT_KLU_TOURNAMENT") != NULL) {
-        fprintf(stderr,
-                "KLS direct KLU tournament: incumbent %.3f ms direct "
-                "%.3f ms probe %.3f ms valid=%d projected %.3f ms -> %s\n",
-                1e3 * incumbent_seconds, 1e3 * direct_seconds,
-                1e3 * probe_seconds, direct_probe_ok,
-                1e3 * projected_saving,
-                adopt_direct ? "KLU" : "INCUMBENT");
       }
     }
   }
@@ -15935,12 +15894,6 @@ static int solve_impl(kls_solver *solver,
                                 1u, x, &solver->common)
         : trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
                                1u, x, &solver->common);
-    if (getenv("KLS_TRACE_LOW_WORK_DIRECT_SOLVE") != NULL ||
-        getenv("KLS_TRACE_LOW_WORK_BTF_DIRECT_SOLVE") != NULL) {
-      fprintf(stderr, "KLS low-work direct native solve: n=%lu t=%d\n",
-              (unsigned long)solver->n,
-              solver->orientation == KLS_ORIENTATION_TRANSPOSE);
-    }
     const double direct_seconds = kls_now_seconds() - start;
     solver->base_solve_seconds = direct_seconds;
     solver->stats.solve_seconds = direct_seconds;
@@ -16219,14 +16172,6 @@ static int solve_impl(kls_solver *solver,
           vendor_ok = kls_i32_solve(solver, b, x, NULL, NULL, NULL, 0);
         }
         ok = vendor_ok;
-        if (getenv("KLS_TRACE_PLAIN_SOLVE_TOURNAMENT") != NULL) {
-          fprintf(stderr,
-                  "KLS plain solve tournament: i32 %.3f ms vendor "
-                  "%.3f ms projected %.3f ms -> %s\n",
-                  1e3 * i32_seconds, 1e3 * vendor_seconds,
-                  1e3 * projected_saving,
-                  solver->plain_solve_choice < 0 ? "VENDOR" : "I32");
-        }
       } else {
         solver->common.status = TRILINOS_KLU_OK;
         ok = kls_i32_solve(solver,
