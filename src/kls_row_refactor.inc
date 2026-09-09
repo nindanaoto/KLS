@@ -16466,34 +16466,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   int use_row_ready_queue = 0;
   int prepared_separator_flop_queue = 0;
   int prepared_separator_row_dep_queue = 0;
-  int row_separator_plan_borrowed = 0;
-  const char *separator_cache_env =
-    getenv("KLS_ENABLE_ROW_SEPARATOR_PLAN_CACHE");
-  const int separator_cache_enabled =
-    separator_cache_env != NULL && separator_cache_env[0] != '\0' &&
-    !(separator_cache_env[0] == '0' && separator_cache_env[1] == '\0');
-  const int separator_cache_available =
-    separator_cache_enabled &&
-    solver->row_refactor_separator_cache_private_groups != NULL &&
-    solver->row_refactor_separator_cache_pipeline_groups != NULL;
-  if (have_group_dag && separator_cache_available &&
-      kls_restore_row_refactor_separator_flop_plan(
-        solver, thread_count, &row_ready_groups, &row_ready_slots,
-        &row_remaining_preds, &row_tail_groups, &row_owned_private_groups,
-        &row_private_thread_ptr, &row_private_group_mask,
-        &row_ready_tail_count, &row_initial_ready_count,
-        &row_separator_flop_private_groups,
-        &row_separator_flop_pipeline_groups,
-        &row_separator_flop_closure_groups,
-        &row_separator_flop_component_count,
-        &row_separator_flop_private_threads,
-        &row_separator_flop_private_min_groups,
-        &row_separator_flop_private_max_groups,
-        &row_separator_flop_private_min_work,
-        &row_separator_flop_private_max_work)) {
-    prepared_separator_flop_queue = 1;
-    row_separator_plan_borrowed = 1;
-  } else if (have_group_dag &&
+  if (have_group_dag &&
       getenv("KLS_DISABLE_ROW_REFACTOR_SEPARATOR_FLOP_QUEUE") == NULL &&
       kls_prepare_row_refactor_separator_flop_ready_queue(
         solver, thread_count, &row_ready_groups, &row_ready_slots,
@@ -16557,25 +16530,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
           &row_separator_flop_private_min_work,
           &row_separator_flop_private_max_work);
     }
-  }
-  if (separator_cache_enabled && !row_separator_plan_borrowed &&
-      prepared_separator_flop_queue &&
-      !prepared_separator_row_dep_queue &&
-      !(prefer_partial_supernode_pipeline &&
-        row_separator_flop_pipeline_groups >=
-          row_separator_flop_private_groups)) {
-    (void)kls_cache_row_refactor_separator_flop_plan(
-      solver, thread_count, row_owned_private_groups,
-      row_private_thread_ptr, row_private_group_mask,
-      row_separator_flop_private_groups,
-      row_separator_flop_pipeline_groups,
-      row_separator_flop_closure_groups,
-      row_separator_flop_component_count,
-      row_separator_flop_private_threads,
-      row_separator_flop_private_min_groups,
-      row_separator_flop_private_max_groups,
-      row_separator_flop_private_min_work,
-      row_separator_flop_private_max_work);
   }
   if (prepared_separator_row_dep_queue) {
     use_row_ready_queue = 1;
@@ -16728,38 +16682,28 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   if (use_row_ready_queue && row_separator_flop_queue &&
       !row_dep_ready_queue && row_private_groups != NULL &&
       row_private_thread_ptr != NULL && row_private_group_mask != NULL) {
-    if (row_separator_plan_borrowed &&
-        solver->row_refactor_separator_cache_order_checked &&
-        solver->row_refactor_separator_cache_ordered_private == 1) {
-      row_ordered_private_queue = 1;
-    } else {
-      row_ordered_private_queue =
-        kls_row_refactor_private_thread_order_valid(
+    row_ordered_private_queue =
+      kls_row_refactor_private_thread_order_valid(
+        solver, row_private_groups, row_private_thread_ptr,
+        row_private_group_mask, thread_count);
+    const char *external_wait_env =
+      getenv("KLS_ROW_REFACTOR_ORDER_PRIVATE_WITH_EXTERNAL_WAITS");
+    const int order_with_external_waits =
+      external_wait_env != NULL && external_wait_env[0] != '\0' &&
+      !(external_wait_env[0] == '0' && external_wait_env[1] == '\0');
+    if (!row_ordered_private_queue && order_with_external_waits) {
+      row_private_external_wait_mask =
+        kls_row_refactor_private_external_wait_mask(
           solver, row_private_groups, row_private_thread_ptr,
-          row_private_group_mask, thread_count);
-      const char *external_wait_env =
-        getenv("KLS_ROW_REFACTOR_ORDER_PRIVATE_WITH_EXTERNAL_WAITS");
-      const int order_with_external_waits =
-        external_wait_env != NULL && external_wait_env[0] != '\0' &&
-        !(external_wait_env[0] == '0' && external_wait_env[1] == '\0');
-      if (!row_ordered_private_queue && order_with_external_waits) {
-        row_private_external_wait_mask =
-          kls_row_refactor_private_external_wait_mask(
-            solver, row_private_groups, row_private_thread_ptr,
-            row_private_group_mask, thread_count,
-            &row_private_external_wait_targets);
-        if (row_private_external_wait_mask != NULL &&
-            row_private_external_wait_targets > 0u) {
-          row_ordered_private_queue = 2;
-        } else {
-          free(row_private_external_wait_mask);
-          row_private_external_wait_mask = NULL;
-          row_private_external_wait_targets = 0u;
-        }
-      }
-      if (separator_cache_enabled && row_ordered_private_queue == 1) {
-        solver->row_refactor_separator_cache_order_checked = 1;
-        solver->row_refactor_separator_cache_ordered_private = 1;
+          row_private_group_mask, thread_count,
+          &row_private_external_wait_targets);
+      if (row_private_external_wait_mask != NULL &&
+          row_private_external_wait_targets > 0u) {
+        row_ordered_private_queue = 2;
+      } else {
+        free(row_private_external_wait_mask);
+        row_private_external_wait_mask = NULL;
+        row_private_external_wait_targets = 0u;
       }
     }
   }
@@ -17058,11 +17002,9 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   }
 
   kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
-  int component_calibration_installed = 0;
   if (component_seconds != NULL && !shared->invalid &&
       !shared->pivot_rejected && !shared->singular) {
-    component_calibration_installed =
-      kls_install_row_refactor_component_calibration(
+    (void)kls_install_row_refactor_component_calibration(
         solver, row_private_groups, row_private_group_count,
         component_seconds, solver->separator.component_count);
   }
@@ -17135,25 +17077,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_component_seconds_count = 0u;
   free(component_seconds);
   pthread_mutex_unlock(&shared->lock);
-  if (row_separator_plan_borrowed &&
-      row_owned_private_groups != NULL &&
-      row_private_thread_ptr != NULL && row_private_group_mask != NULL &&
-      solver->row_refactor_separator_cache_private_groups == NULL &&
-      solver->row_refactor_separator_cache_thread_ptr == NULL &&
-      solver->row_refactor_separator_cache_private_mask == NULL) {
-    solver->row_refactor_separator_cache_private_groups =
-      row_owned_private_groups;
-    solver->row_refactor_separator_cache_thread_ptr =
-      row_private_thread_ptr;
-    solver->row_refactor_separator_cache_private_mask =
-      row_private_group_mask;
-    row_owned_private_groups = NULL;
-    row_private_thread_ptr = NULL;
-    row_private_group_mask = NULL;
-  }
-  if (component_calibration_installed) {
-    kls_invalidate_row_refactor_separator_cache(solver);
-  }
   free(row_owned_private_groups);
   free(row_private_thread_ptr);
   free(row_private_group_mask);
