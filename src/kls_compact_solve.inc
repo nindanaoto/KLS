@@ -1921,13 +1921,6 @@ static void kls_solve_contract_classify(kls_solver *solver,
       solver->low_rcond_solve_contract_state == 1 ? 1 : 2;
     solver->solve_contract_verified =
       solver->low_rcond_solve_contract_state == 1;
-    if (getenv("KLS_TRACE_REFINE") != NULL) {
-      fprintf(stderr,
-              "KLS contract classify: rcond=%.3e state=%d -> probe=%d\n",
-              solver->common.rcond,
-              solver->low_rcond_solve_contract_state,
-              solver->solve_contract_probe);
-    }
     return;
   }
 
@@ -1968,12 +1961,6 @@ static void kls_solve_contract_classify(kls_solver *solver,
        cannot repair shows up in the caller's residual check rather than
        costing every solve a verification sweep it always passes */
     solver->solve_contract_verified = 1;
-  }
-  if (getenv("KLS_TRACE_REFINE") != NULL) {
-    fprintf(stderr,
-            "KLS contract classify: rgrowth=%.3e -> probe=%d\n",
-            growth_common.rgrowth,
-            solver->solve_contract_probe);
   }
 }
 

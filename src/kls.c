@@ -15616,11 +15616,6 @@ static int kls_try_gmres_solve_recovery(kls_solver *solver,
          paying for an identical sparse matrix product twice. */
       carried_residual_norm2 = rnorm2;
     }
-    if (getenv("KLS_TRACE_REFINE") != NULL) {
-      fprintf(stderr,
-              "KLS GMRES recovery cycle=%d steps=%d rel2=%.3e l2ok=%d\n",
-              cycle, steps, sqrt(rnorm2 / l2_scale), verified);
-    }
   }
   free(vectors);
   return verified;
@@ -15850,12 +15845,6 @@ static int kls_try_lsqr_solve_recovery(kls_solver *solver,
         break;
       }
     }
-  }
-  if (getenv("KLS_TRACE_REFINE") != NULL) {
-    fprintf(stderr,
-            "KLS LSQR recovery: iterations=%lu/%lu verified=%d\n",
-            (unsigned long)(iterations + (verified ? 1u : 0u)),
-            (unsigned long)max_iterations, verified);
   }
   free(vectors);
   return verified;
@@ -16496,17 +16485,6 @@ static int solve_impl(kls_solver *solver,
     getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") == NULL;
   const int contract_armed = solver->solve_contract_probe == 2 &&
     !solver->in_solve_refinement && !transpose && nrhs == 1 && b != x;
-  if (getenv("KLS_TRACE_REFINE") != NULL && !solver->in_solve_refinement) {
-    fprintf(stderr,
-            "KLS refine gate: ok=%ld status=%d needs=%d ss=%d row_perm=%d"
-            " scales=%d%d values=%d b_is_x=%d probe=%d/%d\n",
-            (long)ok, (int)solver->common.status,
-            solver->numeric_needs_refinement,
-            solver->solve_refine_single_shot, solver->row_perm != NULL,
-            solver->row_scale != NULL, solver->col_scale != NULL,
-            solver->values != NULL, b == x,
-            solver->solve_contract_probe, contract_probe_wanted);
-  }
   /* A selected pivot tolerance below the caller's request is an accuracy
      risk in every numeric frame.  Transformed frames keep their current
      prepared values in solver->values, while plain pass-through frames use
@@ -16729,27 +16707,6 @@ static int solve_impl(kls_solver *solver,
           bmax = bmax < av ? av : bmax;
         }
       }
-      if (getenv("KLS_TRACE_REFINE") != NULL &&
-          (tight_tol_selected || solver->solve_recovery_active ||
-           solver->promoted_tolerance_l2_recovery_required)) {
-        fprintf(stderr,
-                "KLS promoted-tolerance L2 gate: contract=%d self=%d"
-                " kt=%d nrhs=%ld"
-                " bx=%d fmt=%d rp=%d rs=%d cs=%d sym=%d t=%d ori=%d"
-                " ord=%d n=%ld nnz=%ld blocks=%ld max=%ld\n",
-                promoted_tolerance_l2_contract, self_check_only,
-                kernel_transpose, (long)nrhs, b == x,
-                (int)solver->input_format, solver->row_perm != NULL,
-                solver->row_scale != NULL, solver->col_scale != NULL,
-                solver->symbolic != NULL, solver->options.threads,
-                (int)solver->orientation,
-                (int)solver->stats.selected_ordering, (long)solver->n,
-                (long)solver->nnz,
-                solver->symbolic != NULL
-                  ? (long)solver->symbolic->nblocks : -1L,
-                solver->symbolic != NULL
-                  ? (long)solver->symbolic->maxblock : -1L);
-      }
       /* The promoted-tolerance self-check enforces a strict margin below the
          public 1e-8 relative-L2 contract rather than maximal accuracy.  A
          weak raw draw commonly takes one correction into the e-11..e-9 band
@@ -16903,11 +16860,6 @@ static int solve_impl(kls_solver *solver,
               certified_unscaled_l2_verified = 1;
             }
             kls_remember_verified_rhs(solver, brhs, bnorm2);
-            if (getenv("KLS_TRACE_REFINE") != NULL) {
-              fprintf(stderr,
-                      "KLS refine iter=0 rel2=%.3e l2ok=1\n",
-                      sqrt(rnorm2 / l2_scale));
-            }
             break;
           }
           if (!used_parallel_plain_contract_stats) {
@@ -16972,16 +16924,6 @@ static int solve_impl(kls_solver *solver,
             }
             bounded_public_raw_l2_ok =
               isfinite(residual_upper) && residual_upper <= contract_limit;
-            if (getenv("KLS_TRACE_REFINE") != NULL) {
-              fprintf(stderr,
-                      "KLS bounded raw L2: measured=%.3e error=%.3e "
-                      "upper=%.3e limit=%.3e ok=%d\n",
-                      sqrt(rnorm2 / l2_scale),
-                      sqrt(error_norm2 / l2_scale),
-                      residual_upper / sqrt(l2_scale),
-                      contract_limit / sqrt(l2_scale),
-                      bounded_public_raw_l2_ok);
-            }
           }
         }
         const int raw_l2_ok = repeated_rhs_raw_l2_contract &&
@@ -17066,20 +17008,6 @@ static int solve_impl(kls_solver *solver,
            refinement that made this solve contract-valid. */
         if ((iter == 0 && raw_l2_ok) || verified_rhs_cache_ok) {
           kls_remember_verified_rhs(solver, brhs, bnorm2);
-        }
-        if (getenv("KLS_TRACE_REFINE") != NULL) {
-          fprintf(stderr,
-                  "KLS refine iter=%d rmax=%.3e target=%.3e rel2=%.3e"
-                  " l2ok=%d\n",
-                  iter, rmax, target,
-                  (verified_rhs_contract ||
-                   promoted_tolerance_l2_contract ||
-                   ordinary_self_check_l2_contract ||
-                   certified_unscaled_transpose_l2_contract)
-                    ? sqrt(rnorm2 / l2_scale) : -1.0,
-                  raw_l2_ok || verified_rhs_cache_ok ||
-                    ordinary_self_check_l2_ok || promoted_tolerance_l2_ok ||
-                    certified_unscaled_transpose_l2_ok);
         }
         if (initial_rmax < 0.0) {
           initial_rmax = rmax;
@@ -17168,11 +17096,6 @@ static int solve_impl(kls_solver *solver,
                never on dimensions, sparsity, ordering, or matrix identity. */
             solver->solve_contract_probe = 1;
             solver->solve_contract_verified = 1;
-            if (getenv("KLS_TRACE_REFINE") != NULL) {
-              fprintf(stderr,
-                      "KLS compact-row contract settled: rel2=%.3e\n",
-                      sqrt(rnorm2 / l2_scale));
-            }
           } else if (contract_probe_wanted) {
             /* first-solve verdict for this numeric: clean factors meet
                the componentwise line on the raw solve and never pay again;
@@ -17357,12 +17280,6 @@ static int solve_impl(kls_solver *solver,
                  update the actual numeric control as well as the caller
                  option used by cold-factor policy. */
               solver->common.tol = recovery_tolerances[attempt];
-              if (getenv("KLS_TRACE_REFINE") != NULL) {
-                fprintf(stderr,
-                        "KLS promoted-tolerance recovery refactor:"
-                        " pivot_tolerance=%.3g\n",
-                        recovery_tolerances[attempt]);
-              }
               const int factor_status =
                 kls_factor(solver, recovery_values);
               if (factor_status == KLS_OK) {
@@ -17420,11 +17337,6 @@ static int solve_impl(kls_solver *solver,
              factor path.  The ordinary full factor establishes a fresh
              robust pivot sequence and invalidates its stale descriptors. */
           solver->full_factor_preferred = 1;
-          if (getenv("KLS_TRACE_REFINE") != NULL) {
-            fprintf(stderr,
-                    "KLS certified-unscaled recovery factor: scale=%d\n",
-                    recovery_scale);
-          }
           const int factor_status = kls_factor(solver, recovery_values);
           const int recovery_status = factor_status == KLS_OK
             ? solve_impl(solver, transpose, 1, brhs, nloc, xrhs, nloc)
