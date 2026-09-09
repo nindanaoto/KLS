@@ -11,11 +11,7 @@
 #define DLONG 1
 #endif
 
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 199309L
-#endif
 #include "trilinos_klu_internal.h"
-#include <time.h>
 
 /* ========================================================================== */
 /* === KLU_factor2 ========================================================== */
@@ -34,7 +30,6 @@ static void factor2
     TRILINOS_KLU_common *Common
 )
 {
-    struct timespec kls_t0, kls_t1 ;
     double lsize ;
     double *Lnz, *Rs ;
     Int *P, *Q, *R, *Pnum, *Offp, *Offi, *Pblock, *Pinv, *Iwork,
@@ -48,8 +43,6 @@ static void factor2
     /* ---------------------------------------------------------------------- */
     /* initializations */
     /* ---------------------------------------------------------------------- */
-
-    clock_gettime (CLOCK_MONOTONIC, &kls_t0) ;
 
     Common->kls_kernel_flops = 0 ;
     Common->kls_perturb_count = 0 ;
@@ -123,18 +116,7 @@ static void factor2
 	 * the scale factors are permuted according to the final pivot row
 	 * permutation, so that Rs [k] is the scale factor for the kth row of
 	 * A(p,q) where p and q are the final row and column permutations. */
-	{
-	    struct timespec kls_ts0, kls_ts1 ;
-	    clock_gettime (CLOCK_MONOTONIC, &kls_ts0) ;
-	    TRILINOS_KLU_scale (scale, n, Ap, Ai, (double *) Ax, Rs, Pnum, Common) ;
-	    if (getenv ("KLS_TRACE_FILL") != NULL)
-	    {
-		clock_gettime (CLOCK_MONOTONIC, &kls_ts1) ;
-		fprintf (stderr, "KLS factor2: scale %.3fs\n",
-		    (double) (kls_ts1.tv_sec - kls_ts0.tv_sec) +
-		    1e-9 * (double) (kls_ts1.tv_nsec - kls_ts0.tv_nsec)) ;
-	    }
-	}
+	TRILINOS_KLU_scale (scale, n, Ap, Ai, (double *) Ax, Rs, Pnum, Common) ;
 	if (Common->status < TRILINOS_KLU_OK)
 	{
 	    /* matrix is invalid */
@@ -153,16 +135,6 @@ static void factor2
     /* factor each block using klu */
     /* ---------------------------------------------------------------------- */
 
-    {
-	struct timespec kls_tb ;
-	clock_gettime (CLOCK_MONOTONIC, &kls_tb) ;
-	if (getenv ("KLS_TRACE_FILL") != NULL)
-	{
-	    fprintf (stderr, "KLS factor2: blocks start %.3fs\n",
-		(double) (kls_tb.tv_sec - kls_t0.tv_sec) +
-		1e-9 * (double) (kls_tb.tv_nsec - kls_t0.tv_nsec)) ;
-	}
-    }
     for (block = 0 ; block < nblocks ; block++)
     {
 
@@ -293,25 +265,10 @@ static void factor2
 	    }
 
 	    /* allocates 1 arrays: LUbx [block] */
-	    {
-	    struct timespec kls_bt0, kls_bt1 ;
-	    const int kls_bprof = getenv ("KLS_TRACE_BLOCK_TIME") != NULL ;
-	    if (kls_bprof) clock_gettime (CLOCK_MONOTONIC, &kls_bt0) ;
 	    Numeric->LUsize [block] = TRILINOS_KLU_kernel_factor (nk, Ap, Ai, Ax, Q,
 		    lsize, &LUbx [block], Udiag + k1, Llen + k1, Ulen + k1,
 		    Lip + k1, Uip + k1, Pblock, &lnz_block, &unz_block,
 		    X, Iwork, k1, Pinv, Rs, Offp, Offi, Offx, Common) ;
-	    if (kls_bprof)
-	    {
-		double dt ;
-		clock_gettime (CLOCK_MONOTONIC, &kls_bt1) ;
-		dt = (double) (kls_bt1.tv_sec - kls_bt0.tv_sec) +
-		    1e-9 * (double) (kls_bt1.tv_nsec - kls_bt0.tv_nsec) ;
-		fprintf (stderr, "KLS blocktime: block %ld nk %ld %.4fs"
-			 " lnz %ld\n", (long) block, (long) nk, dt,
-			 (long) lnz_block) ;
-	    }
-	    }
 
 	    if (Common->status < TRILINOS_KLU_OK ||
 	       (Common->status == TRILINOS_KLU_SINGULAR && Common->halt_if_singular))
@@ -357,16 +314,6 @@ static void factor2
 	    /* the local pivot row permutation Pblock is no longer needed */
 	}
     }
-    {
-	struct timespec kls_tb ;
-	clock_gettime (CLOCK_MONOTONIC, &kls_tb) ;
-	if (getenv ("KLS_TRACE_FILL") != NULL)
-	{
-	    fprintf (stderr, "KLS factor2: blocks end %.3fs\n",
-		(double) (kls_tb.tv_sec - kls_t0.tv_sec) +
-		1e-9 * (double) (kls_tb.tv_nsec - kls_t0.tv_nsec)) ;
-	}
-    }
     ASSERT (nzoff == Offp [n]) ;
     PRINTF (("\n------------------- Off diagonal entries:\n")) ;
     ASSERT (TRILINOS_KLU_valid (n, Offp, Offi, Offx)) ;
@@ -375,26 +322,6 @@ static void factor2
     Numeric->unz = unz ;
     Numeric->max_lnz_block = max_lnz_block ;
     Numeric->max_unz_block = max_unz_block ;
-
-    if (getenv ("KLS_TRACE_FILL") != NULL)
-    {
-	clock_gettime (CLOCK_MONOTONIC, &kls_t1) ;
-	{
-	    extern _Thread_local double kls_construct_secs ;
-	    extern _Thread_local long kls_construct_calls ;
-	    extern _Thread_local long kls_construct_entries ;
-	    fprintf (stderr, "KLS fill: n=%ld lnz=%ld unz=%ld nzoff=%ld"
-		" wall=%.3fs construct=%.2fs/%ld/%ld\n",
-		(long) n, (long) lnz, (long) unz, (long) nzoff,
-		(double) (kls_t1.tv_sec - kls_t0.tv_sec) +
-		1e-9 * (double) (kls_t1.tv_nsec - kls_t0.tv_nsec),
-		kls_construct_secs, kls_construct_calls,
-		kls_construct_entries) ;
-	    kls_construct_secs = 0.0 ;
-	    kls_construct_calls = 0 ;
-	    kls_construct_entries = 0 ;
-	}
-    }
 
     /* compute the inverse of Pnum */
 #ifndef NDEBUG
