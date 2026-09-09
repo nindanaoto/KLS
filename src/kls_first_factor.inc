@@ -5355,7 +5355,6 @@ static int kls_row_first_partial_finish(
   kls_row_first_workspace *workspace,
   kls_row_first_entries *local_u_entries,
   kls_row_first_partial_row *state,
-  int allow_pivot,
   int *pivot_needed_out,
   int *pivoted_out,
   UF_long *selected_col_out,
@@ -5397,7 +5396,7 @@ static int kls_row_first_partial_finish(
     }
     return 0;
   }
-  if (allow_pivot && !pivot_needed && ctx->use_separator_for_block) {
+  if (!pivot_needed && ctx->use_separator_for_block) {
     const UF_long force_every = kls_row_first_debug_force_pivot_every();
     if (force_every > 0 && i % force_every == 0) {
       const UF_long alt_col =
@@ -5424,7 +5423,7 @@ static int kls_row_first_partial_finish(
     if (pivot_needed_out != NULL) {
       *pivot_needed_out = 1;
     }
-    if (!allow_pivot || selected_col == KLS_KLU_EMPTY) {
+    if (selected_col == KLS_KLU_EMPTY) {
       return 0;
     }
     const UF_long pivot_col = selected_col;
@@ -6425,7 +6424,7 @@ static void *kls_row_first_pipeline_worker_main(void *arg) {
             shared, KLS_ROW_FIRST_PIPELINE_FAIL_DEPENDENCY);
         } else if (!kls_row_first_partial_finish(
                      shared->ctx, &worker->workspace, &worker->u_entries,
-                     &state, 1, &pivot_needed, &pivoted, &selected_col,
+                     &state, &pivot_needed, &pivoted, &selected_col,
                      &selected_separator_exact,
                      &selected_separator_extent)) {
           kls_row_first_pipeline_mark_failed(

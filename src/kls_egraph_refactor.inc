@@ -1099,8 +1099,7 @@ static UF_long kls_snode_batch_consume_cached_pair(
   UF_long k1,
   UF_long producer_limit,
   const UF_long *snode_run_end,
-  const kls_egraph_refactor_shared *shared,
-  int wait_for_dependencies) {
+  const kls_egraph_refactor_shared *shared) {
   const UF_long j = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
@@ -1125,7 +1124,7 @@ static UF_long kls_snode_batch_consume_cached_pair(
   if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
     return 0;
   }
-  if (wait_for_dependencies) {
+  {
     for (UF_long i = 0; i < t; ++i) {
       if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
         return 0;
@@ -1220,8 +1219,7 @@ static UF_long kls_snode_batch_consume_cached_multi(
   UF_long k1,
   UF_long producer_limit,
   const UF_long *snode_run_end,
-  const kls_egraph_refactor_shared *shared,
-  int wait_for_dependencies) {
+  const kls_egraph_refactor_shared *shared) {
   const UF_long j =
     ui32[0] != NULL ? (UF_long)ui32[0][up[0]] : ui[0][up[0]];
   const UF_long run_end = snode_run_end[k1 + j];
@@ -1255,7 +1253,7 @@ static UF_long kls_snode_batch_consume_cached_multi(
   if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
     return 0;
   }
-  if (wait_for_dependencies) {
+  {
     for (UF_long i = 0; i < t; ++i) {
       if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
         return 0;
@@ -1813,7 +1811,7 @@ static int kls_egraph_refactor_single_unscaled_column_pair(
         const UF_long consumed = kls_snode_batch_consume_cached_pair(
           l_indices, l_values, numeric->Llen, uia, uia32, uxa, ulen_a, upa,
           xa, uib, uib32, uxb, ulen_b, upb, xb, 0u, producer_limit,
-          shared->snode_run_end, shared, 1);
+          shared->snode_run_end, shared);
         if (consumed != 0u) {
           upa += consumed;
           upb += consumed;
@@ -2020,7 +2018,7 @@ static int kls_egraph_refactor_single_unscaled_column_multi(
         const UF_long consumed = kls_snode_batch_consume_cached_multi(
           l_indices, l_values, numeric->Llen, group_count, group_ui,
           group_ui32, group_ux, group_ulen, group_up, group_xv, 0u,
-          group_producer_limit, shared->snode_run_end, shared, 1);
+          group_producer_limit, shared->snode_run_end, shared);
         if (consumed != 0u) {
           for (int g = 0; g < group_count; ++g) {
             up[members[g]] += consumed;
@@ -2056,7 +2054,7 @@ static int kls_egraph_refactor_single_unscaled_column_multi(
         if (aligned) {
           const UF_long consumed = kls_snode_batch_consume_cached_multi(
             l_indices, l_values, numeric->Llen, nc, ui, ui32, ux, ulen,
-            up, xv, 0u, all_producer_limit, shared->snode_run_end, shared, 1);
+            up, xv, 0u, all_producer_limit, shared->snode_run_end, shared);
           if (consumed != 0u) {
             for (int c = 0; c < nc; ++c) {
               up[c] += consumed;
@@ -2713,7 +2711,7 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
         const UF_long consumed = kls_snode_batch_consume_cached_pair(
           l_indices, l_values, llen, uia, uia32, uxa, ulen_a, upa, xa,
           uib, uib32, uxb, ulen_b, upb, xb, k1, producer_limit,
-          shared->snode_run_end, shared, 1);
+          shared->snode_run_end, shared);
         if (consumed != 0u) {
           upa += consumed;
           upb += consumed;
@@ -2949,7 +2947,7 @@ static int kls_egraph_refactor_btf_unscaled_column_multi(
       if (aligned) {
         const UF_long consumed = kls_snode_batch_consume_cached_multi(
           l_indices, l_values, llen, nc, ui, ui32, ux, ulen, up, xv, k1,
-          producer_limit, shared->snode_run_end, shared, 1);
+          producer_limit, shared->snode_run_end, shared);
         if (consumed != 0u) {
           for (int c = 0; c < nc; ++c) {
             up[c] += consumed;
@@ -8788,8 +8786,7 @@ static int kls_serial_refactor_tail_from_block(kls_solver *solver,
 
 static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
                                                  double *numeric_values,
-                                                 UF_long start_block,
-                                                 int check_pivots) {
+                                                 UF_long start_block) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL ||
       solver->col_ptr == NULL || solver->row_idx == NULL ||
@@ -8849,7 +8846,7 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
   UF_long singular_col = KLS_KLU_EMPTY;
   int pool_prefix_current = 0;
   if (!run_refactor_pool(solver, numeric_values, thread_count, start_block,
-                         check_pivots, &invalid, &pivot_rejected,
+                         1, &invalid, &pivot_rejected,
                          &rejected_pivot, &rejected_pivot_col,
                          &rejected_row, &rejected_multiplier_abs,
                          &rejected_pivot_abs, &rejected_candidate_abs,

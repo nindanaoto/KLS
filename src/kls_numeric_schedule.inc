@@ -4059,7 +4059,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
       int tail_ok = -1;
       tail_ok =
         kls_parallel_refactor_tail_from_block(solver, numeric_values,
-                                              tail_start, 1);
+                                              tail_start);
       if (tail_ok < 0) {
         tail_ok =
           solver->common.scale > 0

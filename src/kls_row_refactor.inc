@@ -1524,7 +1524,6 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   const uint16_t *restrict u_cols16,
   const double *restrict u_values,
   const double *restrict udiag,
-  int balanced_target_sum,
   int avx512_target,
   int compact_targets) {
   if (run < 2u || run > 8u) {
@@ -1566,7 +1565,7 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   const UF_long trailing_len = u_ptr[dep_end + 1u] - trailing_begin;
   UF_long target_offset_begin = 0u;
 #if KLS_HAVE_AVX512_KERNELS
-  if (avx512_target && balanced_target_sum && run == 8u) {
+  if (avx512_target && run == 8u) {
     if (compact_targets) {
       target_offset_begin = kls_lean_snode_target_width8_i16_avx512(
         run, x, u_cols16 + trailing_begin, trailing_values,
@@ -1595,69 +1594,6 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
   /* Dispatch once per producer supernode.  Keeping a distinct target loop
      for each short width lets the compiler retain all multipliers and row
      pointers in registers, matching CKTSO's width-specialized kernels. */
-  if (!balanced_target_sum) {
-    switch (run) {
-      case 2u:
-        KLS_LEAN_SNODE_TARGET_LOOP(
-          value -= multipliers[0] * trailing_values[0][offset];
-          value -= multipliers[1] * trailing_values[1][offset];);
-        break;
-      case 3u:
-        KLS_LEAN_SNODE_TARGET_LOOP(
-          value -= multipliers[0] * trailing_values[0][offset];
-          value -= multipliers[1] * trailing_values[1][offset];
-          value -= multipliers[2] * trailing_values[2][offset];);
-        break;
-      case 4u:
-        KLS_LEAN_SNODE_TARGET_LOOP(
-          value -= multipliers[0] * trailing_values[0][offset];
-          value -= multipliers[1] * trailing_values[1][offset];
-          value -= multipliers[2] * trailing_values[2][offset];
-          value -= multipliers[3] * trailing_values[3][offset];);
-        break;
-      case 5u:
-        KLS_LEAN_SNODE_TARGET_LOOP(
-          value -= multipliers[0] * trailing_values[0][offset];
-          value -= multipliers[1] * trailing_values[1][offset];
-          value -= multipliers[2] * trailing_values[2][offset];
-          value -= multipliers[3] * trailing_values[3][offset];
-          value -= multipliers[4] * trailing_values[4][offset];);
-        break;
-      case 6u:
-        KLS_LEAN_SNODE_TARGET_LOOP(
-          value -= multipliers[0] * trailing_values[0][offset];
-          value -= multipliers[1] * trailing_values[1][offset];
-          value -= multipliers[2] * trailing_values[2][offset];
-          value -= multipliers[3] * trailing_values[3][offset];
-          value -= multipliers[4] * trailing_values[4][offset];
-          value -= multipliers[5] * trailing_values[5][offset];);
-        break;
-      case 7u:
-        KLS_LEAN_SNODE_TARGET_LOOP(
-          value -= multipliers[0] * trailing_values[0][offset];
-          value -= multipliers[1] * trailing_values[1][offset];
-          value -= multipliers[2] * trailing_values[2][offset];
-          value -= multipliers[3] * trailing_values[3][offset];
-          value -= multipliers[4] * trailing_values[4][offset];
-          value -= multipliers[5] * trailing_values[5][offset];
-          value -= multipliers[6] * trailing_values[6][offset];);
-        break;
-      case 8u:
-        KLS_LEAN_SNODE_TARGET_LOOP(
-          value -= multipliers[0] * trailing_values[0][offset];
-          value -= multipliers[1] * trailing_values[1][offset];
-          value -= multipliers[2] * trailing_values[2][offset];
-          value -= multipliers[3] * trailing_values[3][offset];
-          value -= multipliers[4] * trailing_values[4][offset];
-          value -= multipliers[5] * trailing_values[5][offset];
-          value -= multipliers[6] * trailing_values[6][offset];
-          value -= multipliers[7] * trailing_values[7][offset];);
-        break;
-      default:
-        return 0u;
-    }
-    return run;
-  }
   switch (run) {
     case 2u:
       KLS_LEAN_SNODE_TARGET_LOOP(
@@ -1755,7 +1691,7 @@ static KLS_ALWAYS_INLINE UF_long kls_lean_row_refactor_snode_step_impl(
     const double *restrict udiag) {                                       \
     return kls_lean_row_refactor_snode_step_impl(                         \
       p, (width), dep0, x, l_values, l_lu, u_ptr, u_cols, NULL, u_values,  \
-      udiag, 1, 0, 0);                                                    \
+      udiag, 0, 0);                                                    \
   }
 
 KLS_DEFINE_LEAN_SNODE_WIDTH(2u)
@@ -1779,8 +1715,7 @@ kls_lean_row_refactor_snode_step_width_8u_avx512(
   const double *restrict u_values,
   const double *restrict udiag) {
   return kls_lean_row_refactor_snode_step_impl(
-    p, 8u, dep0, x, l_values, l_lu, u_ptr, u_cols, NULL, u_values, udiag,
-    1, 1, 0);
+    p, 8u, dep0, x, l_values, l_lu, u_ptr, u_cols, NULL, u_values, udiag, 1, 0);
 }
 #endif
 
@@ -1804,7 +1739,7 @@ kls_lean_row_refactor_snode_step_width_8u_avx512(
     const double *restrict udiag) {                                       \
     return kls_lean_row_refactor_snode_step_impl(                         \
       p, (width), dep0, x, l_values, l_lu, u_ptr, NULL, u_cols16, u_values,\
-      udiag, 1, 0, 1);                                                    \
+      udiag, 0, 1);                                                    \
   }
 
 KLS_DEFINE_LEAN_SNODE_I16_WIDTH(2u)
@@ -1828,8 +1763,7 @@ kls_lean_row_refactor_snode_step_i16_width_8u_avx512(
   const double *restrict u_values,
   const double *restrict udiag) {
   return kls_lean_row_refactor_snode_step_impl(
-    p, 8u, dep0, x, l_values, l_lu, u_ptr, NULL, u_cols16, u_values, udiag,
-    1, 1, 1);
+    p, 8u, dep0, x, l_values, l_lu, u_ptr, NULL, u_cols16, u_values, udiag, 1, 1);
 }
 #endif
 
@@ -4469,7 +4403,6 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
   int row_values_mode,
   int grouped_done_mode,
   int fused_update_mode,
-  int scaled_input_mode,
   int fused_scale_mode,
   int sum_scale_mode,
   int branchless_update_mode) {
@@ -4566,7 +4499,7 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
           x[in_cols[p]] *= row_rs_inv;
         }
       }
-    } else if (scaled_input_mode) {
+    } else {
       row_scale = rs[pnum[row]];
       const double row_rs_inv = 1.0 / row_scale;
       if (in_packed != NULL) {
@@ -4579,15 +4512,6 @@ static KLS_ALWAYS_INLINE void kls_scaled_generic_hoisted_worker_core(
         for (UF_long p = input_begin; p < input_end; ++p) {
           x[in_cols[p]] = values[in_pos[p]] * row_rs_inv;
         }
-      }
-    } else if (in_packed != NULL) {
-      for (UF_long p = input_begin; p < input_end; ++p) {
-        const uint32_t packed = in_packed[p];
-        x[packed & UINT32_C(0xffff)] = values[packed >> 16u];
-      }
-    } else {
-      for (UF_long p = input_begin; p < input_end; ++p) {
-        x[in_cols[p]] = values[in_pos[p]];
       }
     }
     for (UF_long p = dependency_begin; p < dependency_end; ++p) {
@@ -4687,7 +4611,7 @@ static void kls_scaled_generic_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 0, 0,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_grouped_done_mode, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4703,7 +4627,7 @@ static void kls_scaled_generic_i16_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 0,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_grouped_done_mode, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4719,7 +4643,7 @@ static void kls_scaled_generic_i16ptr_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 2,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_grouped_done_mode, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4735,7 +4659,7 @@ static void kls_scaled_generic_i16_u32ptr_hoisted_worker_run(
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 1,
     worker->shared->lean_row_values_mode,
-    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_grouped_done_mode, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4750,7 +4674,7 @@ static void kls_scaled_generic_i16_u32ptr_row_values_worker_run(
   UF_long stride) {
   kls_scaled_generic_hoisted_worker_core(
     worker, generation, rows, stride, 1, 1, 1,
-    worker->shared->lean_grouped_done_mode, 1, 1,
+    worker->shared->lean_grouped_done_mode, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4764,7 +4688,7 @@ static void kls_scaled_generic_i16_u32ptr_row_values_grouped_worker_run(
   const UF_long *restrict rows,
   UF_long stride) {
   kls_scaled_generic_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 1, 1, 1, 1, 1,
+    worker, generation, rows, stride, 1, 1, 1, 1, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4778,7 +4702,7 @@ static void kls_scaled_generic_i16_u32ptr_row_values_grouped_nonfused_worker_run
   const UF_long *restrict rows,
   UF_long stride) {
   kls_scaled_generic_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 1, 1, 1, 0, 1,
+    worker, generation, rows, stride, 1, 1, 1, 1, 0,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 0);
 }
@@ -4792,7 +4716,7 @@ static void kls_scaled_generic_i16_u32ptr_row_values_grouped_branchless_worker_r
   const UF_long *restrict rows,
   UF_long stride) {
   kls_scaled_generic_hoisted_worker_core(
-    worker, generation, rows, stride, 1, 1, 1, 1, 1, 1,
+    worker, generation, rows, stride, 1, 1, 1, 1, 1,
     worker->shared->lean_fused_scale_mode,
     worker->shared->solver->common.scale == 1, 1);
 }
@@ -4810,7 +4734,7 @@ static void kls_scaled_generic_i16_u32ptr_row_values_grouped_branchless_worker_r
     const UF_long *restrict rows,                                      \
     UF_long stride) {                                                  \
     kls_scaled_generic_hoisted_worker_core(                            \
-      worker, generation, rows, stride, 1, 1, 1, 1, 1, 1,            \
+      worker, generation, rows, stride, 1, 1, 1, 1, 1,            \
       2, sum_mode, branchless_mode);                                   \
   }
 
