@@ -596,11 +596,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     solver->i32solve_state = -1;
     return 0;
   }
-  const int trace_i32_prep = getenv("KLS_TRACE_I32_PREP") != NULL;
-  const double i32_prep_start = trace_i32_prep ? kls_now_seconds() : 0.0;
-  double i32_layout_done = i32_prep_start;
-  double i32_copy_done = i32_prep_start;
-  double i32_cache_done = i32_prep_start;
   const UF_long n = symbolic->n;
   const int generic_direct_i16_solve =
     kls_direct_numeric_lean_pattern_capable(solver) &&
@@ -737,9 +732,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   solver->i32solve_loff[n] = lcur;
   solver->i32solve_uoff[n] = ucur;
-  if (trace_i32_prep) {
-    i32_layout_done = kls_now_seconds();
-  }
   if (ok && !solver->i32solve_indices_alias_refactor) {
     atomic_int copy_valid;
     atomic_init(&copy_valid, 1);
@@ -780,9 +772,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
     ok = atomic_load_explicit(&copy_valid, memory_order_relaxed);
   }
-  if (trace_i32_prep) {
-    i32_copy_done = kls_now_seconds();
-  }
   if (!ok) {
     if (!solver->i32solve_indices_alias_refactor) {
       free(solver->i32solve_l);
@@ -799,9 +788,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     return 0;
   }
   kls_build_i16_solve_cache(solver, lcur, ucur);
-  if (trace_i32_prep) {
-    i32_cache_done = kls_now_seconds();
-  }
   const int generic_compact_solve_meta =
         getenv("KLS_DISABLE_GENERIC_COMPACT_SOLVE_META") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
@@ -979,17 +965,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   } else {
     solver->pts_build_deferred = 0;
     kls_pts_try_build(solver);
-  }
-  if (trace_i32_prep) {
-    fprintf(stderr,
-            "KLS i32 prep: layout %.3fms copy %.3fms cache %.3fms "
-            "post %.3fms threads=%d entries=%lld\n",
-            1e3 * (i32_layout_done - i32_prep_start),
-            1e3 * (i32_copy_done - i32_layout_done),
-            1e3 * (i32_cache_done - i32_copy_done),
-            1e3 * (kls_now_seconds() - i32_cache_done),
-            kls_i32_index_copy_thread_count(solver, lcur + ucur),
-            (long long)(lcur + ucur));
   }
   return 1;
 }
