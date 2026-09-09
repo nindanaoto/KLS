@@ -12315,7 +12315,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
   }
   if (solver->lean_choice == 0 &&
-      getenv("KLS_DISABLE_GENERIC_SCALED_LEAN_PRESELECTION") == NULL &&
       solver->common.scale > 0 && solver->numeric->Rs != NULL &&
       kls_repeated_update_workload(&solver->options) &&
       solver->options.threads > 1 && solver->n >= 512u &&
@@ -12379,8 +12378,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
          refactor-plus-solve audit remains the generic final authority. */
       solver->lean_reaudit_state = 0;
     } else if (modeled_row_work > 0.0 &&
-               3.0 * modeled_row_work >= solver->common.flops &&
-               getenv("KLS_DISABLE_GENERIC_SCALED_LEAN_DECLINE") == NULL) {
+               3.0 * modeled_row_work >= solver->common.flops) {
       /* The same retained dependency schedule also supplies a safe negative
          verdict.  When even its optimistic row model consumes at least one
          third of the complete numeric work, the row executor's three
@@ -12394,7 +12392,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
   }
   if (solver->lean_choice == 0 &&
-      getenv("KLS_DISABLE_LOW_INTENSITY_COLUMN_PRESELECTION") == NULL &&
       kls_repeated_update_workload(&solver->options) &&
       solver->symbolic->nblocks == 1u &&
       solver->symbolic->maxblock == solver->n &&
@@ -12420,7 +12417,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
   }
   if (solver->lean_choice == 0 &&
-      getenv("KLS_DISABLE_GENERIC_PACKED_LEAN_PRESELECTION") == NULL &&
       solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
       kls_repeated_update_workload(&solver->options) &&
       solver->options.threads > 1 && solver->common.flops >= 100000.0 &&
@@ -12489,25 +12485,16 @@ int kls_refactor(kls_solver *solver, const double *values) {
        Keep the incumbent without running the consultation. */
     solver->lean_choice = -1;
   }
-  if (kls_low_work_single_block_policy_enabled(solver)) {
-    /* For a low-work retained factor, optional consumer trials cost more
-       work than the fixed-pivot numeric they are trying to optimize. */
+  if (kls_low_work_single_block_policy_enabled(solver) ||
+      kls_low_work_btf_map32_policy_enabled(solver)) {
+    /* Consumer trials cannot repay their cost on the low-work single-block
+       route; the lean BTF route has no batched/padded consumers at all. */
     solver->floor_choice = -1;
     solver->padded_choice = -1;
-  } else if (kls_low_work_btf_map32_policy_enabled(solver)) {
-    /* The retained lean BTF walk has no optional batched/padded consumers;
-       their generic timing probes can only add discarded refactors. */
-    solver->floor_choice = -1;
-    solver->padded_choice = -1;
-  } else
-  if (getenv("KLS_DISABLE_BATCH_FLOOR_PROBE") != NULL &&
-      solver->floor_choice == 0) {
-    solver->floor_choice = -1;
   }
   if (solver->floor_choice > 0 &&
       solver->padded_choice == 0 && solver->padded_pending == 0 &&
-      solver->padded_run_of == NULL &&
-      getenv("KLS_ENABLE_PADDED_AFTER_LOW_FLOOR") == NULL) {
+      solver->padded_run_of == NULL) {
     /* The realized low-floor win says these relaxed supernode runs benefit
        from smaller consumer batches.  Padded panels add dense zero slots to
        those same runs and require eight more alternating refactors to prove
@@ -12515,16 +12502,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
        verdict; a losing/default floor leaves the padded portfolio intact. */
     solver->padded_choice = -1;
   }
-  if (getenv("KLS_DISABLE_PADDED_PANEL_PROBE") != NULL &&
-      solver->padded_choice == 0) {
-    solver->padded_choice = -1;
-  }
   /* batch-floor trial for mapped-path rows (bcircuit: low floors
      measured -13.3% steady; nearly-missing-diagonal one-block: -7%).
      Probe once at steady state, adopt on a decisive margin. */
   const int floor_probe_warm_samples =
-    kls_repeated_update_workload(&solver->options) &&
-    getenv("KLS_DISABLE_GENERIC_EARLY_BATCH_FLOOR_PROBE") == NULL ? 3 : 8;
+    kls_repeated_update_workload(&solver->options) ? 3 : 8;
   if (solver->floor_choice > 0) {
     kls_snode_floor_batch_override = 2;
     kls_snode_floor_work_override = 48;
