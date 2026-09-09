@@ -1638,23 +1638,9 @@ struct kls_solver {
                                  -1 changed or declined for this numeric */
   /* Cold policy state stays at the tail so it does not shift the established
      alignment of hot refactor and solve fields above. */
-  int sparse_spiked_predicted_candidate; /* cached public input topology */
-  int sparse_full_diagonal_metis_row_candidate; /* cached topology proposal */
-  int giant_symmetric_scalar_fringe_metis_row_candidate; /* topology proposal */
   int nearly_missing_diagonal_early_match_selected;
   int compact_missing_diagonal_match_candidate;
   int compact_missing_diagonal_match_selected;
-  int symmetric_partial_diagonal_match_candidate;
-  int symmetric_partial_diagonal_match_selected;
-  int symmetric_partial_diagonal_low_work_class;
-  /* Cold staged eligibility for asymmetric bounded-degree direct METIS. */
-  int asymmetric_bounded_degree_direct_metis_symbolic_eligible;
-  /* Staged state for the near-symmetric mega-hub direct-AMD capability. */
-  int near_symmetric_mega_hub_amd_candidate;
-  int near_symmetric_mega_hub_amd_symbolic_eligible;
-  /* Staged state for the giant dominant-hub METIS dense-tail capability. */
-  int giant_dominant_hub_metis_dense_tail_candidate;
-  int giant_dominant_hub_metis_dense_tail_symbolic_eligible;
   /* Cold solve-accuracy policy state.  Keep it at the tail so adding
      observability does not move the established factor/refactor hot fields. */
   int promoted_tolerance_l2_recovery_required;
@@ -9697,20 +9683,9 @@ static void clear_matrix(kls_solver *solver) {
   solver->sparse_diagonal_row_hub_no_btf_cycle = 0;
   solver->large_reciprocal_hub_amd_btf_cycle = 0;
   solver->value_tolerance_crossing_cycle = 0;
-  solver->sparse_spiked_predicted_candidate = 0;
-  solver->sparse_full_diagonal_metis_row_candidate = 0;
-  solver->giant_symmetric_scalar_fringe_metis_row_candidate = 0;
   solver->nearly_missing_diagonal_early_match_selected = 0;
   solver->compact_missing_diagonal_match_candidate = 0;
   solver->compact_missing_diagonal_match_selected = 0;
-  solver->symmetric_partial_diagonal_match_candidate = 0;
-  solver->symmetric_partial_diagonal_match_selected = 0;
-  solver->symmetric_partial_diagonal_low_work_class = 0;
-  solver->asymmetric_bounded_degree_direct_metis_symbolic_eligible = 0;
-  solver->near_symmetric_mega_hub_amd_candidate = 0;
-  solver->near_symmetric_mega_hub_amd_symbolic_eligible = 0;
-  solver->giant_dominant_hub_metis_dense_tail_candidate = 0;
-  solver->giant_dominant_hub_metis_dense_tail_symbolic_eligible = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
   solver->fast_kls_rebuild_restarts = 0;

@@ -9181,8 +9181,6 @@ select_exact_match_symbolic:;
   solver->common = trial_common;
   solver->stats.selected_ordering = trial_ordering;
   solver->stats.selected_orientation = solver->orientation;
-  solver->symmetric_partial_diagonal_low_work_class =
-    0;
   solver->stats.nblocks = (int64_t)solver->symbolic->nblocks;
   solver->stats.max_block = (int64_t)solver->symbolic->maxblock;
   solver->stats.structural_rank = (int64_t)solver->symbolic->structural_rank;
@@ -11505,7 +11503,6 @@ kls_adopt_unfactored:;
   solver->row_perm = row_perm;
   solver->compact_missing_diagonal_match_selected =
     compact_missing_diagonal_matcher && !selected_unmatched_colamd;
-  solver->symmetric_partial_diagonal_match_selected = 0;
   solver->exact_matching_selected = exact_matching;
   solver->exact_matching_scaling_selected =
     exact_matching_scaling && trial_row_scale != NULL &&
