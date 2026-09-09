@@ -4814,10 +4814,6 @@ static int kls_compact_amf_two_block_specialized_worker_disabled(void) {
     NULL;
 }
 
-static int kls_compact_amf_two_block_trace_enabled(void) {
-  return getenv("KLS_TRACE_COMPACT_AMF_TWO_BLOCK") != NULL;
-}
-
 /* The packed row worker is not tied to an ordering, block count, or matrix
    family.  Its narrow descriptors impose the real limits: dependency rows
    occupy twelve bits, while input/factor offsets and columns occupy sixteen.
@@ -5316,17 +5312,6 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
         getenv("KLS_ENABLE_GENERIC_LEAN_AFFINITY") == NULL) {
       valid = 0;
     }
-  }
-  if (kls_compact_amf_two_block_trace_enabled()) {
-    fprintf(stderr,
-            "KLS compact AMF two-block schedule weights=%g/%g/%g/%g:",
-            dependency_base_weight, dependency_output_weight,
-            input_weight, row_output_weight);
-    for (int tid = 0; tid < thread_count; ++tid) {
-      fprintf(stderr, " t%d=%ld/%.0f", tid, (long)count[tid],
-              worker_finish[tid]);
-    }
-    fprintf(stderr, " valid=%d\n", valid);
   }
   free(finish);
   if (!valid) {
@@ -5952,42 +5937,6 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
           solver->i32solve_udiag_recip = (double *)malloc(
             (size_t)solver->n * sizeof(*solver->i32solve_udiag_recip));
           solver->i32solve_udiag_recip_fresh = 0;
-        }
-        if (kls_compact_amf_two_block_trace_enabled()) {
-          UF_long run_count[5] = {0u, 0u, 0u, 0u, 0u};
-          UF_long waits = 0u;
-          UF_long publishes = 0u;
-          UF_long updates = 0u;
-          for (UF_long pos = 0u; pos < solver->n; ++pos) {
-            const kls_compact_amf_two_block_work_row16 *work = &work_rows[pos];
-            publishes += frontier_publish_mask[work->row] != 0u;
-            UF_long p = (UF_long)work->dependency_begin;
-            const UF_long end = (UF_long)work->dependency_end;
-            while (p < end) {
-              const uint64_t descriptor = packed_work[p];
-              uint32_t run =
-                (uint32_t)((descriptor >> 12u) & UINT64_C(0x0f));
-              if (run < 2u || run > 4u || p + (UF_long)run > end) {
-                run = 1u;
-              }
-              run_count[run]++;
-              for (uint32_t k = 0u; k < run; ++k) {
-                const uint64_t item = packed_work[p + (UF_long)k];
-                waits += ((item >> 16u) & UINT64_C(0xffff)) != 0u;
-                updates += (UF_long)(item >> 48u) -
-                  (UF_long)((item >> 32u) & UINT64_C(0xffff));
-              }
-              p += (UF_long)run;
-            }
-          }
-          fprintf(stderr,
-                  "KLS compact AMF two-block packed rows=%ld deps=%ld"
-                  " runs=%ld/%ld/%ld/%ld waits=%ld publishes=%ld"
-                  " updates=%ld\n",
-                  (long)solver->n, (long)l_count,
-                  (long)run_count[1], (long)run_count[2],
-                  (long)run_count[3], (long)run_count[4],
-                  (long)waits, (long)publishes, (long)updates);
         }
       } else {
         free(work_rows);
