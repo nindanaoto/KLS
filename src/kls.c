@@ -10709,24 +10709,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->predicted_entry_values_captured = 1;
     }
   }
-  if (solver->n <= 8 && getenv("KLS_TRACE_X") != NULL) {
-    fprintf(stderr, "FXC scale=%ld tol=%.17g btf=%ld ordering=%d init=%g\n",
-            (long)solver->common.scale, solver->common.tol,
-            (long)solver->common.btf, solver->options.ordering,
-            solver->common.initmem_amd);
-    for (UF_long fc = 0; fc <= solver->n; ++fc) {
-      fprintf(stderr, "FXP cp[%ld]=%ld\n", (long)fc,
-              (long)solver->col_ptr[fc]);
-    }
-    for (UF_long fr = 0; fr < solver->nnz && fr < 12; ++fr) {
-      fprintf(stderr, "FXR ri[%ld]=%ld\n", (long)fr,
-              (long)solver->row_idx[fr]);
-    }
-    for (UF_long fv = 0; fv < solver->nnz && fv < 12; ++fv) {
-      fprintf(stderr, "FXV %ld %.17g user=%.17g\n", (long)fv,
-              numeric_values[fv], values[fv]);
-    }
-  }
   KLS_ENTRY_PHASE("prep_values")
 
   double elapsed = kls_now_seconds() - solver->snb_factor_start;
@@ -16138,46 +16120,11 @@ static int solve_impl(kls_solver *solver,
 
   UF_long ok = 0;
   int fixed_col_scale_post_applied = 0;
-  const int trace_x = solver->n <= 8 && getenv("KLS_TRACE_X") != NULL;
   if (getenv("KLS_TRACK_NUMERIC_FREE") != NULL && solver->numeric != NULL) {
     kls_numeric_free_check(solver->numeric, solver->numeric->Lip,
                            solver->numeric->Llen, solver->numeric->Uip,
                            solver->numeric->Ulen);
     kls_dbg_check_numeric(solver, "solve entry");
-  }
-  if (trace_x) {
-    fprintf(stderr, "TX pre t=%d path=%d nudges=%ld pred=%d: %.17g %.17g %.17g\n",
-            kernel_transpose, (int)solver->stats.last_factor_path,
-            (long)solver->pivot_nudge_count,
-            solver->numeric_is_predicted,
-            x[0], x[1], solver->n > 2 ? x[2] : 0.0);
-    if (solver->values != NULL) {
-      for (UF_long tv = 0; tv < solver->nnz && tv < 12; ++tv) {
-        fprintf(stderr, "TXV %ld %.17g i2c=%ld\n", (long)tv,
-                solver->values[tv],
-                solver->input_to_csc != NULL
-                  ? (long)solver->input_to_csc[tv] : -1L);
-      }
-    }
-    for (UF_long tk = 0; tk < solver->n; ++tk) {
-      fprintf(stderr,
-              "TXN k=%ld Pnum=%ld Lip=%ld Llen=%ld Uip=%ld Ulen=%ld"
-              " Udiag=%.17g Offp=%ld\n",
-              (long)tk, (long)solver->numeric->Pnum[tk],
-              (long)solver->numeric->Lip[tk],
-              (long)solver->numeric->Llen[tk],
-              (long)solver->numeric->Uip[tk],
-              (long)solver->numeric->Ulen[tk],
-              ((double *)solver->numeric->Udiag)[tk],
-              (long)solver->numeric->Offp[tk]);
-    }
-    if (solver->numeric->LUbx[0] != NULL) {
-      const double *lu = (const double *)solver->numeric->LUbx[0];
-      const size_t lus = solver->numeric->LUsize[0];
-      for (size_t tu = 0; tu < lus && tu < 24; ++tu) {
-        fprintf(stderr, "TXU %zu %.17g\n", tu, lu[tu]);
-      }
-    }
   }
   if (solver->row_refactor_values_ready &&
       !kls_row_refactor_solve_uses_direct_values(solver) &&
@@ -16329,10 +16276,6 @@ static int solve_impl(kls_solver *solver,
       fixed_col_scale_post_applied =
         (fused_matched_i32_rhs || fused_matched_i32_rhs32) &&
         has_col_scale;
-      if (trace_x) {
-        fprintf(stderr, "TX i32 ok=%ld: %.17g %.17g %.17g\n", ok,
-                x[0], x[1], solver->n > 2 ? x[2] : 0.0);
-      }
     } else {
       ok = kernel_transpose
         ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric,
@@ -16341,11 +16284,6 @@ static int solve_impl(kls_solver *solver,
         : trilinos_klu_l_solve(solver->symbolic, solver->numeric,
                                (UF_long)ldx, (UF_long)nrhs, x,
                                &solver->common);
-      if (trace_x) {
-        fprintf(stderr, "TX klu t=%d ok=%ld: %.17g %.17g %.17g\n",
-                kernel_transpose, ok, x[0], x[1],
-                solver->n > 2 ? x[2] : 0.0);
-      }
     }
   }
   if (ok && !kernel_transpose && has_col_scale &&
@@ -16398,11 +16336,6 @@ static int solve_impl(kls_solver *solver,
   }
   if (!solver->in_solve_refinement) {
     solver->base_solve_seconds = kls_now_seconds() - start;
-  }
-  if (trace_x) {
-    fprintf(stderr, "TX post t=%d ok=%ld: %.17g %.17g %.17g\n",
-            kernel_transpose, ok, x[0], x[1],
-            solver->n > 2 ? x[2] : 0.0);
   }
   /* Iterative refinement recovers full double-precision accuracy from a
      reduced-accuracy factorization (such as nudged pivots) at
