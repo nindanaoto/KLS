@@ -1404,19 +1404,6 @@ static int choose_auto_scale_from_pattern_impl(
     const double diag_unit_fraction = diag_count > 0
       ? (double)diag_unit_count / (double)diag_count
       : 0.0;
-    if (getenv("KLS_TRACE_AUTO_SCALE_STATS") != NULL) {
-      fprintf(stderr,
-              "KLS auto scale stats: diag=%ld/%ld weak=%ld missing=%ld "
-              "diag-spread=%.4e row-spread=%.4e p90/p10=%.4e "
-              "row-unit=%.4f diag-unit=%.4f\n",
-              (long)diag_count, (long)n, (long)weak_diagonal,
-              (long)missing_diagonal,
-              min_diag > 0.0 && min_diag < DBL_MAX
-                ? max_diag / min_diag : DBL_MAX,
-              row_min > 0.0 ? row_maximum / row_min : DBL_MAX,
-              row_p10 > 0.0 ? row_p90 / row_p10 : DBL_MAX,
-              row_unit_fraction, diag_unit_fraction);
-    }
     if (100.0 * (double)diag_count >= 95.0 * (double)n &&
         20.0 * (double)missing_diagonal <= (double)n &&
         10.0 * (double)weak_diagonal <= (double)n &&
@@ -1824,12 +1811,6 @@ static int kls_value_tolerance_crossing_initial_profile(
   const UF_long required =
     solver->n / 64u + (solver->n % 64u != 0u);
   const int accepted = valid && crossings >= 16u && crossings >= required;
-  if (getenv("KLS_TRACE_INITIAL_TOLERANCE_CROSSINGS") != NULL) {
-    fprintf(stderr,
-            "KLS initial tolerance crossings: rows=%ld crossings=%ld "
-            "required=%ld accepted=%d\n",
-            (long)solver->n, (long)crossings, (long)required, accepted);
-  }
   return accepted;
 }
 
@@ -2008,16 +1989,6 @@ static double kls_generic_initial_pivot_pressure_tolerance(
     selected = 1.0e-8;
   }
 #undef KLS_PRESSURE_RECOVERS
-  if (getenv("KLS_TRACE_INITIAL_PIVOT_PRESSURE") != NULL) {
-    fprintf(stderr,
-            "KLS initial pivot pressure: valid=%d rows=%ld pressure=%ld/%ld "
-            "recover=%ld,%ld,%ld,%ld required=%ld scale=%ld selected=%.3g\n",
-            valid, (long)solver->n, (long)pressured,
-            (long)pressured_positive, (long)recovered_1e4,
-            (long)recovered_1e6, (long)recovered_3e8,
-            (long)recovered_1e8, (long)required,
-            (long)solver->common.scale, selected);
-  }
   return selected;
 }
 
@@ -7515,10 +7486,6 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
         }
       }
     }
-    if (getenv("KLS_TRACE_MATCH_SWAPS") != NULL) {
-      fprintf(stderr, "KLS match swaps: round=%d changes=%ld\n",
-              round + 1, (long)changes);
-    }
     if (changes == 0) {
       break;
     }
@@ -7964,8 +7931,6 @@ static int build_compact_numeric_row_match(
   const double *numeric_values,
   UF_long **row_perm_out,
   UF_long *matched_out) {
-  const int trace_phases = getenv("KLS_TRACE_MATCH_PHASES") != NULL;
-  const double trace_start = trace_phases ? kls_now_seconds() : 0.0;
   if (n == 0u || n > (UF_long)UINT16_MAX + 1u || col_ptr == NULL ||
       row_idx == NULL || numeric_values == NULL || row_perm_out == NULL ||
       matched_out == NULL) {
@@ -7996,9 +7961,7 @@ static int build_compact_numeric_row_match(
       }
     }
   }
-  const double trace_filled = trace_phases ? kls_now_seconds() : 0.0;
   kls_sort_compact_match_entries_desc(entries, entry_count);
-  const double trace_sorted = trace_phases ? kls_now_seconds() : 0.0;
 
   for (UF_long i = 0u; i < n; ++i) {
     row_perm[i] = KLS_KLU_EMPTY;
@@ -8016,8 +7979,6 @@ static int build_compact_numeric_row_match(
       matched++;
     }
   }
-  const UF_long greedy_matched = matched;
-  const double trace_greedy = trace_phases ? kls_now_seconds() : 0.0;
 
   kls_row_match_graph graph;
   const int graph_status = build_compact_row_match_graph(
@@ -8040,18 +8001,6 @@ static int build_compact_numeric_row_match(
     free(row_perm);
     return complete_status;
   }
-  if (trace_phases) {
-    const double trace_done = kls_now_seconds();
-    fprintf(stderr,
-            "KLS compact match phases: fill=%.3f sort=%.3f greedy=%.3f "
-            "improve=%.3f matched=%ld->%ld total=%.3f ms\n",
-            (trace_filled - trace_start) * 1e3,
-            (trace_sorted - trace_filled) * 1e3,
-            (trace_greedy - trace_sorted) * 1e3,
-            (trace_done - trace_greedy) * 1e3,
-            (long)greedy_matched, (long)matched,
-            (trace_done - trace_start) * 1e3);
-  }
   *row_perm_out = row_perm;
   *matched_out = matched;
 #undef KLS_FREE_GREEDY_MATCH
@@ -8072,8 +8021,6 @@ static int build_greedy_numeric_row_match(UF_long n,
                                           int *spral_matching_out,
                                           double **row_scale_out,
                                           double **col_scale_out) {
-  const int trace_phases = getenv("KLS_TRACE_MATCH_PHASES") != NULL;
-  const double trace_start = trace_phases ? kls_now_seconds() : 0.0;
   if (n <= 0 || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
       row_perm_out == NULL || matched_out == NULL ||
       exact_matching_out == NULL || exact_matching_scaling_out == NULL ||
@@ -8166,9 +8113,7 @@ static int build_greedy_numeric_row_match(UF_long n,
       }
     }
   }
-  const double trace_filled = trace_phases ? kls_now_seconds() : 0.0;
   kls_sort_match_entries_desc(entries, entry_count);
-  const double trace_sorted = trace_phases ? kls_now_seconds() : 0.0;
 
   for (UF_long row = 0; row < n; ++row) {
     row_perm[row] = KLS_KLU_EMPTY;
@@ -8187,8 +8132,6 @@ static int build_greedy_numeric_row_match(UF_long n,
       matched++;
     }
   }
-  const UF_long greedy_matched = matched;
-  const double trace_greedy = trace_phases ? kls_now_seconds() : 0.0;
 
   if (improve_matching) {
     kls_row_match_graph graph;
@@ -8323,18 +8266,6 @@ static int build_greedy_numeric_row_match(UF_long n,
   free(col_match);
   free(row_used);
   free(col_used);
-  if (trace_phases) {
-    const double trace_done = kls_now_seconds();
-    fprintf(stderr,
-            "KLS match phases: fill=%.3f sort=%.3f greedy=%.3f "
-            "improve=%.3f matched=%ld->%ld total=%.3f ms\n",
-            (trace_filled - trace_start) * 1e3,
-            (trace_sorted - trace_filled) * 1e3,
-            (trace_greedy - trace_sorted) * 1e3,
-            (trace_done - trace_greedy) * 1e3,
-            (long)greedy_matched, (long)matched,
-            (trace_done - trace_start) * 1e3);
-  }
   *row_perm_out = row_perm;
   *matched_out = matched;
   return KLS_OK;
@@ -9957,17 +9888,12 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
     return 0;
   }
   double est = sym->est_flops;
-  const double n = (double)sym->n;
   if (!(est > 0.0) && sym->lnz > 0.0 && sym->unz > 0.0) {
     /* some analyze paths leave est_flops unset (mac: the orientation
        trials); a fill-based proxy decides instead - flops scale
        superlinearly in fill, and 3e7 estimated entries puts the
        serial factor in the tens of seconds where the pipe pays */
     est = (sym->lnz + sym->unz) > 3.0e7 ? 6.0e9 : 0.0;
-  }
-  if (getenv("KLS_TRACE_PIPE_ROUTE") != NULL) {
-    fprintf(stderr, "KLS pipe route: est=%.3e n=%.0f fill=%.3e\n",
-            est, n, sym->lnz + sym->unz);
   }
   if (getenv("KLS_KLU_PIPE_FORCE") == NULL &&
       !(est > 5.0e9)) {
@@ -10981,21 +10907,6 @@ matching_attempt:;
     generic_matched_tolerance_resource_fit &&
     (matched_threshold_sensitive >= 2u ||
      (trial_symbolic != NULL && trial_symbolic->est_flops >= 1.0e6));
-  if (getenv("KLS_TRACE_MATCHED_TOLERANCE") != NULL &&
-      generic_recurring_matched_candidate) {
-    fprintf(stderr,
-            "KLS matched tolerance: sensitive=%lu/%lu pair_work=%.0f "
-            "estimated_flops=%.0f storage=%.0f/cache=%.0f fit=%d "
-            "selected=%d\n",
-            (unsigned long)matched_threshold_sensitive,
-            (unsigned long)solver->n,
-            matched_column_pair_work,
-            trial_symbolic != NULL ? trial_symbolic->est_flops : -1.0,
-            generic_matched_tolerance_storage,
-            generic_matched_tolerance_cache,
-            generic_matched_tolerance_resource_fit,
-            generic_recurring_matched_tolerance);
-  }
   if (generic_recurring_matched_tolerance) {
     /* A statically matched repeated lifecycle commits to a fixed pivot
        representation.  Tightening is useful when realized matched diagonals
@@ -13758,20 +13669,9 @@ static void *kls_amf_spec_main(void *arg) {
   job->est_flops = job->status == KLS_OK && job->symbolic != NULL
     ? job->symbolic->est_flops : DBL_MAX;
   if (job->status == KLS_OK && job->symbolic != NULL &&
-      (job->measure_etree_levels ||
-       getenv("KLS_TRACE_AMF_ETREE") != NULL)) {
+      job->measure_etree_levels) {
     job->etree_levels = kls_symbolic_symmetric_etree_levels(
       job->n, job->col_ptr, job->row_idx, job->symbolic);
-  }
-  if (job->status == KLS_OK && job->symbolic != NULL &&
-      getenv("KLS_TRACE_AMF_ETREE") != NULL) {
-    fprintf(stderr,
-            "KLS AMF etree: ordering=%d power=%.3f score=%.4e "
-            "flops=%.4e levels=%ld\n",
-            (int)job->ordering,
-            job->has_amf3_power_override ? job->amf3_power_override : 0.445,
-            job->score, job->symbolic->est_flops,
-            (long)job->etree_levels);
   }
   kls_amf3_power_override_active = saved_power_override_active;
   kls_amf3_power_override = saved_power_override;
