@@ -145,17 +145,15 @@ static void kls_maybe_disable_native_row_panel_auto(
 
 static int kls_egraph_cached_supernode_update_allows(
   UF_long run_rows,
-  UF_long dense_cols,
   UF_long trailing_len) {
   if (run_rows < KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS) {
     return 0;
   }
   const double work =
     0.5 * (double)run_rows * (double)(run_rows - 1u) +
-    (double)run_rows * (double)dense_cols +
     (double)run_rows * (double)trailing_len;
   const double copied_entries =
-    (double)run_rows + (double)dense_cols + (double)trailing_len;
+    (double)run_rows + (double)trailing_len;
   return work >= KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK &&
          work >= KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK_PER_ENTRY *
                    copied_entries;
@@ -197,18 +195,16 @@ static int kls_cblas_work_allows(double work, double copied_entries) {
 }
 
 static int kls_cblas_supernode_vector_update_allows(UF_long run_rows,
-                                                    UF_long dense_cols,
                                                     UF_long trailing_len) {
   if (run_rows < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS ||
-      dense_cols + trailing_len < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS) {
+      trailing_len < KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS) {
     return 0;
   }
   const double work =
     0.5 * (double)run_rows * (double)(run_rows - 1u) +
-    (double)run_rows * (double)dense_cols +
     (double)run_rows * (double)trailing_len;
   const double copied_entries =
-    (double)run_rows + (double)dense_cols + (double)trailing_len;
+    (double)run_rows + (double)trailing_len;
   return kls_cblas_work_allows(work, copied_entries);
 }
 
@@ -10722,7 +10718,7 @@ static int kls_row_refactor_try_compact_supernode_update_cblas(
   if (suffix_begin >= width || run_rows != width - suffix_begin) {
     return 0;
   }
-  if (!kls_cblas_supernode_vector_update_allows(run_rows, 0u,
+  if (!kls_cblas_supernode_vector_update_allows(run_rows,
                                                 trailing_len)) {
     return 0;
   }

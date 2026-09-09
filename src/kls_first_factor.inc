@@ -3635,7 +3635,7 @@ static int kls_row_first_supernode_panel_cache_append(
         u_entries, u_row_ptr, u_row_end, nk, start, end, &tail_len)) {
     return 0;
   }
-  if (!kls_egraph_cached_supernode_update_allows(panel_width, 0u,
+  if (!kls_egraph_cached_supernode_update_allows(panel_width,
                                                  tail_len)) {
     return 0;
   }
@@ -7380,15 +7380,11 @@ static int kls_row_first_refactor_seed_init(
   return 1;
 }
 
-static int kls_row_first_lu_seed_reserve(kls_row_first_lu_seed *seed,
-                                         UF_long extra) {
-  if (seed == NULL || extra == 0u) {
-    return seed != NULL;
-  }
-  if (extra > UF_long_max - seed->count) {
+static int kls_row_first_lu_seed_reserve(kls_row_first_lu_seed *seed) {
+  if (seed == NULL || seed->count == UF_long_max) {
     return 0;
   }
-  const UF_long needed = seed->count + extra;
+  const UF_long needed = seed->count + 1u;
   if (needed <= seed->capacity) {
     return 1;
   }
@@ -7435,15 +7431,11 @@ static int kls_row_first_lu_seed_reserve(kls_row_first_lu_seed *seed,
   return 1;
 }
 
-static int kls_row_first_input_seed_reserve(kls_row_first_input_seed *seed,
-                                            UF_long extra) {
-  if (seed == NULL || extra == 0u) {
-    return seed != NULL;
-  }
-  if (extra > UF_long_max - seed->count) {
+static int kls_row_first_input_seed_reserve(kls_row_first_input_seed *seed) {
+  if (seed == NULL || seed->count == UF_long_max) {
     return 0;
   }
-  const UF_long needed = seed->count + extra;
+  const UF_long needed = seed->count + 1u;
   if (needed <= seed->capacity) {
     return 1;
   }
@@ -7487,7 +7479,7 @@ static int kls_row_first_lu_seed_append(kls_row_first_lu_seed *seed,
                                         double *numeric_value,
                                         double value) {
   if (seed == NULL || numeric_value == NULL ||
-      !kls_row_first_lu_seed_reserve(seed, 1u)) {
+      !kls_row_first_lu_seed_reserve(seed)) {
     return 0;
   }
   const UF_long p = seed->count++;
@@ -7502,7 +7494,7 @@ static int kls_row_first_input_seed_append(kls_row_first_input_seed *seed,
                                            UF_long row,
                                            UF_long col,
                                            UF_long pos) {
-  if (seed == NULL || !kls_row_first_input_seed_reserve(seed, 1u)) {
+  if (seed == NULL || !kls_row_first_input_seed_reserve(seed)) {
     return 0;
   }
   const UF_long p = seed->count++;
