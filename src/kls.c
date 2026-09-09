@@ -1807,7 +1807,6 @@ typedef struct kls_egraph_refactor_shared {
   int row_refactor_lazy_value_scatter;
   int row_refactor_compact_supernode_trsv;
   int row_refactor_blocked_trailing_update;
-  UF_long row_refactor_blocked_trailing_min_work;
   int row_refactor_native_row_panel_state;
   int row_refactor_native_row_panel_active;
 

@@ -61,32 +61,6 @@ static int kls_compact_supernode_trsv_env_state(void) {
   return (value[0] == '0' && value[1] == '\0') ? -1 : 1;
 }
 
-static int kls_blocked_trailing_update_env_enabled(void) {
-  const char *value = getenv("KLS_ENABLE_BLOCKED_TRAILING_UPDATE");
-  /* The target-major kernel has a structural amortization gate at the call
-     site (at least eight producer rows and sixteen trailing columns).  It
-     wins across the retained row-factor families once that gate is met, so
-     make it the ordinary implementation and retain =0 as a diagnostic
-     fallback to the dependency-major loop. */
-  return value == NULL || value[0] == '\0' ||
-         !(value[0] == '0' && value[1] == '\0');
-}
-
-static UF_long kls_blocked_trailing_update_env_min_work(void) {
-  const char *value = getenv("KLS_BLOCKED_TRAILING_MIN_WORK");
-  if (value == NULL || value[0] == '\0') {
-    return 0u;
-  }
-  errno = 0;
-  char *end = NULL;
-  const unsigned long long parsed = strtoull(value, &end, 10);
-  if (errno != 0 || end == value || end == NULL || *end != '\0' ||
-      parsed > (unsigned long long)UF_long_max) {
-    return 0u;
-  }
-  return (UF_long)parsed;
-}
-
 enum {
   KLS_NATIVE_ROW_PANEL_ENV_UNSET = -2,
   KLS_NATIVE_ROW_PANEL_ENV_OFF = -1,
@@ -9230,10 +9204,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   shared.row_refactor_lazy_value_scatter = lazy_value_scatter;
   shared.row_refactor_compact_supernode_trsv =
     kls_compact_supernode_trsv_env_state();
-  shared.row_refactor_blocked_trailing_update =
-    kls_blocked_trailing_update_env_enabled();
-  shared.row_refactor_blocked_trailing_min_work =
-    kls_blocked_trailing_update_env_min_work();
+  shared.row_refactor_blocked_trailing_update = 1;
   shared.row_refactor_native_row_panel_active = 0;
   solver->row_refactor_native_row_panel_enabled =
     kls_native_row_panel_enabled_for_run(
@@ -11044,14 +11015,10 @@ static int kls_row_refactor_try_compact_supernode_update(
   double *trailing_workspace = NULL;
   int use_compact_trsv = 0;
   int use_trailing_gemv = 0;
-  const UF_long blocked_trailing_work =
-    run_rows > 0u && trailing_len > UF_long_max / run_rows
-      ? UF_long_max : run_rows * trailing_len;
   const int want_blocked_trailing =
     shared->row_refactor_blocked_trailing_update &&
     run_rows >= KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_ROWS &&
-    trailing_len >= KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_COLS &&
-    blocked_trailing_work >= shared->row_refactor_blocked_trailing_min_work;
+    trailing_len >= KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_COLS;
   int use_blocked_trailing = 0;
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*supernode_workspace));
@@ -17191,10 +17158,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_lazy_value_scatter = !check_pivots;
   shared->row_refactor_compact_supernode_trsv =
     kls_compact_supernode_trsv_env_state();
-  shared->row_refactor_blocked_trailing_update =
-    kls_blocked_trailing_update_env_enabled();
-  shared->row_refactor_blocked_trailing_min_work =
-    kls_blocked_trailing_update_env_min_work();
+  shared->row_refactor_blocked_trailing_update = 1;
   shared->row_refactor_native_row_panel_state = native_row_panel_state;
   shared->row_refactor_native_row_panel_active = 0;
 
@@ -17383,7 +17347,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   shared->row_refactor_mode = 0;
   shared->row_refactor_compact_supernode_trsv = 0;
   shared->row_refactor_blocked_trailing_update = 0;
-  shared->row_refactor_blocked_trailing_min_work = 0u;
   shared->row_refactor_native_row_panel_active = 0;
   shared->row_pipeline_ready_queue = 0;
   shared->row_pipeline_row_dep_ready_queue = 0;
