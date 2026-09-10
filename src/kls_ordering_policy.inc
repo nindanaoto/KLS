@@ -11503,8 +11503,7 @@ static int kls_initial_certified_unscaled_lifecycle_candidate(
        so require the declared avoided passes to cover half that conservative
        bound; the exact numeric limits below remain authoritative. */
     avoided_scale_work >=
-      0.5 * (solver->symbolic->est_flops + symbolic_fill) &&
-    getenv("KLS_DISABLE_INITIAL_CERTIFIED_UNSCALED_LIFECYCLE") == NULL;
+      0.5 * (solver->symbolic->est_flops + symbolic_fill);
 }
 
 /* For a cache-resident BTF in the caller's compressed frame, KLU row scaling
@@ -11530,8 +11529,7 @@ static int kls_initial_low_work_btf_public_unscaled_candidate(
     solver->nnz > 0u && solver->nnz <= (UF_long)UINT16_MAX &&
     solver->symbolic->structural_rank == solver->n &&
     solver->symbolic->est_flops > 0.0 &&
-    solver->symbolic->est_flops < 100000.0 &&
-    getenv("KLS_DISABLE_INITIAL_LOW_WORK_BTF_PUBLIC_UNSCALED") == NULL;
+    solver->symbolic->est_flops < 100000.0;
 }
 
 /* A scaled factor can be numerically condition-sensitive yet structurally
@@ -11570,8 +11568,7 @@ static int kls_repeated_scaled_egraph_unscaled_trial_enabled(
   }
   const double fill =
     (double)(solver->numeric->lnz + solver->numeric->unz);
-  return fill > 0.0 && fill <= 2.0e7 &&
-    getenv("KLS_DISABLE_SCALED_EGRAPH_UNSCALED_TRIAL") == NULL;
+  return fill > 0.0 && fill <= 2.0e7;
 }
 
 static int kls_repeated_scaled_overhead_trial_enabled(
@@ -11590,7 +11587,6 @@ static int kls_repeated_scaled_overhead_trial_enabled(
     (double)(solver->numeric->lnz + solver->numeric->unz);
   const double scale_pass_work = horizon * (double)solver->nnz;
   const int amortized_scale_overhead =
-    getenv("KLS_DISABLE_AMORTIZED_SCALE_OVERHEAD_TRIAL") == NULL &&
     solver->options.expected_refactorizations >= 64 &&
     solver->options.threads > 1 &&
     solver->common.flops >=
@@ -11666,9 +11662,7 @@ static int should_try_auto_scale(const kls_solver *solver) {
        costs minutes at this size. */
     return 0;
   }
-  if (
-      getenv("KLS_DISABLE_STABLE_UNSCALED_SCALE_GUARD") == NULL &&
-      solver->common.scale <= 0 &&
+  if (solver->common.scale <= 0 &&
       solver->common.noffdiag == 0 &&
       solver->pivot_nudge_count == 0u &&
       solver->common.kls_perturb_count == 0u &&
@@ -11868,7 +11862,6 @@ static int maybe_select_auto_scale(kls_solver *solver,
       (double)solver->options.expected_refactorizations *
       unscaled_recurring_work_saved;
     const int amortized_scale_overhead_trial =
-      getenv("KLS_DISABLE_AMORTIZED_SCALE_OVERHEAD_TRIAL") == NULL &&
       solver->options.expected_refactorizations >= 64 &&
       solver->options.threads > 1 &&
       solver->common.flops >=
@@ -11923,8 +11916,7 @@ static int maybe_select_auto_scale(kls_solver *solver,
       (certified_unscaled_lifecycle_trial &&
        condition_sensitive_unscaled_trial);
     int unscaled_overhead_residual_ok = 0;
-    if (unscaled_overhead_economics && residual_guarded_unscaled_trial &&
-        getenv("KLS_DISABLE_GUARDED_UNSCALED_SCALE_TRIAL") == NULL) {
+    if (unscaled_overhead_economics && residual_guarded_unscaled_trial) {
       /* Removing a recurring scale pass can repay under the broader
          lifecycle economics, including when the scaled incumbent is
          condition-sensitive, but fill/work similarity alone is not an
@@ -12012,10 +12004,6 @@ static int maybe_select_auto_scale(kls_solver *solver,
 }
 
 static int should_try_auto_pivot_tolerance(const kls_solver *solver) {
-  if (getenv("KLS_DISABLE_AUTO_PIVOT_TRIAL") != NULL) {
-    return 0;
-  }
-
   if (solver != NULL && solver->user_col_perm != NULL) {
     /* A block-ordered numeric proved its pivot policy through the solve
        probe; a serial trial factorization at another tolerance re-pivots
