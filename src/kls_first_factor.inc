@@ -6814,12 +6814,8 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
 
   /* A width-one affected subtree has no exploitable row concurrency.  The
      direct topological walk avoids ready-queue, worker, and speculative-state
-     machinery; the force switch is useful for new-architecture experiments,
-     while the default gate is the exact structural certificate. */
-  const int serial_etree_tail =
-    getenv("KLS_ENABLE_FAST_REJECT_SERIAL_ETREE_TAIL") != NULL ||
-    (getenv("KLS_DISABLE_FAST_REJECT_SERIAL_ETREE_TAIL") == NULL &&
-     active_tail_is_chain);
+     machinery; the exact structural certificate controls admission. */
+  const int serial_etree_tail = active_tail_is_chain;
   if (serial_etree_tail) {
     UF_long open_panel_start = KLS_KLU_EMPTY;
     UF_long open_panel_end = KLS_KLU_EMPTY;

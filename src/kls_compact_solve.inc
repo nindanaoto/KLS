@@ -1887,8 +1887,7 @@ static void kls_solve_contract_classify(kls_solver *solver,
       solver->numeric_is_predicted ||
       solver->numeric == NULL || solver->symbolic == NULL ||
       numeric_values == NULL || solver->col_ptr == NULL ||
-      solver->row_idx == NULL ||
-      getenv("KLS_DISABLE_SOLVE_CONTRACT_PROBE") != NULL) {
+      solver->row_idx == NULL) {
     return;
   }
   kls_update_numeric_rcond_guard(solver);
@@ -1926,16 +1925,7 @@ static void kls_solve_contract_classify(kls_solver *solver,
         solver->numeric, &growth_common)) {
     return;
   }
-  double thresh = 1.0e-6;
-  {
-    const char *env = getenv("KLS_CONTRACT_RGROWTH");
-    if (env != NULL && env[0] != '\0') {
-      const double parsed = atof(env);
-      if (parsed > 0.0) {
-        thresh = parsed;
-      }
-    }
-  }
+  const double thresh = 1.0e-6;
   solver->solve_contract_probe =
     growth_common.rgrowth < thresh && growth_common.rgrowth >= 0.0 ? 2 : 1;
   if (solver->solve_contract_probe == 2) {

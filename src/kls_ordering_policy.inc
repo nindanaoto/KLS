@@ -1671,7 +1671,6 @@ static int kls_value_tolerance_crossing_initial_profile(
       solver->col_ptr == NULL || solver->row_idx == NULL ||
       solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
       solver->symbolic->R == NULL ||
-      getenv("KLS_DISABLE_VALUE_TOLERANCE_CROSSING_POLICY") != NULL ||
       fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->options.scale != KLS_SCALE_AUTO || solver->common.scale != -1 ||
@@ -4004,14 +4003,11 @@ static UF_long kls_metis_order(UF_long n,
   int metis_status = METIS_ERROR;
   int par_nd_done = 0;
 #ifdef KLS_HAVE_MTMETIS
-  const int force_det_ndp =
-    getenv("KLS_FORCE_DET_NDP") != NULL ||
-    kls_generic_metis_tuning_ctx;
+  const int force_det_ndp = kls_generic_metis_tuning_ctx;
   if (!par_nd_done && metis_ndp_npes > 1 && metis_ndp_sizes != NULL &&
       n >= 50000 &&
       (force_det_ndp ||
-       kls_metis_order_threads >= (int)metis_ndp_npes) &&
-      getenv("KLS_DISABLE_DET_NDP") == NULL) {
+       kls_metis_order_threads >= (int)metis_ndp_npes)) {
     /* deterministic parallel NodeNDP: serial METIS separators with
        the leaves ordered by concurrent serial NodeND.  Deterministic
        because KLS_GKRAND (default ON) gives each METIS call its own
@@ -5266,8 +5262,6 @@ static void kls_maybe_promote_selected_generic_nd(
       candidate->selected_ordering == KLS_ORDERING_METIS ||
       candidate->block_order_perm != NULL ||
       !kls_repeated_update_workload(options) || options->threads < 2 ||
-      (candidate->n < 30000u &&
-       getenv("KLS_DISABLE_SUB_30K_GENERIC_ND") != NULL) ||
       candidate->n > (UF_long)INT32_MAX ||
       candidate->nnz > (UF_long)INT32_MAX ||
       getenv("KLS_DISABLE_GENERIC_ND_PORTFOLIO") != NULL) {
