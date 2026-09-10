@@ -7639,10 +7639,9 @@ static int kls_mapped_refactor(kls_solver *solver,
         return row_status;
       }
     } else if (!check_pivots) {
-      /* The snb engine's per-matrix acceptance must see refactor calls
-         even where the row engine adopted: its timed comparison uses
-         the wrapper-recorded incumbent (whichever engine that is) and
-         adopts only decisive wins (pre2: snb 3.2s vs row 8.1s). */
+      /* Supernodal acceptance must see refactors even after row adoption:
+         it compares against the wrapper-recorded incumbent and adopts only
+         decisive wins. */
       UF_long snb_ok = 0;
       if (kls_snb_try_refactor(solver, numeric_values, 0, &snb_ok)) {
         return (int)snb_ok;

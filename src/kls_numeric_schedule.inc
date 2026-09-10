@@ -620,11 +620,8 @@ static int kls_snb_prepare(kls_solver *solver) {
      parallelizable shape; serial trials are always worth it (the mapped
      incumbents they race are far slower than any prep). */
   if (ok && solver->snb_trial_budget > 0.0) {
-    /* t4: with the 0.6 decisive-adoption margin, the only measured
-       adopter is pre2 (coop share 0.58); chain giants with tiny snodes
-       (memchip 1.5-wide) and scattered shapes always reject, and their
-       trial+panels would tax the once-charged factor term ~4s each.
-       Gate on the cooperative work share computed from the schedule. */
+    /* Gate the trial on cooperative work share; schedules with tiny
+       supernodes or scattered work cannot amortize panel construction. */
     if ((st->coop_work_share < 0.50) &&
         getenv("KLS_SNB_FORCE_TRIAL") == NULL) {
       ok = 0;
@@ -1487,11 +1484,9 @@ static int kls_snb_env_disabled(void) {
   return value != NULL && value[0] == '1';
 }
 
-/* Run the supernodal acceptance at factor time so its one-time A/B cost
- * lands in the once-charged factor term instead of inflating the first
- * (99x-charged) refactor.  Also lets snb sort the numeric below the
- * snode-panel flops floor: panels have no batch-run floor of their own,
- * and TSOPF-class fused-block rows live down there. */
+/* Run supernodal acceptance at factor time so its one-time A/B cost lands
+ * in the once-charged factor term instead of inflating the first repeated
+ * refactor.  Panels have no separate batch-run floor. */
 static void kls_snb_maybe_accept(kls_solver *solver,
                                  const double *numeric_values,
                                  double *elapsed) {

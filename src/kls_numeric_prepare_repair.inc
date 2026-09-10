@@ -6063,13 +6063,10 @@ static int kls_authoritative_packed_lu_enabled(const kls_solver *solver) {
        measured subtree refactor tournament is still live or has won. */
     return 0;
   }
-  /* This representation removes KLU's interleaved value traffic by keeping
-     compact indices and both value decks resident together.  It wins only
-     when that active deck fits comfortably in the calling core's LLC; once
-     it spills, the duplicate representation increases bandwidth (the
-     measured ASIC/G2 regime).  Query the actual execution domain rather
-     than recognizing a CPU model or matrix.  Large-cache domains retain the
-     already-fast native layout, which also avoids a one-time mirror build. */
+  /* This representation removes interleaved value traffic by keeping compact
+     indices and both value decks resident together.  Once that active deck
+     spills from the calling core's LLC, duplication increases bandwidth.
+     Query the execution domain rather than recognizing a CPU or matrix. */
 #if defined(_SC_LEVEL3_CACHE_SIZE)
   const uint64_t llc = kls_execution_domain_llc_bytes();
   if (llc == 0u || llc > UINT64_C(64) * 1024u * 1024u) {

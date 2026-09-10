@@ -21,11 +21,9 @@ static int kls_row_refactor_env_disabled(void) {
 static int kls_auto_row_refactor_high_work_candidate(
   const kls_solver *solver) {
   return solver != NULL && solver->options.threads > 1 &&
-         /* The row schedule retains O(n) metadata.  On the measured
-            cache-domain workload it pays back on the mid-sized, high-fill
-            ASIC factors, but its preparation pushes multi-million-row
-            factors beyond the per-case wall-time bound before the numeric
-            executor can amortize it. */
+         /* The row schedule retains O(n) metadata.  It pays back on
+            mid-sized, high-fill factors, but very large factors cannot
+            amortize its preparation cost. */
          solver->n >= 300000u && solver->n <= 800000u &&
          solver->refactor_dependency_work >= 1.0e8;
 }
@@ -161,11 +159,9 @@ static int kls_auto_row_refactor_should_run(const kls_solver *solver) {
 }
 
 /* Measured per-numeric adoption of the row-refactor engine. Analytic
-   models mispredict the cooperative engine (memchip: modeled hopeless,
-   measured faster with half the solve time), so alternate real
-   refactors between the column and row engines, pair each with its
-   following solve, and decide on the measured refactor+solve pair —
-   the quantity a SPICE cycle actually pays. */
+   models can mispredict the cooperative engine, so alternate real
+   refactors between the column and row engines and compare each with its
+   following solve: the pair is the cost a SPICE cycle actually pays. */
 static int kls_row_refactor_acceptance_structurally_ready(
   const kls_solver *solver) {
   return (kls_row_refactor_env_enabled() ||
@@ -226,9 +222,7 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
     want = row_n < col_n;
   }
   if (want) {
-    /* Bound the trial: a pathological row schedule (mac_econ-class runs
-       100x the column time at equal flops) must cost at most a few
-       column refactors before the verdict settles on the column side. */
+    /* Bound a pathological row trial to a few incumbent refactors. */
     const double base = solver->adaptive_refactor_seconds > 0.0
       ? solver->adaptive_refactor_seconds
       : 0.5 * solver->stats.factor_seconds;
@@ -267,10 +261,8 @@ static void kls_row_refactor_acceptance_try_decide(kls_solver *solver) {
       solver->row_accept_ref_min[1] + solver->row_accept_solve_min[1];
     solver->row_accept_decision = row_pair < col_pair * 0.98 ? 1 : -1;
     if (solver->row_accept_decision > 0) {
-      /* The verdict pairs also measured both solve routes: when the
-         published column solve decisively beat the row-value solve,
-         publish even where the structural gate would keep row values
-         (pre2: row solve 168ms vs column 64ms at +~20ms publish). */
+      /* When the published column solve decisively beats the row-value
+         solve, measure whether publishing also pays for itself. */
       if (solver->row_accept_solve_min[0] <
           0.8 * solver->row_accept_solve_min[1]) {
         /* A faster column solve is only a candidate: reaching it requires
@@ -300,13 +292,9 @@ static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
     return;
   }
   if (solver->row_accept_decision > 0) {
-    /* Post-adoption steady audit, refactor side. The trial samples
-       both engines during their warmup (mac_econ: cold column trials
-       read 9.1s vs its true 1.1s steady while the row engine trials
-       at 3.6s and steadies at 5s - the pair verdict is honest on
-       corrupted data). After the adopted row engine demonstrates its
-       steady floor, spend ONE forced column refactor to refresh the
-       loser's floor and revert on a decisive margin. */
+    /* Post-adoption steady audit.  Warmup can distort the trial, so after
+       the adopted engine demonstrates its floor, spend one forced column
+       refactor to refresh the losing side and revert on a decisive margin. */
     if (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) {
       if (solver->row_steady_ref_over == 0 ||
           seconds < solver->row_steady_ref_min) {

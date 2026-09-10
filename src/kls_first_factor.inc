@@ -9278,9 +9278,8 @@ static int kls_generic_predicted_diagonal_values_capable(
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                                double *numeric_values,
                                                double *elapsed) {
-  /* Prediction is a parallel pattern-construction optimization.  In serial
-     it is slower than KLU on the ASIC class, and its suffix-closed storage
-     is not a valid input to the later mapped-refactor portfolio. */
+  /* Prediction is a parallel pattern-construction optimization.  Its
+     suffix-closed storage is not valid input to mapped refactor engines. */
   if (solver == NULL || solver->symbolic == NULL || solver->numeric != NULL ||
       numeric_values == NULL ||
       solver->options.threads <= 1 ||
@@ -9366,11 +9365,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
 
   {
     /* Static-diagonal prediction requires the pivot diagonal to be
-       structurally PRESENT under the symbolic's P/Q: patterns whose
-       diagonals are mostly missing (mac_econ: 89% under the raced
-       METIS symbolic) factor to exact-cancellation zero pivots and the
-       honest probe measures e+33 - the whole attempt (~1.5s of build,
-       preps and passes) is a priori hopeless.  O(nnz) scan. */
+       structurally present under the symbolic P/Q.  Mostly missing
+       diagonals lead to cancellation pivots, so reject them in O(nnz). */
     UF_long missing = 0;
     UF_long k, p;
     const UF_long *P = symbolic->P;
@@ -10391,9 +10387,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     for (UF_long i = 0; i < n; ++i) {
       probe_b[i] = 0.0;
     }
-    /* Varied test solution: probing A x = A e is degenerate on matrices
-       whose rows sum to zero exactly (mac_econ accounting identities:
-       b = 0, x = 0, residual 0 for ANY nonsingular factor). */
+    /* A varied test solution avoids the degenerate A*e = 0 probe on
+       matrices whose rows sum to zero exactly. */
     for (UF_long j = 0; j < n; ++j) {
       const double xj = 1.0 + (double)(j % 17) * 0.01;
       for (UF_long p = solver->col_ptr[j]; p < solver->col_ptr[j + 1u];
@@ -11315,9 +11310,8 @@ static int kls_block_trial_entry_cmp(const void *a, const void *b) {
   return (ea->row > eb->row) - (ea->row < eb->row);
 }
 
-/* Block-structured ordering: circuit families such as TSOPF repeat a
-   physics block (one power network per contingency) that generic orderings
-   interleave, forcing the pivots that inflate fill.  Detect the blocks as
+/* Block-structured ordering handles repeated physics blocks that generic
+   orderings interleave, forcing pivots that inflate fill. Detect the blocks as
    connected components after setting aside the dense coupling vertices,
    order each component contiguously (reverse Cuthill-McKee inside), append
    the couplers last, and let the predicted factorization with restricted
@@ -11381,10 +11375,8 @@ static int kls_build_block_structured_order(UF_long n,
   for (UF_long v = 0; v < n; ++v) {
     deg[v] = xadj[v + 1u] - xadj[v];
   }
-  /* Coupler vertices sit orders of magnitude above the block-interior
-     degrees (TSOPF b9: interiors p99=14, couplers 34..7210); a floor
-     relative to the p99 degree separates them where absolute thresholds
-     miss the low-degree couplers. */
+  /* Coupler degrees greatly exceed the block-interior distribution; a
+     floor relative to p99 separates them where absolute thresholds fail. */
   UF_long dense_floor = 24;
   {
     UF_long *deg_sorted = (UF_long *)malloc((size_t)n * sizeof(*deg_sorted));
