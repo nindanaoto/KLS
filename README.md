@@ -1838,7 +1838,6 @@ where CKTSO also times out under that cap are kept out of this tuning loop:
 ```sh
 python3 scripts/run_bench_suite.py --kls-bench build/kls_bench --matrix-dir data/suitesparse-paper-large --manifest bench/suitesparse_paper_large_recon_manifest.txt --orientation auto --threads 4 --repeat 1 --refactor-repeat 1 --timeout 120 --jsonl build/kls_paper_large_recon.jsonl
 python3 scripts/run_cktso_suite.py --cktso-compare build-cktso/cktso_compare --matrix-dir data/suitesparse-paper-large --manifest bench/suitesparse_paper_large_recon_manifest.txt --threads 4 --repeat 1 --refactor-repeat 1 --timeout 120 --jsonl build/cktso_paper_large_recon.jsonl
-python3 scripts/run_klu2_suite.py --klu2-compare build-klu2/klu2_compare --matrix-dir data/suitesparse-paper-large --manifest bench/suitesparse_paper_large_recon_manifest.txt --repeat 1 --refactor-repeat 1 --timeout 120 --jsonl build/klu2_paper_large_recon.jsonl
 ```
 
 Use `bench/suitesparse_stress_timeout_manifest.txt` for shared-hard timeout
@@ -1914,7 +1913,7 @@ deliberate penalty:
 python3 scripts/compare_bench_runs.py --candidate build/kls_paper_large_recon.jsonl --candidate-name kls-auto --reference build/cktso_paper_large_recon.jsonl --reference-name cktso --include-failures --failure-seconds 1000
 ```
 
-For long manifests, the KLS, CKTSO, and KLU2 suite runners preserve manifest
+For long manifests, the KLS and CKTSO suite runners preserve manifest
 order and accept `--skip N --limit M`, so large or CKTSO-gap suites can be run
 in reproducible chunks without treating unrun rows as solver failures in later
 comparisons.
@@ -1980,19 +1979,6 @@ under `build/cache-domain-smallest` by default.  Pass `--manifest`,
 `--matrix-dir`, `--passes`, or `--output-dir` to run another reproducible
 campaign.
 
-An optional Trilinos KLU2 comparison tool can be built against a local Trilinos
-checkout. It calls the Amesos2 KLU2 headers directly and emits the same
-SPICE-cycle JSON metric:
-
-```sh
-cmake -S . -B build-klu2 -DKLS_BUILD_KLU2_COMPARE=ON \
-  -DKLU2_ROOT=/path/to/Trilinos/packages/amesos2/src/KLU2 \
-  -DTEUCHOS_CORE_ROOT=/path/to/Trilinos/packages/rol/src/compatibility/teuchos-lite
-cmake --build build-klu2 -j --target klu2_compare
-./build-klu2/klu2_compare matrix.mtx 10 10
-python3 scripts/run_klu2_suite.py --klu2-compare build-klu2/klu2_compare --matrix-dir data/suitesparse-paper-medium --jsonl build/klu2_suite.jsonl --timeout 120
-```
-
 ## Status
 
 This is a functional implementation with KLS-level analysis choices for
@@ -2008,8 +1994,8 @@ coordinates from KLS-owned pivot checks, plus row-refactor cluster/pipeline
 counters, compact dense-panel markers, and last-run markers, so the remaining
 SubtreeLU/CKTSO row-segment work can be evaluated on the same slow-case
 artifacts.
-On the refreshed selected-large reconstruction, KLS is ahead of the saved KLU2
-artifact but still trails the saved CKTSO artifact, with `pre2` still timing out.
+On the refreshed selected-large reconstruction, KLS still trails the saved
+CKTSO artifact, with `pre2` still timing out.
 The June 29, 2026 current-source rerun keeps the same shape:
 `build/kls_current_large_recon_t4_r1_ref1_timeout120.jsonl` completes six of
 eight selected large rows, wins `TSOPF_FS_b39_c30`, times out on `pre2` and
