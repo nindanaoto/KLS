@@ -12265,8 +12265,7 @@ static int kls_generic_predicted_diagonal_values_capable(
       solver->symbolic->P == NULL || solver->symbolic->Q == NULL ||
       solver->symbolic->R == NULL ||
       (solver->common.scale > 0 &&
-       (solver->options.scale != KLS_SCALE_AUTO ||
-        getenv("KLS_PREDICTED_TRY_SCALED") != NULL))) {
+       solver->options.scale != KLS_SCALE_AUTO)) {
     return 0;
   }
   UF_long *pinv = (UF_long *)malloc((size_t)solver->n * sizeof(*pinv));
@@ -12400,7 +12399,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   const int generic_scaled_auto_prediction_census =
     solver->options.scale == KLS_SCALE_AUTO &&
     solver->common.scale > 0 &&
-    getenv("KLS_PREDICTED_TRY_SCALED") == NULL &&
     solver->options.threads > 1 &&
     kls_repeated_update_workload(&solver->options) &&
     kls_symbolic_repeated_prediction_economic(
@@ -12435,8 +12433,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       !solver->generic_nd_portfolio_selected &&
       !solver->block_trial_active && !solver->prestatic_adopted_unfactored &&
       !kls_generic_repeated_predicted_lifecycle_candidate(solver) &&
-      (solver->metis_race == NULL || n >= 1000000) &&
-      getenv("KLS_FORCE_PIVOT_FILL") == NULL) {
+      (solver->metis_race == NULL || n >= 1000000)) {
     /* With a METIS race pending this numeric is a bootstrap the
        promotion will replace: the parallel predicted fill is far
        cheaper than a serial KLU first factorization, and a predicted
@@ -12474,8 +12471,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         }
       }
       free(pinv_probe);
-      if (missing * 4u > (UF_long)n &&
-          getenv("KLS_PREDICTED_TRY_SCALED") == NULL) {
+      if (missing * 4u > (UF_long)n) {
         return 0;
       }
     }
@@ -12486,14 +12482,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      settles on the unscaled mode in the auto-scale trials anyway.  Restore
      the mode on any rejection. */
   const UF_long saved_scale = solver->common.scale;
-  if (getenv("KLS_PREDICTED_TRY_SCALED") == NULL) {
-    solver->common.scale = -1;
-  } else if (solver->common.scale <= 0) {
-    /* scaled-static experiment: row scaling changes the addends of the
-       exact cancellations that produce the zero pivots (missing-
-       diagonal columns' pivots are pure update sums) */
-    solver->common.scale = 1;
-  }
+  solver->common.scale = -1;
 
   UF_long *pinv = (UF_long *)malloc((size_t)n * sizeof(*pinv));
   UF_long *col_block = generic_nd_fill_only
@@ -13192,7 +13181,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   maybe_prepare_refactor_schedule(solver, elapsed);
   UF_long refactor_ok = 0;
   int saw_singular = 0;
-  if (getenv("KLS_FORCE_PIVOT_FILL") != NULL || solver->block_trial_active) {
+  if (solver->block_trial_active) {
     /* The block trial's matched diagonal is structurally incomplete by
        design; the pivoting fill is its intended factorization. */
     refactor_ok = 0;
@@ -13200,24 +13189,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   }
   const UF_long fill_round_cap = 3u;
   const UF_long nudge_slot_cap = 1024u;
-  const int batch_fast_rounds =
-    getenv("KLS_PREDICTED_BATCH_FAST") != NULL;
-  UF_long batch_window = 32u;
-  {
-    const char *we = getenv("KLS_PREDICTED_BATCH_WINDOW");
-    if (we != NULL && we[0] != '\0') {
-      const long parsed = atol(we);
-      if (parsed > 0) {
-        batch_window = (UF_long)parsed;
-      }
-    }
-  }
+  const UF_long batch_window = 32u;
   const Int zp_saved_halt = common->halt_if_singular;
   UF_long kls_prev_batch_nudged = 0;
   if (refactor_ok == 0 &&
       common->status == TRILINOS_KLU_SINGULAR &&
-      (getenv("KLS_FORCE_PIVOT_FILL") != NULL ||
-       solver->block_trial_active)) {
+      solver->block_trial_active) {
     /* forced-fill path set above: skip the value rounds */
   } else
   for (UF_long fill_round = 0; fill_round < fill_round_cap; ++fill_round) {
@@ -13239,8 +13216,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       const double tolv = common->tol > 0.0 ? common->tol : 0.001;
       UF_long batch_nudged = 0;
       int batch_failed = 0;
-      if (getenv("KLS_PREDICTED_THRESHOLD_WAIVE") != NULL ||
-          kls_predicted_probe_first_threshold_shape(solver)) {
+      if (kls_predicted_probe_first_threshold_shape(solver)) {
         break;
       }
       /* Front-first: violations cascade downstream, so fix only the
@@ -13362,15 +13338,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         break;
       }
       kls_prev_batch_nudged = (UF_long)batch_nudged;
-      if (!batch_fast_rounds) {
-        /* nudges change values, not pattern; the rebuild costs ~14s per
-           round at pre2 scale and is skipped under
-           KLS_PREDICTED_BATCH_FAST */
-        free_refactor_map(solver);
-        free_refactor_schedule(solver);
-        maybe_prepare_refactor_map(solver, elapsed);
-        maybe_prepare_refactor_schedule(solver, elapsed);
-      }
+      /* Nudges change values, not pattern, but rebuild derived schedules
+         before the next round so they match the accepted numeric. */
+      free_refactor_map(solver);
+      free_refactor_schedule(solver);
+      maybe_prepare_refactor_map(solver, elapsed);
+      maybe_prepare_refactor_schedule(solver, elapsed);
       common->status = TRILINOS_KLU_OK;
       refactor_ok = 0;
       continue;
@@ -13570,8 +13543,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     free(probe_r);
     free(probe_b);
     if (!(residual < 1e-9)) {
-      if ((getenv("KLS_ENABLE_PIVOT_FILL") != NULL ||
-           solver->block_trial_active) &&
+      if (solver->block_trial_active &&
           probe_attempt == 0 && !pivot_fill_used &&
           kls_predicted_pivot_rescue(solver, numeric_values, elapsed)) {
         pivot_fill_used = 1;
@@ -13967,8 +13939,7 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_common *common = &solver->common;
   if (numeric == NULL || symbolic == NULL ||
-      (symbolic->maxblock > 200000 &&
-       getenv("KLS_PREDICTED_PIVOT_FILL_LARGE") == NULL) ||
+      symbolic->maxblock > 200000 ||
       common->scale > 0 ||
       numeric->Rs != NULL) {
     return 0;
@@ -15148,8 +15119,7 @@ done:
 static int kls_predicted_pivot_rescue(kls_solver *solver,
                                       const double *numeric_values,
                                       double *elapsed) {
-  if ((getenv("KLS_ENABLE_PIVOT_FILL") == NULL &&
-       !solver->block_trial_active) ||
+  if (!solver->block_trial_active ||
       solver->numeric == NULL || solver->symbolic == NULL) {
     return 0;
   }
