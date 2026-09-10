@@ -6488,10 +6488,6 @@ static int test_egraph_retired_supernode_switch(void) {
   char *saved_egraph =
     saved_egraph_value != NULL ? strdup(saved_egraph_value) : NULL;
   const int had_egraph = saved_egraph_value != NULL;
-  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
-  char *saved_first =
-    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
-  const int had_first = saved_first_value != NULL;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -6516,10 +6512,6 @@ static int test_egraph_retired_supernode_switch(void) {
   }
   if (ok && setenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR=0");
     ok = 0;
   }
 
@@ -6636,15 +6628,10 @@ static int test_egraph_retired_supernode_switch(void) {
                          saved_egraph)) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_first,
-                         saved_first)) {
-    ok = 0;
-  }
 
   free(saved_row);
   free(saved_checked);
   free(saved_egraph);
-  free(saved_first);
   kls_destroy(solver);
   free(ap);
   free(ai);
@@ -10090,10 +10077,6 @@ static int test_fast_factor_separator_queue_repair(void) {
     }
   }
 
-  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
-  char *saved_first =
-    saved_first_value != NULL ? strdup(saved_first_value) : NULL;
-  const int had_saved_first = saved_first_value != NULL;
   const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
   char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
   const int had_saved_row = saved_row_value != NULL;
@@ -10114,14 +10097,9 @@ static int test_fast_factor_separator_queue_repair(void) {
   options.threads = 4;
 
   int ok = 1;
-  if ((had_saved_first && saved_first == NULL) ||
-      (had_saved_row && saved_row == NULL) ||
+  if ((had_saved_row && saved_row == NULL) ||
       (had_saved_checked && saved_checked == NULL)) {
     fprintf(stderr, "failed to save separator repair environment\n");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_KLS_FIRST_FACTOR");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
@@ -10253,10 +10231,6 @@ static int test_fast_factor_separator_queue_repair(void) {
   }
 
 cleanup:
-  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_saved_first,
-                         saved_first)) {
-    ok = 0;
-  }
   if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_saved_row,
                          saved_row)) {
     ok = 0;
@@ -10273,7 +10247,6 @@ cleanup:
   free(b);
   free(x);
   free(expected);
-  free(saved_first);
   free(saved_row);
   free(saved_checked);
   return ok;
@@ -10290,21 +10263,11 @@ static int test_structurally_full_rank_singular_rejection(void) {
   int32_t *ai = (int32_t *)malloc((size_t)nnz * sizeof(*ai));
   double *ax = (double *)malloc((size_t)nnz * sizeof(*ax));
 
-  const char *saved_first_value = getenv("KLS_ENABLE_KLS_FIRST_FACTOR");
-  char *saved_first = saved_first_value != NULL
-    ? strdup(saved_first_value) : NULL;
-  const int had_first = saved_first_value != NULL;
-
   int ok = 1;
   if (ap == NULL || ai == NULL || ax == NULL) {
     fprintf(stderr, "failed to allocate singular fingerprint regression\n");
     ok = 0;
   }
-  if ((had_first && saved_first == NULL)) {
-    fprintf(stderr, "failed to save singular fingerprint environment\n");
-    ok = 0;
-  }
-
   int32_t position = 0;
   for (int32_t col = 0; ok && col < n; ++col) {
     ap[col] = position;
@@ -10363,11 +10326,6 @@ static int test_structurally_full_rank_singular_rejection(void) {
     }
   }
 
-  if (ok && setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0) {
-    perror("configure singular fingerprint regression");
-    ok = 0;
-  }
-
   kls_solver *solver = NULL;
   kls_options options;
   kls_default_options(&options);
@@ -10392,14 +10350,9 @@ static int test_structurally_full_rank_singular_rejection(void) {
   }
 
   kls_destroy(solver);
-  if (!restore_env_value("KLS_ENABLE_KLS_FIRST_FACTOR", had_first,
-                         saved_first != NULL ? saved_first : "")) {
-    ok = 0;
-  }
   free(ap);
   free(ai);
   free(ax);
-  free(saved_first);
   return ok;
 }
 
@@ -10479,10 +10432,8 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
     (cooperative ? 2u * block_size * block_size +
                    4u * (n - 2 * block_size) : 0u);
   const char *env_names[] = {
-    "KLS_ENABLE_KLS_FIRST_FACTOR",
     "KLS_ENABLE_ROW_REFACTOR",
     "KLS_ENABLE_CHECKED_ROW_REFACTOR",
-    "KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC",
     "KLS_DISABLE_I32_SOLVE",
     "KLS_DISABLE_SNB_REFACTOR",
     "KLS_SNB_FORCE_TRIAL"
@@ -10510,10 +10461,8 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
     }
   }
   if (ok &&
-      (setenv("KLS_ENABLE_KLS_FIRST_FACTOR", "0", 1) != 0 ||
-       setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0 ||
+      (setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0 ||
        setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0 ||
-       setenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC", "0", 1) != 0 ||
        unsetenv("KLS_DISABLE_I32_SOLVE") != 0 ||
        unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0 ||
        (cooperative ? setenv("KLS_SNB_FORCE_TRIAL", "1", 1)
