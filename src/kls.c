@@ -10193,22 +10193,18 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->nnz <= 4000000 && !solver->auto_amd_shortcut &&
       !solver->medium_spike_minfill_path &&
       !solver->large_bounded_no_btf_amf_path) {
-    const char *block_ordering_env = getenv("KLS_ENABLE_BLOCK_ORDERING");
-    if (!(block_ordering_env != NULL && block_ordering_env[0] == '0' &&
-          block_ordering_env[1] == '\0')) {
-      block_order_candidate = solver->block_order_perm != NULL;
-      if (!block_order_candidate) {
-        UF_long *block_perm = NULL;
-        UF_long *block_comp = NULL;
-        block_order_candidate = kls_build_block_structured_order(
-          solver->n, solver->col_ptr, solver->row_idx, &block_perm,
-          &block_comp);
-        free(block_comp);
-        if (block_order_candidate) {
-          solver->block_order_perm = block_perm;
-        } else {
-          free(block_perm);
-        }
+    block_order_candidate = solver->block_order_perm != NULL;
+    if (!block_order_candidate) {
+      UF_long *block_perm = NULL;
+      UF_long *block_comp = NULL;
+      block_order_candidate = kls_build_block_structured_order(
+        solver->n, solver->col_ptr, solver->row_idx, &block_perm,
+        &block_comp);
+      free(block_comp);
+      if (block_order_candidate) {
+        solver->block_order_perm = block_perm;
+      } else {
+        free(block_perm);
       }
     }
   }
@@ -10546,8 +10542,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       /* NOT deferrable: without this ordering TSOPF's serial factor
          is 41s and case9's 0.35s (measured) - it IS the one-shot
          path for the block-structured class, not cycle machinery */
-      if ((block_order_candidate ||
-           getenv("KLS_ENABLE_BLOCK_ORDERING") != NULL) &&
+      if (block_order_candidate &&
           !solver->auto_amd_shortcut &&
           !solver->medium_spike_minfill_path &&
           !solver->large_bounded_no_btf_amf_path) {

@@ -14670,14 +14670,6 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       solver->options.scale > 0) {
     return;
   }
-  const char *block_ordering_env = getenv("KLS_ENABLE_BLOCK_ORDERING");
-  if (block_ordering_env != NULL && block_ordering_env[0] == '0' &&
-      block_ordering_env[1] == '\0') {
-    /* Keep an explicit master disable for controlled A/B.  In generic AUTO
-       this routine only proposes a candidate: a measured factor trial,
-       residual probe, and fill bound below still decide adoption. */
-    return;
-  }
   /* Reordering thousands of already-tiny full-rank SCCs is more work than
      their bounded AMD symbolic.  This decision is structural; the stricter
      factor profile still controls every recurring numeric shortcut. */

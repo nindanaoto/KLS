@@ -13435,18 +13435,13 @@ static int kls_choose_symbolic_inner(UF_long n,
        confirm the matched diagonal; the ND trials below would be thrown
        away.  Analyze with AMD only - its estimate doubles as the trial's
        acceptance baseline. */
-    const char *bs_env = getenv("KLS_ENABLE_BLOCK_ORDERING");
-    const int bs_enabled =
-      !(bs_env != NULL && bs_env[0] == '0' && bs_env[1] == '\0');
-    const int bs_forced =
-      bs_env != NULL && bs_env[0] == '1' && bs_env[1] == '\0';
     const int medium_spike_minfill =
       options->ordering == KLS_ORDERING_AUTO && options->threads == 8 &&
       getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
       is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx);
-    if (bs_enabled && !medium_spike_minfill &&
+    if (!medium_spike_minfill &&
         options->static_pivoting && options->scale <= 0 &&
-        (n >= 50000 || bs_forced) && n <= 200000 &&
+        n >= 50000 && n <= 200000 &&
         col_ptr[n] <= 4000000) {
       /* class ceiling: every block-structured adopter (TSOPF/case9
          family) sits under 200K/4M - and the detector walk is

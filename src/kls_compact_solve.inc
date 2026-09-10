@@ -1881,8 +1881,6 @@ static int kls_serial_factor(kls_solver *solver,
 static void kls_solve_contract_classify(kls_solver *solver,
                                         const double *numeric_values) {
   if (solver == NULL || solver->solve_contract_probe != 0 ||
-      (solver->row_perm != NULL &&
-       getenv("KLS_DISABLE_MATCHED_RGROWTH_CLASSIFY") != NULL) ||
       solver->row_scale != NULL ||
       solver->col_scale != NULL || solver->pivot_nudge_count > 0 ||
       solver->common.kls_perturb_count > 0 ||
@@ -1988,14 +1986,12 @@ static void *kls_lean_prewarm_main(void *arg) {
   }
   if (job->build_pattern == 1) {
     (void)kls_build_row_refactor_pattern(job->solver, 1);
-    if (getenv("KLS_DISABLE_OVERLAPPED_COMPACT_ROW_INDICES") == NULL) {
-      /* These narrow descriptors are a second immutable view of the row
-         pattern just published by this worker.  Their builder validates all
-         representational bounds, so attempting it is safe for both the
-         packed executor and the broader moderate-work row executor; a
-         factor outside the narrow bounds simply retains native indices. */
-      (void)kls_build_lean_row_i16_indices(job->solver);
-    }
+    /* These narrow descriptors are a second immutable view of the row
+       pattern just published by this worker.  Their builder validates all
+       representational bounds, so attempting it is safe for both the
+       packed executor and the broader moderate-work row executor; a
+       factor outside the narrow bounds simply retains native indices. */
+    (void)kls_build_lean_row_i16_indices(job->solver);
     return NULL;
   }
   if (job->build_pattern == 2) {
