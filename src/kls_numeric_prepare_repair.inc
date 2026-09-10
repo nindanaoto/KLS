@@ -2200,7 +2200,6 @@ static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
   }
 
   solver->stats.fast_rejected_etree_columns = (int64_t)columns;
-  solver->stats.fast_rejected_etree_work = work;
   free(owned_parent);
 
   const UF_long *tail_cols = NULL;
@@ -2238,14 +2237,12 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   solver->stats.fast_rejected_suffix_columns =
     (int64_t)(k2 - rejected_pivot);
   solver->stats.fast_rejected_descendant_columns = 0;
-  solver->stats.fast_rejected_descendant_work = 0.0;
   solver->stats.fast_rejected_row_tail_columns = 0;
   solver->stats.fast_rejected_row_tail_work = 0.0;
   solver->stats.fast_rejected_group_tail_groups = 0;
   solver->stats.fast_rejected_group_tail_rows = 0;
   solver->stats.fast_rejected_group_tail_work = 0.0;
   solver->stats.fast_rejected_etree_columns = 0;
-  solver->stats.fast_rejected_etree_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_first = -1;
@@ -2340,7 +2337,6 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   if (valid) {
     solver->stats.fast_rejected_descendant_columns =
       (int64_t)descendant_columns;
-    solver->stats.fast_rejected_descendant_work = descendant_work;
   }
 }
 

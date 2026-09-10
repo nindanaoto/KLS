@@ -5703,14 +5703,12 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_block_size = 0;
   solver->stats.fast_rejected_suffix_columns = 0;
   solver->stats.fast_rejected_descendant_columns = 0;
-  solver->stats.fast_rejected_descendant_work = 0.0;
   solver->stats.fast_rejected_row_tail_columns = 0;
   solver->stats.fast_rejected_row_tail_work = 0.0;
   solver->stats.fast_rejected_group_tail_groups = 0;
   solver->stats.fast_rejected_group_tail_rows = 0;
   solver->stats.fast_rejected_group_tail_work = 0.0;
   solver->stats.fast_rejected_etree_columns = 0;
-  solver->stats.fast_rejected_etree_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_columns = 0;
   solver->stats.fast_rejected_pivoting_tail_work = 0.0;
   solver->stats.fast_rejected_pivoting_tail_first = -1;
@@ -16035,12 +16033,6 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
       ? ((solver->i16solve_l != NULL || solver->i16solve_u != NULL) ? 2 : 4)
       : 0;
   }
-  if (copy_size >= offsetof(kls_stats, compact_solve_fused_rhs) +
-                   sizeof(stats->compact_solve_fused_rhs)) {
-    stats->compact_solve_fused_rhs = solver->i32solve_state > 0 &&
-      (solver->i32solve_rhs_perm32 != NULL ||
-       solver->i16solve_rhs_perm != NULL);
-  }
   if (copy_size >=
       offsetof(kls_stats, compact_solve_singleton_run_blocks) +
         sizeof(stats->compact_solve_singleton_run_blocks)) {
@@ -16092,12 +16084,6 @@ int kls_get_stats(const kls_solver *solver, kls_stats *stats) {
       solver->promoted_tolerance_l2_recovery_count > (uint64_t)INT64_MAX
         ? INT64_MAX
         : (int64_t)solver->promoted_tolerance_l2_recovery_count;
-  }
-  if (copy_size >=
-      offsetof(kls_stats, verified_large_pts_solve_policy_eligible) +
-        sizeof(stats->verified_large_pts_solve_policy_eligible)) {
-    stats->verified_large_pts_solve_policy_eligible =
-      kls_verified_large_pts_solve_policy_eligible(solver);
   }
   stats->struct_size = sizeof(kls_stats);
   return KLS_OK;

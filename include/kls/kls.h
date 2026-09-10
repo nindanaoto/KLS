@@ -180,11 +180,9 @@ typedef struct kls_stats {
   int64_t fast_rejected_block_size;
   int64_t fast_rejected_suffix_columns;
   int64_t fast_rejected_descendant_columns;
-  double fast_rejected_descendant_work;
   int64_t fast_rejected_row_tail_columns;
   double fast_rejected_row_tail_work;
   int64_t fast_rejected_etree_columns;
-  double fast_rejected_etree_work;
   int64_t fast_rejected_pivoting_tail_columns;
   double fast_rejected_pivoting_tail_work;
   int64_t fast_rejected_pivoting_tail_first;
@@ -558,7 +556,6 @@ typedef struct kls_stats {
   int64_t verified_rhs_reuse_count;
   /* Zero means no compact triangular-solve mirror is prepared. */
   int compact_solve_index_bytes;
-  int compact_solve_fused_rhs;
   /* Singleton BTF blocks represented by the compact solve run cache, and
      the longest consecutive cached run.  Both are zero until a solve builds
      and adopts that optional representation. */
@@ -581,7 +578,6 @@ typedef struct kls_stats {
   int64_t promoted_tolerance_l2_recovery_count;
   /* The generic PTS builder proved a large elimination forest, bounded
      serial top, and balanced worker partition suitable for direct adoption. */
-  int verified_large_pts_solve_policy_eligible;
   /* The current numeric admits the compact one-RHS all-singleton BTF solve. */
   int tiny_singleton_solve_eligible;
   /* Number of public solves dispatched through that compact kernel. */
