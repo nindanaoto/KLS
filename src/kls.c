@@ -7540,8 +7540,6 @@ static void clear_matrix(kls_solver *solver) {
   kls_metis_race_abandon(solver);
   destroy_refactor_pool(solver);
   free_numeric(solver);
-  free_egraph_worker_scratch(solver);
-  free_egraph_pipeline_done(solver);
 
   free_symbolic(solver);
   free(solver->col_ptr);
@@ -8004,8 +8002,6 @@ void kls_default_options(kls_options *options) {
   memset(options, 0, sizeof(*options));
   options->struct_size = sizeof(*options);
   options->threads = 1;
-  options->ordering = KLS_ORDERING_AUTO;
-  options->orientation = KLS_ORIENTATION_AUTO;
   options->use_btf = 1;
   options->scale = KLS_SCALE_AUTO;
   options->abi_version = KLS_OPTIONS_ABI_VERSION;
@@ -8014,9 +8010,6 @@ void kls_default_options(kls_options *options) {
   options->halt_if_singular = 1;
   options->fast_factor = 1;
   options->static_pivoting = 1;
-  options->backend = KLS_BACKEND_AUTO;
-  options->expected_refactorizations = 0;
-  options->expected_solves = 0;
   options->record_tiny_solve_timing = 1;
 }
 
@@ -8032,8 +8025,6 @@ int kls_create(kls_solver **solver_out) {
   kls_default_options(&solver->options);
   solver->stats.struct_size = sizeof(solver->stats);
   kls_clear_fast_reject_stats(solver);
-  kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
-  kls_invalidate_factor_etree_stats(solver);
   if (!trilinos_klu_l_defaults(&solver->common)) {
     free(solver);
     return KLS_ERR_ANALYZE_FAILED;
