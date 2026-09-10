@@ -12855,8 +12855,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     UF_long *pb_lcur[16] = {NULL};
     UF_long pb_tlnz[16] = {0};
     int pb_nt = solver->options.threads > 16 ? 16 : solver->options.threads;
-    if (nk >= 65536 && pb_nt >= 2 &&
-        getenv("KLS_DISABLE_PARALLEL_PREDICTED_BUILD") == NULL) {
+    if (nk >= 65536 && pb_nt >= 2) {
       int alloc_ok = 1;
       for (int t = 0; t < pb_nt; ++t) {
         pb_partial[t] = (int32_t *)calloc((size_t)nk, sizeof(int32_t));
@@ -13190,8 +13189,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
   solver->numeric_is_predicted = 1;
   /* The pattern was written in ascending row order, so the supernode
      preparation can skip its sorting pass. */
-  solver->snode_numeric_pre_sorted =
-    getenv("KLS_PREDICTED_FORCE_SORT") == NULL;
+  solver->snode_numeric_pre_sorted = 1;
   /* The routing gates below need the factor work estimate, which KLU
      computes from the pattern alone. */
   kls_update_numeric_diagnostics(solver, 0);
@@ -13208,9 +13206,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     refactor_ok = 0;
     common->status = TRILINOS_KLU_SINGULAR;
   }
-  UF_long fill_round_cap = 3u;
-  const UF_long nudge_slot_cap =
-    getenv("KLS_PREDICTED_NUDGE_SLOTS_8K") != NULL ? 8192u : 1024u;
+  const UF_long fill_round_cap = 3u;
+  const UF_long nudge_slot_cap = 1024u;
   const int batch_fast_rounds =
     getenv("KLS_PREDICTED_BATCH_FAST") != NULL;
   UF_long batch_window = 32u;
@@ -13220,15 +13217,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       const long parsed = atol(we);
       if (parsed > 0) {
         batch_window = (UF_long)parsed;
-      }
-    }
-  }
-  {
-    const char *rounds_env = getenv("KLS_PREDICTED_NUDGE_ROUNDS");
-    if (rounds_env != NULL && rounds_env[0] != '\0') {
-      const long parsed = atol(rounds_env);
-      if (parsed > 0 && parsed <= 2048) {
-        fill_round_cap = (UF_long)parsed;
       }
     }
   }
@@ -13505,21 +13493,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         break;
       }
     } else {
-      double tol_sigma =
+      const double tol_sigma =
         (common->tol > 0.0 ? common->tol : 0.001) * base;
-      {
-        /* Smaller sigma lowers the perturbation floor the probe's
-           refinement converges to (it scales with |E|); growth in the
-           unpivoted factor scales inversely.  pre2 stalls at 3.8e-8
-           with the 1e-3 default. */
-        const char *se = getenv("KLS_PREDICTED_NUDGE_SIGMA_SCALE");
-        if (se != NULL && se[0] != '\0') {
-          const double parsed = atof(se);
-          if (parsed > 0.0 && parsed <= 1.0) {
-            tol_sigma *= parsed;
-          }
-        }
-      }
       solver->pivot_nudge_pos[solver->pivot_nudge_count] = diag_pos;
       solver->pivot_nudge_sigma[solver->pivot_nudge_count] = tol_sigma;
       solver->pivot_nudge_count++;
@@ -13607,18 +13582,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       /* Refine while it helps: a reduced-accuracy factorization (nudged or
          waived pivots) that converges under refinement is still usable,
          with production solves flagged to refine the same way. */
-      int probe_iter_cap = solver->block_trial_active ? 10 : 3;
-      double probe_stall_factor = 0.5;
-      {
-        const char *pe = getenv("KLS_PREDICTED_PROBE_ITERS");
-        if (pe != NULL && pe[0] != '\0') {
-          const long parsed = atol(pe);
-          if (parsed > 0 && parsed <= 30) {
-            probe_iter_cap = (int)parsed;
-            probe_stall_factor = 0.75;
-          }
-        }
-      }
+      const int probe_iter_cap = solver->block_trial_active ? 10 : 3;
+      const double probe_stall_factor = 0.5;
       for (int iter = 0; iter <= probe_iter_cap; ++iter) {
         memcpy(probe_r, probe_b, (size_t)n * sizeof(*probe_r));
         for (UF_long j = 0; j < n; ++j) {
@@ -13687,9 +13652,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       *elapsed += kls_now_seconds() - start;
       return 0;
     }
-    if (refine_iters > 0 &&
-        (!(raw_residual < 1.0e-10) ||
-         getenv("KLS_STRICT_PREDICTED_REFINEMENT") != NULL)) {
+    if (refine_iters > 0 && !(raw_residual < 1.0e-10)) {
       /* Only keep per-solve refinement when the raw factorization is
          genuinely inaccurate: a raw probe residual at or below 1e-10 is
          SPICE-grade on its own, and the refinement tax lands on every
@@ -13698,8 +13661,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       /* the probe converging in one or two sweeps proves a single
          correction reaches 1e-13-class: skip the post-correction
          verification SpMV on production solves */
-      solver->solve_refine_single_shot =
-        refine_iters <= 2 && getenv("KLS_STRICT_PREDICTED_REFINEMENT") == NULL;
+      solver->solve_refine_single_shot = refine_iters <= 2;
     }
     break;
   }
@@ -14604,15 +14566,6 @@ static int kls_build_block_structured_order(UF_long n,
       const double avg = (double)xadj[n] / (double)n;
       if ((UF_long)(avg * 8.0) > dense_floor) {
         dense_floor = (UF_long)(avg * 8.0);
-      }
-    }
-  }
-  {
-    const char *floor_env = getenv("KLS_BLOCK_DENSE_FLOOR");
-    if (floor_env != NULL && floor_env[0] != '\0') {
-      const long parsed = atol(floor_env);
-      if (parsed > 0) {
-        dense_floor = (UF_long)parsed;
       }
     }
   }
