@@ -293,20 +293,13 @@ python3 scripts/audit_license_boundary.py
 ```
 
 The benchmark reports analysis, factorization, refactorization, solve,
-transpose-solve, residual, selected orientation, BTF block/rank, fill, flop,
-the initial and last factorization path, largest-BTF-block factor ETree
-shape, refactor dependency-level metrics, dependency root/leaf/max-fanout
-scheduler diagnostics, NICSLU-style `parallel_model_r1`,
-`parallel_model_r2`, `parallel_model_recommends_parallel`, and numeric
-task-flow model metrics, selected input-index width, and memory statistics. By
+transpose-solve, lifecycle timing, residual verification, selected solver
+paths, fill, flop, selected input-index width, and memory statistics. By
 default `kls_bench` uses `--input-index auto`, which passes 32-bit CSC indices
 when the MatrixMarket problem fits the public `KLS_INDEX_INT32` API and falls
 back to 64-bit otherwise; use `--input-index 64` or `--input-index 32` for
 forced A/B runs. Use `--analyze-only` to measure symbolic analysis and ordering
-decisions without running numeric factorization. Use `--structure-only` to stop
-after MatrixMarket cleanup/deduplication and report exact CSC diagonal coverage,
-empty/scalar row and column counts, maximum row and column degrees, and total
-row/column-degree mismatch. The two diagnostic modes are mutually exclusive.
+decisions without running numeric factorization.
 Changed-numeric benchmark cycles use `kls_refactor_solve`; unsupported frames
 transparently retain the ordinary refactor-then-solve implementation, while
 dense single-block row factors can form the forward solution as new L rows are

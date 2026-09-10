@@ -43,18 +43,6 @@ typedef struct matrix {
   double *values;
 } matrix;
 
-typedef struct bench_structure_profile {
-  int64_t diagonal_columns;
-  int64_t empty_rows;
-  int64_t empty_columns;
-  int64_t scalar_rows;
-  int64_t scalar_columns;
-  int64_t max_row_degree;
-  int64_t max_column_degree;
-  int64_t degree_mismatch_vertices;
-  uint64_t degree_imbalance;
-} bench_structure_profile;
-
 typedef enum bench_index_mode {
   BENCH_INDEX_AUTO = 0,
   BENCH_INDEX_INT32,
@@ -164,55 +152,6 @@ static void matrix_free(matrix *a) {
   free(a->row_idx);
   free(a->values);
   memset(a, 0, sizeof(*a));
-}
-
-static int profile_matrix_structure(const matrix *a,
-                                    bench_structure_profile *profile) {
-  if (a == NULL || profile == NULL || a->n <= 0 || a->col_ptr == NULL ||
-      a->row_idx == NULL) {
-    return 0;
-  }
-  memset(profile, 0, sizeof(*profile));
-  int64_t *row_degree =
-    (int64_t *)calloc((size_t)a->n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-  for (int64_t col = 0; col < a->n; ++col) {
-    const int64_t degree = a->col_ptr[col + 1] - a->col_ptr[col];
-    profile->empty_columns += degree == 0;
-    profile->scalar_columns += degree == 1;
-    if (degree > profile->max_column_degree) {
-      profile->max_column_degree = degree;
-    }
-    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      const int64_t row = a->row_idx[p];
-      if (row < 0 || row >= a->n || row_degree[row] == INT64_MAX) {
-        free(row_degree);
-        return 0;
-      }
-      row_degree[row]++;
-      profile->diagonal_columns += row == col;
-    }
-  }
-  for (int64_t row = 0; row < a->n; ++row) {
-    const int64_t row_value = row_degree[row];
-    const int64_t column_value = a->col_ptr[row + 1] - a->col_ptr[row];
-    profile->empty_rows += row_value == 0;
-    profile->scalar_rows += row_value == 1;
-    if (row_value > profile->max_row_degree) {
-      profile->max_row_degree = row_value;
-    }
-    if (row_value != column_value) {
-      const uint64_t difference = row_value > column_value
-        ? (uint64_t)(row_value - column_value)
-        : (uint64_t)(column_value - row_value);
-      profile->degree_mismatch_vertices++;
-      profile->degree_imbalance += difference;
-    }
-  }
-  free(row_degree);
-  return 1;
 }
 
 static void bench_index_view_free(bench_index_view *view) {
@@ -742,7 +681,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only|--structure-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -772,7 +711,6 @@ int main(int argc, char **argv) {
   int transpose_solve = 1;
   int json = 0;
   int analyze_only = 0;
-  int structure_only = 0;
   int lifecycle_systems = 0;
   int expected_refactors_explicit = 0;
   int expected_solves_explicit = 0;
@@ -797,8 +735,6 @@ int main(int argc, char **argv) {
       json = 1;
     } else if (strcmp(argv[i], "--analyze-only") == 0) {
       analyze_only = 1;
-    } else if (strcmp(argv[i], "--structure-only") == 0) {
-      structure_only = 1;
     } else if (strcmp(argv[i], "--lifecycle-systems") == 0 &&
                i + 1 < argc) {
       lifecycle_systems = atoi(argv[++i]);
@@ -915,7 +851,6 @@ int main(int argc, char **argv) {
   if (repeat <= 0 || factor_repeat < 0 || refactor_repeat < 0 ||
       lifecycle_systems < 0 ||
       options.threads <= 0 || refactor_value_amplitude >= 1.0 ||
-      (analyze_only && structure_only) ||
       (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED &&
        refactor_value_amplitude <= 0.0)) {
     usage(argv[0]);
@@ -937,52 +872,6 @@ int main(int argc, char **argv) {
   matrix a = {0};
   if (!read_matrix_market(path, &a)) {
     return EXIT_FAILURE;
-  }
-  if (structure_only) {
-    bench_structure_profile profile;
-    if (!profile_matrix_structure(&a, &profile)) {
-      fprintf(stderr, "cannot profile the structure of %s\n", path);
-      matrix_free(&a);
-      return EXIT_FAILURE;
-    }
-    if (json) {
-      printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
-             ",\"density\":%.9g"
-             ",\"diagonal_columns\":%" PRId64
-             ",\"missing_diagonal_columns\":%" PRId64
-             ",\"empty_rows\":%" PRId64
-             ",\"empty_columns\":%" PRId64
-             ",\"scalar_rows\":%" PRId64
-             ",\"scalar_columns\":%" PRId64
-             ",\"max_row_degree\":%" PRId64
-             ",\"max_column_degree\":%" PRId64
-             ",\"degree_mismatch_vertices\":%" PRId64
-             ",\"degree_imbalance\":%" PRIu64
-             ",\"structure_only\":true}\n",
-             path, a.n, a.nnz, (double)a.nnz / (double)a.n,
-             profile.diagonal_columns, a.n - profile.diagonal_columns,
-             profile.empty_rows, profile.empty_columns,
-             profile.scalar_rows, profile.scalar_columns,
-             profile.max_row_degree, profile.max_column_degree,
-             profile.degree_mismatch_vertices, profile.degree_imbalance);
-    } else {
-      printf("matrix: %s\n", path);
-      printf("n: %" PRId64 ", nnz: %" PRId64 ", density: %.6g\n",
-             a.n, a.nnz, (double)a.nnz / (double)a.n);
-      printf("diagonal/missing: %" PRId64 "/%" PRId64 "\n",
-             profile.diagonal_columns, a.n - profile.diagonal_columns);
-      printf("empty rows/columns: %" PRId64 "/%" PRId64 "\n",
-             profile.empty_rows, profile.empty_columns);
-      printf("scalar rows/columns: %" PRId64 "/%" PRId64 "\n",
-             profile.scalar_rows, profile.scalar_columns);
-      printf("max row/column degree: %" PRId64 "/%" PRId64 "\n",
-             profile.max_row_degree, profile.max_column_degree);
-      printf("degree mismatch vertices/imbalance: %" PRId64 "/%" PRIu64
-             "\n", profile.degree_mismatch_vertices,
-             profile.degree_imbalance);
-    }
-    matrix_free(&a);
-    return EXIT_SUCCESS;
   }
   if (stress_diagonal_column >= a.n) {
     fprintf(stderr, "stress diagonal column %" PRId64
