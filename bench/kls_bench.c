@@ -13,21 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-
-#if defined(__has_include)
-#if __has_include(<valgrind/callgrind.h>)
-#include <valgrind/callgrind.h>
-
-#define KLS_BENCH_HAVE_CALLGRIND 1
-#endif
-#endif
-
-#ifndef KLS_BENCH_HAVE_CALLGRIND
-#define CALLGRIND_START_INSTRUMENTATION ((void)0)
-#define CALLGRIND_STOP_INSTRUMENTATION ((void)0)
-#define CALLGRIND_ZERO_STATS ((void)0)
-#define CALLGRIND_DUMP_STATS ((void)0)
-#endif
+#include <unistd.h>
 
 typedef struct triplet {
   int64_t row;
@@ -58,86 +44,6 @@ typedef struct bench_index_view {
   int32_t *row_idx32;
 } bench_index_view;
 
-
-/* env-gated in-process sampling profiler (ptrace/perf blocked in this
-   container): SIGPROF at 2ms captures only the interrupted instruction
-   pointer from the ucontext (fully async-signal-safe; in-handler
-   unwinding dumps core on this code).  PCs are reported as offsets
-   into the executable for offline addr2line resolution. */
-#include <signal.h>
-#include <sys/time.h>
-#include <ucontext.h>
-#include <dlfcn.h>
-#include <unistd.h>
-#define KLS_BENCH_PROF_MAX 200000
-static void *kls_prof_pcs[KLS_BENCH_PROF_MAX];
-static volatile long kls_prof_n;
-static void kls_prof_handler(int sig, siginfo_t *si, void *uctx) {
-  (void)sig;
-  (void)si;
-  ucontext_t *uc = (ucontext_t *)uctx;
-  const long i = __sync_fetch_and_add(&kls_prof_n, 1);
-  if (i < KLS_BENCH_PROF_MAX) {
-#if defined(__x86_64__)
-    kls_prof_pcs[i] = (void *)uc->uc_mcontext.gregs[REG_RIP];
-#else
-    kls_prof_pcs[i] = NULL;
-#endif
-  }
-}
-static void kls_prof_start(void) {
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_sigaction = kls_prof_handler;
-  sa.sa_flags = SA_RESTART | SA_SIGINFO;
-  sigaction(SIGPROF, &sa, NULL);
-  struct itimerval it;
-  it.it_interval.tv_sec = 0;
-  it.it_interval.tv_usec = 2000;
-  it.it_value = it.it_interval;
-  setitimer(ITIMER_PROF, &it, NULL);
-}
-static int kls_prof_cmp(const void *a, const void *b) {
-  const void *pa = *(void *const *)a;
-  const void *pb = *(void *const *)b;
-  return pa < pb ? -1 : (pa > pb ? 1 : 0);
-}
-static void kls_prof_stop_report(void) {
-  struct itimerval off;
-  memset(&off, 0, sizeof(off));
-  setitimer(ITIMER_PROF, &off, NULL);
-  long n = kls_prof_n < KLS_BENCH_PROF_MAX ? kls_prof_n
-                                           : KLS_BENCH_PROF_MAX;
-  if (n <= 0) {
-    return;
-  }
-  Dl_info info;
-  void *base = NULL;
-  if (dladdr((void *)&kls_prof_stop_report, &info) && info.dli_fbase) {
-    base = info.dli_fbase;
-  }
-  qsort(kls_prof_pcs, (size_t)n, sizeof(void *), kls_prof_cmp);
-  /* bucket by 256-byte regions to group loop bodies */
-  long i = 0;
-  fprintf(stderr, "PROFTOTAL %ld base %p\n", n, base);
-  const unsigned int bucket_shift =
-      getenv("KLS_BENCH_PROF_FINE") != NULL ? 4u : 8u;
-  while (i < n) {
-    const unsigned long bucket =
-      ((unsigned long)kls_prof_pcs[i]) >> bucket_shift;
-    long j = i;
-    while (j < n &&
-           (((unsigned long)kls_prof_pcs[j]) >> bucket_shift) == bucket) {
-      j++;
-    }
-    if (j - i >= n / 200 + 2) {
-      fprintf(stderr, "PROFPC 0x%lx %ld\n",
-              (unsigned long)kls_prof_pcs[i] - (unsigned long)base,
-              j - i);
-    }
-    i = j;
-  }
-}
 
 static int bench_env_enabled(const char *name) {
   const char *value = getenv(name);
@@ -1246,8 +1152,6 @@ int main(int argc, char **argv) {
   double refactor_max_relative_residual = 0.0;
   const int verify_each_refactor =
       bench_env_enabled("KLS_BENCH_VERIFY_EACH_REFACTOR");
-  const int callgrind_refactor =
-      bench_env_enabled("KLS_BENCH_CALLGRIND_REFACTOR");
 
   /* Direct lifecycle mode measures the initial system in its actual place:
      analyze + factor + solve, followed by changed-value refactor/solve pairs.
@@ -1265,29 +1169,11 @@ int main(int argc, char **argv) {
     }
   }
 
-  {
-    const char *prof_env = getenv("KLS_BENCH_PROF");
-    if (prof_env != NULL && prof_env[0] == '2') {
-      /* profile the factor phase too (first-pass warm-up analysis) */
-      kls_prof_start();
-    }
-  }
   for (int i = 0; i < factor_repeat; ++i) {
     status = kls_factor(solver, run_values);
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     factor_total += stats.factor_seconds;
-  }
-  if (bench_env_enabled("KLS_BENCH_PROF")) {
-    const char *prof_env = getenv("KLS_BENCH_PROF");
-    if (prof_env == NULL ||
-        (prof_env[0] != '2' && prof_env[0] != '4')) {
-      kls_prof_start();
-    }
-  }
-  if (callgrind_refactor) {
-    CALLGRIND_START_INSTRUMENTATION;
-    CALLGRIND_ZERO_STATS;
   }
   double refactor_first = 0.0;
   double refactor_solve_first = 0.0;
@@ -1336,26 +1222,6 @@ int main(int argc, char **argv) {
         refactor_max_relative_residual = relative;
       }
     }
-    {
-      const char *prof_env = getenv("KLS_BENCH_PROF");
-      if (prof_env != NULL && prof_env[0] == '4' && i == 0 &&
-          status == KLS_OK) {
-        /* Profile only steady refactors: the first call builds deferred
-           row/egraph metadata and otherwise hides the numeric hot path. */
-        kls_prof_start();
-      }
-    }
-  }
-  if (bench_env_enabled("KLS_BENCH_PROF")) {
-    const char *prof_env = getenv("KLS_BENCH_PROF");
-    if (prof_env == NULL || prof_env[0] != '3') {
-      /* =3 keeps sampling through the measured solve loop below */
-      kls_prof_stop_report();
-    }
-  }
-  if (callgrind_refactor) {
-    CALLGRIND_DUMP_STATS;
-    CALLGRIND_STOP_INSTRUMENTATION;
   }
   const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
   for (int i = 0; i < standalone_solve_repeats && status == KLS_OK; ++i) {
@@ -1363,12 +1229,6 @@ int main(int argc, char **argv) {
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     solve_total += stats.solve_seconds;
-  }
-  {
-    const char *prof_env = getenv("KLS_BENCH_PROF");
-    if (prof_env != NULL && prof_env[0] == '3') {
-      kls_prof_stop_report();
-    }
   }
   if (!transpose_solve) {
     tsolve_total = -1.0 * (double)repeat;
