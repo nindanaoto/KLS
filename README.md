@@ -1882,8 +1882,7 @@ comparisons.
 For failure diagnosis, `run_bench_suite.py --failure-diagnostics analyze`
 attaches an analyze-only diagnostic row (the default). Use `none` to disable
 it. Live row-pipeline tracing and its trace-only runner options have been
-removed; `scripts/summarize_row_pipeline_trace.py` remains available for
-archived trace files.
+removed.
 
 The suite metric is:
 
@@ -1914,74 +1913,6 @@ deliberate penalty:
 
 ```sh
 python3 scripts/compare_bench_runs.py --candidate build/kls_paper_large_recon.jsonl --candidate-name kls-auto --reference build/cktso_paper_large_recon.jsonl --reference-name cktso --include-failures --failure-seconds 1000
-```
-
-To see which phase explains a solver gap, decompose the same JSONL pair into
-analysis, initial factorization, repeated refactorization, and repeated solve
-contributions. For KLS candidate rows, the report also includes EGraph
-dependency levels, root/leaf/max-fanout counts, cluster levels, pipeline
-columns, max per-column work, pipeline max per-column work, and
-dependency-work estimates when those fields are present in the benchmark JSONL.
-For row-engine experiments, `kls_bench` and `run_bench_suite.py` accept
-`--row-refactor env|off|refactor|checked|all` and
-`--kls-first-factor env|off|on`; they also accept
-`--row-solve env|off|on` for the ordinary-factor row-solve seed gate and
-`--input-index auto|32|64` for reproducing benchmark input-width choices. The
-emitted `initial_factor_path`, `last_factor_path`, and `row_refactor_last_*`
-fields show whether the first factorization, later numeric passes, and solves
-really used KLS-owned paths. `--kls-first-factor env` preserves the library's
-automatic first-factor decision, `off` disables it, and `on` forces the
-KLS-owned attempt. Explicit row-refactor modes force the row engine, and
-`--row-refactor off` also disables the automatic KLS-first row-refactor handoff
-for reproducible column/EGraph baselines. With `env`, the automatic KLS-first
-path uses the retained row/EGraph work estimates to skip row refactors whose
-static work model is already worse than the existing exact EGraph schedule:
-
-```sh
-python3 scripts/decompose_solver_gap.py --candidate build/kls_suite.jsonl --candidate-name kls-auto --reference build/cktso_suite.jsonl --reference-name cktso
-```
-
-Add `--concise` for the usual solved-by-reference triage view: it keeps the
-cycle ratio, dominant phase, paper-gap signal, path names, and the core EGraph
-pipeline work counters while omitting the full diagnostic surface. When
-producer-step advance-batch stats are present, it also keeps the duplicate
-retained-state row count, exact unique row count, and row-collapse ratio so the
-grouped-current owner opportunity remains visible in the short report. Use
-`--include-manifest bench/suitesparse_cktso_gap_manifest.txt` with either
-comparison script to rank only the current CKTSO-gap focus set, and
-`--exclude-manifest bench/suitesparse_stress_timeout_manifest.txt` to keep
-shared-hard stress rows such as `Hamrle3` out of CKTSO-relative tuning reports.
-Manifest entries may be bare SuiteSparse names or `.mtx` basenames.
-
-To summarize the CKTSO-style tail-restart opportunity fields across a KLS JSONL
-run, use:
-
-```sh
-python3 scripts/summarize_tail_restart_opportunities.py --jsonl build/kls_suite.jsonl
-```
-
-For executed serial suffix restarts, the summary also reports how many columns
-and how much work the suffix path does beyond the retained CKTSO-style
-pivoting-tail plan. Large overcompute there marks cases where the full
-pipelined pivoting-tail kernel should matter most.
-
-The same script accepts `--jsonl -` for a single piped `kls_bench --json` row
-when inspecting a focused fast-reject case.
-
-To generate those diagnostics across a manifest, `run_bench_suite.py` forwards
-the deterministic diagonal-stress controls accepted by `kls_bench`:
-
-```sh
-python3 scripts/run_bench_suite.py --kls-bench build/kls_bench \
-  --matrix-dir data/suitesparse-paper-medium \
-  --manifest bench/suitesparse_cktso_gap_manifest.txt \
-  --orientation auto --threads 4 --repeat 1 --refactor-repeat 0 \
-  --require-spral-scaling \
-  --stress-diagonal-scale 1e-9 \
-  --timeout 120 --jsonl build/kls_tail_stress_gap.jsonl
-
-python3 scripts/summarize_tail_restart_opportunities.py \
-  --jsonl build/kls_tail_stress_gap.jsonl
 ```
 
 For long manifests, the KLS, CKTSO, and KLU2 suite runners preserve manifest
@@ -2207,8 +2138,7 @@ on `G2_circuit`, no-trace factor time moved from `4.77s` to `5.49s` with a
 rows and cut delayed-output replay entries from about `388M` to `304M`, but did
 not advance past the timeout checkpoint. Traces report
 `compact_window_deferred_output_cache_{stores,applies,l_entries,entries,disables,overflows}`
-plus cache-entry and store-share ratios in
-`scripts/summarize_row_pipeline_trace.py`.
+plus cache-entry and store-share ratios.
 `KLS_ENABLE_ROW_PIPELINE_COMPACT_GROUP_OUTPUT_CACHE=1` adds a second
 experimental delayed-output cache for sparse compact groups. Instead of giving
 each future row its own producer-time hash map, the sparse group owns one
@@ -2817,9 +2747,8 @@ touches, 4.26B of them trailing/output touches. Producer/panel reuse covered
 only about 8.0M target U entries in that logged tail, so the missing paper
 piece is still a producer/panel-to-many-current row/supernode numeric owner,
 not another ordering-only change.
-Use `scripts/summarize_row_pipeline_trace.py build/...stderr` to compare these
-tail traces without hand-written `awk`; it now also reports pivot-long-row
-producer coverage, pivot scalar-output/producer-target ratios, and compact
+Archived tail traces also report pivot-long-row producer coverage,
+pivot scalar-output/producer-target ratios, and compact
 window target/stream reuse for grouped compact-exec probes. Current
 same-commit probes also reject three narrower policies as gap closers: 8/32-slot
 experimental lookahead grows producer target entries but advances fewer tail
