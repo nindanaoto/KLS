@@ -2003,8 +2003,7 @@ static double choose_initial_auto_pivot_tolerance(
       (solver->stats.selected_ordering == KLS_ORDERING_AMF ||
        solver->stats.selected_ordering == KLS_ORDERING_AMMF) &&
       getenv("KLS_DISABLE_GENERIC_MINFILL_PIVOT_PRESSURE") == NULL;
-    return (generic_minfill_pressure ||
-            getenv("KLS_ENABLE_INITIAL_PIVOT_PRESSURE") != NULL)
+    return generic_minfill_pressure
       ? kls_generic_initial_pivot_pressure_tolerance(solver, numeric_values)
       : solver->options.pivot_tolerance;
   }
@@ -4550,8 +4549,7 @@ static UF_long kls_metis_order(UF_long n,
       metis_ndp_npes > 1 && metis_ndp_sizes != NULL;
     const int skip_camd_refine =
       getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL ||
-      (kls_fragmented_metis_tuning_ctx == 2 &&
-       getenv("KLS_ENABLE_DENSE_RECIPROCAL_HUB_CAMD_REFINE") == NULL);
+      kls_fragmented_metis_tuning_ctx == 2;
     UF_long camd_lnz;
     if (skip_camd_refine) {
       /* The pre-static raced-symbolic path subsequently constructs and
@@ -9733,8 +9731,7 @@ static int kls_pipe_first_factor_threads(const kls_solver *solver,
        serial factor in the tens of seconds where the pipe pays */
     est = (sym->lnz + sym->unz) > 3.0e7 ? 6.0e9 : 0.0;
   }
-  if (getenv("KLS_KLU_PIPE_FORCE") == NULL &&
-      !(est > 5.0e9)) {
+  if (!(est > 5.0e9)) {
     /* the old est/n >= 1e5 companion guard existed to keep the pipe
        away from the cancellation classes (mac) whose accuracy it
        destroyed; that was the pivot-race/apply-order defect, fixed by
@@ -10307,8 +10304,7 @@ matching_attempt:;
      tournament, alternate numeric factor, and incumbent Pareto gates below
      supply measured evidence for the combined candidate. */
 
-  if (getenv("KLS_PRESTATIC_FORCE_METIS") != NULL ||
-      solver->medium_partial_static_metis_path) {
+  if (solver->medium_partial_static_metis_path) {
     trial_options.ordering = KLS_ORDERING_METIS;
   }
   if (trial_options.scale == KLS_SCALE_AUTO) {
@@ -10769,24 +10765,6 @@ matching_attempt:;
      pivoted first-factor path build and validate the numeric.  The thresholds
      are execution-resource and lifecycle budgets; no input dimension,
      density, or matrix-family coordinate participates. */
-  const double generic_trial_storage_bytes =
-    trial_score * (double)(sizeof(UF_long) + sizeof(double));
-  const double generic_aggregate_cache_bytes =
-    32.0 * 1024.0 * 1024.0 * (double)solver->options.threads;
-  const double generic_match_lifecycle_work =
-    matched_column_pair_work *
-      (1.0 + (double)solver->options.expected_refactorizations);
-  const int generic_resource_scaled_parallel_first =
-    !deferred &&
-    getenv("KLS_ENABLE_GENERIC_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL &&
-    solver->options.threads > 1 &&
-    kls_repeated_update_workload(&solver->options) &&
-    isfinite(generic_trial_storage_bytes) &&
-    generic_trial_storage_bytes >= generic_aggregate_cache_bytes &&
-    isfinite(generic_match_lifecycle_work) &&
-    isfinite(trial_score) && trial_score > 0.0 &&
-    generic_match_lifecycle_work >= 8.0 * trial_score &&
-    getenv("KLS_DISABLE_GENERIC_RESOURCE_SCALED_PRESTATIC_FIRST") == NULL;
   const int generic_single_block_parallel_first =
     !deferred &&
     solver->options.threads > 1 &&
@@ -10799,7 +10777,6 @@ matching_attempt:;
   const int skip_trial_factor_requested =
     !deferred &&
     (generic_bounded_parallel_first ||
-     generic_resource_scaled_parallel_first ||
      generic_single_block_parallel_first ||
      getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL);
   if (skip_trial_factor_requested &&
@@ -10971,8 +10948,7 @@ matching_attempt:;
        pathological there (rajat30's probe-routed trial ground 21.6s
        piped vs sub-second serial; mac_econ - the pipe's legitimate
        light-column user - is lowdeg-classified) */
-    if (getenv("KLS_KLU_PIPE_FORCE") != NULL ||
-        solver->col_ptr[solver->n] >= 8 * solver->n) {
+    if (solver->col_ptr[solver->n] >= 8 * solver->n) {
       kls_klu_pipe_threads =
         kls_pipe_first_factor_threads(solver, trial_symbolic);
     }
@@ -11621,8 +11597,7 @@ static void *kls_metis_race_main(void *arg) {
     const double rn = (double)race->symbolic->n;
     if (race->options.threads >= 2 &&
         getenv("KLS_DISABLE_PIPE_ROUTE") == NULL &&
-        (getenv("KLS_KLU_PIPE_FORCE_RACE") != NULL ||
-         getenv("KLS_KLU_PIPE_RACE_DEFAULT") != NULL ||
+        (getenv("KLS_KLU_PIPE_RACE_DEFAULT") != NULL ||
          race->giant_symmetric_scalar_fringe_metis_row ||
          (est > 5.0e9 && rn > 0.0 && est / rn >= 1.0e5))) {
       /* default-on measured WORSE: giants pay 16 x O(n) workspace
@@ -11870,8 +11845,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
        on the selected symbolic and covers only the unscaled and row-max arms;
        mode 0 duplicates the unscaled numeric and mode 2 is the usual AUTO
        incumbent. */
-    if (!generic_compact_scale_race &&
-        getenv("KLS_ENABLE_GENERIC_SCALE_RACE") == NULL) {
+    if (!generic_compact_scale_race) {
       return;
     }
   }
@@ -11889,7 +11863,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
     return;
   }
   if (!generic_compact_scale_race &&
-      getenv("KLS_ENABLE_COMPACT_MEDIUM_NUMERIC_TRIALS") == NULL &&
       kls_compact_medium_dominant_btf_symbolic_shape(solver)) {
     /* This modest-work, nearly single-block BTF shape already exposes its
        useful parallelism to the exact EGraph.  A background NodeND plus
@@ -12216,8 +12189,7 @@ static int kls_repeated_scaled_overhead_trial_enabled(
     solver->numeric->lnz <= (UF_long)UINT16_MAX &&
     solver->numeric->unz <= (UF_long)UINT16_MAX &&
     (solver->auto_scale_unscaled_trial_certified ||
-     kls_certified_unscaled_lifecycle_trial_capable(solver) ||
-     getenv("KLS_ENABLE_UNCERTIFIED_PACKED_ROW_SCALE_TRIAL") != NULL) &&
+     kls_certified_unscaled_lifecycle_trial_capable(solver)) &&
     scale_pass_work >= 2.0 * (solver->common.flops + fill);
   return horizon > 1.0 && isfinite(horizon) &&
     (amortized_scale_overhead || conventional_scale_overhead ||
