@@ -3875,10 +3875,7 @@ static UF_long kls_metis_order(UF_long n,
     metis_context != NULL && metis_context->npes > 1 ? metis_context->npes : 0;
 #ifdef KLS_HAVE_MTMETIS
   if (kls_giant_symmetric_scalar_fringe_metis_ctx) {
-    const char *npes_env = getenv(
-      "KLS_GIANT_SYMMETRIC_SCALAR_FRINGE_METIS_NDP_NPES");
-    metis_ndp_npes = npes_env != NULL && npes_env[0] != '\0'
-      ? (idx_t)atol(npes_env) : 7;
+    metis_ndp_npes = 7;
   } else
 #endif
   if (kls_fragmented_metis_tuning_ctx == 3) {
