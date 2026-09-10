@@ -2937,77 +2937,6 @@ static UF_long kls_metis_refine_with_camd(UF_long n,
    large leaves.  The NodeNDP sizes array gives the exact top separator tree,
    so reuse the same component reconstruction used by KLS's subtree
    scheduler and feed those component ids to CAMD. */
-static UF_long kls_metis_refine_components_with_camd(
-  UF_long n,
-  UF_long *col_ptr,
-  UF_long *row_idx,
-  const idx_t *metis_perm,
-  const idx_t *metis_iperm,
-  idx_t npes,
-  const idx_t *sizes,
-  UF_long *perm_out) {
-  if (n == 0u || metis_perm == NULL || metis_iperm == NULL || npes <= 1 ||
-      sizes == NULL || perm_out == NULL) {
-    return 0u;
-  }
-  UF_long *metis_order =
-    (UF_long *)malloc((size_t)n * sizeof(*metis_order));
-  UF_long *constraints =
-    (UF_long *)malloc((size_t)n * sizeof(*constraints));
-  UF_long *camd_perm =
-    (UF_long *)malloc((size_t)n * sizeof(*camd_perm));
-  if (metis_order == NULL || constraints == NULL || camd_perm == NULL) {
-    free(metis_order);
-    free(constraints);
-    free(camd_perm);
-    return 0u;
-  }
-  int valid = 1;
-  for (UF_long pos = 0u; pos < n; ++pos) {
-    const idx_t vertex = metis_perm[pos];
-    if (vertex < 0 || (uint64_t)vertex >= (uint64_t)n) {
-      valid = 0;
-      break;
-    }
-    metis_order[pos] = (UF_long)vertex;
-  }
-  kls_separator_analysis separator;
-  memset(&separator, 0, sizeof(separator));
-  if (!valid ||
-      !kls_build_metis_separator_analysis(n, npes, sizes, metis_iperm,
-                                          metis_order, &separator) ||
-      separator.order_component == NULL) {
-    kls_separator_analysis_clear(&separator);
-    free(metis_order);
-    free(constraints);
-    free(camd_perm);
-    return 0u;
-  }
-  for (UF_long pos = 0u; pos < n; ++pos) {
-    const UF_long vertex = metis_order[pos];
-    constraints[vertex] = (UF_long)separator.order_component[pos];
-  }
-
-  double control[TRILINOS_CAMD_CONTROL];
-  double info[TRILINOS_CAMD_INFO];
-  trilinos_camd_l_defaults(control);
-  const UF_long result = trilinos_camd_l_order(
-    n, col_ptr, row_idx, camd_perm, control, info, constraints);
-  if (result >= TRILINOS_CAMD_OK) {
-    memcpy(perm_out, camd_perm, (size_t)n * sizeof(*perm_out));
-  }
-  const double lnz = info[TRILINOS_CAMD_LNZ];
-  kls_separator_analysis_clear(&separator);
-  free(metis_order);
-  free(constraints);
-  free(camd_perm);
-  if (result < TRILINOS_CAMD_OK) {
-    return 0u;
-  }
-  return lnz > 0.0 && lnz < (double)UF_long_max - (double)n
-    ? (UF_long)lnz + n
-    : (UF_long)-1;
-}
 
 static UF_long kls_metis_order(UF_long n, UF_long *col_ptr,
                                      UF_long *row_idx, UF_long *perm_out,
@@ -4112,16 +4041,7 @@ static UF_long kls_metis_order(UF_long n,
   if (metis_status == METIS_OK) {
     UF_long camd_group_size = kls_metis_camd_group_size(n, col_ptr, row_idx);
     if (kls_generic_metis_tuning_ctx) {
-      const char *generic_group_env =
-        getenv("KLS_GENERIC_METIS_CAMD_GROUP_SIZE");
-      if (generic_group_env != NULL && generic_group_env[0] != '\0') {
-        const unsigned long long requested =
-          strtoull(generic_group_env, NULL, 10);
-        if (requested > 0u && requested <= (unsigned long long)n) {
-          camd_group_size = (UF_long)requested;
-        }
-      } else {
-        /* A BTF challenger spends its ND pass independently inside each
+      /* A BTF challenger spends its ND pass independently inside each
            irreducible block, while no-BTF uses a coarser whole-graph budget.
            Both variants are selected from executor resources and measured
            symbolic economics rather than an input-family classifier. */
@@ -4204,7 +4124,6 @@ static UF_long kls_metis_order(UF_long n,
           camd_group_size = maximum;
         }
         }
-      }
     }
     if (camd_group_size == 0 && n > 1) {
       /* Below the window-refinement floor, keep the METIS order exactly by
@@ -4240,11 +4159,7 @@ static UF_long kls_metis_order(UF_long n,
         pinned_count_ok = (double)maxdeg * (double)maxdeg < (double)n;
       }
     }
-    const int component_refine =
-      getenv("KLS_METIS_CAMD_COMPONENT_GROUPS") != NULL &&
-      metis_ndp_npes > 1 && metis_ndp_sizes != NULL;
     const int skip_camd_refine =
-      getenv("KLS_METIS_SKIP_CAMD_REFINE") != NULL ||
       kls_fragmented_metis_tuning_ctx == 2;
     UF_long camd_lnz;
     if (skip_camd_refine) {
@@ -4259,15 +4174,11 @@ static UF_long kls_metis_order(UF_long n,
       }
       camd_lnz = (UF_long)-1;
     } else {
-      camd_lnz = component_refine
-        ? kls_metis_refine_components_with_camd(
-            n, col_ptr, row_idx, metis_perm, metis_iperm, metis_ndp_npes,
-            metis_ndp_sizes, perm_out)
-        : pinned_count_ok
-            ? kls_pinned_order_fill_count(n, col_ptr, row_idx, metis_perm,
-                                          perm_out)
-            : kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
-                                         camd_group_size, perm_out);
+      camd_lnz = pinned_count_ok
+        ? kls_pinned_order_fill_count(n, col_ptr, row_idx, metis_perm,
+                                      perm_out)
+        : kls_metis_refine_with_camd(n, col_ptr, row_idx, metis_perm,
+                                     camd_group_size, perm_out);
     }
     if (camd_lnz == 0) {
       for (UF_long i = 0; i < n; ++i) {
