@@ -10237,22 +10237,13 @@ matching_attempt:;
   }
   if (!skip_trial_factor) {
   {
-    /* the prestatic trial classes carry the columns the pipelined
-       kernel wants: large-spral (pre2: init 57.4 -> 31.6s) and the
-       medium matched class (onetone1: 12% init win, rajat25 parity);
-       est_flops is EMPTY for given orderings so the class flags are
-       the routing signal.  mac_econ-like light-column matrices never
-       reach this trial (pattern classifiers). */
+    /* Given orderings lack an est_flops value, so the matched structural
+       classes route the pipelined trial directly. */
     int pipe_route = medium_weak_candidate &&
                      solver->nnz >= 8u * solver->n;
-    /* density floor: at avg degree ~7 (rajat25) the trial's columns
-       are light enough that the pipeline's round machinery costs ~7%;
-       the winners measure 9.5+ (onetone1, twotone) */
+    /* Below this density, pipeline round overhead outweighs column work. */
 #ifdef KLS_HAVE_SPRAL_SCALING
-    /* the same light-column density floor as the medium class: the
-       pipeline's round machinery is pathological at low entries/column
-       (rajat29, nnz/n=5.8: piped trial ground >16s where the serial
-       factor takes 0.11s; pre2 at 8.85 keeps the route) */
+    /* Apply the same density floor to the large scaling candidate. */
     pipe_route = pipe_route ||
                  (use_large_spral_match && solver->nnz >= 8u * solver->n);
 #endif
@@ -10328,15 +10319,8 @@ matching_attempt:;
     kls_klu_pipe_threads =
       kls_pipe_scale_threads(solver->options.threads, trial_est_flops);
   } else if (kls_klu_pipe_threads == 0) {
-    /* the class pipe route above already decided for the matched
-       medium/large classes (est_flops is empty for given orderings, so
-       the fill-proxy gate here would wrongly unroute the medium class:
-       twotone's trial measured 0.49s serial vs 0.20s piped); only fill
-       in when no route fired.  Light-column non-lowdeg trials stay
-       serial regardless of the est: the pipe's round machinery is
-       pathological there (rajat30's probe-routed trial ground 21.6s
-       piped vs sub-second serial; mac_econ - the pipe's legitimate
-       light-column user - is lowdeg-classified) */
+    /* Only infer a route when no structural class did.  Low-density trials
+       remain serial because pipeline round overhead dominates their work. */
     if (solver->col_ptr[solver->n] >= 8 * solver->n) {
       kls_klu_pipe_threads =
         kls_pipe_first_factor_threads(solver, trial_symbolic);
@@ -11240,24 +11224,17 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
   }
   if (!generic_compact_scale_race &&
       kls_compact_medium_dominant_btf_symbolic_shape(solver)) {
-    /* This modest-work, nearly single-block BTF shape already exposes its
-       useful parallelism to the exact EGraph.  A background NodeND plus
-       scale-factor race instead contends with the AMD first factor and then
-       delays first-refactor preparation at the join (ckt11752_dc_1: 335ms
-       versus 406ms over the 100-cycle horizon with the race retained). */
+    /* This nearly single-block BTF shape already exposes its useful
+       parallelism to EGraph; a background NodeND race only adds contention
+       and join latency. */
     return;
   }
   if (!generic_compact_scale_race && solver->n <= 200000 &&
       solver->col_ptr != NULL &&
       solver->col_ptr[solver->n] <= 4000000 &&
       solver->options.static_pivoting) {
-    /* the block-structured class (TSOPF/case9 family) adopts its own
-       ordering at factor time and always discards the race - and on
-       its fused-dense-row patterns the race's NodeND grinds for tens
-       of seconds, which the adoption's pattern-lifetime join then
-       waits out on the one-shot path (TSOPF_FS_b39_c19: 54.5s of a
-       54.8s init).  Same pattern-only detector as the choose fast
-       path (~10ms at this size gate). */
+    /* Block-structured inputs adopt their own ordering at factor time.  Do
+       not launch a NodeND result that this path will necessarily discard. */
     UF_long *bs_perm = NULL;
     UF_long *bs_comp = NULL;
     const int bs_hit =
@@ -13887,13 +13864,9 @@ generic_ordering_tournament:;
   return KLS_OK;
 }
 
-/* The prestatic-bound structural class: a mostly-missing diagonal at
-   the large-spral size band (pre2).  These matrices route to the
-   pre-static exact matching at factor time and adopt its matched
-   coordinates and ordering, so the base analyze's candidate
-   competition (concurrent AMD+AMF, ~0.88s on pre2) is pure waste on
-   the one-shot critical path.  The bounds mirror
-   large_spral_candidate exactly. */
+/* Inputs routed to pre-static exact matching adopt its coordinates and
+   ordering, so the base AMD/AMF competition is redundant.  These bounds
+   mirror the corresponding matching candidate. */
 static int is_prestatic_bound_missing_diagonal_pattern(
     UF_long n, const UF_long *col_ptr, const UF_long *row_idx) {
   if (n <= 150000 || n > 750000 || col_ptr == NULL || row_idx == NULL ||
@@ -13914,25 +13887,13 @@ static int is_prestatic_bound_missing_diagonal_pattern(
     }
     missing += !has_diag;
   }
-  /* two structural arms, mirroring the large-spral gate's missing-
-     diagonal arm exactly: the mostly-missing class (pre2) and the
-     partially-missing class (rajat29/rajat30, missing ~1.5% of n but
-     >=4096 rows - their prestatic adopts the matched coordinates the
-     same way, so the base candidate build is equally wasted).  The
-     partial arm ships only after its two blockers fell: the lockstep
-     lane overflow (edacd6a) and the light-column non-lowdeg trial
-     pipe routing (rajat30 21.6s piped vs sub-second serial). */
+  /* Both mostly- and partially-missing diagonal classes adopt the matched
+     coordinates, making the base candidate build equally redundant. */
   if (missing * 2 >= n) {
     return 1;
   }
-  /* partial-missing arm (missing ~1.5% of n, >=4096 rows): the
-     prestatic adopts matched coordinates the same way, so the base
-     candidate build is equally wasted.  Scoped to the light-column
-     members whose serial matched trial is proven sub-second
-     (rajat29 5.25 -> 3.2s); the denser members (rajat30, nnz/n=9.6)
-     stay on the full analyze until the pipe's dense-column
-     pathology is solved - probe-routed, its piped trial ground
-     21.5s against a 9.7s baseline. */
+  /* Restrict the partial-missing arm to light-column inputs where the serial
+     matched trial is bounded; denser inputs retain the full analysis. */
   return missing >= 4096 && missing * 200 >= n &&
          col_ptr[n] < 8 * n;
 }
