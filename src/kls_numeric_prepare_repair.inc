@@ -6527,31 +6527,6 @@ typedef struct {
   UF_long n;
   const UF_long *l_ptr;
   const UF_long *l_cols;
-  const UF_long *u_ptr;
-  const UF_long *u_cols;
-  const UF_long *input_ptr;
-  const UF_long *input_cols;
-  unsigned char *needs_cleanup;
-  UF_long cleanup_rows;
-  UF_long cleanup_entries;
-  int ok;
-} kls_row_input_cleanup_prep_job;
-
-static void kls_row_input_cleanup_prep_run(
-  kls_row_input_cleanup_prep_job *job) {
-  if (job == NULL) {
-    return;
-  }
-  job->ok = kls_build_row_refactor_input_cleanup_flags(
-    job->n, job->l_ptr, job->l_cols, job->u_ptr, job->u_cols,
-    job->input_ptr, job->input_cols, &job->needs_cleanup,
-    &job->cleanup_rows, &job->cleanup_entries);
-}
-
-typedef struct {
-  UF_long n;
-  const UF_long *l_ptr;
-  const UF_long *l_cols;
   UF_long *levels;
   UF_long *level_ptr;
   UF_long *level_rows;
@@ -7503,33 +7478,6 @@ static int kls_build_row_refactor_group_successors(
   return 1;
 }
 
-typedef struct {
-  UF_long group_count;
-  const UF_long *row_group;
-  const UF_long *group_dep_ptr;
-  const UF_long *group_dep_rows;
-  UF_long *successor_ptr;
-  UF_long *successor_groups;
-  UF_long *pred_count;
-  UF_long *root_groups;
-  UF_long edge_count;
-  UF_long root_count;
-  UF_long leaf_count;
-  UF_long max_fanout;
-  int ok;
-} kls_group_successor_prep_job;
-
-static void kls_group_successor_prep_run(kls_group_successor_prep_job *job) {
-  if (job == NULL) {
-    return;
-  }
-  job->ok = kls_build_row_refactor_group_successors(
-    job->group_count, job->row_group, job->group_dep_ptr,
-    job->group_dep_rows, &job->successor_ptr, &job->successor_groups,
-    &job->pred_count, &job->root_groups, &job->edge_count,
-    &job->root_count, &job->leaf_count, &job->max_fanout);
-}
-
 static int kls_row_refactor_u_row_extends_next(const UF_long *u_ptr,
                                                const UF_long *u_cols,
                                                UF_long n,
@@ -8237,46 +8185,6 @@ static void kls_try_build_row_refactor_segment_input_targets(
 }
 
 typedef struct {
-  UF_long n;
-  const UF_long *input_ptr;
-  const UF_long *input_cols;
-  const unsigned char *input_needs_cleanup;
-  const UF_long *l_ptr;
-  const UF_long *l_cols;
-  const UF_long *u_ptr;
-  const UF_long *u_cols;
-  const UF_long *row_group;
-  UF_long group_count;
-  const UF_long *group_ptr;
-  const unsigned char *group_kind;
-  const UF_long *group_trailing_begin;
-  const UF_long *group_trailing_len;
-  unsigned char *row_ready;
-  unsigned char *target_kind;
-  UF_long *target_pos;
-  UF_long *cleanup_ptr;
-  UF_long *cleanup_cols;
-  UF_long target_rows;
-  UF_long target_entries;
-  UF_long cleanup_entries;
-} kls_segment_input_target_prep_job;
-
-static void kls_segment_input_target_prep_run(
-  kls_segment_input_target_prep_job *job) {
-  if (job == NULL) {
-    return;
-  }
-  kls_try_build_row_refactor_segment_input_targets(
-    job->n, job->input_ptr, job->input_cols, job->input_needs_cleanup,
-    job->l_ptr, job->l_cols, job->u_ptr, job->u_cols, job->row_group,
-    job->group_count, job->group_ptr, job->group_kind,
-    job->group_trailing_begin, job->group_trailing_len, &job->row_ready,
-    &job->target_kind, &job->target_pos, &job->cleanup_ptr,
-    &job->cleanup_cols, &job->target_rows, &job->target_entries,
-    &job->cleanup_entries);
-}
-
-typedef struct {
   UF_long group_count;
   const UF_long *group_ptr;
   const UF_long *l_ptr;
@@ -8489,15 +8397,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
 
-  kls_row_input_cleanup_prep_job input_cleanup_job = {
-    .n = n,
-    .l_ptr = l_ptr,
-    .l_cols = l_cols,
-    .u_ptr = u_ptr,
-    .u_cols = u_cols,
-    .input_ptr = input_ptr,
-    .input_cols = input_cols
-  };
   kls_row_level_prep_job row_level_job = {
     .n = n,
     .l_ptr = l_ptr,
@@ -8514,12 +8413,12 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
   free(next);
-  kls_row_input_cleanup_prep_run(&input_cleanup_job);
+  const int input_cleanup_ok =
+    kls_build_row_refactor_input_cleanup_flags(
+      n, l_ptr, l_cols, u_ptr, u_cols, input_ptr, input_cols,
+      &input_needs_cleanup, &input_cleanup_rows, &input_cleanup_entries);
   kls_row_level_prep_run(&row_level_job);
-  input_needs_cleanup = input_cleanup_job.needs_cleanup;
-  input_cleanup_rows = input_cleanup_job.cleanup_rows;
-  input_cleanup_entries = input_cleanup_job.cleanup_entries;
-  if (!input_cleanup_job.ok || !row_level_job.ok) {
+  if (!input_cleanup_ok || !row_level_job.ok) {
     free(l_ptr);
     free(u_ptr);
     free(input_ptr);
@@ -8811,12 +8710,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long group_leaf_count = 0;
   UF_long group_max_fanout = 0;
 
-  kls_group_successor_prep_job group_successor_job = {
-    .group_count = group_count,
-    .row_group = row_group,
-    .group_dep_ptr = group_dep_ptr,
-    .group_dep_rows = group_dep_rows
-  };
   UF_long *group_levels = group_count > 0u
     ? (UF_long *)calloc((size_t)group_count, sizeof(*group_levels)) : NULL;
   if (group_count > 0u && group_levels == NULL) {
@@ -8928,16 +8821,11 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
   free(group_write_pos);
-  kls_group_successor_prep_run(&group_successor_job);
-  group_successor_ptr = group_successor_job.successor_ptr;
-  group_successor_groups = group_successor_job.successor_groups;
-  group_pred_count = group_successor_job.pred_count;
-  group_roots = group_successor_job.root_groups;
-  group_dependency_edges = group_successor_job.edge_count;
-  group_root_count = group_successor_job.root_count;
-  group_leaf_count = group_successor_job.leaf_count;
-  group_max_fanout = group_successor_job.max_fanout;
-  if (!group_successor_job.ok) {
+  if (!kls_build_row_refactor_group_successors(
+        group_count, row_group, group_dep_ptr, group_dep_rows,
+        &group_successor_ptr, &group_successor_groups, &group_pred_count,
+        &group_roots, &group_dependency_edges, &group_root_count,
+        &group_leaf_count, &group_max_fanout)) {
     free(row_group);
     free(group_ptr);
     free(group_levels);
@@ -9011,22 +8899,14 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     }
   }
   kls_sort_row_refactor_successors_by_work(solver);
-  kls_segment_input_target_prep_job segment_input_job = {
-    .n = n,
-    .input_ptr = input_ptr,
-    .input_cols = input_cols,
-    .input_needs_cleanup = solver->row_refactor_input_needs_cleanup,
-    .l_ptr = l_ptr,
-    .l_cols = l_cols,
-    .u_ptr = u_ptr,
-    .u_cols = u_cols,
-    .row_group = row_group,
-    .group_count = group_count,
-    .group_ptr = group_ptr,
-    .group_kind = group_kind,
-    .group_trailing_begin = group_trailing_begin,
-    .group_trailing_len = group_trailing_len
-  };
+  unsigned char *segment_row_ready = NULL;
+  unsigned char *segment_target_kind = NULL;
+  UF_long *segment_target_pos = NULL;
+  UF_long *segment_cleanup_ptr = NULL;
+  UF_long *segment_cleanup_cols = NULL;
+  UF_long segment_target_rows = 0u;
+  UF_long segment_target_entries = 0u;
+  UF_long segment_cleanup_entries = 0u;
   UF_long *group_compact_panel_begin = NULL;
   double *compact_panel_values = NULL;
   atomic_uint *compact_panel_valid = NULL;
@@ -9052,7 +8932,13 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long *dense_producer_run_l_begin = NULL;
   UF_long *dense_producer_run_group = NULL;
   UF_long *dense_producer_run_len = NULL;
-  kls_segment_input_target_prep_run(&segment_input_job);
+  kls_try_build_row_refactor_segment_input_targets(
+    n, input_ptr, input_cols, solver->row_refactor_input_needs_cleanup,
+    l_ptr, l_cols, u_ptr, u_cols, row_group, group_count, group_ptr,
+    group_kind, group_trailing_begin, group_trailing_len,
+    &segment_row_ready, &segment_target_kind, &segment_target_pos,
+    &segment_cleanup_ptr, &segment_cleanup_cols, &segment_target_rows,
+    &segment_target_entries, &segment_cleanup_entries);
   kls_try_build_row_refactor_dense_producer_runs(
     n, l_ptr, l_cols, row_group, group_count, group_ptr, group_kind,
     group_compact_panel_begin, &dense_producer_run_ptr,
@@ -9093,15 +8979,15 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   solver->row_refactor_dense_producer_run_len =
     dense_producer_run_len;
   solver->row_refactor_segment_input_row_ready =
-    segment_input_job.row_ready;
+    segment_row_ready;
   solver->row_refactor_segment_input_target_kind =
-    segment_input_job.target_kind;
+    segment_target_kind;
   solver->row_refactor_segment_input_target_pos =
-    segment_input_job.target_pos;
+    segment_target_pos;
   solver->row_refactor_segment_input_cleanup_ptr =
-    segment_input_job.cleanup_ptr;
+    segment_cleanup_ptr;
   solver->row_refactor_segment_input_cleanup_cols =
-    segment_input_job.cleanup_cols;
+    segment_cleanup_cols;
   solver->row_refactor_level_count = group_level_count;
   solver->row_refactor_level_max_width = group_max_width;
   solver->row_refactor_cluster_level_count = group_level_count;
@@ -9121,11 +9007,11 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   solver->row_refactor_compact_dense_panel_entries =
     compact_dense_panel_entries;
   solver->row_refactor_segment_input_target_rows =
-    segment_input_job.target_rows;
+    segment_target_rows;
   solver->row_refactor_segment_input_target_entries =
-    segment_input_job.target_entries;
+    segment_target_entries;
   solver->row_refactor_segment_input_cleanup_entries =
-    segment_input_job.cleanup_entries;
+    segment_cleanup_entries;
   solver->row_refactor_compact_dense_panel_persistent_groups =
     compact_dense_panel_persistent_groups;
   solver->row_refactor_compact_dense_panel_persistent_entries =
