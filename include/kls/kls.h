@@ -181,7 +181,6 @@ typedef struct kls_stats {
   int64_t refactor_dependency_pipeline_columns;
   double refactor_dependency_work;
   double refactor_dependency_pipeline_work;
-  /* Retired stream dependency/pivot/output diagnostics: always zero. */
   int64_t fast_rejected_block_start;
   int64_t fast_rejected_block_size;
   int64_t fast_rejected_suffix_columns;
@@ -210,7 +209,6 @@ typedef struct kls_stats {
   int64_t refactor_supernode_candidate_max_width;
   double refactor_supernode_candidate_dense_entries;
   double refactor_supernode_candidate_trailing_entries;
-  /* Retired supernode_consumer diagnostics are ABI-reserved, always zero. */
   int64_t row_refactor_group_count;
   int64_t row_refactor_group_level_count;
   int64_t row_refactor_group_level_max_width;
@@ -413,8 +411,6 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_supernode_partial_update_entries;
   int64_t row_refactor_last_separator_flop_closure_groups;
   int64_t row_refactor_separator_flop_closure_group_count;
-  /* Retired pipeline counters; retained for ABI compatibility, always zero. */
-  /* Retired optional EGraph update/ready-queue counters: always zero. */
   double parallel_model_r1;
   double parallel_model_r2;
   int parallel_model_recommends_parallel;
@@ -532,8 +528,6 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_fallback_count;
   int64_t row_refactor_native_row_panel_checked_reject_count;
   int64_t row_refactor_native_row_panel_auto_disable_count;
-  /* Retired L-pattern/adjacent-run/contiguous-suffix diagnostic fields are
-     ABI-reserved, always zero. Sorted-L eligibility statistics remain active. */
   int internal_index_bytes;
   int refactor_map_index32_enabled;
   int64_t refactor_map_index32_entries;
@@ -545,9 +539,6 @@ typedef struct kls_stats {
   int row_refactor_auto_lower_bound_rejected;
   int row_refactor_auto_pattern_build_failed;
   int row_refactor_auto_value_copy_failed;
-  /* Retired optional EGraph panel-cache counters: always zero. */
-  /* Retired consumer_plan fields throughout this struct are ABI-reserved,
-     always zero. */
   int64_t row_refactor_group_single_count;
   int64_t row_refactor_group_batch_count;
   int64_t row_refactor_group_batch_rows;
@@ -578,41 +569,6 @@ typedef struct kls_stats {
   int64_t row_refactor_last_separator_flop_private_max_groups;
   double row_refactor_last_separator_flop_private_min_work;
   double row_refactor_last_separator_flop_private_max_work;
-  /* Retired u_supernode experiment fields throughout this struct are
-     ABI-reserved, always zero. Ordinary supernode update statistics remain. */
-  int64_t
-    refactor_supernode_consumer_plan_first_dep_shape_batch_small_run_count;
-  int64_t
-    refactor_supernode_consumer_plan_first_dep_shape_batch_small_run_rows;
-  int64_t
-    refactor_supernode_consumer_plan_shape_bounded_advance_update_entries;
-  int64_t
-    refactor_supernode_consumer_plan_shape_bounded_advance_max_run_deps;
-  int64_t
-    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_count;
-  int64_t
-    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_count;
-  int64_t
-    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_run_rows;
-  int64_t
-    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_update_entries;
-  double
-    refactor_supernode_consumer_plan_shape_bounded_advance_payoff_advance_work;
-  double
-    refactor_supernode_consumer_plan_shape_bounded_advance_max_payoff_ratio;
-  /* Reserved ABI fields: retired EGraph prefactor experiment; always zero. */
-  /* Retired Algorithm5 payoff statistics: retained for ABI compatibility;
-     these fields through refactor_last_supernode_algorithm5_payoff_* are zero. */
-  int64_t
-    refactor_supernode_algorithm5_payoff_group_advance_duplicate_update_entries;
-  int64_t
-    refactor_supernode_algorithm5_payoff_group_max_run_suffix_update_entries;
-  int64_t
-    refactor_supernode_algorithm5_payoff_group_suffix_duplicate_update_entries;
-  int64_t
-    refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches;
-  /* Retired surface-tracker counters (next eight fields): always zero.
-     The following scalar_run_exec counters remain active. */
   int64_t refactor_last_btf_scalar_run_exec_runs;
   int64_t refactor_last_btf_scalar_run_exec_rows;
   int64_t refactor_last_btf_scalar_run_exec_entries;
@@ -621,54 +577,6 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_exec_rows;
   int64_t refactor_btf_scalar_run_exec_entries;
   int64_t refactor_btf_scalar_run_exec_max_rows;
-  /* Retired btf_scalar_run_group fields are ABI-reserved, always zero.
-     The ordinary BTF scalar-run executor remains supported. */
-  int64_t
-    refactor_btf_scalar_run_group_live_step_runtime_partial_current_count;
-  int64_t
-    refactor_btf_scalar_run_group_live_step_runtime_partial_active_unique_rows;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_advance_batch_unique_entries;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_advance_batch_duplicate_entries;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_advance_batch_max_currents;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_step_advance_ready_currents;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_step_batch_unique_state_rows;
-  int64_t
-    refactor_last_btf_scalar_run_group_live_step_runtime_partial_active_rows;
-  int64_t
-    refactor_last_btf_scalar_run_group_live_step_runtime_partial_active_unique_rows;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_exec_wake_terminal_currents;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_exec_wake_terminal_candidate_currents;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_exec_wake_terminal_nonpipeline_currents;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_exec_wake_terminal_dependency_miss_currents;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_exec_wake_terminal_claim_miss_currents;
-  int64_t
-    refactor_last_btf_scalar_run_group_state_exec_dispatch_bypass_ready_currents;
-  int64_t
-    refactor_btf_scalar_run_group_state_advance_batch_duplicate_entries;
-  int64_t
-    refactor_btf_scalar_run_group_state_step_advance_ready_current_count;
-  int64_t
-    refactor_btf_scalar_run_group_state_exec_wake_terminal_current_count;
-  int64_t
-    refactor_btf_scalar_run_group_state_exec_wake_terminal_candidate_current_count;
-  int64_t
-    refactor_btf_scalar_run_group_state_exec_wake_terminal_nonpipeline_current_count;
-  int64_t
-    refactor_btf_scalar_run_group_state_exec_wake_terminal_dependency_miss_current_count;
-  int64_t
-    refactor_btf_scalar_run_group_state_exec_wake_terminal_claim_miss_current_count;
-  int64_t
-    refactor_btf_scalar_run_group_state_exec_dispatch_bypass_ready_current_count;
   int verified_rhs_reused;
   int64_t verified_rhs_reuse_count;
   int refactor_lean_choice;
@@ -676,31 +584,6 @@ typedef struct kls_stats {
   /* Zero means no compact triangular-solve mirror is prepared. */
   int compact_solve_index_bytes;
   int compact_solve_fused_rhs;
-  /* The retained numeric satisfies the normalized moderate-work,
-     fragmented dominant-BTF policy boundary. */
-  /* The retained AMF numeric fits the normalized compact two-block policy
-     and all recurring accuracy checks; individual packed kernels still
-     validate their derived representations before dispatch. */
-  /* The retained NodeNDP numeric passed the reciprocal-hub proposal,
-     symbolic BTF/separator acceptance, and normalized factor work limits. */
-  /* The retained transpose-AMD numeric has an exact symmetric degree-one
-     fringe and passed the normalized BTF, fill, work, and pivot guards. */
-  /* The retained normal-AMD single block passed normalized symbolic work and
-     measured pivot, fill, balance, and numeric-work guards. */
-  /* The retained unscaled dominant-BTF numeric has a mostly scalar fringe
-     and passed the normalized PTS fill, work, pivot, and balance guards. */
-  /* The retained normal-AMD numeric has a tiny, mostly scalar BTF fringe and
-     passed the normalized high-work EGraph lifecycle guards. */
-  /* The retained low-work AMD/PTS numeric has a hubbed input and an almost
-     entirely scalar BTF fringe. */
-  /* A nearly-missing-diagonal one-block symbolic selected value-aware
-     matching before the first numeric factor. */
-  /* The retained factor has low work spread across many genuinely tiny BTF
-     blocks and uses the bounded tiny-block lifecycle. */
-  /* The selected symbolic has low estimated work spread across many tiny BTF
-     blocks, independent of the later numeric pivot verdict. */
-  /* The retained scaled fragmented factor fits the compact paired-row
-     representation and its bounded-work lifecycle. */
   /* Singleton BTF blocks represented by the compact solve run cache, and
      the longest consecutive cached run.  Both are zero until a solve builds
      and adopts that optional representation. */
@@ -709,48 +592,9 @@ typedef struct kls_stats {
   /* The selected BTF geometry can amortize the compact singleton-run
      representation if a compact solve mirror is later built. */
   int compact_solve_singleton_run_eligible;
-  /* The original AUTO input fits the compact bounded-degree,
-     nearly-missing-diagonal matching representation. */
   /* The compact match covered the input and its accepted factor replaced the
      analyze-time proposal. */
   int compact_missing_diagonal_match_selected;
-  /* The accepted match also produced the fragmented, low-work numeric needed
-     by the compact row/direct-value lifecycle. */
-  /* The original AUTO input is a bounded-degree symmetric graph with a
-     material structural-diagonal defect suitable for value-aware matching. */
-  /* A value-aware match for that proposal was adopted. */
-  /* The adopted match produced the bounded, balanced single-block numeric
-     required by the direct-value/PTS lifecycle. */
-  /* The same structural family produced a smaller AMD/BTF symbolic for which
-     the lightweight matched PTS lifecycle is preferable. */
-  /* The retained NodeNDP symbolic passed the sparse symmetric scalar-fringe
-     input proposal and normalized BTF/fill/separator acceptance. */
-  /* That retained symbolic also produced an unscaled, no-pivot numeric inside
-     the measured balanced fill/work regime. */
-  /* The original normal AUTO input is a nearly diagonal sparse graph with a
-     moderate spike, suitable for overlapped matching and NodeND. */
-  /* Matching produced an accepted one-block predicted METIS numeric inside
-     the normalized fill/work and separator bounds. */
-  /* That factor also has the nearly all-private moderate-work separator for
-     which the retained cluster schedule and relaxed-consume floors apply. */
-  /* The retained scaled BTF factor has normalized dense-input,
-     fragmentation, fill, work, and pivot bounds for direct row updates. */
-  /* The original AUTO input is a bounded-degree, full-diagonal graph in a
-     resource band where tuned METIS refinement can amortize row metadata. */
-  /* Its retained one-block METIS symbolic has balanced intermediate fill and
-     a mostly private separator inside the measured setup-cost bounds. */
-  /* The retained fixed-pivot factor also preserves the normalized fill/work
-     regime required by the recurring cooperative row lifecycle. */
-  /* The original AUTO input is a giant, exactly structurally symmetric
-     sparse graph with an almost-full diagonal, a scalar missing-diagonal
-     fringe, and a bounded hub population. */
-  /* Its raced METIS/BTF symbolic proved a giant core, mostly scalar fringe,
-     bounded fill/work, and a complete mostly-private separator. */
-  /* The retained unscaled fixed-pivot factor also passed normalized numeric
-     fill/work, balance, and pivot-repair guards for recurring row updates. */
-  /* The retained sparse, one-block METIS factor and its separator have the
-     balanced fill/work and nearly all-private geometry used by the hybrid
-     clustered-prefix/dependency-pipeline EGraph schedule. */
   /* A plain-frame factor selected a weaker-than-requested pivot threshold and
      retains the current matrix values needed to enforce a relative-L2 solve
      contract.  This is a numeric-state capability, not an input-shape tag. */
@@ -760,49 +604,9 @@ typedef struct kls_stats {
   /* Number of residual-stagnation episodes that rebuilt the numeric at a
      more conservative, request-relative pivot threshold. */
   int64_t promoted_tolerance_l2_recovery_count;
-  /* A sparse, nearly diagonal-free, bounded in/out-degree input proposed the
-     high-work retained-preconditioner lifecycle. */
-  /* The directly measured transpose/AMD symbolic has a dominant SCC and
-     enough fill/work to make retained-factor updates economically relevant. */
-  /* The installed numeric preserved the symbolic regime and passed the
-     measured factor-work and representation checks. */
-  /* Number of changed-value refactors served by the retained numeric after
-     the entrywise update bound accepted the new values. */
-  /* The original AUTO input is a nearly full-diagonal asymmetric graph with
-     bounded in/out degree and one nearly spanning raw SCC. */
-  /* SCC fragmentation selected the coarse-fringe/eight-leaf class (1) or
-     the thin-fringe/fourteen-leaf class (2). */
-  /* Direct METIS/BTF analysis preserved that SCC class and proved the
-     normalized dominant-core and separator economics. */
-  /* The installed unscaled fixed-pivot numeric also passed normalized
-     fill/work, balance, and pivot-repair guards. */
-  /* The original AUTO input is a dense, nearly degree-balanced mega-hub
-     graph with an almost-full diagonal and very small in/out-degree skew. */
-  /* Its direct AMD/BTF symbolic proved full rank, dominant-core geometry,
-     and normalized fill/work economics. */
-  /* The installed max-row-scaled numeric also passed normalized pivot,
-     fill, work, and representation guards. */
-  /* The original AUTO input is a giant almost-full-diagonal graph with a
-     dominant, degree-balanced in/out hub. */
-  /* Its ordinary AUTO symbolic selected one unscaled METIS block and proved
-     normalized fill plus a nearly all-private separator. */
-  /* The installed full-rank pipelined numeric also proved the dense-tail,
-     pivot, fill, work, and residual-refinement representation. */
-  /* The retained full-rank min-fill factor has balanced high work and a
-     1/512--1/256 mixed-component BTF fringe suitable for direct PTS solves. */
   /* The generic PTS builder proved a large elimination forest, bounded
      serial top, and balanced worker partition suitable for direct adoption. */
   int verified_large_pts_solve_policy_eligible;
-  /* A medium full-diagonal input with one macroscopic column spike proposed
-     the guarded AMMF/BTF ordering. */
-  /* The selected AMMF symbolic also proved the dominant-core, fill, and work
-     contract used by the recurring lifecycle. */
-  /* A large full-diagonal sparse input with a bounded broad column proposed
-     the one-block AMF/no-BTF ordering. */
-  /* The selected one-block AMF symbolic passed its balanced fill/work budget. */
-  /* A large almost-full-diagonal bounded-degree input proposed the guarded
-     one-block AMF/no-BTF ordering. */
-  /* The selected one-block AMF symbolic passed its bounded-work contract. */
   /* The current numeric admits the compact one-RHS all-singleton BTF solve. */
   int tiny_singleton_solve_eligible;
   /* Number of public solves dispatched through that compact kernel. */
