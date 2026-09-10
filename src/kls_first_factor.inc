@@ -9292,17 +9292,6 @@ static int kls_generic_predicted_diagonal_values_capable(
   return capable;
 }
 
-static int kls_predicted_probe_first_threshold_shape(
-  const kls_solver *solver) {
-  /* Threshold violations describe a multiplier bound, not an inaccurate
-     solution.  For a lifecycle-funded generic trial, probe the exact
-     unmodified numeric first; accepting still requires the ordinary true
-     residual below, while a failure discards the trial and returns to KLU.
-     This avoids value-dependent diagonal nudges becoming an implicit input
-     classifier. */
-  return kls_generic_repeated_predicted_lifecycle_candidate(solver);
-}
-
 static int kls_predicted_pattern_first_factor(kls_solver *solver,
                                                double *numeric_values,
                                                double *elapsed) {
@@ -10167,7 +10156,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       const double tolv = common->tol > 0.0 ? common->tol : 0.001;
       UF_long batch_nudged = 0;
       int batch_failed = 0;
-      if (kls_predicted_probe_first_threshold_shape(solver)) {
+      /* Threshold violations describe a multiplier bound, not an inaccurate
+         solution.  For a lifecycle-funded generic trial, probe the exact
+         unmodified numeric first; accepting still requires the ordinary true
+         residual below, while a failure discards the trial and returns to
+         KLU. */
+      if (kls_generic_repeated_predicted_lifecycle_candidate(solver)) {
         break;
       }
       /* Front-first: violations cascade downstream, so fix only the
