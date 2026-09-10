@@ -1001,11 +1001,6 @@ struct kls_solver {
   UF_long row_refactor_lazy_value_scatter_run_count;
   int row_refactor_last_row_solve;
   UF_long row_refactor_row_solve_run_count;
-  UF_long row_solve_parallel_run_count;
-  UF_long row_solve_parallel_l_slice_runs;
-  UF_long row_solve_parallel_u_slice_runs;
-  UF_long row_solve_parallel_l_sparse_level_runs;
-  UF_long row_solve_parallel_u_sparse_level_runs;
   int row_solve_thread_count;
   int row_solve_partition_ready;
   UF_long row_solve_l_sparse_level_count;
@@ -2947,11 +2942,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_lazy_value_scatter_run_count = 0;
   solver->row_refactor_last_row_solve = 0;
   solver->row_refactor_row_solve_run_count = 0;
-  solver->row_solve_parallel_run_count = 0;
-  solver->row_solve_parallel_l_slice_runs = 0;
-  solver->row_solve_parallel_u_slice_runs = 0;
-  solver->row_solve_parallel_l_sparse_level_runs = 0;
-  solver->row_solve_parallel_u_sparse_level_runs = 0;
   solver->row_refactor_work_ready_queue_run_count = 0;
   solver->row_refactor_compact_dense_panel_count = 0;
   solver->row_refactor_local_ready_group_count = 0;
@@ -3123,11 +3113,6 @@ typedef struct {
   UF_long lazy_value_scatter_run_count;
   int last_row_solve;
   UF_long row_solve_run_count;
-  UF_long solve_parallel_run_count;
-  UF_long solve_parallel_l_slice_runs;
-  UF_long solve_parallel_u_slice_runs;
-  UF_long solve_parallel_l_sparse_level_runs;
-  UF_long solve_parallel_u_sparse_level_runs;
   UF_long work_ready_queue_run_count;
   UF_long compact_dense_panel_count;
   UF_long local_ready_group_count;
@@ -3322,15 +3307,6 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_lazy_value_scatter_run_count;
   diag->last_row_solve = solver->row_refactor_last_row_solve;
   diag->row_solve_run_count = solver->row_refactor_row_solve_run_count;
-  diag->solve_parallel_run_count = solver->row_solve_parallel_run_count;
-  diag->solve_parallel_l_slice_runs =
-    solver->row_solve_parallel_l_slice_runs;
-  diag->solve_parallel_u_slice_runs =
-    solver->row_solve_parallel_u_slice_runs;
-  diag->solve_parallel_l_sparse_level_runs =
-    solver->row_solve_parallel_l_sparse_level_runs;
-  diag->solve_parallel_u_sparse_level_runs =
-    solver->row_solve_parallel_u_sparse_level_runs;
   diag->work_ready_queue_run_count =
     solver->row_refactor_work_ready_queue_run_count;
   diag->compact_dense_panel_count =
@@ -3634,15 +3610,6 @@ static void kls_restore_row_refactor_diagnostics(
     diag->lazy_value_scatter_run_count;
   solver->row_refactor_last_row_solve = diag->last_row_solve;
   solver->row_refactor_row_solve_run_count = diag->row_solve_run_count;
-  solver->row_solve_parallel_run_count = diag->solve_parallel_run_count;
-  solver->row_solve_parallel_l_slice_runs =
-    diag->solve_parallel_l_slice_runs;
-  solver->row_solve_parallel_u_slice_runs =
-    diag->solve_parallel_u_slice_runs;
-  solver->row_solve_parallel_l_sparse_level_runs =
-    diag->solve_parallel_l_sparse_level_runs;
-  solver->row_solve_parallel_u_sparse_level_runs =
-    diag->solve_parallel_u_sparse_level_runs;
   solver->row_refactor_work_ready_queue_run_count =
     diag->work_ready_queue_run_count;
   solver->row_refactor_compact_dense_panel_count =
@@ -6204,21 +6171,6 @@ static void kls_record_row_refactor_compact_panel_scalar_update(
     (int64_t)solver->row_refactor_last_compact_panel_scalar_update_entries;
   solver->stats.row_refactor_compact_panel_scalar_update_entries =
     (int64_t)solver->row_refactor_compact_panel_scalar_update_entries;
-}
-
-static void kls_record_row_solve_parallel_run(kls_solver *solver,
-                                              UF_long l_slice_runs,
-                                              UF_long u_slice_runs,
-                                              UF_long l_sparse_level_runs,
-                                              UF_long u_sparse_level_runs) {
-  if (solver == NULL) {
-    return;
-  }
-  solver->row_solve_parallel_run_count++;
-  solver->row_solve_parallel_l_slice_runs += l_slice_runs;
-  solver->row_solve_parallel_u_slice_runs += u_slice_runs;
-  solver->row_solve_parallel_l_sparse_level_runs += l_sparse_level_runs;
-  solver->row_solve_parallel_u_sparse_level_runs += u_sparse_level_runs;
 }
 
 static void kls_record_fast_reject_detail(kls_solver *solver,

@@ -6065,12 +6065,6 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   for (UF_long k = 0; k < n; ++k) {
     x[q[k]] = work[k];
   }
-  if (l_slice_runs > 0u || u_slice_runs > 0u ||
-      l_sparse_level_runs > 0u || u_sparse_level_runs > 0u) {
-    kls_record_row_solve_parallel_run(solver, l_slice_runs, u_slice_runs,
-                                      l_sparse_level_runs,
-                                      u_sparse_level_runs);
-  }
   return l_slice_runs > 0u || u_slice_runs > 0u ||
          l_sparse_level_runs > 0u || u_sparse_level_runs > 0u;
 }
@@ -6420,12 +6414,6 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
   for (UF_long k = 0; k < n; ++k) {
     const double result = work[k];
     x[pnum[k]] = rs != NULL ? result / rs[k] : result;
-  }
-  if (ut_slice_runs > 0u || lt_slice_runs > 0u ||
-      ut_sparse_level_runs > 0u || lt_sparse_level_runs > 0u) {
-    kls_record_row_solve_parallel_run(solver, lt_slice_runs, ut_slice_runs,
-                                      lt_sparse_level_runs,
-                                      ut_sparse_level_runs);
   }
   return ut_slice_runs > 0u || lt_slice_runs > 0u ||
          ut_sparse_level_runs > 0u || lt_sparse_level_runs > 0u;
