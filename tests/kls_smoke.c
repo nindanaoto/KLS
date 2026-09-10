@@ -4306,11 +4306,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
   const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
   char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
   const int had_saved_env = saved_env_value != NULL;
-  const char *saved_trsv_env_value =
-    getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
-  char *saved_trsv_env =
-    saved_trsv_env_value != NULL ? strdup(saved_trsv_env_value) : NULL;
-  const int had_saved_trsv_env = saved_trsv_env_value != NULL;
   const char *saved_native_env_value =
     getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
   char *saved_native_env =
@@ -4320,10 +4315,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
   int ok = 1;
   if (had_saved_env && saved_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
-    ok = 0;
-  }
-  if (had_saved_trsv_env && saved_trsv_env == NULL) {
-    fprintf(stderr, "failed to save KLS_ENABLE_COMPACT_SUPERNODE_TRSV\n");
     ok = 0;
   }
   if (had_saved_native_env && saved_native_env == NULL) {
@@ -4340,10 +4331,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1");
-    ok = 0;
-  }
   if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=1");
     ok = 0;
@@ -4358,17 +4345,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
   } else if (!had_saved_env) {
     if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
       perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
-      ok = 0;
-    }
-  }
-  if (had_saved_trsv_env && saved_trsv_env != NULL) {
-    if (setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", saved_trsv_env, 1) != 0) {
-      perror("restore KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
-      ok = 0;
-    }
-  } else if (!had_saved_trsv_env) {
-    if (unsetenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV") != 0) {
-      perror("unsetenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
       ok = 0;
     }
   }
@@ -4442,11 +4418,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
              stats.row_refactor_last_compact_supernode_gemv != 1 ||
              stats.row_refactor_compact_supernode_gemv_count < 1 ||
              stats.row_refactor_compact_supernode_gemv_rows < lead ||
-             stats.row_refactor_compact_supernode_gemv_entries <= 0 ||
-             stats.row_refactor_last_compact_supernode_trsv != 1 ||
-             stats.row_refactor_compact_supernode_trsv_count < 1 ||
-             stats.row_refactor_compact_supernode_trsv_rows < lead ||
-             stats.row_refactor_compact_supernode_trsv_entries <= 0)) {
+             stats.row_refactor_compact_supernode_gemv_entries <= 0)) {
     fprintf(stderr,
             "unexpected unchecked dense compact-panel stats: row=%d/%d/%d"
             ", dense_segments=%" PRId64 ", compact=%d/%" PRId64
@@ -4807,7 +4779,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
   free(expected_multi);
   free(residual);
   free(saved_env);
-  free(saved_trsv_env);
   free(saved_native_env);
   return ok;
 }
@@ -9142,9 +9113,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
   char *saved_checked = saved_checked_value != NULL
     ? strdup(saved_checked_value) : NULL;
   const int had_checked = saved_checked_value != NULL;
-  const char *saved_trsv_value = getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
-  char *saved_trsv = saved_trsv_value != NULL ? strdup(saved_trsv_value) : NULL;
-  const int had_trsv = saved_trsv_value != NULL;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -9159,8 +9127,7 @@ static int test_checked_row_prefactor_finished_dependency(void) {
   int ok = 1;
   if ((had_row && saved_row == NULL) ||
       (had_partial && saved_partial == NULL) ||
-      (had_checked && saved_checked == NULL) ||
-      (had_trsv && saved_trsv == NULL)) {
+      (had_checked && saved_checked == NULL)) {
     fprintf(stderr, "failed to save prefactor env\n");
     ok = 0;
   }
@@ -9180,10 +9147,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0");
     ok = 0;
   }
   if (ok && !require_ok(kls_factor(solver, ax1),
@@ -9249,10 +9212,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
                          had_checked, saved_checked)) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_ENABLE_COMPACT_SUPERNODE_TRSV",
-                         had_trsv, saved_trsv)) {
-    ok = 0;
-  }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
                         "solve row-prefactor")) ok = 0;
   for (int32_t i = 0; ok && i < n; ++i) {
@@ -9267,7 +9226,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
   free(saved_row);
   free(saved_partial);
   free(saved_checked);
-  free(saved_trsv);
   return ok;
 }
 
@@ -9671,9 +9629,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   char *saved_checked = saved_checked_value != NULL
     ? strdup(saved_checked_value) : NULL;
   const int had_checked = saved_checked_value != NULL;
-  const char *saved_trsv_value = getenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV");
-  char *saved_trsv = saved_trsv_value != NULL ? strdup(saved_trsv_value) : NULL;
-  const int had_trsv = saved_trsv_value != NULL;
   const char *saved_native_value =
     getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
   char *saved_native =
@@ -9694,7 +9649,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   if ((had_row && saved_row == NULL) ||
       (had_partial && saved_partial == NULL) ||
       (had_checked && saved_checked == NULL) ||
-      (had_trsv && saved_trsv == NULL) ||
       (had_native && saved_native == NULL)) {
     fprintf(stderr, "failed to save partial-prefix env\n");
     ok = 0;
@@ -9717,10 +9671,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=1");
-    ok = 0;
-  }
   if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
     perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
     ok = 0;
@@ -9737,10 +9687,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_checked, saved_checked)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_COMPACT_SUPERNODE_TRSV",
-                         had_trsv, saved_trsv)) {
     ok = 0;
   }
   if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
@@ -9763,10 +9709,7 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
              stats.row_refactor_last_done_bitmap != 1 ||
              stats.row_refactor_last_compact_dense_panel != 1 ||
              stats.row_refactor_last_compact_supernode_update != 1 ||
-             stats.row_refactor_last_compact_supernode_trsv != 1 ||
              stats.row_refactor_compact_supernode_update_rows <
-               expected_partial_rows ||
-             stats.row_refactor_compact_supernode_trsv_rows <
                expected_partial_rows)) {
     fprintf(stderr,
             "unexpected partial-prefix stats: parallel=%d partial=%d done=%d"
@@ -9847,10 +9790,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_COMPACT_SUPERNODE_TRSV", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_COMPACT_SUPERNODE_TRSV=0");
-    ok = 0;
-  }
   if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
     perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
     ok = 0;
@@ -9869,10 +9808,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_checked, saved_checked)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_COMPACT_SUPERNODE_TRSV",
-                         had_trsv, saved_trsv)) {
     ok = 0;
   }
   if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
@@ -9967,7 +9902,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   free(saved_row);
   free(saved_partial);
   free(saved_checked);
-  free(saved_trsv);
   free(saved_native);
   free(ap);
   free(ai);

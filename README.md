@@ -750,16 +750,7 @@ suffix pass before the final scatter; stats report
 `row_refactor_last_compact_supernode_gemv`,
 `row_refactor_compact_supernode_gemv_count`,
 `row_refactor_compact_supernode_gemv_rows`, and
-`row_refactor_compact_supernode_gemv_entries`. Unset
-`KLS_ENABLE_COMPACT_SUPERNODE_TRSV` keeps the triangular part on the direct
-scalar dependency walk because current CKTSO-gap probes show the contiguous
-worker-scratch triangular solve over-stages the row-refactor scaffold even after
-large-run gates. Setting the variable to `1` forces that paper-shaped
-triangular-solve probe for coverage and experiments. It reports
-`row_refactor_last_compact_supernode_trsv`,
-`row_refactor_compact_supernode_trsv_count`,
-`row_refactor_compact_supernode_trsv_rows`, and
-`row_refactor_compact_supernode_trsv_entries`. KLS-owned scalar
+`row_refactor_compact_supernode_gemv_entries`. KLS-owned scalar
 multi-producer row-panel updates are available as an opt-in
 `KLS_ENABLE_MULTI_PRODUCER_SUPERNODE=1` experiment when the retained row/segment
 structure and work gates accept them. The default stays on the scalar/compact
