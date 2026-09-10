@@ -226,9 +226,7 @@ static UF_long kls_snode_min_batch_work(void) {
   return 192;
 }
 
-/* Re-measured 2026-07 with the busy-wait pool: the egraph now beats the
-   serial mapped kernel down to ~1e6 total flops (rajat03 3.96e6: 803 ->
-   595us; coupled 2.4e7: 2393 -> 1651us; add32 4.8e4 stays mapped). */
+/* Minimum work needed to amortize EGraph worker dispatch. */
 #define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 2.5e5
 #define KLS_EGRAPH_REFACTOR_MIN_SIZE 5000u
 #define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
@@ -3836,7 +3834,7 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
     frontier_sequence_bits++;
   }
   const unsigned int frontier_sequence_mask = frontier_sequence_bits < 32u
-    ? ((unsigned int)1u << frontier_sequence_bits) - 1u : UINT_MAX;
+    ? (1u << frontier_sequence_bits) - 1u : UINT_MAX;
   const unsigned int frontier_mailbox_count =
     (unsigned int)thread_count * (unsigned int)thread_count;
   if (slot_count > (UF_long)KLS_LEAN_GROUPED_SLOT_MASK ||
@@ -8389,16 +8387,9 @@ int kls_factor(kls_solver *solver, const double *values) {
         symbolic_score(solver->symbolic) <= 1.0e5 &&
         kls_column_pair_work(solver->n, solver->col_ptr) <= 5.0e5;
       if (solver->n >= 512) {
-        /* same contract as the main path's deferral below: engine and
-           solve preps only pay off across repeated refactors, so run
-           them from the first refactorization's consult instead (the
-           model-row prep alone is 0.06s of rajat25's 0.59s one-shot
-           init).  Solves before any refactor take the plain paths.
-           The historical spral-class stall was NOT in the consult:
-           a second factor call arriving with the preps still deferred
-           livelocked the separator-pipeline fast paths - fixed by
-           running the consult at that entry too (pre2 inline preps
-           were 5.3s of init, model-row alone 4.6s). */
+        /* Engine and solve preparation only repay across repeated refactors,
+           so defer them to the first refactor consult.  A later factor call
+           must also settle the deferral before entering dependent pipelines. */
         solver->factor_preps_deferred = 1;
         if (compact_refactor_forest_candidate) {
           const double forest_prep_start = kls_now_seconds();
@@ -8596,9 +8587,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!value_alternative_used) {
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (!had_numeric && solver->numeric == NULL) {
-      /* NOT deferrable: without this ordering TSOPF's serial factor
-         is 41s and case9's 0.35s (measured) - it IS the one-shot
-         path for the block-structured class, not cycle machinery */
+      /* This ordering is the block-structured one-shot path, not deferred
+         cycle machinery. */
       if (block_order_candidate &&
           !solver->auto_amd_shortcut &&
           !solver->medium_spike_minfill_path &&
@@ -8631,7 +8621,7 @@ int kls_factor(kls_solver *solver, const double *values) {
          (solver->generic_nd_portfolio_selected &&
           solver->generic_nd_bounded_symmetric_union) ||
          solver->symbolic == NULL ||
-         (double)(solver->symbolic->lnz + solver->symbolic->unz) >=
+         (solver->symbolic->lnz + solver->symbolic->unz) >=
            4.0e6) &&
         kls_predicted_pattern_first_factor(solver, numeric_values,
                                            &elapsed)) {
@@ -8701,16 +8691,9 @@ int kls_factor(kls_solver *solver, const double *values) {
       if (!had_numeric && solver->metis_race != NULL &&
           solver->symbolic != NULL && solver->symbolic->est_flops >= 1.0e8 &&
           !solver->metis_race->giant_symmetric_scalar_fringe_metis_row) {
-        /* Join only when the serial first factor on the current symbolic
-           would dwarf the NodeND wait (mac_econ-class); small raced
-           matrices factor on the incumbent ordering now and the deferred
-           refactor-time consult arbitrates with timed acceptance. */
-        /* Symbolic join: wait for the worker's analyze, request a
-           symbolic-only result for the extreme-work class, and build the
-           numeric here with the parallel predicted machinery on the raced
-           METIS ordering
-           (mac_econ: the old full join waited ~20s for NodeND + a
-           serial klu factor; the predicted build at t4 takes ~2s). */
+        /* Join only when the incumbent's serial first factor dominates the
+           NodeND wait.  Request a symbolic-only result and build its numeric
+           here with the parallel predicted machinery. */
         kls_metis_race *race = solver->metis_race;
         const double sym_wait0 = kls_now_seconds();
         unsigned spin = 0;
@@ -9042,7 +9025,7 @@ int kls_factor(kls_solver *solver, const double *values) {
            ~:4810); require exactly one qualifying block. */
         UF_long hits = 0;
         UF_long hit_block = 0;
-        for (UF_long b = 0; b + 1 <= (UF_long)solver->symbolic->nblocks;
+        for (UF_long b = 0; b + 1 <= solver->symbolic->nblocks;
              ++b) {
           const UF_long nk =
             solver->symbolic->R[b + 1] - solver->symbolic->R[b];
@@ -10075,14 +10058,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
 #endif
   }
   if (solver->metis_race_deferred) {
-    /* The factor-exit promotion was deferred so a one-shot factor never
-       blocks on the race worker.  A changed-numeric workload has now paid
-       for its first refactor, so join and settle the race in THIS call even
-       if the worker is still running.  Waiting for readiness leaked the
-       promotion into refactor call two on the ASIC class; a five-sample
-       harness then extrapolated that one-time promotion and all replacement
-       preps as 98 steady refactors.  Joining here also prevents the first
-       EGraph pass from contending with NodeND on the same cores. */
+    /* A changed-numeric workload has paid for its first refactor, so settle
+       the deferred race in this call.  This keeps one-time promotion out of
+       later samples and avoids EGraph/NodeND core contention. */
     solver->metis_race_deferred = 0;
     double promo_elapsed = 0.0;
     (void)maybe_promote_auto_metis(solver, &promo_elapsed, numeric_values,

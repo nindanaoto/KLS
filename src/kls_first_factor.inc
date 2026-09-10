@@ -9831,7 +9831,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     }
     }
     if (solver->block_trial_active &&
-        block_lnz > 16 * (UF_long)solver->nnz) {
+        block_lnz > 16 * solver->nnz) {
       /* The blocked ordering only pays when the bound stays near the
          input size; a blowup here means the structure was misjudged. */
       ok = 0;
