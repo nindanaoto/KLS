@@ -11387,13 +11387,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   UF_long *initial_ready_out,
   UF_long *private_group_count_out,
   UF_long *pipeline_group_count_out,
-  UF_long *closure_group_count_out,
-  UF_long *component_count_out,
-  UF_long *private_threads_out,
-  UF_long *private_min_groups_out,
-  UF_long *private_max_groups_out,
-  double *private_min_work_out,
-  double *private_max_work_out) {
+  UF_long *component_count_out) {
   KLS_SET_OPTIONAL_OUTPUT(ready_groups_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(ready_slots_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(remaining_preds_out, NULL);
@@ -11405,27 +11399,14 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   KLS_SET_OPTIONAL_OUTPUT(initial_ready_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(private_group_count_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(pipeline_group_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(closure_group_count_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(component_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(private_threads_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(private_min_groups_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(private_max_groups_out, 0);
-  if (private_min_work_out != NULL) {
-    *private_min_work_out = 0.0;
-  }
-  if (private_max_work_out != NULL) {
-    *private_max_work_out = 0.0;
-  }
   if (solver == NULL || thread_count <= 1 ||
       ready_groups_out == NULL || ready_slots_out == NULL ||
       remaining_preds_out == NULL || tail_groups_out == NULL ||
       private_groups_out == NULL || private_thread_ptr_out == NULL ||
       private_group_mask_out == NULL || tail_count_out == NULL ||
       initial_ready_out == NULL || private_group_count_out == NULL ||
-      pipeline_group_count_out == NULL || closure_group_count_out == NULL ||
-      component_count_out == NULL || private_threads_out == NULL ||
-      private_min_groups_out == NULL || private_max_groups_out == NULL ||
-      private_min_work_out == NULL || private_max_work_out == NULL ||
+      pipeline_group_count_out == NULL || component_count_out == NULL ||
       solver->row_refactor_group_count == 0u ||
       solver->row_refactor_group_ptr == NULL ||
       solver->row_refactor_group_pred_count == NULL ||
@@ -11713,7 +11694,6 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   }
 
   int promoted_pipeline_group = 1;
-  UF_long closure_group_count = 0;
   while (promoted_pipeline_group) {
     promoted_pipeline_group = 0;
     for (UF_long group = 0; group < group_count; ++group) {
@@ -11738,7 +11718,6 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
         if (private_group_mask[successor]) {
           private_group_mask[successor] = 0u;
           pipeline_group_count++;
-          closure_group_count++;
           promoted_pipeline_group = 1;
         }
       }
@@ -11860,38 +11839,6 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     }
   }
 
-  UF_long private_threads = 0;
-  UF_long private_min_groups = 0;
-  UF_long private_max_groups = 0;
-  double private_min_work = 0.0;
-  double private_max_work = 0.0;
-  for (int tid = 0; tid < thread_count; ++tid) {
-    const UF_long begin = thread_ptr[tid];
-    const UF_long end = thread_ptr[tid + 1];
-    if (begin >= end) {
-      continue;
-    }
-    double tid_work = 0.0;
-    for (UF_long pos = begin; pos < end; ++pos) {
-      tid_work += kls_row_refactor_separator_schedule_work(
-        solver, private_groups[pos], include_group_overhead);
-    }
-    const UF_long tid_groups = end - begin;
-    if (private_threads == 0u || tid_groups < private_min_groups) {
-      private_min_groups = tid_groups;
-    }
-    if (tid_groups > private_max_groups) {
-      private_max_groups = tid_groups;
-    }
-    if (private_threads == 0u || tid_work < private_min_work) {
-      private_min_work = tid_work;
-    }
-    if (tid_work > private_max_work) {
-      private_max_work = tid_work;
-    }
-    private_threads++;
-  }
-
   if (!kls_ensure_row_refactor_ready_queue_workspace(solver, group_count)) {
     KLS_FREE_SEPARATOR_QUEUE_TEMP();
     return 0;
@@ -11944,13 +11891,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
   *initial_ready_out = ready_count;
   *private_group_count_out = private_group_count;
   *pipeline_group_count_out = pipeline_group_count;
-  *closure_group_count_out = closure_group_count;
   *component_count_out = assigned_component_count + pipeline_component_count;
-  *private_threads_out = private_threads;
-  *private_min_groups_out = private_min_groups;
-  *private_max_groups_out = private_max_groups;
-  *private_min_work_out = private_min_work;
-  *private_max_work_out = private_max_work;
 #undef KLS_FREE_SEPARATOR_QUEUE_TEMP
   return 1;
 }

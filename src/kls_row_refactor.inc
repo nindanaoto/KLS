@@ -15125,13 +15125,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   UF_long row_initial_ready_count = 0;
   UF_long row_separator_flop_private_groups = 0;
   UF_long row_separator_flop_pipeline_groups = 0;
-  UF_long row_separator_flop_closure_groups = 0;
   UF_long row_separator_flop_component_count = 0;
-  UF_long row_separator_flop_private_threads = 0;
-  UF_long row_separator_flop_private_min_groups = 0;
-  UF_long row_separator_flop_private_max_groups = 0;
-  double row_separator_flop_private_min_work = 0.0;
-  double row_separator_flop_private_max_work = 0.0;
   int row_ordered_private_queue = 0;
   /* Preserve the retained separator-tree private/pipeline queue when it covers
      the row-group DAG.  When the separator schedule is pipeline-heavy and a
@@ -15153,13 +15147,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
         &row_ready_tail_count, &row_initial_ready_count,
         &row_separator_flop_private_groups,
         &row_separator_flop_pipeline_groups,
-        &row_separator_flop_closure_groups,
-        &row_separator_flop_component_count,
-        &row_separator_flop_private_threads,
-        &row_separator_flop_private_min_groups,
-        &row_separator_flop_private_max_groups,
-        &row_separator_flop_private_min_work,
-        &row_separator_flop_private_max_work)) {
+        &row_separator_flop_component_count)) {
     prepared_separator_flop_queue = 1;
   }
   if (prepared_separator_flop_queue &&
@@ -15185,13 +15173,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       row_initial_ready_count = 0;
       row_separator_flop_private_groups = 0;
       row_separator_flop_pipeline_groups = 0;
-      row_separator_flop_closure_groups = 0;
       row_separator_flop_component_count = 0;
-      row_separator_flop_private_threads = 0;
-      row_separator_flop_private_min_groups = 0;
-      row_separator_flop_private_max_groups = 0;
-      row_separator_flop_private_min_work = 0.0;
-      row_separator_flop_private_max_work = 0.0;
       prepared_separator_flop_queue =
         kls_prepare_row_refactor_separator_flop_ready_queue(
           solver, thread_count, &row_ready_groups, &row_ready_slots,
@@ -15200,13 +15182,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
           &row_ready_tail_count, &row_initial_ready_count,
           &row_separator_flop_private_groups,
           &row_separator_flop_pipeline_groups,
-          &row_separator_flop_closure_groups,
-          &row_separator_flop_component_count,
-          &row_separator_flop_private_threads,
-          &row_separator_flop_private_min_groups,
-          &row_separator_flop_private_max_groups,
-          &row_separator_flop_private_min_work,
-          &row_separator_flop_private_max_work);
+          &row_separator_flop_component_count);
     }
   }
   if (prepared_separator_row_dep_queue) {
