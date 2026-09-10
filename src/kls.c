@@ -9017,7 +9017,7 @@ static void free_numeric(kls_solver *solver) {
   solver->compact_amf_two_block_exact_recip_fresh = 0;
   /* deferral flags are solver-level intent (the consult re-validates);
      mid-factor numeric replacements must not wipe them */
-  if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+  if (solver->n >= 512) {
     /* the panels/seeds freed below must be re-prepped by the next
        refactorization's consult */
     solver->factor_preps_deferred = 1;
@@ -9159,7 +9159,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
     /* the numeric this consult would compare against is being replaced */
     solver->metis_race_deferred_invalid = 1;
   }
-  if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+  if (solver->n >= 512) {
     /* deferred-preps regime: a replacement wipes the engine prep state
        (panels, run ends, seeds), exactly like mid-factor replacements do
        before the sync exit block re-preps; re-arm the consult so the
@@ -10268,8 +10268,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->symbolic->est_flops <= 1.0e6 &&
         symbolic_score(solver->symbolic) <= 1.0e5 &&
         kls_column_pair_work(solver->n, solver->col_ptr) <= 5.0e5;
-      if (solver->n >= 512 &&
-          getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+      if (solver->n >= 512) {
         /* same contract as the main path's deferral below: engine and
            solve preps only pay off across repeated refactors, so run
            them from the first refactorization's consult instead (the
@@ -11244,7 +11243,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver->symbolic->est_flops <= 1.0e6 &&
       symbolic_score(solver->symbolic) <= 1.0e5 &&
       kls_column_pair_work(solver->n, solver->col_ptr) <= 5.0e5;
-    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+    if (solver->n >= 512) {
       /* Engine/solve preps (row patterns, solve transpose plans, pts
          trials, panel sorts: ~23% of memchip's factor CPU, ~20% of
          rajat25's) only pay off across repeated refactors; run them

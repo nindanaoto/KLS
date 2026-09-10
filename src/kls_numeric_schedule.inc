@@ -3975,7 +3975,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     solver->solve_contract_verified = 0;
     free(solver->solve_refine_values);
     solver->solve_refine_values = NULL;
-    if (solver->n >= 512 && getenv("KLS_SYNC_FACTOR_PREPS") == NULL) {
+    if (solver->n >= 512) {
       solver->factor_preps_deferred = 1;
     }
     if (solver->fast_kls_rebuild_restarts >

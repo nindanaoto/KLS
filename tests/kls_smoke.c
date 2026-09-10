@@ -13830,7 +13830,6 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
     "KLS_ENABLE_ROW_REFACTOR",
     "KLS_ENABLE_CHECKED_ROW_REFACTOR",
     "KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC",
-    "KLS_SYNC_FACTOR_PREPS",
     "KLS_DISABLE_I32_SOLVE",
     "KLS_DISABLE_SNB_REFACTOR",
     "KLS_SNB_WMAX",
@@ -13865,7 +13864,6 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
        setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0 ||
        setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0 ||
        setenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC", "0", 1) != 0 ||
-       unsetenv("KLS_SYNC_FACTOR_PREPS") != 0 ||
        unsetenv("KLS_DISABLE_I32_SOLVE") != 0 ||
        unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0 ||
        setenv("KLS_SNB_WMAX", "4", 1) != 0 ||
