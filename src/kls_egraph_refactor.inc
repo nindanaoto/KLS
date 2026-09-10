@@ -7541,13 +7541,13 @@ static int kls_mapped_refactor(kls_solver *solver,
          comparison reject a kernel that was consistently faster after the
          retained map became warm.  The setup remains charged to the public
          refactor call; it is merely excluded from the steady executor
-         comparison used to settle the recurring representation. */
+           comparison used to settle the recurring representation. */
       if (!kls_build_lean_btf_off_map(solver, 0)) {
         solver->moderate_btf_lean_choice = -1;
       } else {
         /* Compare one complete execution of each exact representation on the
            same changed values.  The former warm-pair portfolio performed
-           four numerics here and often spent more than an H100 win could
+           four numerics here and could cost more than the retained arm could
            recover.  A compact arm now needs a decisive single-pair margin;
            a close result merely admits the stronger row representation.
            Losers are restored once, while either admitted arm is already a

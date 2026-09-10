@@ -127,9 +127,8 @@ static int prepare_numeric_values(kls_solver *solver, const double *values, doub
 }
 
 /* A refactorization is a pure function of the fixed pattern and its numeric
-   input.  Several real workloads (and the paper harnesses) submit occasional
-   or long runs of byte-identical values.  Reusing the current factor is exact
-   in that case and avoids touching the substantially larger filled factors.
+   input.  Reusing a factor for byte-identical values is exact and avoids
+   touching the substantially larger filled factors.
 
    The first changed refactor after a factor disables the cache, so workloads
    that update values every step pay only one comparison and no per-step
@@ -872,8 +871,7 @@ static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
   /* the tail-repair consumers index tail_parent by rows the per-column
      scan may never have visited: fill the whole array with EMPTY (-1,
      the same value the per-column init writes) so unvisited slots are
-     inert instead of heap garbage (measured: the 3x3 smoke transpose
-     solve flipped with heap layout through a garbage in-bounds parent) */
+     inert instead of allowing an uninitialized in-bounds parent) */
   memset(tail_parent, 0xff,
          (size_t)capacity * sizeof(*solver->fast_reject_tail_parent));
   memset(cols, 0xff,

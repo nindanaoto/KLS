@@ -1502,10 +1502,8 @@ static void kls_snb_maybe_accept(kls_solver *solver,
       getenv("KLS_SNB_FORCE_TRIAL") == NULL) {
     /* SNB's retained schedule is deliberately rich: it performs several
        max-block-sized passes and materializes per-supernode unions and edge
-       maps.  On million-column blocks that setup cannot amortize over H100;
-       worse, sparse giant circuits can spend the entire process timeout in
-       preparation before reaching a single refactor (circuit5M and rajat31).
-       The union audit's largest SNB adopter has a 321K-column block. */
+       maps.  On million-column blocks that setup cannot amortize over a
+       bounded repeated lifecycle and may dominate before the first refactor. */
     solver->snb_declined = 1;
     solver->snb_decision = -1;
     return;
@@ -1586,10 +1584,8 @@ static void kls_snb_maybe_accept(kls_solver *solver,
     numeric_values = NULL;
   }
   if (numeric_values != NULL) {
-    /* run the engine once now: the one-time trial cost lands in the
-       once-charged factor term instead of the 99x-charged refactor
-       average; the incumbent is captured on the first refactor call and
-       the decision falls on the second. */
+    /* Run the engine once now so its one-time trial is charged to factor;
+       capture the incumbent on the first refactor and decide on the second. */
     const int threads = solver->options.threads;
     const double t0 = kls_now_seconds();
     const UF_long snb_ok =
@@ -2388,11 +2384,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
     return 0;
   }
   if (solver->dense_tail_cols > 0) {
-    /* pipe-emitted dense-tail numerics: the fragmented-BTF gate below
-       misses ss1 by hairs (nblocks 95977 vs the 100000 floor, coverage
-       0.53 vs the 0.50 cap, and a scale exclusion the egraph body does
-       not need).  The tail columns no-op in the dispatch and the BLAS3
-       refresh rebuilds them after the parallel pass. */
+    /* Pipe-emitted dense-tail numerics need not satisfy the fragmented-BTF
+       gate: tail columns no-op in dispatch and the BLAS3 refresh rebuilds
+       them after the parallel pass. */
     return solver->common.flops >= 5.0e8;
   }
   {
@@ -3477,11 +3471,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (!check_pivots && solver->common.flops > 0.0 &&
       solver->common.flops <
         egraph_floor * (double)solver->options.threads) {
-    /* Below the per-thread flop floor the pool dispatch costs more than
-       it saves; the busy-wait pool moved the measured four-thread
-       crossover down to ~1e6 total flops (re-measured 2026-07).  Prefer
-       the serial mapped refactor under it and keep the EGraph for
-       shapes it cannot cover. */
+    /* Below the per-thread flop floor pool dispatch costs more than it saves.
+       Prefer mapped serial refactor and retain EGraph for uncovered shapes. */
     if (kls_low_work_single_block_direct_public_capable(solver)) {
       UF_long serial_ok = 0u;
       int compact_used = 0;
@@ -3849,9 +3840,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
        with its own dynamic column pivots): the COLUMN-engine caches
        built for the old layout — LU pointer cache, refactor map,
        dependency schedule, snode panels, dense-tail bookkeeping —
-       dangle into freed memory, and the egraph consuming them
-       measured raj1 at e-4 residuals with values bit-exact to the
-       WRONG factorization (2026-07-15).  Free exactly those; the
+       dangle into freed memory.  Free exactly those; the
        retry below runs schedule-less (serial/row-checked) and the
        deferred consult re-preps on the next refactorization.  The
        ROW structures deliberately survive: they are the repair

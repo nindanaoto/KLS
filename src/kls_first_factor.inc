@@ -9940,9 +9940,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
 
   /* Fill the first values through the solver's own refactorization
      machinery: the pattern is already ascending so the supernode panel
-     preparation and retained schedules apply directly, and the threaded
-     panel refactor computes the identical values one to two orders of
-     magnitude faster than the serial KLU refactorization. */
+     preparation and retained schedules apply directly. */
   common->status = TRILINOS_KLU_OK;
   solver->numeric = numeric;
   numeric_adopted = 1;
@@ -11402,10 +11400,8 @@ static int kls_build_block_structured_order(UF_long n,
     }
     write += tail;
   }
-  /* Repeated-physics-block signature: the near-equal-size components must
-     carry most of the matrix.  Irregular component profiles (hvdc2's
-     40632/34723/30926..., circuit_4's 28k fragments) factor better under
-     the regular orderings and only waste a trial here. */
+  /* Repeated-physics-block signature: near-equal-size components must carry
+     most of the matrix; irregular profiles stay on regular orderings. */
   UF_long equal_mass = 0;
   for (UF_long c = 0; c < ncomp; ++c) {
     const UF_long sz = comp_start[c + 1u] - comp_start[c];
@@ -11715,10 +11711,9 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
     goto done;
   }
   trial_common.scale = -1;
-  /* The matched diagonal is the pivot policy: a low threshold keeps
-     partial pivoting on it through elimination-phase value drift (at the
-     default 1e-3 KLU wanders off and fill explodes ~7x); the solve probe
-     and refinement police the numerics. */
+  /* The matched diagonal is the pivot policy: a low threshold retains it
+     through elimination-phase value drift; solve probing and refinement
+     police the numerics. */
   trial_common.tol =
     solver->common.tol < 1.0e-4 ? solver->common.tol : 1.0e-4;
   if (solver->symbolic != NULL && solver->symbolic->lnz > 0.0 &&
@@ -11726,9 +11721,8 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       trial_symbolic->unz > 0.0 &&
       trial_symbolic->lnz + trial_symbolic->unz >
         4.0 * (solver->symbolic->lnz + solver->symbolic->unz)) {
-    /* The trial's own symbolic bound already dwarfs the baseline estimate;
-       factoring it just to reject on exact fill wastes seconds.  Real fill
-       runs below the bound, so keep a generous margin. */
+    /* Reject a trial whose symbolic bound already dwarfs the baseline.
+       Real fill runs below the bound, so keep a generous margin. */
     goto done;
   }
 
@@ -11915,7 +11909,7 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
     /* Block trials swap into structurally absent slots by design: the
        full closure is their legalization.  The probe-retry path instead
        fills first with vetoes and opens only the veto-hot spans - the
-       full closure explodes on spiked patterns (rajat25: 11x est). */
+       full closure can explode on spiked patterns. */
     if (!kls_predicted_suffix_close_numeric_mode(solver, NULL)) {
       return 0;
     }

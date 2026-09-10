@@ -169,11 +169,8 @@ static void kls_accumulate_scaled_dense_rows8(
 #define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
-/* The retained native panel already pays off on compact circuit panels with
-   only tens of thousands of modeled updates (circuit_2 is the smallest paper
-   case at about 47K).  The old 10M floor stranded that whole class on the
-   scalar row scaffold even though the existing work-per-entry gate provides
-   the relevant arithmetic-intensity check. */
+/* The native panel pays off on compact circuit panels; the work-per-entry
+   gate supplies the relevant arithmetic-intensity check. */
 #define KLS_ROW_REFACTOR_NATIVE_PANEL_AUTO_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_DENSE_BLOCK_ROWS 32u
 #define KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_ROWS 8u
@@ -788,18 +785,14 @@ struct kls_solver {
   int solve_contract_verified;  /* an armed numeric's correction has been
                                    residual-verified once: later solves
                                    apply the correction and skip the
-                                   verification sweep (the single-shot
-                                   trade; b2383: solve 44 -> ~36ms) */
+                                   verification sweep */
   int low_rcond_solve_contract_state; /* same retained pivot family:
                                          0 = first raw solve unmeasured,
                                          1 = raw solve contract settled,
                                          2 = LSQR recovery required */
-  UF_long dense_tail_cols;      /* pipe-emitted dense-tail numeric: the
-                                   trailing block width the first factor
-                                   finished with one dgetrf (ss1: 4096).
-                                   Refactorizations refresh that block
-                                   with a no-pivot BLAS3 LU instead of
-                                   the scalar scatter walk (24.2s -> ~1s) */
+  UF_long dense_tail_cols;      /* trailing block width of a pipe-emitted
+                                   dense-tail numeric; refactorizations use
+                                   no-pivot BLAS3 LU instead of scalar scatter */
   UF_long dense_tail_block;     /* BTF block index holding the tail */
   int predicted_entry_values_captured; /* solve_refine_values holds the
                                    factor entry's prepared input */
@@ -1415,10 +1408,8 @@ typedef struct kls_egraph_refactor_shared {
   UF_long numerical_rank;
   UF_long singular_col;
   pthread_mutex_t lock;
-  /* dense-group help: idle pipeline workers contribute batch-row
-     slices of the dense supernode GEMM instead of spinning (the row
-     engine measured 63.7% idle with 95% of flops chained through the
-     dense groups) */
+  /* Idle pipeline workers contribute batch-row slices of dense-supernode
+     GEMM instead of spinning. */
   _Atomic int dense_help_active;
   _Atomic int dense_help_inflight;
   _Atomic long dense_help_cursor;
@@ -7948,10 +7939,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if (solver->medium_spike_minfill_path &&
       solver->options.scale == KLS_SCALE_AUTO) {
-    /* Scaling leaves this full-diagonal spike accurate but adds about 50M
-       factor flops and one millisecond to every repeated refactor.  The
-       unscaled AMMF numeric has only two off-diagonal pivots and is verified
-       after every generated entrywise update by the benchmark contract. */
+    /* Scaling adds factor work to this accurate full-diagonal spike.  Verify
+       the compact unscaled AMMF numeric after each entrywise update. */
     solver->common.scale = -1;
     solver->auto_scale_checked = 1;
   }
@@ -8383,15 +8372,9 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       solver->generic_amf3_span_variant_selected = 0;
       if (solver->predicted_entry_values_captured) {
-        /* The predicted numeric passed its acceptance probe, but a
-           16T-only corruption was measured AFTER the probe on ss1
-           (probe 2.5e-15, final solves 2.5e-3 on every solve route,
-           4T clean - a race, root cause open; the probe itself can be
-           fooled when the corruption hits the values array BEFORE it
-           runs, which is why the reference copy is taken at the
-           factor entry).  Arm the same per-solve residual self-check
-           the row-refactor path carries: good numerics pay one SpMV,
-           a corrupted one is refined back to the contract line. */
+        /* The acceptance probe cannot detect corruption that precedes its
+           reference snapshot.  Arm the row path's per-solve residual check;
+           valid numerics pay one SpMV and corrupted ones are refined. */
         solver->row_solve_self_check = 1;
       }
     } else {
@@ -8466,12 +8449,9 @@ int kls_factor(kls_solver *solver, const double *values) {
               (int64_t)solver->symbolic->structural_rank;
             solver->stats.estimated_flops = solver->symbolic->est_flops;
             if (kls_dense_tail_class) {
-              /* dense-factor/light-input shape (ss1: fill/n=234 at
-                 nnz/n=4.1): the predicted closure doubles an already
-                 huge fill and its value passes crawl; route the pipe
-                 with a BLAS3 dense-tail finish instead (24.2 -> 2.6s
-                 forced; the scalar kernel runs this tail at ~3 GF/s
-                 where dgetrf runs ~1 TF/s) */
+              /* For dense-factor/light-input shapes, predicted closure can
+                 double already large fill.  Finish the dense tail with
+                 BLAS3 instead of the scalar kernel. */
               kls_klu_dense_tail = 4096;
               kls_klu_pipe_threads =
                 solver->options.threads > 16 ? 16 : solver->options.threads;
@@ -8488,9 +8468,8 @@ int kls_factor(kls_solver *solver, const double *values) {
             if (solver->numeric == NULL && race->numeric != NULL &&
                 race->common.status >= TRILINOS_KLU_OK &&
                 race->common.status != TRILINOS_KLU_SINGULAR) {
-              /* Some patterns reject the static predicted pattern before
-                 construction (nxp1 has 668 structurally missing diagonal
-                 positions).  The join has already waited for the worker's
+              /* Some patterns with missing diagonal positions reject static
+                 prediction.  The join has already waited for the worker's
                  valid KLU numeric in this case; adopt it instead of paying
                  for the identical foreground factor a second time. */
               solver->numeric = race->numeric;
@@ -8956,8 +8935,8 @@ int kls_factor(kls_solver *solver, const double *values) {
   } else if (!had_numeric &&
       kls_defer_cycle_trials_enabled()) {
     /* The exact Hungarian trial belongs to the same cycle-payoff family as
-       the cheaper row-match trial above (OPF_10000: 61ms of an 82ms cold
-       factor).  The shared deferred consult runs both, but only after a
+       the cheaper row-match trial above.  The shared deferred consult runs
+       both, but only after a
        genuinely changed input makes a numeric refactor necessary. */
     solver->rowmatch_deferred = 1;
   } else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
@@ -9827,9 +9806,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
   double generic_lean_setup_seconds = 0.0;
   if (solver->lean_choice == 0 &&
       (kls_symmetric_partial_diagonal_match_factor_cycle(solver))) {
-    /* The accepted sparse-spike predicted factors amortize direct EGraph over
-       H100 while the generic row consultation executes several discarded
-       numerics.  Matching replaces public coordinates, so this decision uses
+    /* Accepted sparse-spike predicted factors amortize direct EGraph while
+       generic row consultation executes several discarded numerics.
+       Matching replaces public coordinates, so this decision uses
        the cached input proposal plus the measured retained factor. */
     solver->lean_choice = -1;
   }
@@ -10086,9 +10065,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
        verdict; a losing/default floor leaves the padded portfolio intact. */
     solver->padded_choice = -1;
   }
-  /* batch-floor trial for mapped-path rows (bcircuit: low floors
-     measured -13.3% steady; nearly-missing-diagonal one-block: -7%).
-     Probe once at steady state, adopt on a decisive margin. */
+  /* Probe the mapped-row batch floor once at steady state and adopt it only
+     on a decisive margin. */
   const int floor_probe_warm_samples =
     kls_repeated_update_workload(&solver->options) ? 3 : 8;
   if (solver->floor_choice > 0) {
@@ -10520,9 +10498,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
   }
 
-  /* Four complete cycles per installed representation are enough to move
-     beyond first-touch noise while keeping the audit repayable for a modest
-     H100 row win.  Cold admission and the final measured-cycle margin remain
+  /* Four complete cycles per installed representation move beyond
+     first-touch noise while keeping the audit repayable.  Cold admission
+     and the final measured-cycle margin remain
      deliberately stricter safeguards against publishing a noisy row arm. */
   if (generic_lean_reaudit && solver->lean_choice < 0 && ok &&
       solver->common.status >= 0 && solver->lean_reaudit_row_arm > 0) {
@@ -10643,13 +10621,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
      back-to-back inside this call: reuse this call's incumbent sample, run
      one discarded lean pass that pays the mirror preparation, then take one
      timed scalar-lean and one timed paired-lean sample.
-     The whole trial is charged where engine trials already live
-     (in-steady probing measured out: the prep alone costs 5-10 steady
-     samples at rr=20).  memplus: pair 244us vs incumbent 493 — under
-     CKTSO's 292; mimo-class correctly keeps the incumbent.
+     The whole trial is charged where engine trials already live.
 
      Do not run this adaptive consultation in the opt-in serial backend.
-     That backend targets a bounded H100 workload and deliberately minimizes
+     That backend targets a bounded repeated workload and minimizes
      policy overhead.  Even when a lean arm wins its isolated kernel sample,
      preparing and timing all three arms commonly costs more than the next 98
      calls can recover.  The mapped incumbent remains available unchanged;
@@ -10679,8 +10654,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
        older consultation discarded it, ran the incumbent twice more, then
        ran a preparation pass plus two timed passes for each lean arm: eight
        numeric factorizations in one API call.  At 99 refactors that setup
-       cannot amortize for the common 5--10% lean wins and dominates small
-       paper cases.  Reuse this call's incumbent timing, execute one untimed
+       cannot amortize for modest lean wins and dominates small systems.
+       Reuse this call's incumbent timing, execute one untimed
        row-pattern/value preparation pass, then take one warm sample per lean
        arm.  Pair workspace allocation is kept outside its timed sample. */
     double t_inc = elapsed;
@@ -11100,7 +11075,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
              schedule and cache warm-up while the comparison column pass is
              already hot.  Previously we resolved that ambiguity using four
              public row cycles followed by two column cycles.  A losing row
-             engine therefore polluted the benchmark's steady window even
+             engine therefore polluted the caller's steady window even
              though all required evidence was local to this first call.
 
              Take one additional, identically positioned row/column pair
@@ -13543,7 +13518,7 @@ static int solve_impl(kls_solver *solver,
           kls_generic_contract_residual_record(
             solver, kls_now_seconds() - contract_residual_probe_start);
         }
-        /* The benchmark contract is relative L2, while the general
+        /* This path's contract is relative L2, while the general
            refinement controller deliberately uses a much tighter max-norm
            target.  On these audited repeated-RHS factors, accept the raw
            solve only after the residual SpMV proves a strict relative-L2
@@ -14188,8 +14163,8 @@ int kls_refactor_solve(kls_solver *solver,
     return refactor_status;
   }
   /* kls_refactor owns the numeric timer.  Charge the combined API's RHS
-     permutation/allocation to that same lifecycle phase so benchmark and
-     caller-visible statistics do not hide fusion setup work. */
+     permutation/allocation to that lifecycle phase so caller-visible
+     statistics do not hide fusion setup work. */
   solver->stats.refactor_seconds +=
     refactor_call_start - fusion_prepare_start;
   solver->fused_refactor_solve_ready =

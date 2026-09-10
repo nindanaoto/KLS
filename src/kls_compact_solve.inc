@@ -486,11 +486,8 @@ static int kls_i32_solve_ready(kls_solver *solver) {
       solver->n < 16384u && solver->numeric != NULL &&
       (solver->numeric->lnz > (UF_long)UINT16_MAX ||
        solver->numeric->unz > (UF_long)UINT16_MAX)) {
-    /* For a small vector with factor streams too large for the compact
-       uint16_t cache, KLU's packed native-index walk wins both setup and
-       solve time.  The paper-union audit found the same crossover on every
-       member of this structural class; building the i32 mirror costs
-       1--2ms and its extra indirection does not repay over 100 solves.
+    /* For a small vector whose factor streams exceed the uint16_t cache,
+       KLU's packed native-index walk avoids an unprofitable i32 mirror.
        A repeated statically matched factor is admitted separately: its i32
        cache can fuse the public-to-numeric RHS permutation, an actual
        capability that removes a full vector pass rather than a matrix-shape
@@ -1836,10 +1833,8 @@ static int kls_serial_factor(kls_solver *solver,
    invariant growth certificate.  Scaled, nudged, perturbed, predicted and
    reduced-precision numerics carry structural risk flags and probe their
    first solve instead unless a narrow raw-accuracy certificate covers the
-   retained refactor path.  The Udiag-spread scan measured OUT as a signal:
-   healthy rajat25 spans 3.1e-9 while the failing b2383 spans 7.2e-9 — no
-   threshold separates them; reciprocal pivot growth does (b2383 reads
-   1.3e-7). */
+   retained refactor path.  Diagonal spread does not separate healthy and
+   failing factors; reciprocal pivot growth does. */
 static void kls_solve_contract_classify(kls_solver *solver,
                                         const double *numeric_values) {
   if (solver == NULL || solver->solve_contract_probe != 0 ||

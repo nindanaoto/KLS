@@ -653,12 +653,6 @@ static void kls_pts_try_build(kls_solver *solver) {
     for (int32_t root = head[nk]; root != -1; root = next[root]) {
       total += swork[root];
     }
-    /* The hybrid huge-single circuit has enough independent large subtrees
-       that the generic 2x overpartition only enlarges the serial ancestor
-       top.  A 1x cut retained balanced bins and reduced its repeated solve
-       top by more than half (3086 -> 1478 columns).  The large weak matched
-       factor has a still-cheaper 0.9x cut: its 73 bins keep the eight-way
-       maximum at 13.6% while reducing the serial ancestor top. */
     /* The generic construction uses the ordinary 2x overpartition.  A 1x
        lifecycle shortcut can leave a verified forest without a certifiable
        solve partition; the plan-quality gates below are more reliable than
@@ -1662,9 +1656,8 @@ static int kls_pts_top_pipeline_enabled(const kls_solver *solver,
     /* The subtree bins already expose all parallelism available below a
        one-block separator.  Replaying that separator through per-column
        atomic claims and dependency publication adds a second scheduler to
-       its intrinsically ordered top; across the paper and held-out
-       one-block PTS cohort the ordinary serial top was uniformly faster or
-       neutral.  Fragmented factors can overlap other blocks with that top
+       its intrinsically ordered top.  Fragmented factors can overlap other
+       blocks with that top
        and retain the measured pipeline gate below.  This is a property of
        the retained factor representation, not of the input matrix shape. */
     return 0;
@@ -2187,9 +2180,8 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
     }
   }
 
-  /* pipelined top: every worker joins phase 2 instead of a serial
-     top pass; the dense separator tail then runs concurrently with
-     ascending claims (the paper's pipeline queue) */
+  /* In a pipelined top every worker joins phase 2; the dense separator tail
+     runs concurrently with ascending claims. */
   const int pipe_top = kls_pts_top_pipeline_enabled(solver, pts);
   pthread_barrier_t pipe_barrier;
   _Atomic int64_t top_cursor;
@@ -2504,10 +2496,8 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
 
 /* Factor-time warm-up: recomputes the just-factored numeric through
    the subtree engine so its buffers, maps, and mirrors take their
-   first-touch faults here, charged once to the factor.  The timing
-   decision happens at refactor time under steady-state conditions --
-   a one-shot cold sample measured 1.5x slower than steady state and
-   biased the acceptance. */
+   first-touch faults here, charged once to factor.  The timing decision is
+   made at refactor time under steady-state conditions. */
 static void kls_pts_maybe_trial(kls_solver *solver,
                                 double *numeric_values,
                                 double *elapsed) {

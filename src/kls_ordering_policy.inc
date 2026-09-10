@@ -446,10 +446,9 @@ static int kls_medium_sparse_full_diagonal_amd_symbolic_contract(
 
 /* A many-component matrix with one dominant SCC can have a cheap numeric
    factor even when AMD's column order leaves long, cache-unfriendly solve
-   streams.  In the retained-factor H100 regime, COLAMD's unsymmetric order
-   is preferable for this bounded low-flop shape (power197k: 0.33 s versus
-   1.07 s).  The flop ceiling separates it from the superficially similar
-   HTC systems, where COLAMD expands the factor by 5--10x. */
+   streams.  Over a retained-factor lifecycle, COLAMD's unsymmetric order is
+   preferable for this bounded low-flop shape.  The flop ceiling excludes
+   higher-work shapes where COLAMD can expand the factor substantially. */
 
 static int is_medium_sparse_high_degree_diagonal_pattern(UF_long n,
                                                          const UF_long *col_ptr,
@@ -695,11 +694,8 @@ static int is_large_nearly_diagonal_spiked_metis_pattern(
   return sparse_spike || dense_spike;
 }
 
-/* The parallel separator-preserving ordering and its tighter CAMD windows
-   were measured on the sparse-spike half of the broader class (nxp1,
-   average degree below eight).  Dense spikes need the original serial
-   NodeNDP/refinement route: rajat30 otherwise grows from roughly 9M factor
-   entries to 60M/90M. */
+/* Keep dense spikes on the serial NodeNDP/refinement route; parallel
+   separator preservation is intended only for the sparse-spike class. */
 static int is_large_sparse_nearly_diagonal_spiked_metis_pattern(
   UF_long n,
   const UF_long *col_ptr,
@@ -884,8 +880,7 @@ static int symbolic_is_low_work_dominant_btf(
 /* Low-work member of the symmetric partial-diagonal family.  Its ordinary
    AMD/BTF symbolic is already compact enough that the lightweight matched
    PTS lifecycle wins; the heavier SPRAL/direct-value preparation does not.
-   Select this route from the cached topology plus measured symbolic shape,
-   rather than the former OPF_3754 dimension fingerprint. */
+   Select this route from cached topology plus measured symbolic shape. */
 
 /* A value-aware row match is a natural first operation when almost every
    structural diagonal entry is absent.  The compact matcher stores both row
@@ -1176,9 +1171,8 @@ static int kls_sparse_full_diagonal_metis_row_input_profile(
    and overlapped preparation have fixed setup/coordination costs.  Require a
    one-block AMD symbolic with enough absolute factor storage and arithmetic
    to amortize those costs, in addition to normalized shape bounds.  These
-   floors separate measured economics: OPF_10000 is about 796K entries / 7.7M
-   predicted operations, while its real OPF_3754 sibling is only 268K / 2.4M
-   and is faster on the ordinary lifecycle. */
+   floors separate workloads that can amortize the specialized lifecycle
+   from those better served by the ordinary lifecycle. */
 static int kls_symmetric_partial_diagonal_match_symbolic_profile(
   UF_long n,
   UF_long nnz,
@@ -2013,7 +2007,7 @@ static double choose_initial_auto_pivot_tolerance(
     /* Ordinary entrywise updates still need more pivot headroom than 1e-5:
        rare generations exhaust the bounded refinement loop.  The 1e-4
        factor stays residual-valid while retaining enough of the compact
-       numeric to beat the competing H100 cycle. */
+       numeric to amortize its lifecycle. */
     return 1.0e-4;
   }
   if (solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -2735,9 +2729,8 @@ static int kls_build_metis_separator_forest(
    lower pattern of P(A+A')P', its elimination tree (Liu, ancestor
    compression), then count fill by row-subtree walks - O(fill) with a
    runaway cap.  Replaces the fully-constrained CAMD call whose degree
-   machinery re-derives this same fill and grinds for tens of seconds
-   when the pinned order is poor (ss1's 109K block: 19-23s; the lnz
-   estimate is that call's only product).  Returns the L fill excluding
+   machinery redundantly derives the same fill and can be very slow when
+   the pinned order is poor.  Returns the L fill excluding
    the diagonal (CAMD's LNZ convention), or 0 on allocation failure. */
 static UF_long kls_pinned_order_fill_count(UF_long n,
                                            const UF_long *col_ptr,
@@ -3070,10 +3063,9 @@ static UF_long kls_metis_camd_group_size(UF_long n,
   }
   if (is_large_sparse_nearly_diagonal_spiked_metis_pattern(
         n, col_ptr, row_idx)) {
-    /* Nearly diagonal spike: 4096-column windows retain a good row schedule,
-       but 2304 reduces both fill and the H100 cycle while keeping CAMD's
-       schedule-shaping benefit.  Raw NodeNDP has lower fill yet refactors
-       more slowly, so do not skip refinement for this class. */
+    /* This smaller window reduces fill and recurring work while preserving
+       CAMD's schedule-shaping benefit.  Do not skip refinement for this
+       class merely because raw NodeNDP has lower fill. */
     return 2304u;
   }
   if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx) &&
@@ -4102,12 +4094,10 @@ static UF_long kls_metis_order(UF_long n,
     if (camd_group_size == 1) {
       /* the fully-pinned "refinement" only produces an lnz estimate.
          On patterns WITHOUT dense rows CAMD's degree machinery tracks
-         the pinned order's fill and grinds (ss1's 109K block: 19-23s;
-         the etree count is exact and O(min(fill, 8*nnz))).  Patterns
-         WITH dense rows keep CAMD: it is fast there (it postpones the
-         dense rows) and the block-structured pipeline's downstream
-         gates are tuned to its estimates (TSOPF_FS_b39_c30 measured
-         0.67 -> 6.5s under the honest count). */
+         the pinned order's fill at excessive cost; the etree count is
+         exact and O(min(fill, 8*nnz)).  Patterns WITH dense rows keep CAMD:
+         postponing dense rows is efficient and downstream gates consume
+         its estimates. */
       UF_long *rowdeg = (UF_long *)calloc((size_t)n, sizeof(*rowdeg));
       if (rowdeg != NULL) {
         UF_long maxdeg = 0;
@@ -8540,7 +8530,7 @@ static int should_try_spral_hungarian_numeric_trial(
     /* On dense-spike systems the incumbent pivoted METIS numeric already
        supports the faster repeated row engine.  Converting it to a matched
        static numeric costs a full symbolic/factor setup and lengthens the
-       H100 solve/refactor pair even when the matched trial is accepted. */
+       repeated solve/refactor lifecycle even when accepted. */
     return 0;
   }
 
@@ -10761,12 +10751,9 @@ typedef struct {
 } kls_scale_trial_arg;
 
 /* Race-side threads must never starve the foreground factor: the race
-   overlaps the first factorization by design, and at normal priority
-   its analyze + concurrent trial factors turn the serial prestatic
-   trial into a scheduling lottery (onetone1: identical 8.4e8-flop
-   trials measured 0.25s..18.3s under a live race; 0.12s flat with the
-   race disabled). Nice the race threads so the foreground preempts
-   them whenever it is runnable. */
+   overlaps the first factorization by design, and its analysis and trial
+   factors otherwise contend with the serial prestatic trial.  Nice the race
+   threads so the foreground preempts them whenever it is runnable. */
 static void kls_race_thread_deprioritize(void) {
 #ifdef __linux__
   errno = 0;
@@ -11001,7 +10988,7 @@ static int kls_compact_medium_dominant_btf_symbolic_shape(
 /* Very large, low-degree circuits can consist mostly of scalar BTF blocks
    around one moderate core.  The generic pre-static deferral leaves this
    class on AMD after its inexpensive matching probe rejects, but a tuned
-   NodeND order of the core repays its analysis cost over H100.  Use a tight
+   NodeND order of the core repays its analysis cost over repeated work. Use a tight
    pattern-only gate for the direct ordering decision, then confirm the BTF
    geometry before suppressing later speculative numeric work. */
 static int kls_large_low_degree_fragmented_pattern(
@@ -11492,9 +11479,8 @@ static int should_try_auto_scale(const kls_solver *solver) {
   }
 
   if (solver->metis_promotion_validated) {
-    /* A timed promotion just measured this numeric's refactor at the
-       current scale; unmeasured scale trial factors cannot be trusted
-       against a measured config (ASIC_320k regressed -1 -> 0 that way). */
+    /* A timed promotion measured this numeric at the current scale;
+       unmeasured scale trials cannot supersede that result. */
     return 0;
   }
   if (solver->row_perm != NULL) {
@@ -12247,9 +12233,8 @@ static int maybe_promote_auto_metis(kls_solver *solver,
            pre-factored candidates are still valid for the incumbent
            symbolic — re-attach them for maybe_select_auto_scale, which
            runs right after this decline.  Freeing them here forced
-           three serial foreground re-factors of the same candidates
-           (Raj1: ~0.7s of a 2.66s init).  The next take — the
-           post-scale re-shot always arrives with race_invalid=1 —
+           three serial foreground re-factors of the same candidates.  The
+           next take — the post-scale re-shot arrives with race_invalid=1 —
            frees it.  The other decline paths above (fragmented guard,
            user_col_perm, should_try) keep today's free: their classes
            carry their own verdict topology, unmeasured here. */
@@ -12307,8 +12292,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
         0.90 * (double)(solver->numeric->lnz + solver->numeric->unz)) {
     /* The recurring-work override exists to find a substantially cheaper
        numeric, not merely to question a stable AMD result.  Reject from the
-       symbolic lower bound before paying for a complete candidate factor.
-       This also bounds the cost of declined challenges on H100 workloads. */
+       symbolic lower bound before paying for a complete candidate factor. */
     if (metis_numeric != NULL) {
       trilinos_klu_l_free_numeric(&metis_numeric, &metis_common);
     }
@@ -12728,14 +12712,10 @@ static int kls_choose_symbolic_inner(UF_long n,
     is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx);
   if (options->ordering == KLS_ORDERING_AUTO && n < 49152 &&
       col_ptr[n] < 262144 && !small_spiked_ordering_class) {
-    /* tiny/sparse systems: the ordering competition (AMF/AMD scoring,
-       spec threads) costs more than the fill deltas it arbitrates at
-       this scale (rajat03: AMD 4.1ms factor vs AMF 4.2ms, the
-       competition itself was the difference; OPF_10000 at n=43.9K:
-       35ms of candidates for a 16ms factor).  The nnz cap keeps the
-       heavier mid-size classes (onetone1: 341K nnz) on the full
-       competition.  Keep the small spiked class on its downstream AMF
-       rule: TSOPF_FS_b9_c1's AMD factor has 2.6x the fill. */
+    /* For tiny sparse systems the ordering competition costs more than the
+       fill deltas it arbitrates.  The nnz cap retains full competition for
+       heavier mid-size systems.  Small spiked systems stay on their
+       downstream AMF rule because AMD can increase fill substantially. */
     kls_options amd_opts = *options;
     amd_opts.ordering = KLS_ORDERING_AMD;
 
@@ -12828,9 +12808,8 @@ static int kls_choose_symbolic_inner(UF_long n,
   if (!kls_analyze_defer_nd && options->threads == 8 &&
       kls_large_low_degree_fragmented_pattern(n, col_ptr)) {
     /* The fragmented low-degree class has one moderate BTF core surrounded
-       by scalar blocks.  Its complete H100 metric favors a tuned NodeND
-       ordering directly; AMD's cheaper analysis is repaid by the smaller
-       retained factor well before the end of the refactor/solve horizon. */
+       by scalar blocks.  A tuned NodeND ordering is repaid by its smaller
+       retained factor over the declared refactor/solve horizon. */
     const int old_tuning_ctx = kls_fragmented_metis_tuning_ctx;
     kls_fragmented_metis_tuning_ctx = 1;
     int status = analyze_with_ordering(n, col_ptr, row_idx, options,
@@ -13110,7 +13089,7 @@ generic_ordering_tournament:;
      pattern-storage budgets, not by matrix identity or topology.  With at
      least four requested workers the independent quotient-graph passes
      overlap the AMD baseline.  A two-worker caller can also afford the two
-     stronger formulations when it declares a long H100-style lifecycle and
+     stronger formulations when it declares a long repeated lifecycle and
      the pair-work budget is high enough to repay their serial setup. */
   const double ordering_pattern_bytes =
     ((double)n + 1.0 + (double)col_ptr[n]) * (double)sizeof(UF_long);
@@ -13580,12 +13559,8 @@ generic_ordering_tournament:;
           spec->symbolic->est_flops <= 1.02 * ordinary_amf3->est_flops &&
           spec->score <= 1.01 * best_score &&
           spec->symbolic->est_flops <= 1.02 * best_symbolic->est_flops &&
-          /* A shallow five-percent depth win is inside the error of the
-             approximate fill/work model: one audited variant reduced the
-             etree by seven percent yet made the realized numeric cycle 2.5x
-             slower.  Require a decisive ten-percent dependency-depth win;
-             the independently useful twelve-percent variant remains in the
-             portfolio. */
+          /* A shallow depth win is within the approximate fill/work model's
+             error.  Require a decisive dependency-depth improvement. */
           10.0 * (double)spec->etree_levels <=
             9.0 * (double)ordinary_amf3->etree_levels;
         const int matched_decisive_span_refinement =
