@@ -4005,19 +4005,10 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
   const char *saved_env_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
   char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
   const int had_saved_env = saved_env_value != NULL;
-  const char *saved_native_env_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native_env =
-    saved_native_env_value != NULL ? strdup(saved_native_env_value) : NULL;
-  const int had_saved_native_env = saved_native_env_value != NULL;
 
   int ok = 1;
   if (had_saved_env && saved_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
-    ok = 0;
-  }
-  if (had_saved_native_env && saved_native_env == NULL) {
-    fprintf(stderr, "failed to save KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR\n");
     ok = 0;
   }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -4030,18 +4021,10 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_factor(solver, ax1),
                         "factor dense checked-row repair")) ok = 0;
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_saved_env, saved_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
     ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
@@ -4158,7 +4141,6 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
 
   kls_destroy(solver);
   free(saved_env);
-  free(saved_native_env);
   free(ap);
   free(ai);
   free(ax0);
@@ -4292,7 +4274,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
   }
 
   kls_solver *solver = NULL;
-  kls_solver *disabled_solver = NULL;
   kls_options options;
   kls_default_options(&options);
   options.threads = 1;
@@ -4306,19 +4287,10 @@ static int test_unchecked_row_dense_compact_panel(void) {
   const char *saved_env_value = getenv("KLS_ENABLE_ROW_REFACTOR");
   char *saved_env = saved_env_value != NULL ? strdup(saved_env_value) : NULL;
   const int had_saved_env = saved_env_value != NULL;
-  const char *saved_native_env_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native_env =
-    saved_native_env_value != NULL ? strdup(saved_native_env_value) : NULL;
-  const int had_saved_native_env = saved_native_env_value != NULL;
 
   int ok = 1;
   if (had_saved_env && saved_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
-    ok = 0;
-  }
-  if (had_saved_native_env && saved_native_env == NULL) {
-    fprintf(stderr, "failed to save KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR\n");
     ok = 0;
   }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -4331,10 +4303,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=1");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_refactor(solver, ax1),
                         "refactor unchecked dense compact panel")) ok = 0;
   if (had_saved_env && saved_env != NULL) {
@@ -4345,18 +4313,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
   } else if (!had_saved_env) {
     if (unsetenv("KLS_ENABLE_ROW_REFACTOR") != 0) {
       perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
-      ok = 0;
-    }
-  }
-  if (had_saved_native_env && saved_native_env != NULL) {
-    if (setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-               saved_native_env, 1) != 0) {
-      perror("restore KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-      ok = 0;
-    }
-  } else if (!had_saved_native_env) {
-    if (unsetenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR") != 0) {
-      perror("unsetenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
       ok = 0;
     }
   }
@@ -4704,65 +4660,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
     ok = 0;
   }
 
-  if (ok && !require_ok(kls_create(&disabled_solver),
-                        "create native row-panel disabled solver")) {
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_analyze_csc(disabled_solver, KLS_INDEX_INT32,
-                                        n, ap, ai, 0, &options),
-                        "analyze native row-panel disabled")) {
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_factor(disabled_solver, ax0),
-                        "factor native row-panel disabled")) {
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_ROW_REFACTOR");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "0", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=0");
-    ok = 0;
-  }
-  if (ok && !require_ok(kls_refactor(disabled_solver, ax1),
-                        "refactor native row-panel disabled")) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR",
-                         had_saved_env, saved_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
-    ok = 0;
-  }
-  kls_stats disabled_stats;
-  disabled_stats.struct_size = sizeof(disabled_stats);
-  if (ok && !require_ok(kls_get_stats(disabled_solver, &disabled_stats),
-                        "stats native row-panel disabled")) {
-    ok = 0;
-  }
-  if (ok && (disabled_stats.row_refactor_last_run != 1 ||
-             disabled_stats.row_refactor_native_row_panel_enabled != 0 ||
-             disabled_stats.row_refactor_last_native_row_panel != 0 ||
-             disabled_stats.row_refactor_native_row_panel_count != 0 ||
-             disabled_stats.row_refactor_native_row_panel_blocked_count != 0 ||
-             disabled_stats.row_refactor_native_row_panel_fallback_count != 0)) {
-    fprintf(stderr,
-            "unexpected native row-panel disabled stats: row=%d,"
-            " native=%d/%d/%" PRId64 "/%" PRId64 "/%" PRId64 "\n",
-            disabled_stats.row_refactor_last_run,
-            disabled_stats.row_refactor_native_row_panel_enabled,
-            disabled_stats.row_refactor_last_native_row_panel,
-            disabled_stats.row_refactor_native_row_panel_count,
-            disabled_stats.row_refactor_native_row_panel_blocked_count,
-            disabled_stats.row_refactor_native_row_panel_fallback_count);
-    ok = 0;
-  }
-
   kls_destroy(solver);
-  kls_destroy(disabled_solver);
   free(ap);
   free(ai);
   free(ax0);
@@ -4779,7 +4677,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
   free(expected_multi);
   free(residual);
   free(saved_env);
-  free(saved_native_env);
   return ok;
 }
 
@@ -4876,11 +4773,6 @@ static int test_row_dense_compact_panel_scalar_update(void) {
   char *saved_checked =
     saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
   const int had_checked = saved_checked_value != NULL;
-  const char *saved_native_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native =
-    saved_native_value != NULL ? strdup(saved_native_value) : NULL;
-  const int had_native = saved_native_value != NULL;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -4895,8 +4787,7 @@ static int test_row_dense_compact_panel_scalar_update(void) {
 
   int ok = 1;
   if ((had_row && saved_row == NULL) ||
-      (had_checked && saved_checked == NULL) ||
-      (had_native && saved_native == NULL)) {
+      (had_checked && saved_checked == NULL)) {
     fprintf(stderr, "failed to save scalar compact-panel env\n");
     ok = 0;
   }
@@ -4920,10 +4811,6 @@ static int test_row_dense_compact_panel_scalar_update(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_refactor(solver, ax1),
                         "refactor scalar compact panel")) {
     ok = 0;
@@ -4944,16 +4831,6 @@ static int test_row_dense_compact_panel_scalar_update(void) {
     }
   } else if (!had_checked && unsetenv("KLS_ENABLE_CHECKED_ROW_REFACTOR") != 0) {
     perror("unsetenv KLS_ENABLE_CHECKED_ROW_REFACTOR");
-    ok = 0;
-  }
-  if (had_native && saved_native != NULL) {
-    if (setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", saved_native, 1) != 0) {
-      perror("restore KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-      ok = 0;
-    }
-  } else if (!had_native &&
-             unsetenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR") != 0) {
-    perror("unsetenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
     ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
@@ -5020,7 +4897,6 @@ static int test_row_dense_compact_panel_scalar_update(void) {
   kls_destroy(solver);
   free(saved_row);
   free(saved_checked);
-  free(saved_native);
   free(ap);
   free(ai);
   free(ax0);
@@ -5734,11 +5610,6 @@ static int test_batched_compact_supernode_update_probe(void) {
   char *saved_checked_env =
     saved_checked_env_value != NULL ? strdup(saved_checked_env_value) : NULL;
   const int had_saved_checked_env = saved_checked_env_value != NULL;
-  const char *saved_native_env_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native_env =
-    saved_native_env_value != NULL ? strdup(saved_native_env_value) : NULL;
-  const int had_saved_native_env = saved_native_env_value != NULL;
 
   int ok = 1;
   if (had_saved_row_env && saved_row_env == NULL) {
@@ -5747,10 +5618,6 @@ static int test_batched_compact_supernode_update_probe(void) {
   }
   if (had_saved_checked_env && saved_checked_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
-    ok = 0;
-  }
-  if (had_saved_native_env && saved_native_env == NULL) {
-    fprintf(stderr, "failed to save KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR\n");
     ok = 0;
   }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -5765,10 +5632,6 @@ static int test_batched_compact_supernode_update_probe(void) {
                         "factor batched compact supernode")) ok = 0;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=1");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -5786,10 +5649,6 @@ static int test_batched_compact_supernode_update_probe(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_saved_checked_env, saved_checked_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
     ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
@@ -5902,10 +5761,6 @@ static int test_batched_compact_supernode_update_probe(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=1");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_factor(checked_solver, ax1),
                         "checked factor batched compact supernode")) {
     ok = 0;
@@ -5916,10 +5771,6 @@ static int test_batched_compact_supernode_update_probe(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_saved_checked_env, saved_checked_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
     ok = 0;
   }
 
@@ -6044,7 +5895,6 @@ static int test_batched_compact_supernode_update_probe(void) {
   kls_destroy(checked_solver);
   free(saved_row_env);
   free(saved_checked_env);
-  free(saved_native_env);
   free(ap);
   free(ai);
   free(ax0);
@@ -6180,19 +6030,10 @@ static int test_batched_compact_supernode_subrange_update_probe(void) {
   char *saved_row_env =
     saved_row_env_value != NULL ? strdup(saved_row_env_value) : NULL;
   const int had_saved_row_env = saved_row_env_value != NULL;
-  const char *saved_native_env_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native_env =
-    saved_native_env_value != NULL ? strdup(saved_native_env_value) : NULL;
-  const int had_saved_native_env = saved_native_env_value != NULL;
 
   int ok = 1;
   if (had_saved_row_env && saved_row_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_ROW_REFACTOR\n");
-    ok = 0;
-  }
-  if (had_saved_native_env && saved_native_env == NULL) {
-    fprintf(stderr, "failed to save KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR\n");
     ok = 0;
   }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -6203,10 +6044,6 @@ static int test_batched_compact_supernode_subrange_update_probe(void) {
                         "factor subrange batched compact supernode")) ok = 0;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -6223,10 +6060,6 @@ static int test_batched_compact_supernode_subrange_update_probe(void) {
       perror("unsetenv KLS_ENABLE_ROW_REFACTOR");
       ok = 0;
     }
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
-    ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
                         "solve subrange batched compact supernode")) ok = 0;
@@ -6329,7 +6162,6 @@ static int test_batched_compact_supernode_subrange_update_probe(void) {
 
   kls_destroy(solver);
   free(saved_row_env);
-  free(saved_native_env);
   free(ap);
   free(ai);
   free(ax0);
@@ -6682,11 +6514,6 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
   char *saved_checked_env =
     saved_checked_env_value != NULL ? strdup(saved_checked_env_value) : NULL;
   const int had_saved_checked_env = saved_checked_env_value != NULL;
-  const char *saved_native_env_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native_env =
-    saved_native_env_value != NULL ? strdup(saved_native_env_value) : NULL;
-  const int had_saved_native_env = saved_native_env_value != NULL;
 
   int ok = 1;
   if (had_saved_row_env && saved_row_env == NULL) {
@@ -6695,10 +6522,6 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
   }
   if (had_saved_checked_env && saved_checked_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
-    ok = 0;
-  }
-  if (had_saved_native_env && saved_native_env == NULL) {
-    fprintf(stderr, "failed to save KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR\n");
     ok = 0;
   }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -6713,10 +6536,6 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
                         "factor ragged batched compact supernode")) ok = 0;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -6736,10 +6555,6 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_saved_checked_env, saved_checked_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
     ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
@@ -6859,10 +6674,6 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_factor(checked_solver, ax1),
                         "checked factor ragged batched compact supernode")) {
     ok = 0;
@@ -6873,10 +6684,6 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_saved_checked_env, saved_checked_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
     ok = 0;
   }
 
@@ -6979,7 +6786,6 @@ static int test_ragged_batched_compact_supernode_update_probe(void) {
   kls_destroy(checked_solver);
   free(saved_row_env);
   free(saved_checked_env);
-  free(saved_native_env);
   free(ap);
   free(ai);
   free(ax0);
@@ -7089,11 +6895,6 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
   char *saved_checked_env =
     saved_checked_env_value != NULL ? strdup(saved_checked_env_value) : NULL;
   const int had_saved_checked_env = saved_checked_env_value != NULL;
-  const char *saved_native_env_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native_env =
-    saved_native_env_value != NULL ? strdup(saved_native_env_value) : NULL;
-  const int had_saved_native_env = saved_native_env_value != NULL;
 
   int ok = 1;
   if (had_saved_row_env && saved_row_env == NULL) {
@@ -7102,10 +6903,6 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
   }
   if (had_saved_checked_env && saved_checked_env == NULL) {
     fprintf(stderr, "failed to save KLS_ENABLE_CHECKED_ROW_REFACTOR\n");
-    ok = 0;
-  }
-  if (had_saved_native_env && saved_native_env == NULL) {
-    fprintf(stderr, "failed to save KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR\n");
     ok = 0;
   }
   if (!require_ok(kls_create(&solver), "create")) ok = 0;
@@ -7120,10 +6917,6 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
                         "factor batch-group ragged supernode")) ok = 0;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
-    ok = 0;
-  }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
     ok = 0;
   }
   if (ok && !require_ok(kls_refactor(solver, ax1),
@@ -7143,10 +6936,6 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_saved_checked_env, saved_checked_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
     ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
@@ -7273,10 +7062,6 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_factor(checked_solver, ax1),
                         "checked factor batch-group ragged")) {
     ok = 0;
@@ -7287,10 +7072,6 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_saved_checked_env, saved_checked_env)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_saved_native_env, saved_native_env)) {
     ok = 0;
   }
 
@@ -7398,7 +7179,6 @@ static int test_batch_group_ragged_supernode_update_probe(void) {
   kls_destroy(checked_solver);
   free(saved_row_env);
   free(saved_checked_env);
-  free(saved_native_env);
   free(ap);
   free(ai);
   free(ax0);
@@ -9594,11 +9374,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   char *saved_checked = saved_checked_value != NULL
     ? strdup(saved_checked_value) : NULL;
   const int had_checked = saved_checked_value != NULL;
-  const char *saved_native_value =
-    getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  char *saved_native =
-    saved_native_value != NULL ? strdup(saved_native_value) : NULL;
-  const int had_native = saved_native_value != NULL;
 
   kls_solver *solver = NULL;
   kls_options options;
@@ -9612,8 +9387,7 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
 
   int ok = 1;
   if ((had_row && saved_row == NULL) ||
-      (had_checked && saved_checked == NULL) ||
-      (had_native && saved_native == NULL)) {
+      (had_checked && saved_checked == NULL)) {
     fprintf(stderr, "failed to save partial-prefix env\n");
     ok = 0;
   }
@@ -9631,10 +9405,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_refactor(solver, ax1),
                         "refactor partial-prefix")) ok = 0;
 
@@ -9643,10 +9413,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_checked, saved_checked)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_native, saved_native)) {
     ok = 0;
   }
   if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
@@ -9742,10 +9508,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR", "auto", 1) != 0) {
-    perror("setenv KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR=auto");
-    ok = 0;
-  }
   if (ok && !require_ok(kls_factor(checked_solver, ax1),
                         "checked factor partial-prefix")) {
     ok = 0;
@@ -9756,10 +9518,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_checked, saved_checked)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR",
-                         had_native, saved_native)) {
     ok = 0;
   }
   if (ok && !require_ok(kls_solve(checked_solver, 1, b, 0, x, 0),
@@ -9849,7 +9607,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   kls_destroy(checked_solver);
   free(saved_row);
   free(saved_checked);
-  free(saved_native);
   free(ap);
   free(ai);
   free(ax0);

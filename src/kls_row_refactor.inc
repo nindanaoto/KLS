@@ -34,25 +34,9 @@ KLS_DEFINE_ENV_FLAG(kls_checked_row_refactor_env_enabled,
                     "KLS_ENABLE_CHECKED_ROW_REFACTOR")
 
 enum {
-  KLS_NATIVE_ROW_PANEL_ENV_UNSET = -2,
   KLS_NATIVE_ROW_PANEL_ENV_OFF = -1,
-  KLS_NATIVE_ROW_PANEL_ENV_AUTO = 0,
-  KLS_NATIVE_ROW_PANEL_ENV_ON = 1
+  KLS_NATIVE_ROW_PANEL_ENV_AUTO = 0
 };
-
-static int kls_native_row_panel_env_state(void) {
-  const char *value = getenv("KLS_ENABLE_NATIVE_ROW_PANEL_REFACTOR");
-  if (value == NULL || value[0] == '\0') {
-    return KLS_NATIVE_ROW_PANEL_ENV_UNSET;
-  }
-  if (value[0] == '0' && value[1] == '\0') {
-    return KLS_NATIVE_ROW_PANEL_ENV_OFF;
-  }
-  if (strcmp(value, "auto") == 0 || strcmp(value, "AUTO") == 0) {
-    return KLS_NATIVE_ROW_PANEL_ENV_AUTO;
-  }
-  return KLS_NATIVE_ROW_PANEL_ENV_ON;
-}
 
 static int kls_native_row_panel_structural_auto_allows(
   const kls_solver *solver) {
@@ -67,15 +51,11 @@ static int kls_native_row_panel_structural_auto_allows(
 }
 
 static int kls_native_row_panel_effective_state(const kls_solver *solver) {
-  const int env_state = kls_native_row_panel_env_state();
-  if (env_state == KLS_NATIVE_ROW_PANEL_ENV_UNSET && solver != NULL &&
-      (solver->row_refactor_auto_native_row_panel ||
-       kls_native_row_panel_structural_auto_allows(solver))) {
-    return KLS_NATIVE_ROW_PANEL_ENV_AUTO;
-  }
-  return env_state == KLS_NATIVE_ROW_PANEL_ENV_UNSET
-           ? KLS_NATIVE_ROW_PANEL_ENV_OFF
-           : env_state;
+  return solver != NULL &&
+         (solver->row_refactor_auto_native_row_panel ||
+          kls_native_row_panel_structural_auto_allows(solver))
+           ? KLS_NATIVE_ROW_PANEL_ENV_AUTO
+           : KLS_NATIVE_ROW_PANEL_ENV_OFF;
 }
 
 static int kls_native_row_panel_enabled_for_run(const kls_solver *solver,
