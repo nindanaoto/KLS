@@ -284,33 +284,6 @@ static double residual_norm_values(const matrix *a, const double *values,
   return rn;
 }
 
-static double transpose_residual_norm_values(const matrix *a,
-                                             const double *values,
-                                             const double *x,
-                                             const double *b,
-                                             double *relative_out) {
-  double *atx = (double *)calloc((size_t)a->n, sizeof(double));
-  if (atx == NULL) return INFINITY;
-  for (int64_t col = 0; col < a->n; ++col) {
-    double sum = 0.0;
-    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      sum += values[p] * x[a->row_idx[p]];
-    }
-    atx[col] = sum;
-  }
-  double r2 = 0.0;
-  double b2 = 0.0;
-  for (int64_t i = 0; i < a->n; ++i) {
-    const double r = atx[i] - b[i];
-    r2 += r * r;
-    b2 += b[i] * b[i];
-  }
-  free(atx);
-  const double rn = sqrt(r2);
-  *relative_out = (b2 > 0.0) ? rn / sqrt(b2) : rn;
-  return rn;
-}
-
 static kls_ordering parse_ordering(const char *s) {
   if (strcmp(s, "amd") == 0) return KLS_ORDERING_AMD;
   if (strcmp(s, "colamd") == 0) return KLS_ORDERING_COLAMD;
@@ -958,15 +931,6 @@ int main(int argc, char **argv) {
       kls_get_stats(solver, &stats);
       tsolve_total += stats.solve_seconds;
     }
-  }
-  if (status == KLS_OK && repeat > 0 && tsolve_total >= 0.0 &&
-      bench_env_enabled("KLS_BENCH_VERIFY_TRANSPOSE")) {
-    double transpose_relative = 0.0;
-    const double transpose_residual = transpose_residual_norm_values(
-      &a, current_values, x, b, &transpose_relative);
-    fprintf(stderr,
-            "KLS transpose residual: %.17g, relative: %.17g\n",
-            transpose_residual, transpose_relative);
   }
   if (status != KLS_OK) {
     fprintf(stderr, "KLS benchmark failed: %s (%d)\n", kls_status_string(status), status);
