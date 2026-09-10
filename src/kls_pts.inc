@@ -673,10 +673,6 @@ static void kls_pts_try_build(kls_solver *solver) {
   int balanced_runtime_solve_plan = 0;
   int balanced_very_wide_solve_plan = 0;
   double bin_work[KLS_PTS_MAX_THREADS];
-  const int very_wide_top_trial =
-    getenv("KLS_ENABLE_VERY_WIDE_TOP_PTS") != NULL;
-  const int wide_top_trial =
-    very_wide_top_trial || getenv("KLS_ENABLE_WIDE_TOP_PTS") != NULL;
   if (ok) {
     for (int32_t root = head[nk]; root != -1; root = next[root]) {
       total += swork[root];
@@ -798,11 +794,11 @@ static void kls_pts_try_build(kls_solver *solver) {
          30% solve gate without using an input-size or density identity. */
       balanced_wide_solve_plan =
         kls_balanced_wide_pts_solve_plan_eligible(
-          wide_top_trial, nk, nthreads, nchunks, ntop, total, top_work,
+          0, nk, nthreads, nchunks, ntop, total, top_work,
           max_bin);
       balanced_runtime_solve_plan =
         kls_balanced_runtime_pts_solve_plan_eligible(
-          wide_top_trial || balanced_wide_solve_plan, nk, nthreads,
+          balanced_wide_solve_plan, nk, nthreads,
           nchunks, ntop, total, top_work, max_bin);
       /* A forest with a work-heavy but column-small shared top can still
          win: the private work is broad enough to occupy every worker while
@@ -810,7 +806,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          let the solve-time tournament judge it; no matrix family enables
          this wider execution envelope. */
       balanced_very_wide_solve_plan =
-        !wide_top_trial && total > 0.0 &&
+        total > 0.0 &&
         nchunks >= 4 * (int64_t)nthreads &&
         /* A column-small top can remain cache-friendly even when its
            arithmetic share is large.  Admit up to one twelfth of the
@@ -824,10 +820,10 @@ static void kls_pts_try_build(kls_solver *solver) {
         max_bin * (double)nthreads <=
           1.20 * (total - top_work);
       const int allow_wide_top =
-        wide_top_trial || balanced_wide_solve_plan ||
+        balanced_wide_solve_plan ||
         balanced_runtime_solve_plan;
       const int allow_very_wide_top =
-        very_wide_top_trial || balanced_very_wide_solve_plan;
+        balanced_very_wide_solve_plan;
       /* the refactor tolerates a fatter serial top (Amdahl on 99
          repeated calls still pays); the solve keeps the tight gate */
       ok = ntop <= (int64_t)(nk / 3u) &&
@@ -847,9 +843,7 @@ static void kls_pts_try_build(kls_solver *solver) {
        spawn overhead is guarded by the 65536-column dispatch floor */
     pts->solve_direct_verified =
       ntop <= (int64_t)(nk / 4u) &&
-      top_work <= (very_wide_top_trial ? 0.60 :
-                  ((wide_top_trial || balanced_wide_solve_plan)
-                     ? 0.45 : 0.30)) * total;
+      top_work <= (balanced_wide_solve_plan ? 0.45 : 0.30) * total;
     pts->solve_ok = streams_ordered && (pts->solve_direct_verified ||
       balanced_runtime_solve_plan || balanced_very_wide_solve_plan);
     /* flop-weighted top share: refactor flops concentrate quadratically
@@ -884,15 +878,10 @@ static void kls_pts_try_build(kls_solver *solver) {
          synchronization.  A repeated generic factor should not consume a
          complete numeric update timing that dominated refactor arm; retain
          the independently useful subtree solve plan. */
-      /* The explicit enable is a diagnostic escape hatch for measuring
-         partitions beyond the conservative Amdahl gate.  Runtime
-         acceptance still compares the resulting path with the incumbent,
-         so a forced trial cannot silently become the steady-state route. */
       pts->refactor_ok =
-        getenv("KLS_ENABLE_PTS_REFACTOR") != NULL ||
-        (total_flops <= 0.0 ||
+        total_flops <= 0.0 ||
          (top_flops <= 0.45 * total_flops &&
-          critical_refactor_flops <= 0.50 * total_flops));
+          critical_refactor_flops <= 0.50 * total_flops);
       pts->refactor_top_flops = top_flops;
       pts->refactor_total_flops = total_flops;
     }
@@ -1721,9 +1710,6 @@ static int kls_pts_top_pipeline_enabled(const kls_solver *solver,
                                         const kls_pts *pts) {
   if (getenv("KLS_DISABLE_PTS_PIPE_TOP") != NULL) {
     return 0;
-  }
-  if (getenv("KLS_PTS_PIPE_TOP") != NULL) {
-    return pts != NULL && pts->ntop > 0;
   }
   if ( solver != NULL &&
       solver->symbolic != NULL && solver->symbolic->nblocks == 1u) {

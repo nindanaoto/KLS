@@ -454,8 +454,7 @@ static int kls_refresh_i32_udiag_recip(kls_solver *solver) {
     solver->i16solve_l != NULL && solver->i16solve_u != NULL;
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Udiag == NULL || solver->i32solve_state <= 0 ||
-      (getenv("KLS_ENABLE_I32_UDIAG_RECIP") == NULL &&
-       !compact_i16_solve &&
+      (!compact_i16_solve &&
               !kls_moderate_work_single_block_lean_policy_enabled(solver) &&
        !kls_low_work_single_block_policy_enabled(solver) &&
        solver->i16solve_singleton_run == NULL &&
@@ -514,7 +513,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     solver->row_perm != NULL && solver->numeric != NULL &&
     solver->numeric->Rs == NULL;
   if (!generic_fused_matched_solve_candidate &&
-      getenv("KLS_ENABLE_SMALL_I32_SOLVE") == NULL &&
       solver->n < 16384u && solver->numeric != NULL &&
       (solver->numeric->lnz > (UF_long)UINT16_MAX ||
        solver->numeric->unz > (UF_long)UINT16_MAX)) {
@@ -744,8 +742,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     n >= 512u && n <= (UF_long)UINT32_MAX &&
     lcur >= 0 && ucur >= 0 &&
     lcur <= (int64_t)UINT32_MAX && ucur <= (int64_t)UINT32_MAX;
-  if (generic_compact_solve_meta ||
-      getenv("KLS_ENABLE_GENERIC_COMPACT_SOLVE_META") != NULL) {
+  if (generic_compact_solve_meta) {
     uint32_t *pnum32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*pnum32));
     uint32_t *q32 = (uint32_t *)malloc(
@@ -762,8 +759,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
       free(q32);
     }
   }
-  if (generic_compact_solve_meta ||
-      getenv("KLS_ENABLE_GENERIC_COMPACT_SOLVE_META") != NULL) {
+  if (generic_compact_solve_meta) {
     uint32_t *llen32 = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*llen32));
     uint32_t *ulen32 = (uint32_t *)malloc(
@@ -1520,8 +1516,7 @@ static UF_long kls_i32_solve(kls_solver *solver,
         const int pts_candidate =
           pts != NULL && pts->block == block &&
           (pts->nk >= 16384u ||
-           (kls_repeated_update_workload(&solver->options)) ||
-           getenv("KLS_ENABLE_SMALL_PTS_SOLVE") != NULL) &&
+           kls_repeated_update_workload(&solver->options)) &&
           pts->solve_ok;
         int use_pts = 0;
         int pts_used = 0;
