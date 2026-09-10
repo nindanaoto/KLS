@@ -3344,7 +3344,6 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     numeric_values = solver->pivot_nudge_values;
   }
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
-  kls_clear_egraph_refactor_last_stats(solver);
   kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_NONE);
   /* Once EGraph has published the authoritative packed factor, keep values
      in that representation across recurring updates.  Re-entering the

@@ -2330,16 +2330,6 @@ static int kls_row_first_workspace_init(
   return 1;
 }
 
-static void kls_row_first_private_worker_free(
-  kls_row_first_private_worker *worker) {
-  if (worker == NULL) {
-    return;
-  }
-  kls_row_first_workspace_free(&worker->workspace);
-  kls_row_first_entries_free(&worker->l_entries);
-  kls_row_first_entries_free(&worker->u_entries);
-}
-
 static void *kls_row_first_private_worker_main(void *arg) {
   kls_row_first_private_worker *worker =
     (kls_row_first_private_worker *)arg;
@@ -2905,7 +2895,9 @@ static int kls_row_first_run_parallel_private_phase(
 
 cleanup_workers:
   for (int tid = 0; tid < thread_count; ++tid) {
-    kls_row_first_private_worker_free(workers + tid);
+    kls_row_first_workspace_free(&workers[tid].workspace);
+    kls_row_first_entries_free(&workers[tid].l_entries);
+    kls_row_first_entries_free(&workers[tid].u_entries);
   }
   free(threads);
   free(workers);
@@ -4998,17 +4990,6 @@ struct kls_row_first_pipeline_worker {
   UF_long pipeline_supernode_panel_update_rows;
 };
 
-static void kls_row_first_pipeline_worker_free(
-  kls_row_first_pipeline_worker *worker) {
-  if (worker == NULL) {
-    return;
-  }
-  kls_row_first_workspace_free(&worker->workspace);
-  kls_row_first_entries_free(&worker->l_entries);
-  kls_row_first_entries_free(&worker->u_entries);
-
-}
-
 static int kls_row_first_pipeline_worker_scalar_batch_candidate(
   const kls_row_first_pipeline_shared *shared,
   const kls_row_first_pipeline_worker *worker,
@@ -6034,7 +6015,9 @@ static int kls_row_first_run_parallel_pipeline_phase(
   pthread_cond_destroy(&shared.cond);
   pthread_mutex_destroy(&shared.lock);
   for (int tid = 0; tid < worker_count; ++tid) {
-    kls_row_first_pipeline_worker_free(workers + tid);
+    kls_row_first_workspace_free(&workers[tid].workspace);
+    kls_row_first_entries_free(&workers[tid].l_entries);
+    kls_row_first_entries_free(&workers[tid].u_entries);
   }
 
   kls_row_first_supernode_panel_cache_free(&private_supernode_panel_cache);

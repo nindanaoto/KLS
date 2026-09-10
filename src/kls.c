@@ -4313,12 +4313,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_reject_tail_seed_valid = 0;
 }
 
-static void kls_clear_tail_last_stats(kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-}
-
 static void kls_set_last_factor_path(kls_solver *solver,
                                      kls_factor_path path) {
   if (solver == NULL) {
@@ -4432,13 +4426,6 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->stats.row_refactor_last_defer_value_scatter = 0;
   solver->stats.row_refactor_last_lazy_value_scatter = 0;
   solver->stats.row_refactor_last_row_solve = 0;
-}
-
-static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-
 }
 
 static void kls_record_row_refactor_run(kls_solver *solver,
@@ -7906,7 +7893,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   kls_set_last_factor_path(solver, KLS_FACTOR_PATH_NONE);
   kls_clear_fast_reject_stats(solver);
-  kls_clear_tail_last_stats(solver);
   kls_clear_row_refactor_last_stats(solver);
   solver->stats.row_refactor_auto_model_recommended = 0;
   solver->stats.row_refactor_auto_model_attempted = 0;
@@ -9463,9 +9449,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->i32solve_udiag_recip_fresh = 0;
     solver->tiny_singleton_rs_recip_fresh = 0;
     kls_clear_fast_reject_stats(solver);
-    kls_clear_tail_last_stats(solver);
     kls_clear_row_refactor_last_stats(solver);
-    kls_clear_egraph_refactor_last_stats(solver);
     kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_NONE);
     solver->lean_pair_active = solver->lean_choice == 2;
     const int ok =
@@ -9542,7 +9526,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
       direct_low_work_public_btf && solver->direct_klu_choice == 0;
     if (!direct_low_work_public_btf || first_direct_low_work_public_btf) {
       kls_clear_fast_reject_stats(solver);
-      kls_clear_tail_last_stats(solver);
       kls_clear_row_refactor_last_stats(solver);
     }
     if (first_direct_low_work_public_btf) {
@@ -9613,7 +9596,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->verified_rhs_valid = 0;
     solver->compact_amf_two_block_exact_recip_fresh = 0;
     kls_clear_fast_reject_stats(solver);
-    kls_clear_tail_last_stats(solver);
     kls_clear_row_refactor_last_stats(solver);
     solver->refactor_direct_user_values_active = 1;
     const int ok = kls_lean_btf_map32_refactor(
@@ -9633,7 +9615,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
   solver->compact_amf_two_block_exact_recip_fresh = 0;
   const double refactor_call_start = kls_now_seconds();
   kls_clear_fast_reject_stats(solver);
-  kls_clear_tail_last_stats(solver);
   kls_clear_row_refactor_last_stats(solver);
   if (kls_refactor_input_is_unchanged(solver, values) &&
       kls_prepare_unchanged_solve_contract(solver, values)) {

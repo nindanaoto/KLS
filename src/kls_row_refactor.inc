@@ -6035,7 +6035,7 @@ static KLS_ALWAYS_INLINE double kls_row_refactor_u_solve_value(
   return solver->row_refactor_u_row_values[p];
 }
 
-static const double *kls_row_refactor_compact_panel_const(
+static double *kls_row_refactor_compact_group_panel(
   const kls_solver *solver,
   UF_long group,
   UF_long entry_count) {
@@ -6102,7 +6102,7 @@ static int kls_row_refactor_try_compact_panel_scalar_update(
   }
   const UF_long panel_entries = dense_entries + width * trailing_len;
   const double *dense_panel =
-    kls_row_refactor_compact_panel_const(solver, group, panel_entries);
+    kls_row_refactor_compact_group_panel(solver, group, panel_entries);
   if (dense_panel == NULL) {
     return 0;
   }
@@ -6205,7 +6205,7 @@ static int kls_row_refactor_compact_panel_solve_value(
   }
   const UF_long panel_entries = dense_entries + width * trailing_len;
   const double *dense_panel =
-    kls_row_refactor_compact_panel_const(solver, group, panel_entries);
+    kls_row_refactor_compact_group_panel(solver, group, panel_entries);
   if (dense_panel == NULL) {
     return 0;
   }
@@ -6341,7 +6341,7 @@ static int kls_row_refactor_compact_panel_solve_group(
   }
   const UF_long panel_entries = dense_entries + width * trailing_len;
   const double *dense_panel =
-    kls_row_refactor_compact_panel_const(solver, group, panel_entries);
+    kls_row_refactor_compact_group_panel(solver, group, panel_entries);
   if (dense_panel == NULL) {
     return 0;
   }
@@ -7108,7 +7108,7 @@ static UF_long kls_row_refactor_compact_panel_solve_value_count(
       continue;
     }
     const UF_long panel_entries = dense_entries + trailing_values;
-    if (kls_row_refactor_compact_panel_const(solver, group, panel_entries) ==
+    if (kls_row_refactor_compact_group_panel(solver, group, panel_entries) ==
         NULL) {
       continue;
     }
@@ -8153,9 +8153,6 @@ static int kls_parallel_row_refactor_process_group(
   kls_egraph_refactor_worker *worker,
   UF_long group,
   int wait_for_dependencies);
-static double *kls_row_refactor_compact_group_panel(kls_solver *solver,
-                                                    UF_long group,
-                                                    UF_long entry_count);
 static double *kls_egraph_worker_supernode_workspace(
   kls_egraph_refactor_worker *worker,
   UF_long entry_count);
@@ -9675,24 +9672,6 @@ static void *kls_egraph_worker_object_workspace(
   worker->object_workspace = workspace;
   worker->object_workspace_size = (UF_long)byte_count;
   return workspace;
-}
-
-static double *kls_row_refactor_compact_group_panel(kls_solver *solver,
-                                                    UF_long group,
-                                                    UF_long entry_count) {
-  if (solver == NULL ||
-      solver->row_refactor_group_compact_panel_begin == NULL ||
-      solver->row_refactor_compact_panel_values == NULL ||
-      group >= solver->row_refactor_group_count || entry_count == 0u) {
-    return NULL;
-  }
-  const UF_long begin = solver->row_refactor_group_compact_panel_begin[group];
-  const UF_long end = solver->row_refactor_group_compact_panel_begin[group + 1u];
-  if (end < begin || end - begin != entry_count ||
-      end > solver->row_refactor_compact_dense_panel_persistent_entries) {
-    return NULL;
-  }
-  return solver->row_refactor_compact_panel_values + begin;
 }
 
 typedef struct {
