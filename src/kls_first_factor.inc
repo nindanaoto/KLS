@@ -7512,7 +7512,6 @@ static int kls_row_first_parallel_factor_block(
   int use_separator_row_order = 0;
   int separator_private_executed = 0;
   int separator_private_owner_valid = 0;
-  int separator_private_run_ok = 0;
   int separator_private_complete = 0;
   int separator_private_partial_active = 0;
   int row_pipeline_separator_queue = 0;
@@ -7992,11 +7991,9 @@ static int kls_row_first_parallel_factor_block(
         }
         if (row_owner == NULL || !separator_private_owner_valid) {
           KLS_FREE_AND_NULL(row_owner);
-          use_separator_row_order = 0;
           row_pipeline_separator_partitioned = 0;
           row_pipeline_separator_split_components = 0;
-        } else if ((separator_private_run_ok =
-                      kls_row_first_run_parallel_private_phase(
+        } else if (kls_row_first_run_parallel_private_phase(
                         &row_ctx, &separator_plan,
                         shared->block_pipeline_thread_count,
                         row_owner, &l_entries, &u_entries,
@@ -8004,7 +8001,7 @@ static int kls_row_first_parallel_factor_block(
                         worker->u_row_end, row_done, &row_stats,
                         &row_pipeline_separator_private_rows,
                         &row_pipeline_separator_private_threads, 1,
-                        &separator_private_complete))) {
+                        &separator_private_complete)) {
           separator_private_executed = 1;
           row_pipeline_separator_queue = 1;
           if (separator_private_complete) {
@@ -8045,7 +8042,6 @@ static int kls_row_first_parallel_factor_block(
           }
         } else {
           KLS_FREE_AND_NULL(row_owner);
-          use_separator_row_order = 0;
           separator_private_complete = 0;
           separator_private_partial_active = 0;
           row_pipeline_separator_private_rows = 0;
