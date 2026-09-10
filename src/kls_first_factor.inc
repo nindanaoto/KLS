@@ -8957,7 +8957,7 @@ static int kls_try_row_first_rebuild_rejected_block(
     (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
   free_refactor_map(solver);
   free_refactor_schedule(solver);
-  free_row_refactor_pattern_preserve_diagnostics(solver);
+  free_row_refactor_pattern(solver);
   free_refactor_lu_pointer_cache(solver);
   solver->common.status = TRILINOS_KLU_OK;
   solver->common.numerical_rank = KLS_KLU_EMPTY;

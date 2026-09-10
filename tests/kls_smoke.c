@@ -3998,68 +3998,16 @@ static int test_checked_row_dense_prefix_scatter_tail_restart(void) {
                KLS_FAST_REJECT_REFRESH_PREFIX ||
              stats.fast_block_restarts != 1 ||
              stats.fast_tail_restarts != 1 ||
-             stats.fast_repaired_tail_restart_ready != 1 ||
-             stats.row_refactor_last_run != 1 ||
-             stats.row_refactor_last_checked != 1 ||
-             stats.row_refactor_last_parallel != 0 ||
-             stats.row_refactor_last_defer_value_scatter != 1 ||
-             stats.row_refactor_dense_segment_count < 1 ||
-             stats.row_refactor_last_compact_dense_panel != 1 ||
-             stats.row_refactor_compact_dense_panel_count < 1 ||
-             stats.row_refactor_compact_dense_panel_eligible_count < 1 ||
-             stats.row_refactor_compact_dense_panel_eligible_rows < 1 ||
-             stats.row_refactor_compact_dense_panel_update_work <= 0.0 ||
-             stats.row_refactor_compact_dense_panel_entries <= 0.0 ||
-             stats.row_refactor_compact_dense_panel_persistent_groups < 1 ||
-             stats.row_refactor_compact_dense_panel_persistent_entries < 1 ||
-             stats.row_refactor_last_compact_dense_panel_persistent != 1 ||
-             stats.row_refactor_compact_dense_panel_persistent_run_count < 1 ||
-             stats.row_refactor_last_compact_dense_panel_direct_input_rows < 1 ||
-             stats.row_refactor_compact_dense_panel_direct_input_rows < 1 ||
-             stats.row_refactor_segment_input_target_rows < 1 ||
-             stats.row_refactor_segment_input_target_entries < 1 ||
-             stats.row_refactor_last_segment_target_input_rows <
-               stats.row_refactor_last_compact_dense_panel_direct_input_rows ||
-             stats.row_refactor_segment_target_input_rows <
-               stats.row_refactor_compact_dense_panel_direct_input_rows)) {
+             stats.fast_repaired_tail_restart_ready != 1)) {
     fprintf(stderr,
             "unexpected dense checked-row prefix stats: pivot=%" PRId64
             ", refresh=%d, block_restarts=%d, tail_restarts=%d"
-            ", tail_ready=%d, row=%d/%d/%d, defer=%d"
-            ", dense_segments=%" PRId64 ", compact=%d/%" PRId64
-            ", eligible=%" PRId64 "/%" PRId64
-            ", work=%.17g, entries=%.17g"
-            ", persistent=%" PRId64 "/%" PRId64
-            ", persistent_used=%d/%" PRId64
-            ", direct_input=%" PRId64 "/%" PRId64
-            ", target_map=%" PRId64 "/%" PRId64
-            ", target_input=%" PRId64 "/%" PRId64 "\n",
+            ", tail_ready=%d\n",
             stats.fast_rejected_pivot,
             stats.fast_rejected_refresh_state,
             stats.fast_block_restarts,
             stats.fast_tail_restarts,
-            stats.fast_repaired_tail_restart_ready,
-            stats.row_refactor_last_run,
-            stats.row_refactor_last_checked,
-            stats.row_refactor_last_parallel,
-            stats.row_refactor_last_defer_value_scatter,
-            stats.row_refactor_dense_segment_count,
-            stats.row_refactor_last_compact_dense_panel,
-            stats.row_refactor_compact_dense_panel_count,
-            stats.row_refactor_compact_dense_panel_eligible_count,
-            stats.row_refactor_compact_dense_panel_eligible_rows,
-            stats.row_refactor_compact_dense_panel_update_work,
-            stats.row_refactor_compact_dense_panel_entries,
-            stats.row_refactor_compact_dense_panel_persistent_groups,
-            stats.row_refactor_compact_dense_panel_persistent_entries,
-            stats.row_refactor_last_compact_dense_panel_persistent,
-            stats.row_refactor_compact_dense_panel_persistent_run_count,
-            stats.row_refactor_last_compact_dense_panel_direct_input_rows,
-            stats.row_refactor_compact_dense_panel_direct_input_rows,
-            stats.row_refactor_segment_input_target_rows,
-            stats.row_refactor_segment_input_target_entries,
-            stats.row_refactor_last_segment_target_input_rows,
-            stats.row_refactor_segment_target_input_rows);
+            stats.fast_repaired_tail_restart_ready);
     ok = 0;
   }
   double max_solution_error = 0.0;

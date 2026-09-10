@@ -5157,7 +5157,7 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     (int64_t)solver->fast_repaired_offdiag_full_refresh_count;
   free_refactor_map(solver);
   free_refactor_schedule(solver);
-  free_row_refactor_pattern_preserve_diagnostics(solver);
+  free_row_refactor_pattern(solver);
   free_refactor_lu_pointer_cache(solver);
   free_snode_panels(solver);
   solver->common.status = TRILINOS_KLU_OK;
