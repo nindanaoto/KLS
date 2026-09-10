@@ -6210,9 +6210,7 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
          KLS_MATCH_HIGH_RADIX_MAX_SIZE =
            1 << KLS_MATCH_HIGH_RADIX_MAX_BITS };
   size_t buckets[KLS_MATCH_HIGH_RADIX_MAX_SIZE];
-  const unsigned int radix_bits =
-    getenv("KLS_MATCH_HIGH_RADIX16") != NULL
-      ? 16u : 8u;
+  const unsigned int radix_bits = 8u;
   const unsigned int digit_count = 1u << radix_bits;
   const uint64_t mask = (UINT64_C(1) << radix_bits) - UINT64_C(1);
   kls_match_entry *src = entries;
@@ -6247,10 +6245,6 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
     memcpy(entries, src, (size_t)count * sizeof(*entries));
   }
   free(scratch);
-
-  if (getenv("KLS_MATCH_SKIP_LOW_SORT") != NULL) {
-    return;
-  }
 
   /* Complete each equal-prefix run, including the old comparator's
      deterministic row/column tie break for exactly equal weights. */
@@ -6399,9 +6393,6 @@ static int build_row_match_graph(UF_long n,
   UF_long *col_idx = (UF_long *)malloc((size_t)entry_count * sizeof(*col_idx));
   double *log_weight = build_log_weights
     ? (double *)malloc((size_t)entry_count * sizeof(*log_weight)) : NULL;
-  const int raw_swap_weights =
-    build_log_weights && n > 50000u &&
-    getenv("KLS_MATCH_RAW_SWAP_WEIGHTS") != NULL;
   UF_long *next = (UF_long *)malloc((size_t)n * sizeof(*next));
   if (row_ptr == NULL || col_idx == NULL ||
       (build_log_weights && log_weight == NULL) || next == NULL) {
@@ -6424,8 +6415,7 @@ static int build_row_match_graph(UF_long n,
     const UF_long dst = next[row]++;
     col_idx[dst] = entries[i].col;
     if (build_log_weights) {
-      log_weight[dst] = raw_swap_weights
-        ? entries[i].weight : log(entries[i].weight);
+      log_weight[dst] = log(entries[i].weight);
     }
   }
 
@@ -6433,7 +6423,6 @@ static int build_row_match_graph(UF_long n,
   graph->row_ptr = row_ptr;
   graph->col_idx = col_idx;
   graph->log_weight = log_weight;
-  graph->weights_are_raw = raw_swap_weights;
   return KLS_OK;
 }
 
@@ -7261,16 +7250,7 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
      eight of them find the same improvement cycles at half the search
      breadth. */
   const UF_long max_candidates_per_row = 8u;
-  int max_rounds = 5;
-  {
-    const char *rounds_env = getenv("KLS_MATCH_SWAP_ROUNDS");
-    if (rounds_env != NULL && rounds_env[0] != '\0') {
-      const int parsed = atoi(rounds_env);
-      if (parsed >= 1 && parsed <= 5) {
-        max_rounds = parsed;
-      }
-    }
-  }
+  const int max_rounds = 5;
   double *current_log_weight =
     (double *)malloc((size_t)n * sizeof(*current_log_weight));
   if (current_log_weight == NULL) {
@@ -7308,13 +7288,9 @@ static void improve_numeric_row_match_by_swaps(UF_long n,
           continue;
         }
         const double other_weight = current_log_weight[other_row];
-        const int improves = graph->weights_are_raw
-          ? (long double)graph->log_weight[p] *
-              (long double)other_to_current >
-            (long double)current_weight * (long double)other_weight *
-              (1.0L + 1.0e-12L)
-          : graph->log_weight[p] + other_to_current - current_weight -
-              other_weight > 1.0e-12;
+        const int improves =
+          graph->log_weight[p] + other_to_current - current_weight -
+            other_weight > 1.0e-12;
         if (improves) {
           row_perm[row] = trial_col;
           row_perm[other_row] = current_col;
@@ -7976,8 +7952,7 @@ static int build_greedy_numeric_row_match(UF_long n,
   if (improve_matching) {
     kls_row_match_graph graph;
     const int improve_weights =
-      !compact_missing_diagonal_match &&
-      getenv("KLS_MATCH_SKIP_SWAPS") == NULL;
+      !compact_missing_diagonal_match;
     int status = build_row_match_graph(n, entry_count, entries,
                                        improve_weights, &graph);
     if (status == KLS_OK) {
@@ -7988,9 +7963,7 @@ static int build_greedy_numeric_row_match(UF_long n,
         matched = augment_numeric_row_match(n, &graph, row_perm, col_match);
       }
       if (matched == n && improve_weights) {
-        if (getenv("KLS_MATCH_SKIP_PAIR_SWAPS") == NULL) {
-          improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
-        }
+        improve_numeric_row_match_by_swaps(n, &graph, row_perm, col_match);
       }
 #ifdef KLS_HAVE_SPRAL_SCALING
       if (matched < n && n >= 4000u && n <= 150000u && nnz <= 1500000u) {

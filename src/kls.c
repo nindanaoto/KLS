@@ -2316,7 +2316,6 @@ typedef struct kls_row_match_graph {
   UF_long *row_ptr;
   UF_long *col_idx;
   double *log_weight;
-  int weights_are_raw;
 } kls_row_match_graph;
 
 typedef struct kls_heap_item {
