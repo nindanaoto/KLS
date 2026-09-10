@@ -9300,11 +9300,9 @@ int kls_factor(kls_solver *solver, const double *values) {
       symbolic_score(solver->symbolic) <= 1.0e5 &&
       kls_column_pair_work(solver->n, solver->col_ptr) <= 5.0e5;
     if (solver->n >= 512) {
-      /* Engine/solve preps (row patterns, solve transpose plans, pts
-         trials, panel sorts: ~23% of memchip's factor CPU, ~20% of
-         rajat25's) only pay off across repeated refactors; run them
-         from the first refactorization so the one-shot factor path
-         stays lean.  Solves before any refactor take the plain paths. */
+      /* Engine and solve preparation only amortizes across refactors.  Defer
+         it until the first refactor so one-shot factors and earlier solves
+         stay on the plain paths. */
       solver->factor_preps_deferred = 1;
       if (compact_refactor_forest_candidate) {
         const double forest_prep_start = kls_now_seconds();
@@ -9589,8 +9587,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
     }
     (void)kls_i32_solve_ready(solver);
     if (!solver->spral_matching_selected) {
-      /* the spral-matched prestatic class never paid the pts trial
-         inline and it stalls against 74M-entry factors (pre2) */
       /* the pts chain's historical calling convention is mutable
          values (in-place scale variants); this path's buffer is
          logically const and the mapped refactor only reads it */
@@ -10034,10 +10030,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
     maybe_select_pre_static_row_match(solver, &prestatic_elapsed,
                                       numeric_values, 1);
     if (solver->values != NULL) {
-      /* adoption replaced the pattern with the trial's permuted+scaled
-         copy; refilling it with the caller's untransformed values
-         factors a different matrix (v22: rajat25/twotone singular at
-         the first refactor) */
+      /* Adoption replaced the pattern with a permuted and scaled copy; retain
+         its transformed values rather than factor a different matrix. */
       numeric_values = solver->values;
     }
   }
@@ -10329,12 +10323,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
 
   if (solver->lean_choice == 0 && solver->common.flops > 0.0 &&
       solver->common.flops < 100000.0) {
-    /* Below this work floor, even a real 10--20% lean-kernel win saves less
-       over 98 steady calls than constructing/timing the alternative mirrors
-       costs in the first refactor.  A five-pass, all-affected-matrix audit
-       improved eight of nine paper-union cases and converted add32 to a win;
-       the one 1.4% regression (TSOPF_RS_b9_c6) remains a 1.5x overall win.
-       Keep the incumbent without running the consultation. */
+    /* Below this work floor, a lean-kernel win cannot repay constructing and
+       timing alternative mirrors over the expected repeated lifecycle. */
     solver->lean_choice = -1;
   }
   if (kls_low_work_single_block_policy_enabled(solver) ||
@@ -10937,10 +10927,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
         (kls_row_refactor_acceptance_structurally_ready(solver) ||
          generic_hoisted_snode_lean_viable))) &&
       solver->numeric->lnz + solver->numeric->unz <= 1000000 &&
-      /* fill cap: coupled (1.36M fill) paid a ~15ms consult through its
-         pre-settling mapped refactors and then went egraph anyway —
-         +51% cycle for a declined trial; the rajat16/18 class (n~94K,
-         fill ~760K, lean -14%) sits inside these caps */
+      /* Cap fill so a consultation cannot dominate before the steady engine
+         settles. */
       solver->lean_wait++ == 0) {
     const double ordinary_lean_consult_start = kls_now_seconds();
     const double scaled_small_consult_start =
@@ -11278,9 +11266,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
   }
   /* Engine consultations are one-time setup, not steady refactor work.  The
      row/column verdict used to skip three calls and then alternate arms across
-     calls four through seven.  A short repeated-numeric harness consequently
-     treated a losing row trial (and, on coupled, its whole lean consultation)
-     as the steady rate.  Front-load a bounded row/column comparison into the
+     calls four through seven.  A short repeated-numeric harness could therefore
+     mistake a losing trial for the steady rate.  Front-load the comparison into the
      first public refactor instead.  A decisive row loss settles immediately;
      row adoption remains deliberately provisional because the following
      solve has not yet been timed.  When the structural work model selected
@@ -11687,14 +11674,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
       solver->row_refactor_values_ready &&
       solver->row_scale == NULL && solver->col_scale == NULL &&
       numeric_values != NULL) {
-    /* Solves will be served from the row engine's published replica
-       values.  That machinery's acceptance is timed, not
-       value-validated, and rare draws publish a reduced-accuracy
-       factor (mac_econ: ~1-in-9 runs at 2e-4 relative vs its 1e-6
-       contract; typical draws e-7..e-6).  Retain this refactor's
-       input values and verify every solve's residual - the refine
-       loop exits after one SpMV when the solve is already at target,
-       and corrects the bad publishes. */
+    /* Row-engine acceptance is timed rather than value-validated.  Retain the
+       refactor values and verify solve residuals; accurate solves exit after
+       one SpMV and inaccurate publications are corrected. */
     if (solver->solve_refine_values == NULL) {
       solver->solve_refine_values = (double *)malloc(
         (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
@@ -13469,15 +13451,12 @@ static int solve_impl(kls_solver *solver,
           carry the correction; derived from the config so no flag
           lifecycle can drop it. The 1e-6 line stays below the 1e-5/1e-4
           initial-tolerance heuristics whose factors are accurate without
-          corrections (mac_econ-class regressed 2x on solves at 1e-4). */
+          corrections. */
       solver->common.tol < 1.0e-6 ||
        /* tolerance-promoted numerics (auto-pivtol 1e-4/1e-5 fill
           adoptions) carry the SELF-CHECK contract the same
-          config-derived way: their accuracy is a pivot-draw lottery
-          the rgrowth classifier cannot separate (mac_econ drew
-          7.9e-11..3.2e-8 across 2026-07-15 certs — some draws above
-          the 1e-8 validity bar with the classifier reading healthy).
-          Self-check semantics, not needs_refinement: one residual
+          config-derived way: pivot-dependent accuracy cannot be reliably
+          separated by the rgrowth classifier. Self-check semantics use one residual
           SpMV per solve, correction only when above the 1e-9 line. */
        tight_tol_selected ||
        /* A solve-triggered conservative refactor must verify the recovery

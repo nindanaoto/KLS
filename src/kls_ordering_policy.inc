@@ -2034,10 +2034,8 @@ static double choose_initial_auto_pivot_tolerance(
        (solver->common.scale == 0 &&
         is_small_spiked_low_diagonal_pattern(solver->n, solver->col_ptr,
                                              solver->row_idx)))) {
-    /* Deficiency orderings explode under loose threshold pivoting on
-       these classes (TSOPF: first factor 9.2e5 fill at 1e-4 vs 6.4e4 at
-       1e-8); they are selected for their tight-tolerance factor and the
-       config-derived refine gate (tol < 1e-6) polices the accuracy. */
+    /* Deficiency orderings can inflate fill under loose threshold pivoting.
+       Their tight tolerance is paired with config-derived refinement. */
     return solver->stats.selected_ordering == KLS_ORDERING_AMF ? 1.0e-8
                                                                : 1.0e-4;
   }
@@ -2833,11 +2831,9 @@ static UF_long kls_pinned_order_fill_count(UF_long n,
       }
     }
   }
-  /* fill count via row-subtree walks (dedup per row with mark).  The
-     walk is O(fill): cap it at a few multiples of nnz - the caller
-     only needs "comparable to the competition or garbage", and dense-
-     fill pinned orders (TSOPF's fused-dense rows: fill ~n^2/2) would
-     otherwise grind for seconds counting exactly how bad they are. */
+  /* Count fill by row-subtree walks, deduplicated per row.  Cap this O(fill)
+     probe because the caller only needs to distinguish competitive orders
+     from fill explosions. */
   const UF_long cap = 8u * (nnz > (UF_long)n ? nnz : (UF_long)n);
   UF_long fill = 0;
   for (UF_long i = 0; i < n && fill < cap; ++i) {
@@ -3170,13 +3166,8 @@ static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
    critical row-refactor chain, while the serial fourteen-leaf forest adds
    substantial cold NodeNDP work.  Scoped to the admitted AUTO race thread. */
 static _Thread_local int kls_giant_symmetric_scalar_fringe_metis_ctx;
-/* set around the pre-static ordering choice: the legacy libc RNG is
-   scoped to exactly the analyses whose forests the separator-pipeline
-   refactor engines consume (the prestatic-adopted ones).  The ana
-   phase's two-orientation analyzes then use thread-local MT19937
-   (deterministic under concurrency); the process-global libc rand was
-   cross-corrupted by those concurrent analyzes - pre2's true
-   run-to-run variance source. */
+/* Scope the legacy RNG to pre-static analyses consumed by separator-pipeline
+   refactors.  Concurrent orientation analyses use thread-local MT19937. */
 /* Set only while ordering a value-matched graph whose complete quotient
    work fits a small fixed budget.  The chooser can then settle BTF versus
    one-block AMD directly instead of launching a broader ordering portfolio. */
@@ -3191,13 +3182,9 @@ static _Thread_local int kls_giant_symmetric_scalar_fringe_metis_ctx;
 /* Published by the winning AUTO tournament on the candidate's own analyze
    thread and immediately copied into kls_pattern_candidate. */
 
-/* per-thread routing request from the analyze level: the mostly-
-   missing-diagonal low-degree class (mac_econ) pays a pathological
-   serial NodeND while its egraph refactor engine has no separator-
-   structure dependence - the measured safe class for threaded ND.
-   pre2-like matrices are prestatic-routed before ordering and their
-   pipeline engines NEED serial NodeNDP structure (measured 14.9 vs
-   2.2s refactor) - never routed here. */
+/* Per-thread request for low-degree, mostly missing-diagonal patterns whose
+   refactor engine is separator-independent.  Pre-static pipeline candidates
+   retain serial NodeNDP structure and are never routed here. */
 
 /* forest-aware threaded ND: replicates METIS_NodeNDP's output contract
    (perm/iperm + the reversed-index sizes tree consumed by
@@ -4391,12 +4378,8 @@ static UF_long kls_scotch_order(UF_long n,
 }
 #endif
 
-/* precomputed-BTF stash: the block triangular form depends only on the
-   pattern, so one competition's candidates (AMD, AMF, METIS, retries)
-   share it through the vendored Common instead of each re-running
-   maxtrans+strongcomp (twotone: 0.75-1.46s per with-btf analyze).
-   Thread-local: orientation sides and the AMF spec thread each carry
-   their own. */
+/* Cache the pattern-only BTF across ordering candidates.  Keep it
+   thread-local so orientation sides and speculative analyses remain isolated. */
 struct kls_btf_stash_s {
   const UF_long *P;
   const UF_long *Q;
@@ -4477,13 +4460,8 @@ static int analyze_with_ordering(UF_long n,
     extern _Thread_local UF_long trilinos_amd_l2_amf;
     extern _Thread_local double trilinos_amd_l2_amf_power;
     {
-      /* mean-local-fill scoring (Rothberg-Eisenstat AMMF) wins on the
-         small classes (TSOPF est 1.31e5 vs METIS 1.50e5) but its lower
-         fill estimates SERIALIZE the pipelined refactor at scale
-         (ASIC_320ks: AMMF bootstrap beat the race-METIS promotion on
-         est flops 6.8e8 vs 9.4e8 yet refactors at 66 vs 43ms, suite
-         2.42x) - keep the old scoring above the small-matrix line
-         until ordering acceptance is timing-aware. */
+      /* Mean-local-fill scoring can win on small factors, but its lower fill
+         estimates can serialize pipelined refactors at scale. */
       trilinos_amd_l2_amf_power = 1.0;
       if (ordering == KLS_ORDERING_AMMF) {
         trilinos_amd_l2_amf = 2;
@@ -4595,12 +4573,9 @@ static UF_long count_pattern_diagonal(UF_long n,
   return diagonal;
 }
 
-/* Once a no-btf retry loses DECISIVELY on this pattern (>2x the btf
-   score against a 0.80x adoption bar), further retries with other
-   orderings are hopeless - the missing block structure, not the
-   ordering, is what loses (twotone: both retries lose 6.7x, one per
-   candidate, ~40% of each analyze side).  Reset per analyzed pattern;
-   thread-local so the two orientation sides stay independent. */
+/* Once a no-BTF retry loses decisively, suppress equivalent retries: the
+   missing block structure, rather than the ordering, is the cause.  Reset per
+   pattern and keep orientation sides thread-local. */
 static _Thread_local int kls_no_btf_retry_hopeless;
 /* Each orientation owns its kls_pattern_candidate, and generic orientation
    analyses may run concurrently.  A thread-local capture target lets the
@@ -4933,9 +4908,8 @@ static int should_start_auto_with_metis(UF_long n,
 static int metis_start_should_skip_no_btf_retry(UF_long n,
                                                 const UF_long *col_ptr,
                                                 const UF_long *row_idx) {
-  /* Large full/nearly-full diagonal ASIC-style matrices use BTF to keep the
-     off-diagonal fringe cheap. Retrying no-BTF doubles METIS analysis cost and
-     has worse repeated-refactor work on this structural class. */
+  /* Full or nearly-full diagonal matrices use BTF to keep the off-diagonal
+     fringe cheap; a no-BTF retry only repeats analysis with worse structure. */
   return is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx) ||
          is_large_moderate_degree_weak_diagonal_metis_pattern(n, col_ptr,
                                                               row_idx);
@@ -8996,14 +8970,11 @@ static int maybe_select_auto_row_match(kls_solver *solver,
                                                       &trial_options,
                                                       trial_values);
 
-  /* the trial factor is the largest single cost of the prestatic
-     one-shot (pre2: 3.4s of the 8.9s init); the deterministic pipe
-     factors it in parallel with identical acceptance semantics */
+  /* Factor the expensive pre-static trial through the deterministic parallel
+     pipeline with unchanged acceptance semantics. */
   kls_klu_pipe_threads =
     kls_pipe_first_factor_threads(solver, trial_symbolic);
-  /* the trial tolerates the full pipe (dense panels + batched
-     consume): its output is judged by the quality gates below and
-     the class's own dense-panel win is the point (pre2) */
+  /* The quality gates below validate the full pipeline output. */
   kls_klu_pipe_det = 0;
   const double trial_factor_start = kls_now_seconds();
   trial_numeric =
@@ -9118,19 +9089,12 @@ done:
   return accepted;
 }
 
-/* pipelined first-factor routing (see trilinos_klu_l_kernel.c): the
-   pipeline wins on heavy columns (pre2: 160k flops/col, init 57->32s)
-   and loses on light ones (mac_econ 24k: 1.9x round overhead, plus
-   cancellation-pivot fragility); route foreground first factors with
-   est work/column above a floor.  Thread-local, so race workers and
-   other background factors never engage it. */
+/* Route sufficiently heavy foreground first factors through the pipeline.
+   Keep the switch thread-local so race workers and background factors do not
+   engage it. */
 
-/* Worker count scaled to the estimated factor work: each pipe worker
-   pays workspace setup (n-sized flag/X arrays) and pointer-chase
-   startup that only amortizes over enough numeric work.  ~5e8 est
-   flops per worker keeps big factors at full width (pre2 1e11 -> 16)
-   while small matrices stop overspawning (onetone1 1.5e9 -> 3:
-   16 workers measured 0.221s vs 0.208 at 4). */
+/* Scale workers to estimated factor work because each pays O(n) workspace and
+   pointer-chase startup costs. */
 static int kls_pipe_scale_threads(int threads, double est_flops) {
   int cap = threads > 16 ? 16 : threads;
   if (est_flops > 0.0) {
@@ -10865,12 +10829,9 @@ static void *kls_scale_trial_main(void *argp) {
 }
 
 static void *kls_metis_race_main(void *arg) {
-  /* Deliberately NOT deprioritized: nice-ing this thread stretches the
-     bandwidth-heavy analyze across the foreground's whole trial phase
-     (nice rations CPU, not bandwidth - mac_econ's column trials read
-     9s against their 1.1s steady under a lingering race). The
-     scale-trial factor threads it spawns ARE niced, and the stage2
-     wait sleeps; those were the init-lottery culprits. */
+  /* Do not deprioritize the bandwidth-heavy analysis: that extends its
+     interference across the foreground trial.  Spawned scale trials may be
+     niced, and the stage-two wait sleeps. */
   kls_metis_race *race = (kls_metis_race *)arg;
   if (race->metis_wanted) {
 #ifdef KLS_HAVE_MTMETIS
@@ -10967,11 +10928,8 @@ static void *kls_metis_race_main(void *arg) {
     if (race->options.threads >= 2 &&
         (race->giant_symmetric_scalar_fringe_metis_row ||
          (est > 5.0e9 && rn > 0.0 && est / rn >= 1.0e5))) {
-      /* default-on measured WORSE: giants pay 16 x O(n) workspace
-         setup on the race thread (circuit5M_dc +1.5s, Freescale1
-         +1.7s) and memchip's default-path run produced resid 1.0
-         (failed adoption; unreproduced under the force env - do not
-         re-default without solving that) */
+      /* Keep this opt-in: large factors pay per-worker O(n) workspace, and
+         the race path has not established a general accuracy win. */
       kls_klu_pipe_threads =
         race->options.threads > 16 ? 16 : race->options.threads;
     }
@@ -12043,13 +12001,9 @@ static int maybe_select_auto_pivot_tolerance(kls_solver *solver,
   return 1;
 }
 
-/* Pivot-inflated factors: when threshold pivoting inflates the fill
-   well past the symbolic (diagonal-order) estimate, a near-diagonal
-   factorization with refinement-policed solves is often both faster
-   and more accurate (TSOPF-class: fill 125k -> 80k, refactor+solve
-   0.73 -> 0.45 ms/iter, residual e-12 -> e-16 with one correction).
-   Adopt only on a decisive fill win validated by an honest two-solve
-   probe against A itself. */
+/* When threshold pivoting inflates fill, try a near-diagonal factorization
+   guarded by iterative refinement.  Adopt only on a decisive fill win
+   validated by two solves against A itself. */
 static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values,
@@ -12083,11 +12037,8 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
     return 0;
   }
 
-  /* The symbolic lnz/unz are upper bounds (TSOPF: est 149k vs actual
-     125k), so pivot inflation is not detectable from them. Gate on
-     pivoting being ACTIVE (the existing selector's noffdiag signal)
-     plus a bounded trial cost; the 0.75 fill margin and the honest
-     probe below make the actual decision. */
+  /* Symbolic lnz/unz are upper bounds, so use active pivoting and bounded
+     trial cost as gates; realized fill and the solve probe decide. */
   const double actual =
     (double)solver->numeric->lnz + (double)solver->numeric->unz;
   if (solver->common.noffdiag < 16 || !(solver->common.flops > 0.0) ||
@@ -12891,11 +12842,8 @@ static int kls_choose_symbolic_inner(UF_long n,
         options->static_pivoting && options->scale <= 0 &&
         n >= 50000 && n <= 200000 &&
         col_ptr[n] <= 4000000) {
-      /* class ceiling: every block-structured adopter (TSOPF/case9
-         family) sits under 200K/4M - and the detector walk is
-         pathological on huge patterns with near-full rows (rajat29,
-         n=644K, rowdeg 454K: 1.9s of a 2.6s one-shot hunting a class
-         it cannot be) */
+      /* Bound the detector: its graph walk is pathological on huge patterns
+         with near-full rows. */
       /* Below ~50k the ND analyses cost almost nothing and their scores
          steer orientation/scale heuristics the factor-time trial relies
          on; only shortcut where the analysis itself is the cost. */
@@ -13123,11 +13071,8 @@ static int kls_choose_symbolic_inner(UF_long n,
                                    large_spiked_metis_no_btf)) {
     if (n <= 30000u &&
         is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
-      /* Fused dense blocks behind spikes: deficiency ordering dominates
-         nested dissection here (TSOPF: est fill 1.31e5 vs 1.50e5,
-         tight-tol factor 6.4e4 vs 8.0e4) and skipping NodeND saves most
-         of the analysis (13.5 -> ~7ms).  Fall through to METIS if the
-         AMF analysis fails. */
+      /* For small fused dense blocks behind spikes, try deficiency ordering
+         before nested dissection.  Fall through if AMF fails. */
       int amf_status = analyze_with_ordering(
         n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
         symbolic_out, common_out, separator_out);
@@ -13155,11 +13100,8 @@ static int kls_choose_symbolic_inner(UF_long n,
                                 &selected_score, 0, separator_out, NULL);
       }
       if (n <= 30000u) {
-        /* Deficiency ordering often beats nested dissection on the
-           small spiked/fused-block circuit classes routed here (TSOPF:
-           est fill 1.31e5 vs METIS 1.50e5, post-tight-tol factor 6.4e4
-           vs 8.0e4); the extra analyze costs ~1ms at this size and the
-           promotion keeps the strict-estimate margin. */
+        /* At this size, cheaply promote deficiency ordering only under the
+           strict estimate margin. */
         maybe_promote_symbolic_ordering(
           n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
           symbolic_out, common_out, selected_ordering_out,
@@ -14122,9 +14064,8 @@ static int choose_symbolic_for_pattern(UF_long n,
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       options->static_pivoting && n <= 200000 && n >= 64 &&
       col_ptr[n] <= 2000000) {
-    /* block-structured systems (TSOPF, case9) adopt their own
-       ordering at factor time via the block trial; ordering scoring
-       here is one-shot overhead for them.  Pattern-only detector. */
+    /* Block-structured systems adopt their factor-time trial ordering; avoid
+       redundant scoring here.  This is a pattern-only detector. */
     UF_long *bs_perm = NULL, *bs_comp = NULL;
     if (kls_build_block_structured_order(n, col_ptr, row_idx, &bs_perm,
                                          &bs_comp)) {
@@ -14133,9 +14074,8 @@ static int choose_symbolic_for_pattern(UF_long n,
       kls_block_order_proposal = bs_perm;
       kls_options amd_opts = *options;
       amd_opts.ordering = KLS_ORDERING_AMD;
-      /* BTF's maximum transversal is pathological on these patterns
-         (case9: 20ms of a 23ms analyze at n=14K) and the block
-         ordering supersedes the block-triangular form anyway */
+      /* Block ordering supersedes BTF, avoiding its unnecessary maximum
+         transversal. */
       amd_opts.use_btf = 0;
       return choose_symbolic_for_pattern(n, col_ptr, row_idx, &amd_opts,
                                          symbolic_out, common_out,
@@ -14655,14 +14595,10 @@ generic_orientation_comparison:
           options->ordering == KLS_ORDERING_AUTO)) &&
         pthread_create(&transpose_thread, NULL, kls_candidate_analyze_main,
                        &transpose_job) == 0) {
-      /* The two sides are independent full analyzes.  A repeated lifecycle
-         may compare several ordering/BTF candidates even for a cache-sized
-         factor, so use its requested worker budget to overlap orientations;
-         the one-shot path retains the small-input spawn bound.  At larger
-         sizes the per-side cost (twotone: 1.5-2.9s at n=121k) dwarfs the
-         spawn.  The 30k-200k one-shot extension covers AUTO only: an
-         explicit-METIS smoke matrix at n=30600 changes its separator verdict
-         under threaded analyze, unresolved. */
+      /* The sides are independent full analyses.  Repeated lifecycles overlap
+         orientations using their worker budget; one-shot calls retain a
+         small-input spawn bound.  The extension remains AUTO-only because
+         explicit ordering must preserve its separator verdict. */
       threaded = 1;
     }
     normal_status = analyze_candidate(normal, options);
@@ -14861,14 +14797,9 @@ static int select_candidate(kls_pattern_candidate *normal,
     return status;
   }
 
-  /* The pre-static large-spral class replaces the analyze-time
-     symbolic wholesale at factor time (matched pattern, its own METIS
-     analysis), so its analyze never needs to pay nested dissection:
-     engage the (previously dormant) defer-ND mode for the whole
-     analyze.  pre2: two concurrent 3.7s METIS analyses -> AMD-class
-     scoring only.  If the pre-static trial rejects, the factor-time
-     METIS race/promotion machinery recovers nested dissection under
-     timed acceptance as on any other auto-path matrix. */
+  /* A pre-static trial replaces the analyze-time symbolic at factor time, so
+     defer nested dissection during analyze.  On rejection, the normal
+     factor-time race can recover it under timed acceptance. */
   kls_pattern_candidate *ref = normal != NULL ? normal : transpose;
   int defer = 0;
   if (ref != NULL && options != NULL && options->static_pivoting &&
