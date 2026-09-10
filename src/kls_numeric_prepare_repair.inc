@@ -856,14 +856,6 @@ static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
     return 1;
   }
   if (capacity > (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_cols)) ||
-      capacity >
-        (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_seed_cols)) ||
-      capacity >
-        (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_parent)) ||
-      capacity >
-        (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_child_count)) ||
-      capacity >
-        (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_level)) ||
       capacity > (UF_long)(SIZE_MAX / sizeof(*solver->fast_reject_tail_marks))) {
     return 0;
   }
@@ -5741,7 +5733,6 @@ static int kls_ensure_refactor_l_sorted_cache(kls_solver *solver) {
   double *value_storage = NULL;
   if (l_entries > 0u) {
     if (l_entries > (UF_long)(KLS_MAX_ALLOCATION / sizeof(*row_storage)) ||
-        l_entries > (UF_long)(KLS_MAX_ALLOCATION / sizeof(*pos_storage)) ||
         l_entries > (UF_long)(KLS_MAX_ALLOCATION / sizeof(*value_storage))) {
       free(sorted_rows);
       free(sorted_pos);
