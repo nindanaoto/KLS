@@ -3187,9 +3187,8 @@ static _Thread_local int kls_giant_symmetric_scalar_fringe_metis_ctx;
 
 /* A recurring-workload AMF3 portfolio may compare the ordinary clique
    amortization with a lower-power variant on independent worker threads.
-   Keep that implementation parameter thread-local: orientation candidates
-   and speculative ordering jobs can run concurrently, while an explicit
-   KLS_AMF3_POWER remains authoritative for diagnostic callers. */
+   Keep that implementation parameter thread-local because orientation
+   candidates and speculative ordering jobs can run concurrently. */
 /* Published by the winning AUTO tournament on the candidate's own analyze
    thread and immediately copied into kls_pattern_candidate. */
 
@@ -4004,8 +4003,8 @@ static UF_long kls_metis_order(UF_long n,
        kls_metis_order_threads >= (int)metis_ndp_npes)) {
     /* deterministic parallel NodeNDP: serial METIS separators with
        the leaves ordered by concurrent serial NodeND.  Deterministic
-       because KLS_GKRAND (default ON) gives each METIS call its own
-       seeded thread-local MT19937 stream; the concurrent leaves
+       because GKlib gives each METIS call its own seeded thread-local
+       MT19937 stream; the concurrent leaves
        cannot perturb each other.  Admit it when the requested thread
        count covers the leaves or a tuning context forces the trial.
        Ordering quality is arbitrated
