@@ -280,14 +280,6 @@ typedef enum kls_row_segment_input_target_kind {
   KLS_ROW_SEGMENT_INPUT_TARGET_U = 4
 } kls_row_segment_input_target_kind;
 
-typedef enum kls_fragmented_update_target_kind {
-  KLS_FRAGMENTED_UPDATE_TARGET_NONE = 0,
-  KLS_FRAGMENTED_UPDATE_TARGET_EXTERNAL = 1,
-  KLS_FRAGMENTED_UPDATE_TARGET_DENSE = 2,
-  KLS_FRAGMENTED_UPDATE_TARGET_PIVOT = 3,
-  KLS_FRAGMENTED_UPDATE_TARGET_TRAILING = 4
-} kls_fragmented_update_target_kind;
-
 typedef struct kls_row_solve_transpose_plan {
   UF_long *ptr;
   UF_long *cols;
