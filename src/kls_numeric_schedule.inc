@@ -104,23 +104,7 @@ static int kls_snb_prepare(kls_solver *solver) {
     return 0;
   }
   st->wnarrow = 8;
-  {
-    const char *wn = getenv("KLS_SNB_WNARROW");
-    if (wn != NULL && wn[0] != '\0') {
-      st->wnarrow = atoi(wn);
-    }
-  }
-
-  st->wmax = KLS_SNB_WMAX;
-  {
-    const char *wm = getenv("KLS_SNB_WMAX");
-    if (wm != NULL && wm[0] != '\0') {
-      const int parsed = atoi(wm);
-      if (parsed >= 4 && parsed <= 128) {
-        st->wmax = parsed;
-      }
-    }
-  }
+  st->wmax = 32;
   st->nblocks = symbolic->nblocks;
   st->blocks =
     (kls_snb_block *)calloc((size_t)st->nblocks, sizeof(*st->blocks));
@@ -156,14 +140,7 @@ static int kls_snb_prepare(kls_solver *solver) {
     double *lu = (double *)numeric->LUbx[block];
 
     /* greedy zeta amalgamation over sorted L patterns */
-    double snb_zeta = (KLS_SNB_ZETA);
-    {
-      const char *z = getenv("KLS_SNB_ZETA");
-      if (z != NULL && z[0] != '\0') {
-        const double parsed = atof(z);
-        if (parsed >= 0.0 && parsed <= 16.0) snb_zeta = parsed;
-      }
-    }
+    const double snb_zeta = 0.2;
     blk->col2snode = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
     if (blk->col2snode == NULL) { ok = 0; break; }
     int64_t ns = 0;

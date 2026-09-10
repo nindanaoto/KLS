@@ -8313,8 +8313,6 @@ typedef struct kls_snb_state {
   double coop_work_share; /* fraction in cooperative fat-chain snodes */
 } kls_snb_state;
 
-#define KLS_SNB_WMAX 32
-#define KLS_SNB_ZETA 0.2
 #define KLS_SNB_MAX_ENTRIES 150000000
 /* Work threshold above which a lone task on a level is executed by the
  * whole crew (column-sliced edges, row-sliced GEMM/scatter and getrf). */
