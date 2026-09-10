@@ -1076,12 +1076,7 @@ static int test_compact_singleton_run_solve(void) {
     return 0;
   }
 
-  const char *env_name = "KLS_DISABLE_COMPACT_SINGLETON_RUN_SOLVE";
-  const char *env_value = getenv(env_name);
-  const int had_env = env_value != NULL;
-  char *saved_env = env_value != NULL ? strdup(env_value) : NULL;
-  int ok = (env_value == NULL || saved_env != NULL) &&
-    unsetenv(env_name) == 0;
+  int ok = 1;
 
   int32_t p = 0;
   ap[0] = 0;
@@ -1174,52 +1169,11 @@ static int test_compact_singleton_run_solve(void) {
   }
   kls_destroy(solver);
 
-  solver = NULL;
-  memset(x, 0, (size_t)N * sizeof(*x));
-  if (ok && setenv(env_name, "1", 1) != 0) ok = 0;
-  if (ok && !require_ok(kls_create(&solver),
-                        "create disabled compact singleton runs")) ok = 0;
-  if (ok && !require_ok(kls_analyze_csc(
-                          solver, KLS_INDEX_INT32, N, ap, ai, 0, &options),
-                        "analyze disabled compact singleton runs")) ok = 0;
-  if (ok && !require_ok(kls_factor(solver, initial),
-                        "factor disabled compact singleton runs")) ok = 0;
-  if (ok && !require_ok(kls_refactor(solver, changed),
-                        "refactor disabled compact singleton runs")) ok = 0;
-  if (ok && !require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                        "solve disabled compact singleton runs")) ok = 0;
-  memset(&stats, 0, sizeof(stats));
-  stats.struct_size = sizeof(stats);
-  if (ok && !require_ok(kls_get_stats(solver, &stats),
-                        "stats disabled compact singleton runs")) ok = 0;
-  if (ok) {
-    ok = stats.compact_solve_index_bytes == 2 &&
-      stats.compact_solve_singleton_run_blocks == 0 &&
-      stats.compact_solve_singleton_run_max == 0 &&
-      stats.compact_solve_singleton_run_eligible == 0;
-    for (int32_t row = 0; ok && row < N; ++row) {
-      ok = close_enough(x[row], expected[row]);
-    }
-    if (!ok) {
-      fprintf(stderr,
-              "unexpected disabled compact singleton-run result: "
-              "compact=%d singletons=%" PRId64 " run=%" PRId64
-              " eligible=%d"
-              " x0=%.17g xlast=%.17g\n",
-              stats.compact_solve_index_bytes,
-              stats.compact_solve_singleton_run_blocks,
-              stats.compact_solve_singleton_run_max,
-              stats.compact_solve_singleton_run_eligible, x[0], x[N - 1]);
-    }
-  }
-  kls_destroy(solver);
-
   /* Keep the same order and entry count, but turn two thirds of the scalar
      fringe into independent two-cycles.  The longest scalar run remains
      large, while singleton coverage falls below the representation's 75%
      payoff boundary. */
   enum { PAIRED_FRINGE_BEGIN = CORE_N + FRINGE_N / 3 };
-  if (ok && unsetenv(env_name) != 0) ok = 0;
   for (int32_t col = PAIRED_FRINGE_BEGIN; col < N; col += 2) {
     ai[ap[col]] = col + 1;
     ai[ap[col + 1]] = col;
@@ -1274,11 +1228,6 @@ static int test_compact_singleton_run_solve(void) {
   }
   kls_destroy(solver);
 
-  if (!(had_env && saved_env == NULL) &&
-      !restore_env_value(env_name, had_env, saved_env)) {
-    ok = 0;
-  }
-  free(saved_env);
   free(ap);
   free(ai);
   free(initial);

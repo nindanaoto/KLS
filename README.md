@@ -255,8 +255,7 @@ at least 75% are singletons, and one consecutive run spans at least 256
 blocks.  An adopted table also enables refreshed diagonal reciprocals from
 the representation itself.  This applies to explicit as well as automatic
 BTF choices and to scaled or unscaled numerics; factors that do not build the
-compact mirror pay no table cost.  Set
-`KLS_DISABLE_COMPACT_SINGLETON_RUN_SOLVE=1` to disable the capability.
+compact mirror pay no table cost.
 `kls_stats` and benchmark JSON report structural eligibility, the number of
 cached singleton blocks, and the longest cached run.  The former Itaipu and
 MIMO8 dimension/nonzero/block fingerprints and their unrelated row-engine

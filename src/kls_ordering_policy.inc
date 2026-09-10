@@ -1533,8 +1533,7 @@ static int kls_compact_singleton_run_solve_profile(
       solver->symbolic->nblocks < 512u ||
       solver->symbolic->nblocks > (UF_long)UINT16_MAX ||
       solver->symbolic->R[0] != 0u ||
-      solver->symbolic->R[solver->symbolic->nblocks] != solver->n ||
-      getenv("KLS_DISABLE_COMPACT_SINGLETON_RUN_SOLVE") != NULL) {
+      solver->symbolic->R[solver->symbolic->nblocks] != solver->n) {
     return 0;
   }
 
