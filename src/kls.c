@@ -1608,7 +1608,6 @@ typedef struct kls_egraph_refactor_shared {
      resident worker publishes into its own slot; worker zero then releases
      the generation.  This avoids a contended read-modify-write cache line
      between small cluster levels while retaining the pthread fallback. */
-  unsigned char cluster_barrier_padding[64];
   atomic_uint cluster_barrier_generation;
   int use_spin_cluster_barrier;
   /* The low-work single-block cohort is faster with scalar dependency
@@ -1681,19 +1680,6 @@ typedef struct kls_egraph_refactor_worker {
   UF_long byte_workspace_size;
   void *object_workspace;
   UF_long object_workspace_size;
-  UF_long *row_target_stamp_workspace;
-  UF_long *row_target_pos_workspace;
-  unsigned char *row_target_kind_workspace;
-  UF_long row_target_workspace_size;
-  UF_long row_target_stamp;
-  int row_target_valid;
-  UF_long row_target_row;
-  UF_long row_target_row_begin;
-  UF_long row_target_row_end;
-  UF_long row_target_external_len;
-  UF_long row_target_trailing_len;
-  const UF_long *row_target_trailing_cols;
-
   UF_long telemetry_compact_dense_input_rows;
   UF_long telemetry_dense_segment_input_rows;
   UF_long telemetry_sparse_segment_input_rows;

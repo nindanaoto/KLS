@@ -8427,9 +8427,6 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   free(worker.index_workspace);
   free(worker.byte_workspace);
   free(worker.object_workspace);
-  free(worker.row_target_stamp_workspace);
-  free(worker.row_target_pos_workspace);
-  free(worker.row_target_kind_workspace);
 
   if (!groups_ok || shared.invalid || shared.pivot_rejected ||
       (shared.singular && common->halt_if_singular)) {
@@ -14348,9 +14345,6 @@ static void kls_row_refactor_refresh_missing_prefix(
   free(worker.index_workspace);
   free(worker.byte_workspace);
   free(worker.object_workspace);
-  free(worker.row_target_stamp_workspace);
-  free(worker.row_target_pos_workspace);
-  free(worker.row_target_kind_workspace);
 }
 
 static void kls_parallel_row_refactor_mark_group_done(

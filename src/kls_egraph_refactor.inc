@@ -5322,9 +5322,6 @@ static void destroy_egraph_refactor_pool(kls_solver *solver) {
       free(pool->workers[i].index_workspace);
       free(pool->workers[i].byte_workspace);
       free(pool->workers[i].object_workspace);
-      free(pool->workers[i].row_target_stamp_workspace);
-      free(pool->workers[i].row_target_pos_workspace);
-      free(pool->workers[i].row_target_kind_workspace);
     }
   }
   free(pool->threads);
