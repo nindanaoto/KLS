@@ -780,15 +780,6 @@ static void kls_first_separator_queue_plan_free(
 
 static double kls_first_separator_row_input_work(UF_long input_count) {
   const double count = (double)input_count;
-  const char *model = getenv("KLS_FIRST_SEPARATOR_WORK_MODEL");
-  if (model != NULL) {
-    if (strcmp(model, "rows") == 0) {
-      return 1.0;
-    }
-    if (strcmp(model, "linear") == 0) {
-      return count;
-    }
-  }
   return count * count;
 }
 
@@ -12378,12 +12369,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      scale; below it the prediction attempt (build + fill + probe) costs
      more than it saves and the symmetrized pattern can carry extra fill
      into every refactorization. */
-  {
-    const char *dis = getenv("KLS_DISABLE_PREDICTED_FIRST");
-    if (dis != NULL && dis[0] == '1') {
-      return 0;
-    }
-  }
   const int generic_nd_unscored_bounded =
     solver->generic_nd_portfolio_selected &&
     solver->generic_nd_bounded_symmetric_union &&

@@ -4804,7 +4804,6 @@ static void maybe_retry_without_btf(UF_long n,
     (*symbolic)->est_flops > 0.0 &&
     no_btf_symbolic->est_flops <= 0.75 * (*symbolic)->est_flops;
   const int pivoted_representation_pareto =
-    getenv("KLS_DISABLE_GENERIC_PIVOTED_NO_BTF_REPRESENTATION") == NULL &&
     drops_repeated_prediction && repeated_generic_comparison &&
     current_score_known && isfinite(no_btf_score) &&
     no_btf_score <= 0.90 * current_score &&
@@ -4835,7 +4834,6 @@ static void maybe_retry_without_btf(UF_long n,
     generic_comparison && repeated_generic_comparison && !btf_degenerate &&
     kls_generic_btf_capture_candidate != NULL &&
     getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
-    getenv("KLS_DISABLE_AMORTIZED_NONDEGENERATE_NO_BTF") == NULL &&
     current_score_known && current_score > 0.0 &&
     isfinite(no_btf_score) && no_btf_score > 0.0 &&
     (*symbolic)->nblocks > 1u && no_btf_symbolic->nblocks == 1u &&
@@ -4858,7 +4856,6 @@ static void maybe_retry_without_btf(UF_long n,
     (double)(n - (*symbolic)->maxblock) <= 0.02 * (double)n &&
     (kls_generic_btf_capture_candidate != NULL ||
      kls_value_matched_ordering_ctx) &&
-    getenv("KLS_DISABLE_CACHE_RESIDENT_TINY_FRINGE_NO_BTF") == NULL &&
     current_score_known && current_score > 0.0 &&
     isfinite(no_btf_score) && no_btf_score > 0.0 &&
     current_score <= btf_cache_entry_budget &&
@@ -7350,8 +7347,7 @@ static int build_greedy_numeric_row_match(UF_long n,
   *col_scale_out = NULL;
 
   if (improve_matching && compact_missing_diagonal_match &&
-      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") == NULL &&
-      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL) {
+      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") == NULL) {
     return build_compact_numeric_row_match(
       n, nnz, col_ptr, row_idx, numeric_values, row_perm_out, matched_out);
   }
@@ -9446,8 +9442,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     32.0 * (double)weak >= 31.0 * (double)solver->n &&
         32.0 * (double)missing_diagonal >= 31.0 * (double)solver->n;
   if (nearly_missing_diagonal_early_match &&
-      solver->nnz >= 4u * solver->n &&
-      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCHER") == NULL) {
+      solver->nnz >= 4u * solver->n) {
     /* When at least 31/32 of the diagonal is structurally absent, the generic
        matcher must construct essentially the whole transversal.  Use the
        linear compact matching builder as the proposal instead of sorting all
@@ -11279,7 +11274,6 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
       (solver->n < 20000 && !generic_compact_scale_race) ||
-      getenv("KLS_DISABLE_METIS_RACE") != NULL ||
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
       (kls_sparse_fragmented_dominant_btf_symbolic_work(solver) &&
        getenv("KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION") == NULL) ||
@@ -15365,10 +15359,8 @@ static int maybe_factor_generic_btf_value_alternative(
     candidate_symbolic->est_flops > 0.0 &&
     candidate_symbolic->est_flops <= 1.05 * solver->symbolic->est_flops &&
     symbolic_saved_fill * (recurring_frames + solve_frames) >=
-      16.0 * candidate_symbolic_fill &&
-    getenv("KLS_DISABLE_GENERIC_BTF_STORAGE_PARETO") == NULL;
+      16.0 * candidate_symbolic_fill;
   const int hoisted_row_executor_proposal =
-    getenv("KLS_DISABLE_GENERIC_BTF_HOISTED_ROW_RECOVERY") == NULL &&
     solver->n >= 512u && solver->n <= 131072u &&
     candidate_symbolic_fill > 0.0 &&
     candidate_symbolic_fill <= 1000000.0 &&
@@ -15403,8 +15395,7 @@ static int maybe_factor_generic_btf_value_alternative(
   kls_lean_prewarm_job prewarm_job;
   int prewarm_active = 0;
   if (repeated_symbolic_pareto_proposal && solver->options.threads > 1 &&
-      solver->egraph_pool == NULL &&
-      getenv("KLS_DISABLE_GENERIC_BTF_LEAN_PREWARM") == NULL) {
+      solver->egraph_pool == NULL) {
     /* The admitted symbolic has already proved enough recurring savings to
        repay its numeric trial.  Build the representation-independent worker
        crew beside that serial KLU factor so a successful candidate does not

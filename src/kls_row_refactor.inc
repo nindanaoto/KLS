@@ -920,10 +920,6 @@ static void kls_row_solve_steady_audit(kls_solver *solver, double seconds) {
 static int kls_row_refactor_should_defer_value_scatter(
   const kls_solver *solver,
   int check_pivots) {
-  const char *env = getenv("KLS_ROW_REFACTOR_DEFER");
-  if (env != NULL && *env != '\0') {
-    return atoi(env) != 0;
-  }
   if (!check_pivots) {
     return 1;
   }
