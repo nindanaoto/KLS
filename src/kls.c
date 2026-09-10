@@ -1900,7 +1900,6 @@ struct kls_egraph_refactor_pool {
   atomic_int active_workers;
   atomic_int spin_completion;
   atomic_int shutdown;
-  int busy_wait;
   int caller_affinity_cpu;
   unsigned worker_spin_iters;
   int conds_initialized;
@@ -1922,7 +1921,6 @@ struct kls_refactor_pool {
   int created_count;
   atomic_int active_workers;
   atomic_int shutdown;
-  int busy_wait;
   int scratch_dirty;
   int conds_initialized;
   int lock_initialized;
@@ -8489,7 +8487,7 @@ static void *kls_refactor_pool_worker_main(void *arg) {
       if (generation != seen_generation) {
         break;
       }
-      if (pool->busy_wait && spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+      if (spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
         spin++;
         kls_cpu_relax();
         continue;
@@ -8605,7 +8603,6 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
   atomic_init(&pool->generation, 0ul);
   atomic_init(&pool->active_workers, 0);
   atomic_init(&pool->shutdown, 0);
-  pool->busy_wait = 1;
   pool->threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*pool->threads));
   pool->workers =
     (kls_parallel_refactor_worker *)calloc((size_t)thread_count, sizeof(*pool->workers));
@@ -8837,14 +8834,12 @@ static int run_refactor_pool(kls_solver *solver,
   atomic_fetch_add_explicit(&pool->generation, 1ul, memory_order_release);
   pthread_cond_broadcast(&pool->work_cond);
   pthread_mutex_unlock(&shared->lock);
-  if (pool->busy_wait) {
-    unsigned spin = 0;
-    while (atomic_load_explicit(&pool->active_workers,
-                                memory_order_acquire) > 0 &&
-           spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
-      spin++;
-      kls_cpu_relax();
-    }
+  unsigned spin = 0;
+  while (atomic_load_explicit(&pool->active_workers,
+                              memory_order_acquire) > 0 &&
+         spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+    spin++;
+    kls_cpu_relax();
   }
   pthread_mutex_lock(&shared->lock);
   while (atomic_load_explicit(&pool->active_workers,

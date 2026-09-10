@@ -5246,7 +5246,7 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
       if (generation != seen_generation) {
         break;
       }
-      if (pool->busy_wait && spin < pool->worker_spin_iters) {
+      if (spin < pool->worker_spin_iters) {
         spin++;
         kls_cpu_relax();
         continue;
@@ -5454,7 +5454,6 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->spin_completion, 0);
   atomic_init(&pool->shutdown, 0);
   {
-    pool->busy_wait = 1;
     /* These retained numerics return after every update/solve pair.  Keep
        their crew live through that bounded gap so the next numeric phase
        avoids seven condition-variable wakeups. */

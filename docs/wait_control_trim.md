@@ -11,7 +11,8 @@ Keep default pool wait mode, spin durations, adaptive spin increases,
 condition-variable fallback and shutdown synchronization. Delete the spin
 parser and override checks; initialize the two wait-mode fields to their
 existing default of one. The fixed fields and their branches remain for a
-separate cleanup. No default threshold or numerical kernel changes.
+separate cleanup (subsequently completed in `fixed_wait_mode_trim.md`).
+No default threshold or numerical kernel changes.
 Net reduction: 19 source lines. Removed overrides are no longer supported;
 the public C API is unchanged. Earlier diagnostic ablations using these
 names describe historical executables, not current runtime options.
