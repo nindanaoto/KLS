@@ -103,25 +103,6 @@ paired median ratio was 1.002. These measurements support leaving the default
 parallel policy unchanged, but they should not be read as a claim that this
 serial work improves parallel performance.
 
-## Rejected width shortcut
-
-The excluded `klu_width_compare_vendored` target builds the same vendored KLU
-sources in 32-bit and 64-bit modes for an exact diagnostic. The 32-bit route
-was not promoted: on equal-fill development cases its scaled refactor was
-roughly 30--35% slower, and two cases changed AMD fill materially. Input CSC
-indices may still be 32-bit through the public API, but the production numeric
-kernel remains the established 64-bit implementation until a broader result
-justifies another backend.
-
-The broader paired recheck now fingerprints symbolic permutations and numeric
-shape and excludes width-dependent AMD factors. Across 24 comparable hard-gap
-and cross-family holdout matrices, KLU32/KLU64 steady refactor measured
-`0.9918x` geomean; only 6 matrices won by more than 2%. The stricter six-row
-identical-numeric-shape subset measured `1.0053x`. This misses the predeclared
-10% implementation gate, so an authoritative 32-bit backend remains rejected.
-Use `scripts/run_klu_width_suite.py` with the excluded dual-width target to
-repeat the gate on another CPU.
-
 ## Reproduction
 
 Build and run the serial policy with:
