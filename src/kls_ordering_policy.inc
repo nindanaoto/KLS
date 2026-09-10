@@ -8798,10 +8798,6 @@ typedef struct kls_psmetis_spec {
   UF_long *col_ptr;
   UF_long *row_idx;
   double *values;           /* read-only during the speculation */
-  int do_factor;            /* also run the METIS trial factor on the
-                               worker (only when the main-side trial
-                               is serial, keeping the thread budget) */
-  int factor_attempted;
   trilinos_klu_l_numeric *numeric;
   kls_options options;
   trilinos_klu_l_symbolic *symbolic;

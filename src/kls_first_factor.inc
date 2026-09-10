@@ -1521,8 +1521,6 @@ typedef struct kls_row_first_row_stats {
   UF_long supernode_update_rows;
   UF_long supernode_panel_update_groups;
   UF_long supernode_panel_update_rows;
-  UF_long pipeline_prefix_panel_rebuilds;
-  UF_long pipeline_prefix_panel_rebuild_rows;
   UF_long active_rank_pivot_resets;
   UF_long active_rank_pivot_reset_rows;
   UF_long active_rank_pivot_panel_rebuilds;
@@ -5053,7 +5051,6 @@ struct kls_row_first_pipeline_worker {
   kls_row_first_entries u_entries;
   kls_row_first_partial_row *active_state;
   UF_long active_order_epoch;
-  kls_row_first_partial_row state_storage;
 
   int external_update_active;
   UF_long rows;
