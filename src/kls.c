@@ -10087,13 +10087,13 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     kls_signal_metis_race_values(solver, numeric_values);
   }
-  int kls_first_factor_used = !had_numeric &&
+  int value_alternative_used = !had_numeric &&
     maybe_factor_generic_btf_value_alternative(
       solver, numeric_values, &elapsed);
-  if (kls_first_factor_used) {
+  if (value_alternative_used) {
     kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLU_FIRST);
   }
-  if (!kls_first_factor_used) {
+  if (!value_alternative_used) {
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (!had_numeric && solver->numeric == NULL) {
       /* NOT deferrable: without this ordering TSOPF's serial factor
@@ -10619,7 +10619,7 @@ int kls_factor(kls_solver *solver, const double *values) {
        exact-repeat refactor needs neither a new numeric nor this trial. */
     solver->rowmatch_deferred = 1;
   } else if (maybe_select_auto_row_match(solver, &elapsed, numeric_values)) {
-    kls_first_factor_used = 0;
+    value_alternative_used = 0;
     promoted_numeric = 1;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
     diagnostics_have_flops = 1;
@@ -10655,7 +10655,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->metis_race_deferred_invalid = promoted_numeric;
   } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
                                       promoted_numeric)) {
-    kls_first_factor_used = 0;
+    value_alternative_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
@@ -10677,7 +10677,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   } else if (allow_deferred_generic_tight_pivot &&
       maybe_select_tight_pivot_tolerance(
         solver, &elapsed, numeric_values, &early_tight_pivot_attempted)) {
-    kls_first_factor_used = 0;
+    value_alternative_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
@@ -10700,7 +10700,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->auto_scale_deferred = 1;
   } else if (maybe_select_auto_scale(solver, &elapsed, numeric_values,
                                      promoted_numeric)) {
-    kls_first_factor_used = 0;
+    value_alternative_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
@@ -10714,7 +10714,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->metis_race_deferred_invalid = 1;
       } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
                                           1)) {
-        kls_first_factor_used = 0;
+        value_alternative_used = 0;
         diagnostics_have_flops = 1;
         diagnostics_have_rcond = 0;
       }
@@ -10727,7 +10727,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   }
   if (!kls_oneshot_lean &&
       maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
-    kls_first_factor_used = 0;
+    value_alternative_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
@@ -10737,7 +10737,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       !solver->tight_pivot_deferred &&
       maybe_select_tight_pivot_tolerance(
         solver, &elapsed, numeric_values, NULL)) {
-    kls_first_factor_used = 0;
+    value_alternative_used = 0;
     promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
@@ -10754,7 +10754,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     solver->rowmatch_deferred = 1;
   } else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                                     numeric_values)) {
-    kls_first_factor_used = 0;
+    value_alternative_used = 0;
     promoted_numeric = 1;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
     diagnostics_have_flops = 1;
@@ -10899,7 +10899,7 @@ int kls_factor(kls_solver *solver, const double *values) {
       }
       goto factor_preps_deferred_exit;
     }
-    if (kls_first_factor_used && solver->common.status >= TRILINOS_KLU_OK) {
+    if (value_alternative_used && solver->common.status >= TRILINOS_KLU_OK) {
       const double start = kls_now_seconds();
       (void)kls_prepare_auto_row_refactor_from_numeric(solver);
       elapsed += kls_now_seconds() - start;
@@ -16177,7 +16177,6 @@ const char *kls_factor_path_name(kls_factor_path path) {
     case KLS_FACTOR_PATH_KLS_FAST_REFACTOR: return "kls_fast_refactor";
     case KLS_FACTOR_PATH_KLU_FALLBACK: return "klu_fallback";
     case KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST: return "prestatic_klu_first";
-    case KLS_FACTOR_PATH_KLS_FIRST: return "kls_first";
     case KLS_FACTOR_PATH_PREDICTED_FIRST: return "predicted_first";
     case KLS_FACTOR_PATH_SERIAL: return "serial";
     default: return "unknown";
