@@ -1635,9 +1635,6 @@ static UF_long kls_i32_solve(kls_solver *solver,
   return 1;
 }
 
-static void kls_run_deferred_factor_preps(kls_solver *solver,
-                                           const double *numeric_values);
-
 /* KLU's threshold pivoting prefers the symbolic diagonal when it is at least
    tol times the largest active-column entry.  Model max-row scaling in the
    actual symbolic BTF frame and count crossings of that same tolerance.  A

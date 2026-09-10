@@ -2374,7 +2374,7 @@ static KLS_ALWAYS_INLINE int kls_lean_forward_initial_value(
   double *value) {
   if (shared == NULL || solver == NULL || value == NULL ||
       shared->lean_forward_solve_work == NULL) {
-    if (value != NULL) *value = 0.0;
+    KLS_SET_OPTIONAL_OUTPUT(value, 0.0);
     return 1;
   }
   if (shared->lean_forward_solve_rhs != NULL) {
