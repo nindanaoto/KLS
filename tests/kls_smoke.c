@@ -9908,7 +9908,6 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
   const char *env_names[] = {
     "KLS_ENABLE_ROW_REFACTOR",
     "KLS_ENABLE_CHECKED_ROW_REFACTOR",
-    "KLS_DISABLE_I32_SOLVE",
     "KLS_DISABLE_SNB_REFACTOR",
     "KLS_SNB_FORCE_TRIAL"
   };
@@ -9937,7 +9936,6 @@ static int test_deferred_sort_rebuilds_compact_solve(int interleaved,
   if (ok &&
       (setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0 ||
        setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0 ||
-       unsetenv("KLS_DISABLE_I32_SOLVE") != 0 ||
        unsetenv("KLS_DISABLE_SNB_REFACTOR") != 0 ||
        (cooperative ? setenv("KLS_SNB_FORCE_TRIAL", "1", 1)
                     : unsetenv("KLS_SNB_FORCE_TRIAL")) != 0)) {

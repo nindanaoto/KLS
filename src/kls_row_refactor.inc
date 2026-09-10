@@ -5805,19 +5805,12 @@ static int kls_estimate_row_refactor_lower_bound_work(kls_solver *solver,
   return 1;
 }
 
-static void kls_reset_auto_row_refactor_prepare_stats(kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-  solver->row_refactor_auto_native_row_panel = 0;
-  solver->row_refactor_auto_lower_bound_rejected = 0;
-}
-
 static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
   if (solver == NULL) {
     return 0;
   }
-  kls_reset_auto_row_refactor_prepare_stats(solver);
+  solver->row_refactor_auto_native_row_panel = 0;
+  solver->row_refactor_auto_lower_bound_rejected = 0;
   if (solver->refactor_dependency_work > 0.0) {
     double lower_bound_work = 0.0;
     if (kls_estimate_row_refactor_lower_bound_work(solver,

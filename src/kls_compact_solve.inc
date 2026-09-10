@@ -500,13 +500,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     solver->i32solve_state = -1;
     return 0;
   }
-  {
-    const char *dis = getenv("KLS_DISABLE_I32_SOLVE");
-    if (dis != NULL && dis[0] == '1') {
-      solver->i32solve_state = -1;
-      return 0;
-    }
-  }
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   if (symbolic == NULL || numeric == NULL || numeric->LUbx == NULL ||
