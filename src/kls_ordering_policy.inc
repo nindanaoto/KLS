@@ -16103,14 +16103,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_last_btf_scalar_run_exec_entries;
   solver->stats.refactor_last_btf_scalar_run_exec_max_rows =
     (int64_t)solver->refactor_last_btf_scalar_run_exec_max_rows;
-  solver->stats.refactor_btf_scalar_run_exec_count =
-    (int64_t)solver->refactor_btf_scalar_run_exec_count;
-  solver->stats.refactor_btf_scalar_run_exec_rows =
-    (int64_t)solver->refactor_btf_scalar_run_exec_rows;
-  solver->stats.refactor_btf_scalar_run_exec_entries =
-    (int64_t)solver->refactor_btf_scalar_run_exec_entries;
-  solver->stats.refactor_btf_scalar_run_exec_max_rows =
-    (int64_t)solver->refactor_btf_scalar_run_exec_max_rows;
   solver->stats.row_refactor_group_count =
     (int64_t)solver->row_refactor_group_count;
   solver->stats.row_refactor_group_single_count =
@@ -16266,10 +16258,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_separator_flop_pipeline_group_count;
   solver->stats.row_refactor_separator_flop_closure_group_count =
     (int64_t)solver->row_refactor_separator_flop_closure_group_count;
-  solver->stats.kls_tail_last_mapped_columns =
-    (int64_t)solver->kls_tail_last_mapped_columns;
-  solver->stats.kls_tail_mapped_column_count =
-    (int64_t)solver->kls_tail_mapped_column_count;
   solver->stats.row_refactor_last_done_bitmap =
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =

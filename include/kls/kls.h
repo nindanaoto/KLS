@@ -325,8 +325,6 @@ typedef struct kls_stats {
   int64_t row_refactor_compact_dense_panel_persistent_run_count;
   int64_t row_refactor_last_private_ready_groups;
   int64_t row_refactor_private_ready_group_count;
-  int64_t kls_tail_last_mapped_columns;
-  int64_t kls_tail_mapped_column_count;
   int64_t separator_analyzed_rows;
   int64_t separator_component_count;
   int64_t separator_private_components;
@@ -548,10 +546,6 @@ typedef struct kls_stats {
   int64_t refactor_last_btf_scalar_run_exec_rows;
   int64_t refactor_last_btf_scalar_run_exec_entries;
   int64_t refactor_last_btf_scalar_run_exec_max_rows;
-  int64_t refactor_btf_scalar_run_exec_count;
-  int64_t refactor_btf_scalar_run_exec_rows;
-  int64_t refactor_btf_scalar_run_exec_entries;
-  int64_t refactor_btf_scalar_run_exec_max_rows;
   int verified_rhs_reused;
   int64_t verified_rhs_reuse_count;
   /* Zero means no compact triangular-solve mirror is prepared. */

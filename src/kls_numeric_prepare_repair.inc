@@ -4477,8 +4477,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
   *skipped_columns_out = skipped_columns;
   *skipped_work_out = skipped_work;
   *exact_mask_used_out = use_restart_mask && promoted_gap_columns == 0;
-  solver->kls_tail_last_mapped_columns += mapped_columns;
-  solver->kls_tail_mapped_column_count += mapped_columns;
   return 1;
 
 fail:

@@ -1263,10 +1263,6 @@ struct kls_solver {
   UF_long refactor_last_btf_scalar_run_exec_rows;
   UF_long refactor_last_btf_scalar_run_exec_entries;
   UF_long refactor_last_btf_scalar_run_exec_max_rows;
-  UF_long refactor_btf_scalar_run_exec_count;
-  UF_long refactor_btf_scalar_run_exec_rows;
-  UF_long refactor_btf_scalar_run_exec_entries;
-  UF_long refactor_btf_scalar_run_exec_max_rows;
 
   UF_long refactor_cluster_level_count;
   UF_long refactor_pipeline_column_count;
@@ -1416,8 +1412,6 @@ struct kls_solver {
   UF_long fast_reject_tail_seed_count;
   int fast_reject_tail_seed_valid;
   int fast_reject_tail_seed_block_suffix;
-  UF_long kls_tail_last_mapped_columns;
-  UF_long kls_tail_mapped_column_count;
   int factor_etree_stats_valid;
   int parallel_model_stats_valid;
   kls_separator_analysis separator;
@@ -5805,8 +5799,6 @@ static void kls_clear_tail_last_stats(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  solver->kls_tail_last_mapped_columns = 0;
-  solver->stats.kls_tail_last_mapped_columns = 0;
 }
 
 static void kls_set_last_factor_path(kls_solver *solver,

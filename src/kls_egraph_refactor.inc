@@ -7517,14 +7517,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     btf_scalar_run_exec_entries;
   solver->refactor_last_btf_scalar_run_exec_max_rows =
     btf_scalar_run_exec_max_rows;
-  solver->refactor_btf_scalar_run_exec_count += btf_scalar_run_exec_runs;
-  solver->refactor_btf_scalar_run_exec_rows += btf_scalar_run_exec_rows;
-  solver->refactor_btf_scalar_run_exec_entries += btf_scalar_run_exec_entries;
-  if (btf_scalar_run_exec_max_rows >
-      solver->refactor_btf_scalar_run_exec_max_rows) {
-    solver->refactor_btf_scalar_run_exec_max_rows =
-      btf_scalar_run_exec_max_rows;
-  }
 
   if (shared->invalid || shared->pivot_rejected ||
       (shared->singular && common->halt_if_singular)) {
