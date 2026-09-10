@@ -938,12 +938,6 @@ struct kls_solver {
   unsigned char *row_refactor_group_shape_valid;
   UF_long row_refactor_pattern_n;
   UF_long row_refactor_group_count;
-  UF_long row_refactor_group_single_count;
-  UF_long row_refactor_group_batch_count;
-  UF_long row_refactor_group_batch_rows;
-  UF_long row_refactor_group_batch_max_width;
-  UF_long row_refactor_group_batch_width_le_4_count;
-  UF_long row_refactor_group_batch_width_le_8_count;
   UF_long row_refactor_group_scalar_candidate_count;
   UF_long row_refactor_group_scalar_candidate_rows;
   UF_long row_refactor_group_scalar_short_count;
@@ -953,12 +947,6 @@ struct kls_solver {
   UF_long row_refactor_group_scalar_stop_next_segment_count;
   UF_long row_refactor_group_scalar_stop_max_width_count;
   UF_long row_refactor_group_scalar_stop_matrix_end_count;
-  UF_long row_refactor_group_generic_count;
-  UF_long row_refactor_group_generic_rows;
-  UF_long row_refactor_group_generic_max_width;
-  UF_long row_refactor_group_dense_count;
-  UF_long row_refactor_group_dense_rows;
-  UF_long row_refactor_group_dense_max_width;
   double row_refactor_group_single_work;
   double row_refactor_group_batch_work;
   double row_refactor_group_generic_work;
@@ -2913,12 +2901,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_producer_run_len = NULL;
   solver->row_refactor_pattern_n = 0;
   solver->row_refactor_group_count = 0;
-  solver->row_refactor_group_single_count = 0;
-  solver->row_refactor_group_batch_count = 0;
-  solver->row_refactor_group_batch_rows = 0;
-  solver->row_refactor_group_batch_max_width = 0;
-  solver->row_refactor_group_batch_width_le_4_count = 0;
-  solver->row_refactor_group_batch_width_le_8_count = 0;
   solver->row_refactor_group_scalar_candidate_count = 0;
   solver->row_refactor_group_scalar_candidate_rows = 0;
   solver->row_refactor_group_scalar_short_count = 0;
@@ -2928,12 +2910,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_group_scalar_stop_next_segment_count = 0;
   solver->row_refactor_group_scalar_stop_max_width_count = 0;
   solver->row_refactor_group_scalar_stop_matrix_end_count = 0;
-  solver->row_refactor_group_generic_count = 0;
-  solver->row_refactor_group_generic_rows = 0;
-  solver->row_refactor_group_generic_max_width = 0;
-  solver->row_refactor_group_dense_count = 0;
-  solver->row_refactor_group_dense_rows = 0;
-  solver->row_refactor_group_dense_max_width = 0;
   solver->row_refactor_group_single_work = 0.0;
   solver->row_refactor_group_batch_work = 0.0;
   solver->row_refactor_group_generic_work = 0.0;
@@ -3122,12 +3098,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
 
 typedef struct {
   UF_long group_count;
-  UF_long group_single_count;
-  UF_long group_batch_count;
-  UF_long group_batch_rows;
-  UF_long group_batch_max_width;
-  UF_long group_batch_width_le_4_count;
-  UF_long group_batch_width_le_8_count;
   UF_long group_scalar_candidate_count;
   UF_long group_scalar_candidate_rows;
   UF_long group_scalar_short_count;
@@ -3137,12 +3107,6 @@ typedef struct {
   UF_long group_scalar_stop_next_segment_count;
   UF_long group_scalar_stop_max_width_count;
   UF_long group_scalar_stop_matrix_end_count;
-  UF_long group_generic_count;
-  UF_long group_generic_rows;
-  UF_long group_generic_max_width;
-  UF_long group_dense_count;
-  UF_long group_dense_rows;
-  UF_long group_dense_max_width;
   double group_single_work;
   double group_batch_work;
   double group_generic_work;
@@ -3329,15 +3293,6 @@ static void kls_save_row_refactor_diagnostics(
     return;
   }
   diag->group_count = solver->row_refactor_group_count;
-  diag->group_single_count = solver->row_refactor_group_single_count;
-  diag->group_batch_count = solver->row_refactor_group_batch_count;
-  diag->group_batch_rows = solver->row_refactor_group_batch_rows;
-  diag->group_batch_max_width =
-    solver->row_refactor_group_batch_max_width;
-  diag->group_batch_width_le_4_count =
-    solver->row_refactor_group_batch_width_le_4_count;
-  diag->group_batch_width_le_8_count =
-    solver->row_refactor_group_batch_width_le_8_count;
   diag->group_scalar_candidate_count =
     solver->row_refactor_group_scalar_candidate_count;
   diag->group_scalar_candidate_rows =
@@ -3356,14 +3311,6 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_group_scalar_stop_max_width_count;
   diag->group_scalar_stop_matrix_end_count =
     solver->row_refactor_group_scalar_stop_matrix_end_count;
-  diag->group_generic_count = solver->row_refactor_group_generic_count;
-  diag->group_generic_rows = solver->row_refactor_group_generic_rows;
-  diag->group_generic_max_width =
-    solver->row_refactor_group_generic_max_width;
-  diag->group_dense_count = solver->row_refactor_group_dense_count;
-  diag->group_dense_rows = solver->row_refactor_group_dense_rows;
-  diag->group_dense_max_width =
-    solver->row_refactor_group_dense_max_width;
   diag->group_single_work = solver->row_refactor_group_single_work;
   diag->group_batch_work = solver->row_refactor_group_batch_work;
   diag->group_generic_work = solver->row_refactor_group_generic_work;
@@ -3681,15 +3628,6 @@ static void kls_restore_row_refactor_diagnostics(
     return;
   }
   solver->row_refactor_group_count = diag->group_count;
-  solver->row_refactor_group_single_count = diag->group_single_count;
-  solver->row_refactor_group_batch_count = diag->group_batch_count;
-  solver->row_refactor_group_batch_rows = diag->group_batch_rows;
-  solver->row_refactor_group_batch_max_width =
-    diag->group_batch_max_width;
-  solver->row_refactor_group_batch_width_le_4_count =
-    diag->group_batch_width_le_4_count;
-  solver->row_refactor_group_batch_width_le_8_count =
-    diag->group_batch_width_le_8_count;
   solver->row_refactor_group_scalar_candidate_count =
     diag->group_scalar_candidate_count;
   solver->row_refactor_group_scalar_candidate_rows =
@@ -3708,14 +3646,6 @@ static void kls_restore_row_refactor_diagnostics(
     diag->group_scalar_stop_max_width_count;
   solver->row_refactor_group_scalar_stop_matrix_end_count =
     diag->group_scalar_stop_matrix_end_count;
-  solver->row_refactor_group_generic_count = diag->group_generic_count;
-  solver->row_refactor_group_generic_rows = diag->group_generic_rows;
-  solver->row_refactor_group_generic_max_width =
-    diag->group_generic_max_width;
-  solver->row_refactor_group_dense_count = diag->group_dense_count;
-  solver->row_refactor_group_dense_rows = diag->group_dense_rows;
-  solver->row_refactor_group_dense_max_width =
-    diag->group_dense_max_width;
   solver->row_refactor_group_single_work = diag->group_single_work;
   solver->row_refactor_group_batch_work = diag->group_batch_work;
   solver->row_refactor_group_generic_work = diag->group_generic_work;
