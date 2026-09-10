@@ -1030,15 +1030,11 @@ struct kls_solver {
   UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_private_ready_group_count;
   int row_refactor_last_separator_private_queue;
-  UF_long row_refactor_separator_private_queue_run_count;
   UF_long row_refactor_last_separator_private_components;
-  UF_long row_refactor_separator_private_component_count;
   int row_refactor_last_separator_flop_queue;
   UF_long row_refactor_separator_flop_queue_run_count;
   int row_refactor_last_separator_flop_ordered_private;
-  UF_long row_refactor_separator_flop_ordered_private_run_count;
   UF_long row_refactor_last_separator_flop_components;
-  UF_long row_refactor_separator_flop_component_count;
   UF_long row_refactor_last_separator_flop_private_groups;
   UF_long row_refactor_last_separator_flop_pipeline_groups;
   UF_long row_refactor_last_separator_flop_closure_groups;
@@ -1047,9 +1043,6 @@ struct kls_solver {
   UF_long row_refactor_last_separator_flop_private_max_groups;
   double row_refactor_last_separator_flop_private_min_work;
   double row_refactor_last_separator_flop_private_max_work;
-  UF_long row_refactor_separator_flop_private_group_count;
-  UF_long row_refactor_separator_flop_pipeline_group_count;
-  UF_long row_refactor_separator_flop_closure_group_count;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_dense_segment_count;
   double row_refactor_dense_segment_trailing_entries;
@@ -1083,7 +1076,6 @@ struct kls_solver {
   UF_long row_refactor_native_row_panel_blocked_entries;
   UF_long row_refactor_native_row_panel_fallback_count;
   UF_long row_refactor_native_row_panel_checked_reject_count;
-  UF_long row_refactor_native_row_panel_auto_disable_count;
   UF_long row_refactor_last_compact_dense_panel_direct_input_rows;
   UF_long row_refactor_compact_dense_panel_direct_input_rows;
   UF_long row_refactor_last_compact_panel_solve_values;
@@ -2947,15 +2939,11 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_local_ready_group_count = 0;
   solver->row_refactor_private_ready_group_count = 0;
   solver->row_refactor_last_separator_private_queue = 0;
-  solver->row_refactor_separator_private_queue_run_count = 0;
   solver->row_refactor_last_separator_private_components = 0;
-  solver->row_refactor_separator_private_component_count = 0;
   solver->row_refactor_last_separator_flop_queue = 0;
   solver->row_refactor_separator_flop_queue_run_count = 0;
   solver->row_refactor_last_separator_flop_ordered_private = 0;
-  solver->row_refactor_separator_flop_ordered_private_run_count = 0;
   solver->row_refactor_last_separator_flop_components = 0;
-  solver->row_refactor_separator_flop_component_count = 0;
   solver->row_refactor_last_separator_flop_private_groups = 0;
   solver->row_refactor_last_separator_flop_pipeline_groups = 0;
   solver->row_refactor_last_separator_flop_closure_groups = 0;
@@ -2964,9 +2952,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_last_separator_flop_private_max_groups = 0;
   solver->row_refactor_last_separator_flop_private_min_work = 0.0;
   solver->row_refactor_last_separator_flop_private_max_work = 0.0;
-  solver->row_refactor_separator_flop_private_group_count = 0;
-  solver->row_refactor_separator_flop_pipeline_group_count = 0;
-  solver->row_refactor_separator_flop_closure_group_count = 0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_dense_segment_count = 0;
   solver->row_refactor_dense_segment_trailing_entries = 0.0;
@@ -2993,7 +2978,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_native_row_panel_blocked_entries = 0;
   solver->row_refactor_native_row_panel_fallback_count = 0;
   solver->row_refactor_native_row_panel_checked_reject_count = 0;
-  solver->row_refactor_native_row_panel_auto_disable_count = 0;
   solver->row_refactor_last_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_last_compact_panel_solve_values = 0;
@@ -3118,15 +3102,11 @@ typedef struct {
   UF_long local_ready_group_count;
   UF_long private_ready_group_count;
   int last_separator_private_queue;
-  UF_long separator_private_queue_run_count;
   UF_long last_separator_private_components;
-  UF_long separator_private_component_count;
   int last_separator_flop_queue;
   UF_long separator_flop_queue_run_count;
   int last_separator_flop_ordered_private;
-  UF_long separator_flop_ordered_private_run_count;
   UF_long last_separator_flop_components;
-  UF_long separator_flop_component_count;
   UF_long last_separator_flop_private_groups;
   UF_long last_separator_flop_pipeline_groups;
   UF_long last_separator_flop_closure_groups;
@@ -3135,9 +3115,6 @@ typedef struct {
   UF_long last_separator_flop_private_max_groups;
   double last_separator_flop_private_min_work;
   double last_separator_flop_private_max_work;
-  UF_long separator_flop_private_group_count;
-  UF_long separator_flop_pipeline_group_count;
-  UF_long separator_flop_closure_group_count;
   UF_long segment_count;
   UF_long dense_segment_count;
   double dense_segment_trailing_entries;
@@ -3155,7 +3132,6 @@ typedef struct {
   UF_long compact_dense_panel_blocked_entries;
   int native_row_panel_enabled;
   int last_native_row_panel;
-  UF_long native_row_panel_auto_disable_count;
   UF_long native_row_panel_count;
   UF_long native_row_panel_rows;
   UF_long native_row_panel_entries;
@@ -3317,24 +3293,16 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_private_ready_group_count;
   diag->last_separator_private_queue =
     solver->row_refactor_last_separator_private_queue;
-  diag->separator_private_queue_run_count =
-    solver->row_refactor_separator_private_queue_run_count;
   diag->last_separator_private_components =
     solver->row_refactor_last_separator_private_components;
-  diag->separator_private_component_count =
-    solver->row_refactor_separator_private_component_count;
   diag->last_separator_flop_queue =
     solver->row_refactor_last_separator_flop_queue;
   diag->separator_flop_queue_run_count =
     solver->row_refactor_separator_flop_queue_run_count;
   diag->last_separator_flop_ordered_private =
     solver->row_refactor_last_separator_flop_ordered_private;
-  diag->separator_flop_ordered_private_run_count =
-    solver->row_refactor_separator_flop_ordered_private_run_count;
   diag->last_separator_flop_components =
     solver->row_refactor_last_separator_flop_components;
-  diag->separator_flop_component_count =
-    solver->row_refactor_separator_flop_component_count;
   diag->last_separator_flop_private_groups =
     solver->row_refactor_last_separator_flop_private_groups;
   diag->last_separator_flop_pipeline_groups =
@@ -3351,12 +3319,6 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_last_separator_flop_private_min_work;
   diag->last_separator_flop_private_max_work =
     solver->row_refactor_last_separator_flop_private_max_work;
-  diag->separator_flop_private_group_count =
-    solver->row_refactor_separator_flop_private_group_count;
-  diag->separator_flop_pipeline_group_count =
-    solver->row_refactor_separator_flop_pipeline_group_count;
-  diag->separator_flop_closure_group_count =
-    solver->row_refactor_separator_flop_closure_group_count;
   diag->segment_count = solver->row_refactor_segment_count;
   diag->dense_segment_count = solver->row_refactor_dense_segment_count;
   diag->dense_segment_trailing_entries =
@@ -3389,8 +3351,6 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_native_row_panel_enabled;
   diag->last_native_row_panel =
     solver->row_refactor_last_native_row_panel;
-  diag->native_row_panel_auto_disable_count =
-    solver->row_refactor_native_row_panel_auto_disable_count;
   diag->native_row_panel_count =
     solver->row_refactor_native_row_panel_count;
   diag->native_row_panel_rows =
@@ -3620,24 +3580,16 @@ static void kls_restore_row_refactor_diagnostics(
     diag->private_ready_group_count;
   solver->row_refactor_last_separator_private_queue =
     diag->last_separator_private_queue;
-  solver->row_refactor_separator_private_queue_run_count =
-    diag->separator_private_queue_run_count;
   solver->row_refactor_last_separator_private_components =
     diag->last_separator_private_components;
-  solver->row_refactor_separator_private_component_count =
-    diag->separator_private_component_count;
   solver->row_refactor_last_separator_flop_queue =
     diag->last_separator_flop_queue;
   solver->row_refactor_separator_flop_queue_run_count =
     diag->separator_flop_queue_run_count;
   solver->row_refactor_last_separator_flop_ordered_private =
     diag->last_separator_flop_ordered_private;
-  solver->row_refactor_separator_flop_ordered_private_run_count =
-    diag->separator_flop_ordered_private_run_count;
   solver->row_refactor_last_separator_flop_components =
     diag->last_separator_flop_components;
-  solver->row_refactor_separator_flop_component_count =
-    diag->separator_flop_component_count;
   solver->row_refactor_last_separator_flop_private_groups =
     diag->last_separator_flop_private_groups;
   solver->row_refactor_last_separator_flop_pipeline_groups =
@@ -3654,12 +3606,6 @@ static void kls_restore_row_refactor_diagnostics(
     diag->last_separator_flop_private_min_work;
   solver->row_refactor_last_separator_flop_private_max_work =
     diag->last_separator_flop_private_max_work;
-  solver->row_refactor_separator_flop_private_group_count =
-    diag->separator_flop_private_group_count;
-  solver->row_refactor_separator_flop_pipeline_group_count =
-    diag->separator_flop_pipeline_group_count;
-  solver->row_refactor_separator_flop_closure_group_count =
-    diag->separator_flop_closure_group_count;
   solver->row_refactor_segment_count = diag->segment_count;
   solver->row_refactor_dense_segment_count = diag->dense_segment_count;
   solver->row_refactor_dense_segment_trailing_entries =
@@ -3692,8 +3638,6 @@ static void kls_restore_row_refactor_diagnostics(
     diag->native_row_panel_enabled;
   solver->row_refactor_last_native_row_panel =
     diag->last_native_row_panel;
-  solver->row_refactor_native_row_panel_auto_disable_count =
-    diag->native_row_panel_auto_disable_count;
   solver->row_refactor_native_row_panel_count =
     diag->native_row_panel_count;
   solver->row_refactor_native_row_panel_rows =
@@ -5998,9 +5942,7 @@ static void kls_record_row_refactor_separator_private_queue(
     return;
   }
   solver->row_refactor_last_separator_private_queue = 1;
-  solver->row_refactor_separator_private_queue_run_count++;
   solver->row_refactor_last_separator_private_components = component_count;
-  solver->row_refactor_separator_private_component_count += component_count;
 }
 
 static void kls_record_row_refactor_separator_flop_queue(
@@ -6023,11 +5965,7 @@ static void kls_record_row_refactor_separator_flop_queue(
   solver->row_refactor_separator_flop_queue_run_count++;
   solver->row_refactor_last_separator_flop_ordered_private =
     ordered_private ? 1 : 0;
-  if (ordered_private) {
-    solver->row_refactor_separator_flop_ordered_private_run_count++;
-  }
   solver->row_refactor_last_separator_flop_components = component_count;
-  solver->row_refactor_separator_flop_component_count += component_count;
   solver->row_refactor_last_separator_flop_private_groups = private_groups;
   solver->row_refactor_last_separator_flop_pipeline_groups = pipeline_groups;
   solver->row_refactor_last_separator_flop_closure_groups = closure_groups;
@@ -6040,9 +5978,6 @@ static void kls_record_row_refactor_separator_flop_queue(
     private_min_work;
   solver->row_refactor_last_separator_flop_private_max_work =
     private_max_work;
-  solver->row_refactor_separator_flop_private_group_count += private_groups;
-  solver->row_refactor_separator_flop_pipeline_group_count += pipeline_groups;
-  solver->row_refactor_separator_flop_closure_group_count += closure_groups;
 }
 
 static void kls_record_row_refactor_defer_value_scatter_run(

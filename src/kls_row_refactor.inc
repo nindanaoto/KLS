@@ -10940,7 +10940,6 @@ static void kls_maybe_disable_native_row_panel_auto(
     return;
   }
   solver->row_refactor_native_row_panel_auto_disabled = 1;
-  solver->row_refactor_native_row_panel_auto_disable_count++;
   solver->row_refactor_native_row_panel_enabled = 0;
 }
 
