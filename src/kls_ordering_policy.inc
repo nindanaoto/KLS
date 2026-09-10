@@ -12287,9 +12287,6 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
 }
 
 static int should_try_auto_metis(const kls_solver *solver) {
-  if (getenv("KLS_DISABLE_AUTO_METIS_PROMOTION") != NULL) {
-    return 0;
-  }
   if (solver->auto_metis_checked || solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->stats.selected_ordering == KLS_ORDERING_METIS ||
       solver->numeric == NULL) {
@@ -12505,10 +12502,7 @@ static int maybe_promote_auto_metis(kls_solver *solver,
      schedule quality both ways (ASIC_320ks: the race-built ordering
      refactors 20% faster than the analyze-selected one; other configs
      regress), so the incumbent stays alive until measurement. */
-  const char *timed_env = getenv("KLS_METIS_PROMOTION_TIMED");
-  const int timed_promotion =
-    solver->n < 1000000 &&
-    (timed_env == NULL || timed_env[0] == '\0' || atoi(timed_env) != 0);
+  const int timed_promotion = solver->n < 1000000;
   double incumbent_ref_seconds = -1.0;
   if (timed_promotion && numeric_values != NULL) {
     /* Promotion runs before the ordinary first-update preparation point.
@@ -13269,8 +13263,6 @@ generic_ordering_tournament:;
   const kls_ordering amf_spec_ordering[3] = {
     KLS_ORDERING_AMF, KLS_ORDERING_AMMF, KLS_ORDERING_AMF3
   };
-  const int amf_trial_disabled =
-    getenv("KLS_DISABLE_AMF_TRIAL") != NULL;
   /* Sum of squared column degrees is a cheap upper-level proxy for the pair
      visits that a different elimination ordering can save.  Charge it over
      the caller's complete numeric horizon; below 5e8 visits, another full
@@ -13314,7 +13306,6 @@ generic_ordering_tournament:;
     isfinite(ordering_pattern_bytes) &&
     ordering_pattern_bytes <= 128.0 * 1024.0 * 1024.0;
   const int stage_cache_ordering_portfolio =
-    getenv("KLS_DISABLE_CACHE_ORDERING_PORTFOLIO_STAGING") == NULL &&
     isfinite(ordering_pattern_bytes) &&
     ordering_pattern_bytes >= 256.0 * 1024.0 &&
     ordering_pattern_bytes <= 2.0 * 1024.0 * 1024.0 &&
@@ -13331,8 +13322,7 @@ generic_ordering_tournament:;
     isfinite(no_btf_lifecycle_work) && no_btf_lifecycle_work >= 1.0e7 &&
     isfinite(column_pair_work) &&
     column_pair_work * requested_numeric_horizon >= 2.0e8 &&
-    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
-    getenv("KLS_DISABLE_PARALLEL_NO_BTF_TRIAL") == NULL;
+    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL;
   /* Eight available workers can also overlap the literal AMF3 clique bound
      with the historically useful relaxed bound.  Published results show
      that a tighter local bound is not universally a better greedy order, so
@@ -13357,9 +13347,7 @@ generic_ordering_tournament:;
   int no_btf_spec_spawned = 0;
   memset(&no_btf_spec, 0, sizeof(no_btf_spec));
   if (amf_trial_economically_relevant &&
-      (n >= 30000 || broad_amf_portfolio) && options->threads >= 2 &&
-      !amf_trial_disabled &&
-      getenv("KLS_DISABLE_AMF_SPEC") == NULL) {
+      (n >= 30000 || broad_amf_portfolio) && options->threads >= 2) {
     memset(amf_spec, 0, sizeof(amf_spec));
     amf_spec_configured = 1;
     for (int i = 0; i < amf_spec_count; ++i) {
@@ -13553,7 +13541,6 @@ generic_ordering_tournament:;
        the control restores it for same-binary audits. */
     const int near_sparse_work_floor =
       stage_cache_ordering_portfolio &&
-      getenv("KLS_DISABLE_NEAR_SPARSE_ORDERING_PORTFOLIO_SETTLE") == NULL &&
       isfinite(settled_base_flops) && settled_base_flops > 0.0 &&
       settled_base_flops <= 1.20 * (double)col_ptr[n];
     suppress_fallback_amf = near_sparse_work_floor;
@@ -13589,8 +13576,7 @@ generic_ordering_tournament:;
         !best_symbolic->do_btf && options->threads >= 8 &&
         kls_generic_btf_capture_candidate != NULL &&
         kls_generic_btf_capture_candidate->generic_btf_value_symbolic !=
-          NULL &&
-        getenv("KLS_DISABLE_PARALLEL_ALIGNED_BTF_AMMF") == NULL) {
+          NULL) {
       /* The measured representation comparison retained a BTF value arm
          while selecting no-BTF for the symbolic incumbent.  Start its
          aligned AMMF candidate now, beside the still-running ordering
@@ -13710,7 +13696,6 @@ generic_ordering_tournament:;
         const int amortized_amf3_work_pareto_refinement = kls_repeated_update_workload(options) &&
           best_ordering == KLS_ORDERING_AMMF &&
           spec->ordering == KLS_ORDERING_AMF3 &&
-          getenv("KLS_DISABLE_AMF3_WORK_PARETO") == NULL &&
           isfinite(spec->score) && spec->score <= best_score &&
           spec->symbolic->est_flops > 0.0 &&
           best_symbolic->est_flops > 0.0 &&
@@ -13832,7 +13817,7 @@ generic_ordering_tournament:;
         kls_separator_analysis_clear(&spec->separator);
       }
     }
-    if (!amf_done && !suppress_fallback_amf && !amf_trial_disabled &&
+    if (!amf_done && !suppress_fallback_amf &&
         amf_trial_economically_relevant &&
         best_score < DBL_MAX) {
       kls_options settled_symbolic_options = *symbolic_options;
@@ -13864,8 +13849,7 @@ generic_ordering_tournament:;
       !best_symbolic->do_btf &&
       kls_generic_btf_capture_candidate->generic_btf_value_symbolic != NULL &&
       kls_generic_btf_capture_candidate->generic_btf_value_ordering !=
-        best_ordering &&
-      getenv("KLS_DISABLE_ALIGNED_BTF_ORDERING_CHALLENGER") == NULL) {
+        best_ordering) {
     kls_pattern_candidate *capture = kls_generic_btf_capture_candidate;
     trilinos_klu_l_symbolic *captured =
       capture->generic_btf_value_symbolic;
