@@ -68,14 +68,6 @@ static int require_build_feature_stats(const kls_stats *stats,
 
 static int require_parallel_model_stats(const kls_stats *stats,
                                         const char *what) {
-  if (stats != NULL &&
-      (stats->refactor_last_egraph_algorithm5_prefactor_columns != 0 ||
-       stats->refactor_last_egraph_algorithm5_prefactor_deps != 0 ||
-       stats->refactor_egraph_algorithm5_prefactor_column_count != 0 ||
-       stats->refactor_egraph_algorithm5_prefactor_dep_count != 0)) {
-    fprintf(stderr, "retired prefactor stats are nonzero for %s\n", what);
-    return 0;
-  }
   if (stats == NULL ||
       stats->parallel_model_r1 <= 0.0 ||
       stats->parallel_model_r2 <= 0.0) {
@@ -416,7 +408,6 @@ static int require_tail_overcompute_bounds(const kls_stats *stats,
       stats->fast_repaired_tail_restart_overcompute_work < 0.0 ||
       stats->fast_repaired_tail_restart_skipped_columns < 0 ||
       stats->fast_repaired_tail_restart_skipped_work < 0.0 ||
-      stats->fast_kls_rebuild_restarts < 0 ||
       (stats->fast_repaired_tail_restart_exact_mask != 0 &&
        stats->fast_repaired_tail_restart_exact_mask != 1) ||
       (stats->fast_repaired_tail_restart_etree_mask != 0 &&
@@ -6542,36 +6533,8 @@ static int test_egraph_retired_supernode_switch(void) {
     ok = 0;
   }
 
-  if (ok &&
-      (stats.refactor_supernode_consumer_plan_cached_panel_count != 0 ||
-       stats.refactor_supernode_consumer_plan_group_l_built != 0 ||
-       stats.refactor_btf_scalar_run_group_built != 0 ||
-       stats.refactor_last_btf_scalar_run_group_waits != 0 ||
-       stats.refactor_supernode_algorithm5_candidate_run_count != 0 ||
-       stats.refactor_supernode_consumer_run_count != 0 ||
-       stats.refactor_last_btf_scalar_run_candidates != 0 ||
-       stats.refactor_u_supernode_pattern_count != 0 ||
-       stats.refactor_u_supernode_value_dense_entries != 0 ||
-       stats.refactor_last_u_supernode_l_update_runs != 0 ||
-       stats.refactor_l_pattern_columns != 0 ||
-       stats.refactor_l_adjacent_run_count != 0 ||
-       stats.refactor_l_contiguous_suffix_columns != 0 ||
-       stats.refactor_stream_dependency_entries != 0.0 ||
-       stats.refactor_stream_pivot_entries != 0.0 ||
-       stats.refactor_stream_output_entries != 0.0)) {
-    fprintf(stderr, "retired experiment statistics must remain zero\n");
-    ok = 0;
-  }
-
-  if (ok && (stats.row_refactor_last_run != 0 ||
-             stats.refactor_supernode_panel_count != 0 ||
-             stats.refactor_supernode_panel_used_count != 0 ||
-             stats.refactor_last_supernode_update_runs != 0 ||
-             stats.refactor_last_supernode_blocked_update_runs != 0 ||
-             stats.refactor_last_supernode_cblas_update_runs != 0 ||
-             stats.refactor_supernode_cached_probe_attempt_count != 0 ||
-             stats.refactor_last_ready_queue_columns != 0)) {
-    fprintf(stderr, "retired EGraph engine statistics must remain zero\n");
+  if (ok && stats.row_refactor_last_run != 0) {
+    fprintf(stderr, "row refactor unexpectedly ran during EGraph test\n");
     ok = 0;
   }
 
@@ -10735,69 +10698,11 @@ static int test_exact_unchanged_refactor_reuse(void) {
    solver and a second solver forced through the ordinary refactor see each
    generated numeric and RHS; their complete solutions must agree. */
 
-static int removed_shape_stats_are_zero(const kls_stats *stats) {
-  return stats != NULL &&
-    stats->moderate_fragmented_policy_eligible == 0 &&
-    stats->compact_amf_two_block_policy_eligible == 0 &&
-    stats->dense_reciprocal_hub_policy_eligible == 0 &&
-    stats->symmetric_scalar_fringe_policy_eligible == 0 &&
-    stats->pivoted_high_work_single_block_policy_eligible == 0 &&
-    stats->low_work_many_fringe_btf_pts_policy_eligible == 0 &&
-    stats->high_work_tiny_scalar_fringe_policy_eligible == 0 &&
-    stats->low_work_hubbed_scalar_fringe_pts_policy_eligible == 0 &&
-    stats->nearly_missing_diagonal_early_match_selected == 0 &&
-    stats->low_work_tiny_block_btf_policy_eligible == 0 &&
-    stats->low_work_tiny_block_btf_symbolic_eligible == 0 &&
-    stats->scaled_fragmented_compact_row_policy_eligible == 0 &&
-    stats->compact_missing_diagonal_match_candidate == 0 &&
-    stats->compact_missing_diagonal_match_selected == 0 &&
-    stats->compact_missing_diagonal_factor_eligible == 0 &&
-    stats->symmetric_partial_diagonal_match_candidate == 0 &&
-    stats->symmetric_partial_diagonal_match_selected == 0 &&
-    stats->symmetric_partial_diagonal_factor_eligible == 0 &&
-    stats->symmetric_partial_diagonal_low_work_eligible == 0 &&
-    stats->sparse_symmetric_fragmented_metis_symbolic_eligible == 0 &&
-    stats->sparse_symmetric_fragmented_metis_policy_eligible == 0 &&
-    stats->sparse_spiked_predicted_candidate == 0 &&
-    stats->sparse_spiked_predicted_factor_eligible == 0 &&
-    stats->sparse_spiked_predicted_clustered_eligible == 0 &&
-    stats->dense_fragmented_scaled_row_factor_eligible == 0 &&
-    stats->sparse_full_diagonal_metis_row_candidate == 0 &&
-    stats->sparse_full_diagonal_metis_row_symbolic_eligible == 0 &&
-    stats->sparse_full_diagonal_metis_row_factor_eligible == 0 &&
-    stats->giant_symmetric_scalar_fringe_metis_row_candidate == 0 &&
-    stats->giant_symmetric_scalar_fringe_metis_row_symbolic_eligible == 0 &&
-    stats->giant_symmetric_scalar_fringe_metis_row_factor_eligible == 0 &&
-    stats->hybrid_huge_single_egraph_factor_eligible == 0 &&
-    stats->bounded_degree_retained_preconditioner_candidate == 0 &&
-    stats->bounded_degree_retained_preconditioner_symbolic_eligible == 0 &&
-    stats->bounded_degree_retained_preconditioner_factor_eligible == 0 &&
-    stats->bounded_degree_retained_preconditioner_reuse_count == 0 &&
-    stats->asymmetric_bounded_degree_direct_metis_candidate == 0 &&
-    stats->asymmetric_bounded_degree_direct_metis_tuning_class == 0 &&
-    stats->asymmetric_bounded_degree_direct_metis_symbolic_eligible == 0 &&
-    stats->asymmetric_bounded_degree_direct_metis_factor_eligible == 0 &&
-    stats->near_symmetric_mega_hub_amd_candidate == 0 &&
-    stats->near_symmetric_mega_hub_amd_symbolic_eligible == 0 &&
-    stats->near_symmetric_mega_hub_amd_factor_eligible == 0 &&
-    stats->giant_dominant_hub_metis_dense_tail_candidate == 0 &&
-    stats->giant_dominant_hub_metis_dense_tail_symbolic_eligible == 0 &&
-    stats->giant_dominant_hub_metis_dense_tail_factor_eligible == 0 &&
-    stats->high_work_tiny_fringe_btf_pts_factor_eligible == 0 &&
-    stats->medium_spike_minfill_candidate == 0 &&
-    stats->medium_spike_minfill_symbolic_eligible == 0 &&
-    stats->sparse_broad_column_amf_no_btf_candidate == 0 &&
-    stats->sparse_broad_column_amf_no_btf_symbolic_eligible == 0 &&
-    stats->bounded_degree_amf_no_btf_candidate == 0 &&
-    stats->bounded_degree_amf_no_btf_symbolic_eligible == 0;
-}
-
-static int check_retired_stats_compatibility(kls_solver *solver) {
+static int check_stats_copy_bounds(kls_solver *solver) {
   kls_stats full;
   memset(&full, 0xa5, sizeof(full));
   full.struct_size = sizeof(full);
-  if (!require_ok(kls_get_stats(solver, &full), "poisoned full stats") ||
-      !removed_shape_stats_are_zero(&full)) return 0;
+  if (!require_ok(kls_get_stats(solver, &full), "poisoned full stats")) return 0;
   for (size_t size = sizeof(full.struct_size); size <= sizeof(full); ++size) {
     kls_stats partial;
     memset(&partial, 0xa5, sizeof(partial));
@@ -10811,12 +10716,6 @@ static int check_retired_stats_compatibility(kls_solver *solver) {
         return 0;
       }
     }
-    /* No computed overlays follow this retired-field boundary. Check even
-       partially copied fields against the full, zero-initialized snapshot. */
-    const size_t tail = offsetof(kls_stats, medium_spike_minfill_candidate);
-    if (size > tail && memcmp(bytes + tail,
-                             (const unsigned char *)&full + tail,
-                             size - tail) != 0) return 0;
   }
   return 1;
 }
@@ -10835,13 +10734,13 @@ static int test_scaled_update_refactor(void) {
     options.orientation = mode % 2 ? KLS_ORIENTATION_TRANSPOSE
                                    : KLS_ORIENTATION_NORMAL;
     int ok = require_ok(kls_create(&solver), "create scaled-update solver");
-    if (ok) ok = check_retired_stats_compatibility(solver);
+    if (ok) ok = check_stats_copy_bounds(solver);
     if (ok) ok = require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3,
                                            ap, ai, 0, &options),
                             "analyze scaled-update solver");
-    if (ok) ok = check_retired_stats_compatibility(solver);
+    if (ok) ok = check_stats_copy_bounds(solver);
     if (ok) ok = require_ok(kls_factor(solver, base), "factor scaled-update base");
-    if (ok) ok = check_retired_stats_compatibility(solver);
+    if (ok) ok = check_stats_copy_bounds(solver);
     for (int update = 0; ok && update < 4; ++update) {
       double ax[9];
       for (int col = 0; col < 3; ++col) {
@@ -10853,7 +10752,7 @@ static int test_scaled_update_refactor(void) {
       /* Alternate separable scaling and ordinary entrywise changes. */
       if (update % 2) ax[1] += 0.125;
       ok = require_ok(kls_refactor(solver, ax), "refactor scaled update");
-      if (ok) ok = check_retired_stats_compatibility(solver);
+      if (ok) ok = check_stats_copy_bounds(solver);
       for (int transpose = 0; ok && transpose < 2; ++transpose) {
         double rhs[6] = {0};
         for (int j = 0; j < 2; ++j) {
@@ -10877,23 +10776,12 @@ static int test_scaled_update_refactor(void) {
           }
         }
       }
-      kls_stats stats = {0};
-      if (ok) ok = check_retired_stats_compatibility(solver);
-      stats.struct_size = sizeof(stats);
-      if (ok) ok = require_ok(kls_get_stats(solver, &stats), "scaled-update stats");
-      if (ok && (!removed_shape_stats_are_zero(&stats) ||
-                 stats.refactor_last_supernode_pipeline_tasks != 0 ||
-                 stats.refactor_last_supernode_pipeline_columns != 0 ||
-                 stats.refactor_supernode_pipeline_task_count != 0 ||
-                 stats.refactor_supernode_pipeline_column_count != 0)) {
-        fprintf(stderr, "retired statistics became nonzero\n");
-        ok = 0;
-      }
+      if (ok) ok = check_stats_copy_bounds(solver);
     }
     if (ok) ok = require_ok(kls_analyze_csc(solver, KLS_INDEX_INT32, 3,
                                            ap, ai, 0, &options),
                             "reanalyze stats compatibility solver");
-    if (ok) ok = check_retired_stats_compatibility(solver);
+    if (ok) ok = check_stats_copy_bounds(solver);
     kls_destroy(solver);
     if (!ok) return 0;
   }
