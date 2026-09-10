@@ -9015,7 +9015,6 @@ int kls_factor(kls_solver *solver, const double *values) {
             solver->col_ptr, solver->row_idx, numeric_values,
             solver->symbolic, &solver->common);
           numeric_factor_seconds += kls_now_seconds() - recovery_start;
-          initial_certified_unscaled_recovery_scale = 0;
         } else {
           if (!initial_low_work_btf_public_unscaled) {
             solver->certified_unscaled_l2_contract = 1;
@@ -9275,7 +9274,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   } else if (maybe_select_auto_scale(solver, &elapsed, numeric_values,
                                      promoted_numeric)) {
     value_alternative_used = 0;
-    promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
     /* The promotion verdict predates this scale: give METIS one more
@@ -9302,7 +9300,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (!kls_oneshot_lean &&
       maybe_select_auto_pivot_tolerance(solver, &elapsed, numeric_values)) {
     value_alternative_used = 0;
-    promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
   }
@@ -9312,7 +9309,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       maybe_select_tight_pivot_tolerance(
         solver, &elapsed, numeric_values, NULL)) {
     value_alternative_used = 0;
-    promoted_numeric = 1;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 0;
   }
@@ -9329,7 +9325,6 @@ int kls_factor(kls_solver *solver, const double *values) {
   } else if (maybe_select_spral_hungarian_row_match(solver, &elapsed,
                                                     numeric_values)) {
     value_alternative_used = 0;
-    promoted_numeric = 1;
     numeric_values = solver->values != NULL ? solver->values : numeric_values;
     diagnostics_have_flops = 1;
     diagnostics_have_rcond = 1;
@@ -10775,7 +10770,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
          trial cost at least twice over the remaining caller-declared
          updates.  A loss is restored immediately, so no solve can observe a
          representation different from the measured verdict. */
-      double incumbent_seconds = elapsed;
+      double incumbent_seconds;
       double challenger_overhead = 0.0;
       int incumbent_ok = 1;
       {
@@ -11464,7 +11459,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
            sampling window can dominate the projected lifecycle even though
            the original measured verdict was decisive. */
         column_seconds = initial_column_seconds;
-        column_valid = 1;
         solver->row_accept_decision = 1;
         solver->row_reaudit_state = 7;
         elapsed = row_seconds;
