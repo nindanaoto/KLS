@@ -2062,16 +2062,6 @@ static int apply_options_to_common(trilinos_klu_l_common *common, const kls_opti
   }
   common->halt_if_singular = options->halt_if_singular ? 1 : 0;
   common->kls_btf_match_trial = 0; /* Reserved bundled-KLU ABI field. */
-  {
-    /* bounded-effort BTF matching: mac_econ's 89%-missing diagonal
-       drives Duff's maxtrans into ~9s of augmenting-path work (of a
-       10.5s analysis); a work cap yields an incomplete matching the
-       analyze already supports. */
-    const char *mw = getenv("KLS_BTF_MAXWORK");
-    if (mw != NULL && mw[0] != '\0') {
-      common->maxwork = atof(mw);
-    }
-  }
   return KLS_OK;
 }
 
@@ -3111,15 +3101,6 @@ static UF_long kls_metis_camd_group_size(UF_long n,
                                          const UF_long *col_ptr,
                                          const UF_long *row_idx) {
   {
-    const char *group_env = getenv("KLS_METIS_CAMD_GROUP_SIZE");
-    if (group_env != NULL && group_env[0] != '\0') {
-      const unsigned long long requested = strtoull(group_env, NULL, 10);
-      if (requested > 0u && requested <= (unsigned long long)n) {
-        return (UF_long)requested;
-      }
-    }
-  }
-  {
     /* Generic NodeND uses only a resource-scaled refinement window.  Smaller
        graphs retain the exact NodeND order (group size zero is converted to
        singleton constraints by the caller); larger graphs amortize CAMD in
@@ -3974,22 +3955,13 @@ static UF_long kls_metis_order(UF_long n,
   } else
 #endif
   if (kls_fragmented_metis_tuning_ctx == 3) {
-    const char *npes_env =
-      getenv("KLS_SPARSE_SYMMETRIC_FRAGMENTED_METIS_NDP_NPES");
-    metis_ndp_npes =
-      npes_env != NULL && npes_env[0] != '\0' ? (idx_t)atol(npes_env) : 8;
+    metis_ndp_npes = 8;
   } else if (kls_generic_metis_tuning_ctx) {
     /* A complete no-BTF graph exposes two deterministic leaves per numeric
        worker; BTF representations use one leaf per worker because their SCC
        structure supplies the outer decomposition.  Matched coordinates use
        their measured separator economics through the generic tuning context. */
-    const char *generic_npes_env =
-      getenv("KLS_GENERIC_METIS_NDP_NPES");
-    if (generic_npes_env != NULL &&
-        generic_npes_env[0] != '\0') {
-      metis_ndp_npes = (idx_t)atol(generic_npes_env);
-    } else {
-      int requested_leaves =
+    int requested_leaves =
         kls_generic_metis_tuning_ctx == 2 ||
         kls_generic_metis_tuning_ctx == 3 ||
         kls_generic_metis_tuning_ctx == 7 ||
@@ -4003,12 +3975,6 @@ static UF_long kls_metis_order(UF_long n,
         requested_leaves = 64;
       }
       metis_ndp_npes = (idx_t)requested_leaves;
-    }
-  } else {
-    const char *npes_env = getenv("KLS_METIS_NDP_NPES");
-    if (npes_env != NULL && npes_env[0] != '\0') {
-      metis_ndp_npes = (idx_t)atol(npes_env);
-    }
   }
   if (kls_metis_ndp_npes_override > 0) {
     metis_ndp_npes = (idx_t)kls_metis_ndp_npes_override;
@@ -4093,14 +4059,7 @@ static UF_long kls_metis_order(UF_long n,
   } else
 
   {
-    const char *niter = getenv("KLS_METIS_NITER");
-    if (niter != NULL && niter[0] != '\0') {
-      options[METIS_OPTION_NITER] = atoi(niter);
-    }
-    const char *nseps = getenv("KLS_METIS_NSEPS");
-    if (nseps != NULL && nseps[0] != '\0') {
-      options[METIS_OPTION_NSEPS] = atoi(nseps);
-    } else if (kls_auto_metis_promotion_quality) {
+    if (kls_auto_metis_promotion_quality) {
       /* Expensive giant refactors benefit from the wider four-separator
          search.  Compact, recurring KLU factors have a different economics:
          two separator trials find the useful alternate tree without the
@@ -4108,21 +4067,8 @@ static UF_long kls_metis_order(UF_long n,
       options[METIS_OPTION_NSEPS] =
         kls_auto_metis_promotion_quality == 2 ? 2 : 4;
     }
-    if (kls_auto_metis_promotion_quality &&
-        getenv("KLS_METIS_NITER") == NULL) {
+    if (kls_auto_metis_promotion_quality) {
       options[METIS_OPTION_NITER] = 10;
-    }
-    const char *ufactor = getenv("KLS_METIS_UFACTOR");
-    if (ufactor != NULL && ufactor[0] != '\0') {
-      options[METIS_OPTION_UFACTOR] = atoi(ufactor);
-    }
-    const char *ctype = getenv("KLS_METIS_CTYPE");
-    if (ctype != NULL && ctype[0] == 'r') {
-      options[METIS_OPTION_CTYPE] = METIS_CTYPE_RM;
-    }
-    const char *dbg = getenv("KLS_METIS_DBGLVL");
-    if (dbg != NULL && dbg[0] != '\0') {
-      options[METIS_OPTION_DBGLVL] = atoi(dbg);
     }
   }
   idx_t nvtxs = (idx_t)n;
