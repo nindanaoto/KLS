@@ -3193,12 +3193,6 @@ static int kls_compact_amf_two_block_symbolic_state(
       solver->n, solver->nnz, solver->symbolic);
 }
 
-static int kls_compact_amf_two_block_initial_cycle(
-  const kls_solver *solver) {
-  return kls_compact_amf_two_block_symbolic_state(solver) &&
-    solver->common.scale == 0;
-}
-
 static double **ensure_egraph_worker_scratch(kls_solver *solver,
                                              int thread_count,
                                              UF_long scratch_size) {

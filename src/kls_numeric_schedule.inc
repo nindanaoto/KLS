@@ -3597,8 +3597,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       return (UF_long)mapped;
     }
     if (check_pivots && solver->common.scale > 0) {
-      const int checked = kls_serial_checked_scaled_refactor(solver,
-                                                            numeric_values);
+      const int checked = kls_serial_checked_scaled_refactor_from_block(
+        solver, numeric_values, 0u);
       if (checked >= 0) {
         if (checked &&
             !kls_checked_refactor_accepts_rowwise_u(solver, 0u)) {

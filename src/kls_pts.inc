@@ -1674,18 +1674,6 @@ typedef struct kls_pts_refactor_pool_job {
   _Atomic unsigned char *top_done;
 } kls_pts_refactor_pool_job;
 
-/* Pipelining replaces one serial separator pass with a barrier, atomic work
-   claims, and dependency publication.  Select it from the work in the
-   verified separator rather than from the matrix that happened to expose the
-   optimization: require enough independent columns and arithmetic to
-   amortize those synchronization costs. */
-static int kls_pts_top_pipeline_is_profitable(const kls_pts *pts) {
-  return pts != NULL && pts->ntop >= 16 * (int64_t)pts->nthreads &&
-    pts->refactor_total_flops > 0.0 &&
-    pts->refactor_top_flops >= 2048.0 * (double)pts->nthreads &&
-    pts->refactor_top_flops >= 0.05 * pts->refactor_total_flops;
-}
-
 static int kls_pts_top_pipeline_enabled(const kls_solver *solver,
                                         const kls_pts *pts) {
   if ( solver != NULL &&
@@ -1701,7 +1689,12 @@ static int kls_pts_top_pipeline_enabled(const kls_solver *solver,
     return 0;
   }
 
-  return kls_pts_top_pipeline_is_profitable(pts);
+  /* Require enough independent columns and arithmetic to amortize the
+     barrier, atomic claims, and dependency publication. */
+  return pts != NULL && pts->ntop >= 16 * (int64_t)pts->nthreads &&
+    pts->refactor_total_flops > 0.0 &&
+    pts->refactor_top_flops >= 2048.0 * (double)pts->nthreads &&
+    pts->refactor_top_flops >= 0.05 * pts->refactor_total_flops;
 }
 
 static int kls_pts_two_stage_top_capable(const kls_solver *solver,

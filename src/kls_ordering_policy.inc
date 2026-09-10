@@ -1995,7 +1995,8 @@ static double choose_initial_auto_pivot_tolerance(
       : solver->options.pivot_tolerance;
   }
 
-  if (kls_compact_amf_two_block_initial_cycle(solver)) {
+  if (kls_compact_amf_two_block_symbolic_state(solver) &&
+      solver->common.scale == 0) {
     /* A modestly stronger threshold keeps this entire normalized compact
        class inside its 16-bit factor streams.  The solve-side residual gate
        measures every changed numeric and corrects any raw solve outside the
@@ -11097,15 +11098,6 @@ static int kls_compact_medium_dominant_btf_symbolic_shape(
          solver->symbolic->lnz + solver->symbolic->unz >= 1.0e6;
 }
 
-/* Dense giant circuits already expose a compact AMD factor, while NodeND and
-   its candidate factor are tens of seconds of non-amortizing setup
-   (circuit5M: 28.6 s rejected promotion).  Sparse giants stay eligible:
-   rajat31 and the Freescale chain materially reduce fill with METIS. */
-static int kls_dense_giant_declines_auto_metis(UF_long n,
-                                                const UF_long *col_ptr) {
-  return col_ptr != NULL && n >= 1000000u && col_ptr[n] / n >= 8u;
-}
-
 /* Very large, low-degree circuits can consist mostly of scalar BTF blocks
    around one moderate core.  The generic pre-static deferral leaves this
    class on AMD after its inexpensive matching probe rejects, but a tuned
@@ -11243,7 +11235,11 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->options.ordering != KLS_ORDERING_AUTO ||
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
       (solver->n < 20000 && !generic_compact_scale_race) ||
-      kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
+      /* Dense giant circuits already expose a compact AMD factor, while
+         NodeND and its candidate factor are non-amortizing setup. Sparse
+         giants remain eligible because METIS can materially reduce fill. */
+      (solver->col_ptr != NULL && solver->n >= 1000000u &&
+       solver->col_ptr[solver->n] / solver->n >= 8u) ||
       kls_sparse_fragmented_dominant_btf_symbolic_work(solver) ||
       solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path ||

@@ -2214,15 +2214,6 @@ static int kls_egraph_refactor_single_scaled_column(
   return 1;
 }
 
-/* Cluster barriers publish all predecessors. This narrow no-wait kernel
-   retains cached-supernode batches and the general kernel's scalar order,
-   without testing the checked, supernode-update, or scalar-run modes. */
-static int kls_egraph_btf_plain_cluster_allowed(
-  const kls_egraph_refactor_shared *shared) {
-  return shared != NULL && !shared->check_pivots &&
-         !shared->btf_scalar_run_exec;
-}
-
 static int kls_egraph_refactor_btf_unscaled_plain_cluster_column(
   kls_egraph_refactor_worker *worker,
   UF_long k,
@@ -7288,7 +7279,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
      every numeric column. */
   shared->btf_unscaled_plain =
     selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
-    kls_egraph_btf_plain_cluster_allowed(shared);
+    !shared->check_pivots && !shared->btf_scalar_run_exec;
 
   shared->cluster_done_premarked = 0;
   if ((kls_egraph_cluster_premark_dispatch(solver, shared, check_pivots) &&
@@ -8119,12 +8110,6 @@ static int kls_serial_checked_scaled_refactor_from_block(
     common->status = TRILINOS_KLU_OK;
   }
   return 1;
-}
-
-static int kls_serial_checked_scaled_refactor(kls_solver *solver,
-                                              double *numeric_values) {
-  return kls_serial_checked_scaled_refactor_from_block(solver, numeric_values,
-                                                       0u);
 }
 
 /* ====================================================================== */
