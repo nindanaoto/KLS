@@ -335,20 +335,6 @@ cleanup:
   return built;
 }
 
-static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      solver->options.backend == KLS_BACKEND_SERIAL ||
-      solver->options.threads <= 1) {
-    return 0;
-  }
-  if (kls_low_work_btf_prefers_native_solve(solver)) {
-    return 1;
-  }
-  /* Outside the cache-resident low-work crossover, build the compact stream
-     and let the generic solve/PTS timing state choose its consumer. */
-  return 0;
-}
-
 typedef struct kls_i32_index_copy_job {
   const trilinos_klu_l_symbolic *symbolic;
   trilinos_klu_l_numeric *numeric;
@@ -488,11 +474,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   if (solver->i32solve_state != 0) {
     return solver->i32solve_state > 0;
   }
-  if (kls_auto_btf_prefers_vendor_solve(solver)) {
-    solver->i32solve_state = -1;
-    return 0;
-  }
-
   if (kls_low_work_btf_prefers_native_solve(solver)) {
     /* Building a second solve-index representation does not repay while the
        complete low-work factor and RHS remain in this cache-sized regime. */
