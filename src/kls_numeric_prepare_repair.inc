@@ -7981,7 +7981,6 @@ static void kls_try_build_row_refactor_segment_input_targets(
   UF_long **cleanup_cols_out,
   UF_long *target_rows_out,
   UF_long *target_entries_out,
-  UF_long *cleanup_rows_out,
   UF_long *cleanup_entries_out) {
   KLS_SET_OPTIONAL_OUTPUT(row_ready_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(target_kind_out, NULL);
@@ -7990,7 +7989,6 @@ static void kls_try_build_row_refactor_segment_input_targets(
   KLS_SET_OPTIONAL_OUTPUT(cleanup_cols_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(target_rows_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(target_entries_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(cleanup_rows_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(cleanup_entries_out, 0);
   if (n <= 0 || input_ptr == NULL || input_cols == NULL ||
       l_ptr == NULL || l_cols == NULL || u_ptr == NULL || u_cols == NULL ||
@@ -8037,7 +8035,6 @@ static void kls_try_build_row_refactor_segment_input_targets(
 
   UF_long target_rows = 0;
   UF_long target_entries = 0;
-  UF_long cleanup_rows = 0;
   UF_long cleanup_entries = 0;
   for (UF_long group = 0; group < group_count; ++group) {
     const unsigned char kind = group_kind[group];
@@ -8187,7 +8184,6 @@ static void kls_try_build_row_refactor_segment_input_targets(
         }
         if (row_cleanup_entries > 0u) {
           cleanup_ptr[row + 1u] = row_cleanup_entries;
-          cleanup_rows++;
           cleanup_entries += row_cleanup_entries;
         }
       }
@@ -8273,9 +8269,6 @@ static void kls_try_build_row_refactor_segment_input_targets(
   if (target_entries_out != NULL) {
     *target_entries_out = target_entries;
   }
-  if (cleanup_rows_out != NULL) {
-    *cleanup_rows_out = cleanup_rows;
-  }
   if (cleanup_entries_out != NULL) {
     *cleanup_entries_out = cleanup_entries;
   }
@@ -8303,7 +8296,6 @@ typedef struct {
   UF_long *cleanup_cols;
   UF_long target_rows;
   UF_long target_entries;
-  UF_long cleanup_rows;
   UF_long cleanup_entries;
 } kls_segment_input_target_prep_job;
 
@@ -8319,7 +8311,7 @@ static void kls_segment_input_target_prep_run(
     job->group_trailing_begin, job->group_trailing_len, &job->row_ready,
     &job->target_kind, &job->target_pos, &job->cleanup_ptr,
     &job->cleanup_cols, &job->target_rows, &job->target_entries,
-    &job->cleanup_rows, &job->cleanup_entries);
+    &job->cleanup_entries);
 }
 
 typedef struct {
@@ -9171,8 +9163,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     segment_input_job.target_rows;
   solver->row_refactor_segment_input_target_entries =
     segment_input_job.target_entries;
-  solver->row_refactor_segment_input_cleanup_rows =
-    segment_input_job.cleanup_rows;
   solver->row_refactor_segment_input_cleanup_entries =
     segment_input_job.cleanup_entries;
   solver->row_refactor_compact_dense_panel_persistent_groups =

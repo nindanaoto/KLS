@@ -1109,7 +1109,6 @@ struct kls_solver {
   UF_long row_refactor_batch_direct_input_rows;
   UF_long row_refactor_segment_input_target_rows;
   UF_long row_refactor_segment_input_target_entries;
-  UF_long row_refactor_segment_input_cleanup_rows;
   UF_long row_refactor_segment_input_cleanup_entries;
   UF_long row_refactor_last_segment_target_input_rows;
   UF_long row_refactor_segment_target_input_rows;
@@ -3025,7 +3024,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_batch_direct_input_rows = 0;
   solver->row_refactor_segment_input_target_rows = 0;
   solver->row_refactor_segment_input_target_entries = 0;
-  solver->row_refactor_segment_input_cleanup_rows = 0;
   solver->row_refactor_segment_input_cleanup_entries = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
   solver->row_refactor_segment_target_input_rows = 0;
@@ -3201,7 +3199,6 @@ typedef struct {
   UF_long batch_direct_input_rows;
   UF_long segment_input_target_rows;
   UF_long segment_input_target_entries;
-  UF_long segment_input_cleanup_rows;
   UF_long segment_input_cleanup_entries;
   UF_long last_segment_target_input_rows;
   UF_long segment_target_input_rows;
@@ -3474,8 +3471,6 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_segment_input_target_rows;
   diag->segment_input_target_entries =
     solver->row_refactor_segment_input_target_entries;
-  diag->segment_input_cleanup_rows =
-    solver->row_refactor_segment_input_cleanup_rows;
   diag->segment_input_cleanup_entries =
     solver->row_refactor_segment_input_cleanup_entries;
   diag->last_segment_target_input_rows =
@@ -3788,8 +3783,6 @@ static void kls_restore_row_refactor_diagnostics(
     diag->segment_input_target_rows;
   solver->row_refactor_segment_input_target_entries =
     diag->segment_input_target_entries;
-  solver->row_refactor_segment_input_cleanup_rows =
-    diag->segment_input_cleanup_rows;
   solver->row_refactor_segment_input_cleanup_entries =
     diag->segment_input_cleanup_entries;
   solver->row_refactor_last_segment_target_input_rows =
