@@ -14051,28 +14051,6 @@ generic_ordering_tournament:;
       pthread_create(&no_btf_spec_tid, NULL, kls_no_btf_spec_main,
                      &no_btf_spec) == 0;
   }
-  /* KLU does not publish fill/work estimates for COLAMD, so its symbolic
-     score is DBL_MAX.  Such a candidate cannot displace a successful,
-     finitely-scored AMD result under the comparison below.  Retain an A/B
-     hook and an AMD-failure fallback, but do not spend a concurrent full
-     graph traversal on a candidate that the selector cannot accept. */
-  struct kls_amf_spec_job colamd_spec;
-  pthread_t colamd_spec_tid;
-  int colamd_spec_spawned = 0;
-  if (n >= 8192u && options->threads >= 4 &&
-      getenv("KLS_ENABLE_UNSCORABLE_COLAMD_SPEC") != NULL &&
-      getenv("KLS_DISABLE_COLAMD_SPEC") == NULL) {
-    memset(&colamd_spec, 0, sizeof(colamd_spec));
-    colamd_spec.n = n;
-    colamd_spec.col_ptr = col_ptr;
-    colamd_spec.row_idx = row_idx;
-    colamd_spec.ordering = KLS_ORDERING_COLAMD;
-    colamd_spec.options = *symbolic_options;
-    if (pthread_create(&colamd_spec_tid, NULL, kls_amf_spec_main,
-                       &colamd_spec) == 0) {
-      colamd_spec_spawned = 1;
-    }
-  }
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   const size_t candidate_count = 1u;
   trilinos_klu_l_symbolic *best_symbolic = NULL;
@@ -14117,7 +14095,7 @@ generic_ordering_tournament:;
 
   }
 
-  if (!any_ok && !colamd_spec_spawned) {
+  if (!any_ok) {
     /* AMD allocation/analysis failure must not turn the optimization above
        into a robustness regression.  COLAMD remains a valid symbolic even
        though it is unscored, so use it as a fallback rather than a peer. */
@@ -14140,30 +14118,6 @@ generic_ordering_tournament:;
     }
   }
 
-  if (colamd_spec_spawned) {
-    pthread_join(colamd_spec_tid, NULL);
-    if (colamd_spec.status == KLS_OK && colamd_spec.symbolic != NULL) {
-      if (!any_ok || colamd_spec.score < best_score) {
-        if (best_symbolic != NULL) {
-          trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
-        }
-        kls_separator_analysis_clear(&best_separator);
-        best_symbolic = colamd_spec.symbolic;
-        best_common = colamd_spec.common;
-        best_ordering = KLS_ORDERING_COLAMD;
-        best_score = colamd_spec.score;
-        kls_separator_analysis_move(&best_separator,
-                                    &colamd_spec.separator);
-        any_ok = 1;
-      } else {
-        trilinos_klu_l_free_symbolic(&colamd_spec.symbolic,
-                                     &colamd_spec.common);
-        kls_separator_analysis_clear(&colamd_spec.separator);
-      }
-    } else {
-      kls_separator_analysis_clear(&colamd_spec.separator);
-    }
-  }
 
   if (!any_ok) {
     {
@@ -14904,141 +14858,6 @@ static int choose_symbolic_for_pattern(UF_long n,
       kls_separator_analysis_clear(&probe_sep);
     }
   }
-  if ( options != NULL &&
-      options->ordering == KLS_ORDERING_AUTO && options->use_btf &&
-      kls_repeated_update_workload(options) &&
-      !kls_prestatic_ordering_ctx &&
-      !generic_guaranteed_inline_match &&
-      getenv("KLS_ENABLE_BOUNDED_NO_BTF_AMD_SHORTCUT") != NULL) {
-    const double numeric_horizon = 1.0 +
-      (double)options->expected_refactorizations +
-      (double)options->expected_solves;
-    double quotient_pair_work = 0.0;
-    for (UF_long col = 0u; col < n; ++col) {
-      const double degree =
-        (double)(col_ptr[col + 1u] - col_ptr[col]);
-      quotient_pair_work += degree * degree;
-    }
-    const double bounded_numeric_lifecycle_budget = 1.0e8;
-    /* This no-BTF bootstrap remains available as a diagnostic.  Production
-       AUTO starts from the ordinary AMD/BTF representation: when the
-       bootstrap found a strict BTF Pareto winner, analyzing no-BTF first
-       duplicated symbolic work and moved row-worker preparation into the
-       first refactor.  Close representation choices remain covered by the
-       generic BTF/no-BTF tournament at larger work budgets.
-
-       A rejected symbolic is pure setup overhead.  Reserve most of the
-       bounded lifecycle budget for the numeric work it is meant to improve;
-       at most one quarter may be spent speculating on this representation. */
-    const double speculative_ordering_budget =
-      0.25 * bounded_numeric_lifecycle_budget;
-    if (numeric_horizon > 0.0 && isfinite(numeric_horizon) &&
-        isfinite(quotient_pair_work) &&
-        quotient_pair_work * numeric_horizon <=
-          speculative_ordering_budget) {
-      /* The complete requested lifecycle contains less quotient-graph work
-         than one large ordering trial.  Probe the stable one-block AMD
-         representation directly, and retain it only when its computed
-         fill and arithmetic fit the same absolute lifecycle budget.  This
-         replaces dimension-based tiny-matrix shortcuts with measured work;
-         a rejected proposal resumes the full BTF/ordering tournament. */
-      kls_options amd_options = *options;
-      amd_options.ordering = KLS_ORDERING_AMD;
-      amd_options.use_btf = 0;
-      trilinos_klu_l_symbolic *amd_symbolic = NULL;
-      trilinos_klu_l_common amd_common;
-      kls_separator_analysis amd_separator;
-      memset(&amd_separator, 0, sizeof(amd_separator));
-      const int amd_status = analyze_with_ordering(
-        n, col_ptr, row_idx, &amd_options, KLS_ORDERING_AMD,
-        &amd_symbolic, &amd_common, &amd_separator);
-      if (amd_status == KLS_OK && amd_symbolic != NULL) {
-        const double amd_score = symbolic_score(amd_symbolic);
-        const int bounded =
-          !amd_symbolic->do_btf && amd_symbolic->nblocks == 1u &&
-          amd_symbolic->maxblock == n && amd_symbolic->est_flops > 0.0 &&
-          isfinite(amd_score) && amd_score > 0.0 &&
-          amd_symbolic->est_flops * numeric_horizon <=
-            bounded_numeric_lifecycle_budget &&
-          amd_score * numeric_horizon <= 4.0e8 &&
-          amd_symbolic->lnz <= 2.0 * amd_symbolic->unz &&
-          amd_symbolic->unz <= 2.0 * amd_symbolic->lnz;
-        if (bounded) {
-          /* The inexpensive one-block proposal is a setup shortcut, not a
-             proof that BTF loses over the requested numeric lifecycle.  If
-             the ordinary AMD/BTF symbolic is work-Pareto and its projected
-             recurring savings repay both its quotient-graph analysis and a
-             numeric trial, retain it for the value-time residual tournament.
-             This compares computed representations and caller work only; it
-             does not classify the input by dimensions or sparsity shape. */
-          kls_pattern_candidate *capture =
-            kls_generic_btf_capture_candidate;
-          if (capture != NULL &&
-              capture->generic_btf_value_symbolic == NULL &&
-              getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL) {
-            kls_options btf_options = *options;
-            btf_options.ordering = KLS_ORDERING_AMD;
-            btf_options.use_btf = 1;
-            trilinos_klu_l_symbolic *btf_symbolic = NULL;
-            trilinos_klu_l_common btf_common;
-            kls_separator_analysis btf_separator;
-            memset(&btf_separator, 0, sizeof(btf_separator));
-            const int btf_status = analyze_with_ordering(
-              n, col_ptr, row_idx, &btf_options, KLS_ORDERING_AMD,
-              &btf_symbolic, &btf_common, &btf_separator);
-            const double btf_score = btf_symbolic != NULL
-              ? symbolic_score(btf_symbolic) : DBL_MAX;
-            const double recurring_frames =
-              (double)options->expected_refactorizations;
-            const double solve_frames =
-              (double)options->expected_solves;
-            const double saved_fill = isfinite(btf_score)
-              ? fmax(0.0, amd_score - btf_score) : 0.0;
-            const double saved_flops = btf_symbolic != NULL
-              ? fmax(0.0,
-                     amd_symbolic->est_flops - btf_symbolic->est_flops)
-              : 0.0;
-            const double projected_savings =
-              recurring_frames * (saved_fill + saved_flops) +
-              solve_frames * saved_fill;
-            const double comparison_work = btf_symbolic != NULL
-              ? quotient_pair_work + btf_score : DBL_MAX;
-            const int retain_btf = btf_status == KLS_OK &&
-              btf_symbolic != NULL && btf_symbolic->do_btf &&
-              btf_symbolic->nblocks > 1u &&
-              btf_symbolic->maxblock < n &&
-              isfinite(btf_score) && btf_score > 0.0 &&
-              btf_score <= amd_score &&
-              btf_symbolic->est_flops > 0.0 &&
-              btf_symbolic->est_flops <= amd_symbolic->est_flops &&
-              isfinite(projected_savings) &&
-              isfinite(comparison_work) && comparison_work > 0.0 &&
-              projected_savings >= 2.0 * comparison_work;
-            if (retain_btf) {
-              capture->generic_btf_value_symbolic = btf_symbolic;
-              capture->generic_btf_value_common = btf_common;
-              capture->generic_btf_value_ordering = KLS_ORDERING_AMD;
-              kls_separator_analysis_move(
-                &capture->generic_btf_value_separator, &btf_separator);
-            } else {
-              if (btf_symbolic != NULL) {
-                trilinos_klu_l_free_symbolic(&btf_symbolic, &btf_common);
-              }
-              kls_separator_analysis_clear(&btf_separator);
-            }
-          }
-          *symbolic_out = amd_symbolic;
-          *common_out = amd_common;
-          *selected_ordering_out = KLS_ORDERING_AMD;
-          *score_out = amd_score;
-          kls_separator_analysis_move(separator_out, &amd_separator);
-          return KLS_OK;
-        }
-        trilinos_klu_l_free_symbolic(&amd_symbolic, &amd_common);
-      }
-      kls_separator_analysis_clear(&amd_separator);
-    }
-  }
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       options->static_pivoting && n <= 200000 && n >= 64 &&
       col_ptr[n] <= 2000000) {
@@ -15063,52 +14882,10 @@ static int choose_symbolic_for_pattern(UF_long n,
                                          separator_out);
     }
   }
-  UF_long *bp = NULL, *bq = NULL, *br = NULL, *bwork = NULL;
-  struct kls_btf_stash_s saved = kls_btf_stash;
-  if (n >= 30000 && options != NULL && options->use_btf &&
-      getenv("KLS_ENABLE_BTF_REUSE") != NULL) {
-    /* measured NET LOSS with the concurrent AMF spec (twotone ana
-       1.5 -> 2.8): pre-reuse each candidate's internal BTF ran hidden
-       inside the parallel AMD||AMF pair, while the shared stash
-       serializes one BTF ahead of both.  AMD-only paths win hugely
-       (0.755 -> 0.043) - re-enable if the spec is ever off. */
-    bp = (UF_long *)malloc((size_t)n * sizeof(UF_long));
-    bq = (UF_long *)malloc((size_t)n * sizeof(UF_long));
-    br = (UF_long *)malloc(((size_t)n + 1u) * sizeof(UF_long));
-    bwork = (UF_long *)malloc(5u * (size_t)n * sizeof(UF_long));
-    if (bp != NULL && bq != NULL && br != NULL && bwork != NULL) {
-      double btf_work = 0.0;
-      UF_long nmatch = 0;
-      UF_long nblocks = trilinos_btf_l_order(n, col_ptr, row_idx, 0.0,
-                                             &btf_work, bp, bq, br, &nmatch,
-                                             bwork);
-      if (nblocks > 0) {
-        if (nmatch < n) {
-          UF_long k;
-          for (k = 0; k < n; ++k) {
-            bq[k] = bq[k] < 0 ? -bq[k] - 2 : bq[k];
-          }
-        }
-        kls_btf_stash.P = bp;
-        kls_btf_stash.Q = bq;
-        kls_btf_stash.R = br;
-        kls_btf_stash.nblocks = nblocks;
-        kls_btf_stash.rank = nmatch;
-        kls_btf_stash.n = n;
-        kls_btf_stash.active = 1;
-      }
-    }
-    free(bwork);
-    bwork = NULL;
-  }
   int status = kls_choose_symbolic_inner(n, col_ptr, row_idx, options,
                                          symbolic_out, common_out,
                                          selected_ordering_out, score_out,
                                          separator_out);
-  kls_btf_stash = saved;
-  free(bp);
-  free(bq);
-  free(br);
   return status;
 }
 
