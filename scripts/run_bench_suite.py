@@ -93,10 +93,6 @@ def append_solver_options(cmd: list[str], args: argparse.Namespace) -> None:
         cmd.extend(["--kls-first-factor", args.kls_first_factor])
     if args.row_solve != "env":
         cmd.extend(["--row-solve", args.row_solve])
-    if args.stress_diagonal_scale is not None:
-        cmd.extend(["--stress-diagonal-scale", str(args.stress_diagonal_scale)])
-    if args.stress_diagonal_column is not None:
-        cmd.extend(["--stress-diagonal-column", str(args.stress_diagonal_column)])
 
 
 def collect_analyze_failure_diagnostic(
@@ -262,8 +258,6 @@ def main() -> int:
         choices=["env", "off", "on"],
         default="env",
     )
-    parser.add_argument("--stress-diagonal-scale", type=float, default=None)
-    parser.add_argument("--stress-diagonal-column", type=int, default=None)
     parser.add_argument("--no-btf", action="store_true")
     parser.add_argument("--no-fast-factor", action="store_true")
     parser.add_argument("--no-static-pivoting", action="store_true")

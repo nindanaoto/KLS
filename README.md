@@ -610,21 +610,6 @@ KLS-first scaffold; `kls_bench` and `run_bench_suite.py` expose it as
 pivoted-factor ETree upper bound, matching the dependency concept used by the
 CKTSO paper for pivoting tail work.
 
-To exercise fast-factor pivot rejection on an unchanged MatrixMarket sparsity
-pattern, scale diagonal entries only in the repeated numeric phase:
-
-```sh
-./build/kls_bench matrix.mtx --repeat 1 --refactor-repeat 0 --orientation auto \
-  --stress-diagonal-scale 1e-12 --stress-diagonal-column 0 --json
-```
-
-The initial factorization still uses the original values; the repeated
-factor/refactor/solve/residual path uses the stressed values. JSON includes
-`stress_diagonal_scale`, `stress_diagonal_column`, and
-`stress_diagonal_entries`. Use `--repeat 1 --refactor-repeat 0` when inspecting
-the first rejected fast-factor tail, because later repeated calls can overwrite
-the first rejection diagnostics.
-
 After a fresh full factorization on medium and larger matrices, KLS sorts the
 retained KLU numeric columns into ascending row order and detects strict
 L-supernode runs: consecutive pivot columns whose sorted patterns nest, so

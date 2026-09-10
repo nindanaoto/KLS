@@ -372,17 +372,6 @@ static int parse_nonnegative_double(const char *s, double *value_out) {
   return 1;
 }
 
-static int parse_int64_arg(const char *s, int64_t *value_out) {
-  char *end = NULL;
-  errno = 0;
-  const long long value = strtoll(s, &end, 10);
-  if (errno != 0 || end == s || *end != '\0') {
-    return 0;
-  }
-  *value_out = (int64_t)value;
-  return 1;
-}
-
 static int parse_index_mode(const char *s, bench_index_mode *mode_out) {
   if (strcmp(s, "auto") == 0) {
     *mode_out = BENCH_INDEX_AUTO;
@@ -540,39 +529,6 @@ static int apply_row_solve_control(const char *s) {
   return 1;
 }
 
-static double *make_stressed_values(const matrix *a,
-                                    double diagonal_scale,
-                                    int64_t diagonal_column,
-                                    int64_t *entries_out) {
-  if (a == NULL || a->values == NULL || entries_out == NULL ||
-      !isfinite(diagonal_scale) || diagonal_scale < 0.0 ||
-      diagonal_column < -1 || diagonal_column >= a->n) {
-    return NULL;
-  }
-  *entries_out = 0;
-  double *values = (double *)malloc((size_t)a->nnz * sizeof(*values));
-  if (values == NULL) {
-    return NULL;
-  }
-  memcpy(values, a->values, (size_t)a->nnz * sizeof(*values));
-  for (int64_t col = 0; col < a->n; ++col) {
-    if (diagonal_column >= 0 && col != diagonal_column) {
-      continue;
-    }
-    for (int64_t p = a->col_ptr[col]; p < a->col_ptr[col + 1]; ++p) {
-      if (a->row_idx[p] == col) {
-        values[p] *= diagonal_scale;
-        ++(*entries_out);
-      }
-    }
-  }
-  if (*entries_out == 0) {
-    free(values);
-    return NULL;
-  }
-  return values;
-}
-
 static const char *scale_name(int scale) {
   switch (scale) {
     case KLS_SCALE_AUTO: return "auto";
@@ -586,7 +542,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--stress-diagonal-scale S] [--stress-diagonal-column C] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -608,8 +564,6 @@ int main(int argc, char **argv) {
   bench_refactor_value_mode refactor_value_mode =
     BENCH_REFACTOR_VALUES_UNCHANGED;
   double refactor_value_amplitude = 1.0e-3;
-  double stress_diagonal_scale = 1.0;
-  int64_t stress_diagonal_column = -1;
   const char *row_refactor_control = "env";
   const char *kls_first_factor_control = "env";
   const char *row_solve_control = "env";
@@ -700,19 +654,6 @@ int main(int argc, char **argv) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
-    } else if (strcmp(argv[i], "--stress-diagonal-scale") == 0 &&
-               i + 1 < argc) {
-      if (!parse_nonnegative_double(argv[++i], &stress_diagonal_scale)) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-      }
-    } else if (strcmp(argv[i], "--stress-diagonal-column") == 0 &&
-               i + 1 < argc) {
-      if (!parse_int64_arg(argv[++i], &stress_diagonal_column) ||
-          stress_diagonal_column < -1) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-      }
     } else if (strcmp(argv[i], "--no-btf") == 0) {
       options.use_btf = 0;
     } else if (strcmp(argv[i], "--no-fast-factor") == 0) {
@@ -764,14 +705,6 @@ int main(int argc, char **argv) {
   if (!read_matrix_market(path, &a)) {
     return EXIT_FAILURE;
   }
-  if (stress_diagonal_column >= a.n) {
-    fprintf(stderr, "stress diagonal column %" PRId64
-            " is outside matrix order %" PRId64 "\n",
-            stress_diagonal_column, a.n);
-    matrix_free(&a);
-    return EXIT_FAILURE;
-  }
-
   bench_index_view input_index = {0};
   if (!prepare_index_view(&a, input_index_mode, &input_index)) {
     matrix_free(&a);
@@ -869,23 +802,7 @@ int main(int argc, char **argv) {
     return EXIT_SUCCESS;
   }
 
-  const int stress_requested =
-      (stress_diagonal_scale != 1.0 || stress_diagonal_column >= 0);
-  int64_t stress_entries = 0;
-  double *stressed_values = NULL;
   const double *run_values = a.values;
-  if (stress_requested) {
-    stressed_values = make_stressed_values(&a, stress_diagonal_scale,
-                                           stress_diagonal_column,
-                                           &stress_entries);
-    if (stressed_values == NULL) {
-      fprintf(stderr, "stress diagonal selection matched no diagonal entries\n");
-      bench_index_view_free(&input_index);
-      matrix_free(&a);
-      return EXIT_FAILURE;
-    }
-    run_values = stressed_values;
-  }
 
   double *x_true = (double *)malloc((size_t)a.n * sizeof(double));
   double *b = (double *)calloc((size_t)a.n, sizeof(double));
@@ -893,7 +810,6 @@ int main(int argc, char **argv) {
   if (x_true == NULL || b == NULL || x == NULL) {
     bench_index_view_free(&input_index);
     matrix_free(&a);
-    free(stressed_values);
     free(x_true);
     free(b);
     free(x);
@@ -912,17 +828,13 @@ int main(int argc, char **argv) {
                              &options);
   }
   if (status == KLS_OK) {
-    /* Diagonal stress is a transition probe: retain the factor of the
-       original values, then time checked factor/refactor recovery on the
-       stressed generation below. */
-    status = kls_factor(solver, stress_requested ? a.values : run_values);
+    status = kls_factor(solver, run_values);
   }
   if (status != KLS_OK) {
     fprintf(stderr, "KLS setup failed: %s (%d)\n", kls_status_string(status), status);
     kls_destroy(solver);
     bench_index_view_free(&input_index);
     matrix_free(&a);
-    free(stressed_values);
     free(x_true);
     free(b);
     free(x);
@@ -944,7 +856,6 @@ int main(int argc, char **argv) {
       kls_destroy(solver);
       bench_index_view_free(&input_index);
       matrix_free(&a);
-      free(stressed_values);
       free(x_true);
       free(b);
       free(x);
@@ -1062,7 +973,6 @@ int main(int argc, char **argv) {
     kls_destroy(solver);
     bench_index_view_free(&input_index);
     matrix_free(&a);
-    free(stressed_values);
     free(generated_values);
     free(x_true);
     free(b);
@@ -1080,7 +990,6 @@ int main(int argc, char **argv) {
     kls_destroy(solver);
     bench_index_view_free(&input_index);
     matrix_free(&a);
-    free(stressed_values);
     free(generated_values);
     free(x_true);
     free(b);
@@ -1205,7 +1114,6 @@ int main(int argc, char **argv) {
   kls_destroy(solver);
   bench_index_view_free(&input_index);
   matrix_free(&a);
-  free(stressed_values);
   free(generated_values);
   free(x_true);
   free(b);
