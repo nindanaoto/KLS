@@ -1,6 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
 
-#if defined(KLS_VENDORED_KLU_ONLY) || defined(KLS_VENDORED_KLU_DUAL)
 #include "trilinos_klu_decl.h"
 #define klu_l_common trilinos_klu_l_common
 #define klu_l_symbolic trilinos_klu_l_symbolic
@@ -12,22 +11,7 @@
 #define klu_l_solve trilinos_klu_l_solve
 #define klu_l_free_numeric trilinos_klu_l_free_numeric
 #define klu_l_free_symbolic trilinos_klu_l_free_symbolic
-#ifdef KLS_VENDORED_KLU_DUAL
-#define klu_common trilinos_klu_common
-#define klu_symbolic trilinos_klu_symbolic
-#define klu_numeric trilinos_klu_numeric
-#define klu_defaults trilinos_klu_defaults
-#define klu_analyze trilinos_klu_analyze
-#define klu_factor trilinos_klu_factor
-#define klu_refactor trilinos_klu_refactor
-#define klu_solve trilinos_klu_solve
-#define klu_free_numeric trilinos_klu_free_numeric
-#define klu_free_symbolic trilinos_klu_free_symbolic
-#endif
 #define KLU_OUT_OF_MEMORY TRILINOS_KLU_OUT_OF_MEMORY
-#else
-#include "klu.h"
-#endif
 
 #include "bench_value_sequence.h"
 
@@ -121,40 +105,6 @@ static uint64_t numeric64_fingerprint(const klu_l_numeric *numeric) {
   return hash;
 }
 
-#ifndef KLS_VENDORED_KLU_ONLY
-static uint64_t symbolic32_fingerprint(const klu_symbolic *symbolic) {
-  if (symbolic == NULL) return 0u;
-  uint64_t hash = UINT64_C(1469598103934665603);
-  hash = fingerprint_word(hash, (uint64_t)symbolic->n);
-  hash = fingerprint_word(hash, (uint64_t)symbolic->nz);
-  hash = fingerprint_word(hash, (uint64_t)symbolic->nblocks);
-  hash = fingerprint_word(hash, (uint64_t)symbolic->nzoff);
-  for (int i = 0; i < symbolic->n; ++i) {
-    hash = fingerprint_word(hash, (uint64_t)symbolic->P[i]);
-    hash = fingerprint_word(hash, (uint64_t)symbolic->Q[i]);
-  }
-  for (int block = 0; block <= symbolic->nblocks; ++block) {
-    hash = fingerprint_word(hash, (uint64_t)symbolic->R[block]);
-  }
-  return hash;
-}
-
-static uint64_t numeric32_fingerprint(const klu_numeric *numeric) {
-  if (numeric == NULL) return 0u;
-  uint64_t hash = UINT64_C(1469598103934665603);
-  hash = fingerprint_word(hash, (uint64_t)numeric->n);
-  hash = fingerprint_word(hash, (uint64_t)numeric->nblocks);
-  hash = fingerprint_word(hash, (uint64_t)numeric->lnz);
-  hash = fingerprint_word(hash, (uint64_t)numeric->unz);
-  hash = fingerprint_word(hash, (uint64_t)numeric->nzoff);
-  for (int i = 0; i < numeric->n; ++i) {
-    hash = fingerprint_word(hash, (uint64_t)numeric->Pnum[i]);
-    hash = fingerprint_word(hash, (uint64_t)numeric->Llen[i]);
-    hash = fingerprint_word(hash, (uint64_t)numeric->Ulen[i]);
-  }
-  return hash;
-}
-#endif
 
 static double now_seconds(void) {
   struct timespec ts;
@@ -376,23 +326,6 @@ static void make_refactor_values(matrix *a, const double *base_values,
   }
 }
 
-#ifndef KLS_VENDORED_KLU_ONLY
-static int copy_int_arrays(const matrix *a, int **ap_out, int **ai_out) {
-  if (a->n > INT_MAX || a->nnz > INT_MAX) return 0;
-  int *ap = (int *)malloc(((size_t)a->n + 1u) * sizeof(*ap));
-  int *ai = (int *)malloc((size_t)a->nnz * sizeof(*ai));
-  if (ap == NULL || ai == NULL) {
-    free(ap);
-    free(ai);
-    return 0;
-  }
-  for (int64_t i = 0; i <= a->n; ++i) ap[i] = (int)a->col_ptr[i];
-  for (int64_t i = 0; i < a->nnz; ++i) ai[i] = (int)a->row_idx[i];
-  *ap_out = ap;
-  *ai_out = ai;
-  return 1;
-}
-#endif
 
 static double residual_norm(const matrix *a, const double *x,
                             const double *rhs, double *relative_out) {
@@ -440,200 +373,6 @@ static double cycle_seconds(const run_stats *s) {
                  s->refactor_solve_steady_seconds_avg);
 }
 
-#ifndef KLS_VENDORED_KLU_ONLY
-static int run_klu32(matrix *a, const double *base_values,
-                     const double *x_true, double *rhs, int repeat,
-                     int factor_repeat, int refactor_repeat,
-                     int lifecycle_systems, int ordering,
-                     int btf, int scale,
-                     bench_refactor_value_mode refactor_value_mode,
-                     double refactor_value_amplitude,
-                     run_stats *out) {
-  memcpy(a->values, base_values, (size_t)a->nnz * sizeof(*a->values));
-  matvec(a, x_true, rhs);
-  out->verify_each_refactor =
-    getenv("BENCH_VERIFY_EACH_REFACTOR") != NULL ||
-    getenv("KLS_BENCH_VERIFY_EACH_REFACTOR") != NULL;
-  int *ap = NULL;
-  int *ai = NULL;
-  if (!copy_int_arrays(a, &ap, &ai)) return 0;
-
-  klu_common common;
-  klu_defaults(&common);
-  common.ordering = ordering;
-  common.btf = btf;
-  common.scale = scale;
-
-  const double analysis_start = now_seconds();
-  klu_symbolic *symbolic =
-    klu_analyze((int)a->n, ap, ai, &common);
-  out->analysis_seconds = now_seconds() - analysis_start;
-  if (symbolic == NULL || common.status < 0) {
-    out->status = common.status;
-    free(ap);
-    free(ai);
-    return 0;
-  }
-  out->nblocks = symbolic->nblocks;
-  out->symbolic_fingerprint = symbolic32_fingerprint(symbolic);
-
-  const double factor_start = now_seconds();
-  klu_numeric *numeric =
-    klu_factor(ap, ai, a->values, symbolic, &common);
-  out->initial_factor_seconds = now_seconds() - factor_start;
-  if (numeric == NULL || common.status < 0) {
-    out->status = common.status;
-    klu_free_symbolic(&symbolic, &common);
-    free(ap);
-    free(ai);
-    return 0;
-  }
-  out->numeric_fingerprint = numeric32_fingerprint(numeric);
-  out->nnz_l = numeric->lnz;
-  out->nnz_u = numeric->unz;
-
-  double total = 0.0;
-  for (int i = 0; i < factor_repeat; ++i) {
-    klu_free_numeric(&numeric, &common);
-    const double start = now_seconds();
-    numeric = klu_factor(ap, ai, a->values, symbolic, &common);
-    total += now_seconds() - start;
-    if (numeric == NULL || common.status < 0) break;
-  }
-  out->factor_seconds_avg = factor_repeat > 0
-    ? total / (double)factor_repeat : out->initial_factor_seconds;
-  if (numeric == NULL || common.status < 0) {
-    out->status = common.status;
-    klu_free_symbolic(&symbolic, &common);
-    free(ap);
-    free(ai);
-    return 0;
-  }
-
-  double *work = (double *)malloc((size_t)a->n * sizeof(*work));
-  if (work == NULL) {
-    out->status = KLU_OUT_OF_MEMORY;
-    klu_free_numeric(&numeric, &common);
-    klu_free_symbolic(&symbolic, &common);
-    free(ap);
-    free(ai);
-    return 0;
-  }
-  double initial_solve_seconds = 0.0;
-  if (lifecycle_systems > 0) {
-    memcpy(work, rhs, (size_t)a->n * sizeof(*work));
-    const double solve_start = now_seconds();
-    const int solve_ok =
-      klu_solve(symbolic, numeric, (int)a->n, 1, work, &common);
-    initial_solve_seconds = now_seconds() - solve_start;
-    if (!solve_ok || common.status < 0) {
-      out->status = common.status;
-      free(work);
-      klu_free_numeric(&numeric, &common);
-      klu_free_symbolic(&symbolic, &common);
-      free(ap);
-      free(ai);
-      return 0;
-    }
-    if (out->verify_each_refactor) {
-      (void)residual_norm(a, work, rhs,
-                          &out->refactor_max_relative_residual);
-    }
-  }
-  total = 0.0;
-  double refactor_solve_total = 0.0;
-  for (int i = 0; i < refactor_repeat; ++i) {
-    if (refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED) {
-      make_refactor_values(a, base_values, refactor_value_mode,
-                           (uint64_t)i + 1u,
-                           refactor_value_amplitude);
-      matvec(a, x_true, rhs);
-    }
-    const double start = now_seconds();
-    const int ok = klu_refactor(ap, ai, a->values, symbolic, numeric,
-                                         &common);
-    const double elapsed = now_seconds() - start;
-    total += elapsed;
-    if (i == 0) out->refactor_first_seconds = elapsed;
-    if (!ok || common.status < 0) break;
-    memcpy(work, rhs, (size_t)a->n * sizeof(*work));
-    const double solve_start = now_seconds();
-    const int solve_ok =
-      klu_solve(symbolic, numeric, (int)a->n, 1, work, &common);
-    const double solve_elapsed = now_seconds() - solve_start;
-    refactor_solve_total += solve_elapsed;
-    if (i == 0) out->refactor_solve_first_seconds = solve_elapsed;
-    if (solve_ok && common.status >= 0 && out->verify_each_refactor) {
-      double relative = 0.0;
-      (void)residual_norm(a, work, rhs, &relative);
-      if (!isfinite(relative)) {
-        out->refactor_max_relative_residual = INFINITY;
-      } else if (relative > out->refactor_max_relative_residual) {
-        out->refactor_max_relative_residual = relative;
-      }
-    }
-    if (!solve_ok ||
-        common.status < 0) {
-      break;
-    }
-  }
-  out->refactor_seconds_avg =
-    refactor_repeat > 0 ? total / (double)refactor_repeat : 0.0;
-  out->refactor_steady_seconds_avg = refactor_repeat > 1
-    ? (total - out->refactor_first_seconds) / (double)(refactor_repeat - 1)
-    : out->refactor_first_seconds;
-  out->refactor_solve_seconds_avg = refactor_repeat > 0
-    ? refactor_solve_total / (double)refactor_repeat : 0.0;
-  out->refactor_solve_steady_seconds_avg = refactor_repeat > 1
-    ? (refactor_solve_total - out->refactor_solve_first_seconds) /
-        (double)(refactor_repeat - 1)
-    : out->refactor_solve_first_seconds;
-  if (common.status < 0) {
-    out->status = common.status;
-    free(work);
-    klu_free_numeric(&numeric, &common);
-    klu_free_symbolic(&symbolic, &common);
-    free(ap);
-    free(ai);
-    return 0;
-  }
-
-  total = 0.0;
-  const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
-  for (int i = 0; i < standalone_solve_repeats; ++i) {
-    memcpy(work, rhs, (size_t)a->n * sizeof(*work));
-    const double start = now_seconds();
-    const int ok = klu_solve(symbolic, numeric, (int)a->n, 1, work,
-                                      &common);
-    total += now_seconds() - start;
-    if (!ok || common.status < 0) break;
-  }
-  out->solve_seconds_avg = lifecycle_systems > 0
-    ? initial_solve_seconds : total / (double)repeat;
-  if (refactor_repeat == 0) {
-    out->refactor_solve_first_seconds = out->solve_seconds_avg;
-    out->refactor_solve_steady_seconds_avg = out->solve_seconds_avg;
-    out->refactor_solve_seconds_avg = out->solve_seconds_avg;
-  }
-  out->residual_l2 = residual_norm(a, work, rhs,
-                                   &out->relative_residual_l2);
-  out->spice_cycle_seconds = cycle_seconds(out);
-  out->measured_lifecycle_seconds = lifecycle_systems > 0
-    ? out->analysis_seconds + out->initial_factor_seconds +
-        initial_solve_seconds +
-        out->refactor_seconds_avg * (double)refactor_repeat +
-        refactor_solve_total
-    : -1.0;
-  out->status = common.status;
-
-  free(work);
-  klu_free_numeric(&numeric, &common);
-  klu_free_symbolic(&symbolic, &common);
-  free(ap);
-  free(ai);
-  return out->status >= 0;
-}
-#endif
 
 static int run_klu64(matrix *a, const double *base_values,
                      const double *x_true, double *rhs, int repeat,
@@ -835,36 +574,6 @@ static int parse_ordering(const char *name) {
   return -1;
 }
 
-#ifndef KLS_VENDORED_KLU_ONLY
-static void print_stats_json(const char *name, const run_stats *s) {
-  printf("\"%s\":{\"status\":%d,\"analysis_seconds\":%.9g,"
-         "\"initial_factor_seconds\":%.9g,\"factor_seconds_avg\":%.9g,"
-         "\"refactor_first_seconds\":%.9g,"
-         "\"refactor_steady_seconds_avg\":%.9g,"
-         "\"refactor_seconds_avg\":%.9g,"
-         "\"refactor_solve_first_seconds\":%.9g,"
-         "\"refactor_solve_steady_seconds_avg\":%.9g,"
-         "\"refactor_solve_seconds_avg\":%.9g,\"solve_seconds_avg\":%.9g,"
-         "\"spice_cycle_seconds\":%.9g,\"nblocks\":%d,"
-         "\"residual_l2\":%.9g,\"relative_residual_l2\":%.9g,"
-         "\"verify_each_refactor\":%s,"
-         "\"refactor_max_relative_residual\":%.9g,"
-         "\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64 ","
-         "\"symbolic_fingerprint\":\"%016" PRIx64 "\","
-         "\"numeric_fingerprint\":\"%016" PRIx64 "\"}",
-         name, s->status, s->analysis_seconds, s->initial_factor_seconds,
-         s->factor_seconds_avg, s->refactor_first_seconds,
-         s->refactor_steady_seconds_avg, s->refactor_seconds_avg,
-         s->refactor_solve_first_seconds,
-         s->refactor_solve_steady_seconds_avg,
-         s->refactor_solve_seconds_avg,
-         s->solve_seconds_avg, s->spice_cycle_seconds, s->nblocks,
-         s->residual_l2, s->relative_residual_l2,
-         s->verify_each_refactor ? "true" : "false",
-         s->refactor_max_relative_residual, s->nnz_l, s->nnz_u,
-         s->symbolic_fingerprint, s->numeric_fingerprint);
-}
-#endif
 
 int main(int argc, char **argv) {
   if (argc < 2) {
@@ -872,7 +581,7 @@ int main(int argc, char **argv) {
             "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] "
             "[--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] "
             "[--ordering amd|colamd|natural] [--scale -1|0|1|2] "
-            "[--no-btf] [--width-order 32-first|64-first] [--json]\n",
+            "[--no-btf] [--json]\n",
             argv[0]);
     return EXIT_FAILURE;
   }
@@ -884,7 +593,6 @@ int main(int argc, char **argv) {
   int ordering = 0;
   int btf = 1;
   int scale = 2;
-  int width32_first = 1;
   int json = 0;
   int lifecycle_systems = 0;
   bench_refactor_value_mode refactor_value_mode =
@@ -925,16 +633,6 @@ int main(int argc, char **argv) {
       scale = atoi(argv[++i]);
     } else if (strcmp(argv[i], "--no-btf") == 0) {
       btf = 0;
-    } else if (strcmp(argv[i], "--width-order") == 0 && i + 1 < argc) {
-      const char *order = argv[++i];
-      if (strcmp(order, "32-first") == 0) {
-        width32_first = 1;
-      } else if (strcmp(order, "64-first") == 0) {
-        width32_first = 0;
-      } else {
-        fprintf(stderr, "unknown width order: %s\n", order);
-        return EXIT_FAILURE;
-      }
     } else if (strcmp(argv[i], "--json") == 0) {
       json = 1;
     } else {
@@ -984,49 +682,22 @@ int main(int argc, char **argv) {
   }
   matvec(&a, x_true, rhs);
 
-#ifndef KLS_VENDORED_KLU_ONLY
-  run_stats s32;
-#endif
   run_stats s64;
-#ifndef KLS_VENDORED_KLU_ONLY
-  memset(&s32, 0, sizeof(s32));
-#endif
   memset(&s64, 0, sizeof(s64));
-#ifndef KLS_VENDORED_KLU_ONLY
-  int ok32;
-  int ok64;
-  if (width32_first) {
-    ok32 = run_klu32(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
-                     refactor_value_mode, refactor_value_amplitude, &s32);
-    ok64 = run_klu64(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
-                     refactor_value_mode, refactor_value_amplitude, &s64);
-  } else {
-    ok64 = run_klu64(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
-                     refactor_value_mode, refactor_value_amplitude, &s64);
-    ok32 = run_klu32(&a, base_values, x_true, rhs, repeat, factor_repeat,
-                     refactor_repeat, lifecycle_systems, ordering, btf, scale,
-                     refactor_value_mode, refactor_value_amplitude, &s32);
-  }
-#else
   const int ok64 = run_klu64(
     &a, base_values, x_true, rhs, repeat, factor_repeat, refactor_repeat,
     lifecycle_systems, ordering, btf, scale, refactor_value_mode,
     refactor_value_amplitude,
     &s64);
-#endif
 
   if (json) {
-#ifdef KLS_VENDORED_KLU_ONLY
     printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
            ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
            "\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d,"
            "\"measured_lifecycle_seconds\":%.9g,"
            "\"refactor_value_mode\":\"%s\","
            "\"refactor_value_amplitude\":%.9g,"
-           "\"ordering\":%d,\"width_order\":\"%s\","
+           "\"ordering\":%d,"
            "\"btf\":%s,\"scale\":%d,\"status\":%d,"
            "\"analysis_seconds\":%.9g,\"initial_factor_seconds\":%.9g,"
            "\"factor_seconds_avg\":%.9g,\"refactor_first_seconds\":%.9g,"
@@ -1047,7 +718,6 @@ int main(int argc, char **argv) {
            refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,
            ordering,
-           width32_first ? "32-first" : "64-first",
            btf ? "true" : "false", scale, s64.status,
            s64.analysis_seconds, s64.initial_factor_seconds,
            s64.factor_seconds_avg, s64.refactor_first_seconds,
@@ -1060,74 +730,16 @@ int main(int argc, char **argv) {
            s64.verify_each_refactor ? "true" : "false",
            s64.refactor_max_relative_residual,
            s64.nblocks, s64.nnz_l, s64.nnz_u);
-#else
-    printf("{\"matrix\":\"%s\",\"n\":%" PRId64 ",\"nnz\":%" PRId64
-           ",\"repeat\":%d,\"factor_repeat\":%d,\"refactor_repeat\":%d,"
-           "\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d,"
-           "\"refactor_value_mode\":\"%s\","
-           "\"refactor_value_amplitude\":%.9g,"
-           "\"ordering\":%d,\"width_order\":\"%s\","
-           "\"btf\":%s,\"scale\":%d,",
-           path, a.n, a.nnz, repeat, factor_repeat, refactor_repeat,
-           lifecycle_systems > 0 ? "direct" : "projected",
-           lifecycle_systems,
-           bench_refactor_value_mode_name(refactor_value_mode),
-           refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
-             ? refactor_value_amplitude : 0.0,
-           ordering,
-           width32_first ? "32-first" : "64-first",
-           btf ? "true" : "false", scale);
-    print_stats_json("klu32", &s32);
-    printf(",");
-    print_stats_json("klu64", &s64);
-    if (ok32 && ok64) {
-      const int same_symbolic =
-        s32.symbolic_fingerprint == s64.symbolic_fingerprint;
-      const int same_numeric = same_symbolic &&
-        s32.numeric_fingerprint == s64.numeric_fingerprint;
-      printf(",\"same_symbolic\":%s,\"same_numeric_shape\":%s,"
-             "\"ratio32_over_64\":{\"analysis\":%.9g,"
-             "\"initial_factor\":%.9g,\"factor\":%.9g,"
-             "\"refactor\":%.9g,\"refactor_steady\":%.9g,"
-             "\"solve\":%.9g,\"spice_cycle\":%.9g}",
-             same_symbolic ? "true" : "false",
-             same_numeric ? "true" : "false",
-             s32.analysis_seconds / s64.analysis_seconds,
-             s32.initial_factor_seconds / s64.initial_factor_seconds,
-             s32.factor_seconds_avg / s64.factor_seconds_avg,
-             s32.refactor_seconds_avg / s64.refactor_seconds_avg,
-             s32.refactor_steady_seconds_avg /
-               s64.refactor_steady_seconds_avg,
-             s32.solve_seconds_avg / s64.solve_seconds_avg,
-             s32.spice_cycle_seconds / s64.spice_cycle_seconds);
-    }
-    printf("}\n");
-#endif
   } else {
-#ifdef KLS_VENDORED_KLU_ONLY
     printf("KLU64: analysis %.6f factor %.6f refactor %.6f solve %.6f cycle %.6f\n",
            s64.analysis_seconds, s64.initial_factor_seconds,
            s64.refactor_seconds_avg, s64.solve_seconds_avg,
            s64.spice_cycle_seconds);
-#else
-    printf("KLU32: analysis %.6f factor %.6f refactor %.6f solve %.6f cycle %.6f\n",
-           s32.analysis_seconds, s32.initial_factor_seconds,
-           s32.refactor_seconds_avg, s32.solve_seconds_avg,
-           s32.spice_cycle_seconds);
-    printf("KLU64: analysis %.6f factor %.6f refactor %.6f solve %.6f cycle %.6f\n",
-           s64.analysis_seconds, s64.initial_factor_seconds,
-           s64.refactor_seconds_avg, s64.solve_seconds_avg,
-           s64.spice_cycle_seconds);
-#endif
   }
 
   matrix_free(&a);
   free(base_values);
   free(x_true);
   free(rhs);
-#ifdef KLS_VENDORED_KLU_ONLY
   return ok64 ? EXIT_SUCCESS : EXIT_FAILURE;
-#else
-  return (ok32 && ok64) ? EXIT_SUCCESS : EXIT_FAILURE;
-#endif
 }
