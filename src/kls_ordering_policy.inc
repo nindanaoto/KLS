@@ -16166,48 +16166,16 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_private_ready_groups;
   solver->stats.row_refactor_private_ready_group_count =
     (int64_t)solver->row_refactor_private_ready_group_count;
-  solver->stats.row_refactor_last_separator_private_queue =
-    solver->row_refactor_last_separator_private_queue;
-  solver->stats.row_refactor_separator_private_queue_run_count =
-    (int64_t)solver->row_refactor_separator_private_queue_run_count;
-  solver->stats.row_refactor_last_separator_private_components =
-    (int64_t)solver->row_refactor_last_separator_private_components;
-  solver->stats.row_refactor_separator_private_component_count =
-    (int64_t)solver->row_refactor_separator_private_component_count;
   solver->stats.row_refactor_last_separator_flop_queue =
     solver->row_refactor_last_separator_flop_queue;
   solver->stats.row_refactor_separator_flop_queue_run_count =
     (int64_t)solver->row_refactor_separator_flop_queue_run_count;
-  solver->stats.row_refactor_last_separator_flop_ordered_private =
-    solver->row_refactor_last_separator_flop_ordered_private;
-  solver->stats.row_refactor_separator_flop_ordered_private_run_count =
-    (int64_t)solver->row_refactor_separator_flop_ordered_private_run_count;
   solver->stats.row_refactor_last_separator_flop_components =
     (int64_t)solver->row_refactor_last_separator_flop_components;
-  solver->stats.row_refactor_separator_flop_component_count =
-    (int64_t)solver->row_refactor_separator_flop_component_count;
   solver->stats.row_refactor_last_separator_flop_private_groups =
     (int64_t)solver->row_refactor_last_separator_flop_private_groups;
   solver->stats.row_refactor_last_separator_flop_pipeline_groups =
     (int64_t)solver->row_refactor_last_separator_flop_pipeline_groups;
-  solver->stats.row_refactor_last_separator_flop_closure_groups =
-    (int64_t)solver->row_refactor_last_separator_flop_closure_groups;
-  solver->stats.row_refactor_last_separator_flop_private_threads =
-    (int64_t)solver->row_refactor_last_separator_flop_private_threads;
-  solver->stats.row_refactor_last_separator_flop_private_min_groups =
-    (int64_t)solver->row_refactor_last_separator_flop_private_min_groups;
-  solver->stats.row_refactor_last_separator_flop_private_max_groups =
-    (int64_t)solver->row_refactor_last_separator_flop_private_max_groups;
-  solver->stats.row_refactor_last_separator_flop_private_min_work =
-    solver->row_refactor_last_separator_flop_private_min_work;
-  solver->stats.row_refactor_last_separator_flop_private_max_work =
-    solver->row_refactor_last_separator_flop_private_max_work;
-  solver->stats.row_refactor_separator_flop_private_group_count =
-    (int64_t)solver->row_refactor_separator_flop_private_group_count;
-  solver->stats.row_refactor_separator_flop_pipeline_group_count =
-    (int64_t)solver->row_refactor_separator_flop_pipeline_group_count;
-  solver->stats.row_refactor_separator_flop_closure_group_count =
-    (int64_t)solver->row_refactor_separator_flop_closure_group_count;
   solver->stats.row_refactor_last_done_bitmap =
     solver->row_refactor_last_done_bitmap;
   solver->stats.row_refactor_done_bitmap_run_count =
@@ -16256,14 +16224,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_row_solve_run_count;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
-  solver->stats.row_refactor_segment_rows =
-    (int64_t)solver->row_refactor_segment_rows;
-  solver->stats.row_refactor_segment_max_width =
-    (int64_t)solver->row_refactor_segment_max_width;
-  solver->stats.row_refactor_segment_dense_entries =
-    solver->row_refactor_segment_dense_entries;
-  solver->stats.row_refactor_segment_trailing_entries =
-    solver->row_refactor_segment_trailing_entries;
   solver->stats.row_refactor_dense_segment_count =
     (int64_t)solver->row_refactor_dense_segment_count;
   solver->stats.row_refactor_dense_segment_rows =
@@ -16366,18 +16326,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_last_segment_target_input_rows;
   solver->stats.row_refactor_segment_target_input_rows =
     (int64_t)solver->row_refactor_segment_target_input_rows;
-  solver->stats.row_refactor_segment_input_cleanup_rows =
-    (int64_t)solver->row_refactor_segment_input_cleanup_rows;
-  solver->stats.row_refactor_segment_input_cleanup_entries =
-    (int64_t)solver->row_refactor_segment_input_cleanup_entries;
-  solver->stats.row_refactor_last_segment_target_cleanup_rows =
-    (int64_t)solver->row_refactor_last_segment_target_cleanup_rows;
-  solver->stats.row_refactor_segment_target_cleanup_rows =
-    (int64_t)solver->row_refactor_segment_target_cleanup_rows;
-  solver->stats.row_refactor_last_segment_target_cleanup_entries =
-    (int64_t)solver->row_refactor_last_segment_target_cleanup_entries;
-  solver->stats.row_refactor_segment_target_cleanup_entries =
-    (int64_t)solver->row_refactor_segment_target_cleanup_entries;
   solver->stats.row_refactor_last_compact_supernode_update =
     solver->row_refactor_last_compact_supernode_update;
   solver->stats.row_refactor_compact_supernode_update_count =
