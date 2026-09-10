@@ -97,8 +97,7 @@ static int kls_verified_large_pts_solve_policy_eligible(
   const kls_solver *solver) {
   return solver != NULL && solver->pts != NULL && solver->pts->solve_ok &&
     solver->pts->solve_direct_verified &&
-    solver->pts->nk >= 16384u && solver->pts->nthreads >= 2 &&
-    getenv("KLS_DISABLE_VERIFIED_LARGE_PTS_SOLVE_POLICY") == NULL;
+    solver->pts->nk >= 16384u && solver->pts->nthreads >= 2;
 }
 
 /* Keep the moderately wide plan certificate out of the forest builder.  It
@@ -144,8 +143,7 @@ static int kls_balanced_runtime_pts_solve_plan_eligible(
     nchunks >= 4 * (int64_t)nthreads &&
     ntop <= (int64_t)(nk / 8u) && total > 0.0 &&
     top_work > 0.30 * total && top_work <= 0.45 * total &&
-    max_bin * (double)nthreads <= 1.20 * (total - top_work) &&
-    getenv("KLS_DISABLE_BALANCED_RUNTIME_PTS_SOLVE") == NULL;
+    max_bin * (double)nthreads <= 1.20 * (total - top_work);
 }
 
 static void kls_pts_free(kls_solver *solver) {
@@ -398,12 +396,6 @@ static size_t kls_pts_accumulator_stride(int64_t ntop) {
 
 static void kls_pts_try_build(kls_solver *solver) {
   kls_pts_free(solver);
-  {
-    const char *dis = getenv("KLS_DISABLE_PTS");
-    if (dis != NULL && dis[0] == '1') {
-      return;
-    }
-  }
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const int measured_matched_factor =
@@ -430,9 +422,7 @@ static void kls_pts_try_build(kls_solver *solver) {
   }
   const UF_long k1 = symbolic->R[best];
   const UF_long nk = best_nk;
-  if (
-      getenv("KLS_DISABLE_DEEP_LOW_INTENSITY_PTS_SETTLE") == NULL &&
-      kls_repeated_update_workload(&solver->options) &&
+  if (kls_repeated_update_workload(&solver->options) &&
       symbolic->nblocks == 1u && nk == solver->n) {
     /* A complete low-intensity factor whose elimination tree is almost a
        chain has no useful second subtree representation to discover: there
@@ -689,14 +679,8 @@ static void kls_pts_try_build(kls_solver *solver) {
        assuming that every repeated workload benefits from the tighter cut. */
     double cut_multiplier = measured_matched_factor ? 0.9 : 2.0;
 
-    const char *cut_env = getenv("KLS_PTS_CUT_MULTIPLIER");
-    if (cut_env != NULL && cut_env[0] != '\0') {
-      const double parsed = atof(cut_env);
-      if (parsed >= 0.5 && parsed <= 4.0) {
-        cut_multiplier = parsed;
-      }
-    } else if (!measured_matched_factor &&
-               kls_repeated_update_workload(&solver->options)) {
+    if (!measured_matched_factor &&
+        kls_repeated_update_workload(&solver->options)) {
       const double candidates[] = {0.75, 1.0, 1.5, 2.0};
       double candidate_scores[4] = {DBL_MAX, DBL_MAX, DBL_MAX, DBL_MAX};
       int64_t candidate_chunks[4] = {0, 0, 0, 0};
@@ -813,9 +797,7 @@ static void kls_pts_try_build(kls_solver *solver) {
            columns when the private forest is demonstrably broad and
            balanced; the adjacent solve tournament still has to measure a
            win before this representation becomes steady state. */
-        ntop <= (int64_t)(nk /
-          (getenv("KLS_DISABLE_BALANCED_VERY_WIDE_PTS_SOLVE") == NULL
-             ? 12u : 20u)) &&
+        ntop <= (int64_t)(nk / 12u) &&
         top_work > 0.45 * total && top_work <= 0.60 * total &&
         max_bin * (double)nthreads <=
           1.20 * (total - top_work);
@@ -949,7 +931,7 @@ static void kls_pts_try_build(kls_solver *solver) {
         pts->top_cols[topc++] = (int32_t)k;
       }
     }
-    if (getenv("KLS_DISABLE_DENSE_RECIPROCAL_HUB_PTS_RUN_SCATTER") == NULL) {
+    {
       /* Build the run representation for every eligible forest, then retain
          it only when the actual top streams contain enough contiguous work
          to halve the indexed-scatter operations. */
@@ -997,9 +979,7 @@ static void kls_pts_try_build(kls_solver *solver) {
          where dispatch overhead still needs a separate economic reason. */
       pts->solve_decision = 1;
     }
-    if ((measured_matched_factor) &&
-        pts->refactor_ok &&
-        getenv("KLS_DISABLE_LARGE_BOUNDED_PTS_REFACTOR") == NULL) {
+    if ((measured_matched_factor) && pts->refactor_ok) {
       /* This class's one-block policy exists specifically to expose the
          verified subtree partition.  Its measured refactor is over twice as
          fast as the mapped incumbent, so avoid charging a complete warm-up
@@ -1708,9 +1688,6 @@ static int kls_pts_top_pipeline_is_profitable(const kls_pts *pts) {
 
 static int kls_pts_top_pipeline_enabled(const kls_solver *solver,
                                         const kls_pts *pts) {
-  if (getenv("KLS_DISABLE_PTS_PIPE_TOP") != NULL) {
-    return 0;
-  }
   if ( solver != NULL &&
       solver->symbolic != NULL && solver->symbolic->nblocks == 1u) {
     /* The subtree bins already expose all parallelism available below a
@@ -2172,8 +2149,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   trilinos_klu_l_common *common = &solver->common;
   if (pts == NULL || !pts->refactor_ok || solver->symbolic == NULL ||
       solver->numeric == NULL ||
-      solver->numeric->Xwork == NULL ||
-      getenv("KLS_DISABLE_PTS_REFACTOR") != NULL) {
+      solver->numeric->Xwork == NULL) {
     return -1;
   }
   const int scaled = common->scale > 0;
@@ -2228,8 +2204,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
   shared.direct_user_values = solver->refactor_direct_user_values_active;
   shared.pivot_tolerance = common->tol;
 
-  if ((1) &&
-      getenv("KLS_DISABLE_PTS_REFACTOR_POOL") == NULL) {
+  {
     const int pool_ok = kls_pts_mapped_refactor_pool(solver, &shared);
     if (pool_ok >= 0) {
       if (pool_ok && scaled &&
@@ -2518,8 +2493,7 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
   } else if (t < acceptance_ratio * incumbent_seconds) {
     solver->pts_ref_decision = 1;
   } else if (repeated_generic && solver->pts_ref_reaudit == 0 &&
-             t <= 1.05 * incumbent_seconds &&
-             getenv("KLS_DISABLE_PTS_CLOSE_REAUDIT") == NULL) {
+             t <= 1.05 * incumbent_seconds) {
     /* One timing pair can compare a cold subtree pass with a noisy incumbent
        (or vice versa).  Re-audit only the ambiguous five-percent band: a
        challenger already slower by more than that cannot satisfy the warm
@@ -2534,8 +2508,7 @@ static int kls_pts_try_refactor_timed(kls_solver *solver,
   } else {
     solver->pts_ref_decision = -1;
   }
-  if (repeated_generic && solver->pts_ref_decision <= 0 &&
-      getenv("KLS_DISABLE_GENERIC_PTS_EGRAPH_TRIAL_RESET") == NULL) {
+  if (repeated_generic && solver->pts_ref_decision <= 0) {
     /* A losing PTS challenger is followed by an EGraph restore in this same
        public refactor.  Its elapsed sample therefore contains both complete
        engines and cannot score any still-undecided EGraph width, fusion,
