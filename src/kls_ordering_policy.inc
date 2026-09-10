@@ -15970,16 +15970,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     (int64_t)solver->fast_rejected_prefix_refresh_columns;
   solver->stats.fast_rejected_prefix_refresh_count =
     (int64_t)solver->fast_rejected_prefix_refresh_count;
-  solver->stats.row_refactor_total_group_work =
-    kls_row_refactor_total_group_work(solver);
   solver->stats.row_refactor_auto_enabled =
     solver->row_refactor_auto_enabled;
-  solver->stats.row_refactor_auto_values_ready =
-    solver->row_refactor_values_ready;
-  solver->stats.row_refactor_auto_work_allowed =
-    kls_auto_row_refactor_cost_allows(solver);
-  solver->stats.row_refactor_auto_should_run =
-    kls_auto_row_refactor_should_run(solver);
   solver->stats.row_refactor_auto_lower_bound_work =
     solver->row_refactor_auto_lower_bound_work;
   solver->stats.row_refactor_auto_lower_bound_rejected =
@@ -16040,16 +16032,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->fast_rejected_prefix_refresh_columns;
   solver->stats.fast_rejected_prefix_refresh_count =
     (int64_t)solver->fast_rejected_prefix_refresh_count;
-  solver->stats.row_refactor_total_group_work =
-    kls_row_refactor_total_group_work(solver);
   solver->stats.row_refactor_auto_enabled =
     solver->row_refactor_auto_enabled;
-  solver->stats.row_refactor_auto_values_ready =
-    solver->row_refactor_values_ready;
-  solver->stats.row_refactor_auto_work_allowed =
-    kls_auto_row_refactor_cost_allows(solver);
-  solver->stats.row_refactor_auto_should_run =
-    kls_auto_row_refactor_should_run(solver);
   solver->stats.row_refactor_auto_lower_bound_work =
     solver->row_refactor_auto_lower_bound_work;
   solver->stats.row_refactor_auto_lower_bound_rejected =
@@ -16106,16 +16090,10 @@ static void fill_numeric_stats(kls_solver *solver) {
 
   solver->stats.refactor_map_index32_enabled =
     solver->refactor_map_index32_enabled;
-  solver->stats.refactor_map_index32_entries =
-    (int64_t)solver->refactor_map_indices32_count;
   solver->stats.refactor_l_index32_enabled =
     solver->refactor_l_index32_enabled;
-  solver->stats.refactor_l_index32_entries =
-    (int64_t)solver->refactor_l_indices32_count;
   solver->stats.refactor_u_index32_enabled =
     solver->refactor_u_index32_enabled;
-  solver->stats.refactor_u_index32_entries =
-    (int64_t)solver->refactor_u_indices32_count;
 
   solver->stats.refactor_last_btf_scalar_run_exec_runs =
     (int64_t)solver->refactor_last_btf_scalar_run_exec_runs;

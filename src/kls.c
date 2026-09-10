@@ -2278,14 +2278,9 @@ static void kls_fill_separator_stats(kls_stats *stats,
     stats->separator_analyzed_rows = 0;
     stats->separator_global_begin = -1;
     stats->separator_global_end = -1;
-    stats->separator_thread_count = 0;
     stats->separator_component_count = 0;
     stats->separator_private_components = 0;
     stats->separator_pipeline_components = 0;
-    stats->separator_private_rows = 0;
-    stats->separator_pipeline_rows = 0;
-    stats->separator_private_max_rows = 0;
-    stats->separator_pipeline_max_rows = 0;
     return;
   }
   stats->separator_analyzed_rows = (int64_t)separator->n;
@@ -2293,16 +2288,11 @@ static void kls_fill_separator_stats(kls_stats *stats,
     ? (int64_t)separator->global_begin : -1;
   stats->separator_global_end = separator->global_range_valid
     ? (int64_t)separator->global_end : -1;
-  stats->separator_thread_count = (int64_t)separator->thread_count;
   stats->separator_component_count = (int64_t)separator->component_count;
   stats->separator_private_components =
     (int64_t)separator->private_component_count;
   stats->separator_pipeline_components =
     (int64_t)separator->pipeline_component_count;
-  stats->separator_private_rows = (int64_t)separator->private_rows;
-  stats->separator_pipeline_rows = (int64_t)separator->pipeline_rows;
-  stats->separator_private_max_rows = (int64_t)separator->private_max_rows;
-  stats->separator_pipeline_max_rows = (int64_t)separator->pipeline_max_rows;
 }
 
 static int kls_separator_analysis_has_global_range(
@@ -5843,14 +5833,8 @@ static void kls_invalidate_factor_etree_stats(kls_solver *solver) {
   }
   solver->factor_etree_stats_valid = 0;
   solver->parallel_model_stats_valid = 0;
-  solver->stats.factor_etree_block_start = -1;
   solver->stats.factor_etree_block_size = 0;
   solver->stats.factor_etree_levels = 0;
-  solver->stats.factor_etree_max_width = 0;
-  solver->stats.factor_etree_edges = 0;
-  solver->stats.factor_etree_root_columns = 0;
-  solver->stats.factor_etree_leaf_columns = 0;
-  solver->stats.factor_etree_max_fanout = 0;
 }
 
 static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
@@ -8936,11 +8920,8 @@ static void fill_build_stats(kls_stats *stats) {
   }
   stats->internal_index_bytes = (int)sizeof(UF_long);
   stats->refactor_map_index32_enabled = 0;
-  stats->refactor_map_index32_entries = 0;
   stats->refactor_l_index32_enabled = 0;
-  stats->refactor_l_index32_entries = 0;
   stats->refactor_u_index32_enabled = 0;
-  stats->refactor_u_index32_entries = 0;
   stats->build_has_metis = 1;
 #ifdef KLS_HAVE_SCOTCH
   stats->build_has_scotch = 1;

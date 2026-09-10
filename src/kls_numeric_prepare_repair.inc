@@ -859,14 +859,8 @@ static void kls_update_factor_etree_stats(kls_solver *solver) {
     }
   }
 
-  solver->stats.factor_etree_block_start = (int64_t)best_k1;
   solver->stats.factor_etree_block_size = (int64_t)best_nk;
   solver->stats.factor_etree_levels = (int64_t)level_count;
-  solver->stats.factor_etree_max_width = (int64_t)max_width;
-  solver->stats.factor_etree_edges = (int64_t)edges;
-  solver->stats.factor_etree_root_columns = (int64_t)roots;
-  solver->stats.factor_etree_leaf_columns = (int64_t)leaves;
-  solver->stats.factor_etree_max_fanout = (int64_t)max_fanout;
   solver->factor_etree_stats_valid = 1;
   free(parent);
   free(level);
