@@ -65,10 +65,7 @@
 #define KLS_ALWAYS_INLINE inline
 #endif
 
-enum {
-  KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES = 4,
-  KLS_LEAN_SNODE_AVX512_MIN_TARGETS = 32
-};
+#include "kls_tuning.inc"
 
 /* Pause hint for atomic spin waits: keeps a blocked worker from hammering
    the shared cache line at full speed and starving the producing thread of
@@ -92,10 +89,12 @@ static int kls_defer_cycle_trials_enabled(void) {
    full sparse-value pass even when its one-shot factor has slightly more
    arithmetic.  Keep the admission solely in caller-supplied lifecycle
    terms: this is deliberately independent of matrix dimensions, density,
-   family, and benchmark identity.  Sixteen updates are enough for one
-   avoided O(nnz) pass per generation to be first-class rather than noise. */
+   family, and benchmark identity. The configured lifecycle threshold makes
+   one avoided O(nnz) pass per generation first-class rather than noise. */
 static int kls_repeated_update_workload(const kls_options *options) {
-  return options != NULL && options->expected_refactorizations >= 16;
+  return options != NULL &&
+    options->expected_refactorizations >=
+      KLS_REPEATED_UPDATE_MIN_REFACTORIZATIONS;
 }
 
 static double *kls_aligned_double_values(UF_long count) {
@@ -183,44 +182,7 @@ static void kls_accumulate_scaled_dense_rows8(
 #else
 #define KLS_MAX_ALLOCATION (SIZE_MAX / 2u)
 #endif
-#define KLS_ROW_REFACTOR_BATCH_MIN_ROWS 8u
-#define KLS_ROW_REFACTOR_BATCH_MAX_ROWS 16u
-#define KLS_ROW_REFACTOR_SMALL_SORT_MAX 32u
-#define KLS_ROW_REFACTOR_DENSE_MIN_WORK 1024.0
-#define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK 32768.0
-#define KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY 8.0
-/* The native panel pays off on compact circuit panels; the work-per-entry
-   gate supplies the relevant arithmetic-intensity check. */
-#define KLS_ROW_REFACTOR_NATIVE_PANEL_AUTO_MIN_WORK 32768.0
-#define KLS_ROW_REFACTOR_DENSE_BLOCK_ROWS 32u
-#define KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_ROWS 8u
-#define KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_COLS 16u
-#define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK 32768.0
-#define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY 8.0
-#define KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS 16u
-#define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK 512.0
-#define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK_PER_ENTRY \
-  KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
-#define KLS_BTF_SCALAR_RUN_EXEC_MIN_ROWS 16u
-#define KLS_BTF_SCALAR_RUN_EXEC_MAX_ROWS 1024u
-#define KLS_ROW_FIRST_PIPELINE_PREFIX_CACHE_REBUILD_MAX_ROWS 32768u
-#define KLS_ROW_FIRST_MISSED_PANEL_CACHE_MAX_STORED_ENTRIES 4194304u
-#define KLS_ROW_FIRST_PRODUCER_BATCH_MIN_SAVED_STREAM 1024u
-#define KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA 1.2
-#define KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ 300000u
-#define KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION 0.70
-#define KLS_ROW_SOLVE_TRAPEZOID_SLICES 8u
-#define KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ
-#define KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC \
-  KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ
-#define KLS_ROW_SOLVE_CLUSTER_ALPHA_NUMERATOR 2u
-#define KLS_NICSLU_PARALLEL_R1_THRESHOLD 2.0
-#define KLS_NICSLU_PARALLEL_R2_THRESHOLD 50.0
-#define KLS_NICSLU_TASK_FLOW_SYNC_COST 1.0
-#define KLS_METIS_NDP_MIN_ROWS 30000u
 #define KLS_SNODE_MIN_BATCH kls_snode_min_batch()
-#define KLS_SNODE_MAX_BATCH 64
-#define KLS_SNODE_TAIL_CHUNK 32
 #define KLS_SNODE_MIN_BATCH_WORK kls_snode_min_batch_work()
 
 /* Per-refactor floor overrides: written by the refactor driver before
@@ -233,30 +195,15 @@ static UF_long kls_snode_min_batch(void) {
   if (kls_snode_floor_batch_override > 0) {
     return kls_snode_floor_batch_override;
   }
-  return 3;
+  return KLS_SNODE_DEFAULT_MIN_BATCH;
 }
 
 static UF_long kls_snode_min_batch_work(void) {
   if (kls_snode_floor_work_override > 0) {
     return kls_snode_floor_work_override;
   }
-  return 192;
+  return KLS_SNODE_DEFAULT_MIN_BATCH_WORK;
 }
-
-/* Minimum work needed to amortize EGraph worker dispatch. */
-#define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 2.5e5
-#define KLS_EGRAPH_REFACTOR_MIN_SIZE 5000u
-#define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
-/* EGraph's caller participates as worker zero. Background workers need only
-   a short grace period to catch back-to-back SPICE refactors; the old 200K
-   idle spin occupied every requested core during serial post/solve phases. */
-#define KLS_EGRAPH_WORKER_SPIN_ITERS 4096u
-#define KLS_METIS_NDP_MIN_LEAF_ROWS 200u
-#define KLS_METIS_NDP_TARGET_DIVISOR 1000u
-#define KLS_METIS_NDP_SUBTREE_THRESHOLD_MIN_ROWS 200000u
-#define KLS_METIS_NDP_MAX_OVERPARTITION_LEAVES 1024u
-#define KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK 100000000.0
-#define KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_SHARE 0.95
 
 typedef struct kls_refactor_pool kls_refactor_pool;
 typedef struct kls_egraph_refactor_pool kls_egraph_refactor_pool;

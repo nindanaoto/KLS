@@ -1444,6 +1444,9 @@ selectors. Freeze the policy and thresholds before running
 `bench/suitesparse_generalization_holdout_manifest.txt`, and report failures
 as well as successful timing rows. The holdout is procedural rather than
 secret: repeatedly tuning against it turns it into another development set.
+Compile-time performance thresholds and resource budgets are cataloged in
+`src/kls_tuning.inc`; retune them against the development corpus, then freeze
+that file before evaluating the holdout corpus.
 Use `--index path/to/ssstats.csv` to regenerate from a pinned SuiteSparse
 metadata snapshot. Generated manifests record the index timestamp and SHA-256;
 `python3 scripts/build_generalization_manifests.py --check` verifies that the

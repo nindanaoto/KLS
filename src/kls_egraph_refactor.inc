@@ -1169,8 +1169,6 @@ static UF_long kls_snode_batch_consume_cached_pair(
   return t;
 }
 
-#define KLS_SNODE_MAX_FUSE 4
-
 /* Fused k-consumer batch consume (k <= KLS_SNODE_MAX_FUSE): one pass
    over the producer run's tail panel feeds k consumer SPAs, dividing
    the dominant panel-stream traffic by k. All consumers' cursors must
@@ -8176,7 +8174,5 @@ typedef struct kls_snb_state {
   double coop_work_share; /* fraction in cooperative fat-chain snodes */
 } kls_snb_state;
 
-#define KLS_SNB_MAX_ENTRIES 150000000
 /* Work threshold above which a lone task on a level is executed by the
  * whole crew (column-sliced edges, row-sliced GEMM/scatter and getrf). */
-#define KLS_SNB_COOP_MIN_DOUBLES 32768

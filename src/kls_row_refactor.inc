@@ -10875,8 +10875,6 @@ struct kls_dense_help_ctx {
   UF_long panel_kb;
 };
 
-#define KLS_DENSE_HELP_TAIL_SLICE 128u
-
 /* Diagonal-block row tails of a blocked dense-panel factorization form
    a forward substitution: row i's tail update reads the FINAL tails of
    rows k..i-1, so rows are sequential — but every tail column is

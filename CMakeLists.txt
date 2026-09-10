@@ -406,7 +406,8 @@ add_library(kls
   src/kls_numeric_schedule.inc
   src/kls_ordering_policy.inc
   src/kls_pts.inc
-  src/kls_row_refactor.inc)
+  src/kls_row_refactor.inc
+  src/kls_tuning.inc)
 
 # These implementation fragments stay in kls.c's translation unit so moving
 # the internal engines does not introduce call boundaries or inhibit inlining.
@@ -420,6 +421,7 @@ set_source_files_properties(
   src/kls_ordering_policy.inc
   src/kls_pts.inc
   src/kls_row_refactor.inc
+  src/kls_tuning.inc
   PROPERTIES HEADER_FILE_ONLY ON)
 
 add_library(KLS::kls ALIAS kls)

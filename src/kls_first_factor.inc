@@ -11983,8 +11983,6 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
    shared ancestor "top" set, accumulated privately, and merged before
    the serial top sweeps.  Backward U needs no accumulation at all: its
    scatter targets are descendants, which stay inside the own chunk.  */
-#define KLS_PTS_MAX_THREADS 16
-
 typedef struct kls_pts_stream_run {
   int32_t row;
   uint32_t length;
