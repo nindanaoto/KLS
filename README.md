@@ -877,20 +877,9 @@ refactor pool scatter kernels use the narrower mirrors when the matrix fits
 32-bit local row/input indices and fall back to the original `UF_long` arrays
 otherwise. The retained U dependency-index arrays use the same default 32-bit
 mirror for eligible matrices, letting the EGraph scalar dependency walk read
-narrower producer indices without changing the KLU-owned numeric factor. Set
-`KLS_ENABLE_REFACTOR_MAP_INDEX32=0`, `KLS_ENABLE_REFACTOR_L_INDEX32=0`, or
-`KLS_ENABLE_REFACTOR_U_INDEX32=0` to disable individual mirrors for A/B
-comparisons. Benchmark JSON reports `refactor_map_index32_enabled` and
-`refactor_map_index32_entries`, `refactor_l_index32_enabled` and
-`refactor_l_index32_entries`, plus `refactor_u_index32_enabled` and
-`refactor_u_index32_entries` so runs can verify whether each mirror was active.
-The opt-in Algorithm-5 speculative prefactor and FP32 factor-mirror experiments
-have been removed. `KLS_ENABLE_EGRAPH_ALGORITHM5_PREF_UPDATE`,
-`KLS_ENABLE_FP32_REFACTOR`, and `KLS_FP32_TAIL_FLOAT_ACCUM` no longer have an
-effect. The four public EGraph Algorithm-5 prefactor statistics remain reserved
-and always zero for ABI compatibility. Production double-precision refinement,
-dependency scheduling, fused BTF dispatch, and narrow integer-index mirrors
-remain supported.
+narrower producer indices without changing the KLU-owned numeric factor.
+Production double-precision refinement, dependency scheduling, fused BTF
+dispatch, and narrow integer-index mirrors remain supported.
 The separate repeated-factor repair guard still blocks high-work pipeline
 factors when pivot repair would be risky, but no longer blocks numerics whose
 retained factor has zero off-diagonal pivots. Those no-pivot cases reuse the

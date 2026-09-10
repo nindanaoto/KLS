@@ -2915,8 +2915,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
 
   UF_long max_level = 0;
-  UF_long edges = 0;
-  UF_long root_columns = 0;
   double max_column_work = 0.0;
   double total_work = 0.0;
 
@@ -2937,7 +2935,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         if (max_column_work < 1.0) {
           max_column_work = 1.0;
         }
-        root_columns++;
       }
       continue;
     }
@@ -2978,10 +2975,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
         }
         work += 1.0 + (double)solver->numeric->Llen[k1 + dep];
 
-        edges++;
-      }
-      if (ucol_len == 0u) {
-        root_columns++;
       }
       levels[k1 + k] = level;
       column_work[k1 + k] = work;
@@ -2992,18 +2985,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       if (level > max_level) {
         max_level = level;
       }
-    }
-  }
-
-  UF_long leaf_columns = 0;
-  UF_long max_fanout = 0;
-  for (UF_long k = 0; k < solver->n; ++k) {
-    const UF_long fanout = successor_counts[k];
-    if (fanout == 0u) {
-      leaf_columns++;
-    }
-    if (fanout > max_fanout) {
-      max_fanout = fanout;
     }
   }
 
@@ -3277,10 +3258,6 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   solver->refactor_separator_private_unsafe_component_count =
     separator_private_unsafe_component_count;
   solver->refactor_level_max_width = max_width;
-  solver->refactor_dependency_edges = edges;
-  solver->refactor_dependency_root_columns = root_columns;
-  solver->refactor_dependency_leaf_columns = leaf_columns;
-  solver->refactor_dependency_max_fanout = max_fanout;
   solver->refactor_dependency_max_column_work = max_column_work;
   solver->refactor_dependency_pipeline_max_column_work =
     pipeline_max_column_work;

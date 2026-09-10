@@ -5241,8 +5241,6 @@ static int kls_build_refactor_map_index32(kls_solver *solver) {
   solver->refactor_row_idx32 = row_idx32;
   solver->refactor_input_pos32 = input_pos32;
   solver->refactor_input_oldrow32 = input_oldrow32;
-  solver->refactor_map_indices32_count = solver->nnz;
-  solver->refactor_map_index32_enabled = 1;
   return 1;
 }
 
@@ -6710,9 +6708,7 @@ static UF_long kls_row_solve_dense_tail_start(UF_long n,
 static UF_long *kls_build_row_solve_slice_bounds(UF_long n,
                                                  const UF_long *ptr,
                                                  UF_long start,
-                                                 UF_long entries,
-                                                 UF_long *max_entries_out) {
-  KLS_SET_OPTIONAL_OUTPUT(max_entries_out, 0);
+                                                 UF_long entries) {
   if (ptr == NULL || start >= n || entries == 0u) {
     return NULL;
   }
@@ -6737,7 +6733,6 @@ static UF_long *kls_build_row_solve_slice_bounds(UF_long n,
     bounds[slice] = row;
   }
 
-  UF_long max_entries = 0;
   for (UF_long slice = 0u; slice < slices; ++slice) {
     const UF_long begin = bounds[slice];
     const UF_long end = bounds[slice + 1u];
@@ -6745,13 +6740,6 @@ static UF_long *kls_build_row_solve_slice_bounds(UF_long n,
       free(bounds);
       return NULL;
     }
-    const UF_long slice_entries = ptr[end] - ptr[begin];
-    if (slice_entries > max_entries) {
-      max_entries = slice_entries;
-    }
-  }
-  if (max_entries_out != NULL) {
-    *max_entries_out = max_entries;
   }
   return bounds;
 }
@@ -6779,13 +6767,9 @@ static int kls_build_row_solve_segment_splits(UF_long n,
                                               const UF_long *bounds,
                                               int upper,
                                               UF_long **split_out,
-                                              UF_long *rows_out,
-                                              UF_long *rect_entries_out,
-                                              UF_long *tri_entries_out) {
+                                              UF_long *rect_entries_out) {
   KLS_SET_OPTIONAL_OUTPUT(split_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(rows_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(rect_entries_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(tri_entries_out, 0);
   if (split_out == NULL || ptr == NULL || cols == NULL || bounds == NULL ||
       n == 0u) {
     return 1;
@@ -6799,9 +6783,7 @@ static int kls_build_row_solve_segment_splits(UF_long n,
     split[row] = ptr[row];
   }
 
-  UF_long rows = 0;
   UF_long rect_entries = 0;
-  UF_long tri_entries = 0;
   for (UF_long slice = 0u; slice < KLS_ROW_SOLVE_TRAPEZOID_SLICES; ++slice) {
     const UF_long slice_begin = bounds[slice];
     const UF_long slice_end = bounds[slice + 1u];
@@ -6828,26 +6810,17 @@ static int kls_build_row_solve_segment_splits(UF_long n,
       const UF_long cut =
         kls_row_solve_col_lower_bound(cols, row_begin, row_end, threshold);
       split[row] = cut;
-      rows++;
       if (upper) {
-        tri_entries += cut - row_begin;
         rect_entries += row_end - cut;
       } else {
         rect_entries += cut - row_begin;
-        tri_entries += row_end - cut;
       }
     }
   }
 
   *split_out = split;
-  if (rows_out != NULL) {
-    *rows_out = rows;
-  }
   if (rect_entries_out != NULL) {
     *rect_entries_out = rect_entries;
-  }
-  if (tri_entries_out != NULL) {
-    *tri_entries_out = tri_entries;
   }
   return 1;
 }
@@ -7027,12 +7000,10 @@ static int kls_build_row_solve_sparse_levels(
   int upper,
   UF_long **level_ptr_out,
   UF_long **level_rows_out,
-  UF_long *level_count_out,
-  UF_long *level_max_width_out) {
+  UF_long *level_count_out) {
   KLS_SET_OPTIONAL_OUTPUT(level_ptr_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(level_rows_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(level_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(level_max_width_out, 0);
   if (level_ptr_out == NULL || level_rows_out == NULL ||
       ptr == NULL || cols == NULL || end > n) {
     return 0;
@@ -7103,12 +7074,8 @@ static int kls_build_row_solve_sparse_levels(
     return 0;
   }
 
-  UF_long max_width = 0;
   level_ptr[0] = 0u;
   for (UF_long level = 0u; level < level_count; ++level) {
-    if (level_counts[level] > max_width) {
-      max_width = level_counts[level];
-    }
     level_ptr[level + 1u] = level_ptr[level] + level_counts[level];
     level_counts[level] = level_ptr[level];
   }
@@ -7123,9 +7090,6 @@ static int kls_build_row_solve_sparse_levels(
   *level_rows_out = level_rows;
   if (level_count_out != NULL) {
     *level_count_out = level_count;
-  }
-  if (level_max_width_out != NULL) {
-    *level_max_width_out = max_width;
   }
   return 1;
 }
@@ -7268,16 +7232,14 @@ static int kls_build_one_row_solve_transpose_plan_impl(
   (void)kls_build_row_solve_sparse_levels(
     n, plan->ptr, plan->cols, tail_start, plan->upper,
     &plan->sparse_level_ptr, &plan->sparse_level_rows,
-    &plan->sparse_level_count, &plan->sparse_level_max_width);
+    &plan->sparse_level_count);
   plan->slice_bounds =
-    kls_build_row_solve_slice_bounds(n, plan->ptr, tail_start,
-                                     tail_entries,
-                                     &plan->slice_max_entries);
+    kls_build_row_solve_slice_bounds(
+      n, plan->ptr, tail_start, tail_entries);
   if (plan->slice_bounds != NULL) {
     (void)kls_build_row_solve_segment_splits(
       n, plan->ptr, plan->cols, plan->slice_bounds, plan->upper,
-      &plan->segment_split, &plan->segmented_rows, &plan->rect_entries,
-      &plan->tri_entries);
+      &plan->segment_split, &plan->rect_entries);
   }
   return 1;
 }
@@ -7392,42 +7354,32 @@ static void kls_build_one_row_solve_partition(kls_solver *solver,
   if (upper) {
     solver->row_solve_u_dense_tail_start = start;
     solver->row_solve_u_dense_tail_rows = start < n ? n - start : 0u;
-    solver->row_solve_u_dense_tail_entries = entries;
     (void)kls_build_row_solve_sparse_levels(
       n, ptr, cols, start, 1, &solver->row_solve_u_sparse_level_ptr,
       &solver->row_solve_u_sparse_level_rows,
-      &solver->row_solve_u_sparse_level_count,
-      &solver->row_solve_u_sparse_level_max_width);
+      &solver->row_solve_u_sparse_level_count);
     solver->row_solve_u_slice_bounds =
-      kls_build_row_solve_slice_bounds(
-        n, ptr, start, entries, &solver->row_solve_u_slice_max_entries);
+      kls_build_row_solve_slice_bounds(n, ptr, start, entries);
     if (solver->row_solve_u_slice_bounds != NULL) {
       (void)kls_build_row_solve_segment_splits(
         n, ptr, cols, solver->row_solve_u_slice_bounds, 1,
         &solver->row_solve_u_segment_split,
-        &solver->row_solve_u_segmented_rows,
-        &solver->row_solve_u_rect_entries,
-        &solver->row_solve_u_tri_entries);
+        &solver->row_solve_u_rect_entries);
     }
   } else {
     solver->row_solve_l_dense_tail_start = start;
     solver->row_solve_l_dense_tail_rows = start < n ? n - start : 0u;
-    solver->row_solve_l_dense_tail_entries = entries;
     (void)kls_build_row_solve_sparse_levels(
       n, ptr, cols, start, 0, &solver->row_solve_l_sparse_level_ptr,
       &solver->row_solve_l_sparse_level_rows,
-      &solver->row_solve_l_sparse_level_count,
-      &solver->row_solve_l_sparse_level_max_width);
+      &solver->row_solve_l_sparse_level_count);
     solver->row_solve_l_slice_bounds =
-      kls_build_row_solve_slice_bounds(
-        n, ptr, start, entries, &solver->row_solve_l_slice_max_entries);
+      kls_build_row_solve_slice_bounds(n, ptr, start, entries);
     if (solver->row_solve_l_slice_bounds != NULL) {
       (void)kls_build_row_solve_segment_splits(
         n, ptr, cols, solver->row_solve_l_slice_bounds, 0,
         &solver->row_solve_l_segment_split,
-        &solver->row_solve_l_segmented_rows,
-        &solver->row_solve_l_rect_entries,
-        &solver->row_solve_l_tri_entries);
+        &solver->row_solve_l_rect_entries);
     }
   }
 }
@@ -7444,7 +7396,6 @@ static void kls_record_row_solve_partition(kls_solver *solver) {
   }
 
   solver->row_solve_partition_ready = 1;
-  solver->row_solve_partition_slices = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
   kls_build_one_row_solve_partition(solver, 0);
   kls_build_one_row_solve_partition(solver, 1);
   kls_build_row_solve_transpose_plans(solver);

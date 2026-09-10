@@ -303,13 +303,9 @@ typedef struct kls_row_solve_transpose_plan {
   UF_long *sparse_level_rows;
   UF_long sparse_level_count;
   UF_long sparse_cluster_levels;
-  UF_long sparse_level_max_width;
   UF_long dense_tail_start;
   UF_long dense_tail_rows;
-  UF_long slice_max_entries;
-  UF_long segmented_rows;
   UF_long rect_entries;
-  UF_long tri_entries;
   int thread_count;
   int source_upper;
   int upper;
@@ -858,7 +854,6 @@ struct kls_solver {
   int refactor_l_indices_sorted;
   int refactor_l_sorted_enabled;
 
-  UF_long refactor_map_indices32_count;
   UF_long refactor_l_indices32_count;
   UF_long refactor_u_indices32_count;
   UF_long *row_refactor_l_ptr;
@@ -1038,27 +1033,16 @@ struct kls_solver {
   UF_long row_solve_l_thread_max_rect_entries;
   UF_long row_solve_u_thread_max_rect_entries;
   int row_solve_partition_ready;
-  UF_long row_solve_partition_slices;
   UF_long row_solve_l_sparse_level_count;
   UF_long row_solve_l_sparse_cluster_levels;
-  UF_long row_solve_l_sparse_level_max_width;
   UF_long row_solve_l_dense_tail_start;
   UF_long row_solve_l_dense_tail_rows;
-  UF_long row_solve_l_dense_tail_entries;
-  UF_long row_solve_l_slice_max_entries;
-  UF_long row_solve_l_segmented_rows;
   UF_long row_solve_l_rect_entries;
-  UF_long row_solve_l_tri_entries;
   UF_long row_solve_u_sparse_level_count;
   UF_long row_solve_u_sparse_cluster_levels;
-  UF_long row_solve_u_sparse_level_max_width;
   UF_long row_solve_u_dense_tail_start;
   UF_long row_solve_u_dense_tail_rows;
-  UF_long row_solve_u_dense_tail_entries;
-  UF_long row_solve_u_slice_max_entries;
-  UF_long row_solve_u_segmented_rows;
   UF_long row_solve_u_rect_entries;
-  UF_long row_solve_u_tri_entries;
   UF_long *row_solve_l_slice_bounds;
   UF_long *row_solve_u_slice_bounds;
   UF_long *row_solve_l_segment_split;
@@ -1239,21 +1223,13 @@ struct kls_solver {
   UF_long refactor_separator_private_component_count;
   UF_long refactor_separator_private_unsafe_component_count;
   UF_long refactor_level_max_width;
-  UF_long refactor_dependency_edges;
-  UF_long refactor_dependency_root_columns;
-  UF_long refactor_dependency_leaf_columns;
-  UF_long refactor_dependency_max_fanout;
   double refactor_dependency_max_column_work;
   double refactor_dependency_pipeline_max_column_work;
-  UF_long refactor_supernode_candidate_count;
   UF_long refactor_supernode_candidate_rows;
   UF_long refactor_supernode_candidate_max_width;
-  double refactor_supernode_candidate_dense_entries;
-  double refactor_supernode_candidate_trailing_entries;
 
   int refactor_l_index32_enabled;
   int refactor_u_index32_enabled;
-  int refactor_map_index32_enabled;
 
   UF_long *refactor_supernode_pipeline_end;
 
@@ -2602,15 +2578,10 @@ static void kls_record_supernode_candidate(
   if (solver == NULL || successor_counts == NULL || width <= 1u) {
     return;
   }
-  solver->refactor_supernode_candidate_count++;
   solver->refactor_supernode_candidate_rows += width;
   if (width > solver->refactor_supernode_candidate_max_width) {
     solver->refactor_supernode_candidate_max_width = width;
   }
-  solver->refactor_supernode_candidate_dense_entries +=
-    (double)width * (double)(width - 1u) * 0.5;
-  solver->refactor_supernode_candidate_trailing_entries +=
-    (double)width * (double)successor_counts[start + width - 1u];
   if (pipeline_end != NULL) {
     pipeline_end[start] = start + width;
   }
@@ -2662,8 +2633,6 @@ static void free_refactor_map(kls_solver *solver) {
   solver->refactor_direct_user_values_active = 0;
   solver->refactor_block_start = NULL;
   solver->refactor_col_block = NULL;
-  solver->refactor_map_indices32_count = 0;
-  solver->refactor_map_index32_enabled = 0;
 }
 
 
@@ -2801,26 +2770,15 @@ static void kls_clear_row_solve_partition(kls_solver *solver) {
   solver->row_solve_u_thread_max_rect_entries = 0;
   solver->row_solve_l_sparse_level_count = 0;
   solver->row_solve_l_sparse_cluster_levels = 0;
-  solver->row_solve_l_sparse_level_max_width = 0;
   solver->row_solve_u_sparse_level_count = 0;
   solver->row_solve_u_sparse_cluster_levels = 0;
-  solver->row_solve_u_sparse_level_max_width = 0;
   solver->row_solve_partition_ready = 0;
-  solver->row_solve_partition_slices = 0;
   solver->row_solve_l_dense_tail_start = 0;
   solver->row_solve_l_dense_tail_rows = 0;
-  solver->row_solve_l_dense_tail_entries = 0;
-  solver->row_solve_l_slice_max_entries = 0;
-  solver->row_solve_l_segmented_rows = 0;
   solver->row_solve_l_rect_entries = 0;
-  solver->row_solve_l_tri_entries = 0;
   solver->row_solve_u_dense_tail_start = 0;
   solver->row_solve_u_dense_tail_rows = 0;
-  solver->row_solve_u_dense_tail_entries = 0;
-  solver->row_solve_u_slice_max_entries = 0;
-  solver->row_solve_u_segmented_rows = 0;
   solver->row_solve_u_rect_entries = 0;
-  solver->row_solve_u_tri_entries = 0;
 }
 
 static void free_row_refactor_pattern(kls_solver *solver) {
@@ -4262,17 +4220,10 @@ static void free_refactor_schedule(kls_solver *solver) {
   solver->refactor_separator_private_component_count = 0;
   solver->refactor_separator_private_unsafe_component_count = 0;
   solver->refactor_level_max_width = 0;
-  solver->refactor_dependency_edges = 0;
-  solver->refactor_dependency_root_columns = 0;
-  solver->refactor_dependency_leaf_columns = 0;
-  solver->refactor_dependency_max_fanout = 0;
   solver->refactor_dependency_max_column_work = 0.0;
   solver->refactor_dependency_pipeline_max_column_work = 0.0;
-  solver->refactor_supernode_candidate_count = 0;
   solver->refactor_supernode_candidate_rows = 0;
   solver->refactor_supernode_candidate_max_width = 0;
-  solver->refactor_supernode_candidate_dense_entries = 0.0;
-  solver->refactor_supernode_candidate_trailing_entries = 0.0;
 
   solver->refactor_cluster_level_count = 0;
   solver->refactor_cluster_level_count_alpha3 = 0;

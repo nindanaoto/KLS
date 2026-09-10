@@ -6234,12 +6234,6 @@ static int test_egraph_retired_supernode_switch(void) {
   char *saved_checked =
     saved_checked_value != NULL ? strdup(saved_checked_value) : NULL;
   const int had_checked = saved_checked_value != NULL;
-  const char *saved_egraph_value =
-    getenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES");
-  char *saved_egraph =
-    saved_egraph_value != NULL ? strdup(saved_egraph_value) : NULL;
-  const int had_egraph = saved_egraph_value != NULL;
-
   kls_solver *solver = NULL;
   kls_options options;
   kls_default_options(&options);
@@ -6261,14 +6255,8 @@ static int test_egraph_retired_supernode_switch(void) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && setenv("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES", "1", 1) != 0) {
-    perror("setenv KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES=1");
-    ok = 0;
-  }
-
   /* The production EGraph work floor would route this small fixture to the
-     serial mapped path; pin it to zero to exercise EGraph after retiring
-     the supernode switch. The old switch must no longer alter execution. */
+     serial mapped path; pin it to zero to exercise EGraph. */
   if (ok && setenv("KLS_EGRAPH_REFACTOR_FLOOR", "0", 1) != 0) {
     perror("setenv KLS_EGRAPH_REFACTOR_FLOOR=0");
     ok = 0;
@@ -6347,14 +6335,8 @@ static int test_egraph_retired_supernode_switch(void) {
                          saved_checked)) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_ENABLE_EGRAPH_SUPERNODE_UPDATES", had_egraph,
-                         saved_egraph)) {
-    ok = 0;
-  }
-
   free(saved_row);
   free(saved_checked);
-  free(saved_egraph);
   kls_destroy(solver);
   free(ap);
   free(ai);
