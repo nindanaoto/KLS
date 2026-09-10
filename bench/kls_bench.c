@@ -813,77 +813,11 @@ int main(int argc, char **argv) {
              ",\"analysis_seconds\":%.9g"
              ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
              ",\"structural_rank\":%" PRId64
-             ",\"factor_etree_block_start\":%" PRId64
-             ",\"factor_etree_block_size\":%" PRId64
-             ",\"factor_etree_levels\":%" PRId64
-             ",\"factor_etree_max_width\":%" PRId64
-             ",\"factor_etree_edges\":%" PRId64
-             ",\"factor_etree_root_columns\":%" PRId64
-             ",\"factor_etree_leaf_columns\":%" PRId64
-             ",\"factor_etree_max_fanout\":%" PRId64
-             ",\"separator_analyzed_rows\":%" PRId64
-             ",\"separator_global_begin\":%" PRId64
-             ",\"separator_global_end\":%" PRId64
-             ",\"separator_thread_count\":%" PRId64
-             ",\"separator_component_count\":%" PRId64
-             ",\"separator_private_components\":%" PRId64
-             ",\"separator_pipeline_components\":%" PRId64
-             ",\"separator_private_rows\":%" PRId64
-             ",\"separator_pipeline_rows\":%" PRId64
-             ",\"separator_private_max_rows\":%" PRId64
-             ",\"separator_pipeline_max_rows\":%" PRId64
              ",\"nnz_l\":%" PRId64 ",\"nnz_u\":%" PRId64
              ",\"estimated_flops\":%.9g"
-             ",\"parallel_model_r1\":%.9g"
-             ",\"parallel_model_r2\":%.9g"
-             ",\"parallel_model_recommends_parallel\":%d"
-             ",\"parallel_task_flow_threads\":%" PRId64
-             ",\"parallel_task_flow_dependencies\":%" PRId64
-             ",\"parallel_task_flow_work\":%.9g"
-             ",\"parallel_task_flow_finish_time\":%.9g"
-             ",\"parallel_task_flow_speedup\":%.9g"
-             ",\"parallel_task_flow_recommends_parallel\":%d"
-             ",\"low_work_tiny_block_btf_symbolic_eligible\":%d"
-             ",\"compact_solve_singleton_run_eligible\":%d"
-             ",\"sparse_symmetric_fragmented_metis_symbolic_eligible\":%d"
-             ",\"sparse_symmetric_fragmented_metis_policy_eligible\":%d"
-             ",\"sparse_spiked_predicted_candidate\":%d"
-             ",\"sparse_spiked_predicted_factor_eligible\":%d"
-             ",\"sparse_spiked_predicted_clustered_eligible\":%d"
-             ",\"dense_fragmented_scaled_row_factor_eligible\":%d"
-             ",\"sparse_full_diagonal_metis_row_candidate\":%d"
-             ",\"sparse_full_diagonal_metis_row_symbolic_eligible\":%d"
-             ",\"sparse_full_diagonal_metis_row_factor_eligible\":%d"
-             ",\"giant_symmetric_scalar_fringe_metis_row_candidate\":%d"
-             ",\"giant_symmetric_scalar_fringe_metis_row_symbolic_eligible\":%d"
-             ",\"giant_symmetric_scalar_fringe_metis_row_factor_eligible\":%d"
-             ",\"hybrid_huge_single_egraph_factor_eligible\":%d"
-             ",\"promoted_tolerance_l2_recovery_eligible\":%d"
-             ",\"promoted_tolerance_l2_contract_run_count\":%" PRId64
-             ",\"promoted_tolerance_l2_recovery_count\":%" PRId64
-             ",\"bounded_degree_retained_preconditioner_candidate\":%d"
-             ",\"bounded_degree_retained_preconditioner_symbolic_eligible\":%d"
-             ",\"bounded_degree_retained_preconditioner_factor_eligible\":%d"
-             ",\"bounded_degree_retained_preconditioner_reuse_count\":%" PRId64
-             ",\"asymmetric_bounded_degree_direct_metis_candidate\":%d"
-             ",\"asymmetric_bounded_degree_direct_metis_tuning_class\":%d"
-             ",\"asymmetric_bounded_degree_direct_metis_symbolic_eligible\":%d"
-             ",\"asymmetric_bounded_degree_direct_metis_factor_eligible\":%d"
-             ",\"near_symmetric_mega_hub_amd_candidate\":%d"
-             ",\"near_symmetric_mega_hub_amd_symbolic_eligible\":%d"
-             ",\"near_symmetric_mega_hub_amd_factor_eligible\":%d"
-             ",\"giant_dominant_hub_metis_dense_tail_candidate\":%d"
-             ",\"giant_dominant_hub_metis_dense_tail_symbolic_eligible\":%d"
-             ",\"giant_dominant_hub_metis_dense_tail_factor_eligible\":%d"
-             ",\"high_work_tiny_fringe_btf_pts_factor_eligible\":%d"
-             ",\"verified_large_pts_solve_policy_eligible\":%d"
-             ",\"medium_spike_minfill_candidate\":%d"
-             ",\"medium_spike_minfill_symbolic_eligible\":%d"
-             ",\"sparse_broad_column_amf_no_btf_candidate\":%d"
-             ",\"sparse_broad_column_amf_no_btf_symbolic_eligible\":%d"
-             ",\"bounded_degree_amf_no_btf_candidate\":%d"
-             ",\"bounded_degree_amf_no_btf_symbolic_eligible\":%d"
-             ",\"analyze_only\":true}\n",
+             ",\"build_has_metis\":%s,\"build_has_scotch\":%s"
+             ",\"build_has_spral_scaling\":%s"
+             ",\"analyze_only\":true,\"status\":%d}\n",
              path, a.n, a.nnz, options.threads,
              kls_backend_name(options.backend),
              index_mode_name(input_index_mode),
@@ -900,76 +834,11 @@ int main(int argc, char **argv) {
              stats.selected_btf ? "true" : "false",
              stats.analysis_seconds, stats.nblocks, stats.max_block,
              stats.structural_rank,
-             stats.factor_etree_block_start,
-             stats.factor_etree_block_size,
-             stats.factor_etree_levels,
-             stats.factor_etree_max_width,
-             stats.factor_etree_edges,
-             stats.factor_etree_root_columns,
-             stats.factor_etree_leaf_columns,
-             stats.factor_etree_max_fanout,
-             stats.separator_analyzed_rows,
-             stats.separator_global_begin,
-             stats.separator_global_end,
-             stats.separator_thread_count,
-             stats.separator_component_count,
-             stats.separator_private_components,
-             stats.separator_pipeline_components,
-             stats.separator_private_rows,
-             stats.separator_pipeline_rows,
-             stats.separator_private_max_rows,
-             stats.separator_pipeline_max_rows,
              stats.nnz_l, stats.nnz_u,
              stats.estimated_flops,
-             stats.parallel_model_r1,
-             stats.parallel_model_r2,
-             stats.parallel_model_recommends_parallel,
-             stats.parallel_task_flow_threads,
-             stats.parallel_task_flow_dependencies,
-             stats.parallel_task_flow_work,
-             stats.parallel_task_flow_finish_time,
-             stats.parallel_task_flow_speedup,
-             stats.parallel_task_flow_recommends_parallel,
-             stats.low_work_tiny_block_btf_symbolic_eligible,
-             stats.compact_solve_singleton_run_eligible,
-             stats.sparse_symmetric_fragmented_metis_symbolic_eligible,
-             stats.sparse_symmetric_fragmented_metis_policy_eligible,
-             stats.sparse_spiked_predicted_candidate,
-             stats.sparse_spiked_predicted_factor_eligible,
-             stats.sparse_spiked_predicted_clustered_eligible,
-             stats.dense_fragmented_scaled_row_factor_eligible,
-             stats.sparse_full_diagonal_metis_row_candidate,
-             stats.sparse_full_diagonal_metis_row_symbolic_eligible,
-             stats.sparse_full_diagonal_metis_row_factor_eligible,
-             stats.giant_symmetric_scalar_fringe_metis_row_candidate,
-             stats.giant_symmetric_scalar_fringe_metis_row_symbolic_eligible,
-             stats.giant_symmetric_scalar_fringe_metis_row_factor_eligible,
-             stats.hybrid_huge_single_egraph_factor_eligible,
-             stats.promoted_tolerance_l2_recovery_eligible,
-             stats.promoted_tolerance_l2_contract_run_count,
-             stats.promoted_tolerance_l2_recovery_count,
-             stats.bounded_degree_retained_preconditioner_candidate,
-             stats.bounded_degree_retained_preconditioner_symbolic_eligible,
-             stats.bounded_degree_retained_preconditioner_factor_eligible,
-             stats.bounded_degree_retained_preconditioner_reuse_count,
-             stats.asymmetric_bounded_degree_direct_metis_candidate,
-             stats.asymmetric_bounded_degree_direct_metis_tuning_class,
-             stats.asymmetric_bounded_degree_direct_metis_symbolic_eligible,
-             stats.asymmetric_bounded_degree_direct_metis_factor_eligible,
-             stats.near_symmetric_mega_hub_amd_candidate,
-             stats.near_symmetric_mega_hub_amd_symbolic_eligible,
-             stats.near_symmetric_mega_hub_amd_factor_eligible,
-             stats.giant_dominant_hub_metis_dense_tail_candidate,
-             stats.giant_dominant_hub_metis_dense_tail_symbolic_eligible,
-             stats.giant_dominant_hub_metis_dense_tail_factor_eligible,
-             stats.high_work_tiny_fringe_btf_pts_factor_eligible,
-             stats.verified_large_pts_solve_policy_eligible,
-             stats.medium_spike_minfill_candidate,
-             stats.medium_spike_minfill_symbolic_eligible,
-             stats.sparse_broad_column_amf_no_btf_candidate,
-             stats.sparse_broad_column_amf_no_btf_symbolic_eligible,
-             stats.bounded_degree_amf_no_btf_candidate,
-             stats.bounded_degree_amf_no_btf_symbolic_eligible);
+             stats.build_has_metis ? "true" : "false",
+             stats.build_has_scotch ? "true" : "false",
+             stats.build_has_spral_scaling ? "true" : "false", status);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -986,59 +855,13 @@ int main(int argc, char **argv) {
       printf("row solve control: %s\n", row_solve_control);
       printf("requested btf: %s\n", options.use_btf ? "on" : "off");
       printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
-      printf("compact singleton-run solve eligible: %s\n",
-             stats.compact_solve_singleton_run_eligible ? "yes" : "no");
       printf("analysis: %.6f s\n", stats.analysis_seconds);
       printf("blocks: %" PRId64 ", max block: %" PRId64 "\n",
              stats.nblocks, stats.max_block);
       printf("structural rank: %" PRId64 "\n", stats.structural_rank);
-      printf("factor ETree largest block: start %" PRId64 ", size %" PRId64
-             ", levels %" PRId64 ", max width %" PRId64 ", edges %" PRId64
-             ", roots %" PRId64 ", leaves %" PRId64
-             ", max fanout %" PRId64 "\n",
-             stats.factor_etree_block_start,
-             stats.factor_etree_block_size,
-             stats.factor_etree_levels,
-             stats.factor_etree_max_width,
-             stats.factor_etree_edges,
-             stats.factor_etree_root_columns,
-             stats.factor_etree_leaf_columns,
-             stats.factor_etree_max_fanout);
-      printf("separator queues: rows %" PRId64 ", global [%" PRId64
-             ", %" PRId64 "), threads %" PRId64
-             ", components %" PRId64 " (private %" PRId64
-             ", pipeline %" PRId64 "), row split %" PRId64 "/%" PRId64
-             ", max private/pipeline %" PRId64 "/%" PRId64 "\n",
-             stats.separator_analyzed_rows,
-             stats.separator_global_begin,
-             stats.separator_global_end,
-             stats.separator_thread_count,
-             stats.separator_component_count,
-             stats.separator_private_components,
-             stats.separator_pipeline_components,
-             stats.separator_private_rows,
-             stats.separator_pipeline_rows,
-             stats.separator_private_max_rows,
-             stats.separator_pipeline_max_rows);
       printf("estimated nnz(L): %" PRId64 ", nnz(U): %" PRId64 "\n",
              stats.nnz_l, stats.nnz_u);
       printf("estimated flops: %.6e\n", stats.estimated_flops);
-      printf("low-work tiny-block BTF symbolic eligible: %s\n",
-             stats.low_work_tiny_block_btf_symbolic_eligible
-               ? "yes" : "no");
-      printf("parallel model R1/R2: %.6g / %.6g, recommends parallel: %s\n",
-             stats.parallel_model_r1,
-             stats.parallel_model_r2,
-             stats.parallel_model_recommends_parallel ? "yes" : "no");
-      printf("NICSLU task-flow model: threads %" PRId64
-             ", deps %" PRId64 ", work %.6g, finish %.6g"
-             ", speedup %.6g, recommends parallel: %s\n",
-             stats.parallel_task_flow_threads,
-             stats.parallel_task_flow_dependencies,
-             stats.parallel_task_flow_work,
-             stats.parallel_task_flow_finish_time,
-             stats.parallel_task_flow_speedup,
-             stats.parallel_task_flow_recommends_parallel ? "yes" : "no");
     }
     kls_destroy(solver);
     bench_index_view_free(&input_index);
