@@ -6101,81 +6101,6 @@ static int compare_match_entries_desc(const void *a, const void *b) {
   return 0;
 }
 
-static void kls_sort_match_entries_desc_full_radix(
-  kls_match_entry *entries,
-  UF_long count,
-  kls_match_entry *scratch) {
-  enum { KLS_MATCH_RADIX_MAX_BITS = 16,
-         KLS_MATCH_RADIX_MAX_SIZE = 1 << KLS_MATCH_RADIX_MAX_BITS };
-  size_t buckets[KLS_MATCH_RADIX_MAX_SIZE];
-  const unsigned int radix_bits =
-    getenv("KLS_MATCH_RADIX16") != NULL
-      ? 16u : 11u;
-  kls_match_entry *src = entries;
-  kls_match_entry *dst = scratch;
-  uint64_t max_row_col = 0u;
-  for (UF_long i = 0u; i < count; ++i) {
-    max_row_col |= (uint64_t)entries[i].row;
-    max_row_col |= (uint64_t)entries[i].col;
-  }
-  unsigned int index_bits = 1u;
-  while (index_bits < 64u && (max_row_col >> index_bits) != 0u) {
-    ++index_bits;
-  }
-
-  /* Stable LSD passes over the reverse integer keys implement the exact
-     comparison order: descending weight, then descending row and column.
-     Sparse-matrix indices need only their significant low passes; positive
-     finite IEEE-754 weights retain numeric order in all 64 representation
-     bits. */
-  for (int key_kind = 0; key_kind < 3; ++key_kind) {
-    const unsigned int key_bits = key_kind < 2 ? index_bits : 64u;
-    for (unsigned int shift = 0u; shift < key_bits;
-         shift += radix_bits) {
-      const unsigned int pass_bits =
-        key_bits - shift < radix_bits ? key_bits - shift : radix_bits;
-      const unsigned int digit_count = 1u << pass_bits;
-      memset(buckets, 0, (size_t)digit_count * sizeof(*buckets));
-      const uint64_t mask = (UINT64_C(1) << pass_bits) - UINT64_C(1);
-      for (UF_long i = 0u; i < count; ++i) {
-        uint64_t raw = 0u;
-        if (key_kind == 0) {
-          raw = (uint64_t)src[i].col;
-        } else if (key_kind == 1) {
-          raw = (uint64_t)src[i].row;
-        } else {
-          memcpy(&raw, &src[i].weight, sizeof(raw));
-        }
-        buckets[(~raw >> shift) & mask]++;
-      }
-      size_t offset = 0u;
-      for (unsigned int digit = 0u; digit < digit_count; ++digit) {
-        const size_t count_for_digit = buckets[digit];
-        buckets[digit] = offset;
-        offset += count_for_digit;
-      }
-      for (UF_long i = 0u; i < count; ++i) {
-        uint64_t raw = 0u;
-        if (key_kind == 0) {
-          raw = (uint64_t)src[i].col;
-        } else if (key_kind == 1) {
-          raw = (uint64_t)src[i].row;
-        } else {
-          memcpy(&raw, &src[i].weight, sizeof(raw));
-        }
-        const size_t digit = (size_t)((~raw >> shift) & mask);
-        dst[buckets[digit]++] = src[i];
-      }
-      kls_match_entry *swap = src;
-      src = dst;
-      dst = swap;
-    }
-  }
-  if (src != entries) {
-    memcpy(entries, src, (size_t)count * sizeof(*entries));
-  }
-}
-
 static void kls_sort_match_entries_desc(kls_match_entry *entries,
                                         UF_long count) {
   if (entries == NULL || count <= 1u) {
@@ -6191,12 +6116,6 @@ static void kls_sort_match_entries_desc(kls_match_entry *entries,
   if (scratch == NULL) {
     qsort(entries, (size_t)count, sizeof(*entries),
           compare_match_entries_desc);
-    return;
-  }
-
-  if (getenv("KLS_MATCH_FULL_RADIX") != NULL) {
-    kls_sort_match_entries_desc_full_radix(entries, count, scratch);
-    free(scratch);
     return;
   }
 
