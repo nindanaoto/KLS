@@ -3430,9 +3430,7 @@ static kls_lean_done_slot *ensure_lean_parallel_done(
     solver->lean_parallel_generation = 0u;
   }
   solver->lean_parallel_generation++;
-  if (generation_out != NULL) {
-    *generation_out = solver->lean_parallel_generation;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(generation_out, solver->lean_parallel_generation);
   return solver->lean_parallel_done;
 }
 
@@ -4107,9 +4105,7 @@ static atomic_uint *ensure_egraph_pipeline_done(
   }
 
   solver->egraph_pipeline_generation++;
-  if (generation_out != NULL) {
-    *generation_out = solver->egraph_pipeline_generation;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(generation_out, solver->egraph_pipeline_generation);
   return solver->egraph_pipeline_done;
 }
 
@@ -6848,24 +6844,12 @@ static int run_refactor_pool(kls_solver *solver,
 
   *invalid_out = invalid;
   *pivot_rejected_out = pivot_rejected;
-  if (rejected_pivot_out != NULL) {
-    *rejected_pivot_out = rejected_pivot;
-  }
-  if (rejected_pivot_col_out != NULL) {
-    *rejected_pivot_col_out = rejected_pivot_col;
-  }
-  if (rejected_row_out != NULL) {
-    *rejected_row_out = rejected_row;
-  }
-  if (rejected_multiplier_abs_out != NULL) {
-    *rejected_multiplier_abs_out = rejected_multiplier_abs;
-  }
-  if (rejected_pivot_abs_out != NULL) {
-    *rejected_pivot_abs_out = rejected_pivot_abs;
-  }
-  if (rejected_candidate_abs_out != NULL) {
-    *rejected_candidate_abs_out = rejected_candidate_abs;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(rejected_pivot_out, rejected_pivot);
+  KLS_SET_OPTIONAL_OUTPUT(rejected_pivot_col_out, rejected_pivot_col);
+  KLS_SET_OPTIONAL_OUTPUT(rejected_row_out, rejected_row);
+  KLS_SET_OPTIONAL_OUTPUT(rejected_multiplier_abs_out, rejected_multiplier_abs);
+  KLS_SET_OPTIONAL_OUTPUT(rejected_pivot_abs_out, rejected_pivot_abs);
+  KLS_SET_OPTIONAL_OUTPUT(rejected_candidate_abs_out, rejected_candidate_abs);
   *singular_out = singular;
   *numerical_rank_out = numerical_rank;
   *singular_col_out = singular_col;

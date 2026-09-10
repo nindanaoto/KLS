@@ -1753,9 +1753,7 @@ static int kls_row_first_separator_position(
   const kls_row_first_block_context *ctx,
   UF_long local_col,
   UF_long *separator_pos_out) {
-  if (separator_pos_out != NULL) {
-    *separator_pos_out = KLS_KLU_EMPTY;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(separator_pos_out, KLS_KLU_EMPTY);
   if (ctx == NULL || separator_pos_out == NULL ||
       !ctx->use_separator_for_block || ctx->solver == NULL ||
       ctx->solver->separator.order_component == NULL ||
@@ -1784,12 +1782,8 @@ static int kls_row_first_pivot_scope(
   UF_long row,
   unsigned int *component_out,
   UF_long *component_last_out) {
-  if (component_out != NULL) {
-    *component_out = UINT_MAX;
-  }
-  if (component_last_out != NULL) {
-    *component_last_out = KLS_KLU_EMPTY;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(component_out, UINT_MAX);
+  KLS_SET_OPTIONAL_OUTPUT(component_last_out, KLS_KLU_EMPTY);
   if (ctx == NULL || component_out == NULL || component_last_out == NULL ||
       !ctx->use_separator_for_block || ctx->solver == NULL ||
       ctx->separator_component_last == NULL ||
@@ -1947,9 +1941,7 @@ static int kls_row_first_select_pivot_exchange(
   int *selected_separator_exact_out,
   int *selected_separator_extent_out) {
   KLS_SET_OPTIONAL_OUTPUT(pivot_needed_out, 0);
-  if (selected_col_out != NULL) {
-    *selected_col_out = KLS_KLU_EMPTY;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(selected_col_out, KLS_KLU_EMPTY);
   KLS_SET_OPTIONAL_OUTPUT(selected_separator_exact_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(selected_separator_extent_out, 0);
   if (choice == NULL || pivot_needed_out == NULL ||
@@ -1981,12 +1973,8 @@ static int kls_row_first_select_pivot_exchange(
   *pivot_needed_out = 1;
   *selected_col_out = best_col;
   if (choice->scope_enabled) {
-    if (selected_separator_exact_out != NULL) {
-      *selected_separator_exact_out = choice->scoped_col_exact;
-    }
-    if (selected_separator_extent_out != NULL) {
-      *selected_separator_extent_out = !choice->scoped_col_exact;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(selected_separator_exact_out, choice->scoped_col_exact);
+    KLS_SET_OPTIONAL_OUTPUT(selected_separator_extent_out, !choice->scoped_col_exact);
   }
   return 1;
 }
@@ -2907,12 +2895,8 @@ static int kls_row_first_run_parallel_private_phase(
                                                  &workers[tid].stats);
     }
   }
-  if (private_rows_out != NULL) {
-    *private_rows_out = commit_private_rows;
-  }
-  if (thread_rows_out != NULL) {
-    *thread_rows_out = ok ? thread_rows : commit_thread_rows;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(private_rows_out, commit_private_rows);
+  KLS_SET_OPTIONAL_OUTPUT(thread_rows_out, ok ? thread_rows : commit_thread_rows);
   if (all_private_completed_out != NULL) {
     *all_private_completed_out =
       ok && commit_private_rows == plan->private_rows_count;
@@ -3132,9 +3116,7 @@ static int kls_row_first_supernode_panel_shape(
       }
     }
   }
-  if (tail_len_out != NULL) {
-    *tail_len_out = tail_len;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(tail_len_out, tail_len);
   return 1;
 }
 
@@ -3230,12 +3212,8 @@ static void kls_row_first_supernode_panel_cache_reset_active(
   UF_long nk,
   UF_long *open_start_io,
   UF_long *open_end_io) {
-  if (open_start_io != NULL) {
-    *open_start_io = KLS_KLU_EMPTY;
-  }
-  if (open_end_io != NULL) {
-    *open_end_io = KLS_KLU_EMPTY;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(open_start_io, KLS_KLU_EMPTY);
+  KLS_SET_OPTIONAL_OUTPUT(open_end_io, KLS_KLU_EMPTY);
   if (workspace != NULL) {
     workspace->supernode_panel_cache = NULL;
   }
@@ -4265,9 +4243,7 @@ static int kls_row_first_partial_apply_supernode_run_scalar(
     }
     run_rows++;
   }
-  if (run_rows_out != NULL) {
-    *run_rows_out = run_rows;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, run_rows);
   return 1;
 }
 
@@ -4405,9 +4381,7 @@ static int kls_row_first_partial_apply_supernode_run_cached_portable(
     x[col] -= update;
   }
 
-  if (run_rows_out != NULL) {
-    *run_rows_out = run_limit;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, run_limit);
   return 1;
 }
 
@@ -4497,9 +4471,7 @@ static int kls_row_first_partial_apply_supernode_run_cached(
       panel_offset, available_end, run_limit, dense_suffix_len, tail_len,
       dense_panel, tail_values, tail_cols, run_rows_out);
   if (portable_status > 0) {
-    if (used_panel_out != NULL) {
-      *used_panel_out = 1;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(used_panel_out, 1);
     return 1;
   }
   if (portable_status < 0) {
@@ -4589,12 +4561,8 @@ static int kls_row_first_partial_apply_supernode_run_cached(
     x[col] -= trailing_workspace[dense_suffix_len + offset];
   }
 
-  if (run_rows_out != NULL) {
-    *run_rows_out = run_rows;
-  }
-  if (used_panel_out != NULL) {
-    *used_panel_out = 1;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, run_rows);
+  KLS_SET_OPTIONAL_OUTPUT(used_panel_out, 1);
   return 1;
 }
 
@@ -4716,9 +4684,7 @@ static int kls_row_first_partial_apply_supernode_run_compact(
     x[col] -= trailing_workspace[offset];
   }
 
-  if (run_rows_out != NULL) {
-    *run_rows_out = run_rows;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, run_rows);
   return 1;
 }
 
@@ -4818,9 +4784,7 @@ static int kls_row_first_partial_apply_ready(
     const UF_long peek = dep_heap[0];
     if (!kls_row_first_dependency_ready(row_done, active_rank,
                                         ready_limit, peek)) {
-      if (blocked_out != NULL) {
-        *blocked_out = 1;
-      }
+      KLS_SET_OPTIONAL_OUTPUT(blocked_out, 1);
       return 1;
     }
     const UF_long dep =
@@ -4894,9 +4858,7 @@ static int kls_row_first_partial_finish(
   int *selected_separator_extent_out) {
   KLS_SET_OPTIONAL_OUTPUT(pivot_needed_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(pivoted_out, 0);
-  if (selected_col_out != NULL) {
-    *selected_col_out = KLS_KLU_EMPTY;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(selected_col_out, KLS_KLU_EMPTY);
   KLS_SET_OPTIONAL_OUTPUT(selected_separator_exact_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(selected_separator_extent_out, 0);
   if (ctx == NULL || workspace == NULL || local_u_entries == NULL ||
@@ -4923,15 +4885,11 @@ static int kls_row_first_partial_finish(
       !kls_row_first_select_pivot_exchange(
         &pivot_choice, pivot, ctx->tol, &pivot_needed, &selected_col,
         &selected_separator_exact, &selected_separator_extent)) {
-    if (pivot_needed_out != NULL) {
-      *pivot_needed_out = 1;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(pivot_needed_out, 1);
     return 0;
   }
   if (pivot_needed) {
-    if (pivot_needed_out != NULL) {
-      *pivot_needed_out = 1;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(pivot_needed_out, 1);
     if (selected_col == KLS_KLU_EMPTY) {
       return 0;
     }
@@ -4953,18 +4911,10 @@ static int kls_row_first_partial_finish(
         pivot_needed) {
       return 0;
     }
-    if (pivoted_out != NULL) {
-      *pivoted_out = 1;
-    }
-    if (selected_col_out != NULL) {
-      *selected_col_out = pivot_col;
-    }
-    if (selected_separator_exact_out != NULL) {
-      *selected_separator_exact_out = pivot_separator_exact;
-    }
-    if (selected_separator_extent_out != NULL) {
-      *selected_separator_extent_out = pivot_separator_extent;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(pivoted_out, 1);
+    KLS_SET_OPTIONAL_OUTPUT(selected_col_out, pivot_col);
+    KLS_SET_OPTIONAL_OUTPUT(selected_separator_exact_out, pivot_separator_exact);
+    KLS_SET_OPTIONAL_OUTPUT(selected_separator_extent_out, pivot_separator_extent);
   }
   UF_long u_count = 0;
   for (UF_long p = 0; p < state->pattern_count; ++p) {
@@ -5832,9 +5782,7 @@ static int kls_row_first_run_parallel_pipeline_phase(
   int *pivot_tail_ready_out,
   UF_long *pivot_tail_rows_out,
   UF_long *pivot_restarts_out) {
-  if (completed_pos_out != NULL) {
-    *completed_pos_out = begin;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(completed_pos_out, begin);
   KLS_SET_OPTIONAL_OUTPUT(pivot_tail_ready_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, 0);
@@ -6045,12 +5993,8 @@ static int kls_row_first_run_parallel_pipeline_phase(
     shared.completed_pos >= begin &&
     shared.completed_pos < end &&
     processed_rows == shared.completed_pos - begin;
-  if (completed_pos_out != NULL) {
-    *completed_pos_out = shared.completed_pos;
-  }
-  if (pivot_tail_ready_out != NULL) {
-    *pivot_tail_ready_out = pivot_tail_ready ? 1 : 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(completed_pos_out, shared.completed_pos);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_ready_out, pivot_tail_ready ? 1 : 0);
   if ((ok || pivot_tail_ready) && pipeline_rows_out != NULL) {
     *pipeline_rows_out = processed_rows;
   }
@@ -6261,42 +6205,18 @@ static int kls_row_first_run_restartable_pipeline_suffix(
     cursor = completed_pos + 1u;
   }
 
-  if (pipeline_rows_out != NULL) {
-    *pipeline_rows_out = pipeline_rows;
-  }
-  if (thread_rows_out != NULL) {
-    *thread_rows_out = max_threads;
-  }
-  if (partial_rows_out != NULL) {
-    *partial_rows_out = partial_rows;
-  }
-  if (wait_partial_rows_out != NULL) {
-    *wait_partial_rows_out = wait_partial_rows;
-  }
-  if (wait_partial_deps_out != NULL) {
-    *wait_partial_deps_out = wait_partial_deps;
-  }
-  if (supernode_update_groups_out != NULL) {
-    *supernode_update_groups_out = supernode_update_groups;
-  }
-  if (supernode_update_rows_out != NULL) {
-    *supernode_update_rows_out = supernode_update_rows;
-  }
-  if (supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = supernode_panel_update_groups;
-  }
-  if (supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = supernode_panel_update_rows;
-  }
-  if (pivot_tail_rows_out != NULL) {
-    *pivot_tail_rows_out = pivot_tail_rows;
-  }
-  if (pivot_restarts_out != NULL) {
-    *pivot_restarts_out = pivot_restarts;
-  }
-  if (pivot_serial_rows_out != NULL) {
-    *pivot_serial_rows_out = pivot_serial_rows;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(pipeline_rows_out, pipeline_rows);
+  KLS_SET_OPTIONAL_OUTPUT(thread_rows_out, max_threads);
+  KLS_SET_OPTIONAL_OUTPUT(partial_rows_out, partial_rows);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_rows_out, wait_partial_rows);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_deps_out, wait_partial_deps);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_groups_out, supernode_update_groups);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_rows_out, supernode_update_rows);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_groups_out, supernode_panel_update_groups);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_rows_out, supernode_panel_update_rows);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, pivot_tail_rows);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, pivot_restarts);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_serial_rows_out, pivot_serial_rows);
   return 1;
 }
 
@@ -6416,12 +6336,8 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
         workspace->u_row_ptr, workspace->u_row_end, udiag_values,
         ctx->nk, stats, &open_panel_start, &open_panel_end, row);
     }
-    if (thread_rows_out != NULL) {
-      *thread_rows_out = 1u;
-    }
-    if (prefactor_rows_out != NULL) {
-      *prefactor_rows_out = active_rows;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(thread_rows_out, 1u);
+    KLS_SET_OPTIONAL_OUTPUT(prefactor_rows_out, active_rows);
     free(active_rank);
     return 1;
   }
@@ -6527,36 +6443,16 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
       &open_panel_end, pivot_row);
     cursor = completed_pos + 1u;
   }
-  if (thread_rows_out != NULL) {
-    *thread_rows_out = max_threads;
-  }
-  if (prefactor_rows_out != NULL) {
-    *prefactor_rows_out = prefactor_rows;
-  }
-  if (wait_partial_rows_out != NULL) {
-    *wait_partial_rows_out = wait_partial_rows;
-  }
-  if (wait_partial_deps_out != NULL) {
-    *wait_partial_deps_out = wait_partial_deps;
-  }
-  if (supernode_update_groups_out != NULL) {
-    *supernode_update_groups_out = supernode_update_groups;
-  }
-  if (supernode_update_rows_out != NULL) {
-    *supernode_update_rows_out = supernode_update_rows;
-  }
-  if (supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = supernode_panel_update_groups;
-  }
-  if (supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = supernode_panel_update_rows;
-  }
-  if (pivot_tail_rows_out != NULL) {
-    *pivot_tail_rows_out = pivot_tail_rows;
-  }
-  if (pivot_restarts_out != NULL) {
-    *pivot_restarts_out = pivot_restarts;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(thread_rows_out, max_threads);
+  KLS_SET_OPTIONAL_OUTPUT(prefactor_rows_out, prefactor_rows);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_rows_out, wait_partial_rows);
+  KLS_SET_OPTIONAL_OUTPUT(wait_partial_deps_out, wait_partial_deps);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_groups_out, supernode_update_groups);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_rows_out, supernode_update_rows);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_groups_out, supernode_panel_update_groups);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_rows_out, supernode_panel_update_rows);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, pivot_tail_rows);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, pivot_restarts);
   free(active_rank);
   return 1;
 }
@@ -7546,39 +7442,17 @@ static int kls_try_row_first_etree_ready_tail_repair(
   *u_entries = trial_u_entries;
   memset(&trial_l_entries, 0, sizeof(trial_l_entries));
   memset(&trial_u_entries, 0, sizeof(trial_u_entries));
-  if (row_pipeline_ready_rows_out != NULL) {
-    *row_pipeline_ready_rows_out = ready_rows;
-  }
-  if (row_pipeline_threads_out != NULL) {
-    *row_pipeline_threads_out = ready_threads;
-  }
-  if (row_pipeline_prefactor_rows_out != NULL) {
-    *row_pipeline_prefactor_rows_out = prefactor_rows;
-  }
-  if (row_pipeline_prefactor_wait_rows_out != NULL) {
-    *row_pipeline_prefactor_wait_rows_out = prefactor_wait_rows;
-  }
-  if (row_pipeline_prefactor_wait_deps_out != NULL) {
-    *row_pipeline_prefactor_wait_deps_out = prefactor_wait_deps;
-  }
-  if (supernode_update_groups_out != NULL) {
-    *supernode_update_groups_out = supernode_update_groups;
-  }
-  if (supernode_update_rows_out != NULL) {
-    *supernode_update_rows_out = supernode_update_rows;
-  }
-  if (supernode_panel_update_groups_out != NULL) {
-    *supernode_panel_update_groups_out = supernode_panel_update_groups;
-  }
-  if (supernode_panel_update_rows_out != NULL) {
-    *supernode_panel_update_rows_out = supernode_panel_update_rows;
-  }
-  if (pivot_tail_rows_out != NULL) {
-    *pivot_tail_rows_out = pivot_tail_rows;
-  }
-  if (pivot_restarts_out != NULL) {
-    *pivot_restarts_out = pivot_restarts;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_ready_rows_out, ready_rows);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_threads_out, ready_threads);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_prefactor_rows_out, prefactor_rows);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_prefactor_wait_rows_out, prefactor_wait_rows);
+  KLS_SET_OPTIONAL_OUTPUT(row_pipeline_prefactor_wait_deps_out, prefactor_wait_deps);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_groups_out, supernode_update_groups);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_update_rows_out, supernode_update_rows);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_groups_out, supernode_panel_update_groups);
+  KLS_SET_OPTIONAL_OUTPUT(supernode_panel_update_rows_out, supernode_panel_update_rows);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_tail_rows_out, pivot_tail_rows);
+  KLS_SET_OPTIONAL_OUTPUT(pivot_restarts_out, pivot_restarts);
   ok = 1;
 
 cleanup:

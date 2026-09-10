@@ -203,9 +203,7 @@ static double kls_pts_cut_lifecycle_score(
   if (nchunks <= 0) {
     return DBL_MAX;
   }
-  if (nchunks_out != NULL) {
-    *nchunks_out = nchunks;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(nchunks_out, nchunks);
   kls_pts_chunk *trial_chunks = (kls_pts_chunk *)malloc(
     (size_t)nchunks * sizeof(*trial_chunks));
   if (trial_chunks == NULL) {

@@ -1264,12 +1264,8 @@ static int choose_auto_scale_from_pattern_impl(
     const double *numeric_values,
     int *unscaled_value_certified_out,
     int *unscaled_trial_certified_out) {
-  if (unscaled_value_certified_out != NULL) {
-    *unscaled_value_certified_out = 0;
-  }
-  if (unscaled_trial_certified_out != NULL) {
-    *unscaled_trial_certified_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(unscaled_value_certified_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(unscaled_trial_certified_out, 0);
   if (options == NULL || col_ptr == NULL || row_idx == NULL || numeric_values == NULL ||
       options->scale != KLS_SCALE_AUTO || n <= 0) {
     return options == NULL ? 2 : initial_scale(options);
@@ -1388,9 +1384,7 @@ static int choose_auto_scale_from_pattern_impl(
          applying scale vectors over every retained update.  This is a
          current-value certificate: a realized fill/work expansion may still
          authorize the ordinary measured scale comparison below. */
-      if (unscaled_value_certified_out != NULL) {
-        *unscaled_value_certified_out = 1;
-      }
+      KLS_SET_OPTIONAL_OUTPUT(unscaled_value_certified_out, 1);
       free(diag_max);
       free(row_max);
       return -1;
@@ -8646,9 +8640,7 @@ static UF_long count_weak_diagonal_rows(UF_long n,
                                         UF_long *missing_diagonal_out) {
   double *row_max = (double *)calloc((size_t)n, sizeof(*row_max));
   double *diag = (double *)calloc((size_t)n, sizeof(*diag));
-  if (missing_diagonal_out != NULL) {
-    *missing_diagonal_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(missing_diagonal_out, 0);
   if (row_max == NULL || diag == NULL) {
     free(row_max);
     free(diag);
@@ -8681,9 +8673,7 @@ static UF_long count_weak_diagonal_rows(UF_long n,
       weak++;
     }
   }
-  if (missing_diagonal_out != NULL) {
-    *missing_diagonal_out = missing;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(missing_diagonal_out, missing);
   free(row_max);
   free(diag);
   return weak;
@@ -11981,9 +11971,7 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
                                               double *elapsed,
                                               const double *numeric_values,
                                               int *attempted_out) {
-  if (attempted_out != NULL) {
-    *attempted_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(attempted_out, 0);
   if (solver == NULL || solver->numeric == NULL || solver->symbolic == NULL ||
       numeric_values == NULL || solver->numeric_is_predicted ||
       kls_uses_structural_initial_pivot_tolerance(solver) ||
@@ -12028,9 +12016,7 @@ static int maybe_select_tight_pivot_tolerance(kls_solver *solver,
   if (apply_options_to_common(&trial_common, &trial_options) != KLS_OK) {
     return 0;
   }
-  if (attempted_out != NULL) {
-    *attempted_out = 1;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(attempted_out, 1);
   const double start = kls_now_seconds();
   trilinos_klu_l_numeric *trial_numeric =
     trilinos_klu_l_factor(solver->col_ptr, solver->row_idx,
@@ -15411,15 +15397,9 @@ static void kls_compute_parallel_model(const kls_solver *solver,
                                        double *r1_out,
                                        double *r2_out,
                                        int *recommends_parallel_out) {
-  if (r1_out != NULL) {
-    *r1_out = 0.0;
-  }
-  if (r2_out != NULL) {
-    *r2_out = 0.0;
-  }
-  if (recommends_parallel_out != NULL) {
-    *recommends_parallel_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(r1_out, 0.0);
+  KLS_SET_OPTIONAL_OUTPUT(r2_out, 0.0);
+  KLS_SET_OPTIONAL_OUTPUT(recommends_parallel_out, 0);
   if (solver == NULL) {
     return;
   }
@@ -15446,15 +15426,9 @@ static void kls_compute_parallel_model(const kls_solver *solver,
   const int recommends_parallel =
     (r1 >= KLS_NICSLU_PARALLEL_R1_THRESHOLD ||
      r2 >= KLS_NICSLU_PARALLEL_R2_THRESHOLD);
-  if (r1_out != NULL) {
-    *r1_out = r1;
-  }
-  if (r2_out != NULL) {
-    *r2_out = r2;
-  }
-  if (recommends_parallel_out != NULL) {
-    *recommends_parallel_out = recommends_parallel;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(r1_out, r1);
+  KLS_SET_OPTIONAL_OUTPUT(r2_out, r2);
+  KLS_SET_OPTIONAL_OUTPUT(recommends_parallel_out, recommends_parallel);
 }
 
 static void kls_compute_nicslu_task_flow_model(
@@ -15466,24 +15440,12 @@ static void kls_compute_nicslu_task_flow_model(
   double *finish_time_out,
   double *speedup_out,
   int *recommends_parallel_out) {
-  if (threads_out != NULL) {
-    *threads_out = 0;
-  }
-  if (dependencies_out != NULL) {
-    *dependencies_out = 0;
-  }
-  if (work_out != NULL) {
-    *work_out = 0.0;
-  }
-  if (finish_time_out != NULL) {
-    *finish_time_out = 0.0;
-  }
-  if (speedup_out != NULL) {
-    *speedup_out = 0.0;
-  }
-  if (recommends_parallel_out != NULL) {
-    *recommends_parallel_out = 0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(threads_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(dependencies_out, 0);
+  KLS_SET_OPTIONAL_OUTPUT(work_out, 0.0);
+  KLS_SET_OPTIONAL_OUTPUT(finish_time_out, 0.0);
+  KLS_SET_OPTIONAL_OUTPUT(speedup_out, 0.0);
+  KLS_SET_OPTIONAL_OUTPUT(recommends_parallel_out, 0);
   if (solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->R == NULL ||
       solver->numeric->LUbx == NULL || solver->numeric->Llen == NULL ||
@@ -15586,24 +15548,12 @@ static void kls_compute_nicslu_task_flow_model(
 
   if (valid && finish_time > 0.0 && work > 0.0) {
     const double speedup = work / finish_time;
-    if (threads_out != NULL) {
-      *threads_out = (int64_t)threads;
-    }
-    if (dependencies_out != NULL) {
-      *dependencies_out = dependencies;
-    }
-    if (work_out != NULL) {
-      *work_out = work;
-    }
-    if (finish_time_out != NULL) {
-      *finish_time_out = finish_time;
-    }
-    if (speedup_out != NULL) {
-      *speedup_out = speedup;
-    }
-    if (recommends_parallel_out != NULL) {
-      *recommends_parallel_out = threads > 1 && speedup > 1.0;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(threads_out, (int64_t)threads);
+    KLS_SET_OPTIONAL_OUTPUT(dependencies_out, dependencies);
+    KLS_SET_OPTIONAL_OUTPUT(work_out, work);
+    KLS_SET_OPTIONAL_OUTPUT(finish_time_out, finish_time);
+    KLS_SET_OPTIONAL_OUTPUT(speedup_out, speedup);
+    KLS_SET_OPTIONAL_OUTPUT(recommends_parallel_out, threads > 1 && speedup > 1.0);
   }
 
   free(finish);

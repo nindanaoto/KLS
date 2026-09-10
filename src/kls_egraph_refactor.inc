@@ -5764,9 +5764,7 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
     if (start > 0u && pool != NULL &&
         kls_run_parallel_row_solve_sparse_block(
           solver, pool, thread_count, view, work, &sparse_level_runs)) {
-      if (sparse_level_runs_out != NULL) {
-        *sparse_level_runs_out = sparse_level_runs;
-      }
+      KLS_SET_OPTIONAL_OUTPUT(sparse_level_runs_out, sparse_level_runs);
     } else {
       kls_row_solve_forward_rows(solver, view, work, 0u, start);
     }
@@ -5785,9 +5783,7 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
           solver, pool, thread_count, view, work)) {
       return 0;
     }
-    if (slice_runs_out != NULL) {
-      *slice_runs_out = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(slice_runs_out, KLS_ROW_SOLVE_TRAPEZOID_SLICES);
     return 1;
   }
 
@@ -5800,9 +5796,7 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
     if (start > 0u && pool != NULL &&
         kls_run_parallel_row_solve_sparse_block(
           solver, pool, thread_count, view, work, &sparse_level_runs)) {
-      if (sparse_level_runs_out != NULL) {
-        *sparse_level_runs_out = sparse_level_runs;
-      }
+      KLS_SET_OPTIONAL_OUTPUT(sparse_level_runs_out, sparse_level_runs);
     } else {
       kls_row_solve_backward_rows(solver, view, work, 0u, start);
     }
@@ -5817,15 +5811,11 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
   if (start > 0u &&
       kls_run_parallel_row_solve_sparse_block(
         solver, pool, thread_count, view, work, &sparse_level_runs)) {
-    if (sparse_level_runs_out != NULL) {
-      *sparse_level_runs_out = sparse_level_runs;
-    }
+    KLS_SET_OPTIONAL_OUTPUT(sparse_level_runs_out, sparse_level_runs);
   } else {
     kls_row_solve_backward_rows(solver, view, work, 0u, start);
   }
-  if (slice_runs_out != NULL) {
-    *slice_runs_out = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(slice_runs_out, KLS_ROW_SOLVE_TRAPEZOID_SLICES);
   return 1;
 }
 

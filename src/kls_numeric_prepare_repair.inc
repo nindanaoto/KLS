@@ -413,12 +413,8 @@ static int kls_numeric_pivots_pass_threshold_from_block(
   UF_long start_block,
   UF_long *rejected_pivot_out,
   UF_long *rejected_pivot_col_out) {
-  if (rejected_pivot_out != NULL) {
-    *rejected_pivot_out = KLS_KLU_EMPTY;
-  }
-  if (rejected_pivot_col_out != NULL) {
-    *rejected_pivot_col_out = KLS_KLU_EMPTY;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(rejected_pivot_out, KLS_KLU_EMPTY);
+  KLS_SET_OPTIONAL_OUTPUT(rejected_pivot_col_out, KLS_KLU_EMPTY);
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
     return 0;
   }
@@ -458,9 +454,7 @@ static int kls_numeric_pivots_pass_threshold_from_block(
         const double value_abs = fabs(lx[p]);
         if (!isfinite(value_abs) || value_abs * tol > 1.0 + 1.0e-12) {
           const UF_long global_col = k1 + k;
-          if (rejected_pivot_out != NULL) {
-            *rejected_pivot_out = global_col;
-          }
+          KLS_SET_OPTIONAL_OUTPUT(rejected_pivot_out, global_col);
           if (rejected_pivot_col_out != NULL) {
             *rejected_pivot_col_out =
               symbolic->Q != NULL ? symbolic->Q[global_col] : KLS_KLU_EMPTY;
@@ -1291,9 +1285,7 @@ static int kls_build_fast_reject_pivoting_tail_plan(
   double *tail_work_out) {
   KLS_SET_OPTIONAL_OUTPUT(tail_cols_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(tail_count_out, 0);
-  if (tail_work_out != NULL) {
-    *tail_work_out = 0.0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(tail_work_out, 0.0);
   if (solver == NULL || tail_cols_out == NULL || tail_count_out == NULL ||
       tail_work_out == NULL || local_reject >= k2 - k1) {
     return 0;
@@ -2727,15 +2719,9 @@ static int kls_reconstruct_block_live_prefix_state(
     prefix_unz += ulen[k] + 1u;
   }
 
-  if (prefix_lup_out != NULL) {
-    *prefix_lup_out = prefix_lup;
-  }
-  if (prefix_lnz_out != NULL) {
-    *prefix_lnz_out = prefix_lnz;
-  }
-  if (prefix_unz_out != NULL) {
-    *prefix_unz_out = prefix_unz;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(prefix_lup_out, prefix_lup);
+  KLS_SET_OPTIONAL_OUTPUT(prefix_lnz_out, prefix_lnz);
+  KLS_SET_OPTIONAL_OUTPUT(prefix_unz_out, prefix_unz);
   return 1;
 }
 
@@ -3989,15 +3975,9 @@ static int kls_pivot_tail_plan_local_range(
       columns == 0u || columns > end - begin) {
     return 0;
   }
-  if (begin_out != NULL) {
-    *begin_out = begin;
-  }
-  if (end_out != NULL) {
-    *end_out = end;
-  }
-  if (columns_out != NULL) {
-    *columns_out = columns;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(begin_out, begin);
+  KLS_SET_OPTIONAL_OUTPUT(end_out, end);
+  KLS_SET_OPTIONAL_OUTPUT(columns_out, columns);
   if (suffix_exact_out != NULL) {
     *suffix_exact_out =
       solver->stats.fast_rejected_pivoting_tail_suffix_exact ? 1 : 0;
@@ -4029,9 +4009,7 @@ static int kls_try_pivot_tail_restart_rejected_block(
   KLS_SET_OPTIONAL_OUTPUT(lnz_block_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(unz_block_out, 0);
   KLS_SET_OPTIONAL_OUTPUT(skipped_columns_out, 0);
-  if (skipped_work_out != NULL) {
-    *skipped_work_out = 0.0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(skipped_work_out, 0.0);
   KLS_SET_OPTIONAL_OUTPUT(exact_mask_used_out, 0);
   if (restart_end == KLS_KLU_EMPTY) {
     restart_end = nk;
@@ -4420,9 +4398,7 @@ fail:
   KLS_SET_OPTIONAL_OUTPUT(new_lu_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(new_size_out, 0u);
   KLS_SET_OPTIONAL_OUTPUT(skipped_columns_out, 0);
-  if (skipped_work_out != NULL) {
-    *skipped_work_out = 0.0;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(skipped_work_out, 0.0);
   KLS_SET_OPTIONAL_OUTPUT(exact_mask_used_out, 0);
   return 0;
 }
@@ -6590,9 +6566,7 @@ static UF_long kls_row_solve_dense_tail_start(UF_long n,
     suffix += ptr[row + 1u] - ptr[row];
     if (suffix >= KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ &&
         (double)suffix >= KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION * total) {
-      if (entries_out != NULL) {
-        *entries_out = suffix;
-      }
+      KLS_SET_OPTIONAL_OUTPUT(entries_out, suffix);
       return row;
     }
   }
@@ -6713,9 +6687,7 @@ static int kls_build_row_solve_segment_splits(UF_long n,
   }
 
   *split_out = split;
-  if (rect_entries_out != NULL) {
-    *rect_entries_out = rect_entries;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(rect_entries_out, rect_entries);
   return 1;
 }
 
@@ -6959,9 +6931,7 @@ static int kls_build_row_solve_sparse_levels(
   free(level_counts);
   *level_ptr_out = level_ptr;
   *level_rows_out = level_rows;
-  if (level_count_out != NULL) {
-    *level_count_out = level_count;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(level_count_out, level_count);
   return 1;
 }
 
@@ -7596,9 +7566,7 @@ static int kls_row_refactor_dense_producer_run_start(
   UF_long l_end,
   UF_long *group_out,
   UF_long *len_out) {
-  if (group_out != NULL) {
-    *group_out = KLS_KLU_EMPTY;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(group_out, KLS_KLU_EMPTY);
   KLS_SET_OPTIONAL_OUTPUT(len_out, 0);
   if (l_cols == NULL || row_group == NULL || group_ptr == NULL ||
       group_kind == NULL || p >= l_end || row >= n) {
@@ -7636,12 +7604,8 @@ static int kls_row_refactor_dense_producer_run_start(
   if (run_len < 2u) {
     return 0;
   }
-  if (group_out != NULL) {
-    *group_out = dep_group;
-  }
-  if (len_out != NULL) {
-    *len_out = run_len;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(group_out, dep_group);
+  KLS_SET_OPTIONAL_OUTPUT(len_out, run_len);
   return 1;
 }
 
@@ -8128,15 +8092,9 @@ static void kls_try_build_row_refactor_segment_input_targets(
   *target_pos_out = target_pos;
   *cleanup_ptr_out = cleanup_ptr;
   *cleanup_cols_out = cleanup_cols;
-  if (target_rows_out != NULL) {
-    *target_rows_out = target_rows;
-  }
-  if (target_entries_out != NULL) {
-    *target_entries_out = target_entries;
-  }
-  if (cleanup_entries_out != NULL) {
-    *cleanup_entries_out = cleanup_entries;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(target_rows_out, target_rows);
+  KLS_SET_OPTIONAL_OUTPUT(target_entries_out, target_entries);
+  KLS_SET_OPTIONAL_OUTPUT(cleanup_entries_out, cleanup_entries);
 }
 
 typedef struct {
@@ -10914,9 +10872,7 @@ static int kls_row_refactor_group_separator_component(
   const kls_solver *solver,
   UF_long group,
   unsigned int *component_out) {
-  if (component_out != NULL) {
-    *component_out = UINT_MAX;
-  }
+  KLS_SET_OPTIONAL_OUTPUT(component_out, UINT_MAX);
   if (solver == NULL || component_out == NULL ||
       !kls_separator_analysis_has_global_range(&solver->separator) ||
       solver->separator.component_count == 0u ||
