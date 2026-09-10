@@ -7774,8 +7774,7 @@ static int kls_row_first_parallel_factor_block(
       row_input_pos[dst] = p;
     }
   }
-  free(row_next);
-  row_next = NULL;
+  KLS_FREE_AND_NULL(row_next);
 
   if (!kls_row_first_entries_enable_col_counts(&l_entries, nk) ||
       !kls_row_first_entries_enable_col_counts(&u_entries, nk) ||
@@ -8007,8 +8006,7 @@ static int kls_row_first_parallel_factor_block(
         rebuilt_row_input_pos[dst] = p;
       }
     }
-    free(row_next);
-    row_next = NULL;
+    KLS_FREE_AND_NULL(row_next);
     free(row_cols);
     free(row_input_pos);
     row_cols = rebuilt_row_cols;
@@ -8141,8 +8139,7 @@ static int kls_row_first_parallel_factor_block(
               row_owner);
         }
         if (row_owner == NULL || !separator_private_owner_valid) {
-          free(row_owner);
-          row_owner = NULL;
+          KLS_FREE_AND_NULL(row_owner);
           use_separator_row_order = 0;
           row_pipeline_separator_partitioned = 0;
           row_pipeline_separator_split_components = 0;
@@ -8195,8 +8192,7 @@ static int kls_row_first_parallel_factor_block(
             pipeline_end = active_rows;
           }
         } else {
-          free(row_owner);
-          row_owner = NULL;
+          KLS_FREE_AND_NULL(row_owner);
           use_separator_row_order = 0;
           separator_private_complete = 0;
           separator_private_partial_active = 0;

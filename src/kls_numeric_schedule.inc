@@ -2705,8 +2705,7 @@ static int kls_build_refactor_separator_private_plan(
     } else {
       const UF_long dst = tail_next != NULL ? tail_next[levels[col]] : 0u;
       if (tail_next == NULL || dst >= tail_column_count) {
-        free(tail_next);
-        tail_next = NULL;
+        KLS_FREE_AND_NULL(tail_next);
         goto cleanup;
       }
       tail_cols[dst] = col;
@@ -2715,13 +2714,11 @@ static int kls_build_refactor_separator_private_plan(
   }
   for (UF_long level = 0u; level < cluster_levels; ++level) {
     if (tail_next != NULL && tail_next[level] != tail_level_ptr[level + 1u]) {
-      free(tail_next);
-      tail_next = NULL;
+      KLS_FREE_AND_NULL(tail_next);
       goto cleanup;
     }
   }
-  free(tail_next);
-  tail_next = NULL;
+  KLS_FREE_AND_NULL(tail_next);
   if (tail_column_count > 0u) {
     if (cluster_levels >
           (UF_long)(SIZE_MAX / (size_t)(thread_count + 1)) ||
@@ -3876,8 +3873,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     solver->dense_tail_block = 0;
     solver->solve_contract_probe = 0;
     solver->solve_contract_verified = 0;
-    free(solver->solve_refine_values);
-    solver->solve_refine_values = NULL;
+    KLS_FREE_AND_NULL(solver->solve_refine_values);
     if (solver->n >= 512) {
       solver->factor_preps_deferred = 1;
     }

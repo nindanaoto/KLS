@@ -144,8 +144,7 @@ static void kls_arm_unchanged_refactor_cache(kls_solver *solver,
   solver->unchanged_refactor_state = 0;
   if (getenv("KLS_DISABLE_UNCHANGED_REFACTOR") != NULL ||
       solver->nnz > (UF_long)(SIZE_MAX / sizeof(double))) {
-    free(solver->refactor_input_snapshot);
-    solver->refactor_input_snapshot = NULL;
+    KLS_FREE_AND_NULL(solver->refactor_input_snapshot);
     solver->unchanged_refactor_state = -1;
     return;
   }
@@ -184,8 +183,7 @@ static int kls_refactor_input_is_unchanged(kls_solver *solver,
   if (solver->unchanged_refactor_state == 1) {
     /* Continuously changing workload: do not add a snapshot memcpy to every
        otherwise-cheap refactorization.  A later explicit factor re-arms it. */
-    free(solver->refactor_input_snapshot);
-    solver->refactor_input_snapshot = NULL;
+    KLS_FREE_AND_NULL(solver->refactor_input_snapshot);
     solver->unchanged_refactor_state = -1;
   }
   return 0;
@@ -274,8 +272,7 @@ static void kls_arm_lean_scale_input_cache(kls_solver *solver,
     solver->lean_scale_rs_snapshot =
       (double *)malloc((size_t)solver->n * sizeof(double));
     if (solver->lean_scale_rs_snapshot == NULL) {
-      free(solver->lean_scale_input_snapshot);
-      solver->lean_scale_input_snapshot = NULL;
+      KLS_FREE_AND_NULL(solver->lean_scale_input_snapshot);
       solver->lean_scale_input_state = -1;
       return;
     }
@@ -8130,8 +8127,7 @@ static void kls_try_build_row_refactor_segment_input_targets(
     }
     free(cleanup_write);
   } else {
-    free(cleanup_ptr);
-    cleanup_ptr = NULL;
+    KLS_FREE_AND_NULL(cleanup_ptr);
   }
   *row_ready_out = row_ready;
   *target_kind_out = target_kind;
@@ -9173,8 +9169,7 @@ static void kls_lean_row_refactor_ensure_snode_runs(kls_solver *solver) {
      (dense_work && covered_entries >= dense_coverage)) ? 1 : -1;
   solver->lean_snode_worker_eligible = eligible;
   if (eligible < 0) {
-    free(runs);
-    runs = NULL;
+    KLS_FREE_AND_NULL(runs);
   }
   solver->lean_snode_run = runs;
 }

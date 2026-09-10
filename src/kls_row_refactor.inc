@@ -1669,8 +1669,7 @@ static int kls_build_lean_row_i16_indices(kls_solver *solver) {
       for (UF_long pos = 0u; pos < n; ++pos) {
         const UF_long row = solver->row_refactor_level_rows[pos];
         if (row > (UF_long)UINT16_MAX) {
-          free(level_rows);
-          level_rows = NULL;
+          KLS_FREE_AND_NULL(level_rows);
           break;
         }
         level_rows[pos] = (uint16_t)row;
@@ -15110,12 +15109,9 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
           &row_remaining_preds, &row_tail_groups, &row_ready_tail_count,
           &row_initial_ready_count);
     if (!prepared_separator_row_dep_queue) {
-      free(row_owned_private_groups);
-      row_owned_private_groups = NULL;
-      free(row_private_thread_ptr);
-      row_private_thread_ptr = NULL;
-      free(row_private_group_mask);
-      row_private_group_mask = NULL;
+      KLS_FREE_AND_NULL(row_owned_private_groups);
+      KLS_FREE_AND_NULL(row_private_thread_ptr);
+      KLS_FREE_AND_NULL(row_private_group_mask);
       row_ready_groups = NULL;
       row_ready_slots = NULL;
       row_remaining_preds = NULL;

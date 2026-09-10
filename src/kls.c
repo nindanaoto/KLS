@@ -3769,14 +3769,10 @@ static int kls_prepare_lean_grouped_done(kls_solver *solver,
      sequence.  Once one consumer stream acquires a producer frontier, all
      earlier rows from that producer are visible for the rest of the
      generation; such covered waits are omitted while building the stream. */
-  free(solver->lean_parallel_l_dep_work64);
-  solver->lean_parallel_l_dep_work64 = NULL;
-  free(solver->lean_parallel_work_rows16);
-  solver->lean_parallel_work_rows16 = NULL;
-  free(solver->lean_parallel_publish_mailbox);
-  solver->lean_parallel_publish_mailbox = NULL;
-  free(solver->lean_parallel_publish_begin);
-  solver->lean_parallel_publish_begin = NULL;
+  KLS_FREE_AND_NULL(solver->lean_parallel_l_dep_work64);
+  KLS_FREE_AND_NULL(solver->lean_parallel_work_rows16);
+  KLS_FREE_AND_NULL(solver->lean_parallel_publish_mailbox);
+  KLS_FREE_AND_NULL(solver->lean_parallel_publish_begin);
   if (kls_packed_row_worker_representation_capable(solver)) {
     const UF_long l_count = solver->row_refactor_l_ptr[solver->n];
     uint64_t *packed_work = l_count <= (UF_long)(SIZE_MAX / sizeof(uint64_t))
@@ -7915,8 +7911,7 @@ int kls_factor(kls_solver *solver, const double *values) {
      mirror up front so no later solve can consume pivots from the preceding
      numeric; the next refactor refreshes it, and an intervening solve uses
      the ordinary exact division path. */
-  free(solver->i32solve_udiag_recip);
-  solver->i32solve_udiag_recip = NULL;
+  KLS_FREE_AND_NULL(solver->i32solve_udiag_recip);
   solver->i32solve_udiag_recip_fresh = 0;
   solver->tiny_singleton_rs_recip_fresh = 0;
   solver->tiny_singleton_solve_state = 0;
@@ -7951,8 +7946,7 @@ int kls_factor(kls_solver *solver, const double *values) {
      could safely supply the old snapshot itself, then rebuild the contract
      from the successful factor below. */
   if (solver->solve_refine_values != numeric_values) {
-    free(solver->solve_refine_values);
-    solver->solve_refine_values = NULL;
+    KLS_FREE_AND_NULL(solver->solve_refine_values);
   }
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
@@ -12163,8 +12157,7 @@ static void kls_remember_verified_rhs(kls_solver *solver,
       prepared[k] = rhs[(UF_long)p16[k]];
     }
   } else {
-    free(solver->verified_factor_rhs);
-    solver->verified_factor_rhs = NULL;
+    KLS_FREE_AND_NULL(solver->verified_factor_rhs);
   }
   solver->verified_rhs_valid = 1;
 }

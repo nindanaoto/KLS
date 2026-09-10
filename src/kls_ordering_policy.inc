@@ -14331,8 +14331,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     /* Generic candidates carry only their copied pattern.  In particular,
        do not compute or publish any of the archived input-family contexts:
        the ordering tournament consumes realized symbolic scores directly. */
-    free(kls_block_order_proposal);
-    kls_block_order_proposal = NULL;
+    KLS_FREE_AND_NULL(kls_block_order_proposal);
     kls_amf3_span_variant_selected = 0;
     if (candidate->generic_btf_value_symbolic != NULL) {
       trilinos_klu_l_free_symbolic(

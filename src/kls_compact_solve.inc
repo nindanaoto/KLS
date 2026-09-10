@@ -151,12 +151,10 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
         rhs_perm[k] = row;
       }
       if (!valid_perm) {
-        free(rhs_perm);
-        rhs_perm = NULL;
+        KLS_FREE_AND_NULL(rhs_perm);
       }
     } else {
-      free(rhs_perm);
-      rhs_perm = NULL;
+      KLS_FREE_AND_NULL(rhs_perm);
     }
     free(row_inverse);
   }
