@@ -16105,56 +16105,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->refactor_last_btf_scalar_run_exec_max_rows;
   solver->stats.row_refactor_group_count =
     (int64_t)solver->row_refactor_group_count;
-  solver->stats.row_refactor_group_single_count =
-    (int64_t)solver->row_refactor_group_single_count;
-  solver->stats.row_refactor_group_batch_count =
-    (int64_t)solver->row_refactor_group_batch_count;
-  solver->stats.row_refactor_group_batch_rows =
-    (int64_t)solver->row_refactor_group_batch_rows;
-  solver->stats.row_refactor_group_batch_max_width =
-    (int64_t)solver->row_refactor_group_batch_max_width;
-  solver->stats.row_refactor_group_batch_width_le_4_count =
-    (int64_t)solver->row_refactor_group_batch_width_le_4_count;
-  solver->stats.row_refactor_group_batch_width_le_8_count =
-    (int64_t)solver->row_refactor_group_batch_width_le_8_count;
-  solver->stats.row_refactor_group_scalar_candidate_count =
-    (int64_t)solver->row_refactor_group_scalar_candidate_count;
-  solver->stats.row_refactor_group_scalar_candidate_rows =
-    (int64_t)solver->row_refactor_group_scalar_candidate_rows;
-  solver->stats.row_refactor_group_scalar_short_count =
-    (int64_t)solver->row_refactor_group_scalar_short_count;
-  solver->stats.row_refactor_group_scalar_short_rows =
-    (int64_t)solver->row_refactor_group_scalar_short_rows;
-  solver->stats.row_refactor_group_scalar_stop_level_mismatch_count =
-    (int64_t)solver->row_refactor_group_scalar_stop_level_mismatch_count;
-  solver->stats.row_refactor_group_scalar_stop_internal_dep_count =
-    (int64_t)solver->row_refactor_group_scalar_stop_internal_dep_count;
-  solver->stats.row_refactor_group_scalar_stop_next_segment_count =
-    (int64_t)solver->row_refactor_group_scalar_stop_next_segment_count;
-  solver->stats.row_refactor_group_scalar_stop_max_width_count =
-    (int64_t)solver->row_refactor_group_scalar_stop_max_width_count;
-  solver->stats.row_refactor_group_scalar_stop_matrix_end_count =
-    (int64_t)solver->row_refactor_group_scalar_stop_matrix_end_count;
-  solver->stats.row_refactor_group_generic_count =
-    (int64_t)solver->row_refactor_group_generic_count;
-  solver->stats.row_refactor_group_generic_rows =
-    (int64_t)solver->row_refactor_group_generic_rows;
-  solver->stats.row_refactor_group_generic_max_width =
-    (int64_t)solver->row_refactor_group_generic_max_width;
-  solver->stats.row_refactor_group_dense_count =
-    (int64_t)solver->row_refactor_group_dense_count;
-  solver->stats.row_refactor_group_dense_rows =
-    (int64_t)solver->row_refactor_group_dense_rows;
-  solver->stats.row_refactor_group_dense_max_width =
-    (int64_t)solver->row_refactor_group_dense_max_width;
-  solver->stats.row_refactor_group_single_work =
-    solver->row_refactor_group_single_work;
-  solver->stats.row_refactor_group_batch_work =
-    solver->row_refactor_group_batch_work;
-  solver->stats.row_refactor_group_generic_work =
-    solver->row_refactor_group_generic_work;
-  solver->stats.row_refactor_group_dense_work =
-    solver->row_refactor_group_dense_work;
   solver->stats.row_refactor_group_level_count =
     (int64_t)solver->row_refactor_level_count;
   solver->stats.row_refactor_group_level_max_width =
@@ -16332,34 +16282,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_compact_dense_panel_update_work;
   solver->stats.row_refactor_compact_dense_panel_entries =
     solver->row_refactor_compact_dense_panel_entries;
-  solver->stats.row_refactor_dense_producer_run_count =
-    (int64_t)solver->row_refactor_dense_producer_run_count;
-  solver->stats.row_refactor_dense_producer_run_rows =
-    (int64_t)solver->row_refactor_dense_producer_run_rows;
-  solver->stats.row_refactor_dense_producer_run_dep_rows =
-    (int64_t)solver->row_refactor_dense_producer_run_dep_rows;
-  solver->stats.row_refactor_dense_producer_run_max_per_row =
-    (int64_t)solver->row_refactor_dense_producer_run_max_per_row;
-  solver->stats.row_refactor_dense_producer_full_suffix_run_count =
-    (int64_t)solver->row_refactor_dense_producer_full_suffix_run_count;
-  solver->stats.row_refactor_dense_producer_full_suffix_rows =
-    (int64_t)solver->row_refactor_dense_producer_full_suffix_rows;
-  solver->stats.row_refactor_dense_producer_multi_run_rows =
-    (int64_t)solver->row_refactor_dense_producer_multi_run_rows;
-  solver->stats.row_refactor_dense_producer_fragmented_rows =
-    (int64_t)solver->row_refactor_dense_producer_fragmented_rows;
-  solver->stats.row_refactor_dense_producer_target_count =
-    (int64_t)solver->row_refactor_dense_producer_target_count;
-  solver->stats.row_refactor_dense_producer_target_none_count =
-    (int64_t)solver->row_refactor_dense_producer_target_none_count;
-  solver->stats.row_refactor_dense_producer_target_external_count =
-    (int64_t)solver->row_refactor_dense_producer_target_external_count;
-  solver->stats.row_refactor_dense_producer_target_dense_count =
-    (int64_t)solver->row_refactor_dense_producer_target_dense_count;
-  solver->stats.row_refactor_dense_producer_target_pivot_count =
-    (int64_t)solver->row_refactor_dense_producer_target_pivot_count;
-  solver->stats.row_refactor_dense_producer_target_trailing_count =
-    (int64_t)solver->row_refactor_dense_producer_target_trailing_count;
   solver->stats.row_refactor_compact_dense_panel_persistent_groups =
     (int64_t)solver->row_refactor_compact_dense_panel_persistent_groups;
   solver->stats.row_refactor_compact_dense_panel_persistent_entries =
