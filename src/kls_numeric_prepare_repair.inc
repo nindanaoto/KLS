@@ -10891,38 +10891,6 @@ static double kls_row_refactor_group_work(const kls_solver *solver,
   return kls_row_refactor_compute_group_work(solver, group);
 }
 
-static KLS_ALWAYS_INLINE int
-kls_row_refactor_group_separator_component_fast(
-  const kls_solver *solver,
-  UF_long group,
-  unsigned int *component_out) {
-  if (component_out != NULL) {
-    *component_out = UINT_MAX;
-  }
-  if (solver == NULL || component_out == NULL ||
-      !kls_separator_analysis_has_global_range(&solver->separator) ||
-      solver->separator.order_component == NULL ||
-      solver->row_refactor_group_ptr == NULL ||
-      group >= solver->row_refactor_group_count) {
-    return 0;
-  }
-  const UF_long row = solver->row_refactor_group_ptr[group];
-  if (row < solver->separator.global_begin ||
-      row >= solver->separator.global_end) {
-    return 0;
-  }
-  const UF_long local = row - solver->separator.global_begin;
-  if (local >= solver->separator.n) {
-    return 0;
-  }
-  const unsigned int component = solver->separator.order_component[local];
-  if ((UF_long)component >= solver->separator.component_count) {
-    return 0;
-  }
-  *component_out = component;
-  return 1;
-}
-
 /* Dense-spiked separator chains also incur fixed per-group scheduling
    overhead. Keep that default estimate alongside the symbolic work model. */
 static double kls_row_refactor_separator_schedule_work(
