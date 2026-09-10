@@ -4586,17 +4586,9 @@ static int analyze_with_ordering(UF_long n,
          est flops 6.8e8 vs 9.4e8 yet refactors at 66 vs 43ms, suite
          2.42x) - keep the old scoring above the small-matrix line
          until ordering acceptance is timing-aware. */
-      const char *amf_mode = getenv("KLS_AMF_MODE");
       trilinos_amd_l2_amf_power = 1.0;
       if (ordering == KLS_ORDERING_AMMF) {
         trilinos_amd_l2_amf = 2;
-        const char *power = getenv("KLS_AMMF_POWER");
-        if (power != NULL && power[0] != '\0') {
-          const double requested = strtod(power, NULL);
-          if (isfinite(requested) && requested >= 0.0 && requested <= 2.0) {
-            trilinos_amd_l2_amf_power = requested;
-          }
-        }
       } else if (ordering == KLS_ORDERING_AMF3) {
         trilinos_amd_l2_amf = kls_amf3_exact_clique_bound ? 4 : 3;
         trilinos_amd_l2_amf_power = 0.445;
@@ -4605,20 +4597,6 @@ static int analyze_with_ordering(UF_long n,
             kls_amf3_power_override >= 0.0 &&
             kls_amf3_power_override <= 2.0) {
           trilinos_amd_l2_amf_power = kls_amf3_power_override;
-        }
-        const char *power = getenv("KLS_AMF3_POWER");
-        if (power != NULL && power[0] != '\0') {
-          const double requested = strtod(power, NULL);
-          if (isfinite(requested) && requested >= 0.0 && requested <= 2.0) {
-            trilinos_amd_l2_amf_power = requested;
-          }
-        }
-      } else if (amf_mode != NULL && amf_mode[0] != '\0') {
-        const long requested = strtol(amf_mode, NULL, 10);
-        trilinos_amd_l2_amf = requested == 1 || requested == 3
-          ? (UF_long)requested : 2;
-        if (trilinos_amd_l2_amf == 3) {
-          trilinos_amd_l2_amf_power = 0.445;
         }
       } else {
         trilinos_amd_l2_amf = n <= 30000 ? 2 : 1;
@@ -13516,8 +13494,7 @@ generic_ordering_tournament:;
   const int amf3_span_portfolio =
     broad_amf_portfolio && options->threads >= 8 &&
     !kls_prestatic_ordering_ctx &&
-    !kls_matched_low_pair_ordering_ctx &&
-    getenv("KLS_AMF3_POWER") == NULL;
+    !kls_matched_low_pair_ordering_ctx;
   const int amf_spec_count = amf3_span_portfolio ? 3 :
     (broad_amf_portfolio ? 2 : 1);
   atomic_int generic_representation_verdict;
