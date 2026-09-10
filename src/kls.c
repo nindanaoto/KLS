@@ -2221,15 +2221,6 @@ static int kls_refresh_pivot_tail_preserved_block_columns(
   UF_long k1,
   UF_long nk,
   const unsigned char *tail_mask);
-static int kls_try_rebuild_current_numeric_with_kls_first(
-  kls_solver *solver,
-  double *numeric_values,
-  double *elapsed);
-static int kls_try_rebuild_current_numeric_with_kls_first_mode(
-  kls_solver *solver,
-  double *numeric_values,
-  double *elapsed,
-  int force);
 static int kls_try_row_first_rebuild_rejected_block(
   kls_solver *solver,
   double *numeric_values,
@@ -2278,7 +2269,6 @@ static int kls_egraph_refactor_wait_done(
   kls_egraph_refactor_shared *shared,
   UF_long col);
 
-static int kls_first_factor_env_enabled(void);
 static int kls_egraph_refreshed_prefix(
   const kls_egraph_refactor_shared *shared,
   UF_long rejected_pivot);
@@ -10165,22 +10155,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     }
     if (solver->numeric != NULL) {
       numeric_values = solver->values != NULL ? solver->values : numeric_values;
-      const int kls_first_factor_used =
-        kls_first_factor_env_enabled() &&
-        kls_try_rebuild_current_numeric_with_kls_first_mode(
-          solver, numeric_values, &elapsed, 1);
-      kls_set_last_factor_path(solver,
-                               kls_first_factor_used
-                                 ? KLS_FACTOR_PATH_KLS_FIRST
-                                 : KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST);
-      if (kls_first_factor_used) {
-        kls_update_numeric_diagnostics(solver, 1);
-        if (solver->common.status >= TRILINOS_KLU_OK) {
-          const double row_start = kls_now_seconds();
-          (void)kls_prepare_auto_row_refactor_from_numeric(solver);
-          elapsed += kls_now_seconds() - row_start;
-        }
-      }
+      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_PRESTATIC_KLU_FIRST);
       const int compact_refactor_forest_candidate =
         kls_repeated_update_workload(&solver->options) &&
         solver->options.threads > 1 && solver->n <= (UF_long)UINT16_MAX &&
@@ -10404,18 +10379,6 @@ int kls_factor(kls_solver *solver, const double *values) {
       solver, numeric_values, &elapsed);
   if (kls_first_factor_used) {
     kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLU_FIRST);
-  }
-  if (!had_numeric && !solver->generic_amf3_span_variant_selected &&
-      !kls_first_factor_used && kls_should_try_first_factor(solver)) {
-    const double start = kls_now_seconds();
-    kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FIRST);
-    kls_first_factor_used =
-      kls_try_first_factor_row_uplooking_blocks(solver, numeric_values);
-    if (!kls_first_factor_used) {
-      kls_first_factor_used =
-        kls_try_first_factor_with_pivoted_blocks(solver, numeric_values);
-    }
-    elapsed += kls_now_seconds() - start;
   }
   if (!kls_first_factor_used) {
 #ifdef KLS_HAVE_SPRAL_SCALING
@@ -11085,16 +11048,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     diagnostics_have_rcond = 1;
   }
 #endif
-  if (promoted_numeric && !kls_first_factor_used &&
-      kls_should_try_first_factor(solver)) {
-    if (kls_try_rebuild_current_numeric_with_kls_first(solver, numeric_values,
-                                                       &elapsed)) {
-      kls_first_factor_used = 1;
-      kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FIRST);
-      diagnostics_have_flops = 0;
-      diagnostics_have_rcond = 0;
-    }
-  }
   pthread_t compact_pattern_thread;
   kls_lean_prewarm_job compact_pattern_job;
   int compact_pattern_active = 0;

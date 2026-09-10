@@ -4651,26 +4651,6 @@ static void kls_record_fast_repaired_block_stats(kls_solver *solver,
   }
 }
 
-static int kls_try_fast_reject_kls_first_rebuild(kls_solver *solver,
-                                                 double *numeric_values) {
-  if (solver == NULL || numeric_values == NULL) {
-    return 0;
-  }
-  if (!kls_first_factor_env_enabled()) {
-    return 0;
-  }
-  if (!kls_try_rebuild_current_numeric_with_kls_first_mode(
-        solver, numeric_values, NULL, 1) ||
-      solver->common.status < TRILINOS_KLU_OK ||
-      solver->common.status == TRILINOS_KLU_SINGULAR) {
-    return 0;
-  }
-  solver->fast_kls_rebuild_restarts++;
-  solver->stats.fast_kls_rebuild_restarts =
-    solver->fast_kls_rebuild_restarts;
-  return 1;
-}
-
 typedef enum {
   KLS_FAST_REJECT_REPAIR_DEFAULT = 0,
   KLS_FAST_REJECT_REPAIR_ETREE = 1,
@@ -4843,8 +4823,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
     repair_mode != KLS_FAST_REJECT_REPAIR_BLOCK;
   const int allow_row_pipeline =
     repair_mode != KLS_FAST_REJECT_REPAIR_SERIAL;
-  const int allow_kls_first_rebuild =
-    repair_mode != KLS_FAST_REJECT_REPAIR_SERIAL;
   const int prefer_row_pipeline_block_repair =
     allow_partial_repair && allow_row_pipeline &&
     solver->options.threads > 1 && nk > 1u;
@@ -4952,13 +4930,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       return 1;
     }
   }
-  if (allow_partial_repair && !kls_block_restart_used &&
-      allow_kls_first_rebuild && can_try_masked_tail &&
-      solver->stats.fast_rejected_pivoting_tail_topological &&
-      kls_try_fast_reject_kls_first_rebuild(solver, numeric_values)) {
-    free(old_pblock);
-    return 1;
-  }
   if (allow_partial_repair && !kls_block_restart_used) {
     UF_long *saved_ptrs = NULL;
     Entry *saved_udiag = NULL;
@@ -5030,13 +5001,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
           free(old_pblock);
           return 1;
         }
-      }
-      if (allow_kls_first_rebuild &&
-          kls_try_fast_reject_kls_first_rebuild(solver, numeric_values)) {
-        free(saved_ptrs);
-        free(saved_udiag);
-        free(old_pblock);
-        return 1;
       }
     }
     free(saved_ptrs);

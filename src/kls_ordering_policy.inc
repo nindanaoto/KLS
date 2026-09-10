@@ -4455,8 +4455,7 @@ static int analyze_with_ordering(UF_long n,
     metis_context.n = n;
     metis_context.npes =
       options != NULL
-        ? kls_metis_ndp_leaf_count(n, options->threads,
-                                   kls_first_factor_env_enabled())
+        ? kls_metis_ndp_leaf_count(n, options->threads, 0)
         : 0;
     metis_context.separator = separator_out;
     metis_context_active = 1;
