@@ -1600,7 +1600,6 @@ static int kls_compact_singleton_run_solve_profile(
 static int kls_verified_rhs_reuse_capable(const kls_solver *solver) {
   return solver != NULL && solver->symbolic != NULL &&
     solver->numeric != NULL && solver->col_ptr != NULL &&
-    getenv("KLS_DISABLE_VERIFIED_RHS_REUSE") == NULL &&
     solver->orientation == KLS_ORIENTATION_NORMAL &&
     solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&

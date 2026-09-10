@@ -3514,10 +3514,7 @@ static int test_verified_rhs_reuse_contract(void) {
   };
   const double expected1[] = {1.0, -2.0, 0.5, 3.0};
   const double expected2[] = {-0.75, 1.25, 2.0, -1.5};
-  const char *env_names[] = {
-    "KLS_ENABLE_ROW_REFACTOR",
-    "KLS_DISABLE_VERIFIED_RHS_REUSE"
-  };
+  const char *env_names[] = {"KLS_ENABLE_ROW_REFACTOR"};
   enum { ENV_COUNT = (int)(sizeof(env_names) / sizeof(env_names[0])) };
   char *saved_env[ENV_COUNT];
   int had_env[ENV_COUNT];
@@ -3617,46 +3614,6 @@ static int test_verified_rhs_reuse_contract(void) {
     }
   }
 
-  int64_t checked_row_solve_count = reused_row_solve_count;
-  for (int env_i = 1; ok && env_i < ENV_COUNT; ++env_i) {
-    if (setenv(env_names[env_i], "1", 1) != 0) {
-      perror("setenv verified RHS disable");
-      ok = 0;
-      break;
-    }
-    memset(x, 0, sizeof(x));
-    if (!require_ok(kls_solve(solver, 1, b, 0, x, 0),
-                    "disabled verified RHS solve")) {
-      ok = 0;
-    }
-    memset(&stats, 0, sizeof(stats));
-    stats.struct_size = sizeof(stats);
-    if (ok && !require_ok(kls_get_stats(solver, &stats),
-                          "disabled verified RHS stats")) ok = 0;
-    checked_row_solve_count++;
-    if (ok && (stats.verified_rhs_reused ||
-               stats.verified_rhs_reuse_count != 1 ||
-               stats.row_refactor_last_row_solve != 1 ||
-               stats.row_refactor_row_solve_run_count !=
-                 checked_row_solve_count)) {
-      fprintf(stderr, "%s did not disable verified RHS reuse\n",
-              env_names[env_i]);
-      ok = 0;
-    }
-    for (int32_t i = 0; ok && i < 4; ++i) {
-      if (!close_enough(x[i], expected1[i])) {
-        fprintf(stderr,
-                "unexpected disabled-reuse solution at %d: %.17g != %.17g\n",
-                (int)i, x[i], expected1[i]);
-        ok = 0;
-      }
-    }
-    if (unsetenv(env_names[env_i]) != 0) {
-      perror("unsetenv verified RHS disable");
-      ok = 0;
-    }
-  }
-
   memset(b, 0, sizeof(b));
   memset(x, 0, sizeof(x));
   for (int32_t col = 0; col < 4; ++col) {
@@ -3674,7 +3631,7 @@ static int test_verified_rhs_reuse_contract(void) {
              stats.verified_rhs_reuse_count != 1 ||
              stats.row_refactor_last_row_solve != 1 ||
              stats.row_refactor_row_solve_run_count !=
-               checked_row_solve_count + 1)) {
+               reused_row_solve_count + 1)) {
     fprintf(stderr,
             "changed RHS incorrectly reused a verdict: %d/%" PRId64 "\n",
             stats.row_refactor_last_row_solve,
