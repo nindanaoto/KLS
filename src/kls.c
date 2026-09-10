@@ -9130,26 +9130,13 @@ int kls_factor(kls_solver *solver, const double *values) {
     if (solver->metis_race != NULL && solver->metis_race->metis_wanted) {
       kls_metis_race_abandon(solver);
     }
-  } else if (kls_oneshot_lean &&
-             (solver->metis_race != NULL ||
-              should_try_auto_metis(solver))) {
-    /* one-shot-lean: the promotion consult is cycle-payoff work; run
-       it from the first refactor's consult like the other deferrals.  A
-       missing analyze-time race does not make synchronous NodeND part of
-       the one-shot factor; the deferred path can perform the same serial
-       fallback if realized numeric evidence still requests it. */
-    solver->metis_race_deferred = 1;
-    solver->metis_race_deferred_invalid = promoted_numeric;
-  } else
-  if (solver->n < 1000000 && solver->metis_race != NULL &&
-      !kls_metis_race_ready(solver)) {
-    /* the race worker is still inside NodeND/the trial factor; joining
-       here would serialize the first factor on it (ASIC_320ks: 0.69s of
-       a 1.46s init).  Consult again from the refactor wrapper once the
-       worker signals completion.  Giant-class races keep the blocking
-       join: deferred, they run 3-4x longer against the refactor loop's
-       thread contention and the bootstrap-rate window costs far more
-       than the join (Freescale1 suite 1.50 -> 3.15). */
+  } else if ((kls_oneshot_lean &&
+              (solver->metis_race != NULL ||
+               should_try_auto_metis(solver))) ||
+             (solver->n < 1000000 && solver->metis_race != NULL &&
+              !kls_metis_race_ready(solver))) {
+    /* Defer cycle-payoff work and non-ready bounded races rather than
+       serializing the first factor on their promotion consult. */
     solver->metis_race_deferred = 1;
     solver->metis_race_deferred_invalid = promoted_numeric;
   } else if (maybe_promote_auto_metis(solver, &elapsed, numeric_values,
@@ -9866,12 +9853,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->common.status = TRILINOS_KLU_OK;
     UF_long ok = 0u;
     int compact_used = 0;
-    if (direct_low_work_public_btf) {
-      ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
-                                   (double *)(uintptr_t)values,
-                                   solver->symbolic, solver->numeric,
-                                   &solver->common);
-    } else if (!kls_try_compact_map32_klu_tournament(
+    if (direct_low_work_public_btf ||
+        !kls_try_compact_map32_klu_tournament(
           solver, (double *)(uintptr_t)values, &ok, &compact_used)) {
       ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                                    (double *)(uintptr_t)values,
@@ -10864,13 +10847,12 @@ int kls_refactor(kls_solver *solver, const double *values) {
            the symmetric refactor-only fallback runs on the next update. */
         solver->lean_reaudit_state = 15;
       }
-    } else if (solver->lean_reaudit_state == 10 &&
-               solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) {
-      /* Another verified row engine already owns recurring numerics; do not
-         spend a second consultation trying to replace it. */
-      solver->lean_reaudit_state = 5;
-    } else if (solver->lean_reaudit_state == 12 ||
+    } else if ((solver->lean_reaudit_state == 10 &&
+                solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW) ||
+               solver->lean_reaudit_state == 12 ||
                solver->lean_reaudit_state == 14) {
+      /* Do not spend another consultation on a settled row engine or a
+         challenger that failed to produce a row cycle. */
       solver->lean_reaudit_state = 5;
     }
   }
@@ -11454,19 +11436,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
           }
         }
 
-        if (!row_valid && column_valid) {
-          solver->row_accept_decision = -1;
-        } else if (row_valid && !column_valid) {
-          solver->row_accept_decision = 1;
-        } else if (row_valid && column_valid &&
-                   row_seconds > 2.0 * column_seconds) {
-          /* Only settle a catastrophic first-row loss.  Constructing and
-             first-touching the row schedule is charged to this arm, whereas
-             the incumbent has already run once in the public call; ordinary
-             close cold gaps are therefore not steady evidence.  The same
-             two-times rejection boundary already used by the paired sampler
-             is strong enough to stop a representation that would otherwise
-             consume eight more lifecycle pairs merely to confirm the loss. */
+        if ((!row_valid && column_valid) ||
+            (row_valid && column_valid &&
+             row_seconds > 2.0 * column_seconds)) {
           solver->row_accept_decision = -1;
         } else if (warm_pair_measured && row_valid && column_valid &&
                    row_seconds >= 1.25 * column_seconds) {
@@ -11494,7 +11466,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
                later refactor-only re-audit would merely replay this pair. */
             solver->row_reaudit_state = 7;
           }
-        } else if (initial_row_candidate && row_valid && column_valid) {
+        } else if ((row_valid && !column_valid) ||
+                   (initial_row_candidate && row_valid && column_valid)) {
           /* The work model admitted this representation before either
              engine ran.  A close cold comparison is therefore evidence to
              continue with row, not a final verdict: eight real row cycles,
@@ -13267,11 +13240,10 @@ static int solve_impl(kls_solver *solver,
     solver->row_refactor_last_row_solve = ok ? 1 : 0;
     solver->stats.row_refactor_last_row_solve =
       solver->row_refactor_last_row_solve;
-  } else if (kernel_transpose && nrhs == 1 &&
-             kls_try_dirty_row_transpose_plan_solve_one_rhs(solver, x)) {
-    ok = 1;
-  } else if (kls_try_row_refactor_solve(solver, kernel_transpose, nrhs,
-                                         x, ldx)) {
+  } else if ((kernel_transpose && nrhs == 1 &&
+              kls_try_dirty_row_transpose_plan_solve_one_rhs(solver, x)) ||
+             kls_try_row_refactor_solve(solver, kernel_transpose, nrhs,
+                                        x, ldx)) {
     ok = 1;
   } else {
     const int lean_compact_match_direct_solve =
