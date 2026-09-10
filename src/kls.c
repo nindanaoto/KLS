@@ -8605,10 +8605,7 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
   atomic_init(&pool->generation, 0ul);
   atomic_init(&pool->active_workers, 0);
   atomic_init(&pool->shutdown, 0);
-  {
-    const char *busy = getenv("KLS_DISABLE_REFACTOR_POOL_BUSY_WAIT");
-    pool->busy_wait = !(busy != NULL && busy[0] == '1');
-  }
+  pool->busy_wait = 1;
   pool->threads = (pthread_t *)calloc((size_t)thread_count, sizeof(*pool->threads));
   pool->workers =
     (kls_parallel_refactor_worker *)calloc((size_t)thread_count, sizeof(*pool->workers));

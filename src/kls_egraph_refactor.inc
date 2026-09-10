@@ -5454,23 +5454,12 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->spin_completion, 0);
   atomic_init(&pool->shutdown, 0);
   {
-    const char *busy = getenv("KLS_DISABLE_EGRAPH_BUSY_WAIT");
-    pool->busy_wait = !(busy != NULL && busy[0] == '1');
+    pool->busy_wait = 1;
     /* These retained numerics return after every update/solve pair.  Keep
        their crew live through that bounded gap so the next numeric phase
        avoids seven condition-variable wakeups. */
-    unsigned initial_spin = (kls_symmetric_partial_diagonal_match_factor_cycle(solver)
+    const unsigned initial_spin = (kls_symmetric_partial_diagonal_match_factor_cycle(solver)
           ? 100000u : KLS_EGRAPH_WORKER_SPIN_ITERS);
-    const char *spin_iters = NULL;
-    {
-      spin_iters = getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE");
-    }
-    if (spin_iters != NULL) {
-      const long requested = strtol(spin_iters, NULL, 10);
-      if (requested >= 0 && requested <= 1000000) {
-        initial_spin = (unsigned)requested;
-      }
-    }
     pool->worker_spin_iters = initial_spin;
   }
   atomic_init(&pool->shared.stop, 0);
@@ -7251,9 +7240,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   if (pool == NULL) {
     return -1;
   }
-  if (
-      getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
-      !check_pivots && kls_repeated_update_workload(&solver->options) &&
+  if (!check_pivots && kls_repeated_update_workload(&solver->options) &&
       kls_pts_solve_available(solver) &&
       pool->worker_spin_iters < 200000u) {
     /* A retained EGraph crew is reused by the following solve/value phases

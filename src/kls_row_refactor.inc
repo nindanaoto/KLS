@@ -4971,8 +4971,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   if (scratch == NULL || done == NULL || generation == 0u || pool == NULL) {
     return -1;
   }
-  if (getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
-      kls_packed_row_worker_representation_capable(solver)) {
+  if (kls_packed_row_worker_representation_capable(solver)) {
     if (pool->worker_spin_iters < 200000u) {
       /* Keep the already-created packed crew live across the bounded solve
          gap.  Its numeric phase is short enough that a futex wake is a
@@ -5108,7 +5107,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
       : solver->n;
   if (symmetric_scalar_fringe_lean_mode &&
       shared->lean_row_values_mode &&
-      getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
       pool->worker_spin_iters < 400000u) {
     /* This executor removes the packed-value scatter and follows the
        numeric with a compact row-mirror solve.  Keep the persistent crew
@@ -5228,7 +5226,6 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   shared->udiag_recip = generic_i16ptr_grouped_recip_worker
     ? solver->i32solve_udiag_recip : NULL;
   if (generic_i16ptr_grouped_recip_worker &&
-      getenv("KLS_EGRAPH_WORKER_SPIN_OVERRIDE") == NULL &&
       pool->worker_spin_iters < 200000u) {
     /* This mixed scalar-prefix/grouped numeric is followed by a compact
        fused solve measured in only a few dozen microseconds.  Keep its
