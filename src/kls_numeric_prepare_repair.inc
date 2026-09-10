@@ -7147,8 +7147,7 @@ static void kls_clear_row_solve_transpose_thread_bounds(
   if (plan == NULL) {
     return;
   }
-  free(plan->thread_bounds);
-  plan->thread_bounds = NULL;
+  KLS_FREE_AND_NULL(plan->thread_bounds);
   plan->thread_count = 0;
   plan->sparse_cluster_levels = 0;
 }

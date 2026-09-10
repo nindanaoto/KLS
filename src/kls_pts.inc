@@ -941,14 +941,10 @@ static void kls_pts_try_build(kls_solver *solver) {
       pts->top_run_scatter = have_l_runs && have_u_runs &&
         top_entries >= 1024u && top_runs * 2u <= (uint64_t)top_entries;
       if (!pts->top_run_scatter) {
-        free(pts->top_l_run_ptr);
-        free(pts->top_u_run_ptr);
-        free(pts->top_l_runs);
-        free(pts->top_u_runs);
-        pts->top_l_run_ptr = NULL;
-        pts->top_u_run_ptr = NULL;
-        pts->top_l_runs = NULL;
-        pts->top_u_runs = NULL;
+        KLS_FREE_AND_NULL(pts->top_l_run_ptr);
+        KLS_FREE_AND_NULL(pts->top_u_run_ptr);
+        KLS_FREE_AND_NULL(pts->top_l_runs);
+        KLS_FREE_AND_NULL(pts->top_u_runs);
       }
     }
     solver->pts = pts;

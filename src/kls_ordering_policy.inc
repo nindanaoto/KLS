@@ -2106,8 +2106,7 @@ static void kls_metis_order_context_clear(
   for (UF_long pos = 0; pos < context->capture_count; ++pos) {
     kls_separator_analysis_clear(&context->captures[pos].separator);
   }
-  free(context->captures);
-  context->captures = NULL;
+  KLS_FREE_AND_NULL(context->captures);
   context->capture_count = 0;
   context->capture_capacity = 0;
 }
@@ -5891,8 +5890,7 @@ static void kls_heap_free(kls_min_heap *heap) {
   if (heap == NULL) {
     return;
   }
-  free(heap->items);
-  heap->items = NULL;
+  KLS_FREE_AND_NULL(heap->items);
   heap->size = 0;
   heap->capacity = 0;
 }

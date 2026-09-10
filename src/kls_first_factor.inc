@@ -58,18 +58,12 @@ static void kls_row_first_entries_free(kls_row_first_entries *entries) {
   if (entries == NULL) {
     return;
   }
-  free(entries->row);
-  free(entries->col);
-  free(entries->next);
-  free(entries->col_head);
-  free(entries->col_count);
-  free(entries->value);
-  entries->row = NULL;
-  entries->col = NULL;
-  entries->next = NULL;
-  entries->col_head = NULL;
-  entries->col_count = NULL;
-  entries->value = NULL;
+  KLS_FREE_AND_NULL(entries->row);
+  KLS_FREE_AND_NULL(entries->col);
+  KLS_FREE_AND_NULL(entries->next);
+  KLS_FREE_AND_NULL(entries->col_head);
+  KLS_FREE_AND_NULL(entries->col_count);
+  KLS_FREE_AND_NULL(entries->value);
   entries->count = 0;
   entries->capacity = 0;
   entries->col_head_len = 0;
