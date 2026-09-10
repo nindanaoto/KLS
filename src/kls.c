@@ -1492,8 +1492,8 @@ typedef struct kls_egraph_refactor_shared {
      between small cluster levels while retaining the pthread fallback. */
   atomic_uint cluster_barrier_generation;
   int use_spin_cluster_barrier;
-  /* The low-work single-block cohort is faster with scalar dependency
-     consumption.  Keep the selected run table in the dispatch state so the
+  /* Low-work single-block factors favor scalar dependency consumption. Keep
+     the selected run table in dispatch state so the
      hot column kernels need only one pointer test. */
   const UF_long *snode_run_end;
   /* A graph-dominant terminal BTF leaf may be completed by a second,

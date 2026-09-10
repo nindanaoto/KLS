@@ -1949,7 +1949,7 @@ static double choose_initial_auto_pivot_tolerance(
        before building the first numeric so a clearly separated pivot regime
        does not require a throwaway loose-threshold factor.  AMD and AMF3 stay
        on the caller's threshold: their elimination layouts can lose locality
-       even when a tighter factor has less fill (the measured rajat15 case).
+       even when a tighter factor has less fill.
        The census itself requires broad recovery of pressured rows, and the
        solve-side contract above verifies every selected tight numeric. */
     const int generic_minfill_pressure =
@@ -12297,11 +12297,9 @@ static int maybe_promote_auto_metis(kls_solver *solver,
     return 0;
   }
 
-  /* Structural checks passed; the adoption itself is decided by a timed
-     refactor on each side. The fill and flop estimates mispredict the
-     schedule quality both ways (ASIC_320ks: the race-built ordering
-     refactors 20% faster than the analyze-selected one; other configs
-     regress), so the incumbent stays alive until measurement. */
+  /* Structural checks passed; adoption is decided by a timed refactor on
+     each side because fill and flop estimates can mispredict schedule
+     quality in either direction. */
   const int timed_promotion = solver->n < 1000000;
   double incumbent_ref_seconds = -1.0;
   if (timed_promotion && numeric_values != NULL) {
@@ -12353,10 +12351,8 @@ static int maybe_promote_auto_metis(kls_solver *solver,
   if (timed_promotion && incumbent_ref_seconds > 0.0) {
     /* kls_numeric_replaced_invalidate deliberately discarded every retained
        engine object tied to the old pivot sequence.  Rebuild the candidate's
-       corresponding objects before its warm/timed passes; measuring here
-       without this step made an otherwise identical explicit-METIS numeric
-       appear roughly three times slower solely because promotion occurs one
-       lifecycle stage earlier than a public refactor. */
+       corresponding objects before its warm/timed passes so lifecycle-stage
+       placement does not bias the comparison. */
     kls_run_deferred_factor_preps(solver, numeric_values);
     double t0 = kls_now_seconds();
     UF_long ok_met = kls_parallel_refactor(solver, (double *)numeric_values, 0);
@@ -12723,10 +12719,8 @@ static int kls_choose_symbolic_inner(UF_long n,
 
   if (options->threads == 8 &&
       is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx)) {
-    /* This class's AMMF factor is the measured retained-numeric winner even
-       though its pre-pivot symbolic fill estimate is fractionally above
-       AMD's.  Select it directly: running AMD first only adds about 20ms to
-       the fixed front end and cannot change the numeric verdict. */
+    /* This class's retained AMMF numeric outperforms AMD despite a slightly
+       higher pre-pivot symbolic fill estimate; skip the redundant AMD pass. */
     int status = analyze_with_ordering(n, col_ptr, row_idx, options,
                                        KLS_ORDERING_AMF, symbolic_out,
                                        common_out, separator_out);
@@ -12864,8 +12858,7 @@ static int kls_choose_symbolic_inner(UF_long n,
       kls_separator_analysis_clear(&a_sep);
       /* AMD failed: fall through to the full competition */
     }
-    /* pre-static choose for the legacy-RNG class: METIS (the measured
-       class-wide winner) analyzes on THIS thread so the only legacy
+    /* Pre-static METIS analyzes on this thread so the only legacy
        libc-rand drawer stays serial, while AMD and AMF analyze on
        workers.  The comparisons replay in the canonical order at the
        join with the standard margins (AMF 0.95 vs the AMD base,
@@ -12958,8 +12951,7 @@ static int kls_choose_symbolic_inner(UF_long n,
                                    large_spiked_metis_no_btf)) {
     /* The background race covers the NodeND trial for this small
        METIS-start matrix: deficiency ordering carries the first numeric
-       (measured refactor parity on this class) and the factor-time
-       timed promotion arbitrates the ND comparison. */
+       while factor-time promotion arbitrates the NodeND comparison. */
     int amf_status = analyze_with_ordering(
       n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
       symbolic_out, common_out, separator_out);
@@ -13046,9 +13038,8 @@ generic_ordering_tournament:;
      the caller's complete numeric horizon; below 5e8 visits, another full
      quotient-graph analysis cannot repay its setup on this machine class.
      The former low floors still launched two graph workers on cache-resident
-     matched factors whose whole retained numeric horizon was cheaper than
-     those workers (the measured setup exceeded five steady updates).
-     This is a workload budget, independent of dimensions and family. */
+     matched factors whose retained numeric horizon was cheaper than their
+     setup.  This is a workload budget independent of dimensions and family. */
   const double column_pair_work = kls_column_pair_work(n, col_ptr);
   const double requested_numeric_horizon = 1.0 +
     (double)options->expected_refactorizations +
@@ -13129,9 +13120,8 @@ generic_ordering_tournament:;
     amf_spec_configured = 1;
     for (int i = 0; i < amf_spec_count; ++i) {
       /* In the recurring portfolio AMMF and AMF3 are the strengthened
-         minimum-fill formulations; retaining the original AMF alongside
-         both only adds a bandwidth-contending graph pass and was dominated
-         in fill/work by one of them throughout the cross-family audit.  The
+         minimum-fill formulations; retaining original AMF alongside both
+         adds a bandwidth-contending graph pass dominated in fill/work. The
          smaller/one-shot path keeps the historical AMF challenger. */
       const int ordering_index = broad_amf_portfolio
         ? (i == 0 ? 1 : 2) : i;

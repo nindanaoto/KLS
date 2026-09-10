@@ -2013,8 +2013,7 @@ static UF_long kls_padded_run_consume(const kls_solver *ps,
    difference entries of column k's tail, chain entry required), their
    sorted union patterns, per-column slot maps, and zeroed panel value
    storage. Write-side only: the mapped kernel refreshes panel rows at
-   column finalize; the stage-2 consume reads them. Census (09bd408):
-   bcircuit z=2 covers 79% of columns at +9.9%% pad. */
+   column finalize; the stage-2 consume reads them. */
 static void kls_build_padded_panels(kls_solver *solver) {
   if (solver == NULL || solver->padded_run_of != NULL ||
       !solver->padded_probe_build ||

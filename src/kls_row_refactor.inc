@@ -5921,15 +5921,10 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
     /* No dependency schedule: the egraph and scheduled column engines
        cannot run off it here, so the steady path is mapped/serial —
        with an explicit egraph-eligibility check as defense in depth
-       against transiently-absent schedules.  Admit the prepare only
-       when no engine already claimed the row (b9_c1's dense-help
-       groups sit at ~100us; an unconditional re-enable displaced them
-       8x in its tail cert) and the factor is large enough for the
-       alternating acceptance trials to amortize.  The fill floor also
-       structurally excludes every lean-consult row (lean caps at 1M
-       fill).  b2383 class: serial steady 240-305ms, measured row
-       acceptance 156ms — the deferred-consult wipe used to strand it
-       on serial with no re-prepare. */
+       against transiently absent schedules.  Prepare only when no engine
+       already owns the row and the factor is large enough to amortize
+       alternating acceptance trials.  The fill floor also excludes every
+       lean-consult row. */
     if (solver->row_refactor_group_count > 0 ||
         kls_egraph_refactor_is_eligible(solver) ||
         solver->numeric->lnz + solver->numeric->unz < 2000000) {
@@ -8953,8 +8948,7 @@ static int kls_row_refactor_prefactor_dep_safe_with_run(
    gathered once into a dense accumulator. Replaces h scattered
    index-walked row updates (the strict-shift pattern guarantees row r
    holds columns r+1..d1 first, then row d1's tail, contiguously in
-   u_row_values). Census: 93-99%% of dep entries on the paper-set gap
-   rows arrive in such runs. Steady checkless refactors only. */
+   u_row_values). Steady checkless refactors only. */
 static int kls_row_refactor_try_light_supernode_run(
   kls_egraph_refactor_worker *worker,
   UF_long row,
@@ -14910,8 +14904,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   /* Preserve the retained separator-tree private/pipeline queue when it covers
      the row-group DAG.  When the separator schedule is pipeline-heavy and a
      work-significant dependent producer is present, wrap its pipeline side in
-     SubtreeLU Algorithm 5's row-prefix release.  The work-share selector keeps
-     the paper mechanism but avoids building a row-edge graph for producers too
+     SubtreeLU Algorithm 5's row-prefix release.  The work-share selector
+     avoids building a row-edge graph for producers too
      small to occupy one worker for their fair share of the tail.  This is
      prefix-safe for checked runs because each producer row is marked done only
      after its pivot check and row-value publication complete.  If preparation
