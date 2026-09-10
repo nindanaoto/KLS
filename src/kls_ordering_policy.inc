@@ -5120,8 +5120,7 @@ static void *kls_generic_nd_trial_main(void *arg) {
      dominant block.  Both use the same cache-sized refinement window; this
      is a representation/resource policy, not an input classifier. */
   kls_generic_metis_tuning_ctx =
-    trial->options.use_btf &&
-    getenv("KLS_DISABLE_BTF_SINGLE_LEAF_ND") == NULL ? 7 : 5;
+    trial->options.use_btf ? 7 : 5;
   kls_generic_metis_scale_hint = trial->scale_hint;
   memset(&kls_btf_stash, 0, sizeof(kls_btf_stash));
   trial->status = analyze_with_ordering(
@@ -5165,14 +5164,11 @@ static int kls_generic_nd_trial_start(
       !kls_repeated_update_workload(options) || options->threads < 2 ||
       candidate->n < 30000u || candidate->n > (UF_long)INT32_MAX ||
       candidate->nnz > (UF_long)INT32_MAX ||
-      getenv("KLS_DISABLE_GENERIC_ND_PORTFOLIO") != NULL ||
-      getenv("KLS_DISABLE_GENERIC_ND_ANALYZE_OVERLAP") != NULL) {
+      getenv("KLS_DISABLE_GENERIC_ND_PORTFOLIO") != NULL) {
     return 0;
   }
 
-  const int recurring_independent_btf =
-    use_btf &&
-    getenv("KLS_DISABLE_RECURRING_INDEPENDENT_BTF_ND") == NULL;
+  const int recurring_independent_btf = use_btf;
   /* For a recurring portfolio, a second independently computed maximum
      matching is itself a valid BTF representation.  It remains provisional:
      factor entry checks actual pivoted fill against the retained incumbent
@@ -5212,8 +5208,7 @@ static int kls_generic_nd_trial_start(
     (double)sizeof(UF_long);
   double overlap_cache_allowance =
     4.0 * 1024.0 * 1024.0 * (double)options->threads;
-  if (options->expected_refactorizations >= 16 &&
-      getenv("KLS_DISABLE_RECURRING_ND_ANALYZE_OVERLAP") == NULL) {
+  if (options->expected_refactorizations >= 16) {
     /* Across a long numeric lifecycle, overlap is useful once each worker
        receives one private-cache-sized slice of the immutable index stream.
        The ordinary aggregate-cache floor remains for short workloads, where
@@ -5316,7 +5311,6 @@ static void kls_maybe_promote_selected_generic_nd(
      aggregate work budget.  These are realized symbolic/workload economics,
      independent of matrix dimensions, names, or degree shape. */
   const int recurring_nd_work_economic =
-    getenv("KLS_DISABLE_RELAXED_GENERIC_ND_WORK_GATE") == NULL &&
     options->expected_refactorizations >= 16 &&
     /* NodeND and a rejected numeric still traverse the complete problem,
        including scalar BTF fringe.  Charge the relaxed arm against all
@@ -5350,8 +5344,7 @@ static void kls_maybe_promote_selected_generic_nd(
   trial_options.use_btf = retained_btf_is_incumbent
     ? 1
     : (candidate->symbolic->do_btf ? 1 : 0);
-  const int btf_single_leaf_nd = trial_options.use_btf &&
-    getenv("KLS_DISABLE_BTF_SINGLE_LEAF_ND") == NULL;
+  const int btf_single_leaf_nd = trial_options.use_btf;
   /* Separator construction must not depend on whether this same proposal
      happened to start before or after the minimum-degree representation
      verdict.  The early worker uses contexts 7/5 for BTF/no-BTF; using 8/6
@@ -13124,7 +13117,6 @@ static int kls_choose_symbolic_inner(UF_long n,
 
   if (kls_prestatic_ordering_ctx && options->threads >= 3 &&
       n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
-      getenv("KLS_DISABLE_PS_CHOOSE_PAR") == NULL &&
       !is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
     if (col_ptr[n] < 8 * n) {
       /* light-column matched pattern: the factor this ordering feeds
@@ -13693,7 +13685,6 @@ generic_ordering_tournament:;
       const double settled_lifecycle_work = settled_flops *
         (1.0 + (double)options->expected_refactorizations);
       const int relaxed_recurring_economic =
-        getenv("KLS_DISABLE_RELAXED_GENERIC_ND_WORK_GATE") == NULL &&
         options->expected_refactorizations >= 16 &&
         settled_flops >= 2048.0 * settled_n &&
         isfinite(settled_lifecycle_work) &&
@@ -14257,7 +14248,6 @@ static int choose_symbolic_for_pattern(UF_long n,
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       options->static_pivoting && options->use_btf &&
       !kls_prestatic_ordering_ctx && !kls_ps_ana_probe_disable &&
-      getenv("KLS_DISABLE_PS_ANA_SKIP") == NULL &&
       (generic_guaranteed_inline_match ||
        is_prestatic_bound_missing_diagonal_pattern(n, col_ptr, row_idx))) {
     /* A NATURAL-ordering analyze gives the pre-static gate the signal it
@@ -15057,8 +15047,7 @@ static int select_candidate(kls_pattern_candidate *normal,
                                                    ref->row_idx) &&
       !kls_large_low_degree_fragmented_pattern(ref->n, ref->col_ptr) &&
       !is_large_very_low_degree_full_diagonal_pattern(
-        ref->n, ref->col_ptr, ref->row_idx) &&
-      getenv("KLS_DISABLE_ANA_ND_DEFER") == NULL) {
+        ref->n, ref->col_ptr, ref->row_idx)) {
     defer = 1;
   }
   const int saved = kls_analyze_defer_nd;

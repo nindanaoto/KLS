@@ -10826,8 +10826,7 @@ int kls_factor(kls_solver *solver, const double *values) {
         solver->generic_nd_portfolio_selected &&
         ((solver->symbolic->nblocks == 1u &&
           solver->symbolic->est_flops > 0.0) ||
-         (getenv("KLS_DISABLE_GENERIC_ND_MODERATE_PIPE") == NULL &&
-          solver->symbolic->nblocks > 1u &&
+         (solver->symbolic->nblocks > 1u &&
           isfinite(solver->generic_nd_fallback_flops) &&
           solver->generic_nd_fallback_flops >= 2.5e8));
       if (generic_nd_full_crew_factor &&
