@@ -3006,13 +3006,10 @@ static int kls_sparse_full_diagonal_hubbed_metis_core_refine_profile(
     }
     diagonal_columns += (UF_long)has_diagonal;
   }
-  if (diagonal_columns != n || 1024u * scalar_columns > n ||
-      512u * max_column_degree < n || 64u * max_column_degree > n ||
-      4.0 * (double)lower_entries > 5.0 * (double)upper_entries ||
-      4.0 * (double)upper_entries > 5.0 * (double)lower_entries) {
-    return 0;
-  }
-  return 1;
+  return diagonal_columns == n && 1024u * scalar_columns <= n &&
+         512u * max_column_degree >= n && 64u * max_column_degree <= n &&
+         4.0 * (double)lower_entries <= 5.0 * (double)upper_entries &&
+         4.0 * (double)upper_entries <= 5.0 * (double)lower_entries;
 }
 
 __attribute__((noinline, cold))
@@ -4976,17 +4973,13 @@ static int should_accept_high_work_dominant_btf_nd_trial(
   kls_ordering trial_ordering,
   const trilinos_klu_l_symbolic *trial_symbolic,
   const kls_separator_analysis *trial_separator) {
-  if (trial_ordering != KLS_ORDERING_METIS ||
-      !symbolic_is_high_work_dominant_btf_nd_candidate(n, best_symbolic) ||
-      trial_symbolic == NULL || trial_separator == NULL ||
-      !trial_symbolic->do_btf ||
-      trial_symbolic->maxblock < (UF_long)(0.90 * (double)n) ||
-      trial_separator->n != n ||
-      trial_separator->pipeline_rows == 0u ||
-      trial_separator->component_count == 0u) {
-    return 0;
-  }
-  return 1;
+  return trial_ordering == KLS_ORDERING_METIS &&
+         symbolic_is_high_work_dominant_btf_nd_candidate(n, best_symbolic) &&
+         trial_symbolic != NULL && trial_separator != NULL &&
+         trial_symbolic->do_btf &&
+         trial_symbolic->maxblock >= (UF_long)(0.90 * (double)n) &&
+         trial_separator->n == n && trial_separator->pipeline_rows > 0u &&
+         trial_separator->component_count > 0u;
 }
 
 static void maybe_promote_symbolic_ordering(
@@ -11057,18 +11050,15 @@ static int kls_sparse_fragmented_dominant_btf_symbolic_structure(
   kls_orientation orientation,
   kls_ordering ordering,
   const trilinos_klu_l_symbolic *symbolic) {
-  if (symbolic == NULL || orientation != KLS_ORIENTATION_NORMAL ||
-      ordering != KLS_ORDERING_AMD || n < 100000u ||
-      n > UF_long_max / 5u || nnz < 3u * n || nnz > 5u * n ||
-      !symbolic->do_btf || symbolic->nblocks < n / 10u ||
-      symbolic->nblocks > n / 5u ||
-      (double)symbolic->maxblock < 0.80 * (double)n ||
-      (double)symbolic->maxblock > 0.95 * (double)n ||
-      (symbolic->structural_rank >= 0 &&
-       (UF_long)symbolic->structural_rank != n)) {
-    return 0;
-  }
-  return 1;
+  return symbolic != NULL && orientation == KLS_ORIENTATION_NORMAL &&
+         ordering == KLS_ORDERING_AMD && n >= 100000u &&
+         n <= UF_long_max / 5u && nnz >= 3u * n && nnz <= 5u * n &&
+         symbolic->do_btf && symbolic->nblocks >= n / 10u &&
+         symbolic->nblocks <= n / 5u &&
+         (double)symbolic->maxblock >= 0.80 * (double)n &&
+         (double)symbolic->maxblock <= 0.95 * (double)n &&
+         (symbolic->structural_rank < 0 ||
+          (UF_long)symbolic->structural_rank == n);
 }
 
 __attribute__((noinline, cold))
@@ -14113,13 +14103,10 @@ static int validate_options(const kls_options *options) {
       options->backend > KLS_BACKEND_SERIAL) {
     return 0;
   }
-  if (options->expected_refactorizations < 0 ||
-      options->expected_solves < 0 ||
-      (options->record_tiny_solve_timing != 0 &&
-       options->record_tiny_solve_timing != 1)) {
-    return 0;
-  }
-  return 1;
+  return options->expected_refactorizations >= 0 &&
+         options->expected_solves >= 0 &&
+         (options->record_tiny_solve_timing == 0 ||
+          options->record_tiny_solve_timing == 1);
 }
 
 static int kls_normalize_options(kls_options *normalized,

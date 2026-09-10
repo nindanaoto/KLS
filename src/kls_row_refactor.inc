@@ -10866,11 +10866,8 @@ static int kls_native_row_panel_enabled_for_run(const kls_solver *solver,
   if (env_state < 0) {
     return 0;
   }
-  if (env_state == 0 && !check_pivots && solver != NULL &&
-      solver->row_refactor_native_row_panel_auto_disabled) {
-    return 0;
-  }
-  return 1;
+  return env_state != 0 || check_pivots || solver == NULL ||
+         !solver->row_refactor_native_row_panel_auto_disabled;
 }
 
 static void kls_maybe_disable_native_row_panel_auto(
