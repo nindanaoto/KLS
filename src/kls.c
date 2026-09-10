@@ -6996,26 +6996,16 @@ static void free_snode_panels(kls_solver *solver) {
   /* a later sort would reorder the packed columns under the i32 solve
      streams; they share the sorted-numeric lifecycle */
   kls_invalidate_i32_solve(solver);
-  free(solver->snode_run_end);
-  solver->snode_run_end = NULL;
-  free(solver->padded_run_of);
-  free(solver->padded_run_start);
-  free(solver->padded_run_len);
-  free(solver->padded_union_ptr);
-  free(solver->padded_union_rows);
-  free(solver->padded_slot_ptr);
-  free(solver->padded_slots);
-  free(solver->padded_panel_ptr);
-  free(solver->padded_panel_values);
-  solver->padded_run_of = NULL;
-  solver->padded_run_start = NULL;
-  solver->padded_run_len = NULL;
-  solver->padded_union_ptr = NULL;
-  solver->padded_union_rows = NULL;
-  solver->padded_slot_ptr = NULL;
-  solver->padded_slots = NULL;
-  solver->padded_panel_ptr = NULL;
-  solver->padded_panel_values = NULL;
+  KLS_FREE_AND_NULL(solver->snode_run_end);
+  KLS_FREE_AND_NULL(solver->padded_run_of);
+  KLS_FREE_AND_NULL(solver->padded_run_start);
+  KLS_FREE_AND_NULL(solver->padded_run_len);
+  KLS_FREE_AND_NULL(solver->padded_union_ptr);
+  KLS_FREE_AND_NULL(solver->padded_union_rows);
+  KLS_FREE_AND_NULL(solver->padded_slot_ptr);
+  KLS_FREE_AND_NULL(solver->padded_slots);
+  KLS_FREE_AND_NULL(solver->padded_panel_ptr);
+  KLS_FREE_AND_NULL(solver->padded_panel_values);
   solver->snode_prepared = 0;
   solver->snode_numeric_pre_sorted = 0;
 }
@@ -7025,28 +7015,19 @@ static void free_snode_panels(kls_solver *solver) {
    the same correction, so zero pivots stay rescued across the whole cycle
    while the solve probe measured the honest residual against A itself. */
 static void free_solve_refine_workspace(kls_solver *solver) {
-  free(solver->solve_refine_workspace);
-  solver->solve_refine_workspace = NULL;
-  free(solver->solve_refine_csc_ptr16);
-  solver->solve_refine_csc_ptr16 = NULL;
-  free(solver->solve_refine_csc_row16);
-  solver->solve_refine_csc_row16 = NULL;
+  KLS_FREE_AND_NULL(solver->solve_refine_workspace);
+  KLS_FREE_AND_NULL(solver->solve_refine_csc_ptr16);
+  KLS_FREE_AND_NULL(solver->solve_refine_csc_row16);
   solver->solve_refine_csc_state = 0;
-  free(solver->solve_refine_csr_ptr16);
-  solver->solve_refine_csr_ptr16 = NULL;
-  free(solver->solve_refine_csr_col_pos32);
-  solver->solve_refine_csr_col_pos32 = NULL;
+  KLS_FREE_AND_NULL(solver->solve_refine_csr_ptr16);
+  KLS_FREE_AND_NULL(solver->solve_refine_csr_col_pos32);
   solver->solve_refine_csr_state = 0;
   memset(solver->solve_refine_csr_row_bound16, 0,
          sizeof(solver->solve_refine_csr_row_bound16));
-  free(solver->solve_refine_csr_ptr32);
-  solver->solve_refine_csr_ptr32 = NULL;
-  free(solver->solve_refine_csr_pos32);
-  solver->solve_refine_csr_pos32 = NULL;
-  free(solver->solve_refine_csr_col16);
-  solver->solve_refine_csr_col16 = NULL;
-  free(solver->solve_refine_csr_col32);
-  solver->solve_refine_csr_col32 = NULL;
+  KLS_FREE_AND_NULL(solver->solve_refine_csr_ptr32);
+  KLS_FREE_AND_NULL(solver->solve_refine_csr_pos32);
+  KLS_FREE_AND_NULL(solver->solve_refine_csr_col16);
+  KLS_FREE_AND_NULL(solver->solve_refine_csr_col32);
   solver->solve_refine_csr32_state = 0;
   solver->solve_refine_csr32_threads = 0;
   memset(solver->solve_refine_csr_row_bound32, 0,
@@ -7058,20 +7039,15 @@ static void free_solve_refine_workspace(kls_solver *solver) {
   memset(solver->contract_residual_min, 0,
          sizeof(solver->contract_residual_min));
   solver->contract_residual_build_seconds = 0.0;
-  free(solver->solve_refine_rinv);
-  solver->solve_refine_rinv = NULL;
-  free(solver->solve_refine_rs_inv);
-  solver->solve_refine_rs_inv = NULL;
+  KLS_FREE_AND_NULL(solver->solve_refine_rinv);
+  KLS_FREE_AND_NULL(solver->solve_refine_rs_inv);
   solver->solve_refine_rs_inv_src = NULL;
 }
 
 static void free_pivot_nudges(kls_solver *solver) {
-  free(solver->pivot_nudge_pos);
-  free(solver->pivot_nudge_sigma);
-  free(solver->pivot_nudge_values);
-  solver->pivot_nudge_pos = NULL;
-  solver->pivot_nudge_sigma = NULL;
-  solver->pivot_nudge_values = NULL;
+  KLS_FREE_AND_NULL(solver->pivot_nudge_pos);
+  KLS_FREE_AND_NULL(solver->pivot_nudge_sigma);
+  KLS_FREE_AND_NULL(solver->pivot_nudge_values);
   solver->pivot_nudge_count = 0;
   solver->pivot_nudge_capacity = 0;
 }
@@ -7119,72 +7095,42 @@ static void free_numeric(kls_solver *solver) {
    derived from the old numeric's pattern or storage is now stale and must
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_invalidate_i32_solve(kls_solver *solver) {
-  /* the i32 solve cache copies the numeric's INDEX layout; any
-     in-place pattern/Pnum mutation (fast block restarts) must drop
-     it or later solves walk the old pattern (noncontiguous-gap
-     smoke: restart pivots [4,1,2,3,0,5], solve answered -1.739
-     where 1.0 belonged) */
+  /* The solve cache copies the numeric index layout; any in-place pattern or
+     permutation mutation must drop it before later solves. */
   if (!solver->i32solve_indices_alias_refactor) {
     free(solver->i32solve_l);
     free(solver->i32solve_u);
   }
-  free(solver->i32solve_loff);
-  free(solver->i32solve_uoff);
-  free(solver->i32solve_pnum);
-  free(solver->i32solve_rhs_perm32);
-  free(solver->i32solve_q);
-  free(solver->i32solve_llen);
-  free(solver->i32solve_ulen);
-  free(solver->i32solve_loff32);
-  free(solver->i32solve_uoff32);
-  free(solver->i32solve_singleton_run);
-  free(solver->i16solve_l);
-  free(solver->i16solve_u);
-  free(solver->i16solve_loff);
-  free(solver->i16solve_uoff);
-  free(solver->i16solve_pnum);
-  free(solver->i16solve_rhs_perm);
-  free(solver->i16solve_q);
-  free(solver->i16solve_r);
-  free(solver->i16solve_singleton_run);
-  free(solver->i16solve_offp);
-  free(solver->i16solve_offi);
-  free(solver->i16solve_offcols);
-  free(solver->i16solve_offcol_block_ptr);
-  free(solver->i16solve_lx);
-  free(solver->i16solve_ux);
-  free(solver->i32solve_udiag_recip);
-  free(solver->tiny_singleton_rs_recip);
   solver->i32solve_l = NULL;
   solver->i32solve_u = NULL;
-  solver->i32solve_loff = NULL;
-  solver->i32solve_uoff = NULL;
-  solver->i32solve_pnum = NULL;
-  solver->i32solve_rhs_perm32 = NULL;
-  solver->i32solve_q = NULL;
-  solver->i32solve_llen = NULL;
-  solver->i32solve_ulen = NULL;
-  solver->i32solve_loff32 = NULL;
-  solver->i32solve_uoff32 = NULL;
-  solver->i32solve_singleton_run = NULL;
-  solver->i16solve_l = NULL;
-  solver->i16solve_u = NULL;
-  solver->i16solve_loff = NULL;
-  solver->i16solve_uoff = NULL;
-  solver->i16solve_pnum = NULL;
-  solver->i16solve_rhs_perm = NULL;
-  solver->i16solve_q = NULL;
-  solver->i16solve_r = NULL;
-  solver->i16solve_singleton_run = NULL;
-  solver->i16solve_offp = NULL;
-  solver->i16solve_offi = NULL;
-  solver->i16solve_offcols = NULL;
-  solver->i16solve_offcol_block_ptr = NULL;
-  solver->i16solve_lx = NULL;
-  solver->i16solve_ux = NULL;
-  solver->i32solve_udiag_recip = NULL;
+  KLS_FREE_AND_NULL(solver->i32solve_loff);
+  KLS_FREE_AND_NULL(solver->i32solve_uoff);
+  KLS_FREE_AND_NULL(solver->i32solve_pnum);
+  KLS_FREE_AND_NULL(solver->i32solve_rhs_perm32);
+  KLS_FREE_AND_NULL(solver->i32solve_q);
+  KLS_FREE_AND_NULL(solver->i32solve_llen);
+  KLS_FREE_AND_NULL(solver->i32solve_ulen);
+  KLS_FREE_AND_NULL(solver->i32solve_loff32);
+  KLS_FREE_AND_NULL(solver->i32solve_uoff32);
+  KLS_FREE_AND_NULL(solver->i32solve_singleton_run);
+  KLS_FREE_AND_NULL(solver->i16solve_l);
+  KLS_FREE_AND_NULL(solver->i16solve_u);
+  KLS_FREE_AND_NULL(solver->i16solve_loff);
+  KLS_FREE_AND_NULL(solver->i16solve_uoff);
+  KLS_FREE_AND_NULL(solver->i16solve_pnum);
+  KLS_FREE_AND_NULL(solver->i16solve_rhs_perm);
+  KLS_FREE_AND_NULL(solver->i16solve_q);
+  KLS_FREE_AND_NULL(solver->i16solve_r);
+  KLS_FREE_AND_NULL(solver->i16solve_singleton_run);
+  KLS_FREE_AND_NULL(solver->i16solve_offp);
+  KLS_FREE_AND_NULL(solver->i16solve_offi);
+  KLS_FREE_AND_NULL(solver->i16solve_offcols);
+  KLS_FREE_AND_NULL(solver->i16solve_offcol_block_ptr);
+  KLS_FREE_AND_NULL(solver->i16solve_lx);
+  KLS_FREE_AND_NULL(solver->i16solve_ux);
+  KLS_FREE_AND_NULL(solver->i32solve_udiag_recip);
   solver->i32solve_udiag_recip_fresh = 0;
-  solver->tiny_singleton_rs_recip = NULL;
+  KLS_FREE_AND_NULL(solver->tiny_singleton_rs_recip);
   solver->tiny_singleton_rs_recip_fresh = 0;
   solver->tiny_singleton_solve_state = 0;
   solver->stats.tiny_singleton_solve_eligible = 0;
@@ -7213,17 +7159,12 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->verified_rhs_valid = 0;
   solver->dense_tail_cols = 0;
   solver->dense_tail_block = 0;
-  free(solver->solve_refine_values);
-  free(solver->verified_rhs);
-  free(solver->verified_factor_rhs);
-  solver->solve_refine_values = NULL;
-  solver->verified_rhs = NULL;
-  solver->verified_factor_rhs = NULL;
+  KLS_FREE_AND_NULL(solver->solve_refine_values);
+  KLS_FREE_AND_NULL(solver->verified_rhs);
+  KLS_FREE_AND_NULL(solver->verified_factor_rhs);
   solver->predicted_entry_values_captured = 0;
-  free(solver->prepared_value_scale);
-  solver->prepared_value_scale = NULL;
-  free(solver->prepared_value_input_pos);
-  solver->prepared_value_input_pos = NULL;
+  KLS_FREE_AND_NULL(solver->prepared_value_scale);
+  KLS_FREE_AND_NULL(solver->prepared_value_input_pos);
   /* Engine timing belongs to the exact retained pattern, scaling, and pivot
      frame.  A wholesale trial adoption starts a fresh measured comparison. */
   solver->numeric_full_factor_seconds = 0.0;
