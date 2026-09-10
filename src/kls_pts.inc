@@ -88,18 +88,6 @@ static int kls_pts_refactor_ready(const kls_solver *solver) {
          solver->pts->refactor_ok;
 }
 
-/* Once the generic PTS builder has proved a large block's forest, bounded
-   serial top, and worker balance, every natural corpus plan that reached this
-   state selected PTS in the independent two-by-two runtime comparison.  Make
-   that measured plan state the capability: it covers unrelated BTF and
-   one-block factors without teaching solve dispatch their matrix families. */
-static int kls_verified_large_pts_solve_policy_eligible(
-  const kls_solver *solver) {
-  return solver != NULL && solver->pts != NULL && solver->pts->solve_ok &&
-    solver->pts->solve_direct_verified &&
-    solver->pts->nk >= 16384u && solver->pts->nthreads >= 2;
-}
-
 /* Keep the moderately wide plan certificate out of the forest builder.  It
    evolves independently of stream reconstruction, and outlining this cold
    policy prevents a threshold change from perturbing the recurring PTS and
@@ -970,10 +958,9 @@ static void kls_pts_try_build(kls_solver *solver) {
          not mistake the permanent zero state for a pending tournament. */
       solver->pts_ref_decision = -1;
     }
-    const int verified_large_pts_solve =
-      kls_verified_large_pts_solve_policy_eligible(solver);
-    if ((verified_large_pts_solve) &&
-        pts->solve_ok) {
+    const int verified_large_pts_solve = pts->solve_ok &&
+      pts->solve_direct_verified && pts->nk >= 16384u && pts->nthreads >= 2;
+    if (verified_large_pts_solve) {
       /* Large plans are already authorized by their measured forest and
          balance proof.  Keep the old class verdicts only for sub-16K plans,
          where dispatch overhead still needs a separate economic reason. */

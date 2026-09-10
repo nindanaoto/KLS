@@ -5709,13 +5709,6 @@ static int kls_copy_row_refactor_values_from_numeric(kls_solver *solver) {
   return 1;
 }
 
-static int kls_seed_row_refactor_values_from_numeric(kls_solver *solver) {
-  if (solver == NULL || !kls_build_row_refactor_pattern(solver, 0)) {
-    return 0;
-  }
-  return kls_copy_row_refactor_values_from_numeric(solver);
-}
-
 static int kls_estimate_row_refactor_lower_bound_work(kls_solver *solver,
                                                       double *work_out) {
   if (work_out != NULL) {
@@ -6013,7 +6006,9 @@ static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
     return;
   }
   const double start = kls_now_seconds();
-  (void)kls_seed_row_refactor_values_from_numeric(solver);
+  if (kls_build_row_refactor_pattern(solver, 0)) {
+    (void)kls_copy_row_refactor_values_from_numeric(solver);
+  }
   *elapsed += kls_now_seconds() - start;
 }
 

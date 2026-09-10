@@ -13178,7 +13178,8 @@ static int solve_impl(kls_solver *solver,
   const int has_row_scale = solver->row_scale != NULL;
   const int has_col_scale = solver->col_scale != NULL;
   const int serial_mapped_vendor_solve =
-    kls_serial_mapped_prefers_vendor_solve(solver);
+    solver->options.backend == KLS_BACKEND_SERIAL &&
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED;
   const int fused_compact_match_rhs =
     solver->row_perm != NULL && !kernel_transpose && nrhs == 1 &&
     !has_row_scale && solver->numeric->Rs == NULL &&

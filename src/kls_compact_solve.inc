@@ -335,13 +335,6 @@ cleanup:
   return built;
 }
 
-static int kls_serial_mapped_prefers_vendor_solve(
-  const kls_solver *solver) {
-  return solver != NULL &&
-    solver->options.backend == KLS_BACKEND_SERIAL &&
-    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED;
-}
-
 static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->options.backend == KLS_BACKEND_SERIAL ||
