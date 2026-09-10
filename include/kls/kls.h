@@ -174,13 +174,8 @@ typedef struct kls_stats {
   int selected_spral_matching;
   int fast_block_restarts;
   int fast_tail_restarts;
-  int64_t refactor_dependency_levels;
-  int64_t refactor_dependency_max_width;
   int64_t refactor_dependency_edges;
-  int64_t refactor_dependency_cluster_levels;
-  int64_t refactor_dependency_pipeline_columns;
   double refactor_dependency_work;
-  double refactor_dependency_pipeline_work;
   int64_t fast_rejected_block_start;
   int64_t fast_rejected_block_size;
   int64_t fast_rejected_suffix_columns;
@@ -579,8 +574,6 @@ typedef struct kls_stats {
   int64_t refactor_btf_scalar_run_exec_max_rows;
   int verified_rhs_reused;
   int64_t verified_rhs_reuse_count;
-  int refactor_lean_choice;
-  int64_t egraph_worker_spin_iters;
   /* Zero means no compact triangular-solve mirror is prepared. */
   int compact_solve_index_bytes;
   int compact_solve_fused_rhs;

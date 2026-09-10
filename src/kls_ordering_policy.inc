@@ -16014,9 +16014,6 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
 
 static void fill_numeric_stats(kls_solver *solver) {
   fill_build_stats(&solver->stats);
-  solver->stats.refactor_lean_choice = solver->lean_choice;
-  solver->stats.egraph_worker_spin_iters = solver->egraph_pool != NULL
-    ? (int64_t)solver->egraph_pool->worker_spin_iters : 0;
   solver->stats.last_kernel_status = (int)solver->common.status;
   solver->stats.selected_scale = (int)solver->common.scale;
   solver->stats.selected_pivot_tolerance = solver->common.tol;
@@ -16084,10 +16081,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->parallel_model_stats_valid = 1;
   }
   kls_update_factor_etree_stats(solver);
-  solver->stats.refactor_dependency_levels =
-    (int64_t)solver->refactor_level_count;
-  solver->stats.refactor_dependency_max_width =
-    (int64_t)solver->refactor_level_max_width;
   solver->stats.refactor_dependency_edges =
     (int64_t)solver->refactor_dependency_edges;
   solver->stats.refactor_dependency_root_columns =
@@ -16611,13 +16604,7 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_compact_supernode_batch_candidate_dep_rows;
   solver->stats.row_refactor_compact_supernode_batch_rejected_work_count =
     (int64_t)solver->row_refactor_compact_supernode_batch_rejected_work_count;
-  solver->stats.refactor_dependency_cluster_levels =
-    (int64_t)solver->refactor_cluster_level_count;
-  solver->stats.refactor_dependency_pipeline_columns =
-    (int64_t)solver->refactor_pipeline_column_count;
   solver->stats.refactor_dependency_work =
     solver->refactor_dependency_work;
-  solver->stats.refactor_dependency_pipeline_work =
-    solver->refactor_pipeline_work;
 
 }
