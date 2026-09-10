@@ -7435,8 +7435,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
 
   if (shared->invalid) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_EGRAPH_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -7745,8 +7743,6 @@ static int kls_mapped_refactor(kls_solver *solver,
   }
 
   if (worker.invalid) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -7854,8 +7850,6 @@ static int kls_serial_refactor_tail_from_block(kls_solver *solver,
   }
 
   if (worker.invalid) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -7954,9 +7948,6 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
                          &rejected_pivot_abs, &rejected_candidate_abs,
                          &singular, &numerical_rank, &singular_col,
                          &pool_prefix_current)) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_POOL_INVALID,
-      TRILINOS_KLU_OUT_OF_MEMORY);
     common->status = TRILINOS_KLU_OUT_OF_MEMORY;
     return 0;
   }
@@ -7966,8 +7957,6 @@ static int kls_parallel_refactor_tail_from_block(kls_solver *solver,
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
 
   if (invalid) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_POOL_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -8076,8 +8065,6 @@ static int kls_serial_checked_scaled_refactor_from_block(
   }
 
   if (worker.invalid) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }

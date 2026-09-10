@@ -243,19 +243,6 @@ static UF_long kls_snode_min_batch_work(void) {
 #define KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_WORK 100000000.0
 #define KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_SHARE 0.95
 
-enum {
-  KLS_FAST_FACTOR_FAIL_NONE = 0,
-  KLS_FAST_FACTOR_FAIL_ROWWISE_U_INVALID = 1,
-  KLS_FAST_FACTOR_FAIL_EGRAPH_INVALID = 2,
-  KLS_FAST_FACTOR_FAIL_MAPPED_INVALID = 3,
-  KLS_FAST_FACTOR_FAIL_POOL_INVALID = 4,
-  KLS_FAST_FACTOR_FAIL_KLU_REFACTOR_FAILED = 5,
-  KLS_FAST_FACTOR_FAIL_NO_REJECT = 6,
-  KLS_FAST_FACTOR_FAIL_INVALID_STATUS = 7,
-  KLS_FAST_FACTOR_FAIL_SINGULAR_STATUS = 8,
-  KLS_FAST_FACTOR_FAIL_PIPELINE_REFACTOR_GUARD = 10
-};
-
 typedef struct kls_refactor_pool kls_refactor_pool;
 typedef struct kls_egraph_refactor_pool kls_egraph_refactor_pool;
 
@@ -4313,18 +4300,6 @@ static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
                              singular_col);
 }
 
-static void kls_record_fast_factor_failure(kls_solver *solver,
-                                           int reason,
-                                           int status) {
-  if (solver == NULL || reason == KLS_FAST_FACTOR_FAIL_NONE) {
-    return;
-  }
-  if (solver->stats.fast_factor_fail_reason == KLS_FAST_FACTOR_FAIL_NONE) {
-    solver->stats.fast_factor_fail_reason = reason;
-    solver->stats.fast_factor_fail_status = status;
-  }
-}
-
 static void kls_clear_fast_reject_stats(kls_solver *solver) {
   if (solver == NULL) {
     return;
@@ -4456,8 +4431,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_pivoting_tail_etree_max_width = 0;
   solver->stats.fast_rejected_refresh_state =
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
-  solver->stats.fast_factor_fail_reason = KLS_FAST_FACTOR_FAIL_NONE;
-  solver->stats.fast_factor_fail_status = TRILINOS_KLU_OK;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline = 0;
   solver->fast_kls_block_restart_row_pipeline_count = 0;
@@ -8583,11 +8556,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         fill_numeric_stats(solver);
         return KLS_OK;
       }
-    } else {
-      kls_record_fast_factor_failure(
-        solver,
-        KLS_FAST_FACTOR_FAIL_PIPELINE_REFACTOR_GUARD,
-        solver->common.status);
     }
   }
 

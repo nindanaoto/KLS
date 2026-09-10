@@ -8131,9 +8131,6 @@ static int kls_checked_refactor_accepts_rowwise_u(
     return 1;
   }
   if (status < 0 || rejected_pivot == KLS_KLU_EMPTY) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_ROWWISE_U_INVALID,
-      solver->common.status);
     solver->common.status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -15603,8 +15600,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     return -1;
   }
   if (shared->invalid) {
-    kls_record_fast_factor_failure(
-      solver, KLS_FAST_FACTOR_FAIL_EGRAPH_INVALID, TRILINOS_KLU_INVALID);
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }

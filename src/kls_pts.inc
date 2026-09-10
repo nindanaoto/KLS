@@ -2072,9 +2072,6 @@ static int kls_pts_mapped_refactor_pool(
     memset(pts->xwork, 0,
            (size_t)nthreads * (size_t)pts->nk * sizeof(double));
     if (invalid) {
-      kls_record_fast_factor_failure(
-        solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID,
-        TRILINOS_KLU_INVALID);
       common->status = TRILINOS_KLU_INVALID;
       return 0;
     }
@@ -2323,8 +2320,6 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
     memset(pts->xwork, 0,
            (size_t)nthreads * (size_t)pts->nk * sizeof(double));
     if (invalid) {
-      kls_record_fast_factor_failure(
-        solver, KLS_FAST_FACTOR_FAIL_MAPPED_INVALID, TRILINOS_KLU_INVALID);
       common->status = TRILINOS_KLU_INVALID;
       return 0;
     }
