@@ -5500,19 +5500,10 @@ static int should_start_auto_without_btf(UF_long n,
     return 0;
   }
 
-  if (is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  if (is_medium_sparse_high_degree_diagonal_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  if (large_spiked_metis_no_btf) {
-    return 1;
-  }
-  if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  return 0;
+  return is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx) ||
+         is_medium_sparse_high_degree_diagonal_pattern(n, col_ptr, row_idx) ||
+         large_spiked_metis_no_btf ||
+         is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx);
 }
 
 static int numeric_candidate_is_better(const trilinos_klu_l_common *current_common,
@@ -8733,15 +8724,10 @@ static int reactive_static_match_setup_is_unlikely_to_pay(
     return 1;
   }
 
-  if (solver->stats.selected_ordering == KLS_ORDERING_METIS &&
-      solver->symbolic->nblocks >= 512u &&
-      solver->common.flops < 2.0e6 &&
-      weak_diagonal * 5u < n &&
-      solver->common.noffdiag < 256u) {
-    return 1;
-  }
-
-  return 0;
+  return solver->stats.selected_ordering == KLS_ORDERING_METIS &&
+         solver->symbolic->nblocks >= 512u &&
+         solver->common.flops < 2.0e6 && weak_diagonal * 5u < n &&
+         solver->common.noffdiag < 256u;
 }
 
 /* the pattern-only half of the refinement gate: everything knowable

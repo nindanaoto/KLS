@@ -7197,12 +7197,9 @@ static int kls_row_refactor_solve_is_eligible(const kls_solver *solver) {
        !kls_row_refactor_solve_has_values(solver, 0))) {
     return 0;
   }
-  if (solver->row_refactor_u_ptr[solver->n] > 0u &&
-      (solver->row_refactor_u_cols == NULL ||
-       !kls_row_refactor_solve_has_values(solver, 1))) {
-    return 0;
-  }
-  return 1;
+  return solver->row_refactor_u_ptr[solver->n] == 0u ||
+         (solver->row_refactor_u_cols != NULL &&
+          kls_row_refactor_solve_has_values(solver, 1));
 }
 
 static int kls_validate_row_refactor_solve_metadata(kls_solver *solver) {

@@ -5105,10 +5105,7 @@ static int kls_row_first_pipeline_worker_scalar_batch_candidate(
       worker->workspace.supernode_panel_cache, shared->row_done,
       shared->active_rank, shared->ctx->nk, shared->supernode_valid_begin,
       shared->completed_pos, state->row, dep);
-  if (cached_run_end > dep) {
-    return 0;
-  }
-  return 1;
+  return cached_run_end <= dep;
 }
 
 

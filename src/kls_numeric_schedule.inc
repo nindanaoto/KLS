@@ -3741,11 +3741,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
   if (!singular) {
     common->status = TRILINOS_KLU_OK;
   }
-  if (check_pivots && !singular &&
-      !kls_checked_refactor_accepts_rowwise_u(solver, 0u)) {
-    return 0;
-  }
-  return 1;
+  return !check_pivots || singular ||
+         kls_checked_refactor_accepts_rowwise_u(solver, 0u);
 }
 
 /* A rejected checked refactor has already measured the fixed-pattern engine
@@ -3891,11 +3888,7 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
                                rejected_pivot_col);
         return 0;
       }
-      if (!kls_checked_refactor_accepts_rowwise_u(
-            solver, repaired_block)) {
-        return 0;
-      }
-      return 1;
+      return kls_checked_refactor_accepts_rowwise_u(solver, repaired_block);
     }
     if (solver->fast_reject_refresh_state == KLS_FAST_REJECT_REFRESH_PREFIX) {
       const UF_long tail_start = repaired_block + 1u;

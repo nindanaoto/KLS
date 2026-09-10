@@ -5124,10 +5124,7 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
       cpus_out[selected++] = cpu;
     }
   }
-  if (selected != thread_count) {
-    return 0;
-  }
-  return 1;
+  return selected == thread_count;
 }
 
 static kls_affinity_scope kls_affinity_scope_enter(int cpu) {
@@ -6249,10 +6246,7 @@ static int kls_try_fused_refactor_upper_solve(kls_solver *solver,
   const int upper_ok = use_row_values
     ? kls_fused_row_values_upper_solve(solver, work, out, q)
     : kls_fused_packed_upper_solve(solver, work, out, q);
-  if (!upper_ok) {
-    return 0;
-  }
-  return 1;
+  return upper_ok;
 }
 
 static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,

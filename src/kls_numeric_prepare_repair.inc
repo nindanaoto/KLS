@@ -361,10 +361,7 @@ static int kls_parallel_refactor_is_eligible(const kls_solver *solver) {
     return solver->numeric->Rs != NULL && solver->numeric->Pnum != NULL &&
            solver->numeric->Xwork != NULL;
   }
-  if (solver->numeric->Rs != NULL) {
-    return 0;
-  }
-  return 1;
+  return solver->numeric->Rs == NULL;
 }
 
 static int kls_refactor_pool_map_is_worthwhile(const kls_solver *solver) {
@@ -374,10 +371,7 @@ static int kls_refactor_pool_map_is_worthwhile(const kls_solver *solver) {
   if ((double)solver->symbolic->maxblock < 0.75 * (double)solver->n) {
     return 0;
   }
-  if (solver->symbolic->nblocks > 20000u || solver->nnz > 3000000u) {
-    return 0;
-  }
-  return 1;
+  return solver->symbolic->nblocks <= 20000u && solver->nnz <= 3000000u;
 }
 
 static int kls_scaled_serial_mapped_btf_is_worthwhile(
@@ -10593,13 +10587,7 @@ static int kls_compare_row_refactor_group_work_desc(const void *a,
   if (ga->work < gb->work) {
     return 1;
   }
-  if (ga->group < gb->group) {
-    return -1;
-  }
-  if (ga->group > gb->group) {
-    return 1;
-  }
-  return 0;
+  return (ga->group > gb->group) - (ga->group < gb->group);
 }
 
 static KLS_ALWAYS_INLINE int kls_row_refactor_group_work_before(
@@ -10918,13 +10906,8 @@ static int kls_compare_separator_component_work_desc(const void *a,
   if (ca->work < cb->work) {
     return 1;
   }
-  if (ca->component < cb->component) {
-    return -1;
-  }
-  if (ca->component > cb->component) {
-    return 1;
-  }
-  return 0;
+  return (ca->component > cb->component) -
+         (ca->component < cb->component);
 }
 
 static int kls_row_refactor_group_separator_component(
