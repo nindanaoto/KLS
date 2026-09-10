@@ -42,10 +42,6 @@ use resource-based amortization floors so candidate setup cannot dominate the
 numeric work. Fixed-width index limits and storage prerequisites remain hard
 capability gates.
 
-The former shape-policy compatibility switch and its archived selectors have
-been removed. Their existing `kls_stats` fields remain in the public structure
-for ABI compatibility and report zero.
-
 In particular, a retained row-matched factor can compare both minimum-degree
 orderings and switch only on numeric Pareto evidence (fill, work, pivot detours,
 and conditioning). A rejected checked-factor suffix compares its measured
@@ -115,13 +111,11 @@ domain when its retained working set exceeds a smaller eligible LLC. The
 choice uses the caller's CPU set, hardware topology, cache capacity, realized
 factor storage, and lifecycle hint—not matrix dimensions or a matrix-family
 detector. It is a no-op on uniform-cache systems and when the work fits every
-eligible LLC. Set `KLS_DISABLE_COMPACT_LLC_AFFINITY=1` for scheduler-controlled
-placement, or `KLS_TRACE_AFFINITY=1` to report an adopted placement.
+eligible LLC.
 
 When a recurring solve contract needs a snapshot of the current coefficient
 values, an already-active numeric worker pool also copies disjoint value
-slices while completing the refactor. Set
-`KLS_DISABLE_PARALLEL_REFINE_COPY=1` for a serial-copy A/B comparison.
+slices while completing the refactor.
 
 Many later sections in this README document the development history of the
 removed profile selectors. Unless a section explicitly describes a capability-
@@ -834,29 +828,10 @@ the reverse group graph and reports `row_refactor_group_dependency_edges`,
 `row_refactor_group_root_count`, `row_refactor_group_leaf_count`, and
 `row_refactor_group_max_fanout`, which are the row-segment task-graph counters
 needed by future private/pipeline partitioning and tail-restart schedulers.
-The optional EGraph supernode-update modes (including cached-only and subtree
-splitting), EGraph ready queue, separate row L/U 32-bit mirrors, raced-METIS
-symbolic reuse, static-match AUTO-scale override, and alternate BTF matching
-trial have been removed. Their old environment switches have no effect.
-Public statistics for the retired executors remain reserved and zero. Normal
-cached-supernode batching, first-factor panels, the row/separator schedulers,
-and compact row-input maps remain supported.
-The retired consumer-plan, group-L, and Algorithm 5 payoff probes are no
-longer supported; their historical results remain in the development reports.
-The diagnostic matching cycle-path search and explicit unscaled static-match
-override have also been removed. Production matching and deferred scaling remain.
-
-The U-supernode diagnostic/prototype and BTF grouped-state experiments have
-been retired. Their old switches have no effect; historical development
-reports retain their results. Explicit deferred-preparation bypass and overlap
-overrides have also been removed. Automatic preparation overlap, normal row
-preparation, and phase-timing diagnostics remain supported.
-
 The BTF scalar producer-run executor is selected automatically for repeated,
 multithreaded BTF workloads whose retained pipeline work is concentrated in
-expensive columns and whose supernode candidates are wide enough. Set
-`KLS_ENABLE_REFACTOR_BTF_SCALAR_RUN_EXEC=1` to request it explicitly, or `=0`
-to disable it. Kernel compatibility and execution-time checks still apply.
+expensive columns and whose supernode candidates are wide enough. Kernel
+compatibility and execution-time checks still apply.
 The executor first waits for every dependency in a contiguous run, then applies
 the run through a local row workspace and retains an owned sorted L-row mirror:
 the in-run triangular prefix is applied locally and the trailing suffix uses

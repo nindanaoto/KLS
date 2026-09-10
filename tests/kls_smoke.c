@@ -6130,7 +6130,7 @@ static int test_batched_compact_supernode_subrange_update_probe(void) {
   return ok;
 }
 
-static int test_egraph_retired_supernode_switch(void) {
+static int test_egraph_blocked_refactor(void) {
   const int32_t n = 15000;
   const int32_t panel_width = 16;
   const int32_t consumer_width = 32;
@@ -10849,7 +10849,7 @@ int main(void) {
   if (!test_batched_compact_supernode_subrange_update_probe()) {
     return EXIT_FAILURE;
   }
-  if (!test_egraph_retired_supernode_switch()) {
+  if (!test_egraph_blocked_refactor()) {
     return EXIT_FAILURE;
   }
   if (!test_ragged_batched_compact_supernode_update_probe()) {
