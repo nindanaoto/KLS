@@ -8519,7 +8519,7 @@ static int kls_serial_checked_scaled_refactor(kls_solver *solver,
 /* ====================================================================== */
 /* Supernodal dense-panel refactor (task #12 port, refactor path only).   */
 /*                                                                        */
-/* Prototype: bench/supernodal_bench.c.  Amalgamated supernodes over the  */
+/* Amalgamated supernodes over the                                       */
 /* sorted numeric; column-major dense panels [exact U rows | diag block | */
 /* below-row union]; per-edge exact producer-column sublists and          */
 /* precomputed scatter destinations; per-edge UB gather + restricted      */
