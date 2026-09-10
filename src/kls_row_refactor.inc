@@ -140,8 +140,6 @@ static int kls_pipeline_refactor_fast_factor_repair_is_risky(
            solver->refactor_dependency_work;
 }
 
-KLS_DEFINE_ENV_FLAG(kls_row_solve_from_numeric_env_enabled,
-                    "KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC")
 
 static double kls_row_refactor_total_group_work(const kls_solver *solver) {
   if (solver == NULL || solver->row_refactor_group_count == 0u) {
@@ -6026,167 +6024,6 @@ static void kls_maybe_prepare_model_row_refactor_from_numeric(
     kls_auto_row_refactor_cost_allows(solver);
 }
 
-static int kls_seed_row_solve_direct_from_numeric(kls_solver *solver) {
-  if (solver == NULL || !kls_build_row_solve_pattern(solver) ||
-      solver->row_refactor_values_dirty) {
-    return 0;
-  }
-  solver->row_refactor_values_ready = 0;
-  solver->row_refactor_solve_direct_ready = 1;
-  solver->row_refactor_solve_validated = 0;
-  return 1;
-}
-
-static int kls_row_solve_from_numeric_copy_is_worthwhile(kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL ||
-      solver->options.threads <= 1 || solver->symbolic->nblocks != 1u ||
-      !kls_build_row_solve_pattern(solver) ||
-      solver->row_solve_partition_ready == 0 ||
-      solver->row_refactor_l_ptr == NULL ||
-      solver->row_refactor_u_ptr == NULL) {
-    return 0;
-  }
-
-  int thread_count = solver->options.threads;
-  const kls_row_solve_transpose_plan *ut = &solver->row_solve_ut_plan;
-  const kls_row_solve_transpose_plan *lt = &solver->row_solve_lt_plan;
-  const UF_long rectangular_entries =
-    (solver->row_solve_l_segment_split != NULL
-       ? solver->row_solve_l_rect_entries : 0u) +
-    (solver->row_solve_u_segment_split != NULL
-       ? solver->row_solve_u_rect_entries : 0u) +
-    (ut->segment_split != NULL ? ut->rect_entries : 0u) +
-    (lt->segment_split != NULL ? lt->rect_entries : 0u);
-  const UF_long sparse_entries =
-    (solver->row_solve_l_sparse_level_ptr != NULL
-       ? solver->row_refactor_l_ptr[solver->row_solve_l_dense_tail_start]
-       : 0u) +
-    (solver->row_solve_u_sparse_level_ptr != NULL
-       ? solver->row_refactor_u_ptr[solver->row_solve_u_dense_tail_start]
-       : 0u) +
-    (ut->sparse_level_ptr != NULL && ut->ptr != NULL
-       ? ut->ptr[ut->dense_tail_start] : 0u) +
-    (lt->sparse_level_ptr != NULL && lt->ptr != NULL
-       ? lt->ptr[lt->dense_tail_start] : 0u);
-  if (rectangular_entries + sparse_entries <
-      KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ) {
-    return 0;
-  }
-
-  UF_long max_rows = 0;
-  if (solver->row_solve_l_segment_split != NULL &&
-      solver->row_solve_l_dense_tail_rows > max_rows) {
-    max_rows = solver->row_solve_l_dense_tail_rows;
-  }
-  if (solver->row_solve_u_segment_split != NULL &&
-      solver->row_solve_u_dense_tail_rows > max_rows) {
-    max_rows = solver->row_solve_u_dense_tail_rows;
-  }
-  if (solver->row_solve_l_sparse_level_ptr != NULL &&
-      solver->row_solve_l_dense_tail_start > max_rows) {
-    max_rows = solver->row_solve_l_dense_tail_start;
-  }
-  if (solver->row_solve_u_sparse_level_ptr != NULL &&
-      solver->row_solve_u_dense_tail_start > max_rows) {
-    max_rows = solver->row_solve_u_dense_tail_start;
-  }
-  if (ut->segment_split != NULL && ut->dense_tail_rows > max_rows) {
-    max_rows = ut->dense_tail_rows;
-  }
-  if (lt->segment_split != NULL && lt->dense_tail_rows > max_rows) {
-    max_rows = lt->dense_tail_rows;
-  }
-  if (ut->sparse_level_ptr != NULL && ut->dense_tail_start > max_rows) {
-    max_rows = ut->dense_tail_start;
-  }
-  if (lt->sparse_level_ptr != NULL && lt->dense_tail_start > max_rows) {
-    max_rows = lt->dense_tail_start;
-  }
-  if ((UF_long)thread_count > max_rows) {
-    thread_count = (int)max_rows;
-  }
-  if (thread_count < 2) {
-    return 0;
-  }
-
-  const UF_long l_sparse_cluster_levels =
-    kls_row_solve_sparse_cluster_levels(
-      solver->row_solve_l_sparse_level_ptr,
-      solver->row_solve_l_sparse_level_count, thread_count);
-  const UF_long u_sparse_cluster_levels =
-    kls_row_solve_sparse_cluster_levels(
-      solver->row_solve_u_sparse_level_ptr,
-      solver->row_solve_u_sparse_level_count, thread_count);
-  const UF_long ut_sparse_cluster_levels =
-    kls_row_solve_sparse_cluster_levels(ut->sparse_level_ptr,
-                                        ut->sparse_level_count,
-                                        thread_count);
-  const UF_long lt_sparse_cluster_levels =
-    kls_row_solve_sparse_cluster_levels(lt->sparse_level_ptr,
-                                        lt->sparse_level_count,
-                                        thread_count);
-  const UF_long active_l_rect_entries =
-    solver->row_solve_l_segment_split != NULL &&
-        solver->row_solve_l_rect_entries >=
-          KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
-      ? solver->row_solve_l_rect_entries
-      : 0u;
-  const UF_long active_u_rect_entries =
-    solver->row_solve_u_segment_split != NULL &&
-        solver->row_solve_u_rect_entries >=
-          KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
-      ? solver->row_solve_u_rect_entries
-      : 0u;
-  const UF_long active_ut_rect_entries =
-    ut->segment_split != NULL &&
-        ut->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
-      ? ut->rect_entries : 0u;
-  const UF_long active_lt_rect_entries =
-    lt->segment_split != NULL &&
-        lt->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
-      ? lt->rect_entries : 0u;
-  const UF_long active_parallel_entries =
-    active_l_rect_entries + active_u_rect_entries +
-    active_ut_rect_entries + active_lt_rect_entries +
-    (l_sparse_cluster_levels > 0u
-       ? solver->row_refactor_l_ptr[solver->row_solve_l_dense_tail_start]
-       : 0u) +
-    (u_sparse_cluster_levels > 0u
-       ? solver->row_refactor_u_ptr[solver->row_solve_u_dense_tail_start]
-       : 0u) +
-    (ut_sparse_cluster_levels > 0u && ut->ptr != NULL
-       ? ut->ptr[ut->dense_tail_start]
-       : 0u) +
-    (lt_sparse_cluster_levels > 0u && lt->ptr != NULL
-       ? lt->ptr[lt->dense_tail_start]
-       : 0u);
-  const UF_long total_solve_entries =
-    solver->row_refactor_l_ptr[solver->n] +
-    solver->row_refactor_u_ptr[solver->n];
-  const UF_long sync_count =
-    (active_l_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
-       : 0u) +
-    (active_u_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
-       : 0u) +
-    (active_ut_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
-       : 0u) +
-    (active_lt_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
-       : 0u) +
-    l_sparse_cluster_levels +
-    u_sparse_cluster_levels +
-    ut_sparse_cluster_levels +
-    lt_sparse_cluster_levels;
-  return active_parallel_entries > 0u &&
-         active_parallel_entries * 5u >= total_solve_entries * 2u &&
-         sync_count > 0u &&
-         active_parallel_entries / sync_count >=
-           KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC;
-}
-
 static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
                                                       double *elapsed) {
   if (solver == NULL || elapsed == NULL ||
@@ -6213,26 +6050,6 @@ static void kls_maybe_reseed_auto_row_refactor_values(kls_solver *solver,
   }
   const double start = kls_now_seconds();
   (void)kls_seed_row_refactor_values_from_numeric(solver);
-  *elapsed += kls_now_seconds() - start;
-}
-
-static void kls_maybe_seed_row_solve_values_from_numeric(kls_solver *solver,
-                                                         double *elapsed) {
-  if (solver == NULL || elapsed == NULL ||
-      !kls_row_solve_from_numeric_env_enabled() ||
-      solver->row_refactor_values_ready ||
-      solver->row_refactor_values_dirty ||
-      solver->numeric == NULL ||
-      solver->common.status < TRILINOS_KLU_OK ||
-      solver->common.status == TRILINOS_KLU_SINGULAR) {
-    return;
-  }
-  const double start = kls_now_seconds();
-  if (kls_row_solve_from_numeric_copy_is_worthwhile(solver)) {
-    (void)kls_seed_row_solve_direct_from_numeric(solver);
-  } else {
-    solver->row_refactor_solve_direct_ready = 0;
-  }
   *elapsed += kls_now_seconds() - start;
 }
 

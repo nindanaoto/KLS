@@ -10226,7 +10226,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         kls_maybe_prepare_snode_panels(solver, &elapsed);
         kls_snb_maybe_accept(solver, numeric_values, &elapsed);
         (void)kls_i32_solve_ready(solver);
-        kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
         maybe_prepare_refactor_map(solver, &elapsed);
         maybe_prepare_refactor_schedule(solver, &elapsed);
         kls_maybe_prepare_model_row_refactor_from_numeric(solver,
@@ -10303,7 +10302,6 @@ int kls_factor(kls_solver *solver, const double *values) {
         }
         kls_set_last_factor_path(solver, KLS_FACTOR_PATH_KLS_FAST_REFACTOR);
         kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
-        kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
         solver->stats.factor_seconds = elapsed;
         kls_update_numeric_diagnostics(solver, 1);
         maybe_prepare_refactor_map(solver, &elapsed);
@@ -11195,7 +11193,6 @@ int kls_factor(kls_solver *solver, const double *values) {
     kls_snb_maybe_accept(solver, numeric_values, &elapsed);
     (void)kls_i32_solve_ready(solver);
     kls_pts_maybe_trial(solver, numeric_values, &elapsed);
-    kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
     maybe_prepare_refactor_map(solver, &elapsed);
     maybe_prepare_refactor_schedule(solver, &elapsed);
     kls_maybe_prepare_model_row_refactor_from_numeric(solver, &elapsed);
@@ -11430,7 +11427,6 @@ static void kls_run_deferred_factor_preps(kls_solver *solver,
       pthread_join(kls_snode_prep_thread, NULL);
     }
     kls_snb_maybe_accept(solver, numeric_values, &preps_elapsed);
-    kls_maybe_seed_row_solve_values_from_numeric(solver, &preps_elapsed);
     maybe_prepare_refactor_map(solver, &preps_elapsed);
     if (kls_pts_refactor_ready(solver) ||
         kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
@@ -13423,7 +13419,6 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (ok && solver->common.status >= 0 &&
       solver->common.status != TRILINOS_KLU_SINGULAR) {
     kls_maybe_reseed_auto_row_refactor_values(solver, &elapsed);
-    kls_maybe_seed_row_solve_values_from_numeric(solver, &elapsed);
   }
   if (solver->options.backend != KLS_BACKEND_SERIAL) {
     /* Preserve the adaptive KLS policy's historical sample, which included

@@ -966,21 +966,7 @@ report `row_refactor_last_defer_value_scatter`,
 `row_refactor_last_lazy_value_scatter`, and
 `row_refactor_lazy_value_scatter_run_count`, plus
 `row_refactor_last_row_solve` and `row_refactor_row_solve_run_count` for this
-row-storage solve handoff. When `KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC=1`, KLS can
-build row-solve structure from ordinary KLU-compatible numeric storage after a
-successful factor/refactor, allowing the row solve to be benchmarked without
-also enabling the experimental KLS-first factorization path. This automatic
-seed is adaptive: KLS first builds the cheap row-solve partition diagnostics and,
-when the CKTSO-style parallel row-solve executor has enough structural work,
-reads values through retained KLU numeric value pointers instead of copying them
-into row-major mirrors. Otherwise the ordinary numeric storage remains
-authoritative and KLS avoids a repeated setup tax on refactor-heavy runs.
-Single-RHS row solves use a scalar row-major loop with cached structural
-validation, matching the common SPICE solve shape while keeping the four-RHS
-batched path available for wider solves. Solve-only seeding builds only the
-row-major `L`/`U` solve structure and KLU value-pointer arrays; the heavier
-row-refactor group, segment, and scheduler metadata is left to the refactor
-paths that actually need it.
+row-storage solve handoff.
 
 For sparse, normal-orientation AMD factors with a dominant BTF core and a
 10--20% block fringe, KLS selects the column-solve representation from retained
