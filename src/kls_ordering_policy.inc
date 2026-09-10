@@ -9506,7 +9506,7 @@ matching_admitted:;
   int bounded_exact_match_probe_current = 0;
   int bounded_exact_match_probe_attempted = 0;
   int bounded_exact_match_probe_rejected = 0;
-  int status = KLS_OK;
+  int status;
 #ifdef KLS_HAVE_SPRAL_SCALING
   const double incumbent_symbolic_score = solver->symbolic != NULL
     ? symbolic_score(solver->symbolic) : DBL_MAX;
@@ -9530,7 +9530,6 @@ matching_attempt:;
   exact_matching = 0;
   exact_matching_scaling = 0;
   spral_matching = 0;
-  status = KLS_OK;
 #ifdef KLS_HAVE_SPRAL_SCALING
   bounded_exact_match_probe_current =
     bounded_exact_match_probe && !bounded_exact_match_probe_attempted;
@@ -9596,7 +9595,6 @@ matching_attempt:;
       row_perm = NULL;
       match_row_scale = NULL;
       match_col_scale = NULL;
-      bounded_exact_match_probe_current = 0;
       bounded_exact_match_probe_rejected = 1;
       goto matching_attempt;
     }
@@ -9711,7 +9709,6 @@ matching_attempt:;
     trial_col_scale = NULL;
     match_row_scale = NULL;
     match_col_scale = NULL;
-    bounded_exact_match_probe_current = 0;
     bounded_exact_match_probe_rejected = 1;
     goto matching_attempt;
   }
@@ -10476,7 +10473,6 @@ matching_attempt:;
         goto done;
       }
     }
-    matching_equilibration_deferred = 0;
   }
   int retain_resource_scaled_native_match = 0;
   if (!deferred &&
@@ -10638,7 +10634,6 @@ matching_attempt:;
 done:
   if (unmatched_colamd_launched && !unmatched_colamd_joined) {
     pthread_join(unmatched_colamd_thread, NULL);
-    unmatched_colamd_joined = 1;
   }
   kls_unmatched_colamd_discard(&unmatched_colamd_job);
   kls_prestatic_ordering_ctx = 0;

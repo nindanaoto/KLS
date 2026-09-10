@@ -67,7 +67,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
     for (int64_t p = 0; p < lcount; ++p) {
       if (solver->i32solve_l[p] < 0 ||
           solver->i32solve_l[p] > (int32_t)UINT16_MAX) {
-        ok = 0;
         goto cleanup;
       }
       lrows[p] = (uint16_t)solver->i32solve_l[p];
@@ -75,7 +74,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
     for (int64_t p = 0; p < ucount; ++p) {
       if (solver->i32solve_u[p] < 0 ||
           solver->i32solve_u[p] > (int32_t)UINT16_MAX) {
-        ok = 0;
         goto cleanup;
       }
       urows[p] = (uint16_t)solver->i32solve_u[p];
@@ -87,21 +85,18 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
           solver->i32solve_loff[k] > (int64_t)UINT16_MAX ||
           solver->i32solve_uoff[k] < 0 ||
           solver->i32solve_uoff[k] > (int64_t)UINT16_MAX) {
-        ok = 0;
         goto cleanup;
       }
       loff[k] = (uint16_t)solver->i32solve_loff[k];
       uoff[k] = (uint16_t)solver->i32solve_uoff[k];
     }
     if (solver->numeric->Offp[k] > (UF_long)UINT16_MAX) {
-      ok = 0;
       goto cleanup;
     }
     offp[k] = (uint16_t)solver->numeric->Offp[k];
     if (k < n) {
       if (solver->numeric->Pnum[k] > (UF_long)UINT16_MAX ||
           solver->symbolic->Q[k] > (UF_long)UINT16_MAX) {
-        ok = 0;
         goto cleanup;
       }
       pnum[k] = (uint16_t)solver->numeric->Pnum[k];
@@ -110,7 +105,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
   }
   for (UF_long block = 0u; block <= nblocks; ++block) {
     if (solver->symbolic->R[block] > (UF_long)UINT16_MAX) {
-      ok = 0;
       goto cleanup;
     }
     rptr[block] = (uint16_t)solver->symbolic->R[block];
@@ -160,7 +154,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
   }
   for (UF_long p = 0u; p < offcount; ++p) {
     if (solver->numeric->Offi[p] > (UF_long)UINT16_MAX) {
-      ok = 0;
       goto cleanup;
     }
     offi[p] = (uint16_t)solver->numeric->Offi[p];
@@ -207,26 +200,22 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
         UF_long len = 0u;
         kls_klu_get_pointer(lu, lip, llen, k, &rows, &values, &len);
         if (len > (UF_long)(lcount - lcur)) {
-          ok = 0;
           goto cleanup;
         }
         lx[global] = values;
         for (UF_long p = 0u; p < len; ++p) {
           if (rows[p] > (UF_long)UINT16_MAX) {
-            ok = 0;
             goto cleanup;
           }
           lrows[lcur++] = (uint16_t)rows[p];
         }
         kls_klu_get_pointer(lu, uip, ulen, k, &rows, &values, &len);
         if (len > (UF_long)(ucount - ucur)) {
-          ok = 0;
           goto cleanup;
         }
         ux[global] = values;
         for (UF_long p = 0u; p < len; ++p) {
           if (rows[p] > (UF_long)UINT16_MAX) {
-            ok = 0;
             goto cleanup;
           }
           urows[ucur++] = (uint16_t)rows[p];
@@ -236,7 +225,6 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
     loff[n] = (uint16_t)lcur;
     uoff[n] = (uint16_t)ucur;
     if (lcur != lcount || ucur != ucount) {
-      ok = 0;
       goto cleanup;
     }
   } else {
@@ -258,13 +246,11 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
         UF_long len = 0u;
         kls_klu_get_pointer(lu, lip, llen, k, &rows, &values, &len);
         if (len != (UF_long)(loff[k1 + k + 1u] - loff[k1 + k])) {
-          ok = 0;
           goto cleanup;
         }
         lx[k1 + k] = values;
         kls_klu_get_pointer(lu, uip, ulen, k, &rows, &values, &len);
         if (len != (UF_long)(uoff[k1 + k + 1u] - uoff[k1 + k])) {
-          ok = 0;
           goto cleanup;
         }
         ux[k1 + k] = values;
@@ -1493,7 +1479,6 @@ static UF_long kls_i32_solve(kls_solver *solver,
               udiag_recip != NULL ? udiag_recip + k1 : NULL);
             if (!pts_used) {
               pts->solve_decision = -1;
-              use_pts = 0;
             }
           }
         }

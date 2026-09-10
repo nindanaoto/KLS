@@ -3306,7 +3306,6 @@ static int kls_copy_live_prefix_lu(Unit *new_lu,
     Entry *dst_ux = (Entry *)(new_lu + lup + u_units);
     Int *src_ui = NULL;
     Entry *src_ux = NULL;
-    src_len = 0;
     GET_POINTER((Unit *)old_lu, old_uip, old_ulen, src_ui, src_ux, k,
                 src_len);
     if ((UF_long)src_len != u_len) {
@@ -4878,7 +4877,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
       memcpy(((Entry *)solver->numeric->Udiag) + k1, saved_udiag,
              (size_t)nk * sizeof(*saved_udiag));
       if (allow_row_pipeline && !kls_row_first_block_rebuild_tried) {
-        kls_row_first_block_rebuild_tried = 1;
         if (kls_try_row_first_rebuild_rejected_block(
               solver, numeric_values, block, k1, nk, rejected_pivot,
               old_pblock, old_lnz_block, old_unz_block, pblock)) {

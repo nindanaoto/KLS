@@ -6133,7 +6133,6 @@ static int kls_row_first_run_restartable_pipeline_suffix(
       supernode_panel_update_rows += phase_supernode_panel_rows;
       pivot_tail_rows += phase_pivot_tail_rows;
       pivot_restarts += phase_pivot_restarts;
-      cursor = end;
       break;
     }
     if (!pivot_tail_ready || completed_pos < cursor ||
@@ -6374,7 +6373,6 @@ static int kls_row_first_run_etree_prefactor_tail_phase(
       supernode_panel_update_rows += phase_supernode_panel_update_rows;
       pivot_tail_rows += phase_pivot_tail_rows;
       pivot_restarts += phase_pivot_restarts;
-      cursor = active_rows;
       break;
     }
     if (!pivot_tail_ready || completed_pos < cursor ||
@@ -9926,7 +9924,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
      preparation and retained schedules apply directly. */
   common->status = TRILINOS_KLU_OK;
   solver->numeric = numeric;
-  numeric_adopted = 1;
   solver->numeric_is_predicted = 1;
   /* The pattern was written in ascending row order, so the supernode
      preparation can skip its sorting pass. */
@@ -10869,7 +10866,6 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
       UF_long lcol_len = 0;
       kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
       double ukk = x[k];
-      double cmax = fabs(ukk);
       UF_long best = KLS_KLU_EMPTY;
       /* Candidates stay inside the supernode run: path closure of the
          symmetrized bound guarantees any earlier column containing one of
@@ -10896,7 +10892,7 @@ static int kls_predicted_pivoting_fill_hot(kls_solver *solver,
         const double av = fabs(x[li[p]]);
         colmax_all = colmax_all < av ? av : colmax_all;
       }
-      cmax = colmax_all;
+      const double cmax = colmax_all;
       /* Candidates by descending magnitude; a veto moves to the next one
          instead of giving up on the swap entirely. */
       if (fabs(ukk) < tol * cmax) {
