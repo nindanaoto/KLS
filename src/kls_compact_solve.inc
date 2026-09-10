@@ -17,8 +17,7 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
       (!from_i32 && !direct) ||
       solver->numeric->Pnum == NULL || solver->numeric->Offp == NULL ||
       solver->numeric->Offi == NULL || solver->symbolic->Q == NULL ||
-      solver->symbolic->R == NULL ||
-      getenv("KLS_DISABLE_I16_SOLVE") != NULL) {
+      solver->symbolic->R == NULL) {
     return 0;
   }
   const UF_long n = solver->n;
@@ -344,8 +343,7 @@ static int kls_serial_mapped_prefers_vendor_solve(
 }
 
 static int kls_auto_btf_prefers_vendor_solve(const kls_solver *solver) {
-  if (getenv("KLS_DISABLE_AUTO_BTF_VENDOR_SOLVE") != NULL ||
-      solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->options.backend == KLS_BACKEND_SERIAL ||
       solver->options.threads <= 1) {
     return 0;
@@ -555,7 +553,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   if ((generic_direct_i16_solve ||
        kls_low_work_single_block_policy_enabled(solver)) &&
       !refactor_forest_candidate &&
-      getenv("KLS_DISABLE_I16_SOLVE") == NULL &&
       n <= (UF_long)UINT16_MAX &&
       numeric->Llen != NULL && numeric->Ulen != NULL) {
     /* This cohort always selects the compact solve.  Construct its final
@@ -736,7 +733,6 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   kls_build_i16_solve_cache(solver, lcur, ucur);
   const int generic_compact_solve_meta =
-        getenv("KLS_DISABLE_GENERIC_COMPACT_SOLVE_META") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
     solver->i16solve_l == NULL && solver->i16solve_u == NULL &&
     n >= 512u && n <= (UF_long)UINT32_MAX &&
@@ -859,8 +855,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     }
   }
   if (symbolic->nblocks >= 65536u &&
-      symbolic->nblocks <= (UF_long)UINT32_MAX &&
-      getenv("KLS_DISABLE_I32_SINGLETON_RUN") == NULL) {
+      symbolic->nblocks <= (UF_long)UINT32_MAX) {
     uint32_t *singleton_run = (uint32_t *)malloc(
       (size_t)symbolic->nblocks * sizeof(*singleton_run));
     if (singleton_run != NULL) {
@@ -892,8 +887,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   if ((solver->generic_nd_portfolio_selected ||
        solver->generic_nd_numeric_validated) &&
       kls_repeated_update_workload(&solver->options) &&
-      solver->options.threads > 1 &&
-      getenv("KLS_DISABLE_DEFERRED_PTS_BUILD") == NULL) {
+      solver->options.threads > 1) {
     /* The compact index stream is already publishable.  Its optional solve
        forest reads only immutable factor structure, so the first EGraph
        numeric pass can hide this one-time construction before the first

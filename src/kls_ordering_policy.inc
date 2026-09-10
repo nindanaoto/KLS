@@ -55,8 +55,7 @@ static int kls_moderate_btf_map32_trial_capable(const kls_solver *solver) {
 
 static int kls_low_work_btf_map32_policy_enabled(
   const kls_solver *solver) {
-  return getenv("KLS_DISABLE_LOW_WORK_BTF_MAP32_POLICY") == NULL &&
-         kls_low_work_btf_map32_capable(solver);
+  return kls_low_work_btf_map32_capable(solver);
 }
 
 /* Prefer the native packed triangular walk when a complete low-work BTF
@@ -68,8 +67,7 @@ static int kls_low_work_btf_map32_policy_enabled(
    dimensions or block counts of a named input matrix. */
 static int kls_low_work_btf_prefers_native_solve(
   const kls_solver *solver) {
-  if (getenv("KLS_DISABLE_LOW_WORK_BTF_NATIVE_SOLVE") != NULL ||
-      !kls_low_work_btf_map32_capable(solver) || solver->n > 16384u) {
+  if (!kls_low_work_btf_map32_capable(solver) || solver->n > 16384u) {
     return 0;
   }
   const UF_long factor_entry_cap = 12u * solver->n;
@@ -95,7 +93,6 @@ static int kls_low_work_btf_prefers_native_solve(
 static int kls_low_work_single_block_policy_enabled(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      getenv("KLS_DISABLE_LOW_WORK_SINGLE_BLOCK_POLICY") != NULL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->common.scale > 0 || solver->numeric->Rs != NULL ||
       solver->n == 0u || solver->n > 4096u ||
@@ -116,7 +113,6 @@ static int kls_low_work_single_block_policy_enabled(
 static int kls_moderate_work_single_block_lean_policy_enabled(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      getenv("KLS_DISABLE_MODERATE_SINGLE_BLOCK_LEAN_POLICY") != NULL ||
       solver->orientation != KLS_ORIENTATION_NORMAL ||
       solver->options.threads < 2 || solver->common.scale != -1 ||
       !kls_repeated_update_workload(&solver->options) ||
@@ -148,7 +144,6 @@ static int kls_moderate_work_single_block_lean_policy_enabled(
 static int kls_moderate_work_fragmented_btf_lean_policy_enabled(
   const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
-      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_BTF_LEAN_POLICY") != NULL ||
       solver->options.threads < 2 || solver->common.scale != -1 ||
       !kls_repeated_update_workload(&solver->options) ||
       solver->numeric->Rs != NULL || solver->n == 0u ||
@@ -1796,8 +1791,7 @@ static double kls_generic_initial_pivot_pressure_tolerance(
       !solver->options.static_pivoting ||
       !kls_repeated_update_workload(&solver->options) ||
       solver->options.ordering != KLS_ORDERING_AUTO ||
-      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12 ||
-      getenv("KLS_DISABLE_GENERIC_INITIAL_PIVOT_PRESSURE") != NULL) {
+      fabs(solver->options.pivot_tolerance - 0.001) > 1.0e-12) {
     return solver == NULL ? 0.001 : solver->options.pivot_tolerance;
   }
 
@@ -2001,8 +1995,7 @@ static double choose_initial_auto_pivot_tolerance(
     const int generic_minfill_pressure =
       kls_repeated_update_workload(&solver->options) &&
       (solver->stats.selected_ordering == KLS_ORDERING_AMF ||
-       solver->stats.selected_ordering == KLS_ORDERING_AMMF) &&
-      getenv("KLS_DISABLE_GENERIC_MINFILL_PIVOT_PRESSURE") == NULL;
+       solver->stats.selected_ordering == KLS_ORDERING_AMMF);
     return generic_minfill_pressure
       ? kls_generic_initial_pivot_pressure_tolerance(solver, numeric_values)
       : solver->options.pivot_tolerance;
