@@ -15945,14 +15945,8 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
-  solver->stats.row_refactor_auto_lower_bound_work =
-    solver->row_refactor_auto_lower_bound_work;
   solver->stats.row_refactor_auto_lower_bound_rejected =
     solver->row_refactor_auto_lower_bound_rejected;
-  solver->stats.row_refactor_auto_pattern_build_failed =
-    solver->row_refactor_auto_pattern_build_failed;
-  solver->stats.row_refactor_auto_value_copy_failed =
-    solver->row_refactor_auto_value_copy_failed;
   kls_fill_separator_stats(&solver->stats, &solver->separator);
   if (solver->symbolic != NULL) {
     solver->stats.last_kernel_status = (int)solver->common.status;
@@ -16000,14 +15994,8 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
-  solver->stats.row_refactor_auto_lower_bound_work =
-    solver->row_refactor_auto_lower_bound_work;
   solver->stats.row_refactor_auto_lower_bound_rejected =
     solver->row_refactor_auto_lower_bound_rejected;
-  solver->stats.row_refactor_auto_pattern_build_failed =
-    solver->row_refactor_auto_pattern_build_failed;
-  solver->stats.row_refactor_auto_value_copy_failed =
-    solver->row_refactor_auto_value_copy_failed;
   kls_fill_separator_stats(&solver->stats, &solver->separator);
   solver->stats.selected_btf =
     (solver->symbolic != NULL && solver->symbolic->do_btf) ? 1 : 0;

@@ -8654,7 +8654,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
       free(row_group);
       free(group_ptr);
       free_row_refactor_pattern(solver);
-      solver->row_refactor_auto_lower_bound_work = row_task_floor;
       solver->row_refactor_auto_lower_bound_rejected = 1;
       return 0;
     }

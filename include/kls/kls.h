@@ -417,10 +417,7 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_fallback_count;
   int64_t row_refactor_native_row_panel_checked_reject_count;
   int internal_index_bytes;
-  double row_refactor_auto_lower_bound_work;
   int row_refactor_auto_lower_bound_rejected;
-  int row_refactor_auto_pattern_build_failed;
-  int row_refactor_auto_value_copy_failed;
   int verified_rhs_reused;
   int64_t verified_rhs_reuse_count;
   /* Zero means no compact triangular-solve mirror is prepared. */

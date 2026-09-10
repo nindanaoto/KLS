@@ -5810,10 +5810,7 @@ static void kls_reset_auto_row_refactor_prepare_stats(kls_solver *solver) {
     return;
   }
   solver->row_refactor_auto_native_row_panel = 0;
-  solver->row_refactor_auto_lower_bound_work = 0.0;
   solver->row_refactor_auto_lower_bound_rejected = 0;
-  solver->row_refactor_auto_pattern_build_failed = 0;
-  solver->row_refactor_auto_value_copy_failed = 0;
 }
 
 static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
@@ -5825,7 +5822,6 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
     double lower_bound_work = 0.0;
     if (kls_estimate_row_refactor_lower_bound_work(solver,
                                                    &lower_bound_work)) {
-      solver->row_refactor_auto_lower_bound_work = lower_bound_work;
       double lower_bound_allowance = solver->refactor_dependency_work;
       if (solver->options.threads > 1) {
         /* The bound is serial work; the cooperative row engine recovers
@@ -5851,7 +5847,6 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
     solver->row_refactor_values_ready = 0;
     solver->row_refactor_solve_direct_ready = 0;
     solver->row_refactor_solve_validated = 0;
-    solver->row_refactor_auto_pattern_build_failed = 1;
     return 0;
   }
   solver->row_refactor_auto_enabled = 1;
@@ -5872,7 +5867,6 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
   }
   if (!kls_copy_row_refactor_values_from_numeric(solver)) {
     solver->row_refactor_auto_native_row_panel = 0;
-    solver->row_refactor_auto_value_copy_failed = 1;
     return 0;
   }
   return 1;

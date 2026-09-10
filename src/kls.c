@@ -977,10 +977,7 @@ struct kls_solver {
   UF_long row_refactor_defer_value_scatter_run_count;
   int row_refactor_auto_enabled;
   int row_refactor_auto_native_row_panel;
-  double row_refactor_auto_lower_bound_work;
   int row_refactor_auto_lower_bound_rejected;
-  int row_refactor_auto_pattern_build_failed;
-  int row_refactor_auto_value_copy_failed;
   int row_refactor_values_ready;
   int row_refactor_values_dirty;
   int row_refactor_solve_direct_ready;
@@ -2890,10 +2887,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_defer_value_scatter_run_count = 0;
   solver->row_refactor_auto_native_row_panel = 0;
-  solver->row_refactor_auto_lower_bound_work = 0.0;
   solver->row_refactor_auto_lower_bound_rejected = 0;
-  solver->row_refactor_auto_pattern_build_failed = 0;
-  solver->row_refactor_auto_value_copy_failed = 0;
   solver->row_refactor_values_ready = 0;
   solver->row_refactor_values_dirty = 0;
   solver->lean_compact_match_row_factor_active = 0;
