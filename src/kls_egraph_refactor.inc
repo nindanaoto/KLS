@@ -3450,8 +3450,8 @@ static UF_long kls_prepare_root_pivot_tail_independent_refresh(
       solver, block, k1, nk, local_reject, saved_state);
   }
   const int mask_ok =
-    kls_build_pivot_tail_restart_mask(
-      solver, k1, nk, local_reject, restart_end, tail_mask);
+    kls_build_pivot_tail_restart_mask_range(
+      solver, k1, nk, local_reject, local_reject, restart_end, tail_mask);
   const int refresh_ok =
     mask_ok &&
     kls_refresh_pivot_tail_preserved_block_columns(

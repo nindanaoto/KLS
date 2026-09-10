@@ -1818,7 +1818,8 @@ static int kls_serial_factor(kls_solver *solver,
   if (diagnostics_have_flops) {
     /* The inflation guard already computed the retained factor's flop count;
        only reciprocal condition estimation remains. */
-    kls_update_numeric_rcond(solver);
+    (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric,
+                               &solver->common);
   } else {
     kls_update_numeric_diagnostics(solver, 1);
   }

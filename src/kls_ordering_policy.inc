@@ -5579,14 +5579,6 @@ static void kls_update_numeric_diagnostics(kls_solver *solver,
   }
 }
 
-static void kls_update_numeric_rcond(kls_solver *solver) {
-  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL) {
-    return;
-  }
-  (void)trilinos_klu_l_rcond(solver->symbolic, solver->numeric,
-                             &solver->common);
-}
-
 /* The lifecycle guard needs only KLU's documented diagonal ratio.  Keep the
    scan branch-free so compilers can reduce min/max in vector lanes; the
    general diagnostic routine above retains KLU's full status semantics. */

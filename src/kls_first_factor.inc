@@ -2281,20 +2281,6 @@ static void kls_row_first_workspace_free(
   memset(workspace, 0, sizeof(*workspace));
 }
 
-static int kls_row_first_workspace_enable_supernode_fit_cache(
-  kls_row_first_workspace *workspace,
-  UF_long nk) {
-  if (workspace == NULL ||
-      nk > (UF_long)(SIZE_MAX / sizeof(*workspace->supernode_fit_status))) {
-    return 0;
-  }
-  free(workspace->supernode_fit_status);
-  workspace->supernode_fit_status =
-    (unsigned char *)calloc((size_t)nk,
-                            sizeof(*workspace->supernode_fit_status));
-  return workspace->supernode_fit_status != NULL || nk == 0u;
-}
-
 static int kls_row_first_workspace_reserve_supernode(
   kls_row_first_workspace *workspace,
   UF_long entry_count) {
@@ -2398,8 +2384,13 @@ static void *kls_row_first_private_worker_main(void *arg) {
       &worker->failure, KLS_ROW_FIRST_FACTOR_ROW_FAIL_SETUP);
     goto done;
   }
-  (void)kls_row_first_workspace_enable_supernode_fit_cache(
-    &worker->workspace, nk);
+  free(worker->workspace.supernode_fit_status);
+  worker->workspace.supernode_fit_status =
+    nk <= (UF_long)(SIZE_MAX /
+                    sizeof(*worker->workspace.supernode_fit_status))
+      ? (unsigned char *)calloc(
+          (size_t)nk, sizeof(*worker->workspace.supernode_fit_status))
+      : NULL;
   if (kls_row_first_supernode_panel_cache_init_rows(&panel_cache, nk)) {
     worker->workspace.supernode_panel_cache = &panel_cache;
   }
@@ -5335,17 +5326,6 @@ static void kls_row_first_pipeline_mark_failed(
   }
 }
 
-static void kls_row_first_pipeline_disable_prefix_supernodes(
-  kls_row_first_pipeline_shared *shared) {
-  if (shared == NULL) {
-    return;
-  }
-  shared->supernode_start = NULL;
-  shared->supernode_end = NULL;
-  shared->open_panel_start = KLS_KLU_EMPTY;
-  shared->open_panel_end = KLS_KLU_EMPTY;
-}
-
 static void kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
   kls_row_first_pipeline_shared *shared,
   UF_long pivot_row,
@@ -5364,7 +5344,10 @@ static void kls_row_first_pipeline_disable_prefix_supernodes_after_pivot(
       shared->supernode_valid_begin = floor;
     }
   } else {
-    kls_row_first_pipeline_disable_prefix_supernodes(shared);
+    shared->supernode_start = NULL;
+    shared->supernode_end = NULL;
+    shared->open_panel_start = KLS_KLU_EMPTY;
+    shared->open_panel_end = KLS_KLU_EMPTY;
   }
   if (shared->private_supernode_panel_cache == NULL || shared->ctx == NULL) {
     return;

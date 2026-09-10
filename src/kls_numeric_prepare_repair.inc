@@ -3751,16 +3751,6 @@ static int kls_build_pivot_tail_restart_mask_range(
          mask[restart_end - 1u];
 }
 
-static int kls_build_pivot_tail_restart_mask(const kls_solver *solver,
-                                             UF_long k1,
-                                             UF_long nk,
-                                             UF_long local_reject,
-                                             UF_long restart_end,
-                                             unsigned char *mask) {
-  return kls_build_pivot_tail_restart_mask_range(
-    solver, k1, nk, local_reject, local_reject, restart_end, mask);
-}
-
 static int kls_pivot_tail_restart_mask_matches_etree_forest(
   kls_solver *solver,
   UF_long block,
