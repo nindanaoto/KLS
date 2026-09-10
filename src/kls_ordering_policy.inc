@@ -16065,44 +16065,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->parallel_model_stats_valid = 1;
   }
   kls_update_factor_etree_stats(solver);
-  solver->stats.refactor_dependency_edges =
-    (int64_t)solver->refactor_dependency_edges;
-  solver->stats.refactor_dependency_root_columns =
-    (int64_t)solver->refactor_dependency_root_columns;
-  solver->stats.refactor_dependency_leaf_columns =
-    (int64_t)solver->refactor_dependency_leaf_columns;
-  solver->stats.refactor_dependency_max_fanout =
-    (int64_t)solver->refactor_dependency_max_fanout;
-  solver->stats.refactor_dependency_max_column_work =
-    solver->refactor_dependency_max_column_work;
-  solver->stats.refactor_dependency_pipeline_max_column_work =
-    solver->refactor_dependency_pipeline_max_column_work;
-  solver->stats.refactor_supernode_candidate_count =
-    (int64_t)solver->refactor_supernode_candidate_count;
-  solver->stats.refactor_supernode_candidate_rows =
-    (int64_t)solver->refactor_supernode_candidate_rows;
-  solver->stats.refactor_supernode_candidate_max_width =
-    (int64_t)solver->refactor_supernode_candidate_max_width;
-  solver->stats.refactor_supernode_candidate_dense_entries =
-    solver->refactor_supernode_candidate_dense_entries;
-  solver->stats.refactor_supernode_candidate_trailing_entries =
-    solver->refactor_supernode_candidate_trailing_entries;
-
-  solver->stats.refactor_map_index32_enabled =
-    solver->refactor_map_index32_enabled;
-  solver->stats.refactor_l_index32_enabled =
-    solver->refactor_l_index32_enabled;
-  solver->stats.refactor_u_index32_enabled =
-    solver->refactor_u_index32_enabled;
-
-  solver->stats.refactor_last_btf_scalar_run_exec_runs =
-    (int64_t)solver->refactor_last_btf_scalar_run_exec_runs;
-  solver->stats.refactor_last_btf_scalar_run_exec_rows =
-    (int64_t)solver->refactor_last_btf_scalar_run_exec_rows;
-  solver->stats.refactor_last_btf_scalar_run_exec_entries =
-    (int64_t)solver->refactor_last_btf_scalar_run_exec_entries;
-  solver->stats.refactor_last_btf_scalar_run_exec_max_rows =
-    (int64_t)solver->refactor_last_btf_scalar_run_exec_max_rows;
   solver->stats.row_refactor_group_count =
     (int64_t)solver->row_refactor_group_count;
   solver->stats.row_refactor_group_level_count =
@@ -16380,7 +16342,5 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_compact_supernode_batch_candidate_dep_rows;
   solver->stats.row_refactor_compact_supernode_batch_rejected_work_count =
     (int64_t)solver->row_refactor_compact_supernode_batch_rejected_work_count;
-  solver->stats.refactor_dependency_work =
-    solver->refactor_dependency_work;
 
 }

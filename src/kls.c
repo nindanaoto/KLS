@@ -1259,10 +1259,6 @@ struct kls_solver {
 
 
 
-  UF_long refactor_last_btf_scalar_run_exec_runs;
-  UF_long refactor_last_btf_scalar_run_exec_rows;
-  UF_long refactor_last_btf_scalar_run_exec_entries;
-  UF_long refactor_last_btf_scalar_run_exec_max_rows;
 
   UF_long refactor_cluster_level_count;
   UF_long refactor_pipeline_column_count;
@@ -1577,11 +1573,6 @@ typedef struct kls_egraph_refactor_shared {
   atomic_ulong next_pipeline_pos;
 
   int btf_scalar_run_exec;
-
-  atomic_ulong btf_scalar_run_exec_runs;
-  atomic_ulong btf_scalar_run_exec_rows;
-  atomic_ulong btf_scalar_run_exec_entries;
-  atomic_ulong btf_scalar_run_exec_max_rows;
 
   UF_long pipeline_pos_end;
   UF_long cluster_level_count;
@@ -5921,15 +5912,6 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
     return;
   }
 
-  solver->refactor_last_btf_scalar_run_exec_runs = 0;
-  solver->refactor_last_btf_scalar_run_exec_rows = 0;
-  solver->refactor_last_btf_scalar_run_exec_entries = 0;
-  solver->refactor_last_btf_scalar_run_exec_max_rows = 0;
-
-  solver->stats.refactor_last_btf_scalar_run_exec_runs = 0;
-  solver->stats.refactor_last_btf_scalar_run_exec_rows = 0;
-  solver->stats.refactor_last_btf_scalar_run_exec_entries = 0;
-  solver->stats.refactor_last_btf_scalar_run_exec_max_rows = 0;
 }
 
 static void kls_record_row_refactor_run(kls_solver *solver,
@@ -8879,9 +8861,6 @@ static void fill_build_stats(kls_stats *stats) {
     return;
   }
   stats->internal_index_bytes = (int)sizeof(UF_long);
-  stats->refactor_map_index32_enabled = 0;
-  stats->refactor_l_index32_enabled = 0;
-  stats->refactor_u_index32_enabled = 0;
   stats->build_has_metis = 1;
 #ifdef KLS_HAVE_SCOTCH
   stats->build_has_scotch = 1;

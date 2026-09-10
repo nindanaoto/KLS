@@ -548,37 +548,6 @@ static int kls_egraph_refactor_wait_done(
   return 1;
 }
 
-static void kls_atomic_update_max_ulong(atomic_ulong *target,
-                                        UF_long value) {
-  if (target == NULL) {
-    return;
-  }
-  const unsigned long capped = (unsigned long)value;
-  unsigned long observed =
-    atomic_load_explicit(target, memory_order_relaxed);
-  while (observed < capped &&
-         !atomic_compare_exchange_weak_explicit(
-           target, &observed, capped, memory_order_relaxed,
-           memory_order_relaxed)) {
-  }
-}
-
-static void kls_egraph_record_btf_scalar_run_exec(
-  kls_egraph_refactor_shared *shared,
-  UF_long rows,
-  UF_long entries) {
-  if (shared == NULL || rows <= 1u) {
-    return;
-  }
-  atomic_fetch_add_explicit(&shared->btf_scalar_run_exec_runs, 1ul,
-                            memory_order_relaxed);
-  atomic_fetch_add_explicit(&shared->btf_scalar_run_exec_rows,
-                            (unsigned long)rows, memory_order_relaxed);
-  atomic_fetch_add_explicit(&shared->btf_scalar_run_exec_entries,
-                            (unsigned long)entries, memory_order_relaxed);
-  kls_atomic_update_max_ulong(&shared->btf_scalar_run_exec_max_rows, rows);
-}
-
 static int kls_egraph_refreshed_prefix(
   const kls_egraph_refactor_shared *shared,
   UF_long rejected_pivot) {
@@ -1429,7 +1398,6 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
     return 0;
   }
 
-  UF_long entries = 0u;
   for (UF_long local = 0u; local < rows; ++local) {
     const UF_long dep = dep0 + local;
     if (wait_for_dependencies &&
@@ -1437,11 +1405,6 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
       return -1;
     }
     const UF_long lcol_len = llen[dep];
-    if (lcol_len > UF_long_max - entries) {
-      entries = UF_long_max;
-    } else {
-      entries += lcol_len;
-    }
     const UF_long dep_global = k1 + dep;
     const int32_t *li32 =
       use_sorted_mirror ? solver->refactor_l_sorted_indices32[dep_global]
@@ -1514,7 +1477,6 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
     }
   }
 
-  kls_egraph_record_btf_scalar_run_exec(shared, rows, entries);
   *up = start_pos + rows;
   return 1;
 }
@@ -5458,11 +5420,6 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->shared.cluster_barrier_generation, 0u);
   atomic_init(&pool->shared.next_pipeline_pos, 0ul);
 
-  atomic_init(&pool->shared.btf_scalar_run_exec_runs, 0ul);
-  atomic_init(&pool->shared.btf_scalar_run_exec_rows, 0ul);
-  atomic_init(&pool->shared.btf_scalar_run_exec_entries, 0ul);
-  atomic_init(&pool->shared.btf_scalar_run_exec_max_rows, 0ul);
-
   atomic_init(&pool->shared.row_pipeline_private_pos, 0ul);
   atomic_init(&pool->shared.row_pipeline_local_ready_groups, 0ul);
   atomic_init(&pool->shared.row_prefactor_rows, 0ul);
@@ -7354,15 +7311,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
     selected_kernel == KLS_EGRAPH_REFACTOR_KERNEL_BTF_UNSCALED &&
     kls_egraph_btf_plain_cluster_allowed(shared);
 
-  atomic_store_explicit(&shared->btf_scalar_run_exec_runs, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->btf_scalar_run_exec_rows, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->btf_scalar_run_exec_entries, 0ul,
-                        memory_order_release);
-  atomic_store_explicit(&shared->btf_scalar_run_exec_max_rows, 0ul,
-                        memory_order_release);
-
   shared->cluster_done_premarked = 0;
   if ((kls_egraph_cluster_premark_dispatch(solver, shared, check_pivots) &&
       !check_pivots && pipeline_done != NULL && pipeline_generation != 0u) && cluster_level_count > 0u &&
@@ -7496,27 +7444,6 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->btf_scalar_run_exec = 0;
 
   pthread_mutex_unlock(&shared->lock);
-
-  const UF_long btf_scalar_run_exec_runs =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_exec_runs,
-                                  memory_order_acquire);
-  const UF_long btf_scalar_run_exec_rows =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_exec_rows,
-                                  memory_order_acquire);
-  const UF_long btf_scalar_run_exec_entries =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_exec_entries,
-                                  memory_order_acquire);
-  const UF_long btf_scalar_run_exec_max_rows =
-    (UF_long)atomic_load_explicit(&shared->btf_scalar_run_exec_max_rows,
-                                  memory_order_acquire);
-
-  solver->refactor_last_btf_scalar_run_exec_runs =
-    btf_scalar_run_exec_runs;
-  solver->refactor_last_btf_scalar_run_exec_rows = btf_scalar_run_exec_rows;
-  solver->refactor_last_btf_scalar_run_exec_entries =
-    btf_scalar_run_exec_entries;
-  solver->refactor_last_btf_scalar_run_exec_max_rows =
-    btf_scalar_run_exec_max_rows;
 
   if (shared->invalid || shared->pivot_rejected ||
       (shared->singular && common->halt_if_singular)) {

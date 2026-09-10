@@ -174,8 +174,6 @@ typedef struct kls_stats {
   int selected_spral_matching;
   int fast_block_restarts;
   int fast_tail_restarts;
-  int64_t refactor_dependency_edges;
-  double refactor_dependency_work;
   int64_t fast_rejected_block_start;
   int64_t fast_rejected_block_size;
   int64_t fast_rejected_suffix_columns;
@@ -192,16 +190,6 @@ typedef struct kls_stats {
   int fast_rejected_refresh_state;
   int fast_factor_fail_reason;
   int fast_factor_fail_status;
-  int64_t refactor_dependency_root_columns;
-  int64_t refactor_dependency_leaf_columns;
-  int64_t refactor_dependency_max_fanout;
-  double refactor_dependency_max_column_work;
-  double refactor_dependency_pipeline_max_column_work;
-  int64_t refactor_supernode_candidate_count;
-  int64_t refactor_supernode_candidate_rows;
-  int64_t refactor_supernode_candidate_max_width;
-  double refactor_supernode_candidate_dense_entries;
-  double refactor_supernode_candidate_trailing_entries;
   int64_t row_refactor_group_count;
   int64_t row_refactor_group_level_count;
   int64_t row_refactor_group_level_max_width;
@@ -440,17 +428,10 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_checked_reject_count;
   int64_t row_refactor_native_row_panel_auto_disable_count;
   int internal_index_bytes;
-  int refactor_map_index32_enabled;
-  int refactor_l_index32_enabled;
-  int refactor_u_index32_enabled;
   double row_refactor_auto_lower_bound_work;
   int row_refactor_auto_lower_bound_rejected;
   int row_refactor_auto_pattern_build_failed;
   int row_refactor_auto_value_copy_failed;
-  int64_t refactor_last_btf_scalar_run_exec_runs;
-  int64_t refactor_last_btf_scalar_run_exec_rows;
-  int64_t refactor_last_btf_scalar_run_exec_entries;
-  int64_t refactor_last_btf_scalar_run_exec_max_rows;
   int verified_rhs_reused;
   int64_t verified_rhs_reuse_count;
   /* Zero means no compact triangular-solve mirror is prepared. */
