@@ -1757,8 +1757,7 @@ use `bench/suitesparse_external_validation_v1_manifest.txt` and follow
 `docs/external_validation.md`.  That protocol excludes the complete
 SuiteSparse group of all earlier manifest entries, runs rank-preserving,
 entrywise, and localized updates at 1/4/8 threads in counterbalanced solver
-order, reports H10/H100/H1000 sensitivity without dropping failures, and keeps
-post-reveal route ablations separate from the confirmatory score.
+order, and reports H10/H100/H1000 sensitivity without dropping failures.
 
 Two additional frozen manifests target the remaining large-policy evidence
 gaps rather than the general suite score:

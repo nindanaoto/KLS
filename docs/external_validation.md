@@ -20,7 +20,7 @@ rest are balanced across size, density, and structural symmetry.
 Do not change solver source, thresholds, default environment controls, or the
 manifest after looking at results.  A failure remains a failure.  Fixes and
 new tuning belong to a later development revision and require a new unseen
-suite.  The post-reveal route ablations below are explanatory only.
+suite.
 
 The group label is an imperfect proxy for independence, and most unused
 groups are not circuit problems.  Report circuit-like and complete-suite
@@ -108,30 +108,6 @@ The strongest evidence against overfitting would be stable aggregate wins,
 coverage, and route choices across entrywise/localized workloads and thread
 counts—not another all-wins count on the separable workload.  Thin margins
 within 2% are reported as ties.
-
-## Post-reveal route diagnostics
-
-Only after the confirmatory files are complete, compare AUTO with the serial
-backend, row execution disabled, fast factorization disabled, BTF disabled,
-and forced AMD/METIS.  Seven rotated passes put every arm in every launch
-position:
-
-```sh
-python3 scripts/run_external_ablation.py \
-  --campaign build/external-validation-v1/campaign.json \
-  --matrix-dir data/suitesparse-external-validation-v1 \
-  --kls-bench build/kls_bench \
-  --output build/external-validation-v1/ablation-t8-entry-p001.jsonl
-
-python3 scripts/analyze_external_ablation.py \
-  --campaign build/external-validation-v1/campaign.json \
-  --results build/external-validation-v1/ablation-t8-entry-p001.jsonl \
-  --json build/external-validation-v1/ablation-t8-entry-p001.json
-```
-
-The diagnostic reports each forced arm relative to AUTO and AUTO's regret
-relative to the best measured arm.  It must not be folded into the headline
-comparison or used to retune the frozen commit.
 
 ## Later cross-machine run
 
