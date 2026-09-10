@@ -8855,7 +8855,6 @@ static int kls_try_row_first_rebuild_rejected_block(
   }
   kls_invalidate_i32_solve(solver);
   solver->fast_block_restarts++;
-  solver->fast_kls_block_restarts++;
   if (shared.row_pipeline_runs > 0u) {
     solver->fast_kls_block_restart_last_row_pipeline = 1;
     solver->fast_kls_block_restart_row_pipeline_count +=
@@ -8938,10 +8937,6 @@ static int kls_try_row_first_rebuild_rejected_block(
         ->fast_kls_block_restart_last_row_pipeline_separator_split_components =
           shared.row_pipeline_separator_split_components;
     }
-    solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
-      shared.row_pipeline_pivot_tail_rows;
-    solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts =
-      shared.row_pipeline_pivot_restarts;
     solver
       ->fast_kls_block_restart_last_row_pipeline_supernode_update_groups =
         shared.row_supernode_update_groups;
@@ -8955,7 +8950,6 @@ static int kls_try_row_first_rebuild_rejected_block(
         shared.row_supernode_panel_update_rows;
   }
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
-  solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
   kls_fill_fast_kls_block_restart_pipeline_stats(solver);
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =

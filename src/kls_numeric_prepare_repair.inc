@@ -5143,13 +5143,11 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   kls_invalidate_i32_solve(solver);
   solver->fast_block_restarts++;
   if (kls_block_restart_used) {
-    solver->fast_kls_block_restarts++;
   }
   if (tail_restart_used) {
     solver->fast_tail_restarts++;
   }
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
-  solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =
     solver->fast_repaired_last_offdiag_suffix_refresh;

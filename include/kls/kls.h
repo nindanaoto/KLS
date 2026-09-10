@@ -195,9 +195,6 @@ typedef struct kls_stats {
   int64_t row_refactor_group_level_max_width;
   int64_t row_refactor_segment_count;
   int64_t row_refactor_dense_segment_count;
-  int64_t row_refactor_dense_segment_rows;
-  int64_t row_refactor_dense_segment_max_width;
-  double row_refactor_dense_segment_dense_entries;
   double row_refactor_dense_segment_trailing_entries;
   int64_t row_refactor_group_cluster_levels;
   int64_t row_refactor_group_pipeline_groups;
@@ -248,16 +245,12 @@ typedef struct kls_stats {
   kls_refactor_path last_refactor_path;
   int64_t factor_etree_block_size;
   int64_t factor_etree_levels;
-  int fast_kls_block_restarts;
   int fast_kls_block_restart_last_row_pipeline;
   int64_t fast_kls_block_restart_row_pipeline_count;
   int64_t fast_kls_block_restart_last_row_pipeline_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_threads;
   int64_t fast_kls_block_restart_last_row_pipeline_prefix_rows;
   int64_t fast_kls_block_restart_last_row_pipeline_suffix_rows;
-  int64_t fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
-  int64_t fast_kls_block_restart_last_row_pipeline_pivot_restarts;
-  int row_refactor_auto_enabled;
   int build_has_metis;
   int build_has_scotch;
   int build_has_spral_scaling;
@@ -285,8 +278,6 @@ typedef struct kls_stats {
   int64_t separator_pipeline_components;
   int64_t separator_global_begin;
   int64_t separator_global_end;
-  int64_t fast_rejected_prefix_refresh_columns;
-  int64_t fast_rejected_prefix_refresh_count;
   int row_refactor_last_partial_supernode_pipeline;
   int64_t row_refactor_last_partial_supernode_pipeline_groups;
   int64_t row_refactor_last_partial_supernode_pipeline_rows;
@@ -417,7 +408,6 @@ typedef struct kls_stats {
   int64_t fast_kls_block_restart_last_row_pipeline_etree_prefactor_wait_deps;
   int row_refactor_native_row_panel_enabled;
   int row_refactor_last_native_row_panel;
-  int row_refactor_native_row_panel_auto_disabled;
   int64_t row_refactor_native_row_panel_count;
   int64_t row_refactor_native_row_panel_rows;
   int64_t row_refactor_native_row_panel_entries;
@@ -426,7 +416,6 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_blocked_entries;
   int64_t row_refactor_native_row_panel_fallback_count;
   int64_t row_refactor_native_row_panel_checked_reject_count;
-  int64_t row_refactor_native_row_panel_auto_disable_count;
   int internal_index_bytes;
   double row_refactor_auto_lower_bound_work;
   int row_refactor_auto_lower_bound_rejected;
@@ -446,7 +435,6 @@ typedef struct kls_stats {
   int compact_solve_singleton_run_eligible;
   /* The compact match covered the input and its accepted factor replaced the
      analyze-time proposal. */
-  int compact_missing_diagonal_match_selected;
   /* A plain-frame factor selected a weaker-than-requested pivot threshold and
      retains the current matrix values needed to enforce a relative-L2 solve
      contract.  This is a numeric-state capability, not an input-shape tag. */

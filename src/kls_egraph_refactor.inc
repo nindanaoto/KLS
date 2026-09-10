@@ -3520,12 +3520,6 @@ static void kls_egraph_refactor_refresh_missing_prefix(
   free(worker.object_workspace);
 
   if (refreshed > 0u) {
-    solver->fast_rejected_prefix_refresh_columns += refreshed;
-    solver->fast_rejected_prefix_refresh_count++;
-    solver->stats.fast_rejected_prefix_refresh_columns =
-      (int64_t)solver->fast_rejected_prefix_refresh_columns;
-    solver->stats.fast_rejected_prefix_refresh_count =
-      (int64_t)solver->fast_rejected_prefix_refresh_count;
   }
 }
 

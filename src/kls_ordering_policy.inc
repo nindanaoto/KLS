@@ -15910,14 +15910,6 @@ static void kls_fill_fast_kls_block_restart_pipeline_stats(kls_solver *solver) {
         solver
           ->fast_kls_block_restart_last_row_pipeline_separator_split_components;
   solver->stats
-    .fast_kls_block_restart_last_row_pipeline_pivot_tail_rows =
-      (int64_t)
-        solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
-  solver->stats
-    .fast_kls_block_restart_last_row_pipeline_pivot_restarts =
-      (int64_t)
-        solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts;
-  solver->stats
     .fast_kls_block_restart_last_row_pipeline_supernode_update_groups =
       (int64_t)
         solver
@@ -15953,7 +15945,6 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     solver->exact_matching_scaling_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
-  solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
   kls_fill_fast_kls_block_restart_pipeline_stats(solver);
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =
@@ -15966,12 +15957,6 @@ static void fill_symbolic_stats(kls_solver *solver, double elapsed) {
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
-  solver->stats.fast_rejected_prefix_refresh_columns =
-    (int64_t)solver->fast_rejected_prefix_refresh_columns;
-  solver->stats.fast_rejected_prefix_refresh_count =
-    (int64_t)solver->fast_rejected_prefix_refresh_count;
-  solver->stats.row_refactor_auto_enabled =
-    solver->row_refactor_auto_enabled;
   solver->stats.row_refactor_auto_lower_bound_work =
     solver->row_refactor_auto_lower_bound_work;
   solver->stats.row_refactor_auto_lower_bound_rejected =
@@ -16015,7 +16000,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->exact_matching_scaling_selected;
   solver->stats.selected_spral_matching = solver->spral_matching_selected;
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
-  solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
   kls_fill_fast_kls_block_restart_pipeline_stats(solver);
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =
@@ -16028,12 +16012,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->fast_repaired_parallel_tail_blocks;
   solver->stats.fast_rejected_refresh_state =
     solver->fast_reject_refresh_state;
-  solver->stats.fast_rejected_prefix_refresh_columns =
-    (int64_t)solver->fast_rejected_prefix_refresh_columns;
-  solver->stats.fast_rejected_prefix_refresh_count =
-    (int64_t)solver->fast_rejected_prefix_refresh_count;
-  solver->stats.row_refactor_auto_enabled =
-    solver->row_refactor_auto_enabled;
   solver->stats.row_refactor_auto_lower_bound_work =
     solver->row_refactor_auto_lower_bound_work;
   solver->stats.row_refactor_auto_lower_bound_rejected =
@@ -16188,12 +16166,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_dense_segment_count =
     (int64_t)solver->row_refactor_dense_segment_count;
-  solver->stats.row_refactor_dense_segment_rows =
-    (int64_t)solver->row_refactor_dense_segment_rows;
-  solver->stats.row_refactor_dense_segment_max_width =
-    (int64_t)solver->row_refactor_dense_segment_max_width;
-  solver->stats.row_refactor_dense_segment_dense_entries =
-    solver->row_refactor_dense_segment_dense_entries;
   solver->stats.row_refactor_dense_segment_trailing_entries =
     solver->row_refactor_dense_segment_trailing_entries;
   solver->stats.row_refactor_compact_dense_panel_eligible_count =
@@ -16224,8 +16196,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_native_row_panel_enabled;
   solver->stats.row_refactor_last_native_row_panel =
     solver->row_refactor_last_native_row_panel;
-  solver->stats.row_refactor_native_row_panel_auto_disabled =
-    solver->row_refactor_native_row_panel_auto_disabled;
   solver->stats.row_refactor_native_row_panel_count =
     (int64_t)solver->row_refactor_native_row_panel_count;
   solver->stats.row_refactor_native_row_panel_rows =
@@ -16242,8 +16212,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_native_row_panel_fallback_count;
   solver->stats.row_refactor_native_row_panel_checked_reject_count =
     (int64_t)solver->row_refactor_native_row_panel_checked_reject_count;
-  solver->stats.row_refactor_native_row_panel_auto_disable_count =
-    (int64_t)solver->row_refactor_native_row_panel_auto_disable_count;
   solver->stats.row_refactor_last_compact_dense_panel_direct_input_rows =
     (int64_t)solver->row_refactor_last_compact_dense_panel_direct_input_rows;
   solver->stats.row_refactor_compact_dense_panel_direct_input_rows =

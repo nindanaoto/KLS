@@ -1344,7 +1344,6 @@ struct kls_solver {
   int exact_matching_scaling_selected;
   int spral_matching_selected;
   int fast_block_restarts;
-  int fast_kls_block_restarts;
   int fast_kls_block_restart_last_row_pipeline;
   UF_long fast_kls_block_restart_row_pipeline_count;
   UF_long fast_kls_block_restart_last_row_pipeline_rows;
@@ -1377,8 +1376,6 @@ struct kls_solver {
   UF_long fast_kls_block_restart_last_row_pipeline_separator_private_threads;
   int fast_kls_block_restart_last_row_pipeline_separator_partitioned;
   UF_long fast_kls_block_restart_last_row_pipeline_separator_split_components;
-  UF_long fast_kls_block_restart_last_row_pipeline_pivot_tail_rows;
-  UF_long fast_kls_block_restart_last_row_pipeline_pivot_restarts;
   UF_long fast_kls_block_restart_last_row_pipeline_supernode_update_groups;
   UF_long fast_kls_block_restart_last_row_pipeline_supernode_update_rows;
   UF_long fast_kls_block_restart_last_row_pipeline_supernode_panel_update_groups;
@@ -1389,8 +1386,6 @@ struct kls_solver {
   UF_long fast_repaired_offdiag_full_refresh_count;
   UF_long fast_repaired_parallel_tail_blocks;
   int fast_reject_refresh_state;
-  UF_long fast_rejected_prefix_refresh_columns;
-  UF_long fast_rejected_prefix_refresh_count;
   UF_long *fast_reject_tail_cols;
   UF_long *fast_reject_tail_seed_cols;
   UF_long *fast_reject_tail_parent;
@@ -5606,7 +5601,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_tail_restart_etree_mask = 0;
   solver->stats.fast_repaired_parallel_tail_blocks = 0;
   solver->stats.fast_block_restarts = 0;
-  solver->stats.fast_kls_block_restarts = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline = 0;
   solver->stats.fast_kls_block_restart_row_pipeline_count = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_rows = 0;
@@ -5661,8 +5655,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
     .fast_kls_block_restart_last_row_pipeline_separator_partitioned = 0;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_separator_split_components = 0;
-  solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
-  solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
   solver->stats
@@ -5709,10 +5701,7 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
     KLS_FAST_REJECT_REFRESH_UNKNOWN;
   solver->stats.fast_factor_fail_reason = KLS_FAST_FACTOR_FAIL_NONE;
   solver->stats.fast_factor_fail_status = TRILINOS_KLU_OK;
-  solver->stats.fast_rejected_prefix_refresh_columns = 0;
-  solver->stats.fast_rejected_prefix_refresh_count = 0;
   solver->fast_block_restarts = 0;
-  solver->fast_kls_block_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline = 0;
   solver->fast_kls_block_restart_row_pipeline_count = 0;
   solver->fast_kls_block_restart_last_row_pipeline_rows = 0;
@@ -5750,8 +5739,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_separator_partitioned = 0;
   solver->fast_kls_block_restart_last_row_pipeline_separator_split_components =
     0;
-  solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
-  solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_rows = 0;
   solver
@@ -5765,8 +5752,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->fast_repaired_offdiag_full_refresh_count = 0;
   solver->fast_repaired_parallel_tail_blocks = 0;
   solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_UNKNOWN;
-  solver->fast_rejected_prefix_refresh_columns = 0;
-  solver->fast_rejected_prefix_refresh_count = 0;
   solver->fast_reject_tail_count = 0;
   solver->fast_reject_tail_plan_mark = 0u;
   solver->fast_reject_tail_plan_block = KLS_KLU_EMPTY;
@@ -6673,8 +6658,6 @@ static void kls_record_fast_reject_detail(kls_solver *solver,
     .fast_kls_block_restart_last_row_pipeline_separator_partitioned = 0;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_separator_split_components = 0;
-  solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
-  solver->stats.fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->stats
     .fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
   solver->stats
@@ -8964,7 +8947,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->value_tolerance_crossing_cycle = 0;
   solver->compact_missing_diagonal_match_selected = 0;
   solver->fast_block_restarts = 0;
-  solver->fast_kls_block_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline = 0;
   solver->fast_kls_block_restart_row_pipeline_count = 0;
   solver->fast_kls_block_restart_last_row_pipeline_rows = 0;
@@ -8990,8 +8972,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->fast_kls_block_restart_last_row_pipeline_separator_partitioned = 0;
   solver->fast_kls_block_restart_last_row_pipeline_separator_split_components =
     0;
-  solver->fast_kls_block_restart_last_row_pipeline_pivot_tail_rows = 0;
-  solver->fast_kls_block_restart_last_row_pipeline_pivot_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_groups = 0;
   solver->fast_kls_block_restart_last_row_pipeline_supernode_update_rows = 0;
   solver
@@ -9001,8 +8981,6 @@ static void clear_matrix(kls_solver *solver) {
     0;
   solver->fast_tail_restarts = 0;
   solver->fast_repaired_parallel_tail_blocks = 0;
-  solver->fast_rejected_prefix_refresh_columns = 0;
-  solver->fast_rejected_prefix_refresh_count = 0;
   memset(&solver->stats, 0, sizeof(solver->stats));
   solver->stats.struct_size = sizeof(solver->stats);
   fill_build_stats(&solver->stats);
