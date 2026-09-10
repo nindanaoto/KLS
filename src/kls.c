@@ -4509,18 +4509,6 @@ static void free_egraph_worker_scratch(kls_solver *solver) {
   solver->lean_parallel_scratch_clean = 0;
 }
 
-static int kls_compact_amf_two_block_policy_disabled(void) {
-  return getenv("KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_POLICY") != NULL;
-}
-
-static int kls_compact_amf_two_block_specialized_worker_disabled(void) {
-  /* Representation validation and the reciprocal-freshness contract guard
-     the packed executor independently.  Keep an explicit diagnostic escape
-     hatch, but admit every factor whose narrow descriptors validate. */
-  return getenv("KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_SPECIALIZED_WORKER") !=
-    NULL;
-}
-
 /* The packed row worker is not tied to an ordering, block count, or matrix
    family.  Its narrow descriptors impose the real limits: dependency rows
    occupy twelve bits, while input/factor offsets and columns occupy sixteen.
@@ -4531,7 +4519,6 @@ static int kls_packed_row_worker_representation_capable(
   const kls_solver *solver) {
   return solver != NULL && solver->numeric != NULL &&
     kls_repeated_update_workload(&solver->options) &&
-    !kls_compact_amf_two_block_specialized_worker_disabled() &&
     solver->common.scale <= 0 && solver->numeric->Rs == NULL &&
     /* Four cache-line-sized operation bundles per retained row are the
        minimum useful grain for the packed worker's dependency publication
@@ -4579,10 +4566,6 @@ static int kls_packed_row_worker_thread_count(const kls_solver *solver,
   return useful_threads;
 }
 
-static const char *kls_compact_amf_two_block_schedule_weights(void) {
-  return getenv("KLS_COMPACT_AMF_TWO_BLOCK_SCHEDULE_WEIGHTS");
-}
-
 /* The packed dependency stream uses twelve bits for a row and the retained
    pointer mirrors use sixteen bits.  Admit a nearly spanning AMF/BTF core
    only after its actual symbolic lands inside those representation limits.
@@ -4614,7 +4597,6 @@ static int kls_compact_amf_two_block_symbolic_profile(
 static int kls_compact_amf_two_block_symbolic_state(
   const kls_solver *solver) {
   return solver != NULL && solver->col_ptr != NULL &&
-    !kls_compact_amf_two_block_policy_disabled() &&
     (solver->options.orientation == KLS_ORIENTATION_AUTO ||
      solver->options.orientation == KLS_ORIENTATION_NORMAL) &&
     (solver->options.ordering == KLS_ORDERING_AUTO ||
@@ -4796,30 +4778,14 @@ static const UF_long *kls_prepare_lean_affinity_rows(kls_solver *solver,
     return solver->row_refactor_level_rows;
   }
 
-  double dependency_base_weight = generic_affinity_cycle
+  const double dependency_base_weight = generic_affinity_cycle
     ? 1.0 : 0.64784;
-  double dependency_output_weight = generic_affinity_cycle
+  const double dependency_output_weight = generic_affinity_cycle
     ? 1.0 : 0.06639;
-  double input_weight = generic_affinity_cycle
+  const double input_weight = generic_affinity_cycle
     ? 0.0 : 0.06292;
-  double row_output_weight = generic_affinity_cycle
+  const double row_output_weight = generic_affinity_cycle
     ? 0.0 : 0.92651;
-  const char *weight_override =
-    kls_compact_amf_two_block_schedule_weights();
-  if (weight_override != NULL) {
-    double db = 0.0;
-    double dout = 0.0;
-    double in = 0.0;
-    double out = 0.0;
-    if (sscanf(weight_override, "%lf,%lf,%lf,%lf",
-               &db, &dout, &in, &out) == 4 && db >= 0.0 && dout >= 0.0 &&
-        in >= 0.0 && out >= 0.0 && db + dout + in + out > 0.0) {
-      dependency_base_weight = db;
-      dependency_output_weight = dout;
-      input_weight = in;
-      row_output_weight = out;
-    }
-  }
 
   UF_long capacity[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
   UF_long count[8] = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
@@ -13953,7 +13919,6 @@ static int kls_prepare_compact_amf_two_block_refine_csr16(kls_solver *solver) {
 
 static int kls_compact_amf_two_block_parallel_residual_ready(kls_solver *solver) {
   if (solver == NULL ||
-      getenv("KLS_DISABLE_COMPACT_AMF_TWO_BLOCK_PARALLEL_RESIDUAL") != NULL ||
       !kls_prepare_compact_amf_two_block_refine_csr16(solver)) {
     return 0;
   }
