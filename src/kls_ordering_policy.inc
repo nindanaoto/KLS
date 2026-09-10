@@ -16184,10 +16184,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     (int64_t)solver->row_refactor_native_row_panel_blocked_rows;
   solver->stats.row_refactor_native_row_panel_blocked_entries =
     (int64_t)solver->row_refactor_native_row_panel_blocked_entries;
-  solver->stats.row_refactor_native_row_panel_fallback_count =
-    (int64_t)solver->row_refactor_native_row_panel_fallback_count;
-  solver->stats.row_refactor_native_row_panel_checked_reject_count =
-    (int64_t)solver->row_refactor_native_row_panel_checked_reject_count;
   solver->stats.row_refactor_last_compact_dense_panel_direct_input_rows =
     (int64_t)solver->row_refactor_last_compact_dense_panel_direct_input_rows;
   solver->stats.row_refactor_compact_dense_panel_direct_input_rows =

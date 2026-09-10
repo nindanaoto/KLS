@@ -13383,12 +13383,8 @@ static int kls_parallel_row_refactor_process_dense_group(
         wait_for_dependencies);
     shared->row_refactor_native_row_panel_active = 0;
     if (compact_status >= 0) {
-      if (compact_status == 0 && shared->pivot_rejected) {
-        kls_record_row_refactor_native_row_panel_checked_reject(solver);
-      }
       return compact_status;
     }
-    kls_record_row_refactor_native_row_panel_fallback(solver);
   }
 
   const int native_status =

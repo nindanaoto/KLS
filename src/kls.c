@@ -1037,8 +1037,6 @@ struct kls_solver {
   UF_long row_refactor_native_row_panel_blocked_count;
   UF_long row_refactor_native_row_panel_blocked_rows;
   UF_long row_refactor_native_row_panel_blocked_entries;
-  UF_long row_refactor_native_row_panel_fallback_count;
-  UF_long row_refactor_native_row_panel_checked_reject_count;
   UF_long row_refactor_last_compact_dense_panel_direct_input_rows;
   UF_long row_refactor_compact_dense_panel_direct_input_rows;
   UF_long row_refactor_last_compact_panel_solve_values;
@@ -2917,8 +2915,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_native_row_panel_blocked_count = 0;
   solver->row_refactor_native_row_panel_blocked_rows = 0;
   solver->row_refactor_native_row_panel_blocked_entries = 0;
-  solver->row_refactor_native_row_panel_fallback_count = 0;
-  solver->row_refactor_native_row_panel_checked_reject_count = 0;
   solver->row_refactor_last_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_compact_dense_panel_direct_input_rows = 0;
   solver->row_refactor_last_compact_panel_solve_values = 0;
@@ -4793,22 +4789,6 @@ static void kls_record_row_refactor_native_row_panel_blocked(
   solver->row_refactor_native_row_panel_blocked_count++;
   solver->row_refactor_native_row_panel_blocked_rows += rows;
   solver->row_refactor_native_row_panel_blocked_entries += entries;
-}
-
-static void kls_record_row_refactor_native_row_panel_fallback(
-  kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-  solver->row_refactor_native_row_panel_fallback_count++;
-}
-
-static void kls_record_row_refactor_native_row_panel_checked_reject(
-  kls_solver *solver) {
-  if (solver == NULL) {
-    return;
-  }
-  solver->row_refactor_native_row_panel_checked_reject_count++;
 }
 
 static void kls_record_row_refactor_compact_dense_panel_direct_input(

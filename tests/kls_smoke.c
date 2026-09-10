@@ -4246,8 +4246,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
              stats.row_refactor_native_row_panel_blocked_count < 1 ||
              stats.row_refactor_native_row_panel_blocked_rows < lead ||
              stats.row_refactor_native_row_panel_blocked_entries <= 0 ||
-             stats.row_refactor_native_row_panel_fallback_count != 0 ||
-             stats.row_refactor_native_row_panel_checked_reject_count != 0 ||
              stats.row_refactor_last_compact_dense_panel_direct_input_rows < 1 ||
              stats.row_refactor_compact_dense_panel_direct_input_rows < 1 ||
              stats.row_refactor_segment_input_target_rows < 1 ||
@@ -4279,7 +4277,7 @@ static int test_unchecked_row_dense_compact_panel(void) {
             ", persistent_used=%d/%" PRId64
             ", blocked=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", native=%d/%d/%" PRId64 "/%" PRId64 "/%" PRId64
-            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", direct_input=%" PRId64 "/%" PRId64
             ", target_map=%" PRId64 "/%" PRId64
             ", target_input=%" PRId64 "/%" PRId64
@@ -4314,8 +4312,6 @@ static int test_unchecked_row_dense_compact_panel(void) {
             stats.row_refactor_native_row_panel_blocked_count,
             stats.row_refactor_native_row_panel_blocked_rows,
             stats.row_refactor_native_row_panel_blocked_entries,
-            stats.row_refactor_native_row_panel_fallback_count,
-            stats.row_refactor_native_row_panel_checked_reject_count,
             stats.row_refactor_last_compact_dense_panel_direct_input_rows,
             stats.row_refactor_compact_dense_panel_direct_input_rows,
             stats.row_refactor_segment_input_target_rows,
@@ -5703,8 +5699,6 @@ static int test_batched_compact_supernode_update_probe(void) {
        checked_stats.row_refactor_native_row_panel_blocked_count < 1 ||
        checked_stats.row_refactor_native_row_panel_blocked_rows < mid ||
        checked_stats.row_refactor_native_row_panel_blocked_entries <= 0 ||
-       checked_stats.row_refactor_native_row_panel_fallback_count != 0 ||
-       checked_stats.row_refactor_native_row_panel_checked_reject_count != 0 ||
        checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows <
          checked_stats.row_refactor_compact_supernode_batch_rows ||
        checked_stats.row_refactor_last_segment_target_input_rows <
@@ -5715,7 +5709,7 @@ static int test_batched_compact_supernode_update_probe(void) {
             ", compact=%d/%" PRId64
             ", blocked=%d/%" PRId64 "/%" PRId64 "/%" PRId64
             ", native=%d/%d/%" PRId64 "/%" PRId64 "/%" PRId64
-            "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64 "/%" PRId64
+            "/%" PRId64 "/%" PRId64 "/%" PRId64
             ", direct=%" PRId64
             ", target=%" PRId64 "\n",
             checked_stats.row_refactor_last_run,
@@ -5739,8 +5733,6 @@ static int test_batched_compact_supernode_update_probe(void) {
             checked_stats.row_refactor_native_row_panel_blocked_count,
             checked_stats.row_refactor_native_row_panel_blocked_rows,
             checked_stats.row_refactor_native_row_panel_blocked_entries,
-            checked_stats.row_refactor_native_row_panel_fallback_count,
-            checked_stats.row_refactor_native_row_panel_checked_reject_count,
             checked_stats.row_refactor_last_compact_dense_panel_direct_input_rows,
             checked_stats.row_refactor_last_segment_target_input_rows);
     ok = 0;

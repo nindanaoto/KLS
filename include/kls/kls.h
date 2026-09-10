@@ -411,8 +411,6 @@ typedef struct kls_stats {
   int64_t row_refactor_native_row_panel_blocked_count;
   int64_t row_refactor_native_row_panel_blocked_rows;
   int64_t row_refactor_native_row_panel_blocked_entries;
-  int64_t row_refactor_native_row_panel_fallback_count;
-  int64_t row_refactor_native_row_panel_checked_reject_count;
   int internal_index_bytes;
   int row_refactor_auto_lower_bound_rejected;
   int verified_rhs_reused;
