@@ -10096,11 +10096,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
      publication, or a fragmented BTF schedule.  The measured incumbent
      below is cheap, necessary work for this public update; after it runs we
      can admit and time a row challenger against the engine it would replace. */
-  /* Lean-row-walk probe over the low-flop cohort: compare the incumbent,
-     scalar lean, and level-paired lean arms
-     (memplus: lean-pair 244us vs incumbent 493, under CKTSO; mimo-class
-     keeps the incumbent).  Runs after the floor probe settles so the
-     incumbent arm samples its final configuration. */
+  /* Compare incumbent, scalar-lean, and level-paired lean arms after the
+     floor probe settles so the incumbent samples its final configuration. */
   if (generic_lean_reaudit && solver->lean_choice < 0 &&
       solver->lean_reaudit_state == 10 &&
       solver->lean_reaudit_candidate_row_seconds > 0.0 &&

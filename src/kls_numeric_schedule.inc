@@ -1691,10 +1691,9 @@ static int kls_snb_try_refactor(kls_solver *solver,
     if (solver->snb_decision < 0) {
       if (snb_ok && snb_seconds < solver->snb_incumbent_seconds &&
           solver->snb_retrial == 0) {
-        /* Near miss: the engine measured absolutely faster but not by
-           the conservative margin - and both samples are warm-up era
-           (bcircuit: trial incumbent 4.9ms vs its 1.57ms steady). Keep
-           the engine and re-run the comparison once at steady state,
+        /* Near miss: the engine measured faster but not by the conservative
+           margin, and both samples are from warm-up. Keep the engine and
+           rerun the comparison once at steady state,
            when adaptive_refactor_seconds carries the incumbent's true
            rate. */
         solver->snb_retrial = 1;
@@ -2100,10 +2099,8 @@ static void kls_build_padded_panels(kls_solver *solver) {
             if (!over) {
               const UF_long len = k - s + 1u;
               const UF_long min_work = 1024u;
-              /* materialize only runs whose consume work amortizes
-                 the per-refactor panel refresh (the refresh tax
-                 cancels scrap-coverage wins: bcircuit all-runs read
-                 +20%) */
+              /* Materialize only runs whose consume work amortizes the
+                 per-refactor panel refresh. */
               if (len * ulen_run >= min_work) {
                 panel_total += (double)len * (double)ulen_run;
                 if (panel_total > 2.5 * lnz_total) {
