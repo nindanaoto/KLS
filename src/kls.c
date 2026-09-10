@@ -6266,85 +6266,10 @@ static void kls_clear_egraph_refactor_last_stats(kls_solver *solver) {
   solver->refactor_last_btf_scalar_run_exec_entries = 0;
   solver->refactor_last_btf_scalar_run_exec_max_rows = 0;
 
-  solver->stats.refactor_last_supernode_pipeline_tasks = 0;
-  solver->stats.refactor_last_supernode_pipeline_columns = 0;
-  solver->stats.refactor_last_supernode_update_runs = 0;
-  solver->stats.refactor_last_supernode_update_rows = 0;
-  solver->stats.refactor_last_supernode_update_entries = 0;
-  solver->stats.refactor_last_supernode_cblas_update_runs = 0;
-  solver->stats.refactor_last_supernode_cblas_update_rows = 0;
-  solver->stats.refactor_last_supernode_cblas_update_entries = 0;
-  solver->stats.refactor_last_supernode_blocked_update_runs = 0;
-  solver->stats.refactor_last_supernode_blocked_update_rows = 0;
-  solver->stats.refactor_last_supernode_blocked_update_entries = 0;
-  solver->stats.refactor_last_supernode_cached_probe_attempts = 0;
-  solver->stats.refactor_last_supernode_cached_probe_panel_hits = 0;
-  solver->stats.refactor_last_supernode_cached_probe_contiguous = 0;
-  solver->stats.refactor_last_supernode_cached_probe_allowed = 0;
-  solver->stats.refactor_last_supernode_cached_probe_allowed_rows = 0;
-  solver->stats.refactor_last_supernode_cached_probe_applied = 0;
-  solver->stats.refactor_last_supernode_cached_probe_applied_rows = 0;
-  solver->stats.refactor_last_supernode_cached_probe_shape_rejects = 0;
-  solver->stats.refactor_last_supernode_cached_probe_shape_reject_rows = 0;
-  solver->stats.refactor_last_supernode_cached_probe_stream_rejects = 0;
-  solver->stats.refactor_last_supernode_cached_probe_stream_reject_rows = 0;
-  solver->stats.refactor_last_supernode_cached_probe_work_rejects = 0;
-  solver->stats.refactor_last_supernode_cached_probe_work_reject_rows = 0;
-  solver->stats.refactor_last_supernode_cached_probe_workspace_rejects = 0;
-  solver->stats.refactor_last_supernode_cached_probe_workspace_reject_rows = 0;
-
   solver->stats.refactor_last_btf_scalar_run_exec_runs = 0;
   solver->stats.refactor_last_btf_scalar_run_exec_rows = 0;
   solver->stats.refactor_last_btf_scalar_run_exec_entries = 0;
   solver->stats.refactor_last_btf_scalar_run_exec_max_rows = 0;
-
-  solver->stats.refactor_last_supernode_algorithm5_payoff_slot_accum_runs = 0;
-  solver->stats.refactor_last_supernode_algorithm5_payoff_slot_accum_rows = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_slot_accum_target_entries = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_slot_accum_target_slots = 0;
-  solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_runs = 0;
-  solver->stats.refactor_last_supernode_algorithm5_payoff_prefix_prep_rows = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_entries = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_prefix_prep_target_slots = 0;
-  solver->stats.refactor_last_supernode_algorithm5_payoff_advance_seed_runs =
-    0;
-  solver->stats.refactor_last_supernode_algorithm5_payoff_advance_seed_deps =
-    0;
-  solver->stats.refactor_last_supernode_algorithm5_payoff_advance_seed_slots =
-    0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_current_state_seed_runs = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_current_state_seed_deps = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_current_state_seed_rows = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_final_trigger_batches = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_final_trigger_multi_batches =
-      0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_final_trigger_claims = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_final_trigger_suffix_deps = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_suffix_advance_slots = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_suffix_advance_deps = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_suffix_advance_updates = 0;
-  solver->stats
-    .refactor_last_supernode_algorithm5_payoff_suffix_advance_finished = 0;
-
-  solver->stats.refactor_supernode_cached_probe_disabled = 0;
-  solver->stats.refactor_supernode_cached_probe_disable_count = 0;
-  solver->stats.refactor_supernode_update_disabled = 0;
-  solver->stats.refactor_supernode_update_disable_count = 0;
-  solver->stats.refactor_last_ready_queue_columns = 0;
 }
 
 static void kls_record_row_refactor_run(kls_solver *solver,
