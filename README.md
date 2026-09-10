@@ -131,8 +131,14 @@ documentation, not as an available production router.
 
 ## Build
 
+**GCC 14 or later is recommended for performance builds.** GCC 13 produces
+correct binaries, but its optimization of the hot SNB refactor kernel is
+sensitive to otherwise harmless source changes and has shown repeatable
+performance regressions. Select GCC 14 explicitly when it is not the system
+default:
+
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+CC=gcc-14 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
