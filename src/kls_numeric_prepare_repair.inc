@@ -8069,283 +8069,6 @@ static void kls_try_build_row_refactor_dense_producer_runs(
   }
 }
 
-typedef struct {
-  UF_long n;
-  const UF_long *l_ptr;
-  const UF_long *l_cols;
-  const UF_long *l_internal_ptr;
-  const UF_long *u_cols;
-  const UF_long *row_group;
-  UF_long group_count;
-  const UF_long *group_ptr;
-  const unsigned char *group_kind;
-  const UF_long *group_trailing_begin;
-  const UF_long *group_trailing_len;
-  const UF_long *run_ptr;
-  const UF_long *run_l_begin;
-  const UF_long *run_group;
-  const UF_long *run_len;
-  const UF_long *target_ptr;
-  unsigned char *target_kind;
-  UF_long *target_pos;
-  UF_long row_begin;
-  UF_long row_end;
-  UF_long none_count;
-  UF_long external_count;
-  UF_long dense_count;
-  UF_long pivot_count;
-  UF_long trailing_count;
-  int ok;
-} kls_dense_producer_target_job;
-
-static void kls_dense_producer_target_run(kls_dense_producer_target_job *job) {
-  if (job == NULL) {
-    return;
-  }
-  job->ok = 1;
-  UF_long none_count = 0;
-  UF_long external_count = 0;
-  UF_long dense_count = 0;
-  UF_long pivot_count = 0;
-  UF_long trailing_count = 0;
-  for (UF_long row = job->row_begin; row < job->row_end; ++row) {
-    const UF_long current_group = job->row_group[row];
-    if (current_group >= job->group_count) {
-      job->ok = 0;
-      return;
-    }
-    const UF_long row_begin = job->group_ptr[current_group];
-    const UF_long row_end = job->group_ptr[current_group + 1u];
-    const UF_long l_begin = job->l_ptr[row];
-    const int current_is_dense =
-      job->group_kind[current_group] == KLS_ROW_REFACTOR_GROUP_DENSE;
-    const UF_long l_end = job->l_ptr[row + 1u];
-    const UF_long l_external_end =
-      current_is_dense ? job->l_internal_ptr[row] : l_begin;
-    const UF_long external_len =
-      l_begin <= l_external_end && l_external_end <= l_end
-        ? l_external_end - l_begin : 0u;
-    const UF_long current_trailing_begin =
-      job->group_trailing_begin[current_group];
-    const UF_long current_trailing_len =
-      job->group_trailing_len[current_group];
-
-    for (UF_long run = job->run_ptr[row];
-         run < job->run_ptr[row + 1u]; ++run) {
-      const UF_long dep_group = job->run_group[run];
-      if (dep_group >= job->group_count) {
-        job->ok = 0;
-        return;
-      }
-      const UF_long dep_trailing_begin =
-        job->group_trailing_begin[dep_group];
-      const UF_long dep_trailing_len = job->group_trailing_len[dep_group];
-      if (job->target_ptr[run + 1u] - job->target_ptr[run] !=
-            dep_trailing_len ||
-          job->run_l_begin[run] < l_begin) {
-        job->ok = 0;
-        return;
-      }
-      const UF_long run_offset = job->run_l_begin[run] - l_begin;
-      if (job->run_len[run] > UF_long_max - run_offset) {
-        job->ok = 0;
-        return;
-      }
-      const UF_long run_end = run_offset + job->run_len[run];
-      for (UF_long dep_col_pos = 0; dep_col_pos < dep_trailing_len;
-           ++dep_col_pos) {
-        const UF_long target_index = job->target_ptr[run] + dep_col_pos;
-        const UF_long col = job->u_cols[dep_trailing_begin + dep_col_pos];
-        unsigned char kind = KLS_FRAGMENTED_UPDATE_TARGET_NONE;
-        UF_long pos = 0;
-        if (current_is_dense && col < row_begin) {
-          UF_long external_pos = KLS_KLU_EMPTY;
-          if (kls_find_uflong_sorted(job->l_cols + l_begin, external_len,
-                                     col, &external_pos) &&
-              external_pos >= run_end) {
-            kind = KLS_FRAGMENTED_UPDATE_TARGET_EXTERNAL;
-            pos = external_pos;
-          }
-        } else if (current_is_dense && col >= row_begin && col < row_end) {
-          pos = col - row_begin;
-          kind = col == row ? KLS_FRAGMENTED_UPDATE_TARGET_PIVOT
-                            : KLS_FRAGMENTED_UPDATE_TARGET_DENSE;
-        } else if (current_is_dense && current_trailing_len > 0u) {
-          UF_long trailing_pos = KLS_KLU_EMPTY;
-          if (kls_find_uflong_sorted(
-                job->u_cols + current_trailing_begin, current_trailing_len,
-                col, &trailing_pos)) {
-            kind = KLS_FRAGMENTED_UPDATE_TARGET_TRAILING;
-            pos = trailing_pos;
-          }
-        }
-        job->target_kind[target_index] = kind;
-        job->target_pos[target_index] = pos;
-        switch ((kls_fragmented_update_target_kind)kind) {
-          case KLS_FRAGMENTED_UPDATE_TARGET_EXTERNAL:
-            external_count++;
-            break;
-          case KLS_FRAGMENTED_UPDATE_TARGET_DENSE:
-            dense_count++;
-            break;
-          case KLS_FRAGMENTED_UPDATE_TARGET_PIVOT:
-            pivot_count++;
-            break;
-          case KLS_FRAGMENTED_UPDATE_TARGET_TRAILING:
-            trailing_count++;
-            break;
-          case KLS_FRAGMENTED_UPDATE_TARGET_NONE:
-          default:
-            none_count++;
-            break;
-        }
-      }
-    }
-  }
-  job->none_count = none_count;
-  job->external_count = external_count;
-  job->dense_count = dense_count;
-  job->pivot_count = pivot_count;
-  job->trailing_count = trailing_count;
-}
-
-static void kls_try_build_row_refactor_dense_producer_target_maps(
-  UF_long n,
-  const UF_long *l_ptr,
-  const UF_long *l_cols,
-  const UF_long *l_internal_ptr,
-  const UF_long *u_cols,
-  const UF_long *row_group,
-  UF_long group_count,
-  const UF_long *group_ptr,
-  const unsigned char *group_kind,
-  const UF_long *group_trailing_begin,
-  const UF_long *group_trailing_len,
-  const UF_long *run_ptr,
-  const UF_long *run_l_begin,
-  const UF_long *run_group,
-  const UF_long *run_len,
-  UF_long run_count,
-  UF_long **target_ptr_out,
-  unsigned char **target_kind_out,
-  UF_long **target_pos_out,
-  UF_long *target_count_out,
-  UF_long *target_none_count_out,
-  UF_long *target_external_count_out,
-  UF_long *target_dense_count_out,
-  UF_long *target_pivot_count_out,
-  UF_long *target_trailing_count_out) {
-  KLS_SET_OPTIONAL_OUTPUT(target_ptr_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(target_kind_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(target_pos_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(target_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(target_none_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(target_external_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(target_dense_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(target_pivot_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(target_trailing_count_out, 0);
-  if (n == 0u || run_count == 0u || l_ptr == NULL || l_cols == NULL ||
-      l_internal_ptr == NULL || u_cols == NULL || row_group == NULL ||
-      group_count == 0u || group_ptr == NULL || group_kind == NULL ||
-      group_trailing_begin == NULL || group_trailing_len == NULL ||
-      run_ptr == NULL || run_l_begin == NULL || run_group == NULL ||
-      run_len == NULL || target_ptr_out == NULL ||
-      target_kind_out == NULL || target_pos_out == NULL ||
-      run_count > (UF_long)((SIZE_MAX / sizeof(UF_long)) - 1u)) {
-    return;
-  }
-
-  UF_long *target_ptr =
-    (UF_long *)calloc((size_t)run_count + 1u, sizeof(*target_ptr));
-  if (target_ptr == NULL) {
-    return;
-  }
-
-  UF_long target_count = 0;
-  for (UF_long run = 0; run < run_count; ++run) {
-    const UF_long dep_group = run_group[run];
-    if (dep_group >= group_count) {
-      free(target_ptr);
-      return;
-    }
-    const UF_long trailing_len = group_trailing_len[dep_group];
-    if (target_count > UF_long_max - trailing_len) {
-      free(target_ptr);
-      return;
-    }
-    target_count += trailing_len;
-    target_ptr[run + 1u] = target_count;
-  }
-  if (target_count <= 0) {
-    free(target_ptr);
-    return;
-  }
-  if (target_count > (UF_long)PTRDIFF_MAX) {
-    free(target_ptr);
-    return;
-  }
-  const size_t target_alloc_count = (size_t)target_count;
-  if (target_alloc_count == 0u ||
-      (UF_long)target_alloc_count != target_count ||
-      target_alloc_count > SIZE_MAX / sizeof(UF_long)) {
-    free(target_ptr);
-    return;
-  }
-
-  unsigned char *target_kind =
-    (unsigned char *)malloc(target_alloc_count * sizeof(*target_kind));
-  UF_long *target_pos =
-    (UF_long *)malloc(target_alloc_count * sizeof(*target_pos));
-  if (target_kind == NULL || target_pos == NULL) {
-    free(target_ptr);
-    free(target_kind);
-    free(target_pos);
-    return;
-  }
-
-  kls_dense_producer_target_job common = {
-    n, l_ptr, l_cols, l_internal_ptr, u_cols, row_group, group_count,
-    group_ptr, group_kind, group_trailing_begin, group_trailing_len, run_ptr,
-    run_l_begin, run_group, run_len, target_ptr, target_kind, target_pos,
-    0u, n, 0u, 0u, 0u, 0u, 0u, 0
-  };
-  kls_dense_producer_target_run(&common);
-  const int ok = common.ok;
-  const UF_long none_count = common.none_count;
-  const UF_long external_count = common.external_count;
-  const UF_long dense_count = common.dense_count;
-  const UF_long pivot_count = common.pivot_count;
-  const UF_long trailing_count = common.trailing_count;
-  if (!ok) {
-    free(target_ptr);
-    free(target_kind);
-    free(target_pos);
-    return;
-  }
-
-  *target_ptr_out = target_ptr;
-  *target_kind_out = target_kind;
-  *target_pos_out = target_pos;
-  if (target_count_out != NULL) {
-    *target_count_out = target_count;
-  }
-  if (target_none_count_out != NULL) {
-    *target_none_count_out = none_count;
-  }
-  if (target_external_count_out != NULL) {
-    *target_external_count_out = external_count;
-  }
-  if (target_dense_count_out != NULL) {
-    *target_dense_count_out = dense_count;
-  }
-  if (target_pivot_count_out != NULL) {
-    *target_pivot_count_out = pivot_count;
-  }
-  if (target_trailing_count_out != NULL) {
-    *target_trailing_count_out = trailing_count;
-  }
-}
-
 static void kls_try_build_row_refactor_segment_input_targets(
   UF_long n,
   const UF_long *input_ptr,
@@ -9549,9 +9272,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long *dense_producer_run_l_begin = NULL;
   UF_long *dense_producer_run_group = NULL;
   UF_long *dense_producer_run_len = NULL;
-  UF_long *dense_producer_target_ptr = NULL;
-  unsigned char *dense_producer_target_kind = NULL;
-  UF_long *dense_producer_target_pos = NULL;
   UF_long dense_producer_run_count = 0;
   UF_long dense_producer_run_rows = 0;
   UF_long dense_producer_run_dep_rows = 0;
@@ -9560,12 +9280,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long dense_producer_full_suffix_rows = 0;
   UF_long dense_producer_multi_run_rows = 0;
   UF_long dense_producer_fragmented_rows = 0;
-  UF_long dense_producer_target_count = 0;
-  UF_long dense_producer_target_none_count = 0;
-  UF_long dense_producer_target_external_count = 0;
-  UF_long dense_producer_target_dense_count = 0;
-  UF_long dense_producer_target_pivot_count = 0;
-  UF_long dense_producer_target_trailing_count = 0;
   kls_segment_input_target_prep_run(&segment_input_job);
   kls_try_build_row_refactor_dense_producer_runs(
     n, l_ptr, l_cols, row_group, group_count, group_ptr, group_kind,
@@ -9578,18 +9292,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     &dense_producer_full_suffix_rows,
     &dense_producer_multi_run_rows,
     &dense_producer_fragmented_rows);
-  kls_try_build_row_refactor_dense_producer_target_maps(
-    n, l_ptr, l_cols, l_internal_ptr, u_cols, row_group, group_count,
-    group_ptr, group_kind, group_trailing_begin, group_trailing_len,
-    dense_producer_run_ptr, dense_producer_run_l_begin,
-    dense_producer_run_group, dense_producer_run_len,
-    dense_producer_run_count, &dense_producer_target_ptr,
-    &dense_producer_target_kind, &dense_producer_target_pos,
-    &dense_producer_target_count, &dense_producer_target_none_count,
-    &dense_producer_target_external_count,
-    &dense_producer_target_dense_count, &dense_producer_target_pivot_count,
-    &dense_producer_target_trailing_count);
-
   UF_long group_single_count = 0u;
   UF_long group_batch_count = 0u;
   UF_long group_batch_rows = 0u;
@@ -9705,12 +9407,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     dense_producer_run_group;
   solver->row_refactor_dense_producer_run_len =
     dense_producer_run_len;
-  solver->row_refactor_dense_producer_target_ptr =
-    dense_producer_target_ptr;
-  solver->row_refactor_dense_producer_target_kind =
-    dense_producer_target_kind;
-  solver->row_refactor_dense_producer_target_pos =
-    dense_producer_target_pos;
   solver->row_refactor_segment_input_row_ready =
     segment_input_job.row_ready;
   solver->row_refactor_segment_input_target_kind =
@@ -9763,18 +9459,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     dense_producer_multi_run_rows;
   solver->row_refactor_dense_producer_fragmented_rows =
     dense_producer_fragmented_rows;
-  solver->row_refactor_dense_producer_target_count =
-    dense_producer_target_count;
-  solver->row_refactor_dense_producer_target_none_count =
-    dense_producer_target_none_count;
-  solver->row_refactor_dense_producer_target_external_count =
-    dense_producer_target_external_count;
-  solver->row_refactor_dense_producer_target_dense_count =
-    dense_producer_target_dense_count;
-  solver->row_refactor_dense_producer_target_pivot_count =
-    dense_producer_target_pivot_count;
-  solver->row_refactor_dense_producer_target_trailing_count =
-    dense_producer_target_trailing_count;
   solver->row_refactor_segment_input_target_rows =
     segment_input_job.target_rows;
   solver->row_refactor_segment_input_target_entries =

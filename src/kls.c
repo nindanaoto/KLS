@@ -1099,9 +1099,6 @@ struct kls_solver {
   UF_long *row_refactor_dense_producer_run_l_begin;
   UF_long *row_refactor_dense_producer_run_group;
   UF_long *row_refactor_dense_producer_run_len;
-  UF_long *row_refactor_dense_producer_target_ptr;
-  unsigned char *row_refactor_dense_producer_target_kind;
-  UF_long *row_refactor_dense_producer_target_pos;
   UF_long row_refactor_dense_producer_run_count;
   UF_long row_refactor_dense_producer_run_rows;
   UF_long row_refactor_dense_producer_run_dep_rows;
@@ -1110,12 +1107,6 @@ struct kls_solver {
   UF_long row_refactor_dense_producer_full_suffix_rows;
   UF_long row_refactor_dense_producer_multi_run_rows;
   UF_long row_refactor_dense_producer_fragmented_rows;
-  UF_long row_refactor_dense_producer_target_count;
-  UF_long row_refactor_dense_producer_target_none_count;
-  UF_long row_refactor_dense_producer_target_external_count;
-  UF_long row_refactor_dense_producer_target_dense_count;
-  UF_long row_refactor_dense_producer_target_pivot_count;
-  UF_long row_refactor_dense_producer_target_trailing_count;
   UF_long row_refactor_compact_dense_panel_persistent_groups;
   UF_long row_refactor_compact_dense_panel_persistent_entries;
   int row_refactor_last_compact_dense_panel_persistent;
@@ -2847,9 +2838,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   free(solver->row_refactor_dense_producer_run_l_begin);
   free(solver->row_refactor_dense_producer_run_group);
   free(solver->row_refactor_dense_producer_run_len);
-  free(solver->row_refactor_dense_producer_target_ptr);
-  free(solver->row_refactor_dense_producer_target_kind);
-  free(solver->row_refactor_dense_producer_target_pos);
   solver->row_refactor_l_ptr = NULL;
   solver->row_refactor_l_ptr32 = NULL;
   solver->row_refactor_l_ptr16 = NULL;
@@ -2937,9 +2925,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_producer_run_l_begin = NULL;
   solver->row_refactor_dense_producer_run_group = NULL;
   solver->row_refactor_dense_producer_run_len = NULL;
-  solver->row_refactor_dense_producer_target_ptr = NULL;
-  solver->row_refactor_dense_producer_target_kind = NULL;
-  solver->row_refactor_dense_producer_target_pos = NULL;
   solver->row_refactor_pattern_n = 0;
   solver->row_refactor_group_count = 0;
   solver->row_refactor_group_single_count = 0;
@@ -3078,12 +3063,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_producer_full_suffix_rows = 0;
   solver->row_refactor_dense_producer_multi_run_rows = 0;
   solver->row_refactor_dense_producer_fragmented_rows = 0;
-  solver->row_refactor_dense_producer_target_count = 0;
-  solver->row_refactor_dense_producer_target_none_count = 0;
-  solver->row_refactor_dense_producer_target_external_count = 0;
-  solver->row_refactor_dense_producer_target_dense_count = 0;
-  solver->row_refactor_dense_producer_target_pivot_count = 0;
-  solver->row_refactor_dense_producer_target_trailing_count = 0;
   solver->row_refactor_compact_dense_panel_persistent_groups = 0;
   solver->row_refactor_compact_dense_panel_persistent_entries = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
@@ -3297,12 +3276,6 @@ typedef struct {
   UF_long dense_producer_full_suffix_rows;
   UF_long dense_producer_multi_run_rows;
   UF_long dense_producer_fragmented_rows;
-  UF_long dense_producer_target_count;
-  UF_long dense_producer_target_none_count;
-  UF_long dense_producer_target_external_count;
-  UF_long dense_producer_target_dense_count;
-  UF_long dense_producer_target_pivot_count;
-  UF_long dense_producer_target_trailing_count;
   UF_long compact_dense_panel_persistent_groups;
   UF_long compact_dense_panel_persistent_entries;
   int last_compact_dense_panel_persistent;
@@ -3597,18 +3570,6 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_dense_producer_multi_run_rows;
   diag->dense_producer_fragmented_rows =
     solver->row_refactor_dense_producer_fragmented_rows;
-  diag->dense_producer_target_count =
-    solver->row_refactor_dense_producer_target_count;
-  diag->dense_producer_target_none_count =
-    solver->row_refactor_dense_producer_target_none_count;
-  diag->dense_producer_target_external_count =
-    solver->row_refactor_dense_producer_target_external_count;
-  diag->dense_producer_target_dense_count =
-    solver->row_refactor_dense_producer_target_dense_count;
-  diag->dense_producer_target_pivot_count =
-    solver->row_refactor_dense_producer_target_pivot_count;
-  diag->dense_producer_target_trailing_count =
-    solver->row_refactor_dense_producer_target_trailing_count;
   diag->compact_dense_panel_persistent_groups =
     solver->row_refactor_compact_dense_panel_persistent_groups;
   diag->compact_dense_panel_persistent_entries =
@@ -3985,18 +3946,6 @@ static void kls_restore_row_refactor_diagnostics(
     diag->dense_producer_multi_run_rows;
   solver->row_refactor_dense_producer_fragmented_rows =
     diag->dense_producer_fragmented_rows;
-  solver->row_refactor_dense_producer_target_count =
-    diag->dense_producer_target_count;
-  solver->row_refactor_dense_producer_target_none_count =
-    diag->dense_producer_target_none_count;
-  solver->row_refactor_dense_producer_target_external_count =
-    diag->dense_producer_target_external_count;
-  solver->row_refactor_dense_producer_target_dense_count =
-    diag->dense_producer_target_dense_count;
-  solver->row_refactor_dense_producer_target_pivot_count =
-    diag->dense_producer_target_pivot_count;
-  solver->row_refactor_dense_producer_target_trailing_count =
-    diag->dense_producer_target_trailing_count;
   solver->row_refactor_compact_dense_panel_persistent_groups =
     diag->compact_dense_panel_persistent_groups;
   solver->row_refactor_compact_dense_panel_persistent_entries =
