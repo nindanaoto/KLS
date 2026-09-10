@@ -33,14 +33,6 @@ static int kls_auto_row_refactor_high_work_candidate(
 KLS_DEFINE_ENV_FLAG(kls_checked_row_refactor_env_enabled,
                     "KLS_ENABLE_CHECKED_ROW_REFACTOR")
 
-static int kls_partial_supernode_pipeline_env_state(void) {
-  const char *value = getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-  if (value == NULL || value[0] == '\0') {
-    return 0;
-  }
-  return (value[0] == '0' && value[1] == '\0') ? -1 : 1;
-}
-
 enum {
   KLS_NATIVE_ROW_PANEL_ENV_UNSET = -2,
   KLS_NATIVE_ROW_PANEL_ENV_OFF = -1,
@@ -15139,10 +15131,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
 
   UF_long partial_supernode_groups = 0;
   UF_long partial_supernode_rows = 0;
-  const int partial_supernode_pipeline_state =
-    kls_partial_supernode_pipeline_env_state();
   const int prefer_partial_supernode_pipeline =
-    partial_supernode_pipeline_state >= 0 &&
     have_group_dag && use_group_pipeline &&
     kls_row_refactor_tail_has_large_partial_supernodes(
       solver, cluster_levels, thread_count, &partial_supernode_groups,

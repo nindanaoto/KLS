@@ -9104,11 +9104,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
   const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
   char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
   const int had_row = saved_row_value != NULL;
-  const char *saved_partial_value =
-    getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-  char *saved_partial = saved_partial_value != NULL
-    ? strdup(saved_partial_value) : NULL;
-  const int had_partial = saved_partial_value != NULL;
   const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
   char *saved_checked = saved_checked_value != NULL
     ? strdup(saved_checked_value) : NULL;
@@ -9126,7 +9121,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
 
   int ok = 1;
   if ((had_row && saved_row == NULL) ||
-      (had_partial && saved_partial == NULL) ||
       (had_checked && saved_checked == NULL)) {
     fprintf(stderr, "failed to save prefactor env\n");
     ok = 0;
@@ -9139,10 +9133,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
                         "factor row-prefactor base")) ok = 0;
   if (ok && setenv("KLS_ENABLE_ROW_REFACTOR", "0", 1) != 0) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
-    ok = 0;
-  }
-  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
-    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
     ok = 0;
   }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
@@ -9204,10 +9194,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
   if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
     ok = 0;
   }
-  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
-                         had_partial, saved_partial)) {
-    ok = 0;
-  }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
                          had_checked, saved_checked)) {
     ok = 0;
@@ -9224,7 +9210,6 @@ static int test_checked_row_prefactor_finished_dependency(void) {
 
   kls_destroy(solver);
   free(saved_row);
-  free(saved_partial);
   free(saved_checked);
   return ok;
 }
@@ -9363,11 +9348,6 @@ static int test_partial_supernode_non_dominant_tail(void) {
   const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
   char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
   const int had_row = saved_row_value != NULL;
-  const char *saved_partial_value =
-    getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-  char *saved_partial = saved_partial_value != NULL
-    ? strdup(saved_partial_value) : NULL;
-  const int had_partial = saved_partial_value != NULL;
   const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
   char *saved_checked = saved_checked_value != NULL
     ? strdup(saved_checked_value) : NULL;
@@ -9385,7 +9365,6 @@ static int test_partial_supernode_non_dominant_tail(void) {
 
   int ok = 1;
   if ((had_row && saved_row == NULL) ||
-      (had_partial && saved_partial == NULL) ||
       (had_checked && saved_checked == NULL)) {
     fprintf(stderr, "failed to save non-dominant partial env\n");
     ok = 0;
@@ -9406,10 +9385,6 @@ static int test_partial_supernode_non_dominant_tail(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR=1");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
-    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-    ok = 0;
-  }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
@@ -9420,10 +9395,6 @@ static int test_partial_supernode_non_dominant_tail(void) {
   }
 
   if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
-                         had_partial, saved_partial)) {
     ok = 0;
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
@@ -9478,7 +9449,6 @@ static int test_partial_supernode_non_dominant_tail(void) {
 
   kls_destroy(solver);
   free(saved_row);
-  free(saved_partial);
   free(saved_checked);
   free(ap);
   free(ai);
@@ -9620,11 +9590,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   const char *saved_row_value = getenv("KLS_ENABLE_ROW_REFACTOR");
   char *saved_row = saved_row_value != NULL ? strdup(saved_row_value) : NULL;
   const int had_row = saved_row_value != NULL;
-  const char *saved_partial_value =
-    getenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-  char *saved_partial = saved_partial_value != NULL
-    ? strdup(saved_partial_value) : NULL;
-  const int had_partial = saved_partial_value != NULL;
   const char *saved_checked_value = getenv("KLS_ENABLE_CHECKED_ROW_REFACTOR");
   char *saved_checked = saved_checked_value != NULL
     ? strdup(saved_checked_value) : NULL;
@@ -9647,7 +9612,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
 
   int ok = 1;
   if ((had_row && saved_row == NULL) ||
-      (had_partial && saved_partial == NULL) ||
       (had_checked && saved_checked == NULL) ||
       (had_native && saved_native == NULL)) {
     fprintf(stderr, "failed to save partial-prefix env\n");
@@ -9663,10 +9627,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
-    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-    ok = 0;
-  }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "0", 1) != 0) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=0");
     ok = 0;
@@ -9679,10 +9639,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
                         "refactor partial-prefix")) ok = 0;
 
   if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
-                         had_partial, saved_partial)) {
     ok = 0;
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
@@ -9782,10 +9738,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
     perror("setenv KLS_ENABLE_ROW_REFACTOR=0");
     ok = 0;
   }
-  if (ok && unsetenv("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE") != 0) {
-    perror("unsetenv KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE");
-    ok = 0;
-  }
   if (ok && setenv("KLS_ENABLE_CHECKED_ROW_REFACTOR", "1", 1) != 0) {
     perror("setenv KLS_ENABLE_CHECKED_ROW_REFACTOR=1");
     ok = 0;
@@ -9800,10 +9752,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   }
 
   if (!restore_env_value("KLS_ENABLE_ROW_REFACTOR", had_row, saved_row)) {
-    ok = 0;
-  }
-  if (!restore_env_value("KLS_ENABLE_PARTIAL_SUPERNODE_PIPELINE",
-                         had_partial, saved_partial)) {
     ok = 0;
   }
   if (!restore_env_value("KLS_ENABLE_CHECKED_ROW_REFACTOR",
@@ -9900,7 +9848,6 @@ static int test_partial_compact_supernode_prefix_pipeline(void) {
   kls_destroy(solver);
   kls_destroy(checked_solver);
   free(saved_row);
-  free(saved_partial);
   free(saved_checked);
   free(saved_native);
   free(ap);
