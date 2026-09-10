@@ -3088,9 +3088,7 @@ work-bounded LSQR recovery against the actual public CSC matrix. Twelve
 two-sided norm-equilibration rounds precede the Krylov iteration, and every
 accepted result is checked at the same `5e-9` relative-L2 margin. This is a
 numeric outcome policy rather than a dimension, sparsity, ordering, or matrix
-identity detector. `KLS_DISABLE_RCOND_SOLVE_CONTRACT=1` restores the old
-uncertified plain solve, and `KLS_DISABLE_LSQR_SOLVE_RECOVERY=1` retains the
-certificate but rejects after the cheaper recoveries fail. On
+identity detector. On
 `fpga_dcop_01`, whose old full-precision LU answer had a `2.55e-2` residual,
 all 20 rank-preserving generations now validate; the worst residual is
 `4.99e-9`. The median five-pass H100 is 1.840 s. Both saved competitor runs

@@ -4899,29 +4899,6 @@ static int kls_row_first_partial_apply_ready(
   return 1;
 }
 
-/* test-only fault injection: treat every k-th pipeline commit row's
-   diagonal as unusable so the separator pipeline's pivot tail/restart
-   machinery is exercised deterministically on any ordering.  The
-   injected pivot is the row's legitimate strongest candidate, so the
-   factorization stays numerically valid (residuals police it); row-id
-   modulo keeps the injection independent of worker interleaving.
-   Zero cost when the env is unset. */
-static UF_long kls_row_first_debug_force_pivot_every(void) {
-  static _Thread_local UF_long cached = -1;
-  if (cached < 0) {
-    const char *value = getenv("KLS_DEBUG_FORCE_ROW_PIPELINE_PIVOT");
-    cached = 0;
-    if (value != NULL && value[0] != '\0') {
-      char *end = NULL;
-      const long parsed = strtol(value, &end, 10);
-      if (end != value && (end == NULL || *end == '\0') && parsed > 0) {
-        cached = (UF_long)parsed;
-      }
-    }
-  }
-  return cached;
-}
-
 static int kls_row_first_partial_finish(
   const kls_row_first_block_context *ctx,
   kls_row_first_workspace *workspace,
@@ -4967,29 +4944,6 @@ static int kls_row_first_partial_finish(
       *pivot_needed_out = 1;
     }
     return 0;
-  }
-  if (!pivot_needed && ctx->use_separator_for_block) {
-    const UF_long force_every = kls_row_first_debug_force_pivot_every();
-    if (force_every > 0 && i % force_every == 0) {
-      const UF_long alt_col =
-        pivot_choice.scope_enabled
-          ? pivot_choice.scoped_col
-          : (pivot_choice.limit_enabled ? pivot_choice.limited_col
-                                        : pivot_choice.global_col);
-      const double alt_abs =
-        pivot_choice.scope_enabled
-          ? pivot_choice.scoped_abs
-          : (pivot_choice.limit_enabled ? pivot_choice.limited_abs
-                                        : pivot_choice.global_abs);
-      if (alt_col != KLS_KLU_EMPTY && alt_col != i && alt_abs > 0.0) {
-        pivot_needed = 1;
-        selected_col = alt_col;
-        if (pivot_choice.scope_enabled) {
-          selected_separator_exact = pivot_choice.scoped_col_exact;
-          selected_separator_extent = !pivot_choice.scoped_col_exact;
-        }
-      }
-    }
   }
   if (pivot_needed) {
     if (pivot_needed_out != NULL) {

@@ -1891,7 +1891,6 @@ static void kls_solve_contract_classify(kls_solver *solver,
   }
   kls_update_numeric_rcond_guard(solver);
   if (solver->options.backend != KLS_BACKEND_SERIAL &&
-      getenv("KLS_DISABLE_RCOND_SOLVE_CONTRACT") == NULL &&
       solver->common.rcond > 0.0 &&
       solver->common.rcond < sqrt(DBL_EPSILON)) {
     /* Reciprocal pivot growth measures backward stability of the factor,
