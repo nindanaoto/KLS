@@ -466,13 +466,6 @@ static int kls_numeric_pivots_pass_threshold_from_block(
   return 1;
 }
 
-static int kls_numeric_pivots_pass_threshold(const kls_solver *solver,
-                                             UF_long *rejected_pivot_out,
-                                             UF_long *rejected_pivot_col_out) {
-  return kls_numeric_pivots_pass_threshold_from_block(
-    solver, 0u, rejected_pivot_out, rejected_pivot_col_out);
-}
-
 static UF_long kls_block_for_pivot(const kls_solver *solver, UF_long pivot) {
   if (solver == NULL || solver->symbolic == NULL ||
       solver->symbolic->R == NULL || pivot >= solver->n) {
@@ -7083,22 +7076,14 @@ static int kls_build_one_row_solve_transpose_plan_impl(
   return 1;
 }
 
-static int kls_build_one_row_solve_transpose_plan(
-  kls_solver *solver,
-  int source_upper,
-  kls_row_solve_transpose_plan *plan) {
-  return kls_build_one_row_solve_transpose_plan_impl(
-    solver, source_upper, plan, 1);
-}
-
 static void kls_build_row_solve_transpose_plans(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  (void)kls_build_one_row_solve_transpose_plan(
-    solver, 1, &solver->row_solve_ut_plan);
-  (void)kls_build_one_row_solve_transpose_plan(
-    solver, 0, &solver->row_solve_lt_plan);
+  (void)kls_build_one_row_solve_transpose_plan_impl(
+    solver, 1, &solver->row_solve_ut_plan, 1);
+  (void)kls_build_one_row_solve_transpose_plan_impl(
+    solver, 0, &solver->row_solve_lt_plan, 1);
 }
 
 static void kls_clear_row_solve_transpose_thread_bounds(

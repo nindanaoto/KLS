@@ -3370,7 +3370,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
      live partial-BTF plan is durable evidence that a more specialized
      input-consuming route owns this factor; preserve it without naming its
      matrix. */
-  if (!check_pivots && kls_low_work_btf_map32_policy_enabled(solver) &&
+  if (!check_pivots && kls_low_work_btf_map32_capable(solver) &&
       solver->solve_contract_probe != 0 &&
       solver->refactor_input_user_pos32 == NULL &&
       solver->snb == NULL && solver->lean_probe_arm <= 0 &&
@@ -3592,8 +3592,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         solver->common.status != TRILINOS_KLU_SINGULAR) {
       UF_long rejected_pivot = KLS_KLU_EMPTY;
       UF_long rejected_pivot_col = KLS_KLU_EMPTY;
-      if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
-                                             &rejected_pivot_col)) {
+      if (!kls_numeric_pivots_pass_threshold_from_block(
+            solver, 0u, &rejected_pivot, &rejected_pivot_col)) {
         solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_ALL;
         kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
         return 0;
@@ -3645,8 +3645,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
         solver->common.status != TRILINOS_KLU_SINGULAR) {
       UF_long rejected_pivot = KLS_KLU_EMPTY;
       UF_long rejected_pivot_col = KLS_KLU_EMPTY;
-      if (!kls_numeric_pivots_pass_threshold(solver, &rejected_pivot,
-                                             &rejected_pivot_col)) {
+      if (!kls_numeric_pivots_pass_threshold_from_block(
+            solver, 0u, &rejected_pivot, &rejected_pivot_col)) {
         solver->fast_reject_refresh_state = KLS_FAST_REJECT_REFRESH_ALL;
         kls_record_fast_reject(solver, rejected_pivot, rejected_pivot_col);
         return 0;

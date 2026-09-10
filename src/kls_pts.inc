@@ -1305,19 +1305,6 @@ static int kls_pts_block_pool(kls_solver *solver,
   return 1;
 }
 
-static int kls_pts_solve_block_pool(kls_solver *solver,
-                                    double *Xb,
-                                    double *lu,
-                                    const UF_long *lip,
-                                    const UF_long *llen,
-                                    const UF_long *uip,
-                                    const UF_long *ulen,
-                                    const double *udiag_b,
-                                    const double *udiag_recip_b) {
-  return kls_pts_block_pool(solver, Xb, lu, lip, llen, uip, ulen,
-                            udiag_b, udiag_recip_b, 0);
-}
-
 static int kls_parallel_i32_permute(kls_solver *solver,
                                     const double *input,
                                     double *output,
@@ -1373,8 +1360,8 @@ static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
                                const UF_long *uip, const UF_long *ulen,
                                const double *udiag_b,
                                const double *udiag_recip_b) {
-  if (kls_pts_solve_block_pool(solver, Xb, lu, lip, llen, uip, ulen,
-                               udiag_b, udiag_recip_b)) {
+  if (kls_pts_block_pool(solver, Xb, lu, lip, llen, uip, ulen,
+                         udiag_b, udiag_recip_b, 0)) {
     return 1;
   }
   kls_pts *pts = solver->pts;

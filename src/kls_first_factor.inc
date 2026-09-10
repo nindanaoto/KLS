@@ -9981,8 +9981,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         common->status != TRILINOS_KLU_SINGULAR) {
       UF_long threshold_pivot = KLS_KLU_EMPTY;
       UF_long threshold_col = KLS_KLU_EMPTY;
-      if (kls_numeric_pivots_pass_threshold(solver, &threshold_pivot,
-                                            &threshold_col)) {
+      if (kls_numeric_pivots_pass_threshold_from_block(
+            solver, 0u, &threshold_pivot, &threshold_col)) {
         break;
       }
       /* Pivots too small for the 1/tol multiplier bound: nudge every
@@ -11937,7 +11937,8 @@ static int kls_predicted_pivot_rescue(kls_solver *solver,
       any_hot = span_hot[k];
     }
     if (any_hot &&
-        !kls_numeric_pivots_pass_threshold(solver, &weak_pivot, &weak_col)) {
+        !kls_numeric_pivots_pass_threshold_from_block(
+          solver, 0u, &weak_pivot, &weak_col)) {
       /* Weak pivots survive behind structural vetoes: open the veto-hot
          spans fully - the minimal closure that legalizes their swaps -
          and refill once. */

@@ -8950,17 +8950,6 @@ static int kls_row_refactor_prefactor_dep_safe_with_run(
   return 1;
 }
 
-static int kls_row_refactor_prefactor_dep_safe(
-  const kls_solver *solver,
-  const kls_egraph_refactor_shared *shared,
-  UF_long l_begin,
-  UF_long pos,
-  const unsigned char *applied,
-  UF_long dep) {
-  return kls_row_refactor_prefactor_dep_safe_with_run(
-    solver, shared, l_begin, pos, pos, applied, dep);
-}
-
 /* Light strict-supernode run consume: a maximal run of consecutive dep
    rows inside one strict U-row supernode updates x as h short
    triangular steps plus h contiguous AXPYs over the shared tail,
@@ -9353,8 +9342,8 @@ static int kls_parallel_row_refactor_prefactor_finished_deps(
     if (dep >= external_dep_limit) {
       continue;
     }
-    if (!kls_row_refactor_prefactor_dep_safe(
-          solver, shared, l_begin, scan, applied, dep)) {
+    if (!kls_row_refactor_prefactor_dep_safe_with_run(
+          solver, shared, l_begin, scan, scan, applied, dep)) {
       continue;
     }
     UF_long compact_run_rows = 0;

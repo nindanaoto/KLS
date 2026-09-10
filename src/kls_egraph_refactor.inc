@@ -7515,10 +7515,10 @@ static int kls_mapped_refactor(kls_solver *solver,
   const int moderate_btf_trial = !check_pivots && !scaled &&
     kls_moderate_btf_map32_trial_capable(solver);
   if (kls_pts_refactor_ready(solver) ||
-      kls_low_work_btf_map32_policy_enabled(solver) ||
+      kls_low_work_btf_map32_capable(solver) ||
       kls_symmetric_partial_diagonal_match_factor_cycle(solver)) {
     (void)kls_build_refactor_user_input_pos32(solver);
-    if (kls_low_work_btf_map32_policy_enabled(solver)) {
+    if (kls_low_work_btf_map32_capable(solver)) {
       /* The first changed-value pass uses the ordinary prepared frame, but
          build the direct Offx map while its column map is already hot.  Once
          the numeric contract is established, later updates can consume the
@@ -7599,7 +7599,7 @@ static int kls_mapped_refactor(kls_solver *solver,
       }
       solver->moderate_btf_lean_choice = -1;
     }
-    if (kls_low_work_btf_map32_policy_enabled(solver)) {
+    if (kls_low_work_btf_map32_capable(solver)) {
       const int lean =
         kls_lean_btf_map32_refactor(solver, numeric_values);
       if (lean >= 0) {

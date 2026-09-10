@@ -9420,7 +9420,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     kls_declined_lean_reaudit_finish(solver);
   }
   const int direct_low_work_btf_map32 =
-    kls_low_work_btf_map32_policy_enabled(solver);
+    kls_low_work_btf_map32_capable(solver);
   if (solver->lean_choice == 0 &&
       kls_moderate_work_single_block_lean_policy_enabled(solver)) {
     /* This retained-factor certificate already excludes transformed,
@@ -9708,7 +9708,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     !solver->prestatic_deferred && !solver->rowmatch_deferred &&
     !solver->factor_preps_deferred;
   const int low_work_btf_direct_values =
-    kls_low_work_btf_map32_policy_enabled(solver) &&
+    kls_low_work_btf_map32_capable(solver) &&
     solver->input_to_csc != NULL && solver->row_scale == NULL &&
     solver->col_scale == NULL && solver->numeric->Rs == NULL &&
     solver->refactor_input_user_pos32 != NULL &&
@@ -10049,7 +10049,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->lean_choice = -1;
   }
   if (kls_low_work_single_block_policy_enabled(solver) ||
-      kls_low_work_btf_map32_policy_enabled(solver)) {
+      kls_low_work_btf_map32_capable(solver)) {
     /* Consumer trials cannot repay their cost on the low-work single-block
        route; the lean BTF route has no batched/padded consumers at all. */
     solver->floor_choice = -1;
@@ -10547,7 +10547,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (ok && solver->common.status >= 0 &&
       !low_work_btf_direct_values &&
       solver->solve_contract_probe == 0 &&
-      kls_low_work_btf_map32_policy_enabled(solver) &&
+      kls_low_work_btf_map32_capable(solver) &&
       solver->refactor_input_user_pos32 != NULL) {
     /* One charged direct pass validates the just-built user-position and
        Offx maps and leaves their compact streams hot.  The low-work policy

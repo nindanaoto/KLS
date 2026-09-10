@@ -53,11 +53,6 @@ static int kls_moderate_btf_map32_trial_capable(const kls_solver *solver) {
          solver->symbolic->structural_rank == solver->n;
 }
 
-static int kls_low_work_btf_map32_policy_enabled(
-  const kls_solver *solver) {
-  return kls_low_work_btf_map32_capable(solver);
-}
-
 /* Prefer the native packed triangular walk when a complete low-work BTF
    factor is already small enough to stay cache-resident.  In this regime a
    duplicate i16/i32 index stream has too little solve work over which to
