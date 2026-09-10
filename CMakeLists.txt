@@ -501,8 +501,8 @@ target_link_libraries(kls
 target_link_libraries(kls
   PRIVATE
     kls_metis)
-# Optional prebuilt mt-metis (threaded NodeND experiment, env-gated at
-# runtime via KLS_MT_ND); build it once with its own configure/make.
+# Optional prebuilt mt-metis supplies threaded separator construction for
+# the deterministic NDP forest; build it once with its own configure/make.
 set(KLS_MTMETIS_LIB
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mtmetis/build/Linux-x86_64/lib/libmtmetis_hidden.o")
 if(EXISTS "${KLS_MTMETIS_LIB}")

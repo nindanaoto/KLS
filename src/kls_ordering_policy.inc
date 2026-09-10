@@ -3255,12 +3255,9 @@ static _Thread_local int kls_amf3_span_variant_selected;
 #ifdef KLS_HAVE_MTMETIS
 #include <mtmetis.h>
 
-/* mt-metis NodeND bridge: converts the 64-bit idx graph to mt-metis's
-   default 32-bit types, runs the threaded ND, converts back.
-   mt-metis's dlthread communicators are process-global: concurrent
-   calls from two orientation-analyze threads crash in its reduction
-   buffers (pre2), so calls serialize on a mutex - each still runs
-   its own internal thread team. */
+/* mt-metis's dlthread communicators are process-global: concurrent
+   separator calls crash in its reduction buffers, so calls serialize on a
+   mutex while each call retains its own internal thread team. */
 static pthread_mutex_t kls_mtmetis_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Giant symmetric scalar-fringe systems use a seven-leaf deterministic
@@ -3297,7 +3294,6 @@ static _Thread_local int kls_giant_symmetric_scalar_fringe_metis_ctx;
    pre2-like matrices are prestatic-routed before ordering and their
    pipeline engines NEED serial NodeNDP structure (measured 14.9 vs
    2.2s refactor) - never routed here. */
-static _Thread_local int kls_mt_nd_class;
 
 /* forest-aware threaded ND: replicates METIS_NodeNDP's output contract
    (perm/iperm + the reversed-index sizes tree consumed by
@@ -3768,13 +3764,6 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
   C.n = n;
   C.serial_sep = serial_sep;
   C.mt_threads = 4;
-  {
-    const char *te = getenv("KLS_MT_ND");
-    if (te != NULL && te[0] != '\0') {
-      int p = atoi(te);
-      if (p >= 1 && p <= 32) C.mt_threads = p;
-    }
-  }
   C.segs = (struct kls_mtnd_seg *)calloc((size_t)(2 * npes), sizeof(*C.segs));
   C.leaves = (struct kls_mtnd_leaf *)calloc((size_t)nleaves,
                                             sizeof(*C.leaves));
@@ -3796,7 +3785,7 @@ static int kls_mtmetis_ndp(UF_long n, const idx_t *xadj, const idx_t *adjncy,
   lopts[METIS_OPTION_NUMBERING] = 0;
   lopts[METIS_OPTION_SEED] = 0;
   C.lopts = lopts;
-  if (serial_sep && getenv("KLS_MTND_SERIAL_SPLIT") == NULL) {
+  if (serial_sep) {
     /* task recursion: level-parallel separators + in-task leaves */
     struct kls_mtnd_task root;
     pthread_t rtid;
@@ -3903,202 +3892,8 @@ cleanup:
   return ok;
 }
 
-static int kls_mtmetis_nd(UF_long n, const idx_t *xadj, const idx_t *adjncy,
-                          idx_t *metis_perm, idx_t *metis_iperm) {
-  const size_t nz = (size_t)xadj[n];
-  mtmetis_adj_type *mx =
-    (mtmetis_adj_type *)malloc(((size_t)n + 1u) * sizeof(*mx));
-  mtmetis_vtx_type *ma =
-    (mtmetis_vtx_type *)malloc((nz + 1u) * sizeof(*ma));
-  mtmetis_pid_type *mp =
-    (mtmetis_pid_type *)malloc((size_t)n * sizeof(*mp));
-  mtmetis_pid_type *mi =
-    (mtmetis_pid_type *)malloc((size_t)n * sizeof(*mi));
-  double *opts = mtmetis_init_options();
-  int ok = 0;
-  if (mx != NULL && ma != NULL && mp != NULL && mi != NULL &&
-      opts != NULL) {
-    UF_long i;
-    int threads = 4;
-    const char *te = getenv("KLS_MT_ND");
-    if (te != NULL && te[0] != '\0') {
-      int p = atoi(te);
-      if (p >= 1 && p <= 32) {
-        threads = p;
-      }
-    }
-    for (i = 0; i <= n; ++i) {
-      mx[i] = (mtmetis_adj_type)xadj[i];
-    }
-    for (i = 0; i < (UF_long)nz; ++i) {
-      ma[i] = (mtmetis_vtx_type)adjncy[i];
-    }
-    opts[MTMETIS_OPTION_NTHREADS] = (double)threads;
-    opts[MTMETIS_OPTION_SEED] = 0.0;
-    if (getenv("KLS_MT_ND_METIS") != NULL) {
-      /* hybrid: serial-METIS quality on the subproblems, threaded top */
-      opts[MTMETIS_OPTION_METIS] = 1.0;
-    }
-    {
-      const char *nr = getenv("KLS_MT_ND_NRUNS");
-      if (nr != NULL && nr[0] != '\0') {
-        opts[MTMETIS_OPTION_NRUNS] = (double)atoi(nr);
-      }
-    }
-    {
-      mtmetis_vtx_type mn = (mtmetis_vtx_type)n;
-      pthread_mutex_lock(&kls_mtmetis_lock);
-      ok = MTMETIS_NodeND(&mn, mx, ma, NULL, opts, mp, mi) ==
-           MTMETIS_SUCCESS;
-      pthread_mutex_unlock(&kls_mtmetis_lock);
-    }
-    if (ok) {
-      for (i = 0; i < n; ++i) {
-        metis_perm[i] = (idx_t)mp[i];
-        metis_iperm[i] = (idx_t)mi[i];
-      }
-    }
-  }
-  free(mx);
-  free(ma);
-  free(mp);
-  free(mi);
-  free(opts);
-  return ok;
-}
 #endif
 
-struct kls_par_nd_half {
-  idx_t nv;
-  idx_t *xadj;
-  idx_t *adjncy;
-  idx_t *perm;   /* local iperm-style: new order of local vertex */
-  idx_t *iperm;
-  idx_t *options;
-  int status;
-};
-
-static void *kls_par_nd_half_main(void *arg) {
-  struct kls_par_nd_half *h = (struct kls_par_nd_half *)arg;
-  idx_t nv = h->nv;
-  h->status = nv > 0
-    ? METIS_NodeND(&nv, h->xadj, h->adjncy, NULL, h->options, h->perm,
-                   h->iperm)
-    : METIS_OK;
-  return NULL;
-}
-
-/* One threaded top level of nested dissection.  Returns 1 on success
-   with metis_perm/metis_iperm filled (NodeND conventions: iperm[v] =
-   position of v in the elimination order, perm = its inverse). */
-static int kls_metis_parallel_nd(idx_t nvtxs, const idx_t *xadj,
-                                 const idx_t *adjncy, idx_t *options,
-                                 idx_t *metis_perm, idx_t *metis_iperm) {
-  const size_t nz = (size_t)xadj[nvtxs];
-  idx_t *part = (idx_t *)malloc((size_t)nvtxs * sizeof(idx_t));
-  idx_t *local = (idx_t *)malloc((size_t)nvtxs * sizeof(idx_t));
-  idx_t *gx = (idx_t *)malloc((size_t)nvtxs * sizeof(idx_t));
-  if (part == NULL || local == NULL || gx == NULL) {
-    free(part); free(local); free(gx);
-    return 0;
-  }
-  idx_t sepsize = 0;
-  idx_t nv = nvtxs;
-  /* the separator call mutates nothing but part/sepsize */
-  int st = METIS_ComputeVertexSeparator(&nv, (idx_t *)xadj,
-                                        (idx_t *)adjncy, NULL, NULL,
-                                        &sepsize, part);
-  if (st != METIS_OK || sepsize <= 0 || sepsize >= nvtxs / 2) {
-    free(part); free(local); free(gx);
-    return 0;
-  }
-  idx_t cnt[3] = {0, 0, 0};
-  for (idx_t v = 0; v < nvtxs; ++v) {
-    idx_t p = part[v];
-    if (p < 0 || p > 2) { p = 2; part[v] = 2; }
-    local[v] = cnt[p]++;
-  }
-  if (cnt[0] == 0 || cnt[1] == 0) {
-    free(part); free(local); free(gx);
-    return 0;
-  }
-  struct kls_par_nd_half h[2];
-  memset(h, 0, sizeof(h));
-  int ok = 1;
-  for (int side = 0; side < 2 && ok; ++side) {
-    idx_t hn = cnt[side];
-    h[side].nv = hn;
-    h[side].options = options;
-    h[side].xadj = (idx_t *)malloc(((size_t)hn + 1u) * sizeof(idx_t));
-    h[side].adjncy = (idx_t *)malloc((nz + 1u) * sizeof(idx_t));
-    h[side].perm = (idx_t *)malloc((size_t)hn * sizeof(idx_t));
-    h[side].iperm = (idx_t *)malloc((size_t)hn * sizeof(idx_t));
-    h[side].status = METIS_ERROR;
-    if (h[side].xadj == NULL || h[side].adjncy == NULL ||
-        h[side].perm == NULL || h[side].iperm == NULL) {
-      ok = 0;
-      break;
-    }
-    idx_t w = 0, lv = 0;
-    for (idx_t v = 0; v < nvtxs; ++v) {
-      if (part[v] != side) continue;
-      h[side].xadj[lv] = w;
-      for (idx_t p = xadj[v]; p < xadj[v + 1]; ++p) {
-        idx_t u = adjncy[p];
-        if (part[u] == side) {
-          h[side].adjncy[w++] = local[u];
-        }
-      }
-      lv++;
-    }
-    h[side].xadj[lv] = w;
-  }
-  if (ok) {
-    pthread_t tid;
-    int threaded = pthread_create(&tid, NULL, kls_par_nd_half_main,
-                                  &h[1]) == 0;
-    kls_par_nd_half_main(&h[0]);
-    if (threaded) {
-      pthread_join(tid, NULL);
-    } else {
-      kls_par_nd_half_main(&h[1]);
-    }
-    ok = h[0].status == METIS_OK && h[1].status == METIS_OK;
-  }
-  if (ok) {
-    /* global elimination positions: half0 first, half1, separator
-       last (separator kept in input order - CAMD refinement below
-       polishes it) */
-    idx_t base1 = cnt[0];
-    idx_t base2 = cnt[0] + cnt[1];
-    idx_t sep_seen = 0;
-    for (idx_t v = 0; v < nvtxs; ++v) {
-      idx_t pos;
-      if (part[v] == 0) {
-        pos = h[0].iperm[local[v]];
-      } else if (part[v] == 1) {
-        pos = base1 + h[1].iperm[local[v]];
-      } else {
-        pos = base2 + sep_seen++;
-      }
-      metis_iperm[v] = pos;
-      gx[pos] = v;
-    }
-    for (idx_t k = 0; k < nvtxs; ++k) {
-      metis_perm[k] = gx[k];
-    }
-  }
-  for (int side = 0; side < 2; ++side) {
-    free(h[side].xadj);
-    free(h[side].adjncy);
-    free(h[side].perm);
-    free(h[side].iperm);
-  }
-  free(part);
-  free(local);
-  free(gx);
-  return ok;
-}
 
 static UF_long kls_metis_order(UF_long n,
                                UF_long *col_ptr,
@@ -4333,44 +4128,6 @@ static UF_long kls_metis_order(UF_long n,
   idx_t nvtxs = (idx_t)n;
   int metis_status = METIS_ERROR;
   int par_nd_done = 0;
-#ifdef KLS_HAVE_MTMETIS
-  if (n >= 200000 &&
-      (getenv("KLS_MT_ND") != NULL ||
-       (kls_mt_nd_class && getenv("KLS_MT_ND_CLASS") != NULL))) {
-    /* threaded ND (mt-metis, MIT).  With a leaf-count request the
-       forest-aware path replicates NodeNDP's sizes contract so the
-       separator forest (and the pipeline refactor engines that read
-       it) stay intact; otherwise the plain bridge. */
-    if (metis_ndp_npes > 1 && metis_ndp_sizes != NULL) {
-      par_nd_done = kls_mtmetis_ndp(n, xadj, adjncy, metis_ndp_npes,
-                                    metis_perm, metis_iperm,
-                                    metis_ndp_sizes, 0);
-    } else {
-      par_nd_done = kls_mtmetis_nd(n, xadj, adjncy, metis_perm,
-                                   metis_iperm);
-      if (par_nd_done) {
-        metis_ndp_npes = 0;
-      }
-    }
-    if (par_nd_done) {
-      metis_status = METIS_OK;
-    }
-  }
-#endif
-  if (metis_ndp_npes <= 1 && n >= 200000 &&
-      getenv("KLS_PAR_ND") != NULL) {
-    /* one manual top level of nested dissection: METIS's own vertex
-       separator, then the two halves NodeND'd CONCURRENTLY (NodeND is
-       serial; this is its own recursion with the top level threaded).
-       Composed order: half 0, half 1, separator last - the same shape
-       NodeND produces.  Quality is arbitrated downstream by the
-       ordering competition's fill scores. */
-    par_nd_done = kls_metis_parallel_nd(nvtxs, xadj, adjncy, options,
-                                        metis_perm, metis_iperm);
-    if (par_nd_done) {
-      metis_status = METIS_OK;
-    }
-  }
 #ifdef KLS_HAVE_MTMETIS
   const int force_det_ndp =
     getenv("KLS_FORCE_DET_NDP") != NULL ||
@@ -13520,11 +13277,6 @@ static int kls_choose_symbolic_inner(UF_long n,
   }
 
   kls_no_btf_retry_hopeless = 0;
-#ifdef KLS_HAVE_MTMETIS
-  kls_mt_nd_class =
-    n >= 200000 &&
-    is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx);
-#endif
   kls_options auto_options = *options;
   symbolic_options = options;
   const int large_spiked_metis_no_btf =
