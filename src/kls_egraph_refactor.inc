@@ -48,13 +48,6 @@ static void kls_egraph_refactor_record_singular(
     atomic_store_explicit(&shared->stop, 1, memory_order_release);
   }
   pthread_mutex_unlock(&shared->lock);
-  if (shared->solver->zero_pivot_collect != NULL) {
-    const long slot = atomic_fetch_add_explicit(
-      &shared->solver->zero_pivot_collect_count, 1, memory_order_relaxed);
-    if (slot < shared->solver->zero_pivot_collect_cap) {
-      shared->solver->zero_pivot_collect[slot] = numerical_rank;
-    }
-  }
 }
 
 static int kls_egraph_refactor_should_stop(

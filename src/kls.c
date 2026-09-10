@@ -757,14 +757,6 @@ struct kls_solver {
   UF_long *pivot_nudge_pos;
   double *pivot_nudge_sigma;
   double *pivot_nudge_values;
-  /* predicted-fill zero-pivot collection: non-NULL only during a
-     halt-off fill pass; workers append pivot indices of exact-zero
-     pivots (the Inf/NaN cascade downstream of a zero never records
-     falsely - NaN != 0 - so one pass yields the frontier of
-     independent zeros) */
-  UF_long *zero_pivot_collect;
-  _Atomic long zero_pivot_collect_count;
-  long zero_pivot_collect_cap;
   UF_long pivot_nudge_count;
   UF_long pivot_nudge_capacity;
   double *solve_refine_workspace;
@@ -5723,8 +5715,7 @@ static atomic_uint *ensure_egraph_pipeline_done(
   return solver->egraph_pipeline_done;
 }
 
-static void kls_record_singular_status(kls_solver *solver,
-                                       int *singular,
+static void kls_record_singular_status(int *singular,
                                        UF_long *recorded_rank,
                                        UF_long *recorded_col,
                                        UF_long numerical_rank,
@@ -5734,19 +5725,12 @@ static void kls_record_singular_status(kls_solver *solver,
     *recorded_rank = numerical_rank;
     *recorded_col = singular_col;
   }
-  if (solver->zero_pivot_collect != NULL) {
-    const long slot = atomic_fetch_add_explicit(
-      &solver->zero_pivot_collect_count, 1, memory_order_relaxed);
-    if (slot < solver->zero_pivot_collect_cap) {
-      solver->zero_pivot_collect[slot] = numerical_rank;
-    }
-  }
 }
 
 static void kls_worker_record_singular(kls_parallel_refactor_worker *worker,
                                        UF_long numerical_rank,
                                        UF_long singular_col) {
-  kls_record_singular_status(worker->shared->solver, &worker->singular,
+  kls_record_singular_status(&worker->singular,
                              &worker->numerical_rank,
                              &worker->singular_col, numerical_rank,
                              singular_col);
@@ -7632,7 +7616,7 @@ static int kls_lean_btf_map32_refactor(kls_solver *solver,
       }
       udiag[k1] = pivot;
       if (pivot == 0.0) {
-        kls_record_singular_status(solver, &singular, &numerical_rank,
+        kls_record_singular_status(&singular, &numerical_rank,
                                    &singular_col, k1, q[k1]);
         if (common->halt_if_singular) {
           break;
@@ -7692,7 +7676,7 @@ static int kls_lean_btf_map32_refactor(kls_solver *solver,
       x[k] = 0.0;
       udiag[global] = pivot;
       if (pivot == 0.0) {
-        kls_record_singular_status(solver, &singular, &numerical_rank,
+        kls_record_singular_status(&singular, &numerical_rank,
                                    &singular_col, global, q[global]);
         if (common->halt_if_singular) {
           break;

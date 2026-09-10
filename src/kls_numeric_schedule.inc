@@ -808,13 +808,6 @@ static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
   if (solver->common.halt_if_singular) {
     atomic_store_explicit(&st->failed, 1, memory_order_release);
   }
-  if (solver->zero_pivot_collect != NULL) {
-    const long slot = atomic_fetch_add_explicit(
-      &solver->zero_pivot_collect_count, 1, memory_order_relaxed);
-    if (slot < solver->zero_pivot_collect_cap) {
-      solver->zero_pivot_collect[slot] = gk;
-    }
-  }
 }
 
 /* Serial edge arithmetic shared by ordinary and cooperative-small-edge

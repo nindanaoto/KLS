@@ -11341,14 +11341,6 @@ static void kls_pivot_first_parallel_record_singular(
     shared->singular_rank = rank;
     shared->singular_col = col;
   }
-  if (shared->solver != NULL &&
-      shared->solver->zero_pivot_collect != NULL) {
-    const long slot = atomic_fetch_add_explicit(
-      &shared->solver->zero_pivot_collect_count, 1, memory_order_relaxed);
-    if (slot < shared->solver->zero_pivot_collect_cap) {
-      shared->solver->zero_pivot_collect[slot] = rank;
-    }
-  }
 }
 
 static int kls_pivot_first_parallel_commit_block(
@@ -13220,24 +13212,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
     }
   }
-  const int zp_collect_mode =
-    getenv("KLS_PREDICTED_COLLECT_ZEROS") != NULL &&
-    !solver->block_trial_active;
   const Int zp_saved_halt = common->halt_if_singular;
-  if (zp_collect_mode) {
-    /* Batch zero-pivot collection: run each fill pass with the halt
-       off so every worker records its exact-zero pivots (downstream
-       Inf/NaN never compares equal to 0.0, so one pass collects the
-       frontier of independent zeros; mac_econ: 507 one-per-pass
-       rounds collapse to the dependency depth). */
-    solver->zero_pivot_collect_cap = 4096;
-    solver->zero_pivot_collect = (UF_long *)malloc(
-      (size_t)solver->zero_pivot_collect_cap *
-      sizeof(*solver->zero_pivot_collect));
-    if (solver->zero_pivot_collect != NULL) {
-      common->halt_if_singular = 0;
-    }
-  }
   UF_long kls_prev_batch_nudged = 0;
   if (refactor_ok == 0 &&
       common->status == TRILINOS_KLU_SINGULAR &&
@@ -13246,20 +13221,7 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     /* forced-fill path set above: skip the value rounds */
   } else
   for (UF_long fill_round = 0; fill_round < fill_round_cap; ++fill_round) {
-    if (solver->zero_pivot_collect != NULL) {
-      atomic_store_explicit(&solver->zero_pivot_collect_count, 0,
-                            memory_order_relaxed);
-    }
     refactor_ok = kls_parallel_refactor(solver, numeric_values, 0);
-    if (solver->zero_pivot_collect != NULL &&
-        atomic_load_explicit(&solver->zero_pivot_collect_count,
-                             memory_order_relaxed) > 0) {
-      /* halt-off passes complete and their join reports neither a
-         failed ok nor a singular status; the recorded zeros are the
-         verdict */
-      refactor_ok = 0;
-      common->status = TRILINOS_KLU_SINGULAR;
-    }
     UF_long k = KLS_KLU_EMPTY;
     if (refactor_ok && common->status >= TRILINOS_KLU_OK &&
         common->status != TRILINOS_KLU_SINGULAR) {
@@ -13428,23 +13390,8 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
         k = (UF_long)common->singular_col;
       }
     }
-    long zp_count = 0;
-    if (solver->zero_pivot_collect != NULL) {
-      zp_count = atomic_load_explicit(&solver->zero_pivot_collect_count,
-                                      memory_order_relaxed);
-      if (zp_count > solver->zero_pivot_collect_cap) {
-        zp_count = solver->zero_pivot_collect_cap;
-      }
-    }
-    int zp_fatal = 0;
-    for (long zp_i = 0; zp_i < (zp_count > 0 ? zp_count : 1) && !zp_fatal;
-         ++zp_i) {
-    if (zp_count > 0) {
-      k = solver->zero_pivot_collect[zp_i];
-    }
     if (k == KLS_KLU_EMPTY || k >= n ||
         solver->pivot_nudge_count >= nudge_slot_cap) {
-      zp_fatal = 1;
       break;
     }
     const UF_long oldcol = Q[k];
@@ -13459,7 +13406,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       }
     }
     if (diag_pos == KLS_KLU_EMPTY) {
-      zp_fatal = 1;
       break;
     }
     if (solver->pivot_nudge_values == NULL) {
@@ -13473,7 +13419,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
           solver->pivot_nudge_pos == NULL ||
           solver->pivot_nudge_sigma == NULL) {
         free_pivot_nudges(solver);
-        zp_fatal = 1;
         break;
       }
       solver->pivot_nudge_capacity = nudge_slot_cap;
@@ -13489,7 +13434,6 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
     if (existing != KLS_KLU_EMPTY) {
       solver->pivot_nudge_sigma[existing] *= 32.0;
       if (!(fabs(solver->pivot_nudge_sigma[existing]) <= base)) {
-        zp_fatal = 1;
         break;
       }
     } else {
@@ -13499,21 +13443,12 @@ static int kls_predicted_pattern_first_factor(kls_solver *solver,
       solver->pivot_nudge_sigma[solver->pivot_nudge_count] = tol_sigma;
       solver->pivot_nudge_count++;
     }
-    }
-    if (zp_fatal) {
-      break;
-    }
     common->status = TRILINOS_KLU_OK;
     common->numerical_rank = KLS_KLU_EMPTY;
     common->singular_col = KLS_KLU_EMPTY;
     refactor_ok = 0;
   }
   common->halt_if_singular = zp_saved_halt;
-  if (solver->zero_pivot_collect != NULL) {
-    free(solver->zero_pivot_collect);
-    solver->zero_pivot_collect = NULL;
-    solver->zero_pivot_collect_cap = 0;
-  }
   int pivot_fill_used = 0;
   if (!refactor_ok || common->status < TRILINOS_KLU_OK ||
       common->status == TRILINOS_KLU_SINGULAR) {
