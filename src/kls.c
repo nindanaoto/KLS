@@ -2814,21 +2814,12 @@ static void kls_clear_row_solve_partition(kls_solver *solver) {
   solver->row_solve_thread_count = 0;
   solver->row_solve_l_thread_max_rect_entries = 0;
   solver->row_solve_u_thread_max_rect_entries = 0;
-  solver->stats.row_solve_thread_count = 0;
-  solver->stats.row_solve_l_thread_max_rect_entries = 0;
-  solver->stats.row_solve_u_thread_max_rect_entries = 0;
   solver->row_solve_l_sparse_level_count = 0;
   solver->row_solve_l_sparse_cluster_levels = 0;
   solver->row_solve_l_sparse_level_max_width = 0;
   solver->row_solve_u_sparse_level_count = 0;
   solver->row_solve_u_sparse_cluster_levels = 0;
   solver->row_solve_u_sparse_level_max_width = 0;
-  solver->stats.row_solve_l_sparse_level_count = 0;
-  solver->stats.row_solve_l_sparse_cluster_levels = 0;
-  solver->stats.row_solve_l_sparse_level_max_width = 0;
-  solver->stats.row_solve_u_sparse_level_count = 0;
-  solver->stats.row_solve_u_sparse_cluster_levels = 0;
-  solver->stats.row_solve_u_sparse_level_max_width = 0;
   solver->row_solve_partition_ready = 0;
   solver->row_solve_partition_slices = 0;
   solver->row_solve_l_dense_tail_start = 0;
@@ -6632,16 +6623,6 @@ static void kls_record_row_solve_parallel_run(kls_solver *solver,
   solver->row_solve_parallel_u_slice_runs += u_slice_runs;
   solver->row_solve_parallel_l_sparse_level_runs += l_sparse_level_runs;
   solver->row_solve_parallel_u_sparse_level_runs += u_sparse_level_runs;
-  solver->stats.row_solve_parallel_run_count =
-    (int64_t)solver->row_solve_parallel_run_count;
-  solver->stats.row_solve_parallel_l_slice_runs =
-    (int64_t)solver->row_solve_parallel_l_slice_runs;
-  solver->stats.row_solve_parallel_u_slice_runs =
-    (int64_t)solver->row_solve_parallel_u_slice_runs;
-  solver->stats.row_solve_parallel_l_sparse_level_runs =
-    (int64_t)solver->row_solve_parallel_l_sparse_level_runs;
-  solver->stats.row_solve_parallel_u_sparse_level_runs =
-    (int64_t)solver->row_solve_parallel_u_sparse_level_runs;
 }
 
 static void kls_record_fast_reject_detail(kls_solver *solver,

@@ -6950,11 +6950,6 @@ static void kls_clear_row_solve_thread_bounds(kls_solver *solver) {
   solver->row_solve_u_thread_max_rect_entries = 0;
   solver->row_solve_l_sparse_cluster_levels = 0;
   solver->row_solve_u_sparse_cluster_levels = 0;
-  solver->stats.row_solve_thread_count = 0;
-  solver->stats.row_solve_l_thread_max_rect_entries = 0;
-  solver->stats.row_solve_u_thread_max_rect_entries = 0;
-  solver->stats.row_solve_l_sparse_cluster_levels = 0;
-  solver->stats.row_solve_u_sparse_cluster_levels = 0;
 }
 
 static UF_long kls_row_solve_sparse_cluster_levels(
@@ -7023,13 +7018,6 @@ static int kls_build_row_solve_thread_bounds(kls_solver *solver,
     kls_row_solve_sparse_cluster_levels(
       solver->row_solve_u_sparse_level_ptr,
       solver->row_solve_u_sparse_level_count, thread_count);
-  solver->stats.row_solve_thread_count = (int64_t)thread_count;
-  solver->stats.row_solve_l_thread_max_rect_entries = (int64_t)l_max_rect;
-  solver->stats.row_solve_u_thread_max_rect_entries = (int64_t)u_max_rect;
-  solver->stats.row_solve_l_sparse_cluster_levels =
-    (int64_t)solver->row_solve_l_sparse_cluster_levels;
-  solver->stats.row_solve_u_sparse_cluster_levels =
-    (int64_t)solver->row_solve_u_sparse_cluster_levels;
   return 1;
 }
 

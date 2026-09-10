@@ -16304,66 +16304,6 @@ static void fill_numeric_stats(kls_solver *solver) {
     solver->row_refactor_last_row_solve;
   solver->stats.row_refactor_row_solve_run_count =
     (int64_t)solver->row_refactor_row_solve_run_count;
-  solver->stats.row_solve_parallel_run_count =
-    (int64_t)solver->row_solve_parallel_run_count;
-  solver->stats.row_solve_parallel_l_slice_runs =
-    (int64_t)solver->row_solve_parallel_l_slice_runs;
-  solver->stats.row_solve_parallel_u_slice_runs =
-    (int64_t)solver->row_solve_parallel_u_slice_runs;
-  solver->stats.row_solve_parallel_l_sparse_level_runs =
-    (int64_t)solver->row_solve_parallel_l_sparse_level_runs;
-  solver->stats.row_solve_parallel_u_sparse_level_runs =
-    (int64_t)solver->row_solve_parallel_u_sparse_level_runs;
-  solver->stats.row_solve_thread_count =
-    (int64_t)solver->row_solve_thread_count;
-  solver->stats.row_solve_l_thread_max_rect_entries =
-    (int64_t)solver->row_solve_l_thread_max_rect_entries;
-  solver->stats.row_solve_u_thread_max_rect_entries =
-    (int64_t)solver->row_solve_u_thread_max_rect_entries;
-  solver->stats.row_solve_partition_ready =
-    solver->row_solve_partition_ready;
-  solver->stats.row_solve_partition_slices =
-    (int64_t)solver->row_solve_partition_slices;
-  solver->stats.row_solve_l_sparse_level_count =
-    (int64_t)solver->row_solve_l_sparse_level_count;
-  solver->stats.row_solve_l_sparse_cluster_levels =
-    (int64_t)solver->row_solve_l_sparse_cluster_levels;
-  solver->stats.row_solve_l_sparse_level_max_width =
-    (int64_t)solver->row_solve_l_sparse_level_max_width;
-  solver->stats.row_solve_l_dense_tail_start =
-    (int64_t)solver->row_solve_l_dense_tail_start;
-  solver->stats.row_solve_l_dense_tail_rows =
-    (int64_t)solver->row_solve_l_dense_tail_rows;
-  solver->stats.row_solve_l_dense_tail_entries =
-    (int64_t)solver->row_solve_l_dense_tail_entries;
-  solver->stats.row_solve_l_slice_max_entries =
-    (int64_t)solver->row_solve_l_slice_max_entries;
-  solver->stats.row_solve_l_segmented_rows =
-    (int64_t)solver->row_solve_l_segmented_rows;
-  solver->stats.row_solve_l_rect_entries =
-    (int64_t)solver->row_solve_l_rect_entries;
-  solver->stats.row_solve_l_tri_entries =
-    (int64_t)solver->row_solve_l_tri_entries;
-  solver->stats.row_solve_u_sparse_level_count =
-    (int64_t)solver->row_solve_u_sparse_level_count;
-  solver->stats.row_solve_u_sparse_cluster_levels =
-    (int64_t)solver->row_solve_u_sparse_cluster_levels;
-  solver->stats.row_solve_u_sparse_level_max_width =
-    (int64_t)solver->row_solve_u_sparse_level_max_width;
-  solver->stats.row_solve_u_dense_tail_start =
-    (int64_t)solver->row_solve_u_dense_tail_start;
-  solver->stats.row_solve_u_dense_tail_rows =
-    (int64_t)solver->row_solve_u_dense_tail_rows;
-  solver->stats.row_solve_u_dense_tail_entries =
-    (int64_t)solver->row_solve_u_dense_tail_entries;
-  solver->stats.row_solve_u_slice_max_entries =
-    (int64_t)solver->row_solve_u_slice_max_entries;
-  solver->stats.row_solve_u_segmented_rows =
-    (int64_t)solver->row_solve_u_segmented_rows;
-  solver->stats.row_solve_u_rect_entries =
-    (int64_t)solver->row_solve_u_rect_entries;
-  solver->stats.row_solve_u_tri_entries =
-    (int64_t)solver->row_solve_u_tri_entries;
   solver->stats.row_refactor_segment_count =
     (int64_t)solver->row_refactor_segment_count;
   solver->stats.row_refactor_segment_rows =
