@@ -7729,13 +7729,11 @@ static int kls_row_refactor_dense_producer_run_start(
   UF_long p,
   UF_long l_end,
   UF_long *group_out,
-  UF_long *len_out,
-  UF_long *suffix_out) {
+  UF_long *len_out) {
   if (group_out != NULL) {
     *group_out = KLS_KLU_EMPTY;
   }
   KLS_SET_OPTIONAL_OUTPUT(len_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(suffix_out, 0);
   if (l_cols == NULL || row_group == NULL || group_ptr == NULL ||
       group_kind == NULL || p >= l_end || row >= n) {
     return 0;
@@ -7778,9 +7776,6 @@ static int kls_row_refactor_dense_producer_run_start(
   if (len_out != NULL) {
     *len_out = run_len;
   }
-  if (suffix_out != NULL) {
-    *suffix_out = dep0 - group_begin;
-  }
   return 1;
 }
 
@@ -7800,13 +7795,6 @@ typedef struct {
   UF_long *run_group;
   UF_long *run_len;
   UF_long run_count;
-  UF_long run_rows;
-  UF_long run_dep_rows;
-  UF_long run_max_per_row;
-  UF_long full_suffix_run_count;
-  UF_long full_suffix_rows;
-  UF_long multi_run_rows;
-  UF_long fragmented_rows;
   int fill;
   int ok;
 } kls_dense_producer_run_build_job;
@@ -7824,21 +7812,17 @@ static void kls_dense_producer_run_build(
     const UF_long row_group_id = job->row_group[row];
     const UF_long l_begin = job->l_ptr[row];
     const UF_long l_end = job->l_ptr[row + 1u];
-    const UF_long row_l_len = l_end - l_begin;
     UF_long row_runs = 0u;
-    UF_long covered_entries = 0u;
-    UF_long row_full_suffix_runs = 0u;
     UF_long write = job->fill ? job->run_ptr[row] : 0u;
     UF_long p = l_begin;
     while (p < l_end) {
       UF_long dep_group = KLS_KLU_EMPTY;
       UF_long run_len = 0u;
-      UF_long suffix = 0u;
       if (kls_row_refactor_dense_producer_run_start(
             job->n, job->l_cols, job->row_group, job->group_count,
             job->group_ptr, job->group_kind,
             job->group_compact_panel_begin, row, row_group_id, p, l_end,
-            &dep_group, &run_len, &suffix)) {
+            &dep_group, &run_len)) {
         if (job->fill) {
           if (write >= job->run_ptr[row + 1u] ||
               job->run_l_begin == NULL || job->run_group == NULL ||
@@ -7851,16 +7835,8 @@ static void kls_dense_producer_run_build(
           job->run_len[write] = run_len;
           write++;
         } else {
-          const UF_long width =
-            job->group_ptr[dep_group + 1u] - job->group_ptr[dep_group];
           row_runs++;
           job->run_count++;
-          covered_entries += run_len;
-          job->run_dep_rows += run_len;
-          if (suffix + run_len == width) {
-            row_full_suffix_runs++;
-            job->full_suffix_run_count++;
-          }
         }
         p += run_len;
       } else {
@@ -7875,22 +7851,6 @@ static void kls_dense_producer_run_build(
       continue;
     }
     job->run_ptr[row + 1u] = row_runs;
-    if (row_runs > 0u) {
-      job->run_rows++;
-      if (row_runs > job->run_max_per_row) {
-        job->run_max_per_row = row_runs;
-      }
-      if (row_full_suffix_runs > 0u) {
-        job->full_suffix_rows++;
-      }
-      if (row_runs > 1u) {
-        job->multi_run_rows++;
-      }
-      if (covered_entries != row_l_len ||
-          row_full_suffix_runs != row_runs) {
-        job->fragmented_rows++;
-      }
-    }
   }
 }
 
@@ -7906,27 +7866,11 @@ static void kls_try_build_row_refactor_dense_producer_runs(
   UF_long **run_ptr_out,
   UF_long **run_l_begin_out,
   UF_long **run_group_out,
-  UF_long **run_len_out,
-  UF_long *run_count_out,
-  UF_long *run_rows_out,
-  UF_long *run_dep_rows_out,
-  UF_long *run_max_per_row_out,
-  UF_long *full_suffix_run_count_out,
-  UF_long *full_suffix_rows_out,
-  UF_long *multi_run_rows_out,
-  UF_long *fragmented_rows_out) {
+  UF_long **run_len_out) {
   KLS_SET_OPTIONAL_OUTPUT(run_ptr_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(run_l_begin_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(run_group_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(run_len_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(run_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(run_rows_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(run_dep_rows_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(run_max_per_row_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(full_suffix_run_count_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(full_suffix_rows_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(multi_run_rows_out, 0);
-  KLS_SET_OPTIONAL_OUTPUT(fragmented_rows_out, 0);
   if (n == 0u || l_ptr == NULL || l_cols == NULL || row_group == NULL ||
       group_count == 0u || group_ptr == NULL || group_kind == NULL ||
       group_compact_panel_begin == NULL || run_ptr_out == NULL ||
@@ -7960,13 +7904,6 @@ static void kls_try_build_row_refactor_dense_producer_runs(
     return;
   }
   const UF_long run_count = run_job.run_count;
-  const UF_long run_rows = run_job.run_rows;
-  const UF_long run_dep_rows = run_job.run_dep_rows;
-  const UF_long run_max_per_row = run_job.run_max_per_row;
-  const UF_long full_suffix_run_count = run_job.full_suffix_run_count;
-  const UF_long full_suffix_rows = run_job.full_suffix_rows;
-  const UF_long multi_run_rows = run_job.multi_run_rows;
-  const UF_long fragmented_rows = run_job.fragmented_rows;
 
   if (run_count == 0u) {
     free(run_ptr);
@@ -8020,30 +7957,6 @@ static void kls_try_build_row_refactor_dense_producer_runs(
   *run_l_begin_out = run_l_begin;
   *run_group_out = run_group;
   *run_len_out = run_len;
-  if (run_count_out != NULL) {
-    *run_count_out = run_count;
-  }
-  if (run_rows_out != NULL) {
-    *run_rows_out = run_rows;
-  }
-  if (run_dep_rows_out != NULL) {
-    *run_dep_rows_out = run_dep_rows;
-  }
-  if (run_max_per_row_out != NULL) {
-    *run_max_per_row_out = run_max_per_row;
-  }
-  if (full_suffix_run_count_out != NULL) {
-    *full_suffix_run_count_out = full_suffix_run_count;
-  }
-  if (full_suffix_rows_out != NULL) {
-    *full_suffix_rows_out = full_suffix_rows;
-  }
-  if (multi_run_rows_out != NULL) {
-    *multi_run_rows_out = multi_run_rows;
-  }
-  if (fragmented_rows_out != NULL) {
-    *fragmented_rows_out = fragmented_rows;
-  }
 }
 
 static void kls_try_build_row_refactor_segment_input_targets(
@@ -9249,26 +9162,12 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long *dense_producer_run_l_begin = NULL;
   UF_long *dense_producer_run_group = NULL;
   UF_long *dense_producer_run_len = NULL;
-  UF_long dense_producer_run_count = 0;
-  UF_long dense_producer_run_rows = 0;
-  UF_long dense_producer_run_dep_rows = 0;
-  UF_long dense_producer_run_max_per_row = 0;
-  UF_long dense_producer_full_suffix_run_count = 0;
-  UF_long dense_producer_full_suffix_rows = 0;
-  UF_long dense_producer_multi_run_rows = 0;
-  UF_long dense_producer_fragmented_rows = 0;
   kls_segment_input_target_prep_run(&segment_input_job);
   kls_try_build_row_refactor_dense_producer_runs(
     n, l_ptr, l_cols, row_group, group_count, group_ptr, group_kind,
     group_compact_panel_begin, &dense_producer_run_ptr,
     &dense_producer_run_l_begin, &dense_producer_run_group,
-    &dense_producer_run_len, &dense_producer_run_count,
-    &dense_producer_run_rows, &dense_producer_run_dep_rows,
-    &dense_producer_run_max_per_row,
-    &dense_producer_full_suffix_run_count,
-    &dense_producer_full_suffix_rows,
-    &dense_producer_multi_run_rows,
-    &dense_producer_fragmented_rows);
+    &dense_producer_run_len);
   UF_long group_single_count = 0u;
   UF_long group_batch_count = 0u;
   UF_long group_batch_rows = 0u;
@@ -9420,22 +9319,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     compact_dense_panel_update_work;
   solver->row_refactor_compact_dense_panel_entries =
     compact_dense_panel_entries;
-  solver->row_refactor_dense_producer_run_count =
-    dense_producer_run_count;
-  solver->row_refactor_dense_producer_run_rows =
-    dense_producer_run_rows;
-  solver->row_refactor_dense_producer_run_dep_rows =
-    dense_producer_run_dep_rows;
-  solver->row_refactor_dense_producer_run_max_per_row =
-    dense_producer_run_max_per_row;
-  solver->row_refactor_dense_producer_full_suffix_run_count =
-    dense_producer_full_suffix_run_count;
-  solver->row_refactor_dense_producer_full_suffix_rows =
-    dense_producer_full_suffix_rows;
-  solver->row_refactor_dense_producer_multi_run_rows =
-    dense_producer_multi_run_rows;
-  solver->row_refactor_dense_producer_fragmented_rows =
-    dense_producer_fragmented_rows;
   solver->row_refactor_segment_input_target_rows =
     segment_input_job.target_rows;
   solver->row_refactor_segment_input_target_entries =

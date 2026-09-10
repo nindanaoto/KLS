@@ -1097,14 +1097,6 @@ struct kls_solver {
   UF_long *row_refactor_dense_producer_run_l_begin;
   UF_long *row_refactor_dense_producer_run_group;
   UF_long *row_refactor_dense_producer_run_len;
-  UF_long row_refactor_dense_producer_run_count;
-  UF_long row_refactor_dense_producer_run_rows;
-  UF_long row_refactor_dense_producer_run_dep_rows;
-  UF_long row_refactor_dense_producer_run_max_per_row;
-  UF_long row_refactor_dense_producer_full_suffix_run_count;
-  UF_long row_refactor_dense_producer_full_suffix_rows;
-  UF_long row_refactor_dense_producer_multi_run_rows;
-  UF_long row_refactor_dense_producer_fragmented_rows;
   UF_long row_refactor_compact_dense_panel_persistent_groups;
   UF_long row_refactor_compact_dense_panel_persistent_entries;
   int row_refactor_last_compact_dense_panel_persistent;
@@ -3049,14 +3041,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_dense_panel_eligible_rows = 0;
   solver->row_refactor_compact_dense_panel_update_work = 0.0;
   solver->row_refactor_compact_dense_panel_entries = 0.0;
-  solver->row_refactor_dense_producer_run_count = 0;
-  solver->row_refactor_dense_producer_run_rows = 0;
-  solver->row_refactor_dense_producer_run_dep_rows = 0;
-  solver->row_refactor_dense_producer_run_max_per_row = 0;
-  solver->row_refactor_dense_producer_full_suffix_run_count = 0;
-  solver->row_refactor_dense_producer_full_suffix_rows = 0;
-  solver->row_refactor_dense_producer_multi_run_rows = 0;
-  solver->row_refactor_dense_producer_fragmented_rows = 0;
   solver->row_refactor_compact_dense_panel_persistent_groups = 0;
   solver->row_refactor_compact_dense_panel_persistent_entries = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
@@ -3262,14 +3246,6 @@ typedef struct {
   UF_long compact_dense_panel_eligible_rows;
   double compact_dense_panel_update_work;
   double compact_dense_panel_entries;
-  UF_long dense_producer_run_count;
-  UF_long dense_producer_run_rows;
-  UF_long dense_producer_run_dep_rows;
-  UF_long dense_producer_run_max_per_row;
-  UF_long dense_producer_full_suffix_run_count;
-  UF_long dense_producer_full_suffix_rows;
-  UF_long dense_producer_multi_run_rows;
-  UF_long dense_producer_fragmented_rows;
   UF_long compact_dense_panel_persistent_groups;
   UF_long compact_dense_panel_persistent_entries;
   int last_compact_dense_panel_persistent;
@@ -3548,22 +3524,6 @@ static void kls_save_row_refactor_diagnostics(
     solver->row_refactor_compact_dense_panel_update_work;
   diag->compact_dense_panel_entries =
     solver->row_refactor_compact_dense_panel_entries;
-  diag->dense_producer_run_count =
-    solver->row_refactor_dense_producer_run_count;
-  diag->dense_producer_run_rows =
-    solver->row_refactor_dense_producer_run_rows;
-  diag->dense_producer_run_dep_rows =
-    solver->row_refactor_dense_producer_run_dep_rows;
-  diag->dense_producer_run_max_per_row =
-    solver->row_refactor_dense_producer_run_max_per_row;
-  diag->dense_producer_full_suffix_run_count =
-    solver->row_refactor_dense_producer_full_suffix_run_count;
-  diag->dense_producer_full_suffix_rows =
-    solver->row_refactor_dense_producer_full_suffix_rows;
-  diag->dense_producer_multi_run_rows =
-    solver->row_refactor_dense_producer_multi_run_rows;
-  diag->dense_producer_fragmented_rows =
-    solver->row_refactor_dense_producer_fragmented_rows;
   diag->compact_dense_panel_persistent_groups =
     solver->row_refactor_compact_dense_panel_persistent_groups;
   diag->compact_dense_panel_persistent_entries =
@@ -3924,22 +3884,6 @@ static void kls_restore_row_refactor_diagnostics(
     diag->compact_dense_panel_update_work;
   solver->row_refactor_compact_dense_panel_entries =
     diag->compact_dense_panel_entries;
-  solver->row_refactor_dense_producer_run_count =
-    diag->dense_producer_run_count;
-  solver->row_refactor_dense_producer_run_rows =
-    diag->dense_producer_run_rows;
-  solver->row_refactor_dense_producer_run_dep_rows =
-    diag->dense_producer_run_dep_rows;
-  solver->row_refactor_dense_producer_run_max_per_row =
-    diag->dense_producer_run_max_per_row;
-  solver->row_refactor_dense_producer_full_suffix_run_count =
-    diag->dense_producer_full_suffix_run_count;
-  solver->row_refactor_dense_producer_full_suffix_rows =
-    diag->dense_producer_full_suffix_rows;
-  solver->row_refactor_dense_producer_multi_run_rows =
-    diag->dense_producer_multi_run_rows;
-  solver->row_refactor_dense_producer_fragmented_rows =
-    diag->dense_producer_fragmented_rows;
   solver->row_refactor_compact_dense_panel_persistent_groups =
     diag->compact_dense_panel_persistent_groups;
   solver->row_refactor_compact_dense_panel_persistent_entries =
