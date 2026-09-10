@@ -1028,8 +1028,6 @@ struct kls_solver {
   UF_long row_solve_parallel_l_sparse_level_runs;
   UF_long row_solve_parallel_u_sparse_level_runs;
   int row_solve_thread_count;
-  UF_long row_solve_l_thread_max_rect_entries;
-  UF_long row_solve_u_thread_max_rect_entries;
   int row_solve_partition_ready;
   UF_long row_solve_l_sparse_level_count;
   UF_long row_solve_l_sparse_cluster_levels;
@@ -2741,8 +2739,6 @@ static void kls_clear_row_solve_partition(kls_solver *solver) {
   solver->row_solve_u_sparse_level_ptr = NULL;
   solver->row_solve_u_sparse_level_rows = NULL;
   solver->row_solve_thread_count = 0;
-  solver->row_solve_l_thread_max_rect_entries = 0;
-  solver->row_solve_u_thread_max_rect_entries = 0;
   solver->row_solve_l_sparse_level_count = 0;
   solver->row_solve_l_sparse_cluster_levels = 0;
   solver->row_solve_u_sparse_level_count = 0;

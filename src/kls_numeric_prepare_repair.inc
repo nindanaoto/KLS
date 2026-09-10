@@ -6839,10 +6839,8 @@ static int kls_build_one_row_solve_thread_bounds(
   const UF_long *slice_bounds,
   int upper,
   int thread_count,
-  UF_long **bounds_out,
-  UF_long *max_rect_entries_out) {
+  UF_long **bounds_out) {
   KLS_SET_OPTIONAL_OUTPUT(bounds_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(max_rect_entries_out, 0);
   if (bounds_out == NULL || ptr == NULL || split == NULL ||
       slice_bounds == NULL || thread_count < 2) {
     return 0;
@@ -6857,7 +6855,6 @@ static int kls_build_one_row_solve_thread_bounds(
     return 0;
   }
 
-  UF_long max_rect_entries = 0;
   for (UF_long slice = 0u; slice < slices; ++slice) {
     const UF_long begin = slice_bounds[slice];
     const UF_long end = slice_bounds[slice + 1u];
@@ -6890,21 +6887,9 @@ static int kls_build_one_row_solve_thread_bounds(
       parts[worker] = row;
     }
 
-    for (UF_long worker = 0u; worker < workers; ++worker) {
-      UF_long worker_entries = 0;
-      for (UF_long r = parts[worker]; r < parts[worker + 1u]; ++r) {
-        worker_entries += kls_row_solve_rect_len(ptr, split, r, upper);
-      }
-      if (worker_entries > max_rect_entries) {
-        max_rect_entries = worker_entries;
-      }
-    }
   }
 
   *bounds_out = bounds;
-  if (max_rect_entries_out != NULL) {
-    *max_rect_entries_out = max_rect_entries;
-  }
   return 1;
 }
 
@@ -6917,8 +6902,6 @@ static void kls_clear_row_solve_thread_bounds(kls_solver *solver) {
   solver->row_solve_l_thread_bounds = NULL;
   solver->row_solve_u_thread_bounds = NULL;
   solver->row_solve_thread_count = 0;
-  solver->row_solve_l_thread_max_rect_entries = 0;
-  solver->row_solve_u_thread_max_rect_entries = 0;
   solver->row_solve_l_sparse_cluster_levels = 0;
   solver->row_solve_u_sparse_cluster_levels = 0;
 }
@@ -6954,13 +6937,11 @@ static int kls_build_row_solve_thread_bounds(kls_solver *solver,
   kls_clear_row_solve_thread_bounds(solver);
   UF_long *l_bounds = NULL;
   UF_long *u_bounds = NULL;
-  UF_long l_max_rect = 0;
-  UF_long u_max_rect = 0;
   if (have_l) {
     if (!kls_build_one_row_solve_thread_bounds(
           solver->n, solver->row_refactor_l_ptr,
           solver->row_solve_l_segment_split, solver->row_solve_l_slice_bounds,
-          0, thread_count, &l_bounds, &l_max_rect)) {
+          0, thread_count, &l_bounds)) {
       free(l_bounds);
       return 0;
     }
@@ -6969,7 +6950,7 @@ static int kls_build_row_solve_thread_bounds(kls_solver *solver,
     if (!kls_build_one_row_solve_thread_bounds(
           solver->n, solver->row_refactor_u_ptr,
           solver->row_solve_u_segment_split, solver->row_solve_u_slice_bounds,
-          1, thread_count, &u_bounds, &u_max_rect)) {
+          1, thread_count, &u_bounds)) {
       free(l_bounds);
       free(u_bounds);
       return 0;
@@ -6979,8 +6960,6 @@ static int kls_build_row_solve_thread_bounds(kls_solver *solver,
   solver->row_solve_l_thread_bounds = l_bounds;
   solver->row_solve_u_thread_bounds = u_bounds;
   solver->row_solve_thread_count = thread_count;
-  solver->row_solve_l_thread_max_rect_entries = l_max_rect;
-  solver->row_solve_u_thread_max_rect_entries = u_max_rect;
   solver->row_solve_l_sparse_cluster_levels =
     kls_row_solve_sparse_cluster_levels(
       solver->row_solve_l_sparse_level_ptr,
@@ -7297,7 +7276,7 @@ static int kls_build_one_row_solve_transpose_thread_bounds(
   if (have_dense &&
       !kls_build_one_row_solve_thread_bounds(
         n, plan->ptr, plan->segment_split, plan->slice_bounds,
-        plan->upper, thread_count, &bounds, NULL)) {
+        plan->upper, thread_count, &bounds)) {
     free(bounds);
     return 0;
   }
