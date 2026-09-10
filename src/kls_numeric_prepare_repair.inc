@@ -8640,15 +8640,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     return 0;
   }
   UF_long group_count = 0;
-  UF_long group_scalar_candidate_count = 0;
-  UF_long group_scalar_candidate_rows = 0;
-  UF_long group_scalar_short_count = 0;
-  UF_long group_scalar_short_rows = 0;
-  UF_long group_scalar_stop_level_mismatch_count = 0;
-  UF_long group_scalar_stop_internal_dep_count = 0;
-  UF_long group_scalar_stop_next_segment_count = 0;
-  UF_long group_scalar_stop_max_width_count = 0;
-  UF_long group_scalar_stop_matrix_end_count = 0;
   UF_long row = 0;
   while (row < n) {
     group_ptr[group_count] = row;
@@ -8666,48 +8657,25 @@ static int kls_finish_row_refactor_pattern_from_arrays(
        That trims ready-queue/task overhead without hiding useful small-width
        parallelism or delaying low-level rows behind later dependencies. */
     if (!segment) {
-      int stop_recorded = 0;
-      group_scalar_candidate_count++;
       while (end < n && end - row < KLS_ROW_REFACTOR_BATCH_MAX_ROWS) {
         if (levels[end] != levels[row]) {
-          group_scalar_stop_level_mismatch_count++;
-          stop_recorded = 1;
           break;
         }
         if (end + 1u < n &&
             kls_row_refactor_u_row_extends_next(u_ptr, u_cols, n,
                                                 end, end + 1u)) {
-          group_scalar_stop_next_segment_count++;
-          stop_recorded = 1;
           break;
         }
         if (kls_row_refactor_row_depends_in_range(l_ptr, l_cols, end,
                                                   row, end)) {
-          group_scalar_stop_internal_dep_count++;
-          stop_recorded = 1;
           break;
         }
         end++;
       }
-      if (!stop_recorded) {
-        if (end >= n) {
-          group_scalar_stop_matrix_end_count++;
-        } else {
-          group_scalar_stop_max_width_count++;
-        }
-      }
       const UF_long candidate_rows = end - row;
-      group_scalar_candidate_rows += candidate_rows;
       if (candidate_rows < KLS_ROW_REFACTOR_BATCH_MIN_ROWS) {
-        group_scalar_short_count++;
-        group_scalar_short_rows += candidate_rows;
         end = row + 1u;
       }
-    } else if (!segment) {
-      group_scalar_candidate_count++;
-      group_scalar_candidate_rows++;
-      group_scalar_short_count++;
-      group_scalar_short_rows++;
     }
     for (UF_long i = row; i < end; ++i) {
       row_group[i] = group_count;
@@ -9176,24 +9144,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   solver->row_refactor_group_pred_count = group_pred_count;
   solver->row_refactor_group_roots = group_roots;
   solver->row_refactor_group_count = group_count;
-  solver->row_refactor_group_scalar_candidate_count =
-    group_scalar_candidate_count;
-  solver->row_refactor_group_scalar_candidate_rows =
-    group_scalar_candidate_rows;
-  solver->row_refactor_group_scalar_short_count =
-    group_scalar_short_count;
-  solver->row_refactor_group_scalar_short_rows =
-    group_scalar_short_rows;
-  solver->row_refactor_group_scalar_stop_level_mismatch_count =
-    group_scalar_stop_level_mismatch_count;
-  solver->row_refactor_group_scalar_stop_internal_dep_count =
-    group_scalar_stop_internal_dep_count;
-  solver->row_refactor_group_scalar_stop_next_segment_count =
-    group_scalar_stop_next_segment_count;
-  solver->row_refactor_group_scalar_stop_max_width_count =
-    group_scalar_stop_max_width_count;
-  solver->row_refactor_group_scalar_stop_matrix_end_count =
-    group_scalar_stop_matrix_end_count;
   solver->row_refactor_group_dependency_edges = group_dependency_edges;
   solver->row_refactor_group_root_count = group_root_count;
   solver->row_refactor_group_leaf_count = group_leaf_count;
