@@ -218,10 +218,8 @@ static void kls_reset_lean_scale_input_cache(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->lean_scale_input_snapshot);
-  free(solver->lean_scale_rs_snapshot);
-  solver->lean_scale_input_snapshot = NULL;
-  solver->lean_scale_rs_snapshot = NULL;
+  KLS_FREE_AND_NULL(solver->lean_scale_input_snapshot);
+  KLS_FREE_AND_NULL(solver->lean_scale_rs_snapshot);
   solver->lean_scale_input_state = 0;
 }
 
@@ -246,10 +244,8 @@ static int kls_lean_scale_input_is_unchanged(kls_solver *solver,
     }
     return 1;
   }
-  free(solver->lean_scale_input_snapshot);
-  free(solver->lean_scale_rs_snapshot);
-  solver->lean_scale_input_snapshot = NULL;
-  solver->lean_scale_rs_snapshot = NULL;
+  KLS_FREE_AND_NULL(solver->lean_scale_input_snapshot);
+  KLS_FREE_AND_NULL(solver->lean_scale_rs_snapshot);
   solver->lean_scale_input_state = -1;
   return 0;
 }
@@ -5653,18 +5649,12 @@ static void kls_free_refactor_l_sorted_cache(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->refactor_l_sorted_indices32);
-  free(solver->refactor_l_sorted_indices32_storage);
-  free(solver->refactor_l_sorted_pos32);
-  free(solver->refactor_l_sorted_pos32_storage);
-  free(solver->refactor_l_sorted_values);
-  free(solver->refactor_l_sorted_values_storage);
-  solver->refactor_l_sorted_indices32 = NULL;
-  solver->refactor_l_sorted_indices32_storage = NULL;
-  solver->refactor_l_sorted_pos32 = NULL;
-  solver->refactor_l_sorted_pos32_storage = NULL;
-  solver->refactor_l_sorted_values = NULL;
-  solver->refactor_l_sorted_values_storage = NULL;
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_indices32);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_indices32_storage);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_pos32);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_pos32_storage);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_values);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_values_storage);
   solver->refactor_l_sorted_enabled = 0;
 }
 
@@ -6810,10 +6800,8 @@ static void kls_clear_row_solve_thread_bounds(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->row_solve_l_thread_bounds);
-  free(solver->row_solve_u_thread_bounds);
-  solver->row_solve_l_thread_bounds = NULL;
-  solver->row_solve_u_thread_bounds = NULL;
+  KLS_FREE_AND_NULL(solver->row_solve_l_thread_bounds);
+  KLS_FREE_AND_NULL(solver->row_solve_u_thread_bounds);
   solver->row_solve_thread_count = 0;
   solver->row_solve_l_sparse_cluster_levels = 0;
   solver->row_solve_u_sparse_cluster_levels = 0;
@@ -9210,10 +9198,8 @@ static int kls_prepare_lean_snode_wait_masks(kls_solver *solver,
       solver->lean_snode_wait_thread_count == thread_count) {
     return 1;
   }
-  free(solver->lean_snode_wait_mask);
-  free(solver->lean_snode_wait_slot);
-  solver->lean_snode_wait_mask = NULL;
-  solver->lean_snode_wait_slot = NULL;
+  KLS_FREE_AND_NULL(solver->lean_snode_wait_mask);
+  KLS_FREE_AND_NULL(solver->lean_snode_wait_slot);
   solver->lean_snode_wait_rows = NULL;
   solver->lean_snode_wait_thread_count = 0;
   if (rows == NULL || thread_count < 2 || thread_count > 8 ||
@@ -12401,8 +12387,7 @@ static int kls_build_row_refactor_group_thread_slices(kls_solver *solver,
     return 1;
   }
 
-  free(solver->row_refactor_group_level_thread_ptr);
-  solver->row_refactor_group_level_thread_ptr = NULL;
+  KLS_FREE_AND_NULL(solver->row_refactor_group_level_thread_ptr);
   solver->row_refactor_group_level_thread_count = 0;
 
   const size_t levels = (size_t)solver->row_refactor_level_count;

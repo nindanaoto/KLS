@@ -2231,20 +2231,13 @@ static void kls_build_padded_panels(kls_solver *solver) {
     return;
   }
 fail_arrays:
-  free(solver->padded_run_start);
-  free(solver->padded_run_len);
-  free(solver->padded_union_ptr);
-  free(solver->padded_union_rows);
-  free(solver->padded_slots);
-  free(solver->padded_panel_ptr);
-  free(solver->padded_panel_values);
-  solver->padded_run_start = NULL;
-  solver->padded_run_len = NULL;
-  solver->padded_union_ptr = NULL;
-  solver->padded_union_rows = NULL;
-  solver->padded_slots = NULL;
-  solver->padded_panel_ptr = NULL;
-  solver->padded_panel_values = NULL;
+  KLS_FREE_AND_NULL(solver->padded_run_start);
+  KLS_FREE_AND_NULL(solver->padded_run_len);
+  KLS_FREE_AND_NULL(solver->padded_union_ptr);
+  KLS_FREE_AND_NULL(solver->padded_union_rows);
+  KLS_FREE_AND_NULL(solver->padded_slots);
+  KLS_FREE_AND_NULL(solver->padded_panel_ptr);
+  KLS_FREE_AND_NULL(solver->padded_panel_values);
 fail:
   free(run_of);
   free(slot_ptr);
