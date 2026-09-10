@@ -1129,22 +1129,6 @@ static int kls_exact_structural_symmetry(
    Topology only proposes the lifecycle; the retained symbolic and numeric
    must independently prove their fill, work, and separator bounds. */
 
-static int kls_sparse_full_diagonal_metis_row_input_economics(
-  UF_long n,
-  const UF_long *col_ptr) {
-  return col_ptr != NULL && n >= 100000u && n <= 4194304u &&
-    n <= UF_long_max / 5u && col_ptr[0] == 0u &&
-    col_ptr[n] >= 3u * n && col_ptr[n] <= 5u * n;
-}
-
-static int kls_sparse_full_diagonal_metis_row_input_profile(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  return kls_sparse_full_diagonal_metis_row_input_economics(n, col_ptr) &&
-    is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx);
-}
-
 /* Classify the actual no-BTF METIS symbolic only after it proves balanced
    intermediate fill and a useful mostly private separator.  Absolute bounds
    express two setup-cost crossovers; normalized bounds keep both meaningful
@@ -12825,14 +12809,8 @@ static int kls_choose_symbolic_inner(UF_long n,
        recovery path. */
   }
 
-  const int sparse_full_diagonal_metis_row_economics =
-    kls_sparse_full_diagonal_metis_row_input_economics(n, col_ptr);
   const int large_very_low_degree_full_diagonal =
-    sparse_full_diagonal_metis_row_economics
-      ? kls_sparse_full_diagonal_metis_row_input_profile(
-          n, col_ptr, row_idx)
-      : is_large_very_low_degree_full_diagonal_pattern(
-          n, col_ptr, row_idx);
+    is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx);
   if (!kls_analyze_defer_nd && large_very_low_degree_full_diagonal) {
     kls_options metis_options = *options;
     metis_options.use_btf = 0;
