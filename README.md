@@ -136,6 +136,43 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+### CPU tuning profiles
+
+KLS uses portable thresholds unless an application supplies a profile. On
+Linux x86-64, the installed tool calibrates hardware-sensitive crossover
+points for one thread count without recompiling KLS:
+
+```sh
+kls-autotune --threads 8 --output kls-8t.conf
+```
+
+Use `--cpus 0,1,2,3,4,5,6,7` to select a cache domain explicitly. Calibration
+uses only deterministic generated sparse systems and accepts a candidate only
+when its synthetic SPICE lifecycle improves without a greater than 2.5%
+per-case regression. The tool accepts no matrix or manifest input, so paper
+benchmark data cannot influence the generated parameters.
+
+Run the application with the same CPU affinity used for calibration. This is
+especially important on CPUs with multiple cache domains. Calibration is a
+fixed amount of work (rather than a timing-dependent stopping rule), making a
+profile reproducible from its recorded generator seed while keeping a typical
+host run to a few minutes.
+
+Applications opt in during analysis:
+
+```c
+kls_options options;
+kls_default_options(&options);
+options.threads = 8;
+options.tuning_profile_path = "kls-8t.conf";
+```
+
+Profiles require an exact build, compiler, CPU/cache, and thread-count match.
+An omitted path keeps portable defaults; a bad or mismatched explicit profile
+returns `KLS_ERR_TUNING_PROFILE`. The benchmark equivalent is
+`--tuning-profile kls-8t.conf`, and profile provenance is available through
+`kls_stats` and benchmark JSON.
+
 The main build is reproducible from pinned submodules. KLS vendors the
 SuiteSparse-derived KLU, AMD, COLAMD, and BTF C sources from Trilinos under
 `third_party/suitesparse` as the current in-tree serial engine. METIS ordering

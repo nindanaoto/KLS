@@ -5,6 +5,25 @@ project(KLS
   DESCRIPTION "Standalone sparse direct solver for SPICE-style repeated linear solves"
   LANGUAGES C)
 
+# Profiles are accepted only by the exact performance implementation that
+# produced them. This fingerprint changes with solver sources and codegen.
+file(GLOB KLS_TUNING_FINGERPRINT_INPUTS CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_*.inc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.h")
+string(TOUPPER "${CMAKE_BUILD_TYPE}" KLS_BUILD_TYPE_UPPER)
+set(KLS_TUNING_FINGERPRINT_TEXT
+  "${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_COMPILER}"
+  ";${CMAKE_C_FLAGS};${CMAKE_C_FLAGS_${KLS_BUILD_TYPE_UPPER}};${CMAKE_BUILD_TYPE}"
+  ";${CMAKE_SYSTEM_NAME};${CMAKE_SYSTEM_PROCESSOR}")
+foreach(KLS_TUNING_INPUT IN LISTS KLS_TUNING_FINGERPRINT_INPUTS)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${KLS_TUNING_INPUT}")
+  file(SHA256 "${KLS_TUNING_INPUT}" KLS_TUNING_INPUT_HASH)
+  string(APPEND KLS_TUNING_FINGERPRINT_TEXT ";${KLS_TUNING_INPUT_HASH}")
+endforeach()
 option(KLS_NATIVE_ARCH "Compile for the build machine's CPU (-march=native)" ON)
 if(KLS_NATIVE_ARCH)
   include(CheckCCompilerFlag)
@@ -18,6 +37,7 @@ option(KLS_ENABLE_HOSTED_SIMD "Enable compiler SIMD pragmas and FMA contraction 
 
 option(KLS_BUILD_TESTS "Build KLS tests" ON)
 option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
+option(KLS_BUILD_AUTOTUNER "Build the host CPU tuning tool" ON)
 option(KLS_BUILD_CKTSO_COMPARE "Build optional CKTSO comparison tool" OFF)
 option(KLS_BUILD_SUBTREELU_COMPARE "Build optional SubtreeLU comparison tool" OFF)
 option(KLS_USE_SYSTEM_METIS "Use a system METIS library instead of the bundled submodule" OFF)
@@ -26,6 +46,11 @@ option(KLS_USE_SYSTEM_SCOTCH "Use a system SCOTCH library instead of the bundled
 option(KLS_ENABLE_SPRAL_SCALING "Enable SPRAL matching/scaling support" ON)
 option(KLS_USE_SYSTEM_SPRAL "Use a system SPRAL library instead of the bundled submodule" OFF)
 option(KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE "Acknowledge that the selected system SPRAL library is redistributable with LGPL KLS" OFF)
+string(APPEND KLS_TUNING_FINGERPRINT_TEXT
+  ";native=${KLS_NATIVE_ARCH};simd=${KLS_ENABLE_HOSTED_SIMD}"
+  ";metis=${KLS_USE_SYSTEM_METIS};scotch=${KLS_ENABLE_SCOTCH}"
+  ";spral=${KLS_ENABLE_SPRAL_SCALING}")
+string(SHA256 KLS_TUNING_BUILD_ID "${KLS_TUNING_FINGERPRINT_TEXT}")
 set(CKTSO_ROOT "" CACHE PATH "Path to a local CKTSO distribution")
 set(SUBTREELU_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../SubtreeLU" CACHE PATH
   "Path to a local SubtreeLU distribution")
@@ -398,6 +423,7 @@ endif()
 
 add_library(kls
   src/kls.c
+  src/kls_tuning_profile.c
   src/kls_compact_solve.inc
   src/kls_egraph_refactor.inc
   src/kls_first_factor.inc
@@ -408,6 +434,9 @@ add_library(kls
   src/kls_pts.inc
   src/kls_row_refactor.inc
   src/kls_tuning.inc)
+
+target_compile_definitions(kls PRIVATE
+  KLS_TUNING_BUILD_FINGERPRINT="${KLS_TUNING_BUILD_ID}")
 
 # These implementation fragments stay in kls.c's translation unit so moving
 # the internal engines does not introduce call boundaries or inhibit inlining.
@@ -429,7 +458,9 @@ add_library(KLS::kls ALIAS kls)
 target_include_directories(kls
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>)
+    $<INSTALL_INTERFACE:include>
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(kls
   PRIVATE
@@ -458,6 +489,18 @@ if(EXISTS "${KLS_MTMETIS_LIB}")
   target_link_libraries(kls
     PRIVATE
       kls_mtmetis)
+endif()
+
+if(KLS_BUILD_AUTOTUNER)
+  add_executable(kls-autotune bench/kls_autotune.c)
+  target_include_directories(kls-autotune PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(kls-autotune PRIVATE KLS::kls)
+  if(KLS_MATH_LIBRARY)
+    target_link_libraries(kls-autotune PRIVATE "${KLS_MATH_LIBRARY}")
+  endif()
+  target_compile_options(kls-autotune PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
 endif()
 if(KLS_ENABLE_SCOTCH)
   target_link_libraries(kls
@@ -577,6 +620,15 @@ if(KLS_BUILD_TESTS)
               --holdout
               "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_large_holdout_manifest.txt"
               --expected-count 12)
+    if(KLS_BUILD_AUTOTUNER AND KLS_BUILD_BENCHMARKS)
+      add_test(
+        NAME kls_autotune_profile
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_autotune_profile.py"
+                --autotune "$<TARGET_FILE:kls-autotune>"
+                --bench "$<TARGET_FILE:kls_bench>"
+                --source "${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
   endif()
   add_executable(kls_smoke
     tests/kls_smoke.c)
@@ -602,5 +654,9 @@ install(TARGETS kls
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
+
+if(KLS_BUILD_AUTOTUNER)
+  install(TARGETS kls-autotune RUNTIME DESTINATION bin)
+endif()
 
 install(DIRECTORY include/ DESTINATION include)

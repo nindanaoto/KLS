@@ -481,7 +481,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--tuning-profile FILE] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -548,6 +548,8 @@ int main(int argc, char **argv) {
       }
     } else if (strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
       options.threads = atoi(argv[++i]);
+    } else if (strcmp(argv[i], "--tuning-profile") == 0 && i + 1 < argc) {
+      options.tuning_profile_path = argv[++i];
     } else if (strcmp(argv[i], "--backend") == 0 && i + 1 < argc) {
       if (!parse_backend(argv[++i], &options.backend)) {
         usage(argv[0]);
@@ -664,6 +666,9 @@ int main(int argc, char **argv) {
              ",\"estimated_flops\":%.9g"
              ",\"build_has_metis\":%s,\"build_has_scotch\":%s"
              ",\"build_has_spral_scaling\":%s"
+             ",\"tuning_profile_active\":%s"
+             ",\"tuning_profile_id\":\"%016" PRIx64 "\""
+             ",\"tuning_profile_field_count\":%d"
              ",\"analyze_only\":true,\"status\":%d}\n",
              path, a.n, a.nnz, options.threads,
              kls_backend_name(options.backend),
@@ -683,7 +688,9 @@ int main(int argc, char **argv) {
              stats.estimated_flops,
              stats.build_has_metis ? "true" : "false",
              stats.build_has_scotch ? "true" : "false",
-             stats.build_has_spral_scaling ? "true" : "false", status);
+             stats.build_has_spral_scaling ? "true" : "false",
+             stats.tuning_profile_active ? "true" : "false",
+             stats.tuning_profile_id, stats.tuning_profile_field_count, status);
     } else {
       printf("matrix: %s\n", path);
       printf("n: %" PRId64 ", nnz: %" PRId64 "\n", a.n, a.nnz);
@@ -960,7 +967,10 @@ int main(int argc, char **argv) {
            ",\"rcond\":%.9g,\"rgrowth\":%.9g"
            ",\"memory_bytes\":%zu,\"memory_peak_bytes\":%zu"
            ",\"build_has_metis\":%s,\"build_has_scotch\":%s"
-           ",\"build_has_spral_scaling\":%s,\"status\":%d}\n",
+           ",\"build_has_spral_scaling\":%s"
+           ",\"tuning_profile_active\":%s"
+           ",\"tuning_profile_id\":\"%016" PRIx64 "\""
+           ",\"tuning_profile_field_count\":%d,\"status\":%d}\n",
            path, a.n, a.nnz, options.threads, repeat, factor_repeat,
            refactor_repeat, lifecycle_systems > 0 ? "direct" : "projected",
            lifecycle_systems, measured_lifecycle_seconds,
@@ -988,7 +998,9 @@ int main(int argc, char **argv) {
            stats.memory_bytes, stats.memory_peak_bytes,
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
-           stats.build_has_spral_scaling ? "true" : "false", status);
+           stats.build_has_spral_scaling ? "true" : "false",
+           stats.tuning_profile_active ? "true" : "false",
+           stats.tuning_profile_id, stats.tuning_profile_field_count, status);
   } else {
     printf("matrix: %s\n", path);
     printf("n: %" PRId64 ", nnz: %" PRId64 ", threads: %d\n",

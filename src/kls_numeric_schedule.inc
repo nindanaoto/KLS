@@ -115,6 +115,7 @@ static int kls_snb_prepare(kls_solver *solver) {
   }
   st->wnarrow = 8;
   st->wmax = 32;
+  st->coop_min_doubles = solver->tuning.snb_coop_min_doubles;
   st->nblocks = symbolic->nblocks;
   st->blocks =
     (kls_snb_block *)calloc((size_t)st->nblocks, sizeof(*st->blocks));
@@ -557,7 +558,7 @@ static int kls_snb_prepare(kls_solver *solver) {
         }
         total += level_work;
         if (end - begin == 1 &&
-            level_max >= (double)KLS_SNB_COOP_MIN_DOUBLES) {
+            level_max >= (double)st->coop_min_doubles) {
           coop += level_work;
         }
       }
@@ -582,7 +583,7 @@ static int kls_snb_prepare(kls_solver *solver) {
               &st->blocks[st->slevel_block[begin]]
                  .snodes[st->slevel_snode[begin]];
             is_coop = (int64_t)sn->height * sn->width >=
-                      KLS_SNB_COOP_MIN_DOUBLES;
+                      (int64_t)st->coop_min_doubles;
           }
           if (is_coop) {
             if (open_start >= 0) {
@@ -1209,7 +1210,8 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
     const double *Ldiag = Lp + ps->uw;
     const double *Lbelow = Lp + ps->uw + pw;
 
-    if (sc < wnarrow || (int64_t)ph * w < KLS_SNB_COOP_MIN_DOUBLES) {
+    if (sc < wnarrow ||
+        (int64_t)ph * w < (int64_t)st->coop_min_doubles) {
       /* small edge: tid 0 runs the ordinary serial edge body */
       if (tid == 0) {
         kls_snb_update_edge(blk, sn, &edges[e], wnarrow,
@@ -2400,9 +2402,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
        numeric is large enough to dispatch and contains at least one pool's
        worth of fixed-pivot work.  Its measured schedule makes the final
        admission decision; no benchmark-family signature is needed here. */
-    return solver->n >= KLS_EGRAPH_REFACTOR_MIN_SIZE &&
+    return solver->n >= (UF_long)solver->tuning.egraph_min_size &&
            solver->common.flops >=
-             KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+             solver->tuning.egraph_min_flops_per_thread *
                (double)solver->options.threads;
   }
 }
@@ -3283,8 +3285,8 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
   *elapsed += kls_now_seconds() - start;
 }
 
-static double kls_egraph_refactor_floor(void) {
-  double floor = KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD;
+static double kls_egraph_refactor_floor(const kls_solver *solver) {
+  double floor = solver->tuning.egraph_min_flops_per_thread;
   const char *floor_env = getenv("KLS_EGRAPH_REFACTOR_FLOOR");
   if (floor_env != NULL && floor_env[0] != '\0') {
     const double parsed = atof(floor_env);
@@ -3472,7 +3474,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
       return (UF_long)lean;
     }
   }
-  const double egraph_floor = kls_egraph_refactor_floor();
+  const double egraph_floor = kls_egraph_refactor_floor(solver);
   if (!check_pivots && solver->common.flops > 0.0 &&
       solver->common.flops <
         egraph_floor * (double)solver->options.threads) {

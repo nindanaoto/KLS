@@ -11384,7 +11384,7 @@ static int kls_repeated_scaled_egraph_unscaled_trial_enabled(
       !(solver->common.flops > 0.0) ||
       solver->common.flops > 5.0e9 ||
       solver->common.flops <
-        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+        solver->tuning.egraph_min_flops_per_thread *
           (double)solver->options.threads) {
     return 0;
   }
@@ -11412,7 +11412,7 @@ static int kls_repeated_scaled_overhead_trial_enabled(
     solver->options.expected_refactorizations >= 64 &&
     solver->options.threads > 1 &&
     solver->common.flops >=
-      KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+      solver->tuning.egraph_min_flops_per_thread *
         (double)solver->options.threads &&
     isfinite(fill) && fill > 0.0 &&
     scale_pass_work >= 8.0 * (solver->common.flops + fill);
@@ -11686,7 +11686,7 @@ static int maybe_select_auto_scale(kls_solver *solver,
       solver->options.expected_refactorizations >= 64 &&
       solver->options.threads > 1 &&
       solver->common.flops >=
-        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+        solver->tuning.egraph_min_flops_per_thread *
           (double)solver->options.threads &&
       isfinite(incumbent_fill) && incumbent_fill > 0.0 &&
       (double)solver->options.expected_refactorizations *
@@ -14064,7 +14064,8 @@ static int kls_normalize_options(kls_options *normalized,
              sizeof(supplied_abi));
     }
     const int has_backend =
-      supplied_abi == KLS_OPTIONS_ABI_VERSION &&
+      (supplied_abi == KLS_OPTIONS_ABI_VERSION ||
+       supplied_abi == KLS_OPTIONS_ABI_VERSION_V2) &&
       options->struct_size >=
         offsetof(kls_options, backend) + sizeof(options->backend);
     const size_t advertised_size = has_backend
@@ -14076,6 +14077,12 @@ static int kls_normalize_options(kls_options *normalized,
     normalized->abi_version = KLS_OPTIONS_ABI_VERSION;
     if (!has_backend) {
       normalized->backend = KLS_BACKEND_AUTO;
+    }
+    if (supplied_abi != KLS_OPTIONS_ABI_VERSION ||
+        options->struct_size <
+          offsetof(kls_options, tuning_profile_path) +
+            sizeof(options->tuning_profile_path)) {
+      normalized->tuning_profile_path = NULL;
     }
   }
   if (!validate_options(normalized)) {

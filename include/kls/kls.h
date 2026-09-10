@@ -19,7 +19,8 @@ typedef enum kls_status {
   KLS_ERR_REFACTOR_FAILED = -5,
   KLS_ERR_SOLVE_FAILED = -6,
   KLS_ERR_SINGULAR = -7,
-  KLS_ERR_UNSUPPORTED = -8
+  KLS_ERR_UNSUPPORTED = -8,
+  KLS_ERR_TUNING_PROFILE = -9
 } kls_status;
 
 typedef enum kls_index_type {
@@ -82,10 +83,10 @@ typedef enum kls_refactor_path {
 
 #define KLS_SCALE_AUTO (-2)
 
-/* Written by kls_default_options.  It occupies padding in the original
-   options layout, allowing the appended backend field to be distinguished
-   from uninitialized tail padding in binaries built against older headers. */
-#define KLS_OPTIONS_ABI_VERSION UINT32_C(0x4b4c5302)
+/* Written by kls_default_options.  This distinguishes fields appended to the
+   public options object from uninitialized tail padding in older callers. */
+#define KLS_OPTIONS_ABI_VERSION_V2 UINT32_C(0x4b4c5302)
+#define KLS_OPTIONS_ABI_VERSION UINT32_C(0x4b4c5303)
 
 typedef enum kls_fast_reject_refresh_state {
   KLS_FAST_REJECT_REFRESH_UNKNOWN = 0,
@@ -116,6 +117,9 @@ typedef struct kls_options {
   /* Set to zero when an outer integration owns timing and the overhead of
      timing each tiny singleton solve would be part of the measured work. */
   int record_tiny_solve_timing;
+  /* Optional application-managed CPU tuning profile. The file is consumed
+     during analyze; this pointer need not remain valid after analyze returns. */
+  const char *tuning_profile_path;
 } kls_options;
 
 typedef struct kls_stats {
@@ -442,6 +446,9 @@ typedef struct kls_stats {
   int tiny_singleton_solve_eligible;
   /* Number of public solves dispatched through that compact kernel. */
   int64_t tiny_singleton_solve_count;
+  int tuning_profile_active;
+  int tuning_profile_field_count;
+  uint64_t tuning_profile_id;
 } kls_stats;
 
 void kls_default_options(kls_options *options);

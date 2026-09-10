@@ -6548,12 +6548,13 @@ static void kls_row_level_prep_run(kls_row_level_prep_job *job) {
   job->ok = 1;
 }
 
-static UF_long kls_row_solve_dense_tail_start(UF_long n,
+static UF_long kls_row_solve_dense_tail_start(const kls_solver *solver,
+                                              UF_long n,
                                               const UF_long *ptr,
                                               UF_long *entries_out) {
   KLS_SET_OPTIONAL_OUTPUT(entries_out, 0);
   if (n == 0u || ptr == NULL || ptr[n] == 0u ||
-      ptr[n] < KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ) {
+      ptr[n] < (UF_long)solver->tuning.solve_dense_tail_min_nnz) {
     return n;
   }
 
@@ -6565,8 +6566,8 @@ static UF_long kls_row_solve_dense_tail_start(UF_long n,
       return n;
     }
     suffix += ptr[row + 1u] - ptr[row];
-    if (suffix >= KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ &&
-        (double)suffix >= KLS_ROW_SOLVE_DENSE_TAIL_MIN_FRACTION * total) {
+    if (suffix >= (UF_long)solver->tuning.solve_dense_tail_min_nnz &&
+        (double)suffix >= solver->tuning.solve_dense_tail_min_fraction * total) {
       KLS_SET_OPTIONAL_OUTPUT(entries_out, suffix);
       return row;
     }
@@ -6574,14 +6575,15 @@ static UF_long kls_row_solve_dense_tail_start(UF_long n,
   return n;
 }
 
-static UF_long *kls_build_row_solve_slice_bounds(UF_long n,
+static UF_long *kls_build_row_solve_slice_bounds(const kls_solver *solver,
+                                                 UF_long n,
                                                  const UF_long *ptr,
                                                  UF_long start,
                                                  UF_long entries) {
   if (ptr == NULL || start >= n || entries == 0u) {
     return NULL;
   }
-  const UF_long slices = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
+  const UF_long slices = solver->tuning.solve_trapezoid_slices;
   UF_long *bounds =
     (UF_long *)malloc(((size_t)slices + 1u) * sizeof(*bounds));
   if (bounds == NULL) {
@@ -6630,7 +6632,8 @@ static UF_long kls_row_solve_col_lower_bound(const UF_long *cols,
   return lo;
 }
 
-static int kls_build_row_solve_segment_splits(UF_long n,
+static int kls_build_row_solve_segment_splits(const kls_solver *solver,
+                                              UF_long n,
                                               const UF_long *ptr,
                                               const UF_long *cols,
                                               const UF_long *bounds,
@@ -6653,7 +6656,8 @@ static int kls_build_row_solve_segment_splits(UF_long n,
   }
 
   UF_long rect_entries = 0;
-  for (UF_long slice = 0u; slice < KLS_ROW_SOLVE_TRAPEZOID_SLICES; ++slice) {
+  for (UF_long slice = 0u;
+       slice < solver->tuning.solve_trapezoid_slices; ++slice) {
     const UF_long slice_begin = bounds[slice];
     const UF_long slice_end = bounds[slice + 1u];
     if (slice_begin > slice_end || slice_end > n) {
@@ -6700,6 +6704,7 @@ static UF_long kls_row_solve_rect_len(const UF_long *ptr,
 }
 
 static int kls_build_one_row_solve_thread_bounds(
+  const kls_solver *solver,
   UF_long n,
   const UF_long *ptr,
   const UF_long *split,
@@ -6713,7 +6718,7 @@ static int kls_build_one_row_solve_thread_bounds(
     return 0;
   }
 
-  const UF_long slices = KLS_ROW_SOLVE_TRAPEZOID_SLICES;
+  const UF_long slices = solver->tuning.solve_trapezoid_slices;
   const UF_long workers = (UF_long)thread_count;
   UF_long *bounds =
     (UF_long *)malloc((size_t)slices * ((size_t)workers + 1u) *
@@ -6804,7 +6809,7 @@ static int kls_build_row_solve_thread_bounds(kls_solver *solver,
   UF_long *u_bounds = NULL;
   if (have_l) {
     if (!kls_build_one_row_solve_thread_bounds(
-          solver->n, solver->row_refactor_l_ptr,
+          solver, solver->n, solver->row_refactor_l_ptr,
           solver->row_solve_l_segment_split, solver->row_solve_l_slice_bounds,
           0, thread_count, &l_bounds)) {
       free(l_bounds);
@@ -6813,7 +6818,7 @@ static int kls_build_row_solve_thread_bounds(kls_solver *solver,
   }
   if (have_u) {
     if (!kls_build_one_row_solve_thread_bounds(
-          solver->n, solver->row_refactor_u_ptr,
+          solver, solver->n, solver->row_refactor_u_ptr,
           solver->row_solve_u_segment_split, solver->row_solve_u_slice_bounds,
           1, thread_count, &u_bounds)) {
       free(l_bounds);
@@ -7068,7 +7073,7 @@ static int kls_build_one_row_solve_transpose_plan_impl(
 
   UF_long tail_entries = 0;
   const UF_long tail_start =
-    kls_row_solve_dense_tail_start(n, plan->ptr, &tail_entries);
+    kls_row_solve_dense_tail_start(solver, n, plan->ptr, &tail_entries);
   plan->dense_tail_start = tail_start;
   plan->dense_tail_rows = tail_start < n ? n - tail_start : 0u;
   (void)kls_build_row_solve_sparse_levels(
@@ -7077,10 +7082,10 @@ static int kls_build_one_row_solve_transpose_plan_impl(
     &plan->sparse_level_count);
   plan->slice_bounds =
     kls_build_row_solve_slice_bounds(
-      n, plan->ptr, tail_start, tail_entries);
+      solver, n, plan->ptr, tail_start, tail_entries);
   if (plan->slice_bounds != NULL) {
     (void)kls_build_row_solve_segment_splits(
-      n, plan->ptr, plan->cols, plan->slice_bounds, plan->upper,
+      solver, n, plan->ptr, plan->cols, plan->slice_bounds, plan->upper,
       &plan->segment_split, &plan->rect_entries);
   }
   return 1;
@@ -7107,6 +7112,7 @@ static void kls_clear_row_solve_transpose_thread_bounds(
 }
 
 static int kls_build_one_row_solve_transpose_thread_bounds(
+  const kls_solver *solver,
   kls_row_solve_transpose_plan *plan,
   UF_long n,
   int thread_count) {
@@ -7129,7 +7135,7 @@ static int kls_build_one_row_solve_transpose_thread_bounds(
   UF_long *bounds = NULL;
   if (have_dense &&
       !kls_build_one_row_solve_thread_bounds(
-        n, plan->ptr, plan->segment_split, plan->slice_bounds,
+        solver, n, plan->ptr, plan->segment_split, plan->slice_bounds,
         plan->upper, thread_count, &bounds)) {
     free(bounds);
     return 0;
@@ -7165,12 +7171,12 @@ static int kls_build_row_solve_transpose_thread_bounds(kls_solver *solver,
   if (have_ut) {
     ok = ok &&
       kls_build_one_row_solve_transpose_thread_bounds(
-        &solver->row_solve_ut_plan, solver->n, thread_count);
+        solver, &solver->row_solve_ut_plan, solver->n, thread_count);
   }
   if (have_lt) {
     ok = ok &&
       kls_build_one_row_solve_transpose_thread_bounds(
-        &solver->row_solve_lt_plan, solver->n, thread_count);
+        solver, &solver->row_solve_lt_plan, solver->n, thread_count);
   }
   return ok;
 }
@@ -7183,7 +7189,8 @@ static void kls_build_one_row_solve_partition(kls_solver *solver,
   const UF_long *cols =
     upper ? solver->row_refactor_u_cols : solver->row_refactor_l_cols;
   UF_long entries = 0;
-  const UF_long start = kls_row_solve_dense_tail_start(n, ptr, &entries);
+  const UF_long start =
+    kls_row_solve_dense_tail_start(solver, n, ptr, &entries);
   if (upper) {
     solver->row_solve_u_dense_tail_start = start;
     solver->row_solve_u_dense_tail_rows = start < n ? n - start : 0u;
@@ -7192,10 +7199,10 @@ static void kls_build_one_row_solve_partition(kls_solver *solver,
       &solver->row_solve_u_sparse_level_rows,
       &solver->row_solve_u_sparse_level_count);
     solver->row_solve_u_slice_bounds =
-      kls_build_row_solve_slice_bounds(n, ptr, start, entries);
+      kls_build_row_solve_slice_bounds(solver, n, ptr, start, entries);
     if (solver->row_solve_u_slice_bounds != NULL) {
       (void)kls_build_row_solve_segment_splits(
-        n, ptr, cols, solver->row_solve_u_slice_bounds, 1,
+        solver, n, ptr, cols, solver->row_solve_u_slice_bounds, 1,
         &solver->row_solve_u_segment_split,
         &solver->row_solve_u_rect_entries);
     }
@@ -7207,10 +7214,10 @@ static void kls_build_one_row_solve_partition(kls_solver *solver,
       &solver->row_solve_l_sparse_level_rows,
       &solver->row_solve_l_sparse_level_count);
     solver->row_solve_l_slice_bounds =
-      kls_build_row_solve_slice_bounds(n, ptr, start, entries);
+      kls_build_row_solve_slice_bounds(solver, n, ptr, start, entries);
     if (solver->row_solve_l_slice_bounds != NULL) {
       (void)kls_build_row_solve_segment_splits(
-        n, ptr, cols, solver->row_solve_l_slice_bounds, 0,
+        solver, n, ptr, cols, solver->row_solve_l_slice_bounds, 0,
         &solver->row_solve_l_segment_split,
         &solver->row_solve_l_rect_entries);
     }
@@ -7463,6 +7470,7 @@ static int kls_row_refactor_group_has_internal_deps(const UF_long *l_ptr,
 }
 
 static void kls_try_build_row_refactor_compact_panel_storage(
+  const kls_solver *solver,
   UF_long group_count,
   const UF_long *group_ptr,
   const unsigned char *group_kind,
@@ -7497,7 +7505,8 @@ static void kls_try_build_row_refactor_compact_panel_storage(
     }
     const UF_long width = group_ptr[group + 1u] - group_ptr[group];
     const UF_long trailing_len = group_trailing_len[group];
-    if (!kls_row_refactor_prefers_compact_dense_panel(width, trailing_len)) {
+    if (!kls_row_refactor_prefers_compact_dense_panel(
+          solver, width, trailing_len)) {
       begin[group + 1u] = total;
       continue;
     }
@@ -8091,6 +8100,7 @@ static void kls_try_build_row_refactor_segment_input_targets(
 }
 
 typedef struct {
+  const kls_tuning_values *tuning;
   UF_long group_count;
   const UF_long *group_ptr;
   const UF_long *l_ptr;
@@ -8138,7 +8148,7 @@ static void kls_dense_group_classification_run(
     job->segment_count++;
     job->group_trailing_begin[group] = trailing_begin;
 
-    if (dense_entries + trailing_entries < KLS_ROW_REFACTOR_DENSE_MIN_WORK) {
+    if (dense_entries + trailing_entries < job->tuning->row_dense_min_work) {
       continue;
     }
     int dense = 1;
@@ -8185,7 +8195,14 @@ static void kls_dense_group_classification_run(
     job->group_kind[group] = KLS_ROW_REFACTOR_GROUP_DENSE;
     job->dense_segment_count++;
     job->dense_segment_trailing_entries += trailing_entries;
-    if (kls_row_refactor_prefers_compact_dense_panel(width, trailing_len)) {
+    const double compact_min_work = job->tuning->row_compact_panel_min_work;
+    const double compact_min_per_entry =
+      job->tuning->row_compact_panel_min_work_per_entry;
+    if (kls_row_refactor_dense_group_update_work(width, trailing_len) >=
+          compact_min_work &&
+        kls_row_refactor_dense_group_update_work(width, trailing_len) >=
+          compact_min_per_entry *
+            kls_row_refactor_dense_group_panel_entries(width, trailing_len)) {
       job->compact_dense_panel_eligible_count++;
       job->compact_dense_panel_eligible_rows += width;
       job->compact_dense_panel_update_work +=
@@ -8398,7 +8415,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
        That trims ready-queue/task overhead without hiding useful small-width
        parallelism or delaying low-level rows behind later dependencies. */
     if (!segment) {
-      while (end < n && end - row < KLS_ROW_REFACTOR_BATCH_MAX_ROWS) {
+      while (end < n && end - row < solver->tuning.row_batch_max_rows) {
         if (levels[end] != levels[row]) {
           break;
         }
@@ -8414,7 +8431,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
         end++;
       }
       const UF_long candidate_rows = end - row;
-      if (candidate_rows < KLS_ROW_REFACTOR_BATCH_MIN_ROWS) {
+      if (candidate_rows < solver->tuning.row_batch_min_rows) {
         end = row + 1u;
       }
     }
@@ -8517,6 +8534,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
     return 0;
   }
   kls_dense_group_classification_job dense_classification_job = {
+    .tuning = &solver->tuning,
     .group_count = group_count,
     .group_ptr = group_ptr,
     .l_ptr = l_ptr,
@@ -8819,7 +8837,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   UF_long compact_dense_panel_persistent_groups = 0;
   UF_long compact_dense_panel_persistent_entries = 0;
   kls_try_build_row_refactor_compact_panel_storage(
-    group_count, group_ptr, group_kind, group_trailing_len,
+    solver, group_count, group_ptr, group_kind, group_trailing_len,
     &group_compact_panel_begin, &compact_panel_values,
     &compact_dense_panel_persistent_groups,
     &compact_dense_panel_persistent_entries);
@@ -10630,7 +10648,7 @@ static int kls_sort_row_refactor_group_list_by_work(
   if (solver == NULL || groups == NULL || count <= 1u) {
     return 1;
   }
-  if (count <= KLS_ROW_REFACTOR_SMALL_SORT_MAX) {
+  if (count <= solver->tuning.row_small_sort_max) {
     for (UF_long i = 1u; i < count; ++i) {
       const UF_long group = groups[i];
       const double work = kls_row_refactor_group_work(solver, group);
@@ -10673,13 +10691,14 @@ static int kls_sort_row_refactor_group_list_by_work(
 }
 
 static int kls_sort_row_refactor_group_list_by_cached_work(
+  const kls_solver *solver,
   UF_long *groups,
   UF_long count,
   const double *group_work) {
-  if (groups == NULL || group_work == NULL || count <= 1u) {
+  if (solver == NULL || groups == NULL || group_work == NULL || count <= 1u) {
     return 1;
   }
-  if (count <= KLS_ROW_REFACTOR_SMALL_SORT_MAX) {
+  if (count <= solver->tuning.row_small_sort_max) {
     for (UF_long i = 1u; i < count; ++i) {
       const UF_long group = groups[i];
       const double work = group_work[group];
@@ -11777,7 +11796,7 @@ static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
       continue;
     }
     if (!kls_sort_row_refactor_group_list_by_cached_work(
-          solver->row_refactor_group_successor_groups + begin, end - begin,
+          solver, solver->row_refactor_group_successor_groups + begin, end - begin,
           group_work)) {
       sort_ok = 0;
       break;
@@ -11790,7 +11809,7 @@ static void kls_sort_row_refactor_successors_by_work(kls_solver *solver) {
   if (solver->row_refactor_group_roots != NULL &&
       solver->row_refactor_group_root_count > 1u) {
     (void)kls_sort_row_refactor_group_list_by_cached_work(
-      solver->row_refactor_group_roots,
+      solver, solver->row_refactor_group_roots,
       solver->row_refactor_group_root_count,
       group_work);
   }

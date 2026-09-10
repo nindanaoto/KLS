@@ -66,6 +66,7 @@
 #endif
 
 #include "kls_tuning.inc"
+#include "kls_tuning_profile.h"
 
 /* Pause hint for atomic spin waits: keeps a blocked worker from hammering
    the shared cache line at full speed and starving the producing thread of
@@ -182,28 +183,11 @@ static void kls_accumulate_scaled_dense_rows8(
 #else
 #define KLS_MAX_ALLOCATION (SIZE_MAX / 2u)
 #endif
-#define KLS_SNODE_MIN_BATCH kls_snode_min_batch()
-#define KLS_SNODE_MIN_BATCH_WORK kls_snode_min_batch_work()
-
 /* Per-refactor floor overrides: written by the refactor driver before
    worker dispatch (single writer, constant during the parallel
    region), read by the consume kernels. 0 = use default. */
 static UF_long kls_snode_floor_batch_override = 0;
 static UF_long kls_snode_floor_work_override = 0;
-
-static UF_long kls_snode_min_batch(void) {
-  if (kls_snode_floor_batch_override > 0) {
-    return kls_snode_floor_batch_override;
-  }
-  return KLS_SNODE_DEFAULT_MIN_BATCH;
-}
-
-static UF_long kls_snode_min_batch_work(void) {
-  if (kls_snode_floor_work_override > 0) {
-    return kls_snode_floor_work_override;
-  }
-  return KLS_SNODE_DEFAULT_MIN_BATCH_WORK;
-}
 
 typedef struct kls_refactor_pool kls_refactor_pool;
 typedef struct kls_egraph_refactor_pool kls_egraph_refactor_pool;
@@ -1164,6 +1148,7 @@ struct kls_solver {
   kls_input_format input_format;
   kls_orientation orientation;
   kls_options options;
+  kls_tuning_values tuning;
   kls_stats stats;
   trilinos_klu_l_common common;
   trilinos_klu_l_symbolic *symbolic;
@@ -1584,9 +1569,20 @@ struct kls_refactor_pool {
   atomic_int active_workers;
   atomic_int shutdown;
   int scratch_dirty;
+  unsigned worker_spin_iters;
   int conds_initialized;
   int lock_initialized;
 };
+
+static UF_long kls_snode_min_batch(const kls_solver *solver) {
+  return kls_snode_floor_batch_override > 0
+    ? kls_snode_floor_batch_override : solver->tuning.snode_min_batch;
+}
+
+static UF_long kls_snode_min_batch_work(const kls_solver *solver) {
+  return kls_snode_floor_work_override > 0
+    ? kls_snode_floor_work_override : solver->tuning.snode_min_batch_work;
+}
 
 extern _Thread_local int kls_klu_pipe_threads;
 extern _Thread_local long kls_klu_refactor_tail_skip;
@@ -1870,8 +1866,8 @@ static double kls_row_refactor_dense_group_update_work(UF_long width,
 static double kls_row_refactor_dense_group_panel_entries(
   UF_long width,
   UF_long trailing_len);
-static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
-                                                        UF_long trailing_len);
+static int kls_row_refactor_prefers_compact_dense_panel(
+  const kls_solver *solver, UF_long width, UF_long trailing_len);
 static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x);
 static int kls_pts_solve_available(const kls_solver *solver);
 static int kls_pts_refactor_ready(const kls_solver *solver);
@@ -5265,7 +5261,7 @@ static UF_long kls_snode_batch_consume(
   while (t < tmax && ui[up + t] == j + t) {
     t++;
   }
-  if (t < KLS_SNODE_MIN_BATCH) {
+  if (t < KLS_SNODE_DEFAULT_MIN_BATCH) {
     return 0;
   }
   UF_long *tli = NULL;
@@ -5273,7 +5269,7 @@ static UF_long kls_snode_batch_consume(
   UF_long tlen = 0;
   kls_klu_get_pointer(lu, (UF_long *)lip, (UF_long *)llen, j + t - 1u, &tli,
                       &tlx, &tlen);
-  if (t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+  if (t * tlen < KLS_SNODE_DEFAULT_MIN_BATCH_WORK) {
     /* Short shared tails lose to the scalar path; only pay the panel
        staging when the batched update amortizes it. */
     return 0;
@@ -6402,7 +6398,7 @@ static void *kls_refactor_pool_worker_main(void *arg) {
       if (generation != seen_generation) {
         break;
       }
-      if (spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+      if (spin < pool->worker_spin_iters) {
         spin++;
         kls_cpu_relax();
         continue;
@@ -6515,6 +6511,7 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
   }
   pool->thread_count = thread_count;
   pool->maxblock = solver->symbolic->maxblock;
+  pool->worker_spin_iters = solver->tuning.egraph_pool_spin_iters;
   atomic_init(&pool->generation, 0ul);
   atomic_init(&pool->active_workers, 0);
   atomic_init(&pool->shutdown, 0);
@@ -6752,7 +6749,7 @@ static int run_refactor_pool(kls_solver *solver,
   unsigned spin = 0;
   while (atomic_load_explicit(&pool->active_workers,
                               memory_order_acquire) > 0 &&
-         spin < KLS_EGRAPH_POOL_SPIN_ITERS) {
+         spin < solver->tuning.egraph_pool_spin_iters) {
     spin++;
     kls_cpu_relax();
   }
@@ -7655,6 +7652,7 @@ void kls_default_options(kls_options *options) {
   options->fast_factor = 1;
   options->static_pivoting = 1;
   options->record_tiny_solve_timing = 1;
+  options->tuning_profile_path = NULL;
 }
 
 
@@ -7667,6 +7665,7 @@ int kls_create(kls_solver **solver_out) {
     return KLS_ERR_OUT_OF_MEMORY;
   }
   kls_default_options(&solver->options);
+  kls_tuning_defaults(&solver->tuning);
   solver->stats.struct_size = sizeof(solver->stats);
   kls_clear_fast_reject_stats(solver);
   if (!trilinos_klu_l_defaults(&solver->common)) {
@@ -7705,6 +7704,15 @@ int kls_analyze_csc(kls_solver *solver,
   if (status != KLS_OK) {
     return status;
   }
+  kls_tuning_values tuning;
+  kls_tuning_metadata tuning_metadata = {0};
+  kls_tuning_defaults(&tuning);
+  if (normalized.tuning_profile_path != NULL) {
+    status = kls_tuning_load_host_profile(normalized.tuning_profile_path,
+                                          normalized.threads, &tuning,
+                                          &tuning_metadata);
+    if (status != KLS_OK) return status;
+  }
   /* Topology discovery can require several sysfs reads.  Warm its process-
      wide cache before analysis timing and candidate trials begin; one-shot
      solvers never pay for information they cannot use. */
@@ -7713,7 +7721,12 @@ int kls_analyze_csc(kls_solver *solver,
   }
 
   clear_matrix(solver);
+  solver->tuning = tuning;
   solver->options = normalized;
+  solver->options.tuning_profile_path = NULL;
+  solver->stats.tuning_profile_active = normalized.tuning_profile_path != NULL;
+  solver->stats.tuning_profile_field_count = tuning_metadata.field_count;
+  solver->stats.tuning_profile_id = tuning_metadata.profile_id;
   solver->input_format = KLS_INPUT_CSC;
   const double start = kls_now_seconds();
 
@@ -7783,12 +7796,26 @@ int kls_analyze_csr(kls_solver *solver,
   if (status != KLS_OK) {
     return status;
   }
+  kls_tuning_values tuning;
+  kls_tuning_metadata tuning_metadata = {0};
+  kls_tuning_defaults(&tuning);
+  if (normalized.tuning_profile_path != NULL) {
+    status = kls_tuning_load_host_profile(normalized.tuning_profile_path,
+                                          normalized.threads, &tuning,
+                                          &tuning_metadata);
+    if (status != KLS_OK) return status;
+  }
   if (kls_repeated_update_workload(&normalized)) {
     kls_warm_topology_cache();
   }
 
   clear_matrix(solver);
+  solver->tuning = tuning;
   solver->options = normalized;
+  solver->options.tuning_profile_path = NULL;
+  solver->stats.tuning_profile_active = normalized.tuning_profile_path != NULL;
+  solver->stats.tuning_profile_field_count = tuning_metadata.field_count;
+  solver->stats.tuning_profile_id = tuning_metadata.profile_id;
   solver->input_format = KLS_INPUT_CSR;
   const double start = kls_now_seconds();
 
@@ -10567,7 +10594,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (ok && solver->common.status >= 0 && solver->lean_choice == 0 &&
       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH &&
       solver->common.flops >=
-        kls_egraph_refactor_floor() * (double)solver->options.threads &&
+        kls_egraph_refactor_floor(solver) * (double)solver->options.threads &&
       !generic_hoisted_snode_lean_viable) {
     /* The lean walk is dispatched only below the EGraph flop floor.  When
        this numeric has already selected EGraph at or above that floor, a
@@ -14225,6 +14252,7 @@ const char *kls_status_string(int status) {
     case KLS_ERR_SOLVE_FAILED: return "solve failed";
     case KLS_ERR_SINGULAR: return "singular matrix";
     case KLS_ERR_UNSUPPORTED: return "unsupported";
+    case KLS_ERR_TUNING_PROFILE: return "invalid or incompatible tuning profile";
     default: return "unknown status";
   }
 }

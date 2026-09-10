@@ -2503,7 +2503,7 @@ static void kls_pts_maybe_trial(kls_solver *solver,
       solver->pts_ref_trial_seconds != 0.0 ||
       solver->options.threads <= 1 || numeric_values == NULL ||
       solver->common.flops <
-        KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+        solver->tuning.egraph_min_flops_per_thread *
           (double)solver->options.threads) {
     return;
   }

@@ -56,9 +56,9 @@ static int kls_native_row_panel_structural_auto_allows(
          solver->row_refactor_compact_dense_panel_persistent_groups > 0u &&
          solver->row_refactor_compact_dense_panel_eligible_rows > 1u &&
          solver->row_refactor_compact_dense_panel_update_work >=
-           KLS_ROW_REFACTOR_NATIVE_PANEL_AUTO_MIN_WORK &&
+           solver->tuning.row_native_panel_min_work &&
          solver->row_refactor_compact_dense_panel_update_work >=
-           KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY *
+           solver->tuning.row_compact_panel_min_work_per_entry *
              solver->row_refactor_compact_dense_panel_entries;
 }
 
@@ -9885,8 +9885,8 @@ static int kls_row_refactor_try_compact_supernode_update(
   int use_trailing_gemv = 0;
   const int want_blocked_trailing =
     shared->row_refactor_blocked_trailing_update &&
-    run_rows >= KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_ROWS &&
-    trailing_len >= KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_COLS;
+    run_rows >= solver->tuning.row_blocked_trailing_min_rows &&
+    trailing_len >= solver->tuning.row_blocked_trailing_min_cols;
   int use_blocked_trailing = 0;
   const UF_long max_workspace_entries =
     (UF_long)(SIZE_MAX / sizeof(*supernode_workspace));
@@ -10735,15 +10735,21 @@ static double kls_row_refactor_dense_group_panel_entries(
   return (w * w) + (w * trailing);
 }
 
-static int kls_row_refactor_prefers_compact_dense_panel(UF_long width,
-                                                        UF_long trailing_len) {
+static int kls_row_refactor_prefers_compact_dense_panel(
+  const kls_solver *solver, UF_long width, UF_long trailing_len) {
   const double update_work =
     kls_row_refactor_dense_group_update_work(width, trailing_len);
   const double panel_entries =
     kls_row_refactor_dense_group_panel_entries(width, trailing_len);
-  return update_work >= KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK &&
+  const double min_work = solver != NULL
+    ? solver->tuning.row_compact_panel_min_work
+    : KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK;
+  const double min_work_per_entry = solver != NULL
+    ? solver->tuning.row_compact_panel_min_work_per_entry
+    : KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY;
+  return update_work >= min_work &&
          update_work >=
-           KLS_ROW_REFACTOR_COMPACT_PANEL_MIN_WORK_PER_ENTRY * panel_entries;
+           min_work_per_entry * panel_entries;
 }
 
 static int kls_native_row_panel_enabled_for_run(const kls_solver *solver,
@@ -11134,8 +11140,8 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
          parallel by disjoint column slices. */
       const UF_long tail_total = width - kb + trailing_len;
       const long slice_count =
-        (long)((tail_total + KLS_DENSE_HELP_TAIL_SLICE - 1u) /
-               KLS_DENSE_HELP_TAIL_SLICE);
+        (long)((tail_total + solver->tuning.dense_help_tail_slice - 1u) /
+               solver->tuning.dense_help_tail_slice);
       panel_tail_ctx.panel_k = k;
       panel_tail_ctx.panel_kb = kb;
       const long tail_epoch = ++shared->dense_help_epoch_seq;
@@ -11155,10 +11161,10 @@ static int kls_compact_dense_panel_factor_blocked_unchecked(
           break;
         }
         const UF_long off_begin =
-          (UF_long)claim * KLS_DENSE_HELP_TAIL_SLICE;
+          (UF_long)claim * solver->tuning.dense_help_tail_slice;
         const UF_long off_end =
-          off_begin + KLS_DENSE_HELP_TAIL_SLICE < tail_total
-            ? off_begin + KLS_DENSE_HELP_TAIL_SLICE : tail_total;
+          off_begin + solver->tuning.dense_help_tail_slice < tail_total
+            ? off_begin + solver->tuning.dense_help_tail_slice : tail_total;
         kls_compact_dense_panel_block_tail_slice(
           dense_panel, trailing_panel, width, trailing_len, k, kb,
           off_begin, off_end);
@@ -11724,8 +11730,8 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
       const UF_long tail_total = block_tail
         ? panel_width - c->panel_kb + c->trailing_len : 0u;
       const long claim_limit = block_tail
-        ? (long)((tail_total + KLS_DENSE_HELP_TAIL_SLICE - 1u) /
-                 KLS_DENSE_HELP_TAIL_SLICE)
+        ? (long)((tail_total + shared->solver->tuning.dense_help_tail_slice - 1u) /
+                 shared->solver->tuning.dense_help_tail_slice)
         : (long)panel_width;
       const double *udiag_base =
         (const double *)shared->solver->numeric->Udiag + c->row_begin;
@@ -11739,10 +11745,10 @@ static int kls_dense_help_try(kls_egraph_refactor_shared *shared,
         }
         if (block_tail) {
           const UF_long off_begin =
-            (UF_long)row * KLS_DENSE_HELP_TAIL_SLICE;
+            (UF_long)row * shared->solver->tuning.dense_help_tail_slice;
           const UF_long off_end =
-            off_begin + KLS_DENSE_HELP_TAIL_SLICE < tail_total
-              ? off_begin + KLS_DENSE_HELP_TAIL_SLICE : tail_total;
+            off_begin + shared->solver->tuning.dense_help_tail_slice < tail_total
+              ? off_begin + shared->solver->tuning.dense_help_tail_slice : tail_total;
           kls_compact_dense_panel_block_tail_slice(
             c->dense_panel, c->trailing_panel, panel_width,
             c->trailing_len, c->panel_k, c->panel_kb, off_begin, off_end);
@@ -12052,9 +12058,9 @@ static int kls_compact_dense_group_try_batched_supernode_update(
     }
   }
 
-  if (update_work < KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK ||
+  if (update_work < solver->tuning.row_batch_snode_min_work ||
       update_work <
-        KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY *
+        solver->tuning.row_batch_snode_min_work_per_entry *
           copied_entries) {
     const UF_long candidate_dep_rows =
       kls_work_to_uflong((double)batch_rows * (double)external_len);
@@ -12374,9 +12380,9 @@ static int kls_compact_dense_group_try_ragged_supernode_update(
        (trailing_cols == NULL || trailing_panel == NULL))) {
     return 0;
   }
-  if (update_work < KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK ||
+  if (update_work < solver->tuning.row_batch_snode_min_work ||
       update_work <
-        KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY *
+        solver->tuning.row_batch_snode_min_work_per_entry *
           copied_entries) {
     kls_record_row_refactor_compact_supernode_batch_candidate(
       solver, batch_end - batch_begin, candidate_dep_rows, 1);
@@ -13421,9 +13427,9 @@ static int kls_batch_group_try_ragged_supernode_update(
       batch_rows > (UF_long)(SIZE_MAX / sizeof(UF_long))) {
     return 0;
   }
-  if (update_work < KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK ||
+  if (update_work < solver->tuning.row_batch_snode_min_work ||
       update_work <
-        KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY *
+        solver->tuning.row_batch_snode_min_work_per_entry *
           copied_entries) {
     kls_record_row_refactor_compact_supernode_batch_candidate(
       solver, batch_rows, candidate_dep_rows, 1);

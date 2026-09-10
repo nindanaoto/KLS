@@ -1018,7 +1018,7 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
       t++;
     }
   }
-  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+  if (t < kls_snode_min_batch(shared->solver) || j + t > producer_limit) {
     return 0;
   }
   if (wait_for_dependencies) {
@@ -1035,7 +1035,8 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
       ? shared->solver->refactor_l_indices32[k1 + j + t - 1u]
       : NULL;
   const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL || t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+  if (tli == NULL ||
+      t * tlen < kls_snode_min_batch_work(shared->solver)) {
     /* Short shared tails lose to the 32-bit-index scalar path; only pay the
        panel staging when the batched update amortizes it. */
     return 0;
@@ -1094,7 +1095,7 @@ static UF_long kls_snode_batch_consume_cached_pair(
          (uib32 != NULL ? (UF_long)uib32[upb + t] : uib[upb + t]) == j + t) {
     t++;
   }
-  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+  if (t < kls_snode_min_batch(shared->solver) || j + t > producer_limit) {
     return 0;
   }
   {
@@ -1106,7 +1107,8 @@ static UF_long kls_snode_batch_consume_cached_pair(
   }
   const UF_long *tli = l_indices[k1 + j + t - 1u];
   const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL || 2u * t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+  if (tli == NULL ||
+      2u * t * tlen < kls_snode_min_batch_work(shared->solver)) {
     return 0;
   }
   double xsa[KLS_SNODE_MAX_BATCH];
@@ -1221,7 +1223,7 @@ static UF_long kls_snode_batch_consume_cached_multi(
       break;
     }
   }
-  if (t < KLS_SNODE_MIN_BATCH || j + t > producer_limit) {
+  if (t < kls_snode_min_batch(shared->solver) || j + t > producer_limit) {
     return 0;
   }
   {
@@ -1233,7 +1235,8 @@ static UF_long kls_snode_batch_consume_cached_multi(
   }
   const UF_long *tli = l_indices[k1 + j + t - 1u];
   const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL || (UF_long)nc * t * tlen < KLS_SNODE_MIN_BATCH_WORK) {
+  if (tli == NULL ||
+      (UF_long)nc * t * tlen < kls_snode_min_batch_work(shared->solver)) {
     return 0;
   }
   double xs[KLS_SNODE_MAX_FUSE][KLS_SNODE_MAX_BATCH];
@@ -1328,6 +1331,7 @@ static void kls_egraph_refactor_apply_btf_scalar_dep(
 }
 
 static UF_long kls_egraph_btf_scalar_producer_run_len(
+  const kls_solver *solver,
   UF_long start_pos,
   UF_long ucol_len,
   const UF_long *ui,
@@ -1343,7 +1347,7 @@ static UF_long kls_egraph_btf_scalar_producer_run_len(
   }
   UF_long rows = 1u;
   while (start_pos + rows < ucol_len &&
-         rows < KLS_BTF_SCALAR_RUN_EXEC_MAX_ROWS) {
+         rows < solver->tuning.btf_scalar_max_rows) {
     if (dep0 > UF_long_max - rows) {
       break;
     }
@@ -1391,8 +1395,8 @@ static int kls_egraph_refactor_try_btf_scalar_producer_run(
   const UF_long start_pos = *up;
   const UF_long rows =
     kls_egraph_btf_scalar_producer_run_len(
-      start_pos, ucol_len, ui, ui32, local_k);
-  if (rows < KLS_BTF_SCALAR_RUN_EXEC_MIN_ROWS) {
+      solver, start_pos, ucol_len, ui, ui32, local_k);
+  if (rows < solver->tuning.btf_scalar_min_rows) {
     return 0;
   }
   const UF_long dep0 =
@@ -4601,9 +4605,10 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
   double *work = shared->row_solve_work;
   const double *values = view->values;
 
-  for (UF_long pass = 0u; pass < KLS_ROW_SOLVE_TRAPEZOID_SLICES; ++pass) {
+  for (UF_long pass = 0u;
+       pass < shared->solver->tuning.solve_trapezoid_slices; ++pass) {
     const UF_long slice = upper
-      ? KLS_ROW_SOLVE_TRAPEZOID_SLICES - 1u - pass
+      ? shared->solver->tuning.solve_trapezoid_slices - 1u - pass
       : pass;
     const UF_long begin = bounds[slice];
     const UF_long end = bounds[slice + 1u];
@@ -5400,8 +5405,9 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     /* These retained numerics return after every update/solve pair.  Keep
        their crew live through that bounded gap so the next numeric phase
        avoids seven condition-variable wakeups. */
-    const unsigned initial_spin = (kls_symmetric_partial_diagonal_match_factor_cycle(solver)
-          ? 100000u : KLS_EGRAPH_WORKER_SPIN_ITERS);
+    const unsigned initial_spin =
+      kls_symmetric_partial_diagonal_match_factor_cycle(solver)
+        ? 100000u : solver->tuning.egraph_worker_spin_iters;
     pool->worker_spin_iters = initial_spin;
   }
   atomic_init(&pool->shared.stop, 0);
@@ -5551,7 +5557,8 @@ static int kls_run_parallel_row_solve_factor(kls_solver *solver,
       (view->diagonal && solver->numeric->Udiag == NULL)) {
     return 0;
   }
-  for (UF_long slice = 0u; slice < KLS_ROW_SOLVE_TRAPEZOID_SLICES; ++slice) {
+  for (UF_long slice = 0u;
+       slice < solver->tuning.solve_trapezoid_slices; ++slice) {
     const UF_long begin = bounds[slice];
     const UF_long end = bounds[slice + 1u];
     if (begin > end || end > solver->n) {
@@ -5781,7 +5788,7 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
     if (pool == NULL ||
         view->slice_bounds == NULL ||
         view->segment_split == NULL ||
-        view->rect_entries < KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ ||
+        view->rect_entries < (UF_long)solver->tuning.solve_parallel_rect_min_nnz ||
         start >= solver->n) {
       kls_row_solve_forward_rows(solver, view, work, start, solver->n);
       return 1;
@@ -5792,14 +5799,15 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
           solver, pool, thread_count, view, work)) {
       return 0;
     }
-    KLS_SET_OPTIONAL_OUTPUT(slice_runs_out, KLS_ROW_SOLVE_TRAPEZOID_SLICES);
+    KLS_SET_OPTIONAL_OUTPUT(slice_runs_out,
+                            solver->tuning.solve_trapezoid_slices);
     return 1;
   }
 
   if (pool == NULL ||
       view->slice_bounds == NULL ||
       view->segment_split == NULL ||
-      view->rect_entries < KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ ||
+      view->rect_entries < (UF_long)solver->tuning.solve_parallel_rect_min_nnz ||
       start >= solver->n) {
     kls_row_solve_backward_rows(solver, view, work, start, solver->n);
     if (start > 0u && pool != NULL &&
@@ -5824,7 +5832,8 @@ static int kls_row_solve_parallel_view(kls_solver *solver,
   } else {
     kls_row_solve_backward_rows(solver, view, work, 0u, start);
   }
-  KLS_SET_OPTIONAL_OUTPUT(slice_runs_out, KLS_ROW_SOLVE_TRAPEZOID_SLICES);
+  KLS_SET_OPTIONAL_OUTPUT(slice_runs_out,
+                          solver->tuning.solve_trapezoid_slices);
   return 1;
 }
 
@@ -5937,7 +5946,7 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
        ? solver->row_refactor_u_ptr[solver->row_solve_u_dense_tail_start]
        : 0u);
   if (rectangular_entries + sparse_entries <
-      KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ) {
+      (UF_long)solver->tuning.solve_parallel_rect_min_nnz) {
     return 0;
   }
 
@@ -5975,13 +5984,13 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
   const UF_long active_l_rect_entries =
     solver->row_solve_l_segment_split != NULL &&
         solver->row_solve_l_rect_entries >=
-          KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+          (UF_long)solver->tuning.solve_parallel_rect_min_nnz
       ? solver->row_solve_l_rect_entries
       : 0u;
   const UF_long active_u_rect_entries =
     solver->row_solve_u_segment_split != NULL &&
         solver->row_solve_u_rect_entries >=
-          KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+          (UF_long)solver->tuning.solve_parallel_rect_min_nnz
       ? solver->row_solve_u_rect_entries
       : 0u;
   const UF_long active_rect_entries =
@@ -6000,10 +6009,10 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
     solver->row_refactor_u_ptr[solver->n];
   const UF_long sync_count =
     (active_l_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       ? 2u * solver->tuning.solve_trapezoid_slices
        : 0u) +
     (active_u_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       ? 2u * solver->tuning.solve_trapezoid_slices
        : 0u) +
     l_sparse_cluster_levels +
     u_sparse_cluster_levels;
@@ -6011,7 +6020,7 @@ static int kls_try_parallel_row_solve_one_rhs(kls_solver *solver, double *x) {
       active_parallel_entries * 5u < total_solve_entries * 2u ||
       sync_count == 0u ||
       active_parallel_entries / sync_count <
-        KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC) {
+        (UF_long)solver->tuning.solve_min_entries_per_sync) {
     return 0;
   }
   if (!kls_build_row_solve_thread_bounds(solver, thread_count)) {
@@ -6288,7 +6297,7 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
     (have_lt && lt->sparse_level_ptr != NULL && lt->ptr != NULL
        ? lt->ptr[lt->dense_tail_start] : 0u);
   if (rectangular_entries + sparse_entries <
-      KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ) {
+      (UF_long)solver->tuning.solve_parallel_rect_min_nnz) {
     return 0;
   }
 
@@ -6326,11 +6335,11 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
                                         thread_count);
   const UF_long active_ut_rect_entries =
     have_ut && ut->segment_split != NULL &&
-        ut->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+        ut->rect_entries >= (UF_long)solver->tuning.solve_parallel_rect_min_nnz
       ? ut->rect_entries : 0u;
   const UF_long active_lt_rect_entries =
     have_lt && lt->segment_split != NULL &&
-        lt->rect_entries >= KLS_ROW_SOLVE_PARALLEL_RECT_MIN_NNZ
+        lt->rect_entries >= (UF_long)solver->tuning.solve_parallel_rect_min_nnz
       ? lt->rect_entries : 0u;
   const UF_long active_parallel_entries =
     active_ut_rect_entries + active_lt_rect_entries +
@@ -6343,10 +6352,10 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
     solver->row_refactor_u_ptr[solver->n];
   const UF_long sync_count =
     (active_ut_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       ? 2u * solver->tuning.solve_trapezoid_slices
        : 0u) +
     (active_lt_rect_entries > 0u
-       ? 2u * KLS_ROW_SOLVE_TRAPEZOID_SLICES
+       ? 2u * solver->tuning.solve_trapezoid_slices
        : 0u) +
     ut_sparse_cluster_levels +
     lt_sparse_cluster_levels;
@@ -6354,7 +6363,7 @@ static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
       active_parallel_entries * 5u < total_solve_entries * 2u ||
       sync_count == 0u ||
       active_parallel_entries / sync_count <
-        KLS_ROW_SOLVE_PARALLEL_MIN_ENTRIES_PER_SYNC) {
+        (UF_long)solver->tuning.solve_min_entries_per_sync) {
     return 0;
   }
   if (!kls_build_row_solve_transpose_thread_bounds(solver, thread_count)) {
@@ -6487,7 +6496,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
        expensive column.  These are machine-resource tests, not input-shape
        identities; later timing trials remain free to reject the engine. */
     const double min_dependency_work =
-      KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD *
+      solver->tuning.egraph_min_flops_per_thread *
       (double)solver->options.threads;
     /* One heavy dependency column limits ideal crew-wide speedup, but it
        does not serialize the remaining schedule.  Admit factors with enough
@@ -6499,7 +6508,7 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       0.5 * (double)solver->options.threads;
     /* The size floor excludes tiny problems dominated by thread dispatch;
        the work checks decide whether schedule construction can amortize. */
-    if (solver->n < KLS_EGRAPH_REFACTOR_MIN_SIZE ||
+    if (solver->n < (UF_long)solver->tuning.egraph_min_size ||
         solver->refactor_level_cols == NULL ||
         solver->refactor_dependency_work < min_dependency_work ||
         (solver->refactor_dependency_max_column_work > 0.0 &&
@@ -7040,7 +7049,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   double **native_u_values = NULL;
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->options.threads <= 1 ||
-      solver->n < KLS_EGRAPH_REFACTOR_MIN_SIZE) {
+      solver->n < (UF_long)solver->tuning.egraph_min_size) {
     return -1;
   }
   if (solver->common.scale <= 0 && solver->numeric->Rs != NULL) {
@@ -8172,6 +8181,7 @@ typedef struct kls_snb_state {
   _Atomic int64_t singular_rank; /* min singular pivot seen this refactor */
   _Atomic int failed;            /* halt_if_singular tripped */
   double coop_work_share; /* fraction in cooperative fat-chain snodes */
+  uint64_t coop_min_doubles;
 } kls_snb_state;
 
 /* Work threshold above which a lone task on a level is executed by the
