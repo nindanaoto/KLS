@@ -5685,7 +5685,6 @@ static int kls_ensure_refactor_u_index32_cache(kls_solver *solver) {
   solver->refactor_u_indices32 = u_indices32;
   solver->refactor_u_indices32_storage = u_indices32_storage;
   solver->refactor_u_indices32_count = u_index32_entries;
-  solver->refactor_u_index32_enabled = 1;
   return 1;
 }
 
@@ -6433,7 +6432,6 @@ static int kls_build_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_l_indices32_count = l_index32_entries;
   solver->refactor_u_indices32_count = u_index32_entries;
   solver->refactor_l_index32_enabled = l_indices32 != NULL;
-  solver->refactor_u_index32_enabled = u_indices32 != NULL;
 
   return (kls_ensure_refactor_l_sorted_cache(solver));
 }

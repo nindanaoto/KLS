@@ -1216,7 +1216,6 @@ struct kls_solver {
   UF_long refactor_supernode_candidate_max_width;
 
   int refactor_l_index32_enabled;
-  int refactor_u_index32_enabled;
 
   UF_long *refactor_supernode_pipeline_end;
 
@@ -2662,7 +2661,6 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   solver->refactor_u_indices32_count = 0;
 
   solver->refactor_l_index32_enabled = 0;
-  solver->refactor_u_index32_enabled = 0;
 
 }
 
