@@ -8053,7 +8053,6 @@ static int matching_equilibration_is_better(
     (base_flops > 0.0 && scaled_flops > 0.0 &&
      scaled_flops < 0.98 * base_flops);
   const int decisive_subroundoff_rescue =
-    getenv("KLS_DISABLE_DECISIVE_SUBROUNDOFF_MATCH_SCALE") == NULL &&
     base_common->rcond > 0.0 &&
     base_common->rcond < 32.0 * DBL_EPSILON &&
     scaled_common->rcond >= 100.0 * base_common->rcond &&
@@ -8215,8 +8214,6 @@ static void maybe_use_matching_equilibration(
     common_io->scale <= 0 && common_io->rcond >= sqrt(DBL_EPSILON) &&
     kls_repeated_update_workload(options);
   if (safe_recurring_unscaled &&
-      getenv("KLS_DISABLE_GENERIC_MATCHING_EQUILIBRATION_PREFILTER") ==
-        NULL &&
       !matching_equilibration_has_threshold_gain(
         n, col_ptr, row_idx, *values_io, *row_scale_io, *col_scale_io,
         options->pivot_tolerance)) {
@@ -8347,7 +8344,6 @@ static int maybe_accept_spral_hungarian_numeric_trial(
   kls_ordering trial_ordering = KLS_ORDERING_AUTO;
   double trial_score = 0.0;
   int incumbent_policy_trial =
-        getenv("KLS_DISABLE_EXACT_MATCH_INCUMBENT_POLICY_TRIAL") == NULL &&
     solver->stats.selected_ordering >= KLS_ORDERING_AMD &&
     solver->stats.selected_ordering <= KLS_ORDERING_METIS;
 select_exact_match_symbolic:;
@@ -8594,9 +8590,7 @@ static int kls_live_numeric_declines_matching_portfolio(
      symbolic envelope, has not demonstrated enough pivot inflation to fund
      a second matching, ordering, and factorization portfolio.  The prior
      25% band remains as an A/B control. */
-  const double modeled_work_band =
-    getenv("KLS_DISABLE_RELAXED_LIVE_MATCH_CERTIFICATE") == NULL
-      ? 1.35 : 1.25;
+  const double modeled_work_band = 1.35;
   return numeric_fill > 0.0 && symbolic_fill > 0.0 &&
     numeric_fill <= 1.10 * symbolic_fill &&
     solver->common.flops <= modeled_work_band * solver->symbolic->est_flops;
@@ -8605,8 +8599,7 @@ static int kls_live_numeric_declines_matching_portfolio(
 static int should_try_spral_hungarian_numeric_trial(
   const kls_solver *solver,
   int ignore_pending_portfolio) {
-  if (getenv("KLS_DISABLE_SPRAL_HUNGARIAN_TRIAL") != NULL ||
-      /* A repeated full-factor sample can arrive while the first factor's
+  if (/* A repeated full-factor sample can arrive while the first factor's
          broader value-aware representation portfolio is deliberately
          waiting for a changed numeric.  Do not let this one exact-match arm
          publish early and make the pending pre-static/row-match candidates
@@ -8616,7 +8609,6 @@ static int should_try_spral_hungarian_numeric_trial(
          ordinary Hungarian challenger. */
       (solver != NULL &&
        !ignore_pending_portfolio &&
-       getenv("KLS_DISABLE_PENDING_MATCH_PORTFOLIO_GUARD") == NULL &&
        (solver->prestatic_deferred || solver->rowmatch_deferred)) ||
       solver == NULL || !solver->options.static_pivoting ||
       solver->numeric == NULL || solver->symbolic == NULL ||
@@ -9189,8 +9181,7 @@ static int kls_pipe_scale_threads(int threads, double est_flops) {
 
 static int kls_pipe_first_factor_threads(const kls_solver *solver,
                                          const trilinos_klu_l_symbolic *sym) {
-  if (solver == NULL || sym == NULL || solver->options.threads < 2 ||
-      getenv("KLS_DISABLE_PIPE_ROUTE") != NULL) {
+  if (solver == NULL || sym == NULL || solver->options.threads < 2) {
     return 0;
   }
   double est = sym->est_flops;
@@ -9467,7 +9458,6 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
   }
   if (deferred && !forced_match &&
       solver->rowmatch_deferred &&
-      getenv("KLS_DISABLE_GENERIC_SINGLE_EXACT_MATCH_TRIAL") == NULL &&
       should_try_spral_hungarian_numeric_trial(solver, 1)) {
     /* Both deferred matchers are performance challengers to the same valid
        numeric.  If the exact sparse-assignment trial independently passes
@@ -9552,9 +9542,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
     }
     if (!deferred && !forced_match && !inline_weak &&
         (kls_defer_cycle_trials_enabled() ||
-         (kls_repeated_update_workload(&solver->options) &&
-          getenv("KLS_DISABLE_GENERIC_PRESTATIC_LIFECYCLE_DEFERRAL") ==
-            NULL))) {
+         kls_repeated_update_workload(&solver->options))) {
       /* A partial weak diagonal is a recurring-cycle opportunity, not a
          reason to duplicate a healthy one-shot factor.  Reconsider it on
          the first changed numeric; a failed first factor still reaches the
@@ -9673,8 +9661,7 @@ matching_admitted:;
     !incumbent_symbolic_already_bounded &&
     isfinite(matched_column_pair_work) &&
     matched_column_pair_work > 1.0e6 &&
-    matched_column_pair_work <= 1.0e7 &&
-    getenv("KLS_DISABLE_BOUNDED_EXACT_MATCH_PROBE") == NULL;
+    matched_column_pair_work <= 1.0e7;
 #endif
 
 matching_attempt:;
@@ -9783,8 +9770,7 @@ matching_attempt:;
       trial_col_scale = match_col_scale;
       match_row_scale = NULL;
       match_col_scale = NULL;
-    } else if (getenv("KLS_DISABLE_LOW_WORK_MATCH_SCALE_DEFER") == NULL &&
-               isfinite(matched_column_pair_work) &&
+    } else if (isfinite(matched_column_pair_work) &&
                matched_column_pair_work <= 1.0e7 &&
                kls_repeated_update_workload(&trial_options)) {
       /* A bounded generic match is first judged in its unscaled
@@ -9813,8 +9799,7 @@ matching_attempt:;
       trial_options.ordering == KLS_ORDERING_AUTO &&
       kls_repeated_update_workload(&trial_options) &&
       isfinite(matched_column_pair_work) &&
-      matched_column_pair_work <= 1.0e7 &&
-      getenv("KLS_DISABLE_BOUNDED_MATCHED_AMD_SHORTCUT") == NULL) {
+      matched_column_pair_work <= 1.0e7) {
     kls_options amd_options = trial_options;
     amd_options.ordering = KLS_ORDERING_AMD;
     amd_options.use_btf = 0;
@@ -10140,8 +10125,7 @@ matching_attempt:;
                                        trial_row_idx, &trial_options,
                                        trial_values);
   const int preapplied_matching_equilibration =
-    (getenv("KLS_PRESTATIC_PREAPPLY_MATCH_SCALE") != NULL ||
-     solver->medium_partial_static_metis_path) &&
+    solver->medium_partial_static_metis_path &&
     trial_options.scale == KLS_SCALE_AUTO &&
     trial_row_scale != NULL && trial_col_scale != NULL;
   if (preapplied_matching_equilibration) {
@@ -10158,8 +10142,7 @@ matching_attempt:;
   }
   const int generic_recurring_matched_candidate =
     kls_repeated_update_workload(&trial_options) &&
-    fabs(trial_options.pivot_tolerance - 0.001) <= 1.0e-12 &&
-    getenv("KLS_DISABLE_GENERIC_MATCHED_TIGHT_TOLERANCE") == NULL;
+    fabs(trial_options.pivot_tolerance - 0.001) <= 1.0e-12;
   const UF_long matched_threshold_sensitive =
     generic_recurring_matched_candidate
       ? kls_matched_threshold_sensitive_columns(
@@ -10221,7 +10204,6 @@ matching_attempt:;
   int skip_trial_factor = 0;
   const int generic_bounded_parallel_first =
     !deferred &&
-    getenv("KLS_DISABLE_GENERIC_BOUNDED_PRESTATIC_FIRST") == NULL &&
     solver->options.threads > 1 &&
     kls_repeated_update_workload(&solver->options) &&
     trial_symbolic != NULL && trial_symbolic->est_flops > 0.0 &&
@@ -10242,13 +10224,11 @@ matching_attempt:;
     trial_symbolic != NULL && trial_symbolic->nblocks == 1u &&
     trial_symbolic->maxblock == solver->n &&
     (trial_symbolic->structural_rank == KLS_KLU_EMPTY ||
-     trial_symbolic->structural_rank == solver->n) &&
-    getenv("KLS_DISABLE_GENERIC_SINGLE_BLOCK_PRESTATIC_FIRST") == NULL;
+     trial_symbolic->structural_rank == solver->n);
   const int skip_trial_factor_requested =
     !deferred &&
     (generic_bounded_parallel_first ||
-     generic_single_block_parallel_first ||
-     getenv("KLS_PRESTATIC_SKIP_TRIAL_FACTOR") != NULL);
+     generic_single_block_parallel_first);
   if (skip_trial_factor_requested &&
       trial_options.scale == KLS_SCALE_AUTO &&
       trial_row_scale != NULL && trial_col_scale != NULL) {
@@ -10318,8 +10298,7 @@ matching_attempt:;
                  (use_large_spral_match && solver->nnz >= 8u * solver->n);
 #endif
 
-    if (pipe_route && solver->options.threads >= 2 &&
-        getenv("KLS_DISABLE_PIPE_ROUTE") == NULL) {
+    if (pipe_route && solver->options.threads >= 2) {
       kls_klu_pipe_threads =
         kls_pipe_scale_threads(solver->options.threads,
                                trial_symbolic != NULL
@@ -10336,24 +10315,6 @@ matching_attempt:;
        (or at done: on trial rejection). */
 
   }
-  if (getenv("KLS_STATIC_PERTURB") != NULL) {
-    /* hard-static regime: keep the matched diagonal everywhere and
-       perturb tiny pivots (SuperLU_DIST recipe); refinement recovers
-       the contract.  sqrt(eps) x amax bounds growth at ~1e8. */
-    double amax = 0.0;
-    for (UF_long pz = 0; pz < (UF_long)solver->nnz; ++pz) {
-      const double av = fabs(trial_values[pz]);
-      if (av > amax) amax = av;
-    }
-    trial_common.kls_static_perturb = 1.49e-8 * amax;
-  }
-  if (!deferred && getenv("KLS_PRESTATIC_SKIP_TRIAL") != NULL) {
-    /* probe: adopt the matched pattern UNFACTORED and let the main
-       path's parallel first-factor machinery build the numeric on
-       these coordinates (the serial trial is pre2's largest cost) */
-    trial_numeric = NULL;
-    goto kls_adopt_unfactored;
-  }
   const double trial_est_fill = trial_symbolic != NULL
     ? trial_symbolic->lnz + trial_symbolic->unz : 0.0;
   const double trial_est_flops = trial_symbolic != NULL
@@ -10365,7 +10326,6 @@ matching_attempt:;
     trial_est_flops >= 8192.0 * (double)solver->n;
   const int generic_unmatched_colamd_proposal =
     !deferred && !forced_match &&
-    getenv("KLS_DISABLE_GENERIC_UNMATCHED_COLAMD_CHALLENGER") == NULL &&
     solver->orientation == KLS_ORIENTATION_NORMAL &&
     solver->input_format == KLS_INPUT_CSC &&
     solver->input_to_csc == NULL && solver->values == NULL &&
@@ -10662,7 +10622,6 @@ matching_attempt:;
 
   if (matching_equilibration_deferred) {
     const int low_work_safe_unscaled =
-      getenv("KLS_DISABLE_LOW_WORK_MATCH_SCALE_DEFER") == NULL &&
       trial_common.rcond >= sqrt(DBL_EPSILON) &&
       trial_symbolic != NULL && trial_symbolic->est_flops > 0.0 &&
       trial_symbolic->est_flops < 1.0e6 &&
@@ -10767,7 +10726,6 @@ matching_attempt:;
   }
   }
 
-kls_adopt_unfactored:;
   /* The early METIS race reads the pattern arrays this adoption frees:
      join and discard it first. */
   kls_metis_race_abandon(solver);
@@ -11066,9 +11024,7 @@ static void *kls_metis_race_main(void *arg) {
     const double est = race->symbolic->est_flops;
     const double rn = (double)race->symbolic->n;
     if (race->options.threads >= 2 &&
-        getenv("KLS_DISABLE_PIPE_ROUTE") == NULL &&
-        (getenv("KLS_KLU_PIPE_RACE_DEFAULT") != NULL ||
-         race->giant_symmetric_scalar_fringe_metis_row ||
+        (race->giant_symmetric_scalar_fringe_metis_row ||
          (est > 5.0e9 && rn > 0.0 && est / rn >= 1.0e5))) {
       /* default-on measured WORSE: giants pay 16 x O(n) workspace
          setup on the race thread (circuit5M_dc +1.5s, Freescale1
