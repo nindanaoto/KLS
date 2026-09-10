@@ -1577,7 +1577,6 @@ int main(int argc, char **argv) {
            ",\"build_has_metis\":%s"
            ",\"build_has_scotch\":%s"
            ",\"build_has_spral_scaling\":%s"
-           ",\"build_has_cblas\":%s"
            ",\"requested_input_index\":\"%s\""
            ",\"input_index_bytes\":%d"
            ",\"internal_index_bytes\":%d"
@@ -1645,7 +1644,6 @@ int main(int argc, char **argv) {
            stats.build_has_metis ? "true" : "false",
            stats.build_has_scotch ? "true" : "false",
            stats.build_has_spral_scaling ? "true" : "false",
-           stats.build_has_cblas ? "true" : "false",
            index_mode_name(input_index_mode),
            input_index.bytes,
            stats.internal_index_bytes,
@@ -3904,12 +3902,6 @@ int main(int argc, char **argv) {
            ",\"refactor_supernode_update_run_count\":%" PRId64
            ",\"refactor_supernode_update_rows\":%" PRId64
            ",\"refactor_supernode_update_entries\":%" PRId64
-           ",\"refactor_last_supernode_cblas_update_runs\":%" PRId64
-           ",\"refactor_last_supernode_cblas_update_rows\":%" PRId64
-           ",\"refactor_last_supernode_cblas_update_entries\":%" PRId64
-           ",\"refactor_supernode_cblas_update_run_count\":%" PRId64
-           ",\"refactor_supernode_cblas_update_rows\":%" PRId64
-           ",\"refactor_supernode_cblas_update_entries\":%" PRId64
            ",\"refactor_last_supernode_blocked_update_runs\":%" PRId64
            ",\"refactor_last_supernode_blocked_update_rows\":%" PRId64
            ",\"refactor_last_supernode_blocked_update_entries\":%" PRId64
@@ -3988,12 +3980,6 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_update_run_count,
            stats.refactor_supernode_update_rows,
            stats.refactor_supernode_update_entries,
-           stats.refactor_last_supernode_cblas_update_runs,
-           stats.refactor_last_supernode_cblas_update_rows,
-           stats.refactor_last_supernode_cblas_update_entries,
-           stats.refactor_supernode_cblas_update_run_count,
-           stats.refactor_supernode_cblas_update_rows,
-           stats.refactor_supernode_cblas_update_entries,
            stats.refactor_last_supernode_blocked_update_runs,
            stats.refactor_last_supernode_blocked_update_rows,
            stats.refactor_last_supernode_blocked_update_entries,
@@ -4565,11 +4551,10 @@ int main(int argc, char **argv) {
            bench_refactor_value_mode_name(refactor_value_mode),
            refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0);
-    printf("build features: METIS %s, SCOTCH %s, SPRAL scaling %s, CBLAS %s\n",
+    printf("build features: METIS %s, SCOTCH %s, SPRAL scaling %s\n",
            stats.build_has_metis ? "on" : "off",
            stats.build_has_scotch ? "on" : "off",
-           stats.build_has_spral_scaling ? "on" : "off",
-           stats.build_has_cblas ? "on" : "off");
+           stats.build_has_spral_scaling ? "on" : "off");
     printf("input index bytes: %d (requested %s)\n",
            input_index.bytes, index_mode_name(input_index_mode));
     printf("requested orientation: %s\n", kls_orientation_name(options.orientation));
@@ -5762,16 +5747,6 @@ int main(int argc, char **argv) {
            stats.refactor_supernode_update_run_count,
            stats.refactor_supernode_update_rows,
            stats.refactor_supernode_update_entries);
-    printf("refactor supernode CBLAS updates: %" PRId64
-           ", rows: %" PRId64 ", entries: %" PRId64
-           ", cumulative updates: %" PRId64
-           ", rows: %" PRId64 ", entries: %" PRId64 "\n",
-           stats.refactor_last_supernode_cblas_update_runs,
-           stats.refactor_last_supernode_cblas_update_rows,
-           stats.refactor_last_supernode_cblas_update_entries,
-           stats.refactor_supernode_cblas_update_run_count,
-           stats.refactor_supernode_cblas_update_rows,
-           stats.refactor_supernode_cblas_update_entries);
     printf("refactor supernode blocked updates: %" PRId64
            ", rows: %" PRId64 ", entries: %" PRId64
            ", cumulative updates: %" PRId64
