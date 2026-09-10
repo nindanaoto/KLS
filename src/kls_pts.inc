@@ -1,5 +1,15 @@
 /* Parallel tree/subtree refactor and solve implementation.
  * Included by kls_numeric_engines.inc in the original definition order.
+ *
+ * PTS cuts an elimination tree into independent subtrees assigned to worker
+ * bins and a serial or pipelined ancestor top.  Build-time scoring chooses the
+ * cut from predicted recurring work; runtime timing still decides whether the
+ * retained plan replaces the incumbent refactor or solve path.
+ *
+ * Subtree workers write disjoint factor regions.  The top may start only after
+ * its child subtrees publish completion.  Pool-backed execution borrows the
+ * EGraph worker pool, so PTS jobs must clear the shared job descriptor before
+ * releasing the pool lock.
  */
 
 static void *kls_pts_touch_main(void *argp) {

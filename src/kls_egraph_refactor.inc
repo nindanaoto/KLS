@@ -1,5 +1,16 @@
 /* Elimination-graph scheduling, dependency execution, and mapped refactor kernels.
  * Included by kls_numeric_engines.inc in the original definition order.
+ *
+ * EGraph turns the fixed-pivot column dependencies into persistent worker
+ * schedules.  Preparation builds immutable graph/stream metadata; each run
+ * publishes only generation, completion, and rejection state.  The principal
+ * layers are scalar/vector column kernels, cluster and separator dispatch,
+ * persistent-pool management, and the measured executor tournament.
+ *
+ * A worker must publish numeric values before marking its dependency done.
+ * Failure and pivot rejection set stop with release semantics; consumers test
+ * completion with acquire semantics.  Keep those publication pairs intact
+ * when simplifying synchronization code.
  */
 
 static void kls_egraph_refactor_record_invalid(

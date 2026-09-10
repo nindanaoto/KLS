@@ -1,5 +1,15 @@
 /* Supernode preparation, sorting, and refactor schedule construction.
  * Included by kls_numeric_engines.inc in the original definition order.
+ *
+ * This module builds retained execution plans but does not own the numeric.
+ * SNB describes supernode panels, EGraph describes column dependencies, and
+ * lightweight maps support serial fallback.  Builders may decline when setup
+ * cannot amortize over the caller-declared lifecycle; a decline must leave the
+ * existing numeric and fallback path usable.
+ *
+ * The final section is the refactor dispatcher.  It tries already-authoritative
+ * representations first, then admitted challengers, and finally KLU.  Checked
+ * runs propagate the earliest rejected pivot into the common repair path.
  */
 
 static void kls_snb_free(kls_solver *solver) {

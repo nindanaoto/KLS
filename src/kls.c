@@ -1,3 +1,23 @@
+/* KLS implementation overview
+ * ---------------------------
+ * KLS keeps one C translation unit so ordering, factorization, refactor, and
+ * solve kernels can be optimized together.  The implementation is physically
+ * split into .inc modules to keep the major subsystems navigable:
+ *
+ *   kls_ordering_policy.inc       symbolic candidates and AUTO selection
+ *   kls_numeric_prepare_repair.inc value frames, metadata, and repair
+ *   kls_row_refactor.inc          row-oriented numeric and solve kernels
+ *   kls_egraph_refactor.inc       dependency-graph execution
+ *   kls_numeric_schedule.inc      schedule and supernode preparation
+ *   kls_first_factor.inc          initial and predicted factorization
+ *   kls_pts.inc                   parallel subtree execution
+ *   kls_compact_solve.inc         compact-index solve representations
+ *
+ * The public lifecycle is analyze -> factor -> {refactor, solve}*.  AUTO may
+ * prepare several representations, but only a timed and accuracy-checked
+ * winner becomes authoritative.  Representation changes must therefore go
+ * through the invalidation helpers rather than freeing individual caches.
+ */
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
@@ -415,6 +435,18 @@ typedef struct kls_separator_analysis {
   UF_long *component_parent;
 } kls_separator_analysis;
 
+/* Persistent state is grouped broadly by lifetime:
+ *
+ *   - input frame and symbolic state survive until the next analyze;
+ *   - numeric storage and representation caches survive until factor replace;
+ *   - adaptive verdicts survive while that numeric remains authoritative;
+ *   - "last" counters describe only the most recent public operation.
+ *
+ * Owned pointers are released by clear_matrix(), free_symbolic(),
+ * free_numeric(), or a representation-specific invalidation helper.  Worker
+ * threads may borrow them, but never own them.  A pointer published to a
+ * worker is not replaced until that worker pool has joined or quiesced.
+ */
 struct kls_solver {
   UF_long n;
   UF_long nnz;
@@ -7632,6 +7664,8 @@ static int is_large_diagonal_circuit_like_pattern(UF_long n,
    direct-input optimizations.  The lean kernel consumes signed 32-bit map
    positions and an unscaled retained factor, but does not depend on matrix
    dimensions, ordering, orientation, or a benchmark update sequence. */
+/* Symbolic policy is included here because it consumes the shared types and
+   utilities above and defines the candidate selection used by analyze below. */
 #include "kls_ordering_policy.inc"
 
 static double *ensure_solve_perm_workspace(kls_solver *solver) {
@@ -7655,6 +7689,9 @@ static double *ensure_solve_perm_workspace(kls_solver *solver) {
   return solver->solve_perm_workspace;
 }
 
+/* Public lifecycle entry points.  Analyze owns structural conversion and
+   symbolic selection; factor establishes a numeric epoch; refactor and solve
+   may then select retained engines without changing the public matrix frame. */
 void kls_default_options(kls_options *options) {
   if (options == NULL) {
     return;
@@ -7853,6 +7890,8 @@ int kls_analyze_csr(kls_solver *solver,
   return KLS_OK;
 }
 
+/* Numeric modules need the completed symbolic policy and are included just
+   before factor/refactor/solve, their public dispatch sites. */
 #include "kls_numeric_engines.inc"
 
 int kls_factor(kls_solver *solver, const double *values) {

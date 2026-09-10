@@ -1,5 +1,17 @@
 /* Value preparation, fast rejection, repair, and retained numeric metadata.
  * Included by kls_numeric_engines.inc in the original definition order.
+ *
+ * This module bridges the caller's value array and every numeric executor.
+ * Its main responsibilities are:
+ *   - map and scale values into the retained CSC frame;
+ *   - build compact pointer/index mirrors shared by refactor and solve;
+ *   - classify rejected pivots and construct bounded repair tails;
+ *   - invalidate metadata whenever a numeric layout is replaced;
+ *   - prepare dependency and row metadata without selecting an executor.
+ *
+ * Prepared arrays are valid only for the numeric epoch that built them.
+ * Repair may preserve a prefix, but any replaced suffix must republish all
+ * pointers derived from LU storage before another worker can run.
  */
 
 static int kls_build_prepared_value_scale(kls_solver *solver) {

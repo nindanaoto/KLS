@@ -1,6 +1,19 @@
 /* Internal ordering and automatic-policy implementation.
  * Included by kls.c at the original definition point to preserve a single
  * translation unit and its optimization behavior.
+ *
+ * Reading map:
+ *   1. capability predicates describe topology or retained-factor properties;
+ *   2. ordering adapters build AMD/AMF/METIS/SCOTCH candidates;
+ *   3. candidate races overlap independent symbolic work;
+ *   4. value-aware matching and scaling prepare alternative matrix frames;
+ *   5. kls_choose_symbolic_inner performs AUTO selection;
+ *   6. promotion helpers compare provisional and incumbent numerics.
+ *
+ * A predicate here normally authorizes a trial, not an unconditional choice.
+ * Adoption must be justified later by symbolic bounds, a measured numeric, or
+ * a residual check.  Keep topology predicates invariant under relabeling and
+ * avoid encoding corpus identities or exact benchmark dimensions.
  */
 
 static int kls_low_work_btf_map32_capable(const kls_solver *solver) {

@@ -1,5 +1,16 @@
 /* Row-first and predicted first-factor construction.
  * Included by kls_numeric_engines.inc in the original definition order.
+ *
+ * The ordinary KLU factor remains the correctness fallback.  Faster builders
+ * may predict fill from a symbolic pattern, factor independent regions in
+ * parallel, and hand a rejected suffix to bounded repair.  Their lifecycle is:
+ *   estimate -> allocate -> construct -> validate pivots/residual -> adopt.
+ * Until adoption, all allocations are local and must be freed on every exit;
+ * after adoption, solver->numeric owns them and normal invalidation applies.
+ *
+ * Prefix repair is legal only when the preserved columns and their dependency
+ * closure are unchanged.  A successful repair republishes LU-derived caches;
+ * otherwise the code falls back to a complete pivoted factorization.
  */
 
 static size_t kls_initial_block_lusize(const kls_solver *solver,

@@ -1,5 +1,19 @@
 /* Row-oriented refactor kernels, compact row solves, and row execution policy.
  * Included by kls_numeric_engines.inc in the original definition order.
+ *
+ * The row representation mirrors fixed-pivot L/U by destination row.  It is
+ * useful when column scatter and dependency publication dominate arithmetic.
+ * The file is organized as:
+ *   - admission and adaptive row/column verdicts;
+ *   - compact and supernode worker kernels;
+ *   - row-pattern construction and value publication;
+ *   - normal and transpose row solves;
+ *   - checked execution, pivot rejection, and parallel dispatch.
+ *
+ * row_refactor_values_dirty means the row representation is authoritative and
+ * native KLU columns require publication before use.  Conversely, a column
+ * executor invalidates row values unless it explicitly refreshes them.  Keep
+ * that ownership transition outside hot inner loops.
  */
 
 KLS_DEFINE_ENV_FLAG(kls_row_refactor_env_enabled,

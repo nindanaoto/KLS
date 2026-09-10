@@ -1,5 +1,15 @@
 /* Compact-index solve cache preparation and solve kernels.
  * Included by kls_numeric_engines.inc in the original definition order.
+ *
+ * Solve caches mirror the retained factor with the narrowest safe index type:
+ * uint16 for small factors, int32 for general compact factors, or native KLU
+ * indices when another mirror cannot amortize.  Builders validate every cast
+ * before publishing a cache; allocation or validation failure simply retains
+ * the wider solve path.
+ *
+ * A solve representation never owns numeric values.  It either points into
+ * the current LU payload or consumes an explicitly published packed mirror,
+ * and must be invalidated whenever the numeric layout changes.
  */
 
 static int kls_build_i16_solve_cache(kls_solver *solver,
