@@ -7265,61 +7265,42 @@ static void clear_matrix(kls_solver *solver) {
   free_numeric(solver);
 
   free_symbolic(solver);
-  free(solver->col_ptr);
-  free(solver->row_idx);
-  free(solver->input_to_csc);
-  free(solver->row_perm);
-  free(solver->user_col_perm);
-  free(solver->row_scale);
-  free(solver->col_scale);
-  free(solver->values);
-  free(solver->block_order_perm);
-  free(solver->prepared_value_scale);
-  free(solver->prepared_value_input_pos);
-  free(solver->refactor_input_snapshot);
-  free(solver->lean_scale_input_snapshot);
-  free(solver->lean_scale_rs_snapshot);
-  free(solver->solve_perm_workspace);
-  free(solver->fused_refactor_solve_work);
+  KLS_FREE_AND_NULL(solver->col_ptr);
+  KLS_FREE_AND_NULL(solver->row_idx);
+  KLS_FREE_AND_NULL(solver->input_to_csc);
+  KLS_FREE_AND_NULL(solver->row_perm);
+  KLS_FREE_AND_NULL(solver->user_col_perm);
+  KLS_FREE_AND_NULL(solver->row_scale);
+  KLS_FREE_AND_NULL(solver->col_scale);
+  KLS_FREE_AND_NULL(solver->values);
+  KLS_FREE_AND_NULL(solver->block_order_perm);
+  KLS_FREE_AND_NULL(solver->prepared_value_scale);
+  KLS_FREE_AND_NULL(solver->prepared_value_input_pos);
+  KLS_FREE_AND_NULL(solver->refactor_input_snapshot);
+  KLS_FREE_AND_NULL(solver->lean_scale_input_snapshot);
+  KLS_FREE_AND_NULL(solver->lean_scale_rs_snapshot);
+  KLS_FREE_AND_NULL(solver->solve_perm_workspace);
+  KLS_FREE_AND_NULL(solver->fused_refactor_solve_work);
   free_solve_refine_workspace(solver);   /* incl. solve_refine_rinv:
      it was only ever freed here-ish; a reused solver otherwise kept a
      STALE row-perm inverse sized to the previous matrix */
-  free(solver->solve_refine_values);
-  free(solver->verified_rhs);
-  free(solver->verified_factor_rhs);
+  KLS_FREE_AND_NULL(solver->solve_refine_values);
+  KLS_FREE_AND_NULL(solver->verified_rhs);
+  KLS_FREE_AND_NULL(solver->verified_factor_rhs);
   free_refactor_map(solver);
   free_refactor_schedule(solver);
-  solver->col_ptr = NULL;
-  solver->row_idx = NULL;
-  solver->input_to_csc = NULL;
-  solver->row_perm = NULL;
-  solver->user_col_perm = NULL;
-  solver->row_scale = NULL;
-  solver->col_scale = NULL;
-  solver->values = NULL;
-  solver->block_order_perm = NULL;
-  solver->verified_rhs = NULL;
-  solver->verified_factor_rhs = NULL;
   solver->verified_rhs_valid = 0;
-  solver->fused_refactor_solve_work = NULL;
   solver->fused_refactor_solve_rhs = NULL;
   solver->fused_refactor_solve_work_n = 0u;
   solver->fused_refactor_solve_requested = 0;
   solver->fused_refactor_solve_computed = 0;
   solver->fused_refactor_solve_ready = 0;
   solver->fused_refactor_solve_row_values = 0;
-  solver->prepared_value_scale = NULL;
-  solver->prepared_value_input_pos = NULL;
-  solver->refactor_input_snapshot = NULL;
   solver->refactor_input_snapshot_valid = 0;
   solver->unchanged_refactor_state = 0;
-  solver->lean_scale_input_snapshot = NULL;
-  solver->lean_scale_rs_snapshot = NULL;
   solver->lean_scale_input_state = 0;
   solver->auto_scale_deferred = 0;
   solver->tight_pivot_deferred = 0;
-  solver->solve_perm_workspace = NULL;
-  solver->solve_refine_values = NULL;
   solver->solve_recovery_active = 0;
   solver->promoted_tolerance_l2_recovery_required = 0;
   solver->promoted_tolerance_l2_contract_run_count = 0u;
@@ -7703,11 +7684,9 @@ static double *ensure_solve_perm_workspace(kls_solver *solver) {
       solver->solve_perm_workspace_n == solver->n) {
     return solver->solve_perm_workspace;
   }
-  free(solver->solve_perm_workspace);
+  KLS_FREE_AND_NULL(solver->solve_perm_workspace);
   free_solve_refine_workspace(solver);
-  free(solver->solve_refine_values);
-  solver->solve_refine_values = NULL;
-  solver->solve_perm_workspace = NULL;
+  KLS_FREE_AND_NULL(solver->solve_refine_values);
   solver->solve_perm_workspace_n = 0;
   solver->solve_perm_workspace =
     (double *)malloc((size_t)solver->n * sizeof(*solver->solve_perm_workspace));
