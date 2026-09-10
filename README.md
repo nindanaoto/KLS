@@ -69,8 +69,7 @@ provisional path, the incumbent's realized flops-per-fill ratio selects between
 coarse and fine resource-scaled CAMD windows, while the exact factor remains
 the acceptance authority. Bounded candidates retain their predicted-fill
 validation. These are lifecycle, representation, and measured-factor contracts
-rather than dimension or matrix-family selectors. Set
-`KLS_DISABLE_GENERIC_ND_PORTFOLIO=1` for A/B runs.
+rather than dimension or matrix-family selectors.
 
 The recurring numeric router is measurement-based as well. A timed lean-row
 winner uses compact 16-bit streams whenever every retained index and pointer
@@ -225,9 +224,7 @@ flops per row, at most `n/64 + 16` off-diagonal pivots, and no scaling,
 nudging, perturbation, or predicted numeric.  This separates matching
 economics from recurring-engine eligibility.
 
-Set `KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH=1` to disable the complete
-policy;
-the former matrix-named `KLS_*GEMAT*` switches are no longer recognized.
+The former matrix-named `KLS_*GEMAT*` switches are no longer recognized.
 `Hamrle2` is included in the extended SuiteSparse manifest as a
 cross-family one-block holdout.  The exact Gemat selector and Gemat-named
 internal representations are removed.
@@ -250,10 +247,6 @@ That immutable symbolic verdict is cached after adoption, so the generic proof
 is not repeated in refactor or solve dispatch.  Direct updates consume public
 values only after the first solve contract succeeds, and both PTS and the
 serial one-block fallback apply the inverse input map and paired match scales.
-Set `KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY=1` to disable the
-whole policy or `KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_DIRECT_VALUES=1` to
-retain matching while disabling fused direct input.
-
 Compact 16-bit triangular solves now cache consecutive singleton BTF runs
 from the selected block structure instead of recognizing two Rommes input
 boxes.  The two-byte-per-block table is built only when block pointers and
@@ -1272,10 +1265,7 @@ matching permutation selects the 32-bit mirror and precomposes public RHS rows
 with numeric rows. The class is bounded by normalized input density, core
 coverage, factor fill/work, rank, and pivot-stability checks. Its analyze-time
 counterpart also suppresses a speculative METIS/scale race only when symbolic
-fill and work fall in the same moderate band. Set
-`KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION=1`,
-`KLS_DISABLE_MODERATE_FRAGMENTED_I32_SOLVE=1`, or
-`KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS=1` for independent A/B diagnosis.
+fill and work fall in the same moderate band.
 
 A compact AMF two-block policy is selected from computed symbolic and numeric
 state rather than an input fingerprint. The symbolic proposal requires
@@ -1713,9 +1703,7 @@ the rest of the tournament after AMD proves one of three realized regimes:
 fragmented bounded work, one-block bounded work, or a bounded-degree exactly
 symmetric high-work grid. This second contract also requires a substantial
 core, balanced fill, and full or unknown structural rank. Rejected AMD
-symbolics are freed before normal AUTO selection continues. Set
-`KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH=1` or
-`KLS_DISABLE_AUTO_AMD_SHORTCUT=1` to restore the respective generic fallback.
+symbolics are freed before normal AUTO selection continues.
 The public stats/benchmark JSON expose proposal and post-symbolic verdicts as
 `medium_spike_minfill_candidate`/`medium_spike_minfill_symbolic_eligible`,
 `sparse_broad_column_amf_no_btf_candidate`/
@@ -3452,9 +3440,7 @@ Second, when nested dissection is only a near-tie lifecycle win in the first
 AUTO orientation, KLS completes the independently realized ND portfolio in the
 other orientation before comparing lifecycle scores.  This is limited by the
 same ND admission and rollback contracts as the first candidate; it does not
-select an orientation from dimensions, density, or matrix provenance.  Set
-`KLS_DISABLE_GENERIC_NEAR_TIE_CROSS_ORIENTATION_ND=1` to retain the first-frame
-shortcut.
+select an orientation from dimensions, density, or matrix provenance.
 
 Finally, an ordinary row-published factor or armed solve probe now verifies
 the same relative-L2 quantity used by the benchmark validity rule, with a
@@ -3516,9 +3502,7 @@ native numeric is larger than aggregate cache but beats its symbolic storage
 bound, an independent deterministic backward-residual probe can certify it
 and avoid a second full matching-equilibration factor.  This uses realized
 threshold pressure, factor storage, lifecycle length, and numerical evidence;
-it does not use matrix dimensions or provenance.  The A/B controls are
-`KLS_DISABLE_GENERIC_RESOURCE_SCALED_MATCHED_TOLERANCE=1` and
-`KLS_DISABLE_GENERIC_RESOURCE_SCALED_NATIVE_MATCH_CERTIFICATE=1`.
+it does not use matrix dimensions or provenance.
 
 Separator width is also part of the realized matched-ordering portfolio.  A
 wide nested-dissection splitter remains the latency candidate.  When its
@@ -3526,9 +3510,7 @@ symbolic storage exceeds aggregate cache over a repeated lifecycle, KLS also
 builds a two-leaf candidate and retains it only for a 0.5% symbolic-fill win
 whose projected recurring saving repays a complete graph comparison.  The
 normal numeric fill, pivot, conditioning, and residual gates still arbitrate
-the selected ordering.  Set
-`KLS_DISABLE_GENERIC_MATCHED_ND_WIDTH_PORTFOLIO=1` to retain only the wide
-candidate.
+the selected ordering.
 
 On `pre2`, the default wide candidate has a `91.38M` symbolic score and
 produces `75.45M` factor entries with `112.88B` factor flops.  The measured
@@ -3595,16 +3577,6 @@ and passed a `1e-9` relative-L2 line in an unscaled full-precision frame, the
 ordinary solve contract may retire its componentwise probe.  Unsettled
 EGraph states retain the existing armed recovery contract.
 
-The individual A/B controls are
-`KLS_DISABLE_MATCHED_DECISIVE_SPAN_REFINEMENT`,
-`KLS_DISABLE_GENERIC_NATIVE_MATCHING_SCALE`,
-`KLS_DISABLE_GENERIC_TIGHT_PIVOT_DEFERRAL`,
-`KLS_DISABLE_EGRAPH_DOMINATED_QUAD_SKIP`,
-`KLS_DISABLE_GENERIC_EARLY_BATCH_FLOOR_PROBE`,
-`KLS_DISABLE_BATCH_FLOOR_CLOSE_REAUDIT`,
-`KLS_DISABLE_PTS_CLOSE_REAUDIT`, and
-`KLS_DISABLE_SETTLED_PTS_RAW_L2_CERTIFICATE`.
-
 On the final eight-core, 20-entrywise-update audit, two counterbalanced passes
 over 18 development and unrelated holdout matrices completed all 72 checked
 runs below the `1e-8` residual limit.  The combined current/control H100
@@ -3632,10 +3604,7 @@ An accepted unscaled factor records its initial condition regime.  Every
 changed numeric receives a vectorized diagonal-ratio check; an eightfold
 deterioration rebuilds that generation with the scaled AUTO mode that
 authorized the trial.  If AUTO had already selected an unscaled incumbent,
-the alternative introduces no new scaling risk.  The controls
-`KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION=1` and
-`KLS_DISABLE_GENERIC_UNSCALED_RCOND_GUARD=1` restore the previous selector and
-disable the changed-value guard, respectively.
+the alternative introduces no new scaling risk.
 
 On the final eight-core, 20-entrywise-update gap suite, the feature/control
 geometric-mean ratio over 27 matrices was `0.9866`.  Fifteen-pass medians put

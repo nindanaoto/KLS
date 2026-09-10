@@ -821,8 +821,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   }
   if (solver->i32solve_rhs_perm32 == NULL &&
       solver->row_perm != NULL &&
-      numeric->Rs == NULL && n <= (UF_long)UINT32_MAX &&
-      getenv("KLS_DISABLE_MODERATE_FRAGMENTED_FUSED_RHS") == NULL) {
+      numeric->Rs == NULL && n <= (UF_long)UINT32_MAX) {
     uint32_t *row_inverse = (uint32_t *)malloc(
       (size_t)(n > 0u ? n : 1u) * sizeof(*row_inverse));
     uint32_t *rhs_perm32 = (uint32_t *)malloc(

@@ -1232,7 +1232,6 @@ static int kls_symmetric_partial_diagonal_match_factor_cycle(
     return 0;
   }
   const int generic_contract =
-    getenv("KLS_DISABLE_SYMMETRIC_PARTIAL_DIAGONAL_MATCH_POLICY") == NULL &&
     kls_repeated_update_workload(&solver->options) &&
     solver->options.orientation == KLS_ORIENTATION_AUTO &&
     solver->options.ordering == KLS_ORDERING_AUTO &&
@@ -4829,7 +4828,6 @@ static void maybe_retry_without_btf(UF_long n,
   const int amortized_non_degenerate_no_btf =
     generic_comparison && repeated_generic_comparison && !btf_degenerate &&
     kls_generic_btf_capture_candidate != NULL &&
-    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
     current_score_known && current_score > 0.0 &&
     isfinite(no_btf_score) && no_btf_score > 0.0 &&
     (*symbolic)->nblocks > 1u && no_btf_symbolic->nblocks == 1u &&
@@ -4867,7 +4865,6 @@ static void maybe_retry_without_btf(UF_long n,
     const int capture_btf_value_alternative =
       kls_generic_btf_capture_candidate != NULL &&
       kls_generic_btf_capture_candidate->generic_btf_value_symbolic == NULL &&
-      getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
       options->ordering == KLS_ORDERING_AUTO &&
       kls_repeated_update_workload(options) &&
       (*symbolic)->do_btf && (*symbolic)->nblocks > 1u &&
@@ -5156,8 +5153,7 @@ static int kls_generic_nd_trial_start(
       options->ordering != KLS_ORDERING_AUTO ||
       !kls_repeated_update_workload(options) || options->threads < 2 ||
       candidate->n < 30000u || candidate->n > (UF_long)INT32_MAX ||
-      candidate->nnz > (UF_long)INT32_MAX ||
-      getenv("KLS_DISABLE_GENERIC_ND_PORTFOLIO") != NULL) {
+      candidate->nnz > (UF_long)INT32_MAX) {
     return 0;
   }
 
@@ -5263,8 +5259,7 @@ static void kls_maybe_promote_selected_generic_nd(
       candidate->block_order_perm != NULL ||
       !kls_repeated_update_workload(options) || options->threads < 2 ||
       candidate->n > (UF_long)INT32_MAX ||
-      candidate->nnz > (UF_long)INT32_MAX ||
-      getenv("KLS_DISABLE_GENERIC_ND_PORTFOLIO") != NULL) {
+      candidate->nnz > (UF_long)INT32_MAX) {
     return;
   }
 
@@ -7340,8 +7335,7 @@ static int build_greedy_numeric_row_match(UF_long n,
   *row_scale_out = NULL;
   *col_scale_out = NULL;
 
-  if (improve_matching && compact_missing_diagonal_match &&
-      getenv("KLS_DISABLE_COMPACT_MISSING_DIAGONAL_MATCH") == NULL) {
+  if (improve_matching && compact_missing_diagonal_match) {
     return build_compact_numeric_row_match(
       n, nnz, col_ptr, row_idx, numeric_values, row_perm_out, matched_out);
   }
@@ -8434,7 +8428,6 @@ select_exact_match_symbolic:;
   }
   const int retain_native_matching_scale =
     kls_repeated_update_workload(&solver->options) &&
-    getenv("KLS_DISABLE_GENERIC_NATIVE_MATCHING_SCALE") == NULL &&
     trial_common.rcond >= 32.0 * DBL_EPSILON &&
     (solver->common.rcond <= 0.0 ||
      trial_common.rcond >= solver->common.rcond) &&
@@ -10031,8 +10024,7 @@ matching_attempt:;
         32.0 * 1024.0 * 1024.0 * (double)solver->options.threads;
       if (solver->options.threads > 2 &&
           kls_repeated_update_workload(&solver->options) &&
-          isfinite(metis_storage) && metis_storage >= aggregate_cache &&
-          getenv("KLS_DISABLE_GENERIC_MATCHED_ND_WIDTH_PORTFOLIO") == NULL) {
+          isfinite(metis_storage) && metis_storage >= aggregate_cache) {
         /* Separator width is a representation/resource choice, not merely
            an analysis-time thread count.  A wide splitter minimizes NodeND
            latency, while two- and three-leaf forests can retain less factor
@@ -10143,12 +10135,10 @@ matching_attempt:;
   const double generic_matched_tolerance_cache =
     32.0 * 1024.0 * 1024.0 * (double)solver->options.threads;
   const int generic_matched_tolerance_resource_fit =
-    getenv("KLS_DISABLE_GENERIC_RESOURCE_SCALED_MATCHED_TOLERANCE") !=
-      NULL ||
-    (isfinite(generic_matched_tolerance_storage) &&
+    isfinite(generic_matched_tolerance_storage) &&
      (generic_matched_tolerance_storage <=
         generic_matched_tolerance_cache ||
-      20.0 * (double)matched_threshold_sensitive >= (double)solver->n));
+      20.0 * (double)matched_threshold_sensitive >= (double)solver->n);
   const int generic_recurring_matched_tolerance =
     generic_recurring_matched_candidate &&
     generic_matched_tolerance_resource_fit &&
@@ -10632,9 +10622,7 @@ matching_attempt:;
       trial_numeric_ok && trial_common.scale <= 0 &&
       isfinite(trial_common.rcond) && trial_common.rcond > 0.0 &&
       trial_common.kls_perturb_count == 0u &&
-      kls_repeated_update_workload(&solver->options) &&
-      getenv("KLS_DISABLE_GENERIC_RESOURCE_SCALED_NATIVE_MATCH_CERTIFICATE") ==
-        NULL) {
+      kls_repeated_update_workload(&solver->options)) {
     const double native_fill =
       (double)trial_numeric->lnz + (double)trial_numeric->unz;
     const double native_storage =
@@ -11269,8 +11257,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
       solver->user_col_perm != NULL || solver->symbolic == NULL ||
       (solver->n < 20000 && !generic_compact_scale_race) ||
       kls_dense_giant_declines_auto_metis(solver->n, solver->col_ptr) ||
-      (kls_sparse_fragmented_dominant_btf_symbolic_work(solver) &&
-       getenv("KLS_DISABLE_SPARSE_FRAGMENTED_RACE_SUPPRESSION") == NULL) ||
+      kls_sparse_fragmented_dominant_btf_symbolic_work(solver) ||
       solver->medium_partial_static_metis_path ||
       solver->medium_spike_minfill_path ||
       solver->large_bounded_no_btf_amf_path) {
@@ -12914,7 +12901,6 @@ static int kls_choose_symbolic_inner(UF_long n,
 
 
   if (options->threads == 8 &&
-      getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
       is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx)) {
     /* This class's AMMF factor is the measured retained-numeric winner even
        though its pre-pivot symbolic fill estimate is fractionally above
@@ -12948,7 +12934,6 @@ static int kls_choose_symbolic_inner(UF_long n,
        acceptance baseline. */
     const int medium_spike_minfill =
       options->ordering == KLS_ORDERING_AUTO && options->threads == 8 &&
-      getenv("KLS_DISABLE_MEDIUM_SPIKE_MINFILL_PATH") == NULL &&
       is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx);
     if (!medium_spike_minfill &&
         options->static_pivoting && options->scale <= 0 &&
@@ -13309,8 +13294,7 @@ generic_ordering_tournament:;
     n <= 1000000u && col_ptr[n] <= 8000000u &&
     isfinite(no_btf_lifecycle_work) && no_btf_lifecycle_work >= 1.0e7 &&
     isfinite(column_pair_work) &&
-    column_pair_work * requested_numeric_horizon >= 2.0e8 &&
-    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL;
+    column_pair_work * requested_numeric_horizon >= 2.0e8;
   /* Eight available workers can also overlap the literal AMF3 clique bound
      with the historically useful relaxed bound.  Published results show
      that a tighter local bound is not universally a better greedy order, so
@@ -13755,7 +13739,6 @@ generic_ordering_tournament:;
           kls_value_matched_ordering_ctx &&
           spec->amf3_span_variant &&
           kls_repeated_update_workload(options) &&
-          getenv("KLS_DISABLE_MATCHED_DECISIVE_SPAN_REFINEMENT") == NULL &&
           ordinary_amf3 != NULL &&
           ordinary_amf3->status == KLS_OK &&
           ordinary_amf3->score > 0.0 &&
@@ -14140,8 +14123,6 @@ static int choose_symbolic_for_pattern(UF_long n,
      normally replaces.  The compact proposal still has to prove a dominant
      SCC here, then match coverage and numeric quality at factor time. */
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
-      getenv("KLS_DISABLE_AUTO_AMD_SHORTCUT") == NULL &&
-      1 &&
       is_medium_sparse_full_diagonal_amd_pattern(n, col_ptr, row_idx)) {
     kls_options amd_options = *options;
     amd_options.ordering = KLS_ORDERING_AMD;
@@ -14910,9 +14891,7 @@ static int select_candidate(kls_pattern_candidate *normal,
           kls_candidate_lifecycle_score(other, generic_options);
         const int inspect_other_nd =
           !(*chosen_out)->generic_nd_portfolio_selected ||
-          ((*chosen_out)->generic_nd_lifecycle_near_tie &&
-           getenv("KLS_DISABLE_GENERIC_NEAR_TIE_CROSS_ORIENTATION_ND") ==
-             NULL) ||
+          (*chosen_out)->generic_nd_lifecycle_near_tie ||
           (isfinite(chosen_lifecycle) && chosen_lifecycle > 0.0 &&
            isfinite(other_lifecycle) && other_lifecycle > 0.0 &&
            other_lifecycle < 0.98 * chosen_lifecycle);
@@ -15273,8 +15252,7 @@ static int maybe_factor_generic_btf_value_alternative(
   trilinos_klu_l_symbolic *candidate_symbolic =
     solver->generic_btf_value_symbolic;
   const int capable =
-    getenv("KLS_DISABLE_GENERIC_BTF_VALUE_SELECTION") == NULL &&
-        solver->options.ordering == KLS_ORDERING_AUTO &&
+    solver->options.ordering == KLS_ORDERING_AUTO &&
     solver->options.scale == KLS_SCALE_AUTO &&
     solver->options.use_btf &&
     kls_repeated_update_workload(&solver->options) &&
