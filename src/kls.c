@@ -2415,6 +2415,11 @@ static inline int kls_env_flag_enabled(const char *name) {
     }                                               \
   } while (0)
 
+#define KLS_FREE_AND_NULL(pointer) do { \
+    free(pointer);                       \
+    (pointer) = NULL;                    \
+  } while (0)
+
 static int kls_refactor_btf_scalar_run_exec_enabled(
   const kls_solver *solver) {
   if (solver == NULL ||
@@ -2473,41 +2478,25 @@ static void free_refactor_map(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->refactor_col_ptr);
-  free(solver->refactor_row_idx);
-  free(solver->refactor_input_pos);
-  free(solver->refactor_row_idx32);
-  free(solver->refactor_input_pos32);
-  free(solver->refactor_input_oldrow32);
-  free(solver->refactor_input_user_pos32);
-  free(solver->refactor_scale_row_ptr);
-  free(solver->refactor_scale_input_pos32);
-  free(solver->refactor_scale_permute_values);
-  free(solver->lean_btf_off_input_pos);
-  free(solver->lean_btf_off_user_pos);
-  free(solver->lean_btf_off_input_runs);
-  free(solver->lean_btf_off_user_runs);
-  free(solver->refactor_block_start);
-  free(solver->refactor_col_block);
-  solver->refactor_col_ptr = NULL;
-  solver->refactor_row_idx = NULL;
-  solver->refactor_input_pos = NULL;
-  solver->refactor_row_idx32 = NULL;
-  solver->refactor_input_pos32 = NULL;
-  solver->refactor_input_oldrow32 = NULL;
-  solver->refactor_input_user_pos32 = NULL;
-  solver->refactor_scale_row_ptr = NULL;
-  solver->refactor_scale_input_pos32 = NULL;
-  solver->refactor_scale_permute_values = NULL;
-  solver->lean_btf_off_input_pos = NULL;
-  solver->lean_btf_off_user_pos = NULL;
-  solver->lean_btf_off_input_runs = NULL;
-  solver->lean_btf_off_user_runs = NULL;
+  KLS_FREE_AND_NULL(solver->refactor_col_ptr);
+  KLS_FREE_AND_NULL(solver->refactor_row_idx);
+  KLS_FREE_AND_NULL(solver->refactor_input_pos);
+  KLS_FREE_AND_NULL(solver->refactor_row_idx32);
+  KLS_FREE_AND_NULL(solver->refactor_input_pos32);
+  KLS_FREE_AND_NULL(solver->refactor_input_oldrow32);
+  KLS_FREE_AND_NULL(solver->refactor_input_user_pos32);
+  KLS_FREE_AND_NULL(solver->refactor_scale_row_ptr);
+  KLS_FREE_AND_NULL(solver->refactor_scale_input_pos32);
+  KLS_FREE_AND_NULL(solver->refactor_scale_permute_values);
+  KLS_FREE_AND_NULL(solver->lean_btf_off_input_pos);
+  KLS_FREE_AND_NULL(solver->lean_btf_off_user_pos);
+  KLS_FREE_AND_NULL(solver->lean_btf_off_input_runs);
+  KLS_FREE_AND_NULL(solver->lean_btf_off_user_runs);
   solver->lean_btf_off_input_run_count = 0u;
   solver->lean_btf_off_user_run_count = 0u;
   solver->refactor_direct_user_values_active = 0;
-  solver->refactor_block_start = NULL;
-  solver->refactor_col_block = NULL;
+  KLS_FREE_AND_NULL(solver->refactor_block_start);
+  KLS_FREE_AND_NULL(solver->refactor_col_block);
 }
 
 
@@ -2515,44 +2504,25 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->refactor_l_indices);
-  free(solver->refactor_l_indices32);
-  free(solver->refactor_l_indices32_storage);
-  free(solver->refactor_l_sorted_indices32);
-  free(solver->refactor_l_sorted_indices32_storage);
-  free(solver->refactor_l_sorted_pos32);
-  free(solver->refactor_l_sorted_pos32_storage);
-  free(solver->refactor_l_values);
-  free(solver->refactor_l_packed_values);
-  free(solver->refactor_l_packed_storage);
-  free(solver->refactor_l_sorted_values);
-  free(solver->refactor_l_sorted_values_storage);
-  free(solver->refactor_u_indices);
-  free(solver->refactor_u_indices32);
-  free(solver->refactor_u_indices32_storage);
-  free(solver->refactor_u_values);
-  free(solver->refactor_u_packed_values);
-  free(solver->refactor_u_packed_storage);
-
-  solver->refactor_l_indices = NULL;
-  solver->refactor_l_indices32 = NULL;
-  solver->refactor_l_indices32_storage = NULL;
-  solver->refactor_l_sorted_indices32 = NULL;
-  solver->refactor_l_sorted_indices32_storage = NULL;
-  solver->refactor_l_sorted_pos32 = NULL;
-  solver->refactor_l_sorted_pos32_storage = NULL;
-  solver->refactor_l_values = NULL;
-  solver->refactor_l_packed_values = NULL;
-  solver->refactor_l_packed_storage = NULL;
+  KLS_FREE_AND_NULL(solver->refactor_l_indices);
+  KLS_FREE_AND_NULL(solver->refactor_l_indices32);
+  KLS_FREE_AND_NULL(solver->refactor_l_indices32_storage);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_indices32);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_indices32_storage);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_pos32);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_pos32_storage);
+  KLS_FREE_AND_NULL(solver->refactor_l_values);
+  KLS_FREE_AND_NULL(solver->refactor_l_packed_values);
+  KLS_FREE_AND_NULL(solver->refactor_l_packed_storage);
   solver->refactor_l_packed_valid = 0;
-  solver->refactor_l_sorted_values = NULL;
-  solver->refactor_l_sorted_values_storage = NULL;
-  solver->refactor_u_indices = NULL;
-  solver->refactor_u_indices32 = NULL;
-  solver->refactor_u_indices32_storage = NULL;
-  solver->refactor_u_values = NULL;
-  solver->refactor_u_packed_values = NULL;
-  solver->refactor_u_packed_storage = NULL;
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_values);
+  KLS_FREE_AND_NULL(solver->refactor_l_sorted_values_storage);
+  KLS_FREE_AND_NULL(solver->refactor_u_indices);
+  KLS_FREE_AND_NULL(solver->refactor_u_indices32);
+  KLS_FREE_AND_NULL(solver->refactor_u_indices32_storage);
+  KLS_FREE_AND_NULL(solver->refactor_u_values);
+  KLS_FREE_AND_NULL(solver->refactor_u_packed_values);
+  KLS_FREE_AND_NULL(solver->refactor_u_packed_storage);
   solver->refactor_u_packed_valid = 0;
 
   solver->refactor_lu_pointer_count = 0;
@@ -2571,18 +2541,12 @@ static void free_fast_reject_tail_plan(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->fast_reject_tail_cols);
-  free(solver->fast_reject_tail_seed_cols);
-  free(solver->fast_reject_tail_parent);
-  free(solver->fast_reject_tail_child_count);
-  free(solver->fast_reject_tail_level);
-  free(solver->fast_reject_tail_marks);
-  solver->fast_reject_tail_cols = NULL;
-  solver->fast_reject_tail_seed_cols = NULL;
-  solver->fast_reject_tail_parent = NULL;
-  solver->fast_reject_tail_child_count = NULL;
-  solver->fast_reject_tail_level = NULL;
-  solver->fast_reject_tail_marks = NULL;
+  KLS_FREE_AND_NULL(solver->fast_reject_tail_cols);
+  KLS_FREE_AND_NULL(solver->fast_reject_tail_seed_cols);
+  KLS_FREE_AND_NULL(solver->fast_reject_tail_parent);
+  KLS_FREE_AND_NULL(solver->fast_reject_tail_child_count);
+  KLS_FREE_AND_NULL(solver->fast_reject_tail_level);
+  KLS_FREE_AND_NULL(solver->fast_reject_tail_marks);
   solver->fast_reject_tail_capacity = 0;
   solver->fast_reject_tail_mark = 0u;
   solver->fast_reject_tail_plan_mark = 0u;
@@ -2619,26 +2583,16 @@ static void kls_clear_row_solve_partition(kls_solver *solver) {
   }
   kls_clear_row_solve_transpose_plan(&solver->row_solve_ut_plan);
   kls_clear_row_solve_transpose_plan(&solver->row_solve_lt_plan);
-  free(solver->row_solve_l_slice_bounds);
-  free(solver->row_solve_u_slice_bounds);
-  free(solver->row_solve_l_segment_split);
-  free(solver->row_solve_u_segment_split);
-  free(solver->row_solve_l_thread_bounds);
-  free(solver->row_solve_u_thread_bounds);
-  free(solver->row_solve_l_sparse_level_ptr);
-  free(solver->row_solve_l_sparse_level_rows);
-  free(solver->row_solve_u_sparse_level_ptr);
-  free(solver->row_solve_u_sparse_level_rows);
-  solver->row_solve_l_slice_bounds = NULL;
-  solver->row_solve_u_slice_bounds = NULL;
-  solver->row_solve_l_segment_split = NULL;
-  solver->row_solve_u_segment_split = NULL;
-  solver->row_solve_l_thread_bounds = NULL;
-  solver->row_solve_u_thread_bounds = NULL;
-  solver->row_solve_l_sparse_level_ptr = NULL;
-  solver->row_solve_l_sparse_level_rows = NULL;
-  solver->row_solve_u_sparse_level_ptr = NULL;
-  solver->row_solve_u_sparse_level_rows = NULL;
+  KLS_FREE_AND_NULL(solver->row_solve_l_slice_bounds);
+  KLS_FREE_AND_NULL(solver->row_solve_u_slice_bounds);
+  KLS_FREE_AND_NULL(solver->row_solve_l_segment_split);
+  KLS_FREE_AND_NULL(solver->row_solve_u_segment_split);
+  KLS_FREE_AND_NULL(solver->row_solve_l_thread_bounds);
+  KLS_FREE_AND_NULL(solver->row_solve_u_thread_bounds);
+  KLS_FREE_AND_NULL(solver->row_solve_l_sparse_level_ptr);
+  KLS_FREE_AND_NULL(solver->row_solve_l_sparse_level_rows);
+  KLS_FREE_AND_NULL(solver->row_solve_u_sparse_level_ptr);
+  KLS_FREE_AND_NULL(solver->row_solve_u_sparse_level_rows);
   solver->row_solve_thread_count = 0;
   solver->row_solve_l_sparse_level_count = 0;
   solver->row_solve_l_sparse_cluster_levels = 0;
@@ -2971,37 +2925,21 @@ static void free_refactor_schedule(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->refactor_level_ptr);
-  free(solver->refactor_level_cols);
-
-  free(solver->refactor_level_thread_ptr);
-  free(solver->refactor_separator_private_cols);
-  free(solver->refactor_separator_private_thread_ptr);
-  free(solver->refactor_separator_cluster_tail_cols);
-  free(solver->refactor_separator_cluster_tail_level_ptr);
-  free(solver->refactor_separator_cluster_tail_level_thread_ptr);
-  free(solver->refactor_separator_private_cols_alpha4);
-  free(solver->refactor_separator_private_thread_ptr_alpha4);
-  free(solver->refactor_separator_cluster_tail_cols_alpha4);
-  free(solver->refactor_separator_cluster_tail_level_ptr_alpha4);
-  free(solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4);
-  free(solver->refactor_supernode_pipeline_end);
-
-  solver->refactor_level_ptr = NULL;
-  solver->refactor_level_cols = NULL;
-
-  solver->refactor_level_thread_ptr = NULL;
-  solver->refactor_separator_private_cols = NULL;
-  solver->refactor_separator_private_thread_ptr = NULL;
-  solver->refactor_separator_cluster_tail_cols = NULL;
-  solver->refactor_separator_cluster_tail_level_ptr = NULL;
-  solver->refactor_separator_cluster_tail_level_thread_ptr = NULL;
-  solver->refactor_separator_private_cols_alpha4 = NULL;
-  solver->refactor_separator_private_thread_ptr_alpha4 = NULL;
-  solver->refactor_separator_cluster_tail_cols_alpha4 = NULL;
-  solver->refactor_separator_cluster_tail_level_ptr_alpha4 = NULL;
-  solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4 = NULL;
-  solver->refactor_supernode_pipeline_end = NULL;
+  KLS_FREE_AND_NULL(solver->refactor_level_ptr);
+  KLS_FREE_AND_NULL(solver->refactor_level_cols);
+  KLS_FREE_AND_NULL(solver->refactor_level_thread_ptr);
+  KLS_FREE_AND_NULL(solver->refactor_separator_private_cols);
+  KLS_FREE_AND_NULL(solver->refactor_separator_private_thread_ptr);
+  KLS_FREE_AND_NULL(solver->refactor_separator_cluster_tail_cols);
+  KLS_FREE_AND_NULL(solver->refactor_separator_cluster_tail_level_ptr);
+  KLS_FREE_AND_NULL(solver->refactor_separator_cluster_tail_level_thread_ptr);
+  KLS_FREE_AND_NULL(solver->refactor_separator_private_cols_alpha4);
+  KLS_FREE_AND_NULL(solver->refactor_separator_private_thread_ptr_alpha4);
+  KLS_FREE_AND_NULL(solver->refactor_separator_cluster_tail_cols_alpha4);
+  KLS_FREE_AND_NULL(solver->refactor_separator_cluster_tail_level_ptr_alpha4);
+  KLS_FREE_AND_NULL(
+    solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4);
+  KLS_FREE_AND_NULL(solver->refactor_supernode_pipeline_end);
   solver->refactor_level_thread_count = 0;
   solver->refactor_separator_private_thread_count = 0;
   solver->refactor_separator_private_plan_attempted = 0;
@@ -3032,16 +2970,12 @@ static void kls_free_refactor_separator_alpha4_plan(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->refactor_separator_private_cols_alpha4);
-  free(solver->refactor_separator_private_thread_ptr_alpha4);
-  free(solver->refactor_separator_cluster_tail_cols_alpha4);
-  free(solver->refactor_separator_cluster_tail_level_ptr_alpha4);
-  free(solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4);
-  solver->refactor_separator_private_cols_alpha4 = NULL;
-  solver->refactor_separator_private_thread_ptr_alpha4 = NULL;
-  solver->refactor_separator_cluster_tail_cols_alpha4 = NULL;
-  solver->refactor_separator_cluster_tail_level_ptr_alpha4 = NULL;
-  solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4 = NULL;
+  KLS_FREE_AND_NULL(solver->refactor_separator_private_cols_alpha4);
+  KLS_FREE_AND_NULL(solver->refactor_separator_private_thread_ptr_alpha4);
+  KLS_FREE_AND_NULL(solver->refactor_separator_cluster_tail_cols_alpha4);
+  KLS_FREE_AND_NULL(solver->refactor_separator_cluster_tail_level_ptr_alpha4);
+  KLS_FREE_AND_NULL(
+    solver->refactor_separator_cluster_tail_level_thread_ptr_alpha4);
   solver->refactor_separator_private_column_count_alpha4 = 0u;
   solver->refactor_separator_cluster_tail_column_count_alpha4 = 0u;
 }
@@ -3055,8 +2989,7 @@ static void free_egraph_worker_scratch(kls_solver *solver) {
       free(solver->egraph_worker_scratch[i]);
     }
   }
-  free(solver->egraph_worker_scratch);
-  solver->egraph_worker_scratch = NULL;
+  KLS_FREE_AND_NULL(solver->egraph_worker_scratch);
   solver->egraph_worker_scratch_size = 0;
   solver->egraph_worker_scratch_count = 0;
   solver->egraph_worker_scratch_dirty = 0;
@@ -3222,49 +3155,34 @@ static void free_egraph_pipeline_done(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
-  free(solver->egraph_pipeline_done);
-  solver->egraph_pipeline_done = NULL;
+  KLS_FREE_AND_NULL(solver->egraph_pipeline_done);
   solver->egraph_pipeline_done_size = 0;
   solver->egraph_pipeline_generation = 0;
-  free(solver->lean_parallel_done);
-  solver->lean_parallel_done = NULL;
+  KLS_FREE_AND_NULL(solver->lean_parallel_done);
   solver->lean_parallel_done_size = 0;
   solver->lean_parallel_generation = 0;
   solver->lean_parallel_owner_thread_count = 0;
-  free(solver->lean_parallel_affinity_rows);
-  solver->lean_parallel_affinity_rows = NULL;
+  KLS_FREE_AND_NULL(solver->lean_parallel_affinity_rows);
   solver->lean_parallel_affinity_thread_count = 0;
   solver->lean_parallel_affinity_decision = 0;
   solver->lean_parallel_affinity_decision_thread_count = 0;
   solver->lean_parallel_affinity_baseline_work = 0.0;
   solver->lean_parallel_affinity_candidate_work = 0.0;
-  free(solver->lean_parallel_grouped_done);
-  free(solver->lean_parallel_grouped_token);
-  free(solver->lean_parallel_owner_frontier);
-  free(solver->lean_parallel_l_dep_work64);
-  free(solver->lean_parallel_work_rows16);
-  free(solver->lean_parallel_publish_mailbox);
-  free(solver->lean_parallel_publish_begin);
-  free(solver->lean_generic_packed_rows32);
-  free(solver->lean_generic_packed_dependencies32);
-  free(solver->lean_generic_packed_publish_mailbox);
-  free(solver->lean_generic_packed_publish_begin);
-  free(solver->lean_parallel_udiag_inv);
-  solver->lean_parallel_grouped_done = NULL;
-  solver->lean_parallel_grouped_token = NULL;
-  solver->lean_parallel_owner_frontier = NULL;
+  KLS_FREE_AND_NULL(solver->lean_parallel_grouped_done);
+  KLS_FREE_AND_NULL(solver->lean_parallel_grouped_token);
+  KLS_FREE_AND_NULL(solver->lean_parallel_owner_frontier);
   solver->lean_parallel_owner_frontier_count = 0;
   solver->lean_parallel_owner_frontier_sequence_bits = 0u;
   solver->lean_parallel_owner_frontier_sequence_mask = 0u;
-  solver->lean_parallel_l_dep_work64 = NULL;
-  solver->lean_parallel_work_rows16 = NULL;
-  solver->lean_parallel_publish_mailbox = NULL;
-  solver->lean_parallel_publish_begin = NULL;
-  solver->lean_generic_packed_rows32 = NULL;
-  solver->lean_generic_packed_dependencies32 = NULL;
-  solver->lean_generic_packed_publish_mailbox = NULL;
-  solver->lean_generic_packed_publish_begin = NULL;
-  solver->lean_parallel_udiag_inv = NULL;
+  KLS_FREE_AND_NULL(solver->lean_parallel_l_dep_work64);
+  KLS_FREE_AND_NULL(solver->lean_parallel_work_rows16);
+  KLS_FREE_AND_NULL(solver->lean_parallel_publish_mailbox);
+  KLS_FREE_AND_NULL(solver->lean_parallel_publish_begin);
+  KLS_FREE_AND_NULL(solver->lean_generic_packed_rows32);
+  KLS_FREE_AND_NULL(solver->lean_generic_packed_dependencies32);
+  KLS_FREE_AND_NULL(solver->lean_generic_packed_publish_mailbox);
+  KLS_FREE_AND_NULL(solver->lean_generic_packed_publish_begin);
+  KLS_FREE_AND_NULL(solver->lean_parallel_udiag_inv);
   solver->lean_parallel_grouped_done_size = 0u;
   solver->lean_parallel_grouped_stride = 0u;
   solver->lean_grouped_profitability_rows = NULL;
