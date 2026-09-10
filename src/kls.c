@@ -7531,7 +7531,6 @@ static void fill_build_stats(kls_stats *stats) {
 #else
   stats->build_has_spral_scaling = 0;
 #endif
-  stats->build_has_cblas = 0;
 }
 
 static void kls_metis_race_abandon(kls_solver *solver);
