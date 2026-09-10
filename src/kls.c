@@ -1353,7 +1353,6 @@ struct kls_solver {
   int spral_matching_selected;
   int fast_block_restarts;
   int fast_kls_block_restarts;
-  int fast_kls_rebuild_restarts;
   int fast_kls_block_restart_last_row_pipeline;
   UF_long fast_kls_block_restart_row_pipeline_count;
   UF_long fast_kls_block_restart_last_row_pipeline_rows;
@@ -5642,7 +5641,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_repaired_parallel_tail_blocks = 0;
   solver->stats.fast_block_restarts = 0;
   solver->stats.fast_kls_block_restarts = 0;
-  solver->stats.fast_kls_rebuild_restarts = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline = 0;
   solver->stats.fast_kls_block_restart_row_pipeline_count = 0;
   solver->stats.fast_kls_block_restart_last_row_pipeline_rows = 0;
@@ -5751,7 +5749,6 @@ static void kls_clear_fast_reject_stats(kls_solver *solver) {
   solver->stats.fast_rejected_prefix_refresh_count = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
-  solver->fast_kls_rebuild_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline = 0;
   solver->fast_kls_block_restart_row_pipeline_count = 0;
   solver->fast_kls_block_restart_last_row_pipeline_rows = 0;
@@ -9048,7 +9045,6 @@ static void clear_matrix(kls_solver *solver) {
   solver->compact_missing_diagonal_match_selected = 0;
   solver->fast_block_restarts = 0;
   solver->fast_kls_block_restarts = 0;
-  solver->fast_kls_rebuild_restarts = 0;
   solver->fast_kls_block_restart_last_row_pipeline = 0;
   solver->fast_kls_block_restart_row_pipeline_count = 0;
   solver->fast_kls_block_restart_last_row_pipeline_rows = 0;

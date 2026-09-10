@@ -5162,8 +5162,6 @@ static int kls_pivot_restart_rejected_block(kls_solver *solver,
   }
   solver->stats.fast_block_restarts = solver->fast_block_restarts;
   solver->stats.fast_kls_block_restarts = solver->fast_kls_block_restarts;
-  solver->stats.fast_kls_rebuild_restarts =
-    solver->fast_kls_rebuild_restarts;
   solver->stats.fast_tail_restarts = solver->fast_tail_restarts;
   solver->stats.fast_repaired_last_offdiag_suffix_refresh =
     solver->fast_repaired_last_offdiag_suffix_refresh;

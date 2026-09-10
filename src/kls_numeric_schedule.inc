@@ -1543,8 +1543,7 @@ static void kls_snb_maybe_accept(kls_solver *solver,
         solver->refactor_level_ptr != NULL ||
         solver->refactor_l_indices32 != NULL ||
         solver->row_refactor_group_count != 0u ||
-        solver->row_refactor_values_ready ||
-        solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
+        solver->row_refactor_values_ready) {
       *elapsed += kls_now_seconds() - accept_start;
       return;
     }
@@ -2268,14 +2267,12 @@ static void kls_maybe_prepare_snode_panels(kls_solver *solver,
     return;
   }
   /* Sorting reorders every L/U column's packed storage, so no
-     position-based retained structure may exist yet.  KLS-first assembled
-     numerics keep their own seeded row metadata, so leave them unsorted. */
+     position-based retained structure may exist yet. */
   if (solver->refactor_col_ptr != NULL ||
       solver->refactor_level_ptr != NULL ||
       solver->refactor_l_indices32 != NULL ||
       solver->row_refactor_group_count != 0u ||
-      solver->row_refactor_values_ready ||
-      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
+      solver->row_refactor_values_ready) {
     return;
   }
   const double start = kls_now_seconds();
@@ -2360,8 +2357,7 @@ static int kls_prepare_snode_sort_for_overlap(kls_solver *solver,
       solver->refactor_level_ptr != NULL ||
       solver->refactor_l_indices32 != NULL ||
       solver->row_refactor_group_count != 0u ||
-      solver->row_refactor_values_ready ||
-      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLS_FIRST) {
+      solver->row_refactor_values_ready) {
     return 0;
   }
   if (solver->snode_numeric_pre_sorted) {
@@ -3918,8 +3914,6 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
         return 0;
       }
     }
-    const int kls_rebuild_restarts_before =
-      solver->fast_kls_rebuild_restarts;
     if (!kls_pivot_restart_rejected_block(
           solver, numeric_values, rejected_pivot, repair_mode)) {
       return 0;
@@ -3954,21 +3948,6 @@ static UF_long kls_fast_factor_with_block_restarts(kls_solver *solver,
     solver->solve_refine_values = NULL;
     if (solver->n >= 512) {
       solver->factor_preps_deferred = 1;
-    }
-    if (solver->fast_kls_rebuild_restarts >
-        kls_rebuild_restarts_before) {
-      UF_long next_rejected_pivot = KLS_KLU_EMPTY;
-      UF_long rejected_pivot_col = KLS_KLU_EMPTY;
-      if (!kls_numeric_pivots_pass_threshold(
-            solver, &next_rejected_pivot, &rejected_pivot_col)) {
-        kls_record_fast_reject(solver, next_rejected_pivot,
-                               rejected_pivot_col);
-        return 0;
-      }
-      if (!kls_checked_refactor_accepts_rowwise_u(solver, 0u)) {
-        return 0;
-      }
-      return 1;
     }
     const UF_long repaired_block = kls_block_for_pivot(solver, rejected_pivot);
     if (repaired_block == KLS_KLU_EMPTY) {
