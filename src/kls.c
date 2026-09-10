@@ -5698,7 +5698,7 @@ static int kls_lean_btf_map32_refactor(kls_solver *solver,
     common->status = TRILINOS_KLU_SINGULAR;
     common->numerical_rank = numerical_rank;
     common->singular_col = singular_col;
-    return common->halt_if_singular ? 0 : 1;
+    return !common->halt_if_singular;
   }
   common->status = TRILINOS_KLU_OK;
   return 1;
@@ -12954,7 +12954,7 @@ static int solve_impl(kls_solver *solver,
   } else if (prepared_single_block_row_solve) {
     solver->common.status = TRILINOS_KLU_OK;
     ok = kls_lean_single_block_prepared_solve(solver, b, x);
-    solver->row_refactor_last_row_solve = ok ? 1 : 0;
+    solver->row_refactor_last_row_solve = ok;
     solver->stats.row_refactor_last_row_solve =
       solver->row_refactor_last_row_solve;
   } else if ((kernel_transpose && nrhs == 1 &&

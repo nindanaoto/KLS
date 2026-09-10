@@ -1767,8 +1767,7 @@ static int kls_value_tolerance_crossing_initial_profile(
 
   const UF_long required =
     solver->n / 64u + (solver->n % 64u != 0u);
-  const int accepted = valid && crossings >= 16u && crossings >= required;
-  return accepted;
+  return valid && crossings >= 16u && crossings >= required;
 }
 
 /* Propose a tighter initial threshold from the values that the selected
@@ -4480,7 +4479,7 @@ static int analyze_with_ordering(UF_long n,
     trilinos_amd_l2_amf = 0;
     trilinos_amd_l2_amf_power = 1.0;
   } else {
-    common.ordering = (ordering == KLS_ORDERING_COLAMD) ? 1 : 0;
+    common.ordering = ordering == KLS_ORDERING_COLAMD;
     symbolic = trilinos_klu_l_analyze(n, col_ptr, row_idx, &common);
   }
   if (symbolic == NULL || common.status < 0) {
@@ -14057,11 +14056,10 @@ static int choose_symbolic_for_pattern(UF_long n,
                                          separator_out);
     }
   }
-  int status = kls_choose_symbolic_inner(n, col_ptr, row_idx, options,
-                                         symbolic_out, common_out,
-                                         selected_ordering_out, score_out,
-                                         separator_out);
-  return status;
+  return kls_choose_symbolic_inner(n, col_ptr, row_idx, options,
+                                   symbolic_out, common_out,
+                                   selected_ordering_out, score_out,
+                                   separator_out);
 }
 
 static int validate_index_base(int index_base) {

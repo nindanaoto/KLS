@@ -1021,7 +1021,7 @@ static void kls_record_fast_reject_block_suffix_tail_seed(
   }
   solver->fast_reject_tail_seed_block = block;
   solver->fast_reject_tail_seed_count = seed_count;
-  solver->fast_reject_tail_seed_valid = seed_count > 0u ? 1 : 0;
+  solver->fast_reject_tail_seed_valid = seed_count > 0u;
   solver->fast_reject_tail_seed_block_suffix =
     solver->fast_reject_tail_seed_valid;
   solver->stats.fast_rejected_pivoting_tail_seed_columns =

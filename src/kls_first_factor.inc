@@ -3736,7 +3736,7 @@ static int kls_row_first_supernode_panel_cache_build(
   cache->tail_col_capacity = tail_col_count;
   cache->tail_value_count = next_tail_value;
   cache->tail_value_capacity = tail_value_count;
-  cache->enabled = next_panel > 0u ? 1 : 0;
+  cache->enabled = next_panel > 0u;
   kls_row_first_record_panel_cache_build(
     stats, next_panel, next_dense, next_tail_value, next_tail_col);
   return 1;
@@ -3841,7 +3841,7 @@ static UF_long kls_row_first_supernode_panel_cache_exchange_columns(
 next_panel:
     ;
   }
-  cache->enabled = still_active > 0u ? 1 : 0;
+  cache->enabled = still_active > 0u;
   return invalidated;
 }
 
@@ -9257,9 +9257,8 @@ static int kls_generic_predicted_diagonal_values_capable(
     recovered += diagonal >= 1.0e-8 * column_max;
   }
   free(pinv);
-  const int capable = valid &&
-    (pressured == 0u || recovered >= pressured - pressured / 4u);
-  return capable;
+  return valid &&
+         (pressured == 0u || recovered >= pressured - pressured / 4u);
 }
 
 static int kls_predicted_pattern_first_factor(kls_solver *solver,

@@ -217,7 +217,7 @@ static int kls_row_refactor_acceptance_wants_row(kls_solver *solver) {
   const int col_n = solver->row_accept_ref_samples[0];
   int want;
   if (row_n == col_n) {
-    want = kls_auto_row_refactor_cost_allows(solver) ? 1 : 0;
+    want = kls_auto_row_refactor_cost_allows(solver);
   } else {
     want = row_n < col_n;
   }
@@ -336,7 +336,7 @@ static void kls_row_refactor_acceptance_record_refactor(kls_solver *solver,
     return;
   }
   const int side =
-    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW ? 1 : 0;
+    solver->stats.last_refactor_path == KLS_REFACTOR_PATH_ROW;
   solver->row_accept_ref_seconds[side] += seconds;
   solver->row_accept_ref_samples[side]++;
   if (solver->row_accept_ref_samples[side] == 1 ||
@@ -5149,7 +5149,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
     solver->common.status = TRILINOS_KLU_SINGULAR;
     solver->common.numerical_rank = numerical_rank;
     solver->common.singular_col = singular_col;
-    return solver->common.halt_if_singular ? 0 : 1;
+    return !solver->common.halt_if_singular;
   }
   solver->common.status = TRILINOS_KLU_OK;
   return 1;
@@ -5831,7 +5831,7 @@ static int kls_prepare_auto_row_refactor_from_numeric(kls_solver *solver) {
   }
   solver->row_refactor_auto_enabled = 1;
   solver->row_refactor_auto_native_row_panel =
-    kls_native_row_panel_structural_auto_allows(solver) ? 1 : 0;
+    kls_native_row_panel_structural_auto_allows(solver);
   if (!kls_auto_row_refactor_cost_allows(solver)) {
     solver->row_refactor_auto_native_row_panel = 0;
     solver->row_refactor_values_ready = 0;
@@ -15653,7 +15653,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     common->status = TRILINOS_KLU_INVALID;
     return 0;
   }
-  solver->row_refactor_values_ready = published_for_solve ? 0 : 1;
+  solver->row_refactor_values_ready = !published_for_solve;
   solver->row_refactor_solve_direct_ready = 0;
   solver->row_refactor_solve_validated = 0;
   solver->numeric_needs_refinement = 0;

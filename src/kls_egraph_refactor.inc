@@ -6243,10 +6243,9 @@ static int kls_try_fused_refactor_upper_solve(kls_solver *solver,
   const UF_long *restrict q = solver->symbolic->Q;
   double *restrict work = solver->fused_refactor_solve_work;
 
-  const int upper_ok = use_row_values
+  return use_row_values
     ? kls_fused_row_values_upper_solve(solver, work, out, q)
     : kls_fused_packed_upper_solve(solver, work, out, q);
-  return upper_ok;
 }
 
 static int kls_try_parallel_row_solve_transpose_one_rhs(kls_solver *solver,
@@ -6692,7 +6691,7 @@ static int kls_egraph_cluster_premark_dispatch(
      per arm.  Both layouts execute the same columns and synchronize at the
      same final barrier; only generation-store placement differs. */
   const int side =
-    solver->eg_premark_samples[0] <= solver->eg_premark_samples[1] ? 0 : 1;
+    solver->eg_premark_samples[0] > solver->eg_premark_samples[1];
   solver->eg_premark_pending = side + 1;
   return side == 1;
 }
