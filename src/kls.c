@@ -1056,14 +1056,7 @@ struct kls_solver {
   UF_long row_refactor_separator_flop_pipeline_group_count;
   UF_long row_refactor_separator_flop_closure_group_count;
   UF_long row_refactor_segment_count;
-  UF_long row_refactor_segment_rows;
-  UF_long row_refactor_segment_max_width;
-  double row_refactor_segment_dense_entries;
-  double row_refactor_segment_trailing_entries;
   UF_long row_refactor_dense_segment_count;
-  UF_long row_refactor_dense_segment_rows;
-  UF_long row_refactor_dense_segment_max_width;
-  double row_refactor_dense_segment_dense_entries;
   double row_refactor_dense_segment_trailing_entries;
   UF_long row_refactor_compact_dense_panel_eligible_count;
   UF_long row_refactor_compact_dense_panel_eligible_rows;
@@ -2986,14 +2979,7 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_separator_flop_pipeline_group_count = 0;
   solver->row_refactor_separator_flop_closure_group_count = 0;
   solver->row_refactor_segment_count = 0;
-  solver->row_refactor_segment_rows = 0;
-  solver->row_refactor_segment_max_width = 0;
-  solver->row_refactor_segment_dense_entries = 0.0;
-  solver->row_refactor_segment_trailing_entries = 0.0;
   solver->row_refactor_dense_segment_count = 0;
-  solver->row_refactor_dense_segment_rows = 0;
-  solver->row_refactor_dense_segment_max_width = 0;
-  solver->row_refactor_dense_segment_dense_entries = 0.0;
   solver->row_refactor_dense_segment_trailing_entries = 0.0;
   solver->row_refactor_compact_dense_panel_eligible_count = 0;
   solver->row_refactor_compact_dense_panel_eligible_rows = 0;
@@ -3170,14 +3156,7 @@ typedef struct {
   UF_long separator_flop_pipeline_group_count;
   UF_long separator_flop_closure_group_count;
   UF_long segment_count;
-  UF_long segment_rows;
-  UF_long segment_max_width;
-  double segment_dense_entries;
-  double segment_trailing_entries;
   UF_long dense_segment_count;
-  UF_long dense_segment_rows;
-  UF_long dense_segment_max_width;
-  double dense_segment_dense_entries;
   double dense_segment_trailing_entries;
   UF_long compact_dense_panel_eligible_count;
   UF_long compact_dense_panel_eligible_rows;
@@ -3406,16 +3385,7 @@ static void kls_save_row_refactor_diagnostics(
   diag->separator_flop_closure_group_count =
     solver->row_refactor_separator_flop_closure_group_count;
   diag->segment_count = solver->row_refactor_segment_count;
-  diag->segment_rows = solver->row_refactor_segment_rows;
-  diag->segment_max_width = solver->row_refactor_segment_max_width;
-  diag->segment_dense_entries = solver->row_refactor_segment_dense_entries;
-  diag->segment_trailing_entries =
-    solver->row_refactor_segment_trailing_entries;
   diag->dense_segment_count = solver->row_refactor_dense_segment_count;
-  diag->dense_segment_rows = solver->row_refactor_dense_segment_rows;
-  diag->dense_segment_max_width = solver->row_refactor_dense_segment_max_width;
-  diag->dense_segment_dense_entries =
-    solver->row_refactor_dense_segment_dense_entries;
   diag->dense_segment_trailing_entries =
     solver->row_refactor_dense_segment_trailing_entries;
   diag->compact_dense_panel_eligible_count =
@@ -3729,18 +3699,7 @@ static void kls_restore_row_refactor_diagnostics(
   solver->row_refactor_separator_flop_closure_group_count =
     diag->separator_flop_closure_group_count;
   solver->row_refactor_segment_count = diag->segment_count;
-  solver->row_refactor_segment_rows = diag->segment_rows;
-  solver->row_refactor_segment_max_width = diag->segment_max_width;
-  solver->row_refactor_segment_dense_entries =
-    diag->segment_dense_entries;
-  solver->row_refactor_segment_trailing_entries =
-    diag->segment_trailing_entries;
   solver->row_refactor_dense_segment_count = diag->dense_segment_count;
-  solver->row_refactor_dense_segment_rows = diag->dense_segment_rows;
-  solver->row_refactor_dense_segment_max_width =
-    diag->dense_segment_max_width;
-  solver->row_refactor_dense_segment_dense_entries =
-    diag->dense_segment_dense_entries;
   solver->row_refactor_dense_segment_trailing_entries =
     diag->dense_segment_trailing_entries;
   solver->row_refactor_compact_dense_panel_eligible_count =

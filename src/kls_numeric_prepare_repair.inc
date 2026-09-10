@@ -8335,14 +8335,7 @@ typedef struct {
   unsigned char *group_dense;
   unsigned char *group_kind;
   UF_long segment_count;
-  UF_long segment_rows;
-  UF_long segment_max_width;
-  double segment_dense_entries;
-  double segment_trailing_entries;
   UF_long dense_segment_count;
-  UF_long dense_segment_rows;
-  UF_long dense_segment_max_width;
-  double dense_segment_dense_entries;
   double dense_segment_trailing_entries;
   UF_long compact_dense_panel_eligible_count;
   UF_long compact_dense_panel_eligible_rows;
@@ -8375,12 +8368,6 @@ static void kls_dense_group_classification_run(
     const double trailing_entries = (double)width * (double)trailing_len;
     job->group_trailing_len[group] = trailing_len;
     job->segment_count++;
-    job->segment_rows += width;
-    if (width > job->segment_max_width) {
-      job->segment_max_width = width;
-    }
-    job->segment_dense_entries += dense_entries;
-    job->segment_trailing_entries += trailing_entries;
     job->group_trailing_begin[group] = trailing_begin;
 
     if (dense_entries + trailing_entries < KLS_ROW_REFACTOR_DENSE_MIN_WORK) {
@@ -8429,11 +8416,6 @@ static void kls_dense_group_classification_run(
     job->group_dense[group] = 1u;
     job->group_kind[group] = KLS_ROW_REFACTOR_GROUP_DENSE;
     job->dense_segment_count++;
-    job->dense_segment_rows += width;
-    if (width > job->dense_segment_max_width) {
-      job->dense_segment_max_width = width;
-    }
-    job->dense_segment_dense_entries += dense_entries;
     job->dense_segment_trailing_entries += trailing_entries;
     if (kls_row_refactor_prefers_compact_dense_panel(width, trailing_len)) {
       job->compact_dense_panel_eligible_count++;
@@ -8855,21 +8837,8 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   free(dep_marks);
   kls_dense_group_classification_run(&dense_classification_job);
   const UF_long segment_count = dense_classification_job.segment_count;
-  const UF_long segment_rows = dense_classification_job.segment_rows;
-  const UF_long segment_max_width =
-    dense_classification_job.segment_max_width;
-  const double segment_dense_entries =
-    dense_classification_job.segment_dense_entries;
-  const double segment_trailing_entries =
-    dense_classification_job.segment_trailing_entries;
   const UF_long dense_segment_count =
     dense_classification_job.dense_segment_count;
-  const UF_long dense_segment_rows =
-    dense_classification_job.dense_segment_rows;
-  const UF_long dense_segment_max_width =
-    dense_classification_job.dense_segment_max_width;
-  const double dense_segment_dense_entries =
-    dense_classification_job.dense_segment_dense_entries;
   const double dense_segment_trailing_entries =
     dense_classification_job.dense_segment_trailing_entries;
   const UF_long compact_dense_panel_eligible_count =
@@ -9187,15 +9156,7 @@ static int kls_finish_row_refactor_pattern_from_arrays(
   solver->row_refactor_pipeline_row_count = 0;
   solver->row_refactor_pipeline_work = 0.0;
   solver->row_refactor_segment_count = segment_count;
-  solver->row_refactor_segment_rows = segment_rows;
-  solver->row_refactor_segment_max_width = segment_max_width;
-  solver->row_refactor_segment_dense_entries = segment_dense_entries;
-  solver->row_refactor_segment_trailing_entries = segment_trailing_entries;
   solver->row_refactor_dense_segment_count = dense_segment_count;
-  solver->row_refactor_dense_segment_rows = dense_segment_rows;
-  solver->row_refactor_dense_segment_max_width = dense_segment_max_width;
-  solver->row_refactor_dense_segment_dense_entries =
-    dense_segment_dense_entries;
   solver->row_refactor_dense_segment_trailing_entries =
     dense_segment_trailing_entries;
   solver->row_refactor_compact_dense_panel_eligible_count =
