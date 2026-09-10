@@ -930,10 +930,6 @@ struct kls_solver {
   unsigned char *row_refactor_group_shape_valid;
   UF_long row_refactor_pattern_n;
   UF_long row_refactor_group_count;
-  double row_refactor_group_single_work;
-  double row_refactor_group_batch_work;
-  double row_refactor_group_generic_work;
-  double row_refactor_group_dense_work;
   UF_long row_refactor_group_dependency_edges;
   UF_long row_refactor_group_root_count;
   UF_long row_refactor_group_leaf_count;
@@ -1021,20 +1017,11 @@ struct kls_solver {
   UF_long row_refactor_compact_dense_panel_count;
   UF_long row_refactor_local_ready_group_count;
   UF_long row_refactor_private_ready_group_count;
-  int row_refactor_last_separator_private_queue;
-  UF_long row_refactor_last_separator_private_components;
   int row_refactor_last_separator_flop_queue;
   UF_long row_refactor_separator_flop_queue_run_count;
-  int row_refactor_last_separator_flop_ordered_private;
   UF_long row_refactor_last_separator_flop_components;
   UF_long row_refactor_last_separator_flop_private_groups;
   UF_long row_refactor_last_separator_flop_pipeline_groups;
-  UF_long row_refactor_last_separator_flop_closure_groups;
-  UF_long row_refactor_last_separator_flop_private_threads;
-  UF_long row_refactor_last_separator_flop_private_min_groups;
-  UF_long row_refactor_last_separator_flop_private_max_groups;
-  double row_refactor_last_separator_flop_private_min_work;
-  double row_refactor_last_separator_flop_private_max_work;
   UF_long row_refactor_segment_count;
   UF_long row_refactor_dense_segment_count;
   double row_refactor_dense_segment_trailing_entries;
@@ -1091,10 +1078,6 @@ struct kls_solver {
   UF_long row_refactor_segment_input_cleanup_entries;
   UF_long row_refactor_last_segment_target_input_rows;
   UF_long row_refactor_segment_target_input_rows;
-  UF_long row_refactor_last_segment_target_cleanup_rows;
-  UF_long row_refactor_segment_target_cleanup_rows;
-  UF_long row_refactor_last_segment_target_cleanup_entries;
-  UF_long row_refactor_segment_target_cleanup_entries;
   int row_refactor_last_compact_supernode_update;
   UF_long row_refactor_compact_supernode_update_count;
   UF_long row_refactor_compact_supernode_update_rows;
@@ -1613,8 +1596,6 @@ typedef struct kls_egraph_refactor_worker {
   UF_long telemetry_sparse_segment_input_rows;
   UF_long telemetry_batch_input_rows;
   UF_long telemetry_segment_target_input_rows;
-  UF_long telemetry_segment_target_cleanup_rows;
-  UF_long telemetry_segment_target_cleanup_entries;
 } kls_egraph_refactor_worker;
 
 static _Thread_local kls_egraph_refactor_worker *kls_dense_help_self;
@@ -2863,10 +2844,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_dense_producer_run_len = NULL;
   solver->row_refactor_pattern_n = 0;
   solver->row_refactor_group_count = 0;
-  solver->row_refactor_group_single_work = 0.0;
-  solver->row_refactor_group_batch_work = 0.0;
-  solver->row_refactor_group_generic_work = 0.0;
-  solver->row_refactor_group_dense_work = 0.0;
   solver->row_refactor_group_dependency_edges = 0;
   solver->row_refactor_group_root_count = 0;
   solver->row_refactor_group_leaf_count = 0;
@@ -2930,20 +2907,11 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_compact_dense_panel_count = 0;
   solver->row_refactor_local_ready_group_count = 0;
   solver->row_refactor_private_ready_group_count = 0;
-  solver->row_refactor_last_separator_private_queue = 0;
-  solver->row_refactor_last_separator_private_components = 0;
   solver->row_refactor_last_separator_flop_queue = 0;
   solver->row_refactor_separator_flop_queue_run_count = 0;
-  solver->row_refactor_last_separator_flop_ordered_private = 0;
   solver->row_refactor_last_separator_flop_components = 0;
   solver->row_refactor_last_separator_flop_private_groups = 0;
   solver->row_refactor_last_separator_flop_pipeline_groups = 0;
-  solver->row_refactor_last_separator_flop_closure_groups = 0;
-  solver->row_refactor_last_separator_flop_private_threads = 0;
-  solver->row_refactor_last_separator_flop_private_min_groups = 0;
-  solver->row_refactor_last_separator_flop_private_max_groups = 0;
-  solver->row_refactor_last_separator_flop_private_min_work = 0.0;
-  solver->row_refactor_last_separator_flop_private_max_work = 0.0;
   solver->row_refactor_segment_count = 0;
   solver->row_refactor_dense_segment_count = 0;
   solver->row_refactor_dense_segment_trailing_entries = 0.0;
@@ -2993,10 +2961,6 @@ static void free_row_refactor_pattern(kls_solver *solver) {
   solver->row_refactor_segment_input_cleanup_entries = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
   solver->row_refactor_segment_target_input_rows = 0;
-  solver->row_refactor_last_segment_target_cleanup_rows = 0;
-  solver->row_refactor_segment_target_cleanup_rows = 0;
-  solver->row_refactor_last_segment_target_cleanup_entries = 0;
-  solver->row_refactor_segment_target_cleanup_entries = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_compact_supernode_update_count = 0;
   solver->row_refactor_compact_supernode_update_rows = 0;
@@ -4618,16 +4582,9 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_private_ready_groups = 0;
   solver->row_refactor_last_separator_flop_queue = 0;
-  solver->row_refactor_last_separator_flop_ordered_private = 0;
   solver->row_refactor_last_separator_flop_components = 0;
   solver->row_refactor_last_separator_flop_private_groups = 0;
   solver->row_refactor_last_separator_flop_pipeline_groups = 0;
-  solver->row_refactor_last_separator_flop_closure_groups = 0;
-  solver->row_refactor_last_separator_flop_private_threads = 0;
-  solver->row_refactor_last_separator_flop_private_min_groups = 0;
-  solver->row_refactor_last_separator_flop_private_max_groups = 0;
-  solver->row_refactor_last_separator_flop_private_min_work = 0.0;
-  solver->row_refactor_last_separator_flop_private_max_work = 0.0;
   solver->row_refactor_last_compact_dense_panel = 0;
   solver->row_refactor_last_compact_dense_panel_persistent = 0;
   solver->row_refactor_last_compact_dense_panel_blocked = 0;
@@ -4642,8 +4599,6 @@ static void kls_clear_row_refactor_last_stats(kls_solver *solver) {
   solver->row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->row_refactor_last_batch_direct_input_rows = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
-  solver->row_refactor_last_segment_target_cleanup_rows = 0;
-  solver->row_refactor_last_segment_target_cleanup_entries = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_last_compact_supernode_partial_update = 0;
   solver->row_refactor_last_compact_supernode_gemv = 0;
@@ -4738,8 +4693,6 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_sparse_segment_direct_input_rows = 0;
   solver->row_refactor_last_batch_direct_input_rows = 0;
   solver->row_refactor_last_segment_target_input_rows = 0;
-  solver->row_refactor_last_segment_target_cleanup_rows = 0;
-  solver->row_refactor_last_segment_target_cleanup_entries = 0;
   solver->row_refactor_last_compact_supernode_update = 0;
   solver->row_refactor_last_compact_supernode_partial_update = 0;
   solver->row_refactor_last_compact_supernode_gemv = 0;
@@ -4747,19 +4700,10 @@ static void kls_record_row_refactor_run(kls_solver *solver,
   solver->row_refactor_last_compact_supernode_batch = 0;
   solver->row_refactor_last_local_ready_groups = 0;
   solver->row_refactor_last_private_ready_groups = 0;
-  solver->row_refactor_last_separator_private_queue = 0;
-  solver->row_refactor_last_separator_private_components = 0;
   solver->row_refactor_last_separator_flop_queue = 0;
-  solver->row_refactor_last_separator_flop_ordered_private = 0;
   solver->row_refactor_last_separator_flop_components = 0;
   solver->row_refactor_last_separator_flop_private_groups = 0;
   solver->row_refactor_last_separator_flop_pipeline_groups = 0;
-  solver->row_refactor_last_separator_flop_closure_groups = 0;
-  solver->row_refactor_last_separator_flop_private_threads = 0;
-  solver->row_refactor_last_separator_flop_private_min_groups = 0;
-  solver->row_refactor_last_separator_flop_private_max_groups = 0;
-  solver->row_refactor_last_separator_flop_private_min_work = 0.0;
-  solver->row_refactor_last_separator_flop_private_max_work = 0.0;
   solver->row_refactor_last_defer_value_scatter = 0;
   solver->row_refactor_run_count++;
   if (check_pivots) {
@@ -4985,26 +4929,6 @@ static void kls_record_row_refactor_segment_target_input(
   solver->row_refactor_segment_target_input_rows++;
 }
 
-static void kls_record_row_refactor_segment_target_cleanup(
-  kls_solver *solver,
-  UF_long entries) {
-  if (solver == NULL) {
-    return;
-  }
-  if (kls_dense_help_self != NULL &&
-      kls_dense_help_self->shared != NULL &&
-      kls_dense_help_self->shared->solver == solver &&
-      kls_dense_help_self->shared->row_refactor_mode) {
-    kls_dense_help_self->telemetry_segment_target_cleanup_rows++;
-    kls_dense_help_self->telemetry_segment_target_cleanup_entries += entries;
-    return;
-  }
-  solver->row_refactor_last_segment_target_cleanup_rows++;
-  solver->row_refactor_segment_target_cleanup_rows++;
-  solver->row_refactor_last_segment_target_cleanup_entries += entries;
-  solver->row_refactor_segment_target_cleanup_entries += entries;
-}
-
 static void kls_record_row_refactor_compact_supernode_update(
   kls_solver *solver,
   UF_long rows,
@@ -5189,49 +5113,20 @@ static void kls_record_row_refactor_private_ready_groups(kls_solver *solver,
   solver->row_refactor_private_ready_group_count += group_count;
 }
 
-static void kls_record_row_refactor_separator_private_queue(
-  kls_solver *solver,
-  UF_long component_count) {
-  if (solver == NULL || component_count == 0u) {
-    return;
-  }
-  solver->row_refactor_last_separator_private_queue = 1;
-  solver->row_refactor_last_separator_private_components = component_count;
-}
-
 static void kls_record_row_refactor_separator_flop_queue(
   kls_solver *solver,
   UF_long component_count,
   UF_long private_groups,
-  UF_long pipeline_groups,
-  UF_long closure_groups,
-  int ordered_private,
-  UF_long private_threads,
-  UF_long private_min_groups,
-  UF_long private_max_groups,
-  double private_min_work,
-  double private_max_work) {
+  UF_long pipeline_groups) {
   if (solver == NULL || component_count == 0u ||
       private_groups == 0u || pipeline_groups == 0u) {
     return;
   }
   solver->row_refactor_last_separator_flop_queue = 1;
   solver->row_refactor_separator_flop_queue_run_count++;
-  solver->row_refactor_last_separator_flop_ordered_private =
-    ordered_private ? 1 : 0;
   solver->row_refactor_last_separator_flop_components = component_count;
   solver->row_refactor_last_separator_flop_private_groups = private_groups;
   solver->row_refactor_last_separator_flop_pipeline_groups = pipeline_groups;
-  solver->row_refactor_last_separator_flop_closure_groups = closure_groups;
-  solver->row_refactor_last_separator_flop_private_threads = private_threads;
-  solver->row_refactor_last_separator_flop_private_min_groups =
-    private_min_groups;
-  solver->row_refactor_last_separator_flop_private_max_groups =
-    private_max_groups;
-  solver->row_refactor_last_separator_flop_private_min_work =
-    private_min_work;
-  solver->row_refactor_last_separator_flop_private_max_work =
-    private_max_work;
 }
 
 static void kls_record_row_refactor_defer_value_scatter_run(

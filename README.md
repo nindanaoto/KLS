@@ -1034,14 +1034,10 @@ separator schedule.
 Stats report this path through
 `row_refactor_last_separator_flop_queue`,
 `row_refactor_separator_flop_queue_run_count`,
-`row_refactor_last_separator_flop_ordered_private`,
-`row_refactor_separator_flop_ordered_private_run_count`,
 `row_refactor_last_separator_flop_components`,
 `row_refactor_last_separator_flop_private_groups`, and
-`row_refactor_last_separator_flop_pipeline_groups`, plus closure promotions via
-`row_refactor_last_separator_flop_closure_groups` and
-`row_refactor_separator_flop_closure_group_count`. When a completed group releases
-multiple successors, the completing
+`row_refactor_last_separator_flop_pipeline_groups`. When a completed group
+releases multiple successors, the completing
 worker keeps one local continuation and only spills the rest to the shared
 queue. Checked queued
 rejects refresh any missing prefix rows before accepting a prefix-tail repair

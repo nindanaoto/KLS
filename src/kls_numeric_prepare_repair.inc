@@ -9181,28 +9181,6 @@ static int kls_finish_row_refactor_pattern_from_arrays(
       }
     }
   }
-  solver->row_refactor_group_single_work = 0.0;
-  solver->row_refactor_group_batch_work = 0.0;
-  solver->row_refactor_group_generic_work = 0.0;
-  solver->row_refactor_group_dense_work = 0.0;
-  for (UF_long group = 0; group < group_count; ++group) {
-    const double work = kls_row_refactor_group_work(solver, group);
-    switch ((kls_row_refactor_group_kind)group_kind[group]) {
-      case KLS_ROW_REFACTOR_GROUP_BATCH:
-        solver->row_refactor_group_batch_work += work;
-        break;
-      case KLS_ROW_REFACTOR_GROUP_GENERIC:
-        solver->row_refactor_group_generic_work += work;
-        break;
-      case KLS_ROW_REFACTOR_GROUP_DENSE:
-        solver->row_refactor_group_dense_work += work;
-        break;
-      case KLS_ROW_REFACTOR_GROUP_SINGLE:
-      default:
-        solver->row_refactor_group_single_work += work;
-        break;
-    }
-  }
   kls_record_row_solve_partition(solver);
   return 1;
 }
@@ -11192,14 +11170,12 @@ static int kls_build_row_refactor_separator_private_thread_queues(
   UF_long group_count,
   int thread_count,
   UF_long **private_groups_out,
-  UF_long **thread_ptr_out,
-  UF_long *component_count_out) {
+  UF_long **thread_ptr_out) {
   KLS_SET_OPTIONAL_OUTPUT(private_groups_out, NULL);
   KLS_SET_OPTIONAL_OUTPUT(thread_ptr_out, NULL);
-  KLS_SET_OPTIONAL_OUTPUT(component_count_out, 0);
   if (private_groups_out == NULL || thread_ptr_out == NULL ||
-      component_count_out == NULL || solver == NULL ||
-      source_groups == NULL || group_count == 0u || thread_count <= 1 ||
+      solver == NULL || source_groups == NULL || group_count == 0u ||
+      thread_count <= 1 ||
       !kls_separator_analysis_has_global_range(&solver->separator) ||
       solver->separator.component_count <= 1u ||
       solver->separator.component_kind == NULL ||
@@ -11390,7 +11366,6 @@ static int kls_build_row_refactor_separator_private_thread_queues(
   free(thread_work);
   *private_groups_out = private_groups;
   *thread_ptr_out = thread_ptr;
-  *component_count_out = active_count;
   return 1;
 }
 

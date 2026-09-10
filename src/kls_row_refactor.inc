@@ -7894,7 +7894,6 @@ static int kls_clear_row_refactor_segment_target_residuals(kls_solver *solver,
     }
     x[col] = 0.0;
   }
-  kls_record_row_refactor_segment_target_cleanup(solver, end - begin);
   return 1;
 }
 
@@ -15119,8 +15118,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
   UF_long *row_private_thread_ptr = NULL;
   unsigned char *row_private_group_mask = NULL;
   UF_long row_private_group_count = 0;
-  UF_long row_separator_private_component_count = 0;
-  int row_separator_private_queue = 0;
   int row_separator_flop_queue = 0;
   int row_ready_initial_queued = 0;
   int row_dep_ready_queue = 0;
@@ -15306,10 +15303,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       row_initial_ready_count > 0u &&
       kls_build_row_refactor_separator_private_thread_queues(
         solver, row_private_groups, row_initial_ready_count, thread_count,
-        &row_owned_private_groups, &row_private_thread_ptr,
-        &row_separator_private_component_count)) {
+        &row_owned_private_groups, &row_private_thread_ptr)) {
     row_private_groups = row_owned_private_groups;
-    row_separator_private_queue = 1;
     row_private_group_count = row_initial_ready_count;
     row_ready_initial_queued = 0;
   }
@@ -15330,10 +15325,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       row_initial_ready_count > 0u &&
       kls_build_row_refactor_separator_private_thread_queues(
         solver, row_ready_groups, row_initial_ready_count, thread_count,
-        &row_owned_private_groups, &row_private_thread_ptr,
-        &row_separator_private_component_count)) {
+        &row_owned_private_groups, &row_private_thread_ptr)) {
     row_private_groups = row_owned_private_groups;
-    row_separator_private_queue = 1;
     row_private_group_count = row_initial_ready_count;
     row_ready_initial_queued = 0;
     for (UF_long pos = 0; pos < row_initial_ready_count; ++pos) {
@@ -15542,22 +15535,11 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     }
     kls_record_row_refactor_private_ready_groups(
       solver, row_private_group_count);
-    if (row_separator_private_queue) {
-      kls_record_row_refactor_separator_private_queue(
-        solver, row_separator_private_component_count);
-    }
     if (row_separator_flop_queue) {
       kls_record_row_refactor_separator_flop_queue(
         solver, row_separator_flop_component_count,
         row_separator_flop_private_groups,
-        row_separator_flop_pipeline_groups,
-        row_separator_flop_closure_groups,
-        row_ordered_private_queue,
-        row_separator_flop_private_threads,
-        row_separator_flop_private_min_groups,
-        row_separator_flop_private_max_groups,
-        row_separator_flop_private_min_work,
-        row_separator_flop_private_max_work);
+        row_separator_flop_pipeline_groups);
     }
   }
   if (pipeline_done != NULL) {
@@ -15575,8 +15557,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     pool->workers[i].telemetry_sparse_segment_input_rows = 0u;
     pool->workers[i].telemetry_batch_input_rows = 0u;
     pool->workers[i].telemetry_segment_target_input_rows = 0u;
-    pool->workers[i].telemetry_segment_target_cleanup_rows = 0u;
-    pool->workers[i].telemetry_segment_target_cleanup_entries = 0u;
   }
 
   kls_egraph_pool_dispatch_and_wait(pool, shared, thread_count);
@@ -15602,14 +15582,6 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       telemetry->telemetry_segment_target_input_rows;
     solver->row_refactor_segment_target_input_rows +=
       telemetry->telemetry_segment_target_input_rows;
-    solver->row_refactor_last_segment_target_cleanup_rows +=
-      telemetry->telemetry_segment_target_cleanup_rows;
-    solver->row_refactor_segment_target_cleanup_rows +=
-      telemetry->telemetry_segment_target_cleanup_rows;
-    solver->row_refactor_last_segment_target_cleanup_entries +=
-      telemetry->telemetry_segment_target_cleanup_entries;
-    solver->row_refactor_segment_target_cleanup_entries +=
-      telemetry->telemetry_segment_target_cleanup_entries;
   }
   const UF_long row_local_ready_groups =
     use_row_ready_queue
