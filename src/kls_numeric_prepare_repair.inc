@@ -792,53 +792,32 @@ static void kls_update_factor_etree_stats(kls_solver *solver) {
   }
   UF_long *parent = (UF_long *)malloc((size_t)best_nk * sizeof(*parent));
   UF_long *level = (UF_long *)calloc((size_t)best_nk, sizeof(*level));
-  UF_long *width = (UF_long *)calloc((size_t)best_nk + 1u, sizeof(*width));
-  UF_long *fanout = (UF_long *)calloc((size_t)best_nk, sizeof(*fanout));
-  if (parent == NULL || level == NULL || width == NULL || fanout == NULL) {
+  if (parent == NULL || level == NULL) {
     free(parent);
     free(level);
-    free(width);
-    free(fanout);
     solver->factor_etree_stats_valid = 1;
     return;
   }
   if (!kls_build_ordered_block_etree(solver, best_k1, best_k2, parent)) {
     free(parent);
     free(level);
-    free(width);
-    free(fanout);
     solver->factor_etree_stats_valid = 1;
     return;
   }
 
-  UF_long edges = 0;
-  UF_long roots = 0;
-  UF_long max_fanout = 0;
   for (UF_long col = 0; col < best_nk; ++col) {
     level[col] = 1u;
     if (parent[col] == KLS_KLU_EMPTY) {
-      roots++;
       continue;
     }
     if (parent[col] >= best_nk || parent[col] <= col) {
       free(parent);
       free(level);
-      free(width);
-      free(fanout);
       solver->factor_etree_stats_valid = 1;
       return;
     }
-    edges++;
-    fanout[parent[col]]++;
   }
-  UF_long leaves = 0;
   for (UF_long col = 0; col < best_nk; ++col) {
-    if (fanout[col] == 0u) {
-      leaves++;
-    }
-    if (fanout[col] > max_fanout) {
-      max_fanout = fanout[col];
-    }
     const UF_long next = parent[col];
     if (next != KLS_KLU_EMPTY && level[next] < level[col] + 1u) {
       level[next] = level[col] + 1u;
@@ -846,16 +825,9 @@ static void kls_update_factor_etree_stats(kls_solver *solver) {
   }
 
   UF_long level_count = 0;
-  UF_long max_width = 0;
   for (UF_long col = 0; col < best_nk; ++col) {
     if (level[col] > level_count) {
       level_count = level[col];
-    }
-    if (level[col] <= best_nk) {
-      const UF_long count = ++width[level[col]];
-      if (count > max_width) {
-        max_width = count;
-      }
     }
   }
 
@@ -864,8 +836,6 @@ static void kls_update_factor_etree_stats(kls_solver *solver) {
   solver->factor_etree_stats_valid = 1;
   free(parent);
   free(level);
-  free(width);
-  free(fanout);
 }
 
 static int kls_ensure_fast_reject_tail_plan_storage(kls_solver *solver,
@@ -2181,7 +2151,6 @@ static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
   }
 
   UF_long columns = 0;
-  double work = 0.0;
   UF_long col = local_reject;
   while (col != KLS_KLU_EMPTY && col < nk) {
     double column_work = 0.0;
@@ -2191,7 +2160,6 @@ static void kls_fill_fast_reject_etree_tail_stats(kls_solver *solver,
       return;
     }
     columns++;
-    work += column_work;
     const UF_long next = parent[col];
     if (next == col) {
       break;
@@ -2296,7 +2264,6 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
   const UF_long *uip = solver->numeric->Uip + k1;
   const UF_long *ulen = solver->numeric->Ulen + k1;
   UF_long descendant_columns = 0;
-  double descendant_work = 0.0;
   int valid = 1;
 
   for (UF_long k = local_reject; k < nk; ++k) {
@@ -2329,7 +2296,6 @@ static void kls_fill_fast_reject_tail_stats(kls_solver *solver,
     if (is_affected) {
       affected[k] = 1u;
       descendant_columns++;
-      descendant_work += column_work;
     }
   }
 
@@ -4232,7 +4198,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
   }
   const int use_mapped_tail =
     kls_tail_mapped_block_is_valid(solver, k1, nk, psinv);
-  UF_long mapped_columns = 0;
   UF_long skipped_columns = 0;
   double skipped_work = 0.0;
   for (UF_long kk = local_reject; kk < restart_end; ++kk) {
@@ -4331,9 +4296,6 @@ static int kls_try_pivot_tail_restart_rejected_block(
     if (!constructed) {
       solver->common.status = TRILINOS_KLU_INVALID;
       goto fail;
-    }
-    if (use_mapped_tail) {
-      mapped_columns++;
     }
     kls_tail_lsolve_numeric(live_pinv, new_lu, stack, lip, top, (Int)nk,
                             llen, (Entry *)solver->numeric->Xwork);

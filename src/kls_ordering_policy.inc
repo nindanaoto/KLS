@@ -1845,7 +1845,6 @@ static double kls_generic_initial_pivot_pressure_tolerance(
   UF_long pressured = 0u;
   UF_long pressured_positive = 0u;
   UF_long recovered_1e4 = 0u;
-  UF_long recovered_1e6 = 0u;
   UF_long recovered_3e8 = 0u;
   UF_long recovered_1e8 = 0u;
   UF_long block = 0u;
@@ -1907,7 +1906,6 @@ static double kls_generic_initial_pivot_pressure_tolerance(
     pressured_positive++;
     const double ratio = diagonal / column_max;
     recovered_1e4 += ratio >= 1.0e-4;
-    recovered_1e6 += ratio >= 1.0e-6;
     recovered_3e8 += ratio >= 3.0e-8;
     recovered_1e8 += ratio >= 1.0e-8;
   }
@@ -13299,7 +13297,7 @@ generic_ordering_tournament:;
   atomic_init(&generic_representation_verdict,
               !symbolic_options->use_btf ? 2 : 0);
   struct kls_amf_spec_job aligned_btf_ammf_spec;
-  pthread_t aligned_btf_ammf_spec_tid;
+  pthread_t aligned_btf_ammf_spec_tid = {0};
   int aligned_btf_ammf_spec_spawned = 0;
   atomic_int aligned_btf_representation_verdict;
   atomic_init(&aligned_btf_representation_verdict, 1);
