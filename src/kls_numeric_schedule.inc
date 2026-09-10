@@ -3620,21 +3620,6 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
     pthread_join(deferred_pts_thread, NULL);
   }
   if (egraph >= 0) {
-#ifdef KLS_HAVE_CBLAS
-    if (egraph > 0 && solver->dense_tail_cols > 0 &&
-        solver->common.status >= 0) {
-      /* the egraph pass no-opped the dense-tail columns; rebuild them
-         from the refreshed prefix (fallback: one full scalar walk) */
-      if (!kls_dense_tail_refresh(solver, numeric_values)) {
-        egraph = (int)trilinos_klu_l_refactor(solver->col_ptr,
-                                              solver->row_idx,
-                                              numeric_values,
-                                              solver->symbolic,
-                                              solver->numeric,
-                                              &solver->common);
-      }
-    }
-#endif
     kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_EGRAPH);
     if (egraph && check_pivots &&
         !kls_checked_refactor_accepts_rowwise_u(solver, 0u)) {

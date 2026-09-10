@@ -513,14 +513,7 @@ panel-cache staging is reported through
 `kls_first_row_panel_cache_append_panels`, and
 `kls_first_row_panel_cache_append_entries`, so large runs can distinguish
 full prefix-cache rebuilds from panels appended as rows are published.
-Builds configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` can use the same
-runtime `KLS_ENABLE_CBLAS_SUPERNODE=1` gate to consume eligible KLS-first
-cached panels with CBLAS `dtrsv` and `dgemv`; otherwise the cached panel uses
-the scalar in-panel solver. KLS-first CBLAS consumption now also requires at
-least 2048 producer rows, at least 512 dense/tail update columns, at least 50M
-estimated update operations, and at least 16 estimated operations per copied
-panel entry, so medium and fragmented Level-2 panel updates stay on the
-portable compact kernel. Dynamic column
+Dynamic column
 exchanges rebuild the phase-local
 pipeline cache from the post-exchange column order over the whole committed
 prefix and reset the row-up producer panel caches. Separator pipeline
@@ -1021,20 +1014,6 @@ change. Current top-five
 CKTSO-gap forced-row probes still accept zero independent compact-supernode
 batches, so that part is covered by targeted smoke fixtures rather than by
 those slow-case rows.
-Builds
-configured with `-DKLS_ENABLE_CBLAS_SUPERNODE=ON` also compile an opt-in
-`KLS_ENABLE_CBLAS_SUPERNODE=1` supernode experiment that uses standard CBLAS
-calls with the same scalar fallback and pivot checks. Completed producer
-supernodes can update later rows with CBLAS `dtrsv` plus `dgemv`, matching the
-paper's direct update shape over the retained row-major panel when the
-structural update work and row/panel dimensions are large enough to amortize
-BLAS calls. Smaller producer/consumer shapes stay on the KLS-owned scalar
-compact kernels, and checked dense panels keep the native blocked kernel unless
-at least one row update can pass the same large-work CBLAS gate. When a whole
-unchecked dense consumer group, or a contiguous row subrange inside it, has the
-same ordered list of completed dense producer suffixes as its external
-dependency pattern, the CBLAS experiment can batch those producer updates
-across those consumer rows with one `dtrsm` and one `dgemm` per producer.
 Earlier producer updates can flow into later producer multiplier columns before
 those later suffixes are solved; stats report
 `row_refactor_last_compact_supernode_batch`,

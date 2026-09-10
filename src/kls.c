@@ -17,9 +17,6 @@
 #ifdef KLS_HAVE_SPRAL_SCALING
 #include "spral_scaling.h"
 #endif
-#ifdef KLS_HAVE_CBLAS
-#include <cblas.h>
-#endif
 
 #include <errno.h>
 #include <float.h>
@@ -178,24 +175,11 @@ static void kls_accumulate_scaled_dense_rows8(
    scalar row scaffold even though the existing work-per-entry gate provides
    the relevant arithmetic-intensity check. */
 #define KLS_ROW_REFACTOR_NATIVE_PANEL_AUTO_MIN_WORK 32768.0
-#define KLS_ROW_REFACTOR_CBLAS_BLOCK_ROWS 32u
-#define KLS_ROW_REFACTOR_CBLAS_PANEL_BLOCK_ROWS 8u
-#define KLS_ROW_REFACTOR_CBLAS_MIN_VECTOR_ROWS 512u
+#define KLS_ROW_REFACTOR_DENSE_BLOCK_ROWS 32u
 #define KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_ROWS 8u
 #define KLS_ROW_REFACTOR_BLOCKED_TRAILING_MIN_COLS 16u
-#define KLS_ROW_REFACTOR_CBLAS_MIN_BATCH_ROWS 64u
-#define KLS_ROW_REFACTOR_CBLAS_MIN_BATCH_DEP_ROWS 64u
-#define KLS_ROW_REFACTOR_CBLAS_MIN_PANEL_WIDTH 16u
 #define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK 32768.0
 #define KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY 8.0
-#define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK 5000000.0
-#define KLS_ROW_REFACTOR_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY \
-  KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
-#define KLS_ROW_REFACTOR_CBLAS_PANEL_MIN_WORK 200000.0
-#define KLS_ROW_FIRST_CBLAS_MIN_VECTOR_ROWS 2048u
-#define KLS_ROW_FIRST_CBLAS_MIN_UPDATE_COLS 512u
-#define KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK 50000000.0
-#define KLS_ROW_FIRST_CBLAS_SUPERNODE_MIN_WORK_PER_ENTRY 16.0
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_ROWS 16u
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK 512.0
 #define KLS_EGRAPH_CACHED_SUPERNODE_MIN_WORK_PER_ENTRY \
@@ -9337,11 +9321,7 @@ static void fill_build_stats(kls_stats *stats) {
 #else
   stats->build_has_spral_scaling = 0;
 #endif
-#ifdef KLS_HAVE_CBLAS
-  stats->build_has_cblas = 1;
-#else
   stats->build_has_cblas = 0;
-#endif
 }
 
 static void kls_metis_race_abandon(kls_solver *solver);
@@ -9836,34 +9816,11 @@ void kls_default_options(kls_options *options) {
   options->record_tiny_solve_timing = 1;
 }
 
-#ifdef KLS_HAVE_CBLAS
-/* KLS schedules its own parallelism and calls BLAS from its worker
-   threads; OpenBLAS's internal pool only interferes.  Worse, that
-   pool spin-waits with sched_yield for tens of ms after every call:
-   sampling showed 78% of a small one-shot's CPU inside sched_yield,
-   and rajat03's serial 2.7ms first factor measured 4.1ms (16.3ms on
-   bad draws) with the pool enabled.  Serialize it once up front. */
-extern void openblas_set_num_threads(int);
-#pragma weak openblas_set_num_threads
-static void kls_serialize_blas_once(void) {
-  static int done = 0;
-  if (done || getenv("KLS_KEEP_BLAS_THREADS") != NULL) {
-    return;
-  }
-  done = 1;
-  if (openblas_set_num_threads != NULL) {
-    openblas_set_num_threads(1);
-  }
-}
-#endif
 
 int kls_create(kls_solver **solver_out) {
   if (solver_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
-#ifdef KLS_HAVE_CBLAS
-  kls_serialize_blas_once();
-#endif
   kls_solver *solver = (kls_solver *)calloc(1, sizeof(*solver));
   if (solver == NULL) {
     return KLS_ERR_OUT_OF_MEMORY;
