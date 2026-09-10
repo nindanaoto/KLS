@@ -5630,22 +5630,12 @@ static int kls_scatter_row_refactor_prefix_values(kls_solver *solver,
          kls_scatter_row_refactor_u_prefix_values(solver, end_row);
 }
 
-static int kls_scatter_row_refactor_l_values(kls_solver *solver) {
-  return solver != NULL &&
-         kls_scatter_row_refactor_l_prefix_values(solver, solver->n);
-}
-
-static int kls_scatter_row_refactor_u_values(kls_solver *solver) {
-  return solver != NULL &&
-         kls_scatter_row_refactor_u_prefix_values(solver, solver->n);
-}
-
 static int kls_publish_row_refactor_values(kls_solver *solver) {
   if (solver == NULL || !solver->row_refactor_values_dirty) {
     return 1;
   }
-  if (!kls_scatter_row_refactor_l_values(solver) ||
-      !kls_scatter_row_refactor_u_values(solver)) {
+  if (!kls_scatter_row_refactor_l_prefix_values(solver, solver->n) ||
+      !kls_scatter_row_refactor_u_prefix_values(solver, solver->n)) {
     solver->common.status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -8356,8 +8346,8 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   if (defer_value_scatter) {
     if (lazy_value_scatter) {
       kls_record_row_refactor_lazy_value_scatter_run(solver);
-    } else if (!kls_scatter_row_refactor_l_values(solver) ||
-               !kls_scatter_row_refactor_u_values(solver)) {
+    } else if (!kls_scatter_row_refactor_l_prefix_values(solver, solver->n) ||
+               !kls_scatter_row_refactor_u_prefix_values(solver, solver->n)) {
       common->status = TRILINOS_KLU_INVALID;
       return 0;
     }
@@ -15472,8 +15462,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       }
     } else if (shared->row_refactor_lazy_value_scatter) {
       kls_record_row_refactor_lazy_value_scatter_run(solver);
-    } else if (!kls_scatter_row_refactor_l_values(solver) ||
-               !kls_scatter_row_refactor_u_values(solver)) {
+    } else if (!kls_scatter_row_refactor_l_prefix_values(solver, solver->n) ||
+               !kls_scatter_row_refactor_u_prefix_values(solver, solver->n)) {
       common->status = TRILINOS_KLU_INVALID;
       return 0;
     }
