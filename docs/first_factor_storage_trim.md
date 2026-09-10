@@ -16,7 +16,7 @@ the preceding, starting, and candidate binaries, checks build provenance,
 records commands/hashes/source diff, and verifies H100 entrywise refactors
 at a 1e-8 residual limit. Timed runs do not overlap builds or tests.
 
-Besides the automatic-policy controls, explicit `--kls-first-factor on`
+Besides the automatic-policy controls, explicit `KLS_ENABLE_KLS_FIRST_FACTOR=1`
 tests cover 1138_bus, circuit_4 and bcircuit; all report `kls_first` initial
 factor paths. Their four-triplet screen passes 36/36 launches but flags
 1138_bus at +2.97% versus the preceding commit and +3.74% versus the pushed

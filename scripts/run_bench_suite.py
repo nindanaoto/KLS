@@ -89,10 +89,6 @@ def append_solver_options(cmd: list[str], args: argparse.Namespace) -> None:
         cmd.extend(["--pivot-tol", str(args.pivot_tol)])
     if args.row_refactor != "env":
         cmd.extend(["--row-refactor", args.row_refactor])
-    if args.kls_first_factor != "env":
-        cmd.extend(["--kls-first-factor", args.kls_first_factor])
-    if args.row_solve != "env":
-        cmd.extend(["--row-solve", args.row_solve])
 
 
 def collect_analyze_failure_diagnostic(
@@ -246,16 +242,6 @@ def main() -> int:
     parser.add_argument(
         "--row-refactor",
         choices=["env", "off", "refactor", "checked", "all"],
-        default="env",
-    )
-    parser.add_argument(
-        "--kls-first-factor",
-        choices=["env", "off", "on"],
-        default="env",
-    )
-    parser.add_argument(
-        "--row-solve",
-        choices=["env", "off", "on"],
         default="env",
     )
     parser.add_argument("--no-btf", action="store_true")

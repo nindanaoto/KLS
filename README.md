@@ -590,18 +590,13 @@ numeric factors can also enter the same owned row/segment refactor preparation
 when the NICSLU R1/R2 model recommends parallel numeric work and an exact
 dependency schedule is already available; the existing row-work gate still
 rejects row setup when it is more expensive than the EGraph estimate.
-`kls_bench` and
-`run_bench_suite.py` also accept
-`--kls-first-factor env|off|on` so this path can be compared reproducibly
-without relying on an ambient environment variable. Benchmark JSON reports the
-model bridge as `row_refactor_auto_model_recommended`,
+Benchmark statistics report the model bridge as `row_refactor_auto_model_recommended`,
 `row_refactor_auto_model_attempted`, and `row_refactor_auto_model_accepted`.
 `KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC=1` separately seeds the same row-major
 solve mirrors after successful ordinary numeric factors/refactors when the
 factor has no external KLS row/column permutation or scaling. This is an
 experiment switch for measuring KLS-owned row solves independent of the
-KLS-first scaffold; `kls_bench` and `run_bench_suite.py` expose it as
-`--row-solve env|off|on`.
+KLS-first scaffold.
 `factor_etree_block_start`,
 `factor_etree_block_size`, `factor_etree_levels`,
 `factor_etree_max_width`, `factor_etree_edges`,

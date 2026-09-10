@@ -449,18 +449,6 @@ static int valid_row_refactor_control(const char *s) {
          strcmp(s, "all") == 0;
 }
 
-static int valid_kls_first_factor_control(const char *s) {
-  return strcmp(s, "env") == 0 ||
-         strcmp(s, "off") == 0 ||
-         strcmp(s, "on") == 0;
-}
-
-static int valid_row_solve_control(const char *s) {
-  return strcmp(s, "env") == 0 ||
-         strcmp(s, "off") == 0 ||
-         strcmp(s, "on") == 0;
-}
-
 static int apply_row_refactor_control(const char *s) {
   if (strcmp(s, "env") == 0) {
     return 1;
@@ -480,28 +468,6 @@ static int apply_row_refactor_control(const char *s) {
   return 1;
 }
 
-static int apply_kls_first_factor_control(const char *s) {
-  if (strcmp(s, "env") == 0) {
-    return 1;
-  }
-  if (setenv("KLS_ENABLE_KLS_FIRST_FACTOR",
-             strcmp(s, "on") == 0 ? "1" : "0", 1) != 0) {
-    return 0;
-  }
-  return 1;
-}
-
-static int apply_row_solve_control(const char *s) {
-  if (strcmp(s, "env") == 0) {
-    return 1;
-  }
-  if (setenv("KLS_ENABLE_ROW_SOLVE_FROM_NUMERIC",
-             strcmp(s, "on") == 0 ? "1" : "0", 1) != 0) {
-    return 0;
-  }
-  return 1;
-}
-
 static const char *scale_name(int scale) {
   switch (scale) {
     case KLS_SCALE_AUTO: return "auto";
@@ -515,7 +481,7 @@ static const char *scale_name(int scale) {
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--kls-first-factor env|off|on] [--row-solve env|off|on] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
+          "Usage: %s <matrix.mtx> [--lifecycle-systems N] [--repeat N] [--factor-repeat N] [--refactor-repeat N] [--expected-refactors N] [--expected-solves N] [--refactor-values unchanged|rank-preserving|entrywise|localized-entrywise] [--refactor-value-amplitude A] [--threads N] [--backend auto|kls|serial] [--ordering auto|amd|colamd|natural|metis|scotch|amf|ammf|amf3] [--orientation auto|normal|transpose] [--scale auto|-1|0|1|2] [--input-index auto|32|64] [--pivot-tol T] [--row-refactor env|off|refactor|checked|all] [--no-btf] [--no-fast-factor] [--no-static-pivoting] [--no-transpose-solve] [--analyze-only] [--json]\n",
           argv0);
 }
 
@@ -538,8 +504,6 @@ int main(int argc, char **argv) {
     BENCH_REFACTOR_VALUES_UNCHANGED;
   double refactor_value_amplitude = 1.0e-3;
   const char *row_refactor_control = "env";
-  const char *kls_first_factor_control = "env";
-  const char *row_solve_control = "env";
   bench_index_mode input_index_mode = BENCH_INDEX_AUTO;
   kls_options options;
   kls_default_options(&options);
@@ -614,19 +578,6 @@ int main(int argc, char **argv) {
         usage(argv[0]);
         return EXIT_FAILURE;
       }
-    } else if (strcmp(argv[i], "--kls-first-factor") == 0 &&
-               i + 1 < argc) {
-      kls_first_factor_control = argv[++i];
-      if (!valid_kls_first_factor_control(kls_first_factor_control)) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-      }
-    } else if (strcmp(argv[i], "--row-solve") == 0 && i + 1 < argc) {
-      row_solve_control = argv[++i];
-      if (!valid_row_solve_control(row_solve_control)) {
-        usage(argv[0]);
-        return EXIT_FAILURE;
-      }
     } else if (strcmp(argv[i], "--no-btf") == 0) {
       options.use_btf = 0;
     } else if (strcmp(argv[i], "--no-fast-factor") == 0) {
@@ -663,14 +614,6 @@ int main(int argc, char **argv) {
   }
   if (!apply_row_refactor_control(row_refactor_control)) {
     perror("apply row-refactor control");
-    return EXIT_FAILURE;
-  }
-  if (!apply_kls_first_factor_control(kls_first_factor_control)) {
-    perror("apply kls-first-factor control");
-    return EXIT_FAILURE;
-  }
-  if (!apply_row_solve_control(row_solve_control)) {
-    perror("apply row-solve control");
     return EXIT_FAILURE;
   }
 
@@ -713,8 +656,6 @@ int main(int argc, char **argv) {
              ",\"requested_orientation\":\"%s\",\"orientation\":\"%s\""
              ",\"ordering\":\"%s\",\"requested_scale\":\"%s\""
              ",\"row_refactor_control\":\"%s\""
-             ",\"kls_first_factor_control\":\"%s\""
-             ",\"row_solve_control\":\"%s\""
              ",\"requested_btf\":%s,\"btf\":%s"
              ",\"analysis_seconds\":%.9g"
              ",\"nblocks\":%" PRId64 ",\"max_block\":%" PRId64
@@ -734,8 +675,6 @@ int main(int argc, char **argv) {
              kls_ordering_name(stats.selected_ordering),
              scale_name(options.scale),
              row_refactor_control,
-             kls_first_factor_control,
-             row_solve_control,
              options.use_btf ? "true" : "false",
              stats.selected_btf ? "true" : "false",
              stats.analysis_seconds, stats.nblocks, stats.max_block,
@@ -757,8 +696,6 @@ int main(int argc, char **argv) {
       printf("ordering: %s\n", kls_ordering_name(stats.selected_ordering));
       printf("requested scale: %s\n", scale_name(options.scale));
       printf("row refactor control: %s\n", row_refactor_control);
-      printf("KLS first-factor control: %s\n", kls_first_factor_control);
-      printf("row solve control: %s\n", row_solve_control);
       printf("requested btf: %s\n", options.use_btf ? "on" : "off");
       printf("selected btf: %s\n", stats.selected_btf ? "on" : "off");
       printf("analysis: %.6f s\n", stats.analysis_seconds);
