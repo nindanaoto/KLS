@@ -149,6 +149,15 @@ static void factor2
 
 	if (nk == 1)
 	{
+	    /* KLS also inspects column metadata outside the block kernels.
+	     * A singleton has no stored strict L/U entries.  Native KLU skips
+	     * these fields, but leaving them uninitialized makes KLS's global
+	     * statistics and compact-layout decisions depend on heap contents. */
+	    Lip [k1] = 0 ;
+	    Uip [k1] = 0 ;
+	    Llen [k1] = 0 ;
+	    Ulen [k1] = 0 ;
+	    Numeric->LUsize [block] = 0 ;
 
 	    /* -------------------------------------------------------------- */
 	    /* singleton case */

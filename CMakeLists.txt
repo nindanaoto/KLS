@@ -639,6 +639,11 @@ if(KLS_BUILD_TESTS)
   target_compile_options(kls_smoke PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
   add_test(NAME kls_smoke COMMAND kls_smoke)
+  add_executable(kls_singleton_metadata tests/kls_singleton_metadata.c)
+  target_link_libraries(kls_singleton_metadata PRIVATE kls_suitesparse)
+  target_compile_options(kls_singleton_metadata PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+  add_test(NAME kls_singleton_metadata COMMAND kls_singleton_metadata)
   add_executable(kls_transformed_residual tests/kls_transformed_residual.c)
   target_link_libraries(kls_transformed_residual PRIVATE KLS::kls)
   if(KLS_MATH_LIBRARY)
