@@ -9400,6 +9400,15 @@ int kls_refactor(kls_solver *solver, const double *values) {
      corrected residual; later solves against that unchanged numeric may
      reuse the verdict. */
   solver->solve_contract_verified = 0;
+  /* A condition-based certificate belongs to one numeric generation, not
+     to its sparsity pattern. Reclassify after an ill-conditioned solve or
+     failed refinement; otherwise changed values inherit both an obsolete
+     diagonal ratio and a residual snapshot from the previous matrix. */
+  if (solver->low_rcond_solve_contract_state != 0 ||
+      solver->solve_contract_probe == 3) {
+    solver->solve_contract_probe = 0;
+    solver->low_rcond_solve_contract_state = 0;
+  }
   const int generic_lean_reaudit =
     kls_repeated_update_workload(&solver->options) &&
     /* A short dependency schedule cannot repay four row/column lifecycle
@@ -13557,6 +13566,29 @@ static int solve_impl(kls_solver *solver,
            componentwise accuracy when one correction has already produced
            a contract-valid long-vector answer. */
         const double ordinary_self_check_l2_limit_squared = 25.0e-18;
+        if (ordinary_self_check_l2_contract && kernel_transpose &&
+            !(rnorm2 <= ordinary_self_check_l2_limit_squared * l2_scale)) {
+          /* Cancellation can make the double SpMV less accurate than the
+             answer it is checking. Pay for extended accumulation only on
+             a failed check, before feeding that residual to refinement.
+             The acceptance threshold itself is unchanged. */
+          long double accurate_norm2 = 0.0L;
+          rmax = 0.0;
+          for (UF_long col = 0; col < nloc; ++col) {
+            const UF_long row = cmap != NULL ? cmap[col] : col;
+            long double acc = (long double)brhs[row];
+            for (UF_long p = solver->col_ptr[col];
+                 p < solver->col_ptr[col + 1u]; ++p) {
+              const UF_long ir = solver->row_idx[p];
+              acc -= (long double)refine_a[p] *
+                (long double)xrhs[rinv != NULL ? rinv[ir] : ir];
+            }
+            residual[row] = (double)acc;
+            accurate_norm2 += acc * acc;
+            rmax = fmax(rmax, fabs(residual[row]));
+          }
+          rnorm2 = (double)accurate_norm2;
+        }
         const int ordinary_self_check_l2_ok =
           ordinary_self_check_l2_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&

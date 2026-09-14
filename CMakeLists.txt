@@ -639,6 +639,10 @@ if(KLS_BUILD_TESTS)
   target_compile_options(kls_smoke PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
   add_test(NAME kls_smoke COMMAND kls_smoke)
+  add_executable(kls_cancellation tests/kls_cancellation.c)
+  target_link_libraries(kls_cancellation PRIVATE kls)
+  add_test(NAME kls_cancellation COMMAND kls_cancellation)
+
   add_executable(kls_singleton_metadata tests/kls_singleton_metadata.c)
   target_link_libraries(kls_singleton_metadata PRIVATE kls_suitesparse)
   target_compile_options(kls_singleton_metadata PRIVATE
