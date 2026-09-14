@@ -40,8 +40,15 @@ static int check_scaled_chain(int exponent, int zero_initial_rhs) {
     } else {
       status = kls_refactor_solve(solver, a, 1, b, 0, x, 0);
     }
-    long double r2 = 0, b2 = 0;
-    if (status == KLS_OK) {
+    /* A retained pivot-family policy must not cache a previous RHS answer.
+       Exercise a second RHS before advancing to the next numeric epoch. */
+    for (int rhs = 0; status == KLS_OK && rhs < 2; ++rhs) {
+      if (rhs) {
+        for (int row = 0; row < 3; ++row) b[row] = -b[row];
+        status = kls_solve(solver, 1, b, 0, x, 0);
+        if (status != KLS_OK) break;
+      }
+      long double r2 = 0, b2 = 0;
       for (int row = 0; row < 3; ++row) {
         long double r = b[row];
         for (int p = ptr[row]; p < ptr[row + 1]; ++p)

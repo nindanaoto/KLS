@@ -9400,14 +9400,16 @@ int kls_refactor(kls_solver *solver, const double *values) {
      corrected residual; later solves against that unchanged numeric may
      reuse the verdict. */
   solver->solve_contract_verified = 0;
-  /* A condition-based certificate belongs to one numeric generation, not
-     to its sparsity pattern. Reclassify after an ill-conditioned solve or
-     failed refinement; otherwise changed values inherit both an obsolete
-     diagonal ratio and a residual snapshot from the previous matrix. */
+  /* Refresh the current diagonal ratio, but distinguish the retained
+     pivot-family policy from per-answer validity. State 1 records that the
+     low-rcond heuristic was pessimistic for this pivot family; it does not
+     cache an RHS or a corrected answer. Failed refinement (probe 3) must
+     discard that policy too, so the next numeric gets a fresh check. */
   if (solver->low_rcond_solve_contract_state != 0 ||
       solver->solve_contract_probe == 3) {
+    if (solver->solve_contract_probe == 3)
+      solver->low_rcond_solve_contract_state = 0;
     solver->solve_contract_probe = 0;
-    solver->low_rcond_solve_contract_state = 0;
   }
   const int generic_lean_reaudit =
     kls_repeated_update_workload(&solver->options) &&
@@ -11342,7 +11344,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
       }
     }
     kls_solve_contract_classify(solver, numeric_values);
-    if ((solver->solve_contract_probe == 2 ||
+    if ((solver->solve_refine_values != NULL ||
+         solver->solve_contract_probe == 2 ||
          (solver->numeric_is_predicted &&
           solver->row_solve_self_check) ||
          solver->promoted_tolerance_l2_recovery_required ||
