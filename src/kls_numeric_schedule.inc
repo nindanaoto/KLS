@@ -756,7 +756,7 @@ static int kls_snb_prepare(kls_solver *solver) {
     for (int t = 0; ok && t < nworkers; ++t) {
       /* Dense updates reuse these SIMD scratch streams. Give them the
          same alignment guarantee as the other numeric work buffers. */
-      st->ub_w[t] = kls_aligned_double_values(2u * (UF_long)st->wmax *
+      st->ub_w[t] = kls_aligned_double_values((UF_long)st->wmax *
                                              (UF_long)st->wmax);
       st->gemm_w[t] = kls_aligned_double_values((UF_long)gmax_below *
                                                (UF_long)st->wmax);
@@ -795,10 +795,91 @@ static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
   }
 }
 
+/* Dense edge product, with columns contiguous in scratch. Accumulate a
+   register tile in producer order, reusing each contiguous L load across four
+   output columns. The vector bounds are storage bounds, not policy gates;
+   scalar tails also support builds without AVX-512. */
+static KLS_ALWAYS_INLINE void kls_snb_dense_product(
+  const double *L, int32_t ld, const int32_t *sub, int32_t sc,
+  const double *B, int32_t w, int32_t r0, int32_t r1, double *T) {
+  const int32_t nr = r1 - r0;
+  int32_t c = 0;
+#if defined(__AVX512F__)
+  for (; c + 3 < w; c += 4) {
+    const double *b0 = B + (size_t)c * sc;
+    const double *b1 = b0 + sc, *b2 = b1 + sc, *b3 = b2 + sc;
+    int32_t r = r0;
+    for (; r + 7 < r1; r += 8) {
+      __m512d l = _mm512_loadu_pd(L + (size_t)sub[0] * ld + r);
+      __m512d t0 = _mm512_mul_pd(l, _mm512_set1_pd(b0[0]));
+      __m512d t1 = _mm512_mul_pd(l, _mm512_set1_pd(b1[0]));
+      __m512d t2 = _mm512_mul_pd(l, _mm512_set1_pd(b2[0]));
+      __m512d t3 = _mm512_mul_pd(l, _mm512_set1_pd(b3[0]));
+      for (int32_t i = 1; i < sc; ++i) {
+        l = _mm512_loadu_pd(L + (size_t)sub[i] * ld + r);
+        t0 = _mm512_add_pd(t0, _mm512_mul_pd(l, _mm512_set1_pd(b0[i])));
+        t1 = _mm512_add_pd(t1, _mm512_mul_pd(l, _mm512_set1_pd(b1[i])));
+        t2 = _mm512_add_pd(t2, _mm512_mul_pd(l, _mm512_set1_pd(b2[i])));
+        t3 = _mm512_add_pd(t3, _mm512_mul_pd(l, _mm512_set1_pd(b3[i])));
+      }
+      double *out = T + (size_t)c * nr + r - r0;
+      _mm512_storeu_pd(out, t0);
+      _mm512_storeu_pd(out + nr, t1);
+      _mm512_storeu_pd(out + 2u * nr, t2);
+      _mm512_storeu_pd(out + 3u * nr, t3);
+    }
+    for (; r < r1; ++r) {
+      double t0 = L[(size_t)sub[0] * ld + r] * b0[0];
+      double t1 = L[(size_t)sub[0] * ld + r] * b1[0];
+      double t2 = L[(size_t)sub[0] * ld + r] * b2[0];
+      double t3 = L[(size_t)sub[0] * ld + r] * b3[0];
+      for (int32_t i = 1; i < sc; ++i) {
+        const double l = L[(size_t)sub[i] * ld + r];
+        t0 += l * b0[i]; t1 += l * b1[i];
+        t2 += l * b2[i]; t3 += l * b3[i];
+      }
+      double *out = T + (size_t)c * nr + r - r0;
+      out[0] = t0; out[nr] = t1; out[2u * nr] = t2; out[3u * nr] = t3;
+    }
+  }
+#endif
+  for (; c < w; ++c) {
+    const double *b = B + (size_t)c * sc;
+#if defined(__AVX512F__)
+    int32_t r = r0;
+    for (; r + 7 < r1; r += 8) {
+      __m512d t = _mm512_mul_pd(
+        _mm512_loadu_pd(L + (size_t)sub[0] * ld + r), _mm512_set1_pd(b[0]));
+      for (int32_t i = 1; i < sc; ++i)
+        t = _mm512_add_pd(t, _mm512_mul_pd(
+          _mm512_loadu_pd(L + (size_t)sub[i] * ld + r), _mm512_set1_pd(b[i])));
+      _mm512_storeu_pd(T + (size_t)c * nr + r - r0, t);
+    }
+    for (; r < r1; ++r) {
+      double t = L[(size_t)sub[0] * ld + r] * b[0];
+      for (int32_t i = 1; i < sc; ++i) t += L[(size_t)sub[i] * ld + r] * b[i];
+      T[(size_t)c * nr + r - r0] = t;
+    }
+#else
+    /* Portable column update: contiguous L and T streams allow the compiler
+       to use its available SIMD width without a row-major B mirror. */
+    double *out = T + (size_t)c * nr;
+    const double *l = L + (size_t)sub[0] * ld + r0;
+#pragma omp simd
+    for (int32_t row = 0; row < nr; ++row) out[row] = l[row] * b[0];
+    for (int32_t i = 1; i < sc; ++i) {
+      l = L + (size_t)sub[i] * ld + r0;
+#pragma omp simd
+      for (int32_t row = 0; row < nr; ++row) out[row] += l[row] * b[i];
+    }
+#endif
+  }
+}
+
 /* Serial edge arithmetic shared by ordinary and cooperative-small-edge
  * execution. The caller owns dependency waits and crew barriers; scratch is
  * private to the executing worker. Keep the same accumulation order and
- * row-major dense product in both callers. */
+ * dense product in both callers. */
 static KLS_ALWAYS_INLINE void kls_snb_update_edge(
   const kls_snb_block *blk, const kls_snb_snode *sn,
   const kls_snb_edge *edge, int wnarrow,
@@ -863,46 +944,11 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
     for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
   }
   if (ph == 0) return;
-  double *Brow = ub_scratch + (size_t)sc * w;
-  for (int32_t c = 0; c < w; ++c) {
-    const double *Bc = B + (size_t)c * sc;
-    for (int32_t i = 0; i < sc; ++i) {
-      Brow[(size_t)i * w + c] = Bc[i];
-    }
-  }
   double *T = gemm_scratch;
-  {
-    const double *lb = Lbelow + (size_t)sub[0] * pld;
-    const double *br = Brow;
-    for (int32_t r = 0; r < ph; ++r) {
-      const double l = lb[r];
-      double *tr = T + (size_t)r * w;
-      /* Scratch output is disjoint from the read-only product inputs. */
-#pragma omp simd
-      for (int32_t c = 0; c < w; ++c) tr[c] = l * br[c];
-    }
-    for (int32_t i = 1; i < sc; ++i) {
-      const double *lbi = Lbelow + (size_t)sub[i] * pld;
-      const double *bri = Brow + (size_t)i * w;
-      for (int32_t r = 0; r < ph; ++r) {
-        const double l = lbi[r];
-        double *tr = T + (size_t)r * w;
-        /* Scratch output is disjoint from the read-only product inputs. */
-#pragma omp simd
-        for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-      }
-    }
-  }
-  for (int32_t r = 0; r < ph; ++r) {
-    const int32_t dst = dsts[r];
-    const double *tr = T + (size_t)r * w;
-    if (dst >= 0) {
-      double *Wd = W + dst;
-      for (int32_t c = 0; c < w; ++c) {
-        Wd[(size_t)c * H] -= tr[c];
-      }
-    }
-  }
+  kls_snb_dense_product(Lbelow, pld, sub, sc, B, w, 0, ph, T);
+  for (int32_t c = 0; c < w; ++c)
+    for (int32_t r = 0; r < ph; ++r)
+      if (dsts[r] >= 0) W[(size_t)c * H + dsts[r]] -= T[(size_t)c * ph + r];
 }
 
 /* Process one supernode: panel compute (memset, A-scatter program, edge
@@ -1151,8 +1197,8 @@ typedef struct kls_snb_par_ctx {
 /* Cooperative processing of one large supernode by the whole crew.
  * Edge updates: tid 0 gathers/TRSMs/writes back the (small) UB block,
  * then every worker computes and scatters a disjoint row slice of the
- * GEMM (producer below-rows split across the crew; the shared B row
- * mirror is read-only).  Narrow edges are cheap and stay on tid 0.
+ * GEMM (producer below-rows split across the crew; shared B is read-only).
+ * Narrow edges are cheap and stay on tid 0.
  * getrf: i-steps run row-sliced with a spin barrier per step so row i
  * is fully updated before the crew reads it.  Writeback: column-sliced.
  * All slices are disjoint; the only shared writes are the barrier. */
@@ -1220,10 +1266,9 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
       kls_snb_spin_barrier_wait(&ctx->coop, crew);
       continue;
     }
-    /* big edge: stage A on tid 0 (gather + TRSM + writeback + row
-       mirror into ub_w[0]), stage B row-sliced across the crew */
+    /* big edge: stage A on tid 0 (gather + TRSM + writeback),
+       stage B row-sliced across the crew */
     double *B = st->ub_w[0];
-    double *Brow = st->ub_w[0] + (size_t)sc * w;
     if (tid == 0) {
       for (int32_t c = 0; c < w; ++c) {
         const double *Wc = W + (size_t)c * H + ustart;
@@ -1248,7 +1293,6 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
         const double *Bc = B + (size_t)c * sc;
         for (int32_t i = 0; i < sc; ++i) {
           Wc[i] = Bc[i];
-          Brow[(size_t)i * w + c] = Bc[i];
         }
       }
     }
@@ -1260,37 +1304,11 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
       if (r1 > ph) r1 = ph;
       if (r0 < r1) {
         double *T = st->gemm_w[tid];
-        {
-          const double *lb = Lbelow + (size_t)sub[0] * pld;
-          for (int32_t r = r0; r < r1; ++r) {
-            const double l = lb[r];
-            double *tr = T + (size_t)(r - r0) * w;
-            /* Scratch output is disjoint from the read-only product inputs. */
-#pragma omp simd
-            for (int32_t c = 0; c < w; ++c) tr[c] = l * Brow[c];
-          }
-          for (int32_t i = 1; i < sc; ++i) {
-            const double *lbi = Lbelow + (size_t)sub[i] * pld;
-            const double *bri = Brow + (size_t)i * w;
-            for (int32_t r = r0; r < r1; ++r) {
-              const double l = lbi[r];
-              double *tr = T + (size_t)(r - r0) * w;
-              /* Scratch output is disjoint from the read-only product inputs. */
-#pragma omp simd
-              for (int32_t c = 0; c < w; ++c) tr[c] += l * bri[c];
-            }
-          }
-        }
-        for (int32_t r = r0; r < r1; ++r) {
-          const int32_t dst = dsts[r];
-          const double *tr = T + (size_t)(r - r0) * w;
-          if (dst >= 0) {
-            double *Wd = W + dst;
-            for (int32_t c = 0; c < w; ++c) {
-              Wd[(size_t)c * H] -= tr[c];
-            }
-          }
-        }
+        kls_snb_dense_product(Lbelow, pld, sub, sc, B, w, r0, r1, T);
+        for (int32_t c = 0; c < w; ++c)
+          for (int32_t r = r0; r < r1; ++r)
+            if (dsts[r] >= 0)
+              W[(size_t)c * H + dsts[r]] -= T[(size_t)c * (r1 - r0) + r - r0];
       }
     }
     kls_snb_spin_barrier_wait(&ctx->coop, crew);

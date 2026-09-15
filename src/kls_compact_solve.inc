@@ -1145,6 +1145,101 @@ static UF_long kls_lean_single_block_prepared_solve(
   return 1u;
 }
 
+/* Native one-block transpose solve.  Copy the permuted RHS before scattering
+   results so callers may alias input and output.  Values must already have
+   been published to Numeric, just as for the vendor transpose executor.
+   Reuse the independent-accumulator dot product to shorten the dependency
+   chain; residual checking and refinement remain the caller's responsibility. */
+static UF_long kls_native_transpose_solve(kls_solver *solver, double *out) {
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long n = solver->n;
+  double *work = (double *)numeric->Xwork;
+  const double *lu = (const double *)numeric->LUbx[0];
+  const double *diag = (const double *)numeric->Udiag;
+  const double *rs = (const double *)numeric->Rs;
+  solver->common.status = TRILINOS_KLU_OK;
+  for (UF_long k = 0; k < n; ++k) work[k] = out[solver->symbolic->Q[k]];
+  for (UF_long k = 0; k < n; ++k) {
+    const UF_long len = numeric->Ulen[k];
+    const UF_long *indices = (const UF_long *)(lu + numeric->Uip[k]);
+    const double *values = lu + numeric->Uip[k] + kls_klu_units_for_indices(len);
+    work[k] = kls_compact_match_row_solve_dot(values, indices, work,
+                                             0, len, work[k]) / diag[k];
+  }
+  for (UF_long k = n; k-- > 0;) {
+    const UF_long len = numeric->Llen[k];
+    const UF_long *indices = (const UF_long *)(lu + numeric->Lip[k]);
+    const double *values = lu + numeric->Lip[k] + kls_klu_units_for_indices(len);
+    work[k] = kls_compact_match_row_solve_dot(values, indices, work,
+                                             0, len, work[k]);
+    out[numeric->Pnum[k]] = rs == NULL ? work[k] : work[k] / rs[k];
+  }
+  return 1u;
+}
+
+/* One-block transpose counterpart of the compact solve. The same immutable
+   column indices serve both directions; values still belong to the retained
+   KLU factor. A combined refactor may already have computed U^T y = Q^T b. */
+static UF_long kls_compact_transpose_solve(kls_solver *solver,
+                                         const double *rhs, double *out) {
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long n = solver->n;
+  const int prepared = solver->transpose_cycle.active == 1 &&
+    solver->fused_refactor_solve_computed && !solver->in_solve_refinement;
+  double *work = prepared ? solver->fused_refactor_solve_work
+                          : (double *)numeric->Xwork;
+  solver->fused_refactor_solve_computed = 0;
+  const double *udiag = (const double *)numeric->Udiag;
+  const double *rs = (const double *)numeric->Rs;
+  const int narrow = solver->i16solve_l != NULL &&
+    solver->i16solve_u != NULL && solver->i16solve_lx != NULL &&
+    solver->i16solve_ux != NULL;
+  if (!prepared) {
+    for (UF_long k = 0; k < n; ++k) {
+      double value = rhs[solver->symbolic->Q[k]];
+      if (narrow) {
+        const UF_long begin = solver->i16solve_uoff[k];
+        const UF_long len = solver->i16solve_uoff[k + 1u] - begin;
+        value = kls_lean_i16_row_solve_dot(solver->i16solve_ux[k],
+                  solver->i16solve_u + begin, work, 0, len, value);
+      } else {
+        const UF_long len = numeric->Ulen[k];
+        const double *ux = (double *)numeric->LUbx[0] + numeric->Uip[k] +
+                          kls_klu_units_for_indices(len);
+        const int32_t *ui = solver->i32solve_u + solver->i32solve_uoff[k];
+        for (UF_long p = 0; p < len; ++p)
+          value -= ux[p] * work[ui[p]];
+      }
+      work[k] = value / udiag[k];
+    }
+  }
+  for (UF_long k = n; k-- > 0;) {
+    double value = work[k];
+    if (narrow) {
+      const UF_long begin = solver->i16solve_loff[k];
+      const UF_long len = solver->i16solve_loff[k + 1u] - begin;
+      value = kls_lean_i16_row_solve_dot(solver->i16solve_lx[k],
+                solver->i16solve_l + begin, work, 0, len, value);
+    } else {
+      const UF_long len = numeric->Llen[k];
+      const double *lx = (double *)numeric->LUbx[0] + numeric->Lip[k] +
+                        kls_klu_units_for_indices(len);
+      const int32_t *li = solver->i32solve_l + solver->i32solve_loff[k];
+      for (UF_long p = 0; p < len; ++p)
+        value -= lx[p] * work[li[p]];
+    }
+    work[k] = value;
+    /* A fused refactor has already computed these scale reciprocals for
+       this numeric. Scatter the answer while the completed row is hot;
+       subsequent L^T equations consume work[], never the output array. */
+    const double reciprocal = prepared && rs != NULL
+      ? solver->fused_refactor_solve_work[n + k] : 0.0;
+    out[numeric->Pnum[k]] = rs == NULL ? value
+      : (prepared && isfinite(reciprocal) ? value * reciprocal : value / rs[k]);
+  }
+  return 1u;
+}
+
 /* One-rhs solve with klu_l_solve semantics over the i32 streams. */
 /* Keep this recurring sparse kernel's placement stable when unrelated
    diagnostics or setup code change earlier in the translation unit. */

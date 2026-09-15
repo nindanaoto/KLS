@@ -642,6 +642,17 @@ if(KLS_BUILD_TESTS)
   add_executable(kls_cancellation tests/kls_cancellation.c)
   target_link_libraries(kls_cancellation PRIVATE kls)
   add_test(NAME kls_cancellation COMMAND kls_cancellation)
+  foreach(KLS_PRIVATE_TEST kls_compact_transpose kls_snb_product)
+    add_executable(${KLS_PRIVATE_TEST} tests/${KLS_PRIVATE_TEST}.c)
+    target_link_libraries(${KLS_PRIVATE_TEST} PRIVATE kls)
+    target_include_directories(${KLS_PRIVATE_TEST} PRIVATE
+      $<TARGET_PROPERTY:kls,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(${KLS_PRIVATE_TEST} PRIVATE
+      $<TARGET_PROPERTY:kls,COMPILE_DEFINITIONS>)
+    target_compile_options(${KLS_PRIVATE_TEST} PRIVATE
+      $<TARGET_PROPERTY:kls,COMPILE_OPTIONS>)
+    add_test(NAME ${KLS_PRIVATE_TEST} COMMAND ${KLS_PRIVATE_TEST})
+  endforeach()
 
   add_executable(kls_singleton_metadata tests/kls_singleton_metadata.c)
   target_link_libraries(kls_singleton_metadata PRIVATE kls_suitesparse)

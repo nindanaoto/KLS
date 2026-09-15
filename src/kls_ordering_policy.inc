@@ -212,6 +212,34 @@ static int kls_direct_klu_public_frame_capable(const kls_solver *solver) {
      (solver->common.scale <= 0 && solver->numeric->Rs == NULL));
 }
 
+/* A measured alternative for an already-selected native column refactor.
+   An unused subtree descriptor does not own the factor and must not exclude
+   this trial. Active packed, row, or subtree numerics retain their lifecycle. */
+static int kls_compact_transpose_cycle_capable(const kls_solver *solver) {
+  return kls_direct_klu_public_frame_capable(solver) &&
+    solver->options.backend != KLS_BACKEND_SERIAL &&
+    solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
+    solver->n > 0u && solver->n <= (UF_long)INT32_MAX &&
+    solver->n <= (UF_long)(SIZE_MAX / (2u * sizeof(double))) &&
+    solver->nnz > 0u && solver->nnz <= (UF_long)INT32_MAX &&
+    solver->nnz <= (UF_long)(SIZE_MAX / sizeof(double)) &&
+    solver->symbolic->nblocks == 1u && solver->dense_tail_cols == 0u &&
+    solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FIRST &&
+    (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU ||
+     (solver->transpose_cycle.cycles > 0 &&
+      solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED)) &&
+    !solver->factor_preps_deferred && !solver->prestatic_deferred &&
+    !solver->rowmatch_deferred && !solver->metis_race_deferred &&
+    !solver->auto_scale_deferred && !solver->numeric_is_predicted &&
+    !solver->numeric_needs_refinement && !solver->tight_tol_refine &&
+    !solver->promoted_tolerance_l2_recovery_required &&
+    solver->pivot_nudge_count == 0u && solver->common.kls_perturb_count == 0u &&
+    !solver->refactor_l_packed_valid && !solver->refactor_u_packed_valid &&
+    !solver->row_refactor_values_ready && !solver->row_refactor_values_dirty &&
+    solver->lean_choice <= 0 && solver->snb == NULL &&
+    !kls_pts_refactor_ready(solver);
+}
+
 /* A mapped KLS refactor may retain a mathematically equivalent numeric while
    repacking storage that the vendor refactor does not understand.  Pointer
    and value-frame capability alone cannot prove that the vendor walk still

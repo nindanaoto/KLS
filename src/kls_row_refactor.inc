@@ -15636,7 +15636,8 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
    divide.  If the compact solve is already live, publish those same exact
    reciprocals so the post-refactor solve refresh becomes a no-op. */
 static int kls_lean_single_block_map32_refactor(kls_solver *solver,
-                                                double *numeric_values) {
+                                                double *numeric_values,
+                                                int fuse_transpose) {
   if (numeric_values == NULL || solver == NULL || solver->symbolic == NULL ||
       solver->numeric == NULL || solver->symbolic->nblocks != 1u ||
       solver->numeric->Udiag == NULL || solver->numeric->Lip == NULL ||
@@ -15672,25 +15673,61 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
   const int32_t *restrict map_oldrow = solver->refactor_input_oldrow32;
   const int scaled = common->scale > 0;
   const double *restrict rs = (const double *)numeric->Rs;
+  const double *rhs = fuse_transpose ? solver->fused_refactor_solve_rhs : NULL;
+  double *y = fuse_transpose ? solver->fused_refactor_solve_work : NULL;
+  if (fuse_transpose && (rhs == NULL || y == NULL ||
+      (scaled && !kls_build_refactor_scale_rows(solver)))) {
+    return -1;
+  }
+  /* A preceding triangular solve may have used this KLU workspace. */
+  memset(x, 0, (size_t)solver->n * sizeof(*x));
 
   common->status = TRILINOS_KLU_OK;
   common->numerical_rank = KLS_KLU_EMPTY;
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
-  if (scaled && !trilinos_klu_l_scale(
+  if (scaled && !fuse_transpose && !trilinos_klu_l_scale(
         (UF_long)common->scale, solver->n, solver->col_ptr,
         solver->row_idx, numeric_values, (double *)numeric->Rs, NULL,
         common)) {
     return 0;
   }
+  double *scale_recip = scaled && fuse_transpose ? y + solver->n : NULL;
+  if (scale_recip != NULL) {
+    /* Reduce each original row in KLU's input order, then write its scale
+       directly in pivot order. This avoids repeated scattered scale updates,
+       an old-row lookup for each input entry, and the final scale permutation.
+       The shared row-position map stores no numerical values. */
+    const UF_long *ptr = solver->refactor_scale_row_ptr;
+    const int32_t *pos = solver->refactor_scale_input_pos32;
+    double *numeric_rs = (double *)numeric->Rs;
+    for (UF_long row = 0; row < solver->n; ++row) {
+      double magnitude = 0.0;
+      for (UF_long p = ptr[row]; p < ptr[row + 1u]; ++p) {
+        const double value = fabs(numeric_values[pos[p]]);
+        magnitude = common->scale == 1 ? magnitude + value
+                                      : (value > magnitude ? value : magnitude);
+      }
+      if (magnitude == 0.0) magnitude = 1.0;
+      const UF_long pivot_row = numeric->Pinv[row];
+      numeric_rs[pivot_row] = magnitude;
+      scale_recip[pivot_row] = 1.0 / magnitude;
+    }
+  }
 
   for (UF_long k = 0u; k < solver->n; ++k) {
+    /* U(:,k) becomes final in this iteration. Its transpose equation only
+       uses y[0:k], so solve it while those entries are already hot. */
+    double yk = fuse_transpose ? rhs[q[k]] : 0.0;
     const UF_long input_begin = solver->refactor_col_ptr[k];
     const UF_long input_end = solver->refactor_col_ptr[k + 1u];
     for (UF_long p = input_begin; p < input_end; ++p) {
       double value = numeric_values[(UF_long)map_input[p]];
       if (scaled) {
-        value /= rs[(UF_long)map_oldrow[p]];
+        const UF_long oldrow = fuse_transpose ? (UF_long)map_row[p]
+                                             : (UF_long)map_oldrow[p];
+        value = scale_recip != NULL && isfinite(scale_recip[oldrow])
+          ? value * scale_recip[oldrow] : value / rs[oldrow];
       }
       x[(UF_long)map_row[p]] = value;
     }
@@ -15704,6 +15741,9 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
       const double ujk = x[j];
       x[j] = 0.0;
       ux[up] = ujk;
+      if (fuse_transpose) {
+        yk -= ujk * y[j];
+      }
       if (ujk != 0.0) {
         UF_long *li = NULL;
         double *lx = NULL;
@@ -15728,6 +15768,9 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
     }
     udiag[k] = ukk;
     const double reciprocal = 1.0 / ukk;
+    if (fuse_transpose) {
+      y[k] = isfinite(reciprocal) ? yk * reciprocal : yk / ukk;
+    }
     if (diag_recip != NULL) {
       diag_recip[k] = reciprocal;
     }
@@ -15738,14 +15781,14 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
     kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
     for (UF_long p = 0u; p < lcol_len; ++p) {
       const UF_long i = li[p];
-      lx[p] = x[i] * reciprocal;
+      lx[p] = isfinite(reciprocal) ? x[i] * reciprocal : x[i] / ukk;
       x[i] = 0.0;
     }
   }
   if (diag_recip != NULL) {
     solver->i32solve_udiag_recip_fresh = 1;
   }
-  if (scaled) {
+  if (scaled && !fuse_transpose) {
     double *restrict numeric_rs = (double *)numeric->Rs;
     for (UF_long k = 0u; k < solver->n; ++k) {
       x[k] = numeric_rs[numeric->Pnum[k]];
@@ -15754,6 +15797,9 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
       numeric_rs[k] = x[k];
       x[k] = 0.0;
     }
+  }
+  if (fuse_transpose) {
+    solver->fused_refactor_solve_computed = 1;
   }
   return 1;
 }
@@ -15803,7 +15849,7 @@ static int kls_try_compact_map32_klu_tournament(
   if (solver->compact_map32_choice > 0) {
     solver->compact_map32_probe_active = 1;
     const int compact_ok =
-      kls_lean_single_block_map32_refactor(solver, numeric_values);
+      kls_lean_single_block_map32_refactor(solver, numeric_values, 0);
     solver->compact_map32_probe_active = 0;
     if (compact_ok >= 0) {
       *ok_out = (UF_long)compact_ok;
@@ -15835,7 +15881,7 @@ static int kls_try_compact_map32_klu_tournament(
   int arm_ok = 0;
   if (compact_arm) {
     arm_ok = kls_lean_single_block_map32_refactor(
-      solver, numeric_values);
+      solver, numeric_values, 0);
   } else {
     arm_ok = (int)trilinos_klu_l_refactor(
       solver->col_ptr, solver->row_idx, numeric_values, solver->symbolic,
@@ -15890,10 +15936,11 @@ static int kls_try_compact_map32_klu_tournament(
        complete expected run and the maximum possible gain is immaterial. */
     const int adopt_compact =
       solver->compact_map32_trial_probe_ok && compact_seconds > 0.0 &&
-      vendor_seconds > 0.0 && compact_seconds < 0.98 * vendor_seconds &&
-      vendor_seconds - compact_seconds >= 1.0e-6 &&
+      vendor_seconds > 0.0 && compact_seconds <
+        (1.0 - KLS_COMPACT_CYCLE_MIN_RELATIVE_SAVING) * vendor_seconds &&
+      vendor_seconds - compact_seconds >= KLS_COMPACT_CYCLE_MIN_SECONDS_SAVED &&
       projected_saving >
-        2.0 * solver->compact_map32_trial_overhead;
+        KLS_COMPACT_CYCLE_PREPARATION_PAYBACK * solver->compact_map32_trial_overhead;
     solver->compact_map32_choice = adopt_compact ? 1 : -1;
   }
   return 1;

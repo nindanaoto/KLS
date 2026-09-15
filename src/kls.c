@@ -1251,6 +1251,15 @@ struct kls_solver {
   /* Keep the optional frontier stream at the cold tail so established hot
      solver fields retain their offsets. */
   uint32_t *lean_snode_wait_slot;
+  /* Combined-API trial of the scaled/transposed compact column lifecycle.
+     active: 0 ordinary call, 1 compact+fused, 2 incumbent sample. Keep this
+     state at the tail to preserve all established hot-field offsets. */
+  struct {
+    unsigned cycles;
+    int choice, sample, active;
+    double seconds[2][3];
+    double preparation_seconds;
+  } transpose_cycle;
 };
 
 struct kls_generic_nd_trial;
@@ -6913,6 +6922,7 @@ static void free_pivot_nudges(kls_solver *solver) {
 }
 
 static void free_numeric(kls_solver *solver) {
+  memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
   solver->numeric_needs_refinement = 0;
   solver->solve_refine_single_shot = 0;
   solver->certified_unscaled_l2_contract = 0;
@@ -6955,6 +6965,8 @@ static void free_numeric(kls_solver *solver) {
    derived from the old numeric's pattern or storage is now stale and must
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_invalidate_i32_solve(kls_solver *solver) {
+  memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
+  solver->fused_refactor_solve_computed = 0;
   /* The solve cache copies the numeric index layout; any in-place pattern or
      permutation mutation must drop it before later solves. */
   if (!solver->i32solve_indices_alias_refactor) {
@@ -7126,6 +7138,7 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   memset(solver->compact_map32_trial_samples, 0,
          sizeof(solver->compact_map32_trial_samples));
   solver->compact_map32_trial_overhead = 0.0;
+  memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
   solver->moderate_btf_lean_choice = 0;
   solver->moderate_btf_mapped_seconds = 0.0;
   solver->moderate_btf_compact_seconds = 0.0;
@@ -7872,6 +7885,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
+  memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
   solver->certified_unscaled_l2_contract = 0;
   solver->certified_unscaled_recovery_scale = 0;
   solver->generic_btf_unscaled_recovery_scale = 0;
@@ -9521,10 +9535,14 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->direct_klu_choice == 2 ||
     (solver->direct_klu_choice > 0 &&
      kls_direct_klu_public_frame_capable(solver));
+  const int direct_compact_transpose =
+    (solver->transpose_cycle.active == 1 ||
+     solver->transpose_cycle.choice > 0) &&
+    kls_compact_transpose_cycle_capable(solver);
   if ((settled_direct_klu ||
        kls_low_work_single_block_direct_public_capable(solver) ||
-       direct_low_work_public_btf) &&
-      solver->solve_contract_probe >= 1 &&
+       direct_low_work_public_btf || direct_compact_transpose) &&
+      (solver->solve_contract_probe >= 1 || direct_compact_transpose) &&
       solver->unchanged_refactor_state < 0 &&
       !solver->factor_preps_deferred && !solver->prestatic_deferred &&
       !solver->rowmatch_deferred && !solver->metis_race_deferred &&
@@ -9560,16 +9578,34 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->common.status = TRILINOS_KLU_OK;
     UF_long ok = 0u;
     int compact_used = 0;
-    if (direct_low_work_public_btf ||
+    if (direct_compact_transpose) {
+      solver->compact_map32_probe_active = 1;
+      const int compact_ok = kls_lean_single_block_map32_refactor(
+        solver, (double *)(uintptr_t)values,
+        solver->transpose_cycle.active == 1);
+      solver->compact_map32_probe_active = 0;
+      if (compact_ok >= 0) {
+        ok = (UF_long)compact_ok;
+        compact_used = 1;
+      } else {
+        solver->transpose_cycle.choice = -1;
+        solver->fused_refactor_solve_computed = 0;
+      }
+    }
+    if (!compact_used && (direct_compact_transpose || direct_low_work_public_btf ||
         !kls_try_compact_map32_klu_tournament(
-          solver, (double *)(uintptr_t)values, &ok, &compact_used)) {
+          solver, (double *)(uintptr_t)values, &ok, &compact_used))) {
       ok = trilinos_klu_l_refactor(solver->col_ptr, solver->row_idx,
                                    (double *)(uintptr_t)values,
                                    solver->symbolic, solver->numeric,
                                    &solver->common);
     }
+    if (direct_compact_transpose && ok && solver->common.status >= 0)
+      kls_solve_contract_classify(solver, values);
     if (ok && solver->common.status >= 0 &&
-        solver->solve_contract_probe == 2 && solver->nnz > 0u) {
+        (solver->solve_contract_probe == 2 || solver->row_solve_self_check ||
+         (direct_compact_transpose && solver->solve_refine_values != NULL)) &&
+        solver->nnz > 0u) {
       /* Growth-armed solves verify against the current numeric.  The full
          adaptive path captures this snapshot after dispatch; the settled
          direct entry must refresh the same contract before returning. */
@@ -9577,6 +9613,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver->solve_refine_values = (double *)malloc(
           (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
       }
+      if (direct_compact_transpose && solver->solve_refine_values == NULL)
+        return KLS_ERR_OUT_OF_MEMORY;
       if (solver->solve_refine_values != NULL) {
         memcpy(solver->solve_refine_values, values,
                (size_t)solver->nnz * sizeof(*values));
@@ -12769,6 +12807,9 @@ static int solve_impl(kls_solver *solver,
 
   const int kernel_transpose =
     (solver->orientation == KLS_ORIENTATION_TRANSPOSE) ? !transpose : transpose;
+  const int compact_transpose_solve = kernel_transpose && nrhs == 1 &&
+    (solver->transpose_cycle.active == 1 || solver->transpose_cycle.choice > 0) &&
+    kls_compact_transpose_cycle_capable(solver) && kls_i32_solve_ready(solver);
   const int has_row_scale = solver->row_scale != NULL;
   const int has_col_scale = solver->col_scale != NULL;
   const int serial_mapped_vendor_solve =
@@ -12906,7 +12947,10 @@ static int solve_impl(kls_solver *solver,
       solver->row_refactor_values_ready = 0;
     }
   }
-  if (fused_compact_match_rhs) {
+  if (compact_transpose_solve) {
+    solver->common.status = TRILINOS_KLU_OK;
+    ok = kls_compact_transpose_solve(solver, x, x);
+  } else if (fused_compact_match_rhs) {
     solver->common.status = TRILINOS_KLU_OK;
     ok = kls_i32_solve(solver, b, x, solver->i16solve_rhs_perm,
                        NULL, NULL, 0);
@@ -13027,13 +13071,20 @@ static int solve_impl(kls_solver *solver,
         (fused_matched_i32_rhs || fused_matched_i32_rhs32) &&
         has_col_scale;
     } else {
-      ok = kernel_transpose
-        ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric,
-                                (UF_long)ldx, (UF_long)nrhs, x,
-                                &solver->common)
-        : trilinos_klu_l_solve(solver->symbolic, solver->numeric,
-                               (UF_long)ldx, (UF_long)nrhs, x,
-                               &solver->common);
+      /* This boundary has published native factor values.  Multiple blocks
+         need off-diagonal updates and multiple RHS retain the vendor path. */
+      if (kernel_transpose && nrhs == 1 && solver->n > 1 &&
+          solver->symbolic->nblocks == 1) {
+        ok = kls_native_transpose_solve(solver, x);
+      } else {
+        ok = kernel_transpose
+          ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric,
+                                  (UF_long)ldx, (UF_long)nrhs, x,
+                                  &solver->common)
+          : trilinos_klu_l_solve(solver->symbolic, solver->numeric,
+                                 (UF_long)ldx, (UF_long)nrhs, x,
+                                 &solver->common);
+      }
     }
   }
   if (ok && !kernel_transpose && has_col_scale &&
@@ -14078,6 +14129,106 @@ int kls_solve_transpose(kls_solver *solver,
   return solve_impl(solver, 1, nrhs, b, ldb, x, ldx);
 }
 
+/* Trial one complete repeated-update lifecycle, not an isolated hot kernel.
+   Observed reuse supplies the conservative horizon when callers have no hint.
+   The first compact cycle pays for preparation and the ordinary residual
+   self-check; subsequent alternating samples measure recurring costs only. */
+static int kls_compact_transpose_refactor_solve(kls_solver *solver,
+                                               const double *values,
+                                               const double *b, double *x) {
+  const int sample = solver->transpose_cycle.sample;
+  const int trial = solver->transpose_cycle.choice == 0 &&
+    solver->transpose_cycle.cycles >= KLS_REPEATED_UPDATE_MIN_REFACTORIZATIONS &&
+    sample < 7;
+  const int compact = solver->transpose_cycle.choice > 0 ||
+    (trial && (sample % 2 == 0));
+  const int certify = trial && sample == 0;
+  double *saved_rhs = NULL;
+  if (b == x) {
+    saved_rhs = (double *)malloc((size_t)solver->n * sizeof(*saved_rhs));
+    if (saved_rhs == NULL) return KLS_ERR_OUT_OF_MEMORY;
+    memcpy(saved_rhs, b, (size_t)solver->n * sizeof(*saved_rhs));
+    b = saved_rhs;
+  }
+  const double start = kls_now_seconds();
+  if (certify) {
+    solver->compact_map32_probe_active = 1;
+    const int ready = kls_build_refactor_map(solver) && kls_i32_solve_ready(solver);
+    solver->compact_map32_probe_active = 0;
+    {
+      /* The second vector holds temporary scale reciprocals. Keep Numeric's
+         row scales exact; unlike in-place inversion this needs no round trip. */
+      double *work = (double *)realloc(solver->fused_refactor_solve_work,
+                                      2u * (size_t)solver->n * sizeof(*work));
+      if (work != NULL) {
+        solver->fused_refactor_solve_work = work;
+        solver->fused_refactor_solve_work_n = solver->n;
+      }
+      if (work == NULL) {
+        solver->transpose_cycle.choice = -1;
+        int status = kls_refactor(solver, values);
+        if (status == KLS_OK) status = kls_solve(solver, 1, b, 0, x, 0);
+        free(saved_rhs);
+        return status;
+      }
+    }
+    if (!ready || solver->fused_refactor_solve_work_n != solver->n) {
+      solver->transpose_cycle.choice = -1;
+      int status = kls_refactor(solver, values);
+      if (status == KLS_OK) status = kls_solve(solver, 1, b, 0, x, 0);
+      free(saved_rhs);
+      return status;
+    }
+  }
+  solver->transpose_cycle.active = compact ? 1 : 2;
+  solver->fused_refactor_solve_rhs = compact ? b : NULL;
+  solver->fused_refactor_solve_computed = 0;
+  if (certify) solver->row_solve_self_check = 1;
+  int status = kls_refactor(solver, values);
+  if (status == KLS_OK) status = kls_solve(solver, 1, b, 0, x, 0);
+  const double seconds = kls_now_seconds() - start;
+  solver->fused_refactor_solve_rhs = NULL;
+  solver->fused_refactor_solve_computed = 0;
+  solver->transpose_cycle.active = 0;
+  if (certify) solver->row_solve_self_check = 0;
+  free(saved_rhs);
+  if (status != KLS_OK || !kls_compact_transpose_cycle_capable(solver)) {
+    solver->transpose_cycle.choice = -1;
+    return status;
+  }
+  if (solver->transpose_cycle.cycles < UINT_MAX) ++solver->transpose_cycle.cycles;
+  if (trial && solver->transpose_cycle.choice == 0) {
+    if (certify) {
+      solver->transpose_cycle.preparation_seconds += seconds;
+    } else {
+      solver->transpose_cycle.seconds[compact ? 0 : 1][(sample - 1) / 2] = seconds;
+    }
+    ++solver->transpose_cycle.sample;
+  }
+  if (solver->transpose_cycle.choice == 0 && solver->transpose_cycle.sample == 7) {
+      double median[2];
+      for (int arm = 0; arm < 2; ++arm) {
+        const double *t = solver->transpose_cycle.seconds[arm];
+        median[arm] = t[0] + t[1] + t[2] - fmin(t[0], fmin(t[1], t[2])) -
+                      fmax(t[0], fmax(t[1], t[2]));
+      }
+      const double saving = median[1] - median[0];
+      const double horizon = fmax((double)solver->transpose_cycle.cycles,
+        (double)solver->options.expected_refactorizations - solver->transpose_cycle.cycles);
+      if (!(saving >= KLS_COMPACT_CYCLE_MIN_SECONDS_SAVED &&
+            saving > KLS_COMPACT_CYCLE_MIN_RELATIVE_SAVING * median[1])) {
+        solver->transpose_cycle.choice = -1;
+      } else if (horizon * saving > KLS_COMPACT_CYCLE_PREPARATION_PAYBACK *
+                                   solver->transpose_cycle.preparation_seconds) {
+        solver->transpose_cycle.choice = 1;
+      }
+      /* A faster candidate can remain pending until observed reuse repays
+         preparation. Do not turn a short initial horizon into a permanent
+         rejection, and do not repeat the already-paid timing experiment. */
+  }
+  return status;
+}
+
 int kls_refactor_solve(kls_solver *solver,
                        const double *values,
                        int64_t nrhs,
@@ -14094,6 +14245,10 @@ int kls_refactor_solve(kls_solver *solver,
   if (effective_ldb < (int64_t)solver->n ||
       effective_ldx < (int64_t)solver->n) {
     return KLS_ERR_INVALID_ARGUMENT;
+  }
+  if (nrhs == 1 && solver->transpose_cycle.choice >= 0 &&
+      kls_compact_transpose_cycle_capable(solver)) {
+    return kls_compact_transpose_refactor_solve(solver, values, b, x);
   }
 
   if (kls_tiny_singleton_cached_ready(solver, nrhs)) {

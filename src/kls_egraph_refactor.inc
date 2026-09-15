@@ -7547,7 +7547,7 @@ static int kls_mapped_refactor(kls_solver *solver,
   if (!check_pivots && !scaled &&
       kls_low_work_single_block_policy_enabled(solver)) {
     const int lean_single =
-      kls_lean_single_block_map32_refactor(solver, numeric_values);
+      kls_lean_single_block_map32_refactor(solver, numeric_values, 0);
     if (lean_single >= 0) {
       return lean_single;
     }
