@@ -318,6 +318,16 @@ python3 scripts/audit_license_boundary.py
 
 ## Benchmark
 
+With `--lifecycle-systems N`, timing schema 2 measures `measured_lifecycle_seconds`
+around the complete public analyze, initial factor/solve and subsequent
+refactor-solve calls, including certification and recovery. It excludes solver
+creation/destruction, input generation, independent residual checks and the final
+verification-only solve. `internal_lifecycle_seconds` retains the former sum of
+internal timers. Results lacking `lifecycle_timing_schema: 2` use that older
+internal-only definition and must not be pooled with the new metric.
+`spice_cycle_seconds` remains an internal-timer projection, not public-call wall
+time. Both lifecycle fields are `-1` outside direct lifecycle mode.
+
 ```sh
 ./build/kls_bench ../cktso/demo/add20.mtx --repeat 20 --refactor-repeat 20 --orientation auto --json
 ```

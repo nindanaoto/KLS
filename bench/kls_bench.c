@@ -13,6 +13,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
+
+/* Public-call wall time includes caller-side certification and recovery.
+ * Matrix generation, independent verification and reporting stay outside. */
+static double bench_monotonic_seconds(void) {
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    perror("clock_gettime");
+    exit(EXIT_FAILURE);
+  }
+  return (double)now.tv_sec + (double)now.tv_nsec * 1e-9;
+}
 
 typedef struct triplet {
   int64_t row;
@@ -739,13 +751,18 @@ int main(int argc, char **argv) {
 
   kls_solver *solver = NULL;
   int status = kls_create(&solver);
+  double public_lifecycle_seconds = 0.0;
   if (status == KLS_OK) {
+    const double start = bench_monotonic_seconds();
     status = kls_analyze_csc(solver, input_index.type, a.n,
                              input_index.col_ptr, input_index.row_idx, 0,
                              &options);
+    public_lifecycle_seconds += bench_monotonic_seconds() - start;
   }
   if (status == KLS_OK) {
+    const double start = bench_monotonic_seconds();
     status = kls_factor(solver, run_values);
+    public_lifecycle_seconds += bench_monotonic_seconds() - start;
   }
   if (status != KLS_OK) {
     fprintf(stderr, "KLS setup failed: %s (%d)\n", kls_status_string(status), status);
@@ -793,7 +810,9 @@ int main(int argc, char **argv) {
      analyze + factor + solve, followed by changed-value refactor/solve pairs.
      It does not substitute a final-state solve or project sampled averages. */
   if (lifecycle_systems > 0) {
+    const double start = bench_monotonic_seconds();
     status = kls_solve(solver, 1, b, 0, x, 0);
+    public_lifecycle_seconds += bench_monotonic_seconds() - start;
     if (status == KLS_OK) {
       kls_get_stats(solver, &stats);
       solve_total = stats.solve_seconds;
@@ -821,7 +840,9 @@ int main(int argc, char **argv) {
       current_values = generated_values;
       matvec_values(&a, current_values, x_true, b);
     }
+    const double public_start = bench_monotonic_seconds();
     status = kls_refactor_solve(solver, current_values, 1, b, 0, x, 0);
+    public_lifecycle_seconds += bench_monotonic_seconds() - public_start;
     if (status != KLS_OK) break;
     kls_get_stats(solver, &stats);
     refactor_total += stats.refactor_seconds;
@@ -928,10 +949,12 @@ int main(int argc, char **argv) {
     stats.analysis_seconds + initial_factor_seconds + solve_avg +
     refactor_first + refactor_solve_first_effective +
     98.0 * (refactor_steady_avg + refactor_solve_steady_avg);
-  const double measured_lifecycle_seconds = lifecycle_systems > 0
+  const double internal_lifecycle_seconds = lifecycle_systems > 0
     ? stats.analysis_seconds + initial_factor_seconds + solve_total +
         refactor_total + refactor_solve_total
     : -1.0;
+  const double measured_lifecycle_seconds = lifecycle_systems > 0
+    ? public_lifecycle_seconds : -1.0;
   const double tsolve_avg = tsolve_total / (double)repeat;
 
   if (json) {
@@ -940,6 +963,7 @@ int main(int argc, char **argv) {
            ",\"refactor_repeat\":%d"
            ",\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d"
            ",\"measured_lifecycle_seconds\":%.9g"
+           ",\"lifecycle_timing_schema\":2,\"internal_lifecycle_seconds\":%.9g"
            ",\"refactor_value_mode\":\"%s\""
            ",\"refactor_value_amplitude\":%.9g"
            ",\"backend\":\"%s\",\"requested_input_index\":\"%s\""
@@ -973,7 +997,7 @@ int main(int argc, char **argv) {
            ",\"tuning_profile_field_count\":%d,\"status\":%d}\n",
            path, a.n, a.nnz, options.threads, repeat, factor_repeat,
            refactor_repeat, lifecycle_systems > 0 ? "direct" : "projected",
-           lifecycle_systems, measured_lifecycle_seconds,
+           lifecycle_systems, measured_lifecycle_seconds, internal_lifecycle_seconds,
            bench_refactor_value_mode_name(refactor_value_mode),
            refactor_value_mode != BENCH_REFACTOR_VALUES_UNCHANGED
              ? refactor_value_amplitude : 0.0,
@@ -1018,6 +1042,9 @@ int main(int argc, char **argv) {
            solve_avg);
     printf("SPICE cycle %.6g, relative residual %.6g\n",
            spice_cycle_seconds, rel_residual);
+    if (lifecycle_systems > 0)
+      printf("public API lifecycle %.6g, internal lifecycle %.6g (timing schema 2)\n",
+             measured_lifecycle_seconds, internal_lifecycle_seconds);
     printf("nnz(L/U): %" PRId64 "/%" PRId64
            ", factor flops %.6g, memory %zu bytes (peak %zu)\n",
            stats.nnz_l, stats.nnz_u, stats.factor_flops,

@@ -620,6 +620,13 @@ if(KLS_BUILD_TESTS)
               --holdout
               "${CMAKE_CURRENT_SOURCE_DIR}/bench/suitesparse_generalization_large_holdout_manifest.txt"
               --expected-count 12)
+    if(KLS_BUILD_BENCHMARKS)
+      add_test(NAME kls_bench_lifecycle_timing
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bench_lifecycle_timing.py"
+                --bench "$<TARGET_FILE:kls_bench>")
+      set_tests_properties(kls_bench_lifecycle_timing PROPERTIES TIMEOUT 120)
+    endif()
     if(KLS_BUILD_AUTOTUNER AND KLS_BUILD_BENCHMARKS)
       add_test(
         NAME kls_autotune_profile
