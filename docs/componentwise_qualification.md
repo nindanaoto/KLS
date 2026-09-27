@@ -30,6 +30,17 @@ Xyce accepts `KLS_ACCURACY_POLICY=DEFAULT`, `STRICT_RHS_L2`, or
 option is equivalent to `DEFAULT`. Updating adapter options destroys the old
 solver and applies the new selection before analysis.
 
+An explicit `KLS_ACCURACY_APPLICATION_MANAGED` opt-out is also available;
+Xyce selects it with `KLS_ACCURACY_POLICY=APPLICATION_MANAGED`. It skips
+residual certification and certificate-driven corrections/recovery, but retains
+kernel failure reporting, finite input/output checks, and atomic publication.
+It does not promise a residual bound. The default remains componentwise.
+The 37-test suite covers the opt-out API and failure behavior. Initial opt-out
+screens matched BJT and mux8 waveforms, but MOS13 failed DC operating-point
+convergence at both thread counts (25 linear attempts, zero reported linear
+failures). This failure is not a fast timing result and blocks default opt-in
+promotion. Evidence: `/tmp/kls-refinement-first/application-managed/`.
+
 ## Numerical qualification, 2026-09-27
 
 The optimized, explicit-componentwise candidate passed full exact-rational

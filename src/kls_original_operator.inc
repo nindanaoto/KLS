@@ -76,6 +76,8 @@ static int private_original_operator_build(const kls_solver *s,
       const int64_t row = inverse_row[s->row_idx[k]];
       const int64_t at = cursor[transposed ? row : col]++;
       result.rows[at] = transposed ? col : row;
+      if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED &&
+         !isfinite(caller_values[source[k]])) goto done;
       memcpy(result.values + at, caller_values + source[k], sizeof(double));
     }
   }

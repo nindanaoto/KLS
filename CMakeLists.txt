@@ -715,7 +715,7 @@ if(KLS_BUILD_TESTS)
   add_test(NAME kls_snb_profile COMMAND kls_snb_profile)
   set(KLS_PRIVATE_TESTS kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan)
   set(KLS_ACCURACY_TESTS
-    kls_accuracy_owner kls_accuracy_best kls_accuracy_gate kls_accuracy_recovery kls_componentwise_caller
+    kls_accuracy_owner kls_accuracy_best kls_accuracy_gate kls_accuracy_recovery kls_componentwise_caller kls_application_managed
     kls_accuracy_epochs kls_accuracy_frames kls_accuracy_rhs
     kls_accuracy_factor_epochs kls_accuracy_fused_epochs)
   list(APPEND KLS_PRIVATE_TESTS ${KLS_ACCURACY_TESTS})

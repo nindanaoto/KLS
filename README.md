@@ -41,6 +41,25 @@ The default is `KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR`. The previous
 the public options/statistics structure layout, and the choice persists across
 numeric updates. Changing it after analysis is rejected.
 
+Certification is **opt-out**, not disabled by default. Applications that own
+their accuracy acceptance can select `KLS_ACCURACY_APPLICATION_MANAGED` before
+analysis. In Xyce, use:
+
+```spice
+.OPTIONS LINSOL KLS_ACCURACY_POLICY=APPLICATION_MANAGED
+```
+
+This mode skips residual certification and certificate-driven corrections or
+recovery. It makes **no residual-bound guarantee**. Kernel failures and
+nonfinite inputs/outputs still fail, and failed calls do not publish partial
+output. The application must validate its convergence and requested accuracy.
+Benchmark this policy separately from certified mode; successful simulation
+recovery or waveform agreement is not a certificate of each linear answer.
+In the initial opt-out screen, MOS13 failed its DC operating-point calculation
+at both one and eight threads. Its certified runs succeed with bounded
+correction and reported rejection. Therefore the opt-out is not a drop-in
+accuracy-equivalent SPICE mode, and certification remains the default.
+
 The componentwise policy certifies every row against the original operator:
 `abs(b-A*x)[i] <= 1e-8 * (abs(A)*abs(x)+abs(b))[i]`. A zero denominator requires
 zero residual. It checks the raw answer, attempts at most three ordinary

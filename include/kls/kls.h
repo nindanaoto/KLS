@@ -457,7 +457,10 @@ void kls_destroy(kls_solver *solver);
 
 typedef enum kls_accuracy_policy {
   KLS_ACCURACY_STRICT_RHS_L2 = 0,
-  KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR = 1
+  KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR = 1,
+  /* No residual-bound guarantee or certificate-driven correction/recovery.
+   * The application owns accuracy acceptance; kernel failures still fail. */
+  KLS_ACCURACY_APPLICATION_MANAGED = 2
 } kls_accuracy_policy;
 /* Select before the first successful analysis. The default is componentwise
  * backward error; strict RHS-relative L2 remains explicitly selectable. */

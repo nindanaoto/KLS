@@ -7698,7 +7698,8 @@ void kls_default_options(kls_options *options) {
 int kls_set_accuracy_policy(kls_solver *s, kls_accuracy_policy policy) {
   if (!s || s->accuracy_policy_locked || s->symbolic ||
       (policy!=KLS_ACCURACY_STRICT_RHS_L2 &&
-       policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR))
+       policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+       policy!=KLS_ACCURACY_APPLICATION_MANAGED))
     return KLS_ERR_INVALID_ARGUMENT;
   s->accuracy_policy=policy;
   return KLS_OK;
@@ -12840,6 +12841,22 @@ done:
 
 static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
     double *saved, double *x, int64_t ldx, int status) {
+  if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) {
+    /* Opting out of residual certification never turns a failed kernel into
+     * success. Public wrappers still publish all RHSs atomically. */
+    const double start=kls_now_seconds();
+    if(status==KLS_OK) {
+      if(!ldx) ldx=s->n;
+      for(int64_t rhs=0;rhs<nrhs && status==KLS_OK;++rhs)
+        for(UF_long i=0;i<s->n;++i)
+          if(!isfinite(saved[(size_t)rhs*(size_t)s->n+i]) ||
+             !isfinite(x[(size_t)rhs*(size_t)ldx+i])) {
+            status=KLS_ERR_SOLVE_FAILED;break;
+          }
+    }
+    s->stats.solve_seconds+=kls_now_seconds()-start;
+    free(saved);return status;
+  }
   if(s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR) {
     const double start=kls_now_seconds(),prior=s->stats.solve_seconds;
     status=private_componentwise_finish(s,transpose,nrhs,saved,x,ldx,status);
