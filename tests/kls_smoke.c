@@ -3406,7 +3406,9 @@ static int run_btf_row_refactor_offblock_refresh(int scale) {
              solve_stats.row_refactor_last_lazy_value_scatter != 1 ||
              solve_stats.row_refactor_last_row_solve != 1 ||
              solve_stats.row_refactor_lazy_value_scatter_run_count != 1 ||
-             solve_stats.row_refactor_row_solve_run_count != 1)) {
+             /* Armed recovery executes each RHS independently. The counter
+                counts kernel invocations, not public API calls. */
+             solve_stats.row_refactor_row_solve_run_count != nrhs)) {
     fprintf(stderr,
             "unexpected btf row-refactor solve stats for scale %d: dirty=%d"
             ", lazy=%d/%" PRId64 ", row_solve=%d/%" PRId64 "\n",
@@ -3440,7 +3442,7 @@ static int run_btf_row_refactor_offblock_refresh(int scale) {
              solve_stats.row_refactor_last_lazy_value_scatter != 1 ||
              solve_stats.row_refactor_last_row_solve != 1 ||
              solve_stats.row_refactor_lazy_value_scatter_run_count != 1 ||
-             solve_stats.row_refactor_row_solve_run_count != 2)) {
+             solve_stats.row_refactor_row_solve_run_count != 2 * nrhs)) {
     fprintf(stderr,
             "unexpected btf row-refactor transpose stats for scale %d:"
             " dirty=%d"
@@ -3530,6 +3532,9 @@ static int test_verified_rhs_reuse_contract(void) {
   kls_solver *solver = NULL;
   if (ok && !require_ok(kls_create(&solver),
                         "create verified RHS reuse")) ok = 0;
+  /* RHS-answer reuse is a legacy strict-policy optimization. */
+  if (ok && !require_ok(kls_set_accuracy_policy(solver,KLS_ACCURACY_STRICT_RHS_L2),
+                        "select strict verified RHS reuse")) ok = 0;
   if (ok && !require_ok(kls_analyze_csc(
                           solver, KLS_INDEX_INT32, 4, ap, ai, 0, &options),
                         "analyze verified RHS reuse")) ok = 0;
@@ -7628,7 +7633,8 @@ static int test_parallel_row_refactor_pipeline_scope(void) {
              stats.row_refactor_defer_value_scatter_run_count !=
                expect_defer ||
              stats.row_refactor_lazy_value_scatter_run_count != 1 ||
-             stats.row_refactor_row_solve_run_count != 1 ||
+             /* The two RHSs take two checked row-solve invocations. */
+             stats.row_refactor_row_solve_run_count != 2 ||
              stats.row_refactor_work_ready_queue_run_count !=
                expected_work_queue_runs ||
              (used_partial_supernode &&

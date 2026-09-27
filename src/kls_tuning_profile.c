@@ -70,6 +70,48 @@ static size_t kls_tuning_field_count(void) {
   return sizeof(kls_tuning_fields) / sizeof(kls_tuning_fields[0]);
 }
 
+typedef struct kls_cost_field { const char *name; size_t offset; } kls_cost_field;
+#define CF(name, member) {name, offsetof(kls_snb_cost_model, member)}
+static const kls_cost_field kls_cost_fields[] = {
+  CF("snb_narrow_edge", narrow[0]), CF("snb_narrow_trsm", narrow[1]),
+  CF("snb_narrow_scatter", narrow[2]), CF("snb_dense_edge", dense[0]),
+  CF("snb_dense_trsm", dense[1]), CF("snb_dense_vectors", dense[2]),
+  CF("snb_dense_loads", dense[3]), CF("snb_dense_tails", dense[4]),
+  CF("snb_dense_scatter", dense[5]), CF("snb_panel_fixed", panel[0]),
+  CF("snb_panel_divisions", panel[1]), CF("snb_panel_updates", panel[2]),
+  CF("snb_panel_entries", panel[3])
+};
+#undef CF
+#define KLS_COST_FIELD_COUNT (sizeof(kls_cost_fields)/sizeof(kls_cost_fields[0]))
+
+static int kls_cost_model_valid(const kls_snb_cost_model *m) {
+  if (m == NULL || !m->enabled) return 1;
+  double total = 0.0;
+  for (size_t i=0;i<KLS_COST_FIELD_COUNT;++i) {
+    const double value=*(const double *)((const unsigned char *)m+kls_cost_fields[i].offset);
+    if (!isfinite(value) || value < 0.0) return 0;
+    total += value;
+  }
+  return isfinite(total) && m->enabled == 1 && m->narrow[0]+m->narrow[1]+m->narrow[2] > 0.0 &&
+    m->dense[0]+m->dense[1]+m->dense[2]+m->dense[3]+m->dense[4]+m->dense[5] > 0.0 &&
+    m->panel[0]+m->panel[1]+m->panel[2]+m->panel[3] > 0.0;
+}
+
+static int kls_set_cost_field(kls_snb_cost_model *m, const char *key,
+                              const char *value, unsigned *seen) {
+  for (size_t i=0;i<KLS_COST_FIELD_COUNT;++i) {
+    if (strcmp(key,kls_cost_fields[i].name)) continue;
+    char *end=NULL; errno=0;
+    const double parsed=strtod(value,&end);
+    if ((*seen & (1u<<i)) || errno || end==value || *end ||
+        !isfinite(parsed) || parsed<0.0) return 0;
+    *(double *)((unsigned char *)m+kls_cost_fields[i].offset)=parsed;
+    *seen |= 1u<<i;
+    return 1;
+  }
+  return -1;
+}
+
 static int kls_tuning_changed_fields(const kls_tuning_values *values) {
   kls_tuning_values defaults;
   kls_tuning_defaults(&defaults);
@@ -197,6 +239,9 @@ int kls_tuning_load_host_profile(const char *path, int threads,
   FILE *file = fopen(path, "r");
   if (file == NULL) return KLS_ERR_TUNING_PROFILE;
   kls_tuning_values candidate;
+  kls_snb_cost_model cost = {0};
+  unsigned cost_seen = 0;
+  int cost_version_seen = 0;
   kls_tuning_defaults(&candidate);
   unsigned char seen[sizeof(kls_tuning_fields) / sizeof(kls_tuning_fields[0])] = {0};
   int format_seen = 0, build_seen = 0, cpu_seen = 0, threads_seen = 0;
@@ -233,8 +278,12 @@ int kls_tuning_load_host_profile(const char *path, int threads,
     } else if (strcmp(line, "generator_seed") == 0) {
       char *end = NULL; (void)strtoull(value, &end, 10);
       if (seed_seen++ || *value == '\0' || *end != '\0') goto fail;
+    } else if (strcmp(line, "snb_cost_version") == 0) {
+      if (cost_version_seen++ || strcmp(value,"1") || threads != 1) goto fail;
+      cost.enabled=1;
     } else {
       int result = kls_set_field(&candidate, line, value, seen);
+      if (result < 0) result = kls_set_cost_field(&cost, line, value, &cost_seen);
       if (result <= 0) goto fail;
     }
   }
@@ -242,12 +291,15 @@ int kls_tuning_load_host_profile(const char *path, int threads,
   for (size_t i = 0; i < kls_tuning_field_count(); ++i)
     if (!seen[i]) return KLS_ERR_TUNING_PROFILE;
   if (!format_seen || !build_seen || !cpu_seen || !threads_seen || !seed_seen ||
-      !checksum_seen || hash != expected_hash || !kls_tuning_consistent(&candidate))
+      !checksum_seen || hash != expected_hash || !kls_tuning_consistent(&candidate) ||
+      (cost_version_seen ? cost_seen != (1u<<KLS_COST_FIELD_COUNT)-1u : cost_seen != 0) ||
+      !kls_cost_model_valid(&cost))
     return KLS_ERR_TUNING_PROFILE;
   *values = candidate;
   *metadata = (kls_tuning_metadata){hash,
-                                    kls_tuning_changed_fields(&candidate),
-                                    threads};
+                                    kls_tuning_changed_fields(&candidate) +
+                                      (cost.enabled ? (int)KLS_COST_FIELD_COUNT : 0),
+                                    threads, cost};
   return KLS_OK;
 fail:
   fclose(file);
@@ -265,8 +317,17 @@ int kls_tuning_write_host_profile(const char *path, int threads,
                                   const kls_tuning_values *values,
                                   unsigned long long seed, int force,
                                   kls_tuning_metadata *metadata) {
+  return kls_tuning_write_host_profile_model(path,threads,values,NULL,seed,force,metadata);
+}
+
+int kls_tuning_write_host_profile_model(const char *path, int threads,
+                                  const kls_tuning_values *values,
+                                  const kls_snb_cost_model *model,
+                                  unsigned long long seed, int force,
+                                  kls_tuning_metadata *metadata) {
   if (path == NULL || values == NULL || threads <= 0 ||
-      !kls_tuning_consistent(values)) return KLS_ERR_INVALID_ARGUMENT;
+      !kls_tuning_consistent(values) || !kls_cost_model_valid(model) ||
+      (model != NULL && model->enabled && threads != 1)) return KLS_ERR_INVALID_ARGUMENT;
   if (!force && access(path, F_OK) == 0) return KLS_ERR_TUNING_PROFILE;
   char temp[4096];
   if (snprintf(temp, sizeof(temp), "%s.tmp.%ld", path, (long)getpid()) >= (int)sizeof(temp))
@@ -291,6 +352,13 @@ int kls_tuning_write_host_profile(const char *path, int threads,
     else if (field->kind == KLS_TUNE_UNSIGNED) EMIT("%s=%u\n", field->name, *(const unsigned *)base);
     else EMIT("%s=%" PRIu64 "\n", field->name, *(const uint64_t *)base);
   }
+  if (model != NULL && model->enabled) {
+    EMIT("snb_cost_version=1\n");
+    for (size_t i=0;i<KLS_COST_FIELD_COUNT;++i) {
+      const double value=*(const double *)((const unsigned char *)model+kls_cost_fields[i].offset);
+      EMIT("%s=%.17g\n",kls_cost_fields[i].name,value);
+    }
+  }
   if (fprintf(f, "checksum=%016" PRIx64 "\n", hash) < 0 ||
       fflush(f) != 0 || fsync(fileno(f)) != 0 || fclose(f) != 0) {
     f = NULL; goto write_fail;
@@ -303,8 +371,9 @@ int kls_tuning_write_host_profile(const char *path, int threads,
   }
   if (metadata != NULL)
     *metadata = (kls_tuning_metadata){hash,
-                                      kls_tuning_changed_fields(values),
-                                      threads};
+                                      kls_tuning_changed_fields(values) +
+                                        (model && model->enabled ? (int)KLS_COST_FIELD_COUNT : 0),
+                                      threads, model ? *model : (kls_snb_cost_model){0}};
   return KLS_OK;
 write_fail:
   if (f != NULL) fclose(f);

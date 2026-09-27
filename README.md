@@ -32,6 +32,56 @@ The end-to-end paper reproduction protocol, including direct H100 timing,
 counterbalanced passes, strict reduction, ablations, scaling, and one-use
 external validation, is documented in `docs/paper_artifact.md`.
 
+## Solve accuracy
+
+The default is `KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR`. The previous
+`KLS_ACCURACY_STRICT_RHS_L2` contract remains explicitly selectable through
+`kls_set_accuracy_policy(solver, policy)` before the first successful analysis.
+`kls_get_accuracy_policy` reports the selected policy. Neither function changes
+the public options/statistics structure layout, and the choice persists across
+numeric updates. Changing it after analysis is rejected.
+
+The componentwise policy certifies every row against the original operator:
+`abs(b-A*x)[i] <= 1e-8 * (abs(A)*abs(x)+abs(b))[i]`. A zero denominator requires
+zero residual. It checks the raw answer, attempts at most three ordinary
+double-precision refinement corrections, and otherwise reports failure without
+publishing output. It does not use Krylov, solve-triggered refactor, or lattice
+recovery. This is a different contract from RHS-relative L2, not an equivalent
+implementation of it. Consumers requiring the previous RHS-relative contract
+must explicitly select strict mode. SPICE qualification includes full exact
+audits of BJT, MOS13 and mem_plus at one/eight threads, plus waveform and paired
+control-performance checks; this is not a universal performance guarantee.
+MOS13 permits explicitly reported solver rejection only when the simulation
+recovers and matches the reference waveform; rejection is never counted as a
+certified successful linear answer.
+
+The following strict-mode contract remains unchanged:
+
+Successful normal, transpose, and combined refactor/solve calls certify every
+returned RHS against the original caller-supplied matrix at a RHS-relative
+L2 residual limit of `1e-8` (absolute L2 for an exactly zero RHS). Scaling,
+permutation, an earlier successful solve, or a retained pivot pattern do not
+replace that check. Ordinary iterative refinement still targets `5e-9`.
+
+If ordinary recovery cannot meet the limit, a cold native search may propose
+alternative binary64 answers. Its cooperative allowance is shared across the
+whole public call, including multiple RHSs and nested solves. Search limits
+live in `src/kls_tuning.inc`; they do not relax the accuracy requirement.
+The search is incomplete: failure to find a certificate is not a proof that
+no accurate binary64 answer exists. Some systems have no binary64 answer
+satisfying this contract. Such calls must return a failure, not an inaccurate
+success. Failed calls do not publish their candidate output.
+
+The retained strict certificate requires compiler-supported IEEE binary128 arithmetic
+and 128-bit integers, but no external numerical solver or quadmath library.
+CMake checks support explicitly. Fast-math and finite-only builds are
+unsupported, and the checker requires nearest rounding at runtime.
+GCC 14 or later is recommended.
+Accuracy qualification is separate from performance qualification; earlier
+paper timings must not be attributed to this changed implementation.
+See [the qualification record](docs/componentwise_qualification.md) for scope,
+tests, recovery policy, and measured control overhead.
+
 ## AUTO policy
 
 The production `AUTO` path is matrix-family agnostic. It compares affordable
@@ -154,9 +204,10 @@ benchmark data cannot influence the generated parameters.
 
 Run the application with the same CPU affinity used for calibration. This is
 especially important on CPUs with multiple cache domains. Calibration is a
-fixed amount of work (rather than a timing-dependent stopping rule), making a
-profile reproducible from its recorded generator seed while keeping a typical
-host run to a few minutes.
+fixed amount of work (rather than a timing-dependent stopping rule), making
+the generated calibration inputs reproducible from the recorded seed while
+keeping a typical host run to a few minutes. Timing-derived coefficients are
+not bitwise reproducible; retain the profile itself with benchmark artifacts.
 
 Applications opt in during analysis:
 
@@ -172,6 +223,40 @@ An omitted path keeps portable defaults; a bad or mismatched explicit profile
 returns `KLS_ERR_TUNING_PROFILE`. The benchmark equivalent is
 `--tuning-profile kls-8t.conf`, and profile provenance is available through
 `kls_stats` and benchmark JSON.
+
+One-thread profiles can also contain an optional `snb_cost_version=1`
+section, calibrated from generated dense-panel and sparse-edge shapes.
+To calibrate just that model, leaving the other thresholds at their portable
+defaults, use:
+
+```sh
+kls-autotune --threads 1 --cpus 0 --snb-only --output kls-snb-1t.conf
+```
+
+This experimental model only proposes regrouping after the existing SNB
+refactor engine has qualified on a repeated, single-RHS workload. Search
+and construction are budgeted; retained candidate storage cannot exceed the
+incumbent's. Four paired refactor/solve samples run the incumbent last and
+return its answer. Adoption requires residual validation, a measured saving,
+and projected repayment of the complete trial overhead. Numeric invalidation
+cancels the experiment. Unsupported calls keep their existing execution path.
+There are no matrix-name selectors or built-in CPU cost coefficients.
+
+Before searching, a lifecycle-wide planning allowance must cover search,
+cold construction and all four trials together. The allowance is 2% of
+observed incumbent work or caller-estimated total work, whichever is larger;
+it is frozen for that experiment. This is a cooperative time budget, not a
+hard latency bound, and inaccurate caller hints can overestimate affordable
+work. Without a hint, short workloads earn no speculative search until their
+observed work can fund the complete experiment. This policy is experimental
+and still requires application/corpus validation.
+
+Legacy profiles without this section keep the original grouping. A failed
+synthetic validation produces no SNB-only profile. The standard threshold
+autotuner still writes legacy profiles; the grouping model currently requires
+the explicit experimental `--snb-only` mode. Calibration is not evidence of application-level
+speedup: compare complete simulations, including preparation and trials,
+before deploying a new profile.
 
 The main build is reproducible from pinned submodules. KLS vendors the
 SuiteSparse-derived KLU, AMD, COLAMD, and BTF C sources from Trilinos under

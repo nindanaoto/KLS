@@ -12,8 +12,22 @@
  * runs propagate the earliest rejected pivot into the common repair path.
  */
 
-static void kls_snb_free(kls_solver *solver) {
-  kls_snb_state *st = solver->snb;
+typedef struct kls_snb_partition {
+  int64_t *starts, *counts;
+} kls_snb_partition;
+
+typedef struct kls_snb_group_cycle {
+  kls_snb_partition proposal;
+  kls_snb_state *other; /* Challenger normally, incumbent during a sample. */
+  unsigned cycles;
+  int started, active, samples;
+  double history[KLS_SNB_GROUP_SAMPLES];
+  double incumbent[KLS_SNB_GROUP_SAMPLES], challenger[KLS_SNB_GROUP_SAMPLES];
+  double overhead, predicted_fraction;
+  double incumbent_total, experiment_limit;
+} kls_snb_group_cycle;
+
+static void kls_snb_destroy(kls_snb_state *st) {
   if (st == NULL) {
     return;
   }
@@ -39,10 +53,8 @@ static void kls_snb_free(kls_solver *solver) {
   free(st->col_off_ptr);
   free(st->col_blk_ptr);
   for (int t = 0; t < st->nworkers; ++t) {
-    if (st->ub_w != NULL) free(st->ub_w[t]);
     if (st->gemm_w != NULL) free(st->gemm_w[t]);
   }
-  free(st->ub_w);
   free(st->gemm_w);
   free(st->rs_tmp);
   free(st->slevel_ptr);
@@ -51,6 +63,19 @@ static void kls_snb_free(kls_solver *solver) {
   free(st->seg_ptr);
   free(st->seg_coop);
   free(st);
+}
+
+static void kls_snb_free(kls_solver *solver) {
+  kls_snb_group_cycle *g = solver->snb_group;
+  ++solver->snb_group_epoch;
+  if (g != NULL) {
+    if (g->started) solver->snb_group_disabled = 1;
+    if (g->other != solver->snb) kls_snb_destroy(g->other);
+    g->other = NULL;
+    free(g->proposal.starts); free(g->proposal.counts);
+    g->proposal = (kls_snb_partition){0};
+  }
+  kls_snb_destroy(solver->snb);
   solver->snb = NULL;
   solver->snb_decision = 0;
 }
@@ -87,38 +112,39 @@ static int32_t kls_snb_upper_panel_row(const kls_snb_block *blk,
     ? edge->u_start + lo : -1;
 }
 
-/* Build the supernodal structures from the sorted numeric.  Returns 1 on
- * success; on failure or decline the solver is marked so we never retry. */
-static int kls_snb_prepare(kls_solver *solver) {
+/* A proposed partition has one local start array per native block. It is
+   built without mutating the incumbent executor or native factor. */
+static void *kls_snb_allocate(kls_snb_state *st, size_t count, size_t size,
+                              int clear, double deadline, size_t limit) {
+  if (size && count > SIZE_MAX / size) return NULL;
+  const size_t bytes = count * size;
+  if (bytes > limit || st->allocation_bytes > limit - bytes ||
+      (deadline > 0.0 && kls_now_seconds() >= deadline)) return NULL;
+  void *p = clear ? calloc(count, size) : malloc(bytes);
+  if (p != NULL) st->allocation_bytes += bytes;
+  return p;
+}
+
+static kls_snb_state *kls_snb_build(kls_solver *solver,
+    const kls_snb_partition *partition, double deadline, size_t limit) {
+  const double build_start = kls_now_seconds();
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
-  if (solver->snb != NULL) {
-    return 1;
-  }
-  if (solver->snb_declined) {
-    return 0;
-  }
   if (symbolic == NULL || numeric == NULL || numeric->LUbx == NULL ||
-      !solver->snode_prepared) {
-    /* the sorted-numeric prep has not run yet; retry on a later call */
-    return 0;
-  }
-  if ((double)(numeric->lnz + numeric->unz) >
-      (double)KLS_SNB_MAX_ENTRIES) {
-    solver->snb_declined = 1;
-    return 0;
-  }
+      !solver->snode_prepared ||
+      (double)(numeric->lnz + numeric->unz) > (double)KLS_SNB_MAX_ENTRIES ||
+      limit < sizeof(kls_snb_state) ||
+      (deadline > 0.0 && build_start >= deadline)) return NULL;
   kls_snb_state *st = (kls_snb_state *)calloc(1u, sizeof(*st));
-  if (st == NULL) {
-    solver->snb_declined = 1;
-    return 0;
-  }
+  if (st == NULL) return NULL;
+  st->allocation_bytes = sizeof(*st);
   st->wnarrow = 8;
   st->wmax = 32;
   st->coop_min_doubles = solver->tuning.snb_coop_min_doubles;
   st->nblocks = symbolic->nblocks;
   st->blocks =
-    (kls_snb_block *)calloc((size_t)st->nblocks, sizeof(*st->blocks));
+    (kls_snb_block *)kls_snb_allocate(st, (size_t)st->nblocks,  sizeof(*st->blocks), 1, deadline, limit);
+  if (st->blocks == NULL) { kls_snb_destroy(st); return NULL; }
   const UF_long maxblock = symbolic->maxblock;
   UF_long *union_rows =
     (UF_long *)malloc((size_t)maxblock * sizeof(*union_rows));
@@ -135,6 +161,7 @@ static int kls_snb_prepare(kls_solver *solver) {
   }
 
   for (UF_long block = 0; ok && block < st->nblocks; ++block) {
+    if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
     const UF_long k1 = symbolic->R[block];
     const UF_long k2 = symbolic->R[block + 1u];
     const UF_long nk = k2 - k1;
@@ -152,10 +179,23 @@ static int kls_snb_prepare(kls_solver *solver) {
 
     /* greedy zeta amalgamation over sorted L patterns */
     const double snb_zeta = 0.2;
-    blk->col2snode = (int32_t *)malloc((size_t)nk * sizeof(int32_t));
+    blk->col2snode = (int32_t *)kls_snb_allocate(
+      st, (size_t)nk, sizeof(int32_t), 0, deadline, limit);
     if (blk->col2snode == NULL) { ok = 0; break; }
     int64_t ns = 0;
-    {
+    if (partition != NULL) {
+      ns = partition->counts[block];
+      if (ns <= 0 || ns > (int64_t)nk) { ok = 0; break; }
+      memcpy(starts, partition->starts + k1, (size_t)ns * sizeof(*starts));
+      for (int64_t i = 0; i < ns; ++i) {
+        const int64_t end = i + 1 < ns ? starts[i+1] : (int64_t)nk;
+        if (starts[i] < 0 || (i == 0 && starts[i] != 0) ||
+            end <= starts[i] || end > (int64_t)nk ||
+            end - starts[i] > st->wmax) { ok = 0; break; }
+        for (int64_t c = starts[i]; c < end; ++c) blk->col2snode[c] = (int32_t)i;
+      }
+      if (!ok) break;
+    } else {
       UF_long c = 0;
       while (c < nk) {
         UF_long *li; double *lx; UF_long len;
@@ -204,7 +244,7 @@ static int kls_snb_prepare(kls_solver *solver) {
     }
     blk->snode_count = ns;
     blk->snodes =
-      (kls_snb_snode *)calloc((size_t)ns, sizeof(*blk->snodes));
+      (kls_snb_snode *)kls_snb_allocate(st, (size_t)ns,  sizeof(*blk->snodes), 1, deadline, limit);
     if (blk->snodes == NULL) { ok = 0; break; }
     for (int64_t s = 0; s < ns; ++s) {
       blk->snodes[s].start = starts[s];
@@ -217,6 +257,7 @@ static int kls_snb_prepare(kls_solver *solver) {
     for (int pass = 0; pass < 2 && ok; ++pass) {
       int64_t cursor = 0;
       for (int64_t s = 0; s < ns; ++s) {
+        if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
         kls_snb_snode *sn = &blk->snodes[s];
         const int64_t end = sn->start + sn->width;
         UF_long ulen_cur = 0;
@@ -255,8 +296,8 @@ static int kls_snb_prepare(kls_solver *solver) {
         cursor += below;
       }
       if (pass == 0) {
-        blk->below_rows = (int32_t *)malloc(
-          (size_t)(rows_total > 0 ? rows_total : 1) * sizeof(int32_t));
+        blk->below_rows = (int32_t *)kls_snb_allocate(st,
+          (size_t)(rows_total > 0 ? rows_total : 1) * sizeof(int32_t), 1u, 0, deadline, limit);
         if (blk->below_rows == NULL) { ok = 0; }
       }
     }
@@ -269,6 +310,7 @@ static int kls_snb_prepare(kls_solver *solver) {
       int64_t sub_cursor = 0;
       int64_t edge_cursor = 0;
       for (int64_t s = 0; s < ns; ++s) {
+        if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
         kls_snb_snode *sn = &blk->snodes[s];
         const int64_t end = sn->start + sn->width;
         int64_t m = 0;
@@ -327,10 +369,10 @@ static int kls_snb_prepare(kls_solver *solver) {
         edge_cursor += cnt;
       }
       if (pass == 0) {
-        blk->edges = (kls_snb_edge *)malloc(
-          (size_t)(edges_total > 0 ? edges_total : 1) * sizeof(kls_snb_edge));
-        blk->subcols = (int32_t *)malloc(
-          (size_t)(subs_total > 0 ? subs_total : 1) * sizeof(int32_t));
+        blk->edges = (kls_snb_edge *)kls_snb_allocate(st,
+          (size_t)(edges_total > 0 ? edges_total : 1) * sizeof(kls_snb_edge), 1u, 0, deadline, limit);
+        blk->subcols = (int32_t *)kls_snb_allocate(st,
+          (size_t)(subs_total > 0 ? subs_total : 1) * sizeof(int32_t), 1u, 0, deadline, limit);
         if (blk->edges == NULL || blk->subcols == NULL) { ok = 0; }
       }
     }
@@ -358,10 +400,11 @@ static int kls_snb_prepare(kls_solver *solver) {
         dsts_total += blk->snodes[edges[e].producer].below;
       }
     }
-    blk->edge_dsts = (int32_t *)malloc(
-      (size_t)(dsts_total > 0 ? dsts_total : 1) * sizeof(int32_t));
+    blk->edge_dsts = (int32_t *)kls_snb_allocate(st,
+      (size_t)(dsts_total > 0 ? dsts_total : 1) * sizeof(int32_t), 1u, 0, deadline, limit);
     if (blk->edge_dsts == NULL) { ok = 0; break; }
     for (int64_t s = 0; s < ns; ++s) {
+      if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
       kls_snb_snode *sn = &blk->snodes[s];
       const kls_snb_edge *edges = blk->edges + sn->edges_off;
       for (int32_t e = 0; e < sn->edge_count; ++e) {
@@ -410,16 +453,17 @@ static int kls_snb_prepare(kls_solver *solver) {
       for (UF_long k = 0; k < nk; ++k) {
         wb_total += llen[k] + ulen[k];
       }
-      blk->writeback = (int32_t *)malloc(
-        (size_t)(wb_total > 0 ? wb_total : 1) * sizeof(int32_t));
+      blk->writeback = (int32_t *)kls_snb_allocate(st,
+        (size_t)(wb_total > 0 ? wb_total : 1) * sizeof(int32_t), 1u, 0, deadline, limit);
       blk->wb_col_off =
-        (int64_t *)malloc(((size_t)nk + 1u) * sizeof(int64_t));
+        (int64_t *)kls_snb_allocate(st, ((size_t)nk + 1u) * sizeof(int64_t), 1u, 0, deadline, limit);
       if (blk->writeback == NULL || blk->wb_col_off == NULL) {
         ok = 0;
         break;
       }
       int64_t wb = 0;
       for (UF_long k = 0; ok && k < nk; ++k) {
+        if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
         blk->wb_col_off[k] = wb;
         const int32_t s = blk->col2snode[k];
         const kls_snb_snode *sn = &blk->snodes[s];
@@ -497,12 +541,12 @@ static int kls_snb_prepare(kls_solver *solver) {
       st->slevel_count = max_level + 1;
       counts = (int64_t *)calloc((size_t)st->slevel_count + 1u,
                                  sizeof(int64_t));
-      st->slevel_ptr = (int64_t *)calloc((size_t)st->slevel_count + 1u,
-                                         sizeof(int64_t));
+      st->slevel_ptr = (int64_t *)kls_snb_allocate(st, (size_t)st->slevel_count + 1u,
+                                         sizeof(int64_t), 1, deadline, limit);
       st->slevel_block =
-        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+        (int32_t *)kls_snb_allocate(st, (size_t)total_snodes * sizeof(int32_t), 1u, 0, deadline, limit);
       st->slevel_snode =
-        (int32_t *)malloc((size_t)total_snodes * sizeof(int32_t));
+        (int32_t *)kls_snb_allocate(st, (size_t)total_snodes * sizeof(int32_t), 1u, 0, deadline, limit);
       if (counts != NULL && st->slevel_ptr != NULL &&
           st->slevel_block != NULL && st->slevel_snode != NULL) {
         base = 0;
@@ -568,9 +612,9 @@ static int kls_snb_prepare(kls_solver *solver) {
        levels; inside a segment cross-level dependencies are enforced by
        the per-edge published-column spins, so no barriers are needed */
     if (st->slevel_ptr != NULL && st->slevel_count > 0) {
-      st->seg_ptr = (int64_t *)malloc(((size_t)st->slevel_count * 2u + 2u) *
-                                      sizeof(int64_t));
-      st->seg_coop = (unsigned char *)malloc((size_t)st->slevel_count + 1u);
+      st->seg_ptr = (int64_t *)kls_snb_allocate(st, ((size_t)st->slevel_count * 2u + 2u) *
+                                      sizeof(int64_t), 1u, 0, deadline, limit);
+      st->seg_coop = (unsigned char *)kls_snb_allocate(st, (size_t)st->slevel_count + 1u, 1u, 0, deadline, limit);
       if (st->seg_ptr != NULL && st->seg_coop != NULL) {
         int64_t nseg = 0;
         int64_t open_start = -1;
@@ -620,8 +664,8 @@ static int kls_snb_prepare(kls_solver *solver) {
     for (UF_long b = 0; ok && b < st->nblocks; ++b) {
       kls_snb_block *blk = &st->blocks[b];
       if (blk->nk < 2u || blk->snode_count <= 0) continue;
-      blk->published = (_Atomic int32_t *)calloc(
-        (size_t)blk->snode_count, sizeof(_Atomic int32_t));
+      blk->published = (_Atomic int32_t *)kls_snb_allocate(st,
+        (size_t)blk->snode_count,  sizeof(_Atomic int32_t), 1, deadline, limit);
       if (blk->published == NULL) ok = 0;
     }
   }
@@ -643,7 +687,7 @@ static int kls_snb_prepare(kls_solver *solver) {
       kls_snb_block *blk = &st->blocks[b];
       if (blk->nk < 2u || blk->panel_doubles <= 0) continue;
       blk->panels =
-        (double *)malloc((size_t)blk->panel_doubles * sizeof(double));
+        (double *)kls_snb_allocate(st, (size_t)blk->panel_doubles * sizeof(double), 1u, 0, deadline, limit);
       if (blk->panels == NULL) { ok = 0; break; }
       memset(blk->panels, 0, (size_t)blk->panel_doubles * sizeof(double));
 
@@ -663,6 +707,7 @@ static int kls_snb_prepare(kls_solver *solver) {
         const UF_long k1 = symbolic->R[block];
         const UF_long k2 = symbolic->R[block + 1u];
         for (UF_long k = k1; k < k2; ++k) {
+          if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
           const UF_long oldcol = symbolic->Q[k];
           for (UF_long p = solver->col_ptr[oldcol];
                p < solver->col_ptr[oldcol + 1u]; ++p) {
@@ -677,12 +722,12 @@ static int kls_snb_prepare(kls_solver *solver) {
         }
       }
     }
-    st->off = (kls_snb_entry *)malloc(
-      (size_t)(off_count > 0 ? off_count : 1) * sizeof(kls_snb_entry));
-    st->blk = (kls_snb_entry *)malloc(
-      (size_t)(blk_count > 0 ? blk_count : 1) * sizeof(kls_snb_entry));
-    st->col_off_ptr = (int64_t *)calloc((size_t)n + 1u, sizeof(int64_t));
-    st->col_blk_ptr = (int64_t *)calloc((size_t)n + 1u, sizeof(int64_t));
+    st->off = (kls_snb_entry *)kls_snb_allocate(st,
+      (size_t)(off_count > 0 ? off_count : 1) * sizeof(kls_snb_entry), 1u, 0, deadline, limit);
+    st->blk = (kls_snb_entry *)kls_snb_allocate(st,
+      (size_t)(blk_count > 0 ? blk_count : 1) * sizeof(kls_snb_entry), 1u, 0, deadline, limit);
+    st->col_off_ptr = (int64_t *)kls_snb_allocate(st, (size_t)n + 1u,  sizeof(int64_t), 1, deadline, limit);
+    st->col_blk_ptr = (int64_t *)kls_snb_allocate(st, (size_t)n + 1u,  sizeof(int64_t), 1, deadline, limit);
     ok = st->off != NULL && st->blk != NULL && st->col_off_ptr != NULL &&
          st->col_blk_ptr != NULL;
     if (ok) {
@@ -693,6 +738,7 @@ static int kls_snb_prepare(kls_solver *solver) {
         const UF_long k2 = symbolic->R[block + 1u];
         const kls_snb_block *blk = &st->blocks[block];
         for (UF_long k = k1; ok && k < k2; ++k) {
+          if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
           st->col_off_ptr[k] = poff;
           st->col_blk_ptr[k] = pblk;
           const UF_long oldcol = symbolic->Q[k];
@@ -749,35 +795,47 @@ static int kls_snb_prepare(kls_solver *solver) {
     if (nworkers < 1) nworkers = 1;
     if (nworkers > 64) nworkers = 64;
     st->nworkers = nworkers;
-    st->ub_w = (double **)calloc((size_t)nworkers, sizeof(double *));
-    st->gemm_w = (double **)calloc((size_t)nworkers, sizeof(double *));
-    st->rs_tmp = (double *)malloc((size_t)symbolic->n * sizeof(double));
-    ok = st->ub_w != NULL && st->gemm_w != NULL && st->rs_tmp != NULL;
+    st->gemm_w = (double **)kls_snb_allocate(st, (size_t)nworkers,  sizeof(double *), 1, deadline, limit);
+    st->rs_tmp = (double *)kls_snb_allocate(st, (size_t)symbolic->n * sizeof(double), 1u, 0, deadline, limit);
+    ok = st->gemm_w != NULL && st->rs_tmp != NULL;
     for (int t = 0; ok && t < nworkers; ++t) {
       /* Dense updates reuse these SIMD scratch streams. Give them the
          same alignment guarantee as the other numeric work buffers. */
-      st->ub_w[t] = kls_aligned_double_values((UF_long)st->wmax *
-                                             (UF_long)st->wmax);
+      const size_t scratch_bytes = (size_t)gmax_below * (size_t)st->wmax * sizeof(double);
+      if (scratch_bytes > limit || st->allocation_bytes > limit - scratch_bytes ||
+          (deadline > 0.0 && kls_now_seconds() >= deadline)) { ok = 0; break; }
+      st->allocation_bytes += scratch_bytes;
       st->gemm_w[t] = kls_aligned_double_values((UF_long)gmax_below *
                                                (UF_long)st->wmax);
-      ok = st->ub_w[t] != NULL && st->gemm_w[t] != NULL;
+      ok = st->gemm_w[t] != NULL;
     }
   }
 
+build_done:
   free(union_rows);
   free(merge_tmp);
   free(starts);
   free(map);
   free(inset);
-  if (!ok) {
-    solver->snb = st;
-    kls_snb_free(solver);
-    solver->snb_declined = 1;
-    return 0;
+  if (!ok || (deadline > 0.0 && kls_now_seconds() >= deadline)) {
+    kls_snb_destroy(st);
+    return NULL;
   }
-  solver->snb = st;
-  return 1;
+  st->preparation_seconds = kls_now_seconds() - build_start;
+  return st;
 }
+
+static int kls_snb_prepare(kls_solver *solver) {
+  if (solver->snb != NULL) return 1;
+  if (solver->snb_declined) return 0;
+  if (solver->symbolic == NULL || solver->numeric == NULL ||
+      solver->numeric->LUbx == NULL || !solver->snode_prepared) return 0;
+  solver->snb = kls_snb_build(solver, NULL, 0.0, SIZE_MAX);
+  if (solver->snb == NULL) solver->snb_declined = 1;
+  return solver->snb != NULL;
+}
+
+#include "kls_snb_grouping.inc"
 
 /* Record the first (lowest-index) singular pivot seen this refactor. */
 static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
@@ -798,16 +856,18 @@ static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
 /* Dense edge product, with columns contiguous in scratch. Accumulate a
    register tile in producer order, reusing each contiguous L load across four
    output columns. The vector bounds are storage bounds, not policy gates;
-   scalar tails also support builds without AVX-512. */
-static KLS_ALWAYS_INLINE void kls_snb_dense_product(
+   scalar tails also support builds without AVX-512. Keep this kernel out of
+   line to avoid duplicating the vector body in scheduler workers. Masked
+   tail multiplies suppress inactive-lane exceptions (notably 0 * Inf). */
+static __attribute__((noinline)) void kls_snb_dense_product(
   const double *L, int32_t ld, const int32_t *sub, int32_t sc,
-  const double *B, int32_t w, int32_t r0, int32_t r1, double *T) {
+  const double *B, int32_t bld, int32_t w, int32_t r0, int32_t r1, double *T) {
   const int32_t nr = r1 - r0;
   int32_t c = 0;
 #if defined(__AVX512F__)
   for (; c + 3 < w; c += 4) {
-    const double *b0 = B + (size_t)c * sc;
-    const double *b1 = b0 + sc, *b2 = b1 + sc, *b3 = b2 + sc;
+    const double *b0 = B + (size_t)c * bld;
+    const double *b1 = b0 + bld, *b2 = b1 + bld, *b3 = b2 + bld;
     int32_t r = r0;
     for (; r + 7 < r1; r += 8) {
       __m512d l = _mm512_loadu_pd(L + (size_t)sub[0] * ld + r);
@@ -828,23 +888,30 @@ static KLS_ALWAYS_INLINE void kls_snb_dense_product(
       _mm512_storeu_pd(out + 2u * nr, t2);
       _mm512_storeu_pd(out + 3u * nr, t3);
     }
-    for (; r < r1; ++r) {
-      double t0 = L[(size_t)sub[0] * ld + r] * b0[0];
-      double t1 = L[(size_t)sub[0] * ld + r] * b1[0];
-      double t2 = L[(size_t)sub[0] * ld + r] * b2[0];
-      double t3 = L[(size_t)sub[0] * ld + r] * b3[0];
+    if (r < r1) {
+      const __mmask8 mask = (__mmask8)((1u << (r1-r))-1u);
+      __m512d l = _mm512_maskz_loadu_pd(mask,L+(size_t)sub[0]*ld+r);
+      __m512d t0 = _mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b0[0]));
+      __m512d t1 = _mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b1[0]));
+      __m512d t2 = _mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b2[0]));
+      __m512d t3 = _mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b3[0]));
       for (int32_t i = 1; i < sc; ++i) {
-        const double l = L[(size_t)sub[i] * ld + r];
-        t0 += l * b0[i]; t1 += l * b1[i];
-        t2 += l * b2[i]; t3 += l * b3[i];
+        l = _mm512_maskz_loadu_pd(mask,L+(size_t)sub[i]*ld+r);
+        t0 = _mm512_add_pd(t0,_mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b0[i])));
+        t1 = _mm512_add_pd(t1,_mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b1[i])));
+        t2 = _mm512_add_pd(t2,_mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b2[i])));
+        t3 = _mm512_add_pd(t3,_mm512_maskz_mul_pd(mask,l,_mm512_set1_pd(b3[i])));
       }
       double *out = T + (size_t)c * nr + r - r0;
-      out[0] = t0; out[nr] = t1; out[2u * nr] = t2; out[3u * nr] = t3;
+      _mm512_mask_storeu_pd(out,mask,t0);
+      _mm512_mask_storeu_pd(out+nr,mask,t1);
+      _mm512_mask_storeu_pd(out+2u*nr,mask,t2);
+      _mm512_mask_storeu_pd(out+3u*nr,mask,t3);
     }
   }
 #endif
   for (; c < w; ++c) {
-    const double *b = B + (size_t)c * sc;
+    const double *b = B + (size_t)c * bld;
 #if defined(__AVX512F__)
     int32_t r = r0;
     for (; r + 7 < r1; r += 8) {
@@ -855,10 +922,14 @@ static KLS_ALWAYS_INLINE void kls_snb_dense_product(
           _mm512_loadu_pd(L + (size_t)sub[i] * ld + r), _mm512_set1_pd(b[i])));
       _mm512_storeu_pd(T + (size_t)c * nr + r - r0, t);
     }
-    for (; r < r1; ++r) {
-      double t = L[(size_t)sub[0] * ld + r] * b[0];
-      for (int32_t i = 1; i < sc; ++i) t += L[(size_t)sub[i] * ld + r] * b[i];
-      T[(size_t)c * nr + r - r0] = t;
+    if (r < r1) {
+      const __mmask8 mask = (__mmask8)((1u << (r1-r))-1u);
+      __m512d t = _mm512_maskz_mul_pd(mask,
+        _mm512_maskz_loadu_pd(mask,L+(size_t)sub[0]*ld+r),_mm512_set1_pd(b[0]));
+      for (int32_t i = 1; i < sc; ++i)
+        t = _mm512_add_pd(t,_mm512_maskz_mul_pd(mask,
+          _mm512_maskz_loadu_pd(mask,L+(size_t)sub[i]*ld+r),_mm512_set1_pd(b[i])));
+      _mm512_mask_storeu_pd(T+(size_t)c*nr+r-r0,mask,t);
     }
 #else
     /* Portable column update: contiguous L and T streams allow the compiler
@@ -883,7 +954,7 @@ static KLS_ALWAYS_INLINE void kls_snb_dense_product(
 static KLS_ALWAYS_INLINE void kls_snb_update_edge(
   const kls_snb_block *blk, const kls_snb_snode *sn,
   const kls_snb_edge *edge, int wnarrow,
-  double *ub_scratch, double *gemm_scratch) {
+  double *gemm_scratch) {
   const kls_snb_snode *ps = &blk->snodes[edge->producer];
   const int32_t w = sn->width;
   const int32_t H = sn->height;
@@ -919,34 +990,70 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
     }
     return;
   }
-  double *B = ub_scratch;
-  for (int32_t c = 0; c < w; ++c) {
-    const double *Wc = W + (size_t)c * H + ustart;
-    double *Bc = B + (size_t)c * sc;
-    for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
-  }
+  /* This edge's producer below rows follow all its diagonal columns.
+     Its scatter therefore cannot overwrite this upper block. Other edges
+     may update it, so preserve edge order and finish the product first. */
+  double *B = W + ustart;
+  /* The builder emits strictly increasing producer-column subsets. For a
+     contiguous subset, direct row loads avoid gathers without changing the
+     triangular update order. Gapped subsets retain the indexed kernel. */
+  const int contiguous = sub[sc-1]-sub[0] == sc-1;
   for (int32_t i = 0; i < sc; ++i) {
     {
       const double *lcol = Ldiag + (size_t)sub[i] * pld;
       for (int32_t c = 0; c < w; ++c) {
-        double *Bc = B + (size_t)c * sc;
+        double *Bc = B + (size_t)c * H;
         const double u = Bc[i];
         if (u == 0.0) continue;
-        for (int32_t i2 = i + 1; i2 < sc; ++i2) {
-          Bc[i2] -= lcol[sub[i2]] * u;
+        if (contiguous) {
+          const double *selected = lcol + sub[0];
+#if defined(__AVX512F__)
+          /* Vectorize rows only, preserving producer/target-column order.
+             Explicit FMA gives full vectors and tails the same rounding.
+             Mask arithmetic too: inactive lanes must not evaluate 0*Inf. */
+          const __m512d vu = _mm512_set1_pd(u);
+          int32_t i2 = i + 1;
+          for (; i2 + 7 < sc; i2 += 8) {
+            _mm512_storeu_pd(Bc+i2, _mm512_fnmadd_pd(
+              _mm512_loadu_pd(selected+i2), vu, _mm512_loadu_pd(Bc+i2)));
+          }
+          if (i2 < sc) {
+            const __mmask8 mask = (__mmask8)((1u << (sc-i2))-1u);
+            _mm512_mask_storeu_pd(Bc+i2,mask,
+              _mm512_mask3_fnmadd_pd(_mm512_maskz_loadu_pd(mask,selected+i2),
+                vu, _mm512_maskz_loadu_pd(mask,Bc+i2), mask));
+          }
+#else
+          for (int32_t i2 = i + 1; i2 < sc; ++i2)
+            Bc[i2] -= selected[i2] * u;
+#endif
+        } else {
+          for (int32_t i2 = i + 1; i2 < sc; ++i2)
+            Bc[i2] -= lcol[sub[i2]] * u;
         }
       }
     }
   }
-  for (int32_t c = 0; c < w; ++c) {
-    double *Wc = W + (size_t)c * H + ustart;
-    const double *Bc = B + (size_t)c * sc;
-    for (int32_t i = 0; i < sc; ++i) Wc[i] = Bc[i];
-  }
   if (ph == 0) return;
   double *T = gemm_scratch;
-  kls_snb_dense_product(Lbelow, pld, sub, sc, B, w, 0, ph, T);
-  for (int32_t c = 0; c < w; ++c)
+  kls_snb_dense_product(Lbelow, pld, sub, sc, B, H, w, 0, ph, T);
+  /* Share destination decoding across the same four-column width used
+     by the product. Each column retains producer-row subtraction order. */
+  int32_t c = 0;
+  for (; c + 3 < w; c += 4) {
+    double *w0 = W + (size_t)c * H;
+    const double *t0 = T + (size_t)c * ph;
+    for (int32_t r = 0; r < ph; ++r) {
+      const int32_t dst = dsts[r];
+      if (dst >= 0) {
+        w0[dst] -= t0[r];
+        w0[(size_t)H + dst] -= t0[(size_t)ph + r];
+        w0[2u * H + dst] -= t0[2u * ph + r];
+        w0[3u * H + dst] -= t0[3u * ph + r];
+      }
+    }
+  }
+  for (; c < w; ++c)
     for (int32_t r = 0; r < ph; ++r)
       if (dsts[r] >= 0) W[(size_t)c * H + dsts[r]] -= T[(size_t)c * ph + r];
 }
@@ -959,8 +1066,7 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
 static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
                                    kls_snb_block *blk, int64_t s,
                                    const double *az, const double *rs,
-                                   int scale, double *ub_scratch,
-                                   double *gemm_scratch, int pipelined) {
+                                   int scale, double *gemm_scratch, int pipelined) {
   const UF_long k1 = blk->k1;
   double *panels = blk->panels;
   double *offx = (double *)solver->numeric->Offx;
@@ -1001,7 +1107,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       }
     }
     kls_snb_update_edge(blk, sn, &edges[e], wnarrow,
-                        ub_scratch, gemm_scratch);
+                        gemm_scratch);
   }
   /* fused no-pivot getrf/TRSM */
   {
@@ -1150,7 +1256,7 @@ static UF_long kls_snb_refactor(kls_solver *solver,
     if (blk->nk < 2u) continue;
     for (int64_t s = 0; s < blk->snode_count; ++s) {
       kls_snb_process_target(solver, st, blk, s, numeric_values, rs, scale,
-                             st->ub_w[0], st->gemm_w[0], 0);
+                             st->gemm_w[0], 0);
       if (atomic_load_explicit(&st->failed, memory_order_acquire)) {
         return 0;
       }
@@ -1261,38 +1367,26 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
       /* small edge: tid 0 runs the ordinary serial edge body */
       if (tid == 0) {
         kls_snb_update_edge(blk, sn, &edges[e], wnarrow,
-                            st->ub_w[0], st->gemm_w[0]);
+                            st->gemm_w[0]);
       }
       kls_snb_spin_barrier_wait(&ctx->coop, crew);
       continue;
     }
-    /* big edge: stage A on tid 0 (gather + TRSM + writeback),
-       stage B row-sliced across the crew */
-    double *B = st->ub_w[0];
+    /* Big edge: in-place TRSM on tid 0, then product/scatter row-sliced
+       across the crew. The barrier publishes the completed upper block. */
+    double *B = W + ustart;
     if (tid == 0) {
-      for (int32_t c = 0; c < w; ++c) {
-        const double *Wc = W + (size_t)c * H + ustart;
-        double *Bc = B + (size_t)c * sc;
-        for (int32_t i = 0; i < sc; ++i) Bc[i] = Wc[i];
-      }
       for (int32_t i = 0; i < sc; ++i) {
         {
           const double *lcol = Ldiag + (size_t)sub[i] * pld;
           for (int32_t c = 0; c < w; ++c) {
-            double *Bc = B + (size_t)c * sc;
+            double *Bc = B + (size_t)c * H;
             const double u = Bc[i];
             if (u == 0.0) continue;
             for (int32_t i2 = i + 1; i2 < sc; ++i2) {
               Bc[i2] -= lcol[sub[i2]] * u;
             }
           }
-        }
-      }
-      for (int32_t c = 0; c < w; ++c) {
-        double *Wc = W + (size_t)c * H + ustart;
-        const double *Bc = B + (size_t)c * sc;
-        for (int32_t i = 0; i < sc; ++i) {
-          Wc[i] = Bc[i];
         }
       }
     }
@@ -1304,7 +1398,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
       if (r1 > ph) r1 = ph;
       if (r0 < r1) {
         double *T = st->gemm_w[tid];
-        kls_snb_dense_product(Lbelow, pld, sub, sc, B, w, r0, r1, T);
+        kls_snb_dense_product(Lbelow, pld, sub, sc, B, H, w, r0, r1, T);
         for (int32_t c = 0; c < w; ++c)
           for (int32_t r = r0; r < r1; ++r)
             if (dsts[r] >= 0)
@@ -1425,7 +1519,7 @@ static void *kls_snb_par_worker(void *argp) {
       kls_snb_block *blk = &st->blocks[st->slevel_block[idx]];
       kls_snb_process_target(ctx->solver, st, blk,
                              (int64_t)st->slevel_snode[idx], ctx->values,
-                             ctx->rs, ctx->scale, st->ub_w[arg->tid],
+                             ctx->rs, ctx->scale,
                              st->gemm_w[arg->tid], 1);
     }
     (void)pthread_barrier_wait(&ctx->barrier);
@@ -1941,9 +2035,27 @@ static UF_long kls_parallel_lu_sort(kls_solver *solver) {
   return 1;
 }
 
+/* Structural prefix selection, independent of producer publication. */
+static UF_long kls_padded_batch_length(const kls_solver *ps, UF_long k1,
+  UF_long j, const UF_long *ui, UF_long ucol_len, UF_long up) {
+  if (up >= ucol_len) return 0;
+  const UF_long run1 = ps->padded_run_of[k1 + j];
+  if (run1 == 0u) return 0;
+  const UF_long run = run1 - 1u;
+  const UF_long end = ps->padded_run_start[run] + ps->padded_run_len[run];
+  UF_long tmax = end - (k1 + j);
+  if (tmax > ucol_len - up) tmax = ucol_len - up;
+  if (tmax > 64u) tmax = 64u;
+  UF_long t = 1;
+  while (t < tmax && ui[up + t] == j + t) ++t;
+  const UF_long ulen = ps->padded_union_ptr[run + 1u] -
+                       ps->padded_union_ptr[run];
+  return t >= 2u && t * ulen >= 192u ? t : 0u;
+}
+
 /* B'-CORE stage 2: dense consume over a padded run. The consumer's U
-   positions must hold the run contiguously from producer j to the run
-   end. Multipliers are computed sequentially using the panel's
+   positions must hold a contiguous prefix of the run from producer j.
+   Multipliers are computed sequentially using the panel's
    within-run slots (the sorted union's first (len-1) rows are exactly
    s+1..e by the chain property, so row r's slot is r-s-1), then the
    tail accumulates chunked over contiguous panel rows - the strict
@@ -1960,33 +2072,16 @@ static UF_long kls_padded_run_consume(const kls_solver *ps,
                                       UF_long ucol_len,
                                       UF_long up,
                                       double *restrict x) {
-  const UF_long run1 = ps->padded_run_of[k1 + j];
-  if (run1 == 0u) {
+  const UF_long t = kls_padded_batch_length(ps, k1, j, ui, ucol_len, up);
+  if (t == 0u) {
     return 0;
   }
-  const UF_long run = run1 - 1u;
+  const UF_long run = ps->padded_run_of[k1 + j] - 1u;
   const UF_long s = ps->padded_run_start[run] - k1;
   const UF_long len = ps->padded_run_len[run];
   const UF_long e = s + len - 1u;
-  UF_long tmax = e - j + 1u;
-  if (tmax > ucol_len - up) {
-    tmax = ucol_len - up;
-  }
-  if (tmax > 64u) {
-    tmax = 64u;
-  }
-  UF_long t = 1;
-  while (t < tmax && ui[up + t] == j + t) {
-    t++;
-  }
-  if (t < 2u) {
-    return 0;
-  }
   const UF_long ubase = ps->padded_union_ptr[run];
   const UF_long ulen_run = ps->padded_union_ptr[run + 1u] - ubase;
-  if (t * ulen_run < 192u) {
-    return 0;
-  }
   const UF_long *urows = ps->padded_union_rows + ubase;
   const double *panel =
     ps->padded_panel_values + ps->padded_panel_ptr[run];
@@ -3318,6 +3413,13 @@ static double kls_egraph_refactor_floor(const kls_solver *solver) {
 static UF_long kls_parallel_refactor(kls_solver *solver,
                                      double *numeric_values,
                                      int check_pivots) {
+  /* Checked updates may enter a native engine instead of packed EGraph. */
+  if (check_pivots) {
+    kls_sync_authoritative_packed_l_values(solver);
+    kls_sync_authoritative_packed_u_values(solver);
+    solver->refactor_l_packed_valid = 0;
+    solver->refactor_u_packed_valid = 0;
+  }
   /* Any numeric engine below may replace Udiag values.  An EGraph pass can
      republish the reciprocal mirror from its worker pool; all other paths
      leave the public wrapper to refresh it serially. */

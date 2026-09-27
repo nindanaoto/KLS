@@ -14,6 +14,17 @@
 #ifndef KLS_TUNING_INC
 #define KLS_TUNING_INC
 
+/* Accuracy recovery search policy. These bound proposal effort, never the
+ * acceptance tolerance. Compiler/CPU/corpus validation is required before
+ * retuning. The current lattice implementation supports at most 64 columns. */
+#define KLS_COLD_RECOVERY_SECONDS 100.0
+#define KLS_COLD_LATTICE_FIRST_WIDTH 32
+#define KLS_COLD_LATTICE_LAST_WIDTH 64
+#define KLS_COLD_LATTICE_SWEEPS 32
+#define KLS_COLD_LATTICE_ROW_LIMIT 1024
+#define KLS_COLD_LATTICE_REGULARIZER 1.0e-7
+#define KLS_COLD_LATTICE_MAX_STEPS 10000
+
 /* Workload lifecycle and repeated-factorization admission. */
 #define KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES 4
 #define KLS_LEAN_SNODE_AVX512_MIN_TARGETS 32
@@ -21,6 +32,11 @@
 #define KLS_COMPACT_CYCLE_MIN_RELATIVE_SAVING 0.02
 #define KLS_COMPACT_CYCLE_MIN_SECONDS_SAVED 1.0e-6
 #define KLS_COMPACT_CYCLE_PREPARATION_PAYBACK 2.0
+/* One bounded grouping search and four paired lifecycle samples. */
+#define KLS_SNB_GROUP_SAMPLES 4
+/* Total speculative allowance relative to observed or caller-estimated work.
+   A cooperative time budget, not a hard real-time latency guarantee. */
+#define KLS_SNB_GROUP_MAX_OVERHEAD_FRACTION 0.02
 
 /* Row-oriented refactor batching and dense-panel crossovers. */
 #define KLS_ROW_REFACTOR_BATCH_MIN_ROWS 8u

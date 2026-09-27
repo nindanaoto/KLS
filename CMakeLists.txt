@@ -10,9 +10,14 @@ project(KLS
 file(GLOB KLS_TUNING_FINGERPRINT_INPUTS CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_accuracy_*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_componentwise.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_componentwise.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_*.inc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.h")
+list(APPEND KLS_TUNING_FINGERPRINT_INPUTS
+  "${CMAKE_CURRENT_SOURCE_DIR}/bench/kls_snb_calibrate.c")
 string(TOUPPER "${CMAKE_BUILD_TYPE}" KLS_BUILD_TYPE_UPPER)
 set(KLS_TUNING_FINGERPRINT_TEXT
   "${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_COMPILER}"
@@ -69,6 +74,30 @@ set(CMAKE_C_EXTENSIONS OFF)
 find_library(KLS_MATH_LIBRARY m)
 find_package(Threads REQUIRED)
 find_package(Python3 COMPONENTS Interpreter QUIET)
+
+# The final caller-system certificate must not silently become a heuristic on
+# unsupported compilers or under unsafe reassociation. Compile/link the actual
+# checker early, before building the bundled ordering libraries.
+include(CheckCSourceCompiles)
+unset(KLS_HAVE_ACCURACY_CERTIFICATE CACHE)
+set(CMAKE_REQUIRED_LIBRARIES_SAVED "${CMAKE_REQUIRED_LIBRARIES}")
+if(KLS_MATH_LIBRARY)
+  list(APPEND CMAKE_REQUIRED_LIBRARIES "${KLS_MATH_LIBRARY}")
+endif()
+check_c_source_compiles("
+#include \"${CMAKE_CURRENT_SOURCE_DIR}/src/kls_accuracy_certificate.c\"
+int main(void) { double bound;
+  return kls_accuracy_certify(0, 0, 0, 0, 0, 0, 0, &bound); }
+" KLS_HAVE_ACCURACY_CERTIFICATE)
+set(CMAKE_REQUIRED_LIBRARIES "${CMAKE_REQUIRED_LIBRARIES_SAVED}")
+unset(CMAKE_REQUIRED_LIBRARIES_SAVED)
+if(NOT KLS_HAVE_ACCURACY_CERTIFICATE)
+  message(FATAL_ERROR
+    "KLS accuracy verification requires IEEE binary64, compiler-supported IEEE "
+    "binary128 (__float128), 128-bit integers, and strict floating-point "
+    "semantics. Fast-math and finite-only modes are unsupported. "
+    "GCC 14 or later is recommended.")
+endif()
 
 if(KLS_USE_SYSTEM_METIS)
     find_path(KLS_SYSTEM_METIS_INCLUDE_DIR
@@ -423,6 +452,15 @@ endif()
 
 add_library(kls
   src/kls.c
+  src/kls_accuracy_certificate.c
+  src/kls_componentwise.c
+  src/kls_accuracy_lattice.c
+  src/kls_accuracy_recovery.c
+  src/kls_accuracy_schedule.c
+  src/kls_caller_recovery.inc
+  src/kls_lattice_recovery.inc
+  src/kls_original_operator.inc
+  src/kls_strict_interval.inc
   src/kls_tuning_profile.c
   src/kls_compact_solve.inc
   src/kls_egraph_refactor.inc
@@ -441,6 +479,10 @@ target_compile_definitions(kls PRIVATE
 # These implementation fragments stay in kls.c's translation unit so moving
 # the internal engines does not introduce call boundaries or inhibit inlining.
 set_source_files_properties(
+  src/kls_caller_recovery.inc
+  src/kls_lattice_recovery.inc
+  src/kls_original_operator.inc
+  src/kls_strict_interval.inc
   src/kls_compact_solve.inc
   src/kls_egraph_refactor.inc
   src/kls_first_factor.inc
@@ -492,7 +534,7 @@ if(EXISTS "${KLS_MTMETIS_LIB}")
 endif()
 
 if(KLS_BUILD_AUTOTUNER)
-  add_executable(kls-autotune bench/kls_autotune.c)
+  add_executable(kls-autotune bench/kls_autotune.c bench/kls_snb_calibrate.c)
   target_include_directories(kls-autotune PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(kls-autotune PRIVATE KLS::kls)
@@ -500,7 +542,11 @@ if(KLS_BUILD_AUTOTUNER)
     target_link_libraries(kls-autotune PRIVATE "${KLS_MATH_LIBRARY}")
   endif()
   target_compile_options(kls-autotune PRIVATE
-    $<$<C_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>)
+    $<TARGET_PROPERTY:kls,COMPILE_OPTIONS>)
+  target_compile_definitions(kls-autotune PRIVATE
+    $<TARGET_PROPERTY:kls,COMPILE_DEFINITIONS>)
+  target_include_directories(kls-autotune PRIVATE
+    $<TARGET_PROPERTY:kls,INCLUDE_DIRECTORIES>)
 endif()
 if(KLS_ENABLE_SCOTCH)
   target_link_libraries(kls
@@ -594,6 +640,21 @@ endif()
 if(KLS_BUILD_TESTS)
   enable_testing()
   if(Python3_Interpreter_FOUND)
+    add_test(NAME kls_componentwise_differential
+      COMMAND "${CMAKE_COMMAND}" -E env "CC=${CMAKE_C_COMPILER}"
+              "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_componentwise_certificate.py")
+    set_tests_properties(kls_componentwise_differential PROPERTIES
+      RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+      add_test(
+        NAME kls_accuracy_build_flags
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_accuracy_build_flags.py"
+                "${CMAKE_C_COMPILER}")
+      set_tests_properties(kls_accuracy_build_flags PROPERTIES
+        RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+    endif()
     add_test(
       NAME kls_slim_build_provenance
       COMMAND "${Python3_EXECUTABLE}"
@@ -649,7 +710,19 @@ if(KLS_BUILD_TESTS)
   add_executable(kls_cancellation tests/kls_cancellation.c)
   target_link_libraries(kls_cancellation PRIVATE kls)
   add_test(NAME kls_cancellation COMMAND kls_cancellation)
-  foreach(KLS_PRIVATE_TEST kls_compact_transpose kls_snb_product)
+  add_executable(kls_snb_profile tests/kls_snb_profile.c)
+  target_link_libraries(kls_snb_profile PRIVATE kls)
+  add_test(NAME kls_snb_profile COMMAND kls_snb_profile)
+  set(KLS_PRIVATE_TESTS kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan)
+  set(KLS_ACCURACY_TESTS
+    kls_accuracy_owner kls_accuracy_best kls_accuracy_gate kls_accuracy_recovery kls_componentwise_caller
+    kls_accuracy_epochs kls_accuracy_frames kls_accuracy_rhs
+    kls_accuracy_factor_epochs kls_accuracy_fused_epochs)
+  list(APPEND KLS_PRIVATE_TESTS ${KLS_ACCURACY_TESTS})
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND KLS_PRIVATE_TESTS kls_snb_masked_bounds kls_trsm_masked_contract)
+  endif()
+  foreach(KLS_PRIVATE_TEST IN LISTS KLS_PRIVATE_TESTS)
     add_executable(${KLS_PRIVATE_TEST} tests/${KLS_PRIVATE_TEST}.c)
     target_link_libraries(${KLS_PRIVATE_TEST} PRIVATE kls)
     target_include_directories(${KLS_PRIVATE_TEST} PRIVATE
@@ -660,6 +733,39 @@ if(KLS_BUILD_TESTS)
       $<TARGET_PROPERTY:kls,COMPILE_OPTIONS>)
     add_test(NAME ${KLS_PRIVATE_TEST} COMMAND ${KLS_PRIVATE_TEST})
   endforeach()
+
+  set_tests_properties(${KLS_ACCURACY_TESTS} PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+  set_tests_properties(kls_egraph_batch_plan PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 120)
+  add_executable(kls_accuracy_certificate tests/kls_accuracy_certificate.c)
+  add_executable(kls_componentwise tests/kls_componentwise.c)
+  target_link_libraries(kls_componentwise PRIVATE kls)
+  add_test(NAME kls_componentwise COMMAND kls_componentwise)
+  set_tests_properties(kls_componentwise PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+  add_executable(kls_componentwise_faults tests/kls_componentwise_faults.c)
+  target_link_libraries(kls_componentwise_faults PRIVATE m)
+  add_test(NAME kls_componentwise_faults COMMAND kls_componentwise_faults)
+  set_tests_properties(kls_componentwise_faults PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+  add_executable(kls_accuracy_schedule tests/kls_accuracy_schedule.c)
+  target_link_libraries(kls_accuracy_schedule PRIVATE m)
+  add_test(NAME kls_accuracy_schedule COMMAND kls_accuracy_schedule)
+  set_tests_properties(kls_accuracy_schedule PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+  add_executable(kls_accuracy_sweep tests/kls_accuracy_sweep.c)
+  add_executable(kls_interval_bounds tests/kls_interval_bounds.c)
+  target_link_libraries(kls_interval_bounds PRIVATE m)
+  add_test(NAME kls_interval_bounds COMMAND kls_interval_bounds)
+  set_tests_properties(kls_interval_bounds PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+  target_link_libraries(kls_accuracy_sweep PRIVATE m)
+  add_test(NAME kls_accuracy_sweep COMMAND kls_accuracy_sweep)
+  set_tests_properties(kls_accuracy_sweep PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+  target_link_libraries(kls_accuracy_certificate PRIVATE kls)
+  add_test(NAME kls_accuracy_certificate COMMAND kls_accuracy_certificate)
+  set_tests_properties(kls_accuracy_certificate PROPERTIES
+    RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
 
   add_executable(kls_singleton_metadata tests/kls_singleton_metadata.c)
   target_link_libraries(kls_singleton_metadata PRIVATE kls_suitesparse)

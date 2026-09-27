@@ -5872,6 +5872,15 @@ static int kls_ensure_authoritative_packed_l_values(kls_solver *solver) {
   }
   if (solver->refactor_l_packed_values != NULL &&
       solver->refactor_l_packed_storage != NULL) {
+    if (!solver->refactor_l_packed_valid) {
+      for (UF_long col = 0; col < solver->n; ++col) {
+        const UF_long len = solver->numeric->Llen[col];
+        if (len && solver->refactor_l_values[col] &&
+            solver->refactor_l_packed_values[col])
+          memcpy(solver->refactor_l_packed_values[col],
+                 solver->refactor_l_values[col], (size_t)len * sizeof(double));
+      }
+    }
     return 1;
   }
   UF_long entries = 0u;
@@ -5938,6 +5947,15 @@ static int kls_ensure_authoritative_packed_u_values(kls_solver *solver) {
   }
   if (solver->refactor_u_packed_values != NULL &&
       solver->refactor_u_packed_storage != NULL) {
+    if (!solver->refactor_u_packed_valid) {
+      for (UF_long col = 0; col < solver->n; ++col) {
+        const UF_long len = solver->numeric->Ulen[col];
+        if (len && solver->refactor_u_values[col] &&
+            solver->refactor_u_packed_values[col])
+          memcpy(solver->refactor_u_packed_values[col],
+                 solver->refactor_u_values[col], (size_t)len * sizeof(double));
+      }
+    }
     return 1;
   }
   UF_long entries = 0u;

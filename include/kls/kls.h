@@ -455,6 +455,15 @@ void kls_default_options(kls_options *options);
 int kls_create(kls_solver **solver);
 void kls_destroy(kls_solver *solver);
 
+typedef enum kls_accuracy_policy {
+  KLS_ACCURACY_STRICT_RHS_L2 = 0,
+  KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR = 1
+} kls_accuracy_policy;
+/* Select before the first successful analysis. The default is componentwise
+ * backward error; strict RHS-relative L2 remains explicitly selectable. */
+int kls_set_accuracy_policy(kls_solver *solver, kls_accuracy_policy policy);
+int kls_get_accuracy_policy(const kls_solver *solver, kls_accuracy_policy *policy);
+
 int kls_analyze_csc(kls_solver *solver,
                     kls_index_type index_type,
                     int64_t n,

@@ -981,21 +981,23 @@ static UF_long kls_snode_batch_consume_cached_apply(
   return t;
 }
 
-static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
+/* Structural choice only: no numeric values or publication state are read.
+   A future deferred dispatch must retain this exact prefix while waiting;
+   partner availability must not shorten it or change its eligibility. */
+static KLS_ALWAYS_INLINE UF_long kls_snode_cached_batch_length(
+  const kls_solver *solver,
   UF_long *const *l_indices,
-  double *const *l_values,
   const UF_long *llen_local,
   const UF_long *ui,
   const int32_t *ui32,
-  double *ux,
   UF_long ucol_len,
   UF_long up,
-  double *restrict x,
   UF_long k1,
   UF_long producer_limit,
-  const UF_long *snode_run_end,
-  const kls_egraph_refactor_shared *shared,
-  int wait_for_dependencies) {
+  const UF_long *snode_run_end) {
+  if (up >= ucol_len) {
+    return 0;
+  }
   const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
   const UF_long run_end = snode_run_end[k1 + j];
   if (run_end <= k1 + j + 1u) {
@@ -1018,13 +1020,47 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
       t++;
     }
   }
-  if (t < kls_snode_min_batch(shared->solver) || j + t > producer_limit) {
+  if (t < kls_snode_min_batch(solver) || j + t > producer_limit) {
     return 0;
   }
+  if (l_indices[k1 + j + t - 1u] == NULL ||
+      t * llen_local[j + t - 1u] < kls_snode_min_batch_work(solver)) {
+    return 0;
+  }
+  return t;
+}
+
+typedef struct {
+  UF_long consumed;
+  int pending;
+} kls_cached_batch_result;
+
+static KLS_ALWAYS_INLINE kls_cached_batch_result kls_snode_batch_try_cached(
+  UF_long *const *l_indices,
+  double *const *l_values,
+  const UF_long *llen_local,
+  const UF_long *ui,
+  const int32_t *ui32,
+  double *ux,
+  UF_long ucol_len,
+  UF_long up,
+  double *restrict x,
+  UF_long k1,
+  UF_long producer_limit,
+  const UF_long *snode_run_end,
+  const kls_egraph_refactor_shared *shared,
+  int wait_for_dependencies) {
+  const UF_long t = kls_snode_cached_batch_length(
+    shared->solver, l_indices, llen_local, ui, ui32, ucol_len, up, k1,
+    producer_limit, snode_run_end);
+  if (t == 0u) {
+    return (kls_cached_batch_result){0u, 0};
+  }
+  const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
   if (wait_for_dependencies) {
     for (UF_long i = 0; i < t; ++i) {
       if (!kls_egraph_refactor_dependency_done_now(shared, k1 + j + i)) {
-        return 0;
+        return (kls_cached_batch_result){0u, 1};
       }
     }
   }
@@ -1035,15 +1071,62 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
       ? shared->solver->refactor_l_indices32[k1 + j + t - 1u]
       : NULL;
   const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL ||
-      t * tlen < kls_snode_min_batch_work(shared->solver)) {
-    /* Short shared tails lose to the 32-bit-index scalar path; only pay the
-       panel staging when the batched update amortizes it. */
-    return 0;
-  }
-  return kls_snode_batch_consume_cached_apply(
+  const UF_long consumed = kls_snode_batch_consume_cached_apply(
     shared != NULL ? shared->solver : NULL,
     l_values, ux, up, x, k1, j, t, tli, tli32, tlen);
+  return (kls_cached_batch_result){consumed, 0};
+}
+
+/* Only single-column owners may wait here. Every planned producer is below
+   producer_limit, so no member of the batch can be the consumer itself.
+   On interrupted waiting pending remains set: callers must abort, not select
+   scalar or padded arithmetic. Cooperative owners use try_cached instead. */
+static KLS_ALWAYS_INLINE kls_cached_batch_result kls_snode_batch_consume_cached(
+  UF_long *const *l_indices, double *const *l_values,
+  const UF_long *llen_local, const UF_long *ui, const int32_t *ui32,
+  double *ux, UF_long ucol_len, UF_long up, double *restrict x,
+  UF_long k1, UF_long producer_limit, const UF_long *snode_run_end,
+  kls_egraph_refactor_shared *shared, int wait_for_dependencies) {
+  const kls_cached_batch_result result = kls_snode_batch_try_cached(
+    l_indices, l_values, llen_local, ui, ui32, ux, ucol_len, up, x, k1,
+    producer_limit, snode_run_end, shared, wait_for_dependencies);
+  if (!result.pending) {
+    return result;
+  }
+  const UF_long t = kls_snode_cached_batch_length(
+    shared->solver, l_indices, llen_local, ui, ui32, ucol_len, up, k1,
+    producer_limit, snode_run_end);
+  const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
+  for (UF_long i = 0; i < t; ++i) {
+    if (!kls_egraph_refactor_wait_done(shared, k1 + j + i)) {
+      return result;
+    }
+  }
+  return kls_snode_batch_try_cached(
+    l_indices, l_values, llen_local, ui, ui32, ux, ucol_len, up, x, k1,
+    producer_limit, snode_run_end, shared, 0);
+}
+
+/* Padded single-column dispatch waits only on panel rows actually read.
+   Later rows of the run are destinations, not dependencies. */
+static kls_cached_batch_result kls_egraph_padded_consume(
+  kls_egraph_refactor_shared *shared, UF_long k1, UF_long producer_limit,
+  UF_long j, const UF_long *ui, double *ux, UF_long ucol_len, UF_long up,
+  double *x, int wait_for_dependencies) {
+  const UF_long t = kls_padded_batch_length(
+    shared->solver, k1, j, ui, ucol_len, up);
+  if (t == 0u || j + t > producer_limit) {
+    return (kls_cached_batch_result){0u, 0};
+  }
+  if (wait_for_dependencies) {
+    for (UF_long i = 0; i < t; ++i) {
+      if (!kls_egraph_refactor_wait_done(shared, k1 + j + i)) {
+        return (kls_cached_batch_result){0u, 1};
+      }
+    }
+  }
+  return (kls_cached_batch_result){kls_padded_run_consume(
+    shared->solver, k1, j, ui, ux, ucol_len, up, x), 0};
 }
 
 /* Fused two-consumer batch consume: one pass over the producer run's tail
@@ -1051,8 +1134,8 @@ static KLS_ALWAYS_INLINE UF_long kls_snode_batch_consume_cached(
    sharing it halves the dominant refactor traffic).  Both consumers must
    hold the run contiguously at their current U positions; the run's shared
    tail pattern (last member) is producer-side structure and thus consumer
-   independent.  Per-consumer arithmetic order matches the single kernel
-   exactly, so paired columns are bit-identical to single dispatch.
+   independent. Fusion must preserve both independent batch lengths and
+   eligibility; it must not truncate one consumer to its partner's prefix.
    Returns producers consumed from BOTH positions, or 0 to fall back. */
 static UF_long kls_snode_batch_consume_cached_pair(
   UF_long *const *l_indices,
@@ -1074,28 +1157,16 @@ static UF_long kls_snode_batch_consume_cached_pair(
   UF_long producer_limit,
   const UF_long *snode_run_end,
   const kls_egraph_refactor_shared *shared) {
-  const UF_long j = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
-  const UF_long run_end = snode_run_end[k1 + j];
-  if (run_end <= k1 + j + 1u) {
+  const UF_long t = kls_snode_cached_batch_length(
+    shared->solver, l_indices, llen_local, uia, uia32, ulen_a, upa, k1,
+    producer_limit, snode_run_end);
+  if (t == 0u || t != kls_snode_cached_batch_length(
+        shared->solver, l_indices, llen_local, uib, uib32, ulen_b, upb, k1,
+        producer_limit, snode_run_end)) {
     return 0;
   }
-  UF_long tmax = run_end - (k1 + j);
-  if (tmax > KLS_SNODE_MAX_BATCH) {
-    tmax = KLS_SNODE_MAX_BATCH;
-  }
-  if (tmax > ulen_a - upa) {
-    tmax = ulen_a - upa;
-  }
-  if (tmax > ulen_b - upb) {
-    tmax = ulen_b - upb;
-  }
-  UF_long t = 1;
-  while (t < tmax &&
-         (uia32 != NULL ? (UF_long)uia32[upa + t] : uia[upa + t]) == j + t &&
-         (uib32 != NULL ? (UF_long)uib32[upb + t] : uib[upb + t]) == j + t) {
-    t++;
-  }
-  if (t < kls_snode_min_batch(shared->solver) || j + t > producer_limit) {
+  const UF_long j = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
+  if ((uib32 != NULL ? (UF_long)uib32[upb] : uib[upb]) != j) {
     return 0;
   }
   {
@@ -1107,10 +1178,6 @@ static UF_long kls_snode_batch_consume_cached_pair(
   }
   const UF_long *tli = l_indices[k1 + j + t - 1u];
   const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL ||
-      2u * t * tlen < kls_snode_min_batch_work(shared->solver)) {
-    return 0;
-  }
   double xsa[KLS_SNODE_MAX_BATCH];
   double xsb[KLS_SNODE_MAX_BATCH];
   const double *lx_arr[KLS_SNODE_MAX_BATCH];
@@ -1174,9 +1241,8 @@ static UF_long kls_snode_batch_consume_cached_pair(
 /* Fused k-consumer batch consume (k <= KLS_SNODE_MAX_FUSE): one pass
    over the producer run's tail panel feeds k consumer SPAs, dividing
    the dominant panel-stream traffic by k. All consumers' cursors must
-   point at the run start (caller-checked) and hold it contiguously;
-   per-consumer arithmetic order matches the single kernel exactly, so
-   fused columns stay bit-identical to single dispatch. Returns
+   have identical independent batch plans. Group size changes panel reuse,
+   not arithmetic boundaries or the structural work eligibility. Returns
    producers consumed from EVERY cursor, or 0 to fall back. */
 static UF_long kls_snode_batch_consume_cached_multi(
   UF_long *const *l_indices,
@@ -1193,38 +1259,24 @@ static UF_long kls_snode_batch_consume_cached_multi(
   UF_long producer_limit,
   const UF_long *snode_run_end,
   const kls_egraph_refactor_shared *shared) {
+  if (nc < 1 || nc > KLS_SNODE_MAX_FUSE) {
+    return 0;
+  }
+  const UF_long t = kls_snode_cached_batch_length(
+    shared->solver, l_indices, llen_local, ui[0], ui32[0], ulen[0], up[0],
+    k1, producer_limit, snode_run_end);
+  if (t == 0u) {
+    return 0;
+  }
   const UF_long j =
     ui32[0] != NULL ? (UF_long)ui32[0][up[0]] : ui[0][up[0]];
-  const UF_long run_end = snode_run_end[k1 + j];
-  if (run_end <= k1 + j + 1u) {
-    return 0;
-  }
-  UF_long tmax = run_end - (k1 + j);
-  if (tmax > KLS_SNODE_MAX_BATCH) {
-    tmax = KLS_SNODE_MAX_BATCH;
-  }
-  for (int c = 0; c < nc; ++c) {
-    if (tmax > ulen[c] - up[c]) {
-      tmax = ulen[c] - up[c];
+  for (int c = 1; c < nc; ++c) {
+    if (t != kls_snode_cached_batch_length(
+          shared->solver, l_indices, llen_local, ui[c], ui32[c], ulen[c],
+          up[c], k1, producer_limit, snode_run_end) ||
+        (ui32[c] != NULL ? (UF_long)ui32[c][up[c]] : ui[c][up[c]]) != j) {
+      return 0;
     }
-  }
-  UF_long t = 1;
-  for (; t < tmax; ++t) {
-    int aligned = 1;
-    for (int c = 0; c < nc; ++c) {
-      const UF_long jc = ui32[c] != NULL
-        ? (UF_long)ui32[c][up[c] + t] : ui[c][up[c] + t];
-      if (jc != j + t) {
-        aligned = 0;
-        break;
-      }
-    }
-    if (!aligned) {
-      break;
-    }
-  }
-  if (t < kls_snode_min_batch(shared->solver) || j + t > producer_limit) {
-    return 0;
   }
   {
     for (UF_long i = 0; i < t; ++i) {
@@ -1235,10 +1287,6 @@ static UF_long kls_snode_batch_consume_cached_multi(
   }
   const UF_long *tli = l_indices[k1 + j + t - 1u];
   const UF_long tlen = llen_local[j + t - 1u];
-  if (tli == NULL ||
-      (UF_long)nc * t * tlen < kls_snode_min_batch_work(shared->solver)) {
-    return 0;
-  }
   double xs[KLS_SNODE_MAX_FUSE][KLS_SNODE_MAX_BATCH];
   const double *lx_arr[KLS_SNODE_MAX_BATCH];
   for (UF_long i = 0; i < t; ++i) {
@@ -1535,36 +1583,24 @@ static int kls_egraph_refactor_single_unscaled_column(
   while (up < ucol_len) {
 
     if (snode_batches_allowed) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_consume_cached(
         l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
         0u, k, shared->snode_run_end, shared, wait_for_dependencies);
-      if (consumed != 0u) {
-        up += consumed;
+      if (batch.pending) return 0;
+      if (batch.consumed != 0u) {
+        up += batch.consumed;
         continue;
       }
     }
     if (snode_batches_allowed && solver->padded_run_of != NULL &&
         solver->padded_active && symbolic->nblocks == 1u) {
       const UF_long j0 = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-      const UF_long r1 = solver->padded_run_of[j0];
-      int run_ready = r1 != 0u;
-      if (run_ready && wait_for_dependencies) {
-        const UF_long re0 = solver->padded_run_start[r1 - 1u] +
-                            solver->padded_run_len[r1 - 1u];
-        for (UF_long c = j0; c < re0; ++c) {
-          if (!kls_egraph_refactor_dependency_done_now(shared, c)) {
-            run_ready = 0;
-            break;
-          }
-        }
-      }
-      if (run_ready) {
-        const UF_long consumed = kls_padded_run_consume(
-          solver, 0u, j0, ui, ux, ucol_len, up, x);
-        if (consumed != 0u) {
-          up += consumed;
-          continue;
-        }
+      const kls_cached_batch_result batch = kls_egraph_padded_consume(
+        shared, 0u, k, j0, ui, ux, ucol_len, up, x, wait_for_dependencies);
+      if (batch.pending) return 0;
+      if (batch.consumed != 0u) {
+        up += batch.consumed;
+        continue;
       }
     }
     const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
@@ -1662,11 +1698,12 @@ static int kls_egraph_refactor_single_unscaled_plain_column(
   const UF_long ucol_len = kls_egraph_ulen_at(solver, k);
   UF_long up = 0u;
   while (up < ucol_len) {
-    const UF_long consumed = kls_snode_batch_consume_cached(
+    const kls_cached_batch_result batch = kls_snode_batch_consume_cached(
       l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
       0u, k, shared->snode_run_end, shared, wait_for_dependencies);
-    if (consumed != 0u) {
-      up += consumed;
+    if (batch.pending) return 0;
+    if (batch.consumed != 0u) {
+      up += batch.consumed;
       continue;
     }
 
@@ -1788,13 +1825,13 @@ static int kls_egraph_refactor_single_unscaled_column_pair(
       }
     }
     if (!progress && upa < ulen_a) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_try_cached(
         l_indices, l_values, numeric->Llen, uia, uia32, uxa, ulen_a, upa,
         xa, 0u, ka, shared->snode_run_end, shared, 1);
-      if (consumed != 0u) {
-        upa += consumed;
+      if (batch.consumed != 0u) {
+        upa += batch.consumed;
         progress = 1;
-      } else {
+      } else if (!batch.pending) {
         const UF_long ja = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
         if (kls_egraph_refactor_dependency_done_now(shared, ja)) {
           const double ujk = xa[ja];
@@ -1811,13 +1848,13 @@ static int kls_egraph_refactor_single_unscaled_column_pair(
       }
     }
     if (!progress && upb < ulen_b) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_try_cached(
         l_indices, l_values, numeric->Llen, uib, uib32, uxb, ulen_b, upb,
         xb, 0u, kb, shared->snode_run_end, shared, 1);
-      if (consumed != 0u) {
-        upb += consumed;
+      if (batch.consumed != 0u) {
+        upb += batch.consumed;
         progress = 1;
-      } else {
+      } else if (!batch.pending) {
         const UF_long jb = uib32 != NULL ? (UF_long)uib32[upb] : uib[upb];
         if (kls_egraph_refactor_dependency_done_now(shared, jb)) {
           const double ujk = xb[jb];
@@ -2042,13 +2079,16 @@ static int kls_egraph_refactor_single_unscaled_column_multi(
       if (done[c] || up[c] >= ulen[c]) {
         continue;
       }
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_try_cached(
         l_indices, l_values, numeric->Llen, ui[c], ui32[c], ux[c],
         ulen[c], up[c], xv[c], 0u, cols[c], shared->snode_run_end,
         shared, 1);
-      if (consumed != 0u) {
-        up[c] += consumed;
+      if (batch.consumed != 0u) {
+        up[c] += batch.consumed;
         progress = 1;
+        continue;
+      }
+      if (batch.pending) {
         continue;
       }
       const UF_long jc = ui32[c] != NULL
@@ -2140,36 +2180,24 @@ static int kls_egraph_refactor_single_scaled_column(
   while (up < ucol_len) {
 
     if (snode_batches_allowed) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_consume_cached(
         l_indices, l_values, numeric->Llen, ui, ui32, ux, ucol_len, up, x,
         0u, k, shared->snode_run_end, shared, wait_for_dependencies);
-      if (consumed != 0u) {
-        up += consumed;
+      if (batch.pending) return 0;
+      if (batch.consumed != 0u) {
+        up += batch.consumed;
         continue;
       }
     }
     if (snode_batches_allowed && solver->padded_run_of != NULL &&
         solver->padded_active && symbolic->nblocks == 1u) {
       const UF_long j0 = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-      const UF_long r1 = solver->padded_run_of[j0];
-      int run_ready = r1 != 0u;
-      if (run_ready && wait_for_dependencies) {
-        const UF_long re0 = solver->padded_run_start[r1 - 1u] +
-                            solver->padded_run_len[r1 - 1u];
-        for (UF_long c = j0; c < re0; ++c) {
-          if (!kls_egraph_refactor_dependency_done_now(shared, c)) {
-            run_ready = 0;
-            break;
-          }
-        }
-      }
-      if (run_ready) {
-        const UF_long consumed = kls_padded_run_consume(
-          solver, 0u, j0, ui, ux, ucol_len, up, x);
-        if (consumed != 0u) {
-          up += consumed;
-          continue;
-        }
+      const kls_cached_batch_result batch = kls_egraph_padded_consume(
+        shared, 0u, k, j0, ui, ux, ucol_len, up, x, wait_for_dependencies);
+      if (batch.pending) return 0;
+      if (batch.consumed != 0u) {
+        up += batch.consumed;
+        continue;
       }
     }
     const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
@@ -2296,11 +2324,12 @@ static int kls_egraph_refactor_btf_unscaled_plain_cluster_column(
   UF_long up = 0u;
   while (up < ucol_len) {
     if (snode_batches_allowed) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_consume_cached(
         l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
         local_k, shared->snode_run_end, shared, wait_for_dependencies);
-      if (consumed != 0u) {
-        up += consumed;
+      if (batch.pending) return 0;
+      if (batch.consumed != 0u) {
+        up += batch.consumed;
         continue;
       }
     }
@@ -2431,36 +2460,24 @@ static int kls_egraph_refactor_btf_unscaled_column(
   if (wait_for_dependencies) {
     while (up < ucol_len) {
       if (snode_batches_allowed) {
-        const UF_long consumed = kls_snode_batch_consume_cached(
+        const kls_cached_batch_result batch = kls_snode_batch_consume_cached(
           l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
           local_k, shared->snode_run_end, shared, 1);
-        if (consumed != 0u) {
-          up += consumed;
+        if (batch.pending) return 0;
+        if (batch.consumed != 0u) {
+          up += batch.consumed;
           continue;
         }
       }
       if (snode_batches_allowed && solver->padded_run_of != NULL &&
           solver->padded_active) {
         const UF_long j0 = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
-        const UF_long r1 = solver->padded_run_of[k1 + j0];
-        int run_ready = r1 != 0u;
-        if (run_ready) {
-          const UF_long re0 = solver->padded_run_start[r1 - 1u] +
-                              solver->padded_run_len[r1 - 1u];
-          for (UF_long c = k1 + j0; c < re0; ++c) {
-            if (!kls_egraph_refactor_dependency_done_now(shared, c)) {
-              run_ready = 0;
-              break;
-            }
-          }
-        }
-        if (run_ready) {
-          const UF_long consumed = kls_padded_run_consume(
-            solver, k1, j0, ui, ux, ucol_len, up, x);
-          if (consumed != 0u) {
-            up += consumed;
-            continue;
-          }
+        const kls_cached_batch_result batch = kls_egraph_padded_consume(
+          shared, k1, local_k, j0, ui, ux, ucol_len, up, x, 1);
+        if (batch.pending) return 0;
+        if (batch.consumed != 0u) {
+          up += batch.consumed;
+          continue;
         }
       }
       const UF_long j = ui32 != NULL ? (UF_long)ui32[up] : ui[up];
@@ -2487,11 +2504,12 @@ static int kls_egraph_refactor_btf_unscaled_column(
   } else {
     while (up < ucol_len) {
       if (snode_batches_allowed) {
-        const UF_long consumed = kls_snode_batch_consume_cached(
+        const kls_cached_batch_result batch = kls_snode_batch_consume_cached(
           l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
           local_k, shared->snode_run_end, shared, 0);
-        if (consumed != 0u) {
-          up += consumed;
+        if (batch.pending) return 0;
+        if (batch.consumed != 0u) {
+          up += batch.consumed;
           continue;
         }
       }
@@ -2675,7 +2693,13 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
           upa += consumed;
           upb += consumed;
           progress = 1;
-        } else if (kls_egraph_refactor_dependency_done_now(shared,
+        } else if (kls_snode_cached_batch_length(
+                     solver, l_indices, llen, uia, uia32, ulen_a, upa,
+                     k1, local_a, shared->snode_run_end) == 0u &&
+                   kls_snode_cached_batch_length(
+                     solver, l_indices, llen, uib, uib32, ulen_b, upb,
+                     k1, local_b, shared->snode_run_end) == 0u &&
+                   kls_egraph_refactor_dependency_done_now(shared,
                                                            k1 + ja)) {
           const double ua = xa[ja];
           const double ub = xb[ja];
@@ -2704,13 +2728,13 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
       }
     }
     if (!progress && upa < ulen_a) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_try_cached(
         l_indices, l_values, llen, uia, uia32, uxa, ulen_a, upa, xa, k1,
         local_a, shared->snode_run_end, shared, 1);
-      if (consumed != 0u) {
-        upa += consumed;
+      if (batch.consumed != 0u) {
+        upa += batch.consumed;
         progress = 1;
-      } else {
+      } else if (!batch.pending) {
         const UF_long ja = uia32 != NULL ? (UF_long)uia32[upa] : uia[upa];
         if (kls_egraph_refactor_dependency_done_now(shared, k1 + ja)) {
           kls_egraph_refactor_apply_btf_scalar_dep(
@@ -2722,13 +2746,13 @@ static int kls_egraph_refactor_btf_unscaled_column_pair(
       }
     }
     if (!progress && upb < ulen_b) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_try_cached(
         l_indices, l_values, llen, uib, uib32, uxb, ulen_b, upb, xb, k1,
         local_b, shared->snode_run_end, shared, 1);
-      if (consumed != 0u) {
-        upb += consumed;
+      if (batch.consumed != 0u) {
+        upb += batch.consumed;
         progress = 1;
-      } else {
+      } else if (!batch.pending) {
         const UF_long jb = uib32 != NULL ? (UF_long)uib32[upb] : uib[upb];
         if (kls_egraph_refactor_dependency_done_now(shared, k1 + jb)) {
           kls_egraph_refactor_apply_btf_scalar_dep(
@@ -2904,6 +2928,15 @@ static int kls_egraph_refactor_btf_unscaled_column_multi(
         }
       }
       if (aligned) {
+        int all_scalar = 1;
+        for (int c = 0; c < nc; ++c) {
+          if (kls_snode_cached_batch_length(
+                solver, l_indices, llen, ui[c], ui32[c], ulen[c], up[c],
+                k1, local_col[c], shared->snode_run_end) != 0u) {
+            all_scalar = 0;
+            break;
+          }
+        }
         const UF_long consumed = kls_snode_batch_consume_cached_multi(
           l_indices, l_values, llen, nc, ui, ui32, ux, ulen, up, xv, k1,
           producer_limit, shared->snode_run_end, shared);
@@ -2912,7 +2945,7 @@ static int kls_egraph_refactor_btf_unscaled_column_multi(
             up[c] += consumed;
           }
           progress = 1;
-        } else if (kls_egraph_refactor_dependency_done_now(shared,
+        } else if (all_scalar && kls_egraph_refactor_dependency_done_now(shared,
                                                             k1 + j0)) {
           /* Scalar aligned producers are worth fusing too: read each L row
              and value once, then update every independent SPA. */
@@ -2964,12 +2997,15 @@ static int kls_egraph_refactor_btf_unscaled_column_multi(
       if (done[c] || up[c] >= ulen[c]) {
         continue;
       }
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_try_cached(
         l_indices, l_values, llen, ui[c], ui32[c], ux[c], ulen[c], up[c],
         xv[c], k1, local_col[c], shared->snode_run_end, shared, 1);
-      if (consumed != 0u) {
-        up[c] += consumed;
+      if (batch.consumed != 0u) {
+        up[c] += batch.consumed;
         progress = 1;
+        continue;
+      }
+      if (batch.pending) {
         continue;
       }
       const UF_long j = ui32[c] != NULL
@@ -3166,11 +3202,12 @@ static int kls_egraph_refactor_column(kls_egraph_refactor_worker *worker,
   while (up < ucol_len) {
 
     if (snode_batches_allowed) {
-      const UF_long consumed = kls_snode_batch_consume_cached(
+      const kls_cached_batch_result batch = kls_snode_batch_consume_cached(
         l_indices, l_values, llen, ui, ui32, ux, ucol_len, up, x, k1,
         local_k, shared->snode_run_end, shared, wait_for_dependencies);
-      if (consumed != 0u) {
-        up += consumed;
+      if (batch.pending) return 0;
+      if (batch.consumed != 0u) {
+        up += batch.consumed;
         continue;
       }
     }
@@ -8163,7 +8200,6 @@ typedef struct kls_snb_state {
   kls_snb_entry *blk;      /* in-panel scatter entries */
   int64_t *col_off_ptr;    /* per global col: range in off[] */
   int64_t *col_blk_ptr;    /* per global col: range in blk[] */
-  double **ub_w;           /* per-worker scratch */
   double **gemm_w;
   int nworkers;
   double *rs_tmp;          /* n scratch for the Rs permute */
@@ -8182,6 +8218,8 @@ typedef struct kls_snb_state {
   _Atomic int failed;            /* halt_if_singular tripped */
   double coop_work_share; /* fraction in cooperative fat-chain snodes */
   uint64_t coop_min_doubles;
+  size_t allocation_bytes; /* Requested retained bytes, including scratch. */
+  double preparation_seconds;
 } kls_snb_state;
 
 /* Work threshold above which a lone task on a level is executed by the

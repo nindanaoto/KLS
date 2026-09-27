@@ -379,6 +379,8 @@ typedef struct kls_separator_analysis {
  * worker is not replaced until that worker pool has joined or quiesced.
  */
 struct kls_solver {
+  kls_accuracy_policy accuracy_policy;
+  int accuracy_policy_locked;
   UF_long n;
   UF_long nnz;
   UF_long *col_ptr;
@@ -749,6 +751,13 @@ struct kls_solver {
                                    residual-verified once: later solves
                                    apply the correction and skip the
                                    verification sweep */
+  struct private_original_operator *private_original;
+  unsigned private_numeric_depth;
+  int private_original_valid;
+  unsigned private_solve_depth;
+  unsigned private_caller_depth;
+  double private_cold_deadline;
+  int private_cold_trial; /* isolated proposal: never recursively search */
   int low_rcond_solve_contract_state; /* same retained pivot family:
                                          0 = first raw solve unmeasured,
                                          1 = raw solve contract settled,
@@ -1260,6 +1269,11 @@ struct kls_solver {
     double seconds[2][3];
     double preparation_seconds;
   } transpose_cycle;
+  /* Optional grouping policy is cold and does not shift existing hot fields. */
+  kls_snb_cost_model snb_cost;
+  struct kls_snb_group_cycle *snb_group;
+  unsigned snb_group_epoch;
+  int snb_group_disabled;
 };
 
 struct kls_generic_nd_trial;
@@ -1625,6 +1639,8 @@ static int kls_i32_solve_ready(kls_solver *solver);
 static int kls_refresh_i32_udiag_recip(kls_solver *solver);
 static int kls_direct_user_value_maps_capable(const kls_solver *solver);
 
+static UF_long kls_padded_batch_length(const kls_solver *ps, UF_long k1,
+  UF_long j, const UF_long *ui, UF_long ucol_len, UF_long up);
 static UF_long kls_padded_run_consume(const kls_solver *ps,
                                       UF_long k1,
                                       UF_long j,
@@ -1805,7 +1821,10 @@ static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
     !solver->solve_recovery_active &&
     solver->pivot_nudge_count == 0u &&
     solver->common.kls_perturb_count == 0u &&
-    solver->solve_contract_probe == 1;
+    /* Raw tiny solves are safe under the current call's final certificate;
+       they must not require reusing a verdict from an earlier RHS. */
+    (solver->solve_contract_probe == 1 ||
+     (solver->private_caller_depth > 0 && solver->private_original_valid));
 }
 
 static int kls_tiny_singleton_cached_ready(const kls_solver *solver,
@@ -7206,12 +7225,19 @@ static void fill_build_stats(kls_stats *stats) {
 
 static void kls_metis_race_abandon(kls_solver *solver);
 
+#include "kls_original_operator.inc"
+
 static void clear_matrix(kls_solver *solver) {
+  private_original_operator_free(solver->private_original);
+  KLS_FREE_AND_NULL(solver->private_original);
+  solver->private_original_valid = 0;
   kls_metis_race_abandon(solver);
   destroy_refactor_pool(solver);
   free_numeric(solver);
 
   free_symbolic(solver);
+  KLS_FREE_AND_NULL(solver->snb_group);
+  solver->snb_group_disabled = 0;
   KLS_FREE_AND_NULL(solver->col_ptr);
   KLS_FREE_AND_NULL(solver->row_idx);
   KLS_FREE_AND_NULL(solver->input_to_csc);
@@ -7669,6 +7695,21 @@ void kls_default_options(kls_options *options) {
 }
 
 
+int kls_set_accuracy_policy(kls_solver *s, kls_accuracy_policy policy) {
+  if (!s || s->accuracy_policy_locked || s->symbolic ||
+      (policy!=KLS_ACCURACY_STRICT_RHS_L2 &&
+       policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR))
+    return KLS_ERR_INVALID_ARGUMENT;
+  s->accuracy_policy=policy;
+  return KLS_OK;
+}
+
+int kls_get_accuracy_policy(const kls_solver *s, kls_accuracy_policy *policy) {
+  if (!s || !policy) return KLS_ERR_INVALID_ARGUMENT;
+  *policy=s->accuracy_policy;
+  return KLS_OK;
+}
+
 int kls_create(kls_solver **solver_out) {
   if (solver_out == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
@@ -7678,6 +7719,7 @@ int kls_create(kls_solver **solver_out) {
     return KLS_ERR_OUT_OF_MEMORY;
   }
   kls_default_options(&solver->options);
+  solver->accuracy_policy = KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR;
   kls_tuning_defaults(&solver->tuning);
   solver->stats.struct_size = sizeof(solver->stats);
   kls_clear_fast_reject_stats(solver);
@@ -7735,6 +7777,7 @@ int kls_analyze_csc(kls_solver *solver,
 
   clear_matrix(solver);
   solver->tuning = tuning;
+  solver->snb_cost = tuning_metadata.snb_cost;
   solver->options = normalized;
   solver->options.tuning_profile_path = NULL;
   solver->stats.tuning_profile_active = normalized.tuning_profile_path != NULL;
@@ -7782,6 +7825,7 @@ int kls_analyze_csc(kls_solver *solver,
     kls_metis_race_abandon(solver);
   }
   adopt_candidate(solver, chosen);
+  solver->accuracy_policy_locked=1;
   fill_symbolic_stats(solver, elapsed);
   kls_maybe_start_metis_race(solver);
   free_candidate(&transpose);
@@ -7824,6 +7868,7 @@ int kls_analyze_csr(kls_solver *solver,
 
   clear_matrix(solver);
   solver->tuning = tuning;
+  solver->snb_cost = tuning_metadata.snb_cost;
   solver->options = normalized;
   solver->options.tuning_profile_path = NULL;
   solver->stats.tuning_profile_active = normalized.tuning_profile_path != NULL;
@@ -7870,6 +7915,7 @@ int kls_analyze_csr(kls_solver *solver,
     kls_metis_race_abandon(solver);
   }
   adopt_candidate(solver, chosen);
+  solver->accuracy_policy_locked=1;
   fill_symbolic_stats(solver, elapsed);
   kls_maybe_start_metis_race(solver);
   free_candidate(&normal);
@@ -7881,7 +7927,34 @@ int kls_analyze_csr(kls_solver *solver,
    before factor/refactor/solve, their public dispatch sites. */
 #include "kls_numeric_engines.inc"
 
+static int private_factor_body(kls_solver *solver, const double *values);
+/* Public numeric updates own the original-system snapshot. Internal recovery
+ * may replace factors, but must not replace the caller's problem with its
+ * transformed or repaired working operator. */
+static int private_numeric_snapshot_finish(kls_solver *solver,
+    const double *values, int status, int public_epoch) {
+  if (!solver) return status;
+  --solver->private_numeric_depth;
+  if (!public_epoch || status != KLS_OK) return status;
+  if (!solver->private_original) {
+    solver->private_original = calloc(1, sizeof(*solver->private_original));
+    if (!solver->private_original) return KLS_ERR_OUT_OF_MEMORY;
+  }
+  status = private_original_operator_build(solver, values, solver->private_original);
+  solver->private_original_valid = status == KLS_OK;
+  return status;
+}
 int kls_factor(kls_solver *solver, const double *values) {
+  const int public_epoch = solver && !solver->private_numeric_depth &&
+    !solver->private_solve_depth;
+  if (solver) {
+    if (public_epoch) solver->private_original_valid = 0;
+    ++solver->private_numeric_depth;
+  }
+  int status=private_factor_body(solver,values);
+  return private_numeric_snapshot_finish(solver, values, status, public_epoch);
+}
+static int private_factor_body(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
@@ -7961,6 +8034,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver->options.backend == KLS_BACKEND_SERIAL) {
     status = kls_serial_factor(solver, numeric_values);
     if (status == KLS_OK) {
+      kls_factor_solve_contract_classify(solver, numeric_values);
       kls_arm_unchanged_refactor_cache(solver, values);
       solver->stats.factor_seconds =
         kls_now_seconds() - solver->snb_factor_start;
@@ -9388,7 +9462,18 @@ static int kls_prepare_unchanged_solve_contract(kls_solver *solver,
   return 1;
 }
 
+static int private_refactor_body(kls_solver *solver, const double *values);
 int kls_refactor(kls_solver *solver, const double *values) {
+  const int public_epoch = solver && !solver->private_numeric_depth &&
+    !solver->private_solve_depth;
+  if (solver) {
+    if (public_epoch) solver->private_original_valid = 0;
+    ++solver->private_numeric_depth;
+  }
+  int status=private_refactor_body(solver,values);
+  return private_numeric_snapshot_finish(solver, values, status, public_epoch);
+}
+static int private_refactor_body(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
     return KLS_ERR_INVALID_ARGUMENT;
   }
@@ -9414,18 +9499,16 @@ int kls_refactor(kls_solver *solver, const double *values) {
      corrected residual; later solves against that unchanged numeric may
      reuse the verdict. */
   solver->solve_contract_verified = 0;
-  /* Refresh the current diagonal ratio, but distinguish the retained
-     pivot-family policy from per-answer validity. State 1 records that the
-     low-rcond heuristic was pessimistic for this pivot family; it does not
-     cache an RHS or a corrected answer. Failed refinement (probe 3) must
-     discard that policy too, so the next numeric gets a fresh check. */
+  /* A successful raw solve certifies only its current numeric values.
+     Retaining the pivot pattern cannot certify a changed matrix, so refresh
+     both the diagonal-risk classification and its solve verdict. */
   if (solver->low_rcond_solve_contract_state != 0 ||
       solver->solve_contract_probe == 3) {
-    if (solver->solve_contract_probe == 3)
-      solver->low_rcond_solve_contract_state = 0;
+    solver->low_rcond_solve_contract_state = 0;
     solver->solve_contract_probe = 0;
   }
   const int generic_lean_reaudit =
+    !(solver->snb_group && solver->snb_group->active) &&
     kls_repeated_update_workload(&solver->options) &&
     /* A short dependency schedule cannot repay four row/column lifecycle
        samples after the initial timed consultation.  Retain the audit for a
@@ -9495,6 +9578,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
         solver, (double *)(uintptr_t)values);
     kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_ROW);
     if (ok > 0 && solver->common.status >= TRILINOS_KLU_OK) {
+      /* This direct return bypasses the common refactor epilogue. A checked
+         answer must use this epoch's input, including when the worker did
+         not perform a parallel snapshot copy. */
+      kls_factor_solve_contract_classify(solver, values);
       (void)kls_refresh_i32_udiag_recip(solver);
     }
     solver->adaptive_refactor_seconds = kls_now_seconds() - start;
@@ -11338,6 +11425,21 @@ int kls_refactor(kls_solver *solver, const double *values) {
     /* classify each numeric on its first refactorization — once per
        numeric, off the solve path; numeric_values is the prepared
        internal-frame array, current for THIS call */
+    if (solver->lean_user_values_active ||
+        solver->refactor_direct_user_values_active) {
+      /* Direct-input kernels read caller-order values through their maps.
+         Residual verification instead reads the retained internal CSC
+         matrix, which that kernel does not publish. Refresh it before any
+         solve can verify or refine against the preceding numeric epoch. */
+      double *prepared = NULL;
+      status = prepare_numeric_values(solver, values, &prepared);
+      if (status != KLS_OK || prepared == NULL) {
+        return status != KLS_OK ? status : KLS_ERR_REFACTOR_FAILED;
+      }
+      numeric_values = prepared;
+      solver->lean_user_values_active = 0;
+      solver->refactor_direct_user_values_active = 0;
+    }
     if (solver->generic_btf_unscaled_recovery_scale > 0 &&
         solver->generic_btf_unscaled_rcond_floor > 0.0 &&
         solver->common.scale <= 0 && solver->numeric->Rs == NULL) {
@@ -12175,8 +12277,7 @@ static int kls_promoted_tolerance_factor(
   return solver != NULL && solver->numeric != NULL &&
     solver->stats.selected_pivot_tolerance > 0.0 &&
     solver->stats.selected_pivot_tolerance <
-      solver->options.pivot_tolerance &&
-    (!kls_uses_structural_initial_pivot_tolerance(solver));
+      solver->options.pivot_tolerance;
 }
 
 __attribute__((noinline))
@@ -12210,6 +12311,30 @@ static int kls_promoted_tolerance_l2_recovery_factor_cycle(
    directions can still combine the same inexpensive triangular solves into
    a contract-valid answer.  This implementation is intentionally limited to
    the plain normal frame in which A*x and the public residual coincide. */
+#include "kls_strict_interval.inc"
+#include "kls_lattice_recovery.inc"
+/* Private cold-path transaction: rank candidates by a conservative bound,
+ * never let a failed challenger discard the best bounded answer. The final
+ * certificate still applies to the actual returned vector. */
+static void private_keep_best(kls_solver *s,const double *a,const double *b,
+    const double *x,int transposed,double *best,long double *best_upper,
+    int *best_certified) {
+  /* This ranking state belongs to one RHS and one immutable operator in
+   * private_solve_body. Re-visiting the identical incumbent cannot improve
+   * its bound. The public caller gate still checks the returned vector
+   * independently. A failed bound
+   * (including allocation failure) remains retryable. */
+  if(isfinite(*best_upper) &&
+     !memcmp(best,x,(size_t)s->n*sizeof(*x))) return;
+  long double upper=INFINITY;
+  const int certified=interval_csc_certificate((size_t)s->n,s->col_ptr,
+                          s->row_idx,a,b,x,transposed,&upper,NULL);
+  if(isfinite(upper) && upper<*best_upper) {
+    memcpy(best,x,(size_t)s->n*sizeof(*x));
+    *best_upper=upper;
+    *best_certified=certified;
+  }
+}
 static int kls_try_gmres_solve_recovery(kls_solver *solver,
                                         const double *a,
                                         const double *b,
@@ -12638,7 +12763,168 @@ static int kls_try_lsqr_solve_recovery(kls_solver *solver,
   return verified;
 }
 
-static int solve_impl(kls_solver *solver,
+/* Save caller coordinates before an in-place solve can overwrite the RHS.
+ * Bound both allocation size and strided pointer arithmetic before reading. */
+extern int kls_accuracy_certify(size_t, const int64_t *, const int64_t *,
+                        const double *, const double *, const double *, int,
+                        double *);
+static int private_caller_rhs(kls_solver *s, int64_t nrhs, const double *b,
+    int64_t ldb, double *x, int64_t ldx, double **saved) {
+  *saved = NULL;
+  if (!s || !s->symbolic || s->n <= 0 || !b || !x || nrhs <= 0)
+    return KLS_ERR_INVALID_ARGUMENT;
+  const uint64_t n = s->n;
+  if (!ldb) ldb = (int64_t)n;
+  if (!ldx) ldx = (int64_t)n;
+  const uint64_t limit = (uint64_t)PTRDIFF_MAX / sizeof(double);
+  if (ldb < 0 || ldx < 0 || (uint64_t)ldb < n || (uint64_t)ldx < n ||
+      n > limit || (uint64_t)nrhs > limit / n ||
+      (uint64_t)(nrhs - 1) > (limit - n) / (uint64_t)ldb ||
+      (uint64_t)(nrhs - 1) > (limit - n) / (uint64_t)ldx)
+    return KLS_ERR_INVALID_ARGUMENT;
+  *saved = malloc((size_t)nrhs * (size_t)n * sizeof(double));
+  if (!*saved) return KLS_ERR_OUT_OF_MEMORY;
+  for (int64_t k = 0; k < nrhs; ++k)
+    memcpy(*saved + (size_t)k * n, b + (size_t)k * ldb,
+           (size_t)n * sizeof(double));
+  return KLS_OK;
+}
+
+#include "kls_caller_recovery.inc"
+
+#include "kls_componentwise.h"
+static int private_solve_body(kls_solver *, int, int64_t, const double *, int64_t, double *, int64_t);
+
+static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs,
+    const double *b,double *x,int64_t ldx,int status) {
+  if(status!=KLS_OK) return status; /* Never certify a failed kernel's output. */
+  const private_original_operator *a=s->private_original;
+  if(!s->private_original_valid || !a || a->n!=(size_t)s->n)
+    return KLS_ERR_SOLVE_FAILED;
+  if(!ldx) ldx=(int64_t)a->n;
+  double *work=NULL;
+  for(int64_t rhs=0;rhs<nrhs;++rhs) {
+    const double *br=b+(size_t)rhs*a->n;
+    double *xr=x+(size_t)rhs*(size_t)ldx;
+    for(int step=0;;++step) {
+      long double upper;
+      int certified=kls_componentwise_certify(a->n,a->p,a->rows,a->values,
+                                             br,xr,transpose,NULL,&upper);
+      if(certified==1) break;
+      if(certified<0) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
+      if(step==KLS_COMPONENTWISE_MAX_CORRECTIONS) {status=KLS_ERR_SOLVE_FAILED;goto done;}
+      if(!work) {
+        if(a->n>SIZE_MAX/(2*sizeof(double))) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
+        work=malloc(2*a->n*sizeof(*work));
+        if(!work) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
+      }
+      /* A nonfinite bound means no usable residual, not a large safe bound. */
+      certified=kls_componentwise_certify(a->n,a->p,a->rows,a->values,
+                                         br,xr,transpose,work,&upper);
+      if(certified<0) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
+      if(!isfinite(upper)) {status=KLS_ERR_SOLVE_FAILED;goto done;}
+      int old_refinement=s->in_solve_refinement;
+      s->in_solve_refinement=1;
+      ++s->private_solve_depth;
+      status=private_solve_body(s,transpose,1,work,(int64_t)a->n,
+                                work+a->n,(int64_t)a->n);
+      --s->private_solve_depth;
+      s->in_solve_refinement=old_refinement;
+      if(status!=KLS_OK) goto done;
+      for(size_t i=0;i<a->n;++i) xr[i]+=work[a->n+i];
+    }
+  }
+done:
+  free(work);return status;
+}
+
+static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
+    double *saved, double *x, int64_t ldx, int status) {
+  if(s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR) {
+    const double start=kls_now_seconds(),prior=s->stats.solve_seconds;
+    status=private_componentwise_finish(s,transpose,nrhs,saved,x,ldx,status);
+    s->stats.solve_seconds=prior+kls_now_seconds()-start;
+    free(saved);return status;
+  }
+  if (status == KLS_OK || status == KLS_ERR_SOLVE_FAILED) {
+    const private_original_operator *a = s->private_original;
+    if (!s->private_original_valid || !a || a->n != (size_t)s->n)
+      status = KLS_ERR_SOLVE_FAILED;
+    else {
+      status = KLS_OK;
+      /* Standalone fixture calls have no public-call lifetime. Real APIs
+       * retain one lazily started deadline through all nested solves/RHSs. */
+      if (!s->private_caller_depth) s->private_cold_deadline = 0;
+      if (!ldx) ldx = (int64_t)a->n;
+      for (int64_t k = 0; k < nrhs; ++k) {
+        double bound;
+        if (!kls_accuracy_certify(a->n, a->p, a->rows, a->values,
+              saved + (size_t)k * a->n, x + (size_t)k * ldx,
+              transpose, &bound) &&
+            (!private_caller_recover(s,a,saved+(size_t)k*a->n,
+                                     x+(size_t)k*ldx,transpose,
+                                     private_recovery_deadline(s)) ||
+             !kls_accuracy_certify(a->n,a->p,a->rows,a->values,saved+(size_t)k*a->n,
+                           x+(size_t)k*ldx,transpose,&bound))) {
+          status = KLS_ERR_SOLVE_FAILED;
+          break;
+        }
+      }
+    }
+  }
+  free(saved);
+  return status;
+}
+
+static int private_solve_body(kls_solver *, int, int64_t, const double *, int64_t, double *, int64_t);
+static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
+                      const double *b, int64_t ldb, double *x, int64_t ldx) {
+  if(!solver) return KLS_ERR_INVALID_ARGUMENT;
+  if (!solver->private_solve_depth && solver->numeric &&
+      !solver->private_original_valid) return KLS_ERR_SOLVE_FAILED;
+  const int public_call = !solver->private_solve_depth;
+  const int caller_gate = public_call && !solver->private_caller_depth;
+  double *saved = NULL;
+  double *candidate = NULL;
+  if (caller_gate) {
+    int status = private_caller_rhs(solver,nrhs,b,ldb,x,ldx,&saved);
+    if (status != KLS_OK) return status;
+    candidate = calloc((size_t)nrhs*(size_t)solver->n,sizeof(double));
+    if (!candidate) { free(saved);return KLS_ERR_OUT_OF_MEMORY; }
+    solver->private_cold_deadline = 0;
+    ++solver->private_caller_depth;
+  }
+  if(!solver->private_solve_depth) {
+    /* Accuracy-first experiment: a previous answer is not a certificate for
+     * another public RHS. Keep armed risk state, but do not reuse clean or
+     * divergent-answer shortcuts. Nested correction solves are unaffected. */
+    if(solver->solve_contract_probe==1 || solver->solve_contract_probe==3)
+      solver->solve_contract_probe=0;
+    if(solver->low_rcond_solve_contract_state==1)
+      solver->low_rcond_solve_contract_state=0;
+    solver->solve_contract_verified=0;
+    /* Exact-RHS preparation may still be reused within the same numeric
+       epoch. It is only an execution optimization: the outer caller gate
+       independently certifies the returned vector on every call. */
+  }
+  ++solver->private_solve_depth;
+  int status=private_solve_body(solver,transpose,nrhs,
+      caller_gate?saved:b,caller_gate?(int64_t)solver->n:ldb,
+      caller_gate?candidate:x,caller_gate?(int64_t)solver->n:ldx);
+  --solver->private_solve_depth;
+  if (caller_gate) {
+    status = private_caller_finish(solver,transpose,nrhs,saved,candidate,0,status);
+    if (status == KLS_OK)
+      for (int64_t k=0;k<nrhs;++k)
+        memcpy(x+(size_t)k*(ldx?ldx:solver->n),
+               candidate+(size_t)k*solver->n,(size_t)solver->n*sizeof(double));
+    free(candidate);
+    --solver->private_caller_depth;
+  }
+  if (public_call && status != KLS_OK) solver->verified_rhs_valid = 0;
+  return status;
+}
+static int private_solve_body(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
                       const double *b,
@@ -12662,11 +12948,55 @@ static int solve_impl(kls_solver *solver,
     return KLS_ERR_INVALID_ARGUMENT;
   }
 
+  if (!solver->in_solve_refinement && solver->solve_contract_probe == 2 &&
+      solver->nnz > 0 && solver->input_to_csc == NULL &&
+      solver->row_perm == NULL && solver->user_col_perm == NULL &&
+      solver->row_scale == NULL && solver->col_scale == NULL &&
+      solver->solve_refine_values == NULL) {
+    /* An armed plain-frame contract must not use a stale analyze-time
+     * matrix when allocation of its current snapshot failed. */
+    return KLS_ERR_OUT_OF_MEMORY;
+  }
+  if (!solver->in_solve_refinement && (b == x || nrhs > 1) &&
+      (solver->solve_contract_probe == 2 ||
+       kls_promoted_tolerance_factor(solver) ||
+       solver->promoted_tolerance_l2_recovery_required ||
+       (solver->common.rcond > 0.0 &&
+        solver->common.rcond < sqrt(DBL_EPSILON)))) {
+    /* Preserve every input before an aliased output can overwrite it.
+       Each RHS then follows the same verified single-RHS recovery path. */
+    const double wrapper_start = kls_now_seconds();
+    const size_t n = (size_t)solver->n;
+    const size_t allocated_n = n ? n : 1;
+    if ((size_t)nrhs > KLS_MAX_ALLOCATION / sizeof(double) / allocated_n)
+      return KLS_ERR_OUT_OF_MEMORY;
+    double *rhs_copy = malloc(allocated_n * (size_t)nrhs * sizeof(double));
+    if (rhs_copy == NULL) return KLS_ERR_OUT_OF_MEMORY;
+    for (int64_t r = 0; r < nrhs; ++r)
+      memcpy(rhs_copy + r*n, b + r*ldb, n*sizeof(double));
+    int status = KLS_OK;
+    for (int64_t r = 0; r < nrhs && status == KLS_OK; ++r)
+      status = solve_impl(solver, transpose, 1, rhs_copy + r*n,
+                          solver->n, x + r*ldx, solver->n);
+    free(rhs_copy);
+    solver->stats.solve_seconds = kls_now_seconds() - wrapper_start;
+    return status;
+  }
+
   const int unmeasured_tiny_singleton =
     !solver->options.record_tiny_solve_timing &&
     kls_tiny_singleton_cached_ready(solver, nrhs);
   const double start = unmeasured_tiny_singleton
     ? 0.0 : kls_now_seconds();
+  /* Both one-block transpose executors consume authoritative packed values.
+     Other consumers retain publication, charged to the solve. */
+  if ((solver->refactor_l_packed_valid || solver->refactor_u_packed_valid) &&
+      !(nrhs == 1 &&
+        ((solver->orientation == KLS_ORIENTATION_TRANSPOSE) != !!transpose) &&
+        solver->n > 1 && solver->symbolic->nblocks == 1)) {
+    kls_sync_authoritative_packed_l_values(solver);
+    kls_sync_authoritative_packed_u_values(solver);
+  }
   int tiny_singleton_ready =
     kls_tiny_singleton_cached_ready(solver, nrhs);
   if (!tiny_singleton_ready &&
@@ -12768,6 +13098,8 @@ static int solve_impl(kls_solver *solver,
       memmove(x, b, (size_t)solver->n * sizeof(*x));
     }
     solver->common.status = TRILINOS_KLU_OK;
+    kls_sync_authoritative_packed_l_values(solver);
+    kls_sync_authoritative_packed_u_values(solver);
     const UF_long direct_ok =
       solver->orientation == KLS_ORIENTATION_TRANSPOSE
         ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, solver->n,
@@ -13071,12 +13403,14 @@ static int solve_impl(kls_solver *solver,
         (fused_matched_i32_rhs || fused_matched_i32_rhs32) &&
         has_col_scale;
     } else {
-      /* This boundary has published native factor values.  Multiple blocks
-         need off-diagonal updates and multiple RHS retain the vendor path. */
+      /* One-block transpose reads packed values directly. Multiple blocks
+         and multiple RHS require native publication for the vendor path. */
       if (kernel_transpose && nrhs == 1 && solver->n > 1 &&
           solver->symbolic->nblocks == 1) {
         ok = kls_native_transpose_solve(solver, x);
       } else {
+        kls_sync_authoritative_packed_l_values(solver);
+        kls_sync_authoritative_packed_u_values(solver);
         ok = kernel_transpose
           ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric,
                                   (UF_long)ldx, (UF_long)nrhs, x,
@@ -13165,11 +13499,11 @@ static int solve_impl(kls_solver *solver,
     (solver->common.rcond > 0.0 &&
      solver->common.rcond < sqrt(DBL_EPSILON));
   const int contract_probe_wanted = !solver->in_solve_refinement &&
-    !transpose && nrhs == 1 && b != x &&
+    nrhs == 1 && b != x &&
     solver->solve_contract_probe == 0 &&
     contract_structural_risk;
   const int contract_armed = solver->solve_contract_probe == 2 &&
-    !solver->in_solve_refinement && !transpose && nrhs == 1 && b != x;
+    !solver->in_solve_refinement && nrhs == 1 && b != x;
   /* A selected pivot tolerance below the caller's request is an accuracy
      risk in every numeric frame.  Transformed frames keep their current
      prepared values in solver->values, while plain pass-through frames use
@@ -13214,7 +13548,8 @@ static int solve_impl(kls_solver *solver,
     solver->stats.verified_rhs_reused = 1;
     solver->stats.verified_rhs_reuse_count++;
   }
-  if (ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
+  if (solver->accuracy_policy==KLS_ACCURACY_STRICT_RHS_L2 &&
+      ok && solver->common.status >= 0 && !solver->in_solve_refinement &&
       !repeated_rhs_verified &&
       (solver->numeric_needs_refinement || solver->row_solve_self_check ||
        /* near-diagonal factors (tight-tolerance adoption at 1e-8) always
@@ -13273,7 +13608,7 @@ static int solve_impl(kls_solver *solver,
     const UF_long *rinv = solver->solve_refine_rinv;
     const UF_long *cmap = solver->user_col_perm;
     if (solver->row_perm != NULL && rinv == NULL) {
-      goto refine_skip;
+      return KLS_ERR_OUT_OF_MEMORY;
     }
     if (solver->row_scale != NULL &&
         solver->solve_refine_rs_inv_src != solver->row_scale) {
@@ -13292,13 +13627,14 @@ static int solve_impl(kls_solver *solver,
       solver->row_scale != NULL ? solver->solve_refine_rs_inv : NULL;
     const double *cs = solver->col_scale;
     if (solver->row_scale != NULL && rs_inv == NULL) {
-      goto refine_skip;
+      return KLS_ERR_OUT_OF_MEMORY;
     }
     if (solver->solve_refine_workspace == NULL) {
       solver->solve_refine_workspace = (double *)malloc(
         4u * (size_t)solver->n * sizeof(*solver->solve_refine_workspace));
     }
     double *residual = solver->solve_refine_workspace;
+    if(residual == NULL) return KLS_ERR_OUT_OF_MEMORY;
     double *correction =
       residual != NULL ? residual + solver->n : NULL;
     double *saved_x =
@@ -13319,10 +13655,11 @@ static int solve_impl(kls_solver *solver,
          !solver->numeric_needs_refinement) &&
         (solver->solve_recovery_active ||
          solver->promoted_tolerance_l2_recovery_required ||
+         tight_tol_selected ||
          !(solver->common.tol < 1.0e-6)) &&
         getenv("KLS_ENABLE_SOLVE_REFINEMENT") == NULL;
       const int promoted_tolerance_l2_contract = self_check_only &&
-        !kernel_transpose && nrhs == 1 && b != x &&
+        nrhs == 1 && b != x &&
         (tight_tol_selected || solver->solve_recovery_active ||
          solver->promoted_tolerance_l2_recovery_required) &&
         getenv("KLS_DISABLE_PROMOTED_TOLERANCE_L2_RECOVERY") == NULL &&
@@ -13414,6 +13751,11 @@ static int solve_impl(kls_solver *solver,
       int certified_unscaled_l2_verified =
         !solver->certified_unscaled_l2_contract;
       memcpy(saved_x, xrhs, (size_t)nloc * sizeof(*saved_x));
+      const int preserve_ordinary_best=ordinary_self_check_l2_contract &&
+        !rinv && !cmap && !solver->row_perm && !solver->user_col_perm &&
+        !solver->row_scale && !solver->col_scale;
+      long double best_residual_upper=INFINITY;
+      int best_residual_certified=0;
       int refinement_limit = solver->solve_recovery_active
         ? 16
         : (self_check_only ? 8 : 3);
@@ -13643,6 +13985,9 @@ static int solve_impl(kls_solver *solver,
           }
           rnorm2 = (double)accurate_norm2;
         }
+        if(preserve_ordinary_best)
+          private_keep_best(solver,refine_a,brhs,xrhs,kernel_transpose,
+                            saved_x,&best_residual_upper,&best_residual_certified);
         const int ordinary_self_check_l2_ok =
           ordinary_self_check_l2_contract &&
           isfinite(bnorm2) && isfinite(rnorm2) &&
@@ -13758,7 +14103,7 @@ static int solve_impl(kls_solver *solver,
             certified_unscaled_transpose_l2_ok ||
             (!promoted_tolerance_l2_contract &&
              !(rmax < (self_check_only ? 0.999 : 0.5) * last_rmax))) {
-          if (!promoted_tolerance_l2_contract &&
+          if (!promoted_tolerance_l2_contract && !preserve_ordinary_best &&
               initial_rmax >= 0.0 && rmax > initial_rmax) {
             /* Refinement diverged: the factorization amplifies in this
                direction.  Keep the preceding correction when its measured
@@ -13903,6 +14248,12 @@ static int solve_impl(kls_solver *solver,
           break;
         }
       }
+      if(preserve_ordinary_best && !ordinary_self_check_l2_verified &&
+         isfinite(best_residual_upper)) {
+        private_keep_best(solver,refine_a,brhs,xrhs,kernel_transpose,
+                          saved_x,&best_residual_upper,&best_residual_certified);
+        memcpy(xrhs,saved_x,(size_t)nloc*sizeof(*xrhs));
+      }
       if (promoted_tolerance_l2_contract &&
           !promoted_tolerance_l2_verified) {
         /* A tolerance-promoted factor can still be too ill-conditioned for
@@ -14043,6 +14394,12 @@ static int solve_impl(kls_solver *solver,
           solver->solve_contract_probe = 2;
         }
       }
+      if(preserve_ordinary_best) {
+        private_keep_best(solver,refine_a,brhs,xrhs,kernel_transpose,
+                          saved_x,&best_residual_upper,&best_residual_certified);
+        if(!ordinary_self_check_l2_verified && isfinite(best_residual_upper))
+          memcpy(xrhs,saved_x,(size_t)nloc*sizeof(*xrhs));
+      }
       if (ordinary_self_check_l2_contract &&
           !ordinary_self_check_l2_verified && !kernel_transpose &&
           nrhs == 1 && b != x && solver->common.rcond > 0.0 &&
@@ -14053,6 +14410,42 @@ static int solve_impl(kls_solver *solver,
         solver->low_rcond_solve_contract_state = 2;
         if (contract_probe_wanted || contract_armed) {
           solver->solve_contract_probe = 2;
+        }
+      }
+      if(preserve_ordinary_best) {
+        private_keep_best(solver,refine_a,brhs,xrhs,kernel_transpose,
+                          saved_x,&best_residual_upper,&best_residual_certified);
+        if(isfinite(best_residual_upper)) {
+          memcpy(xrhs,saved_x,(size_t)nloc*sizeof(*xrhs));
+          /* This proof belongs to the just-restored incumbent, not an earlier
+           * recovery flag. It is local to this RHS and immutable plain-frame
+           * operator; refactor recovery returns before reaching here. The
+           * original-system public gate remains independent. */
+          ordinary_self_check_l2_verified=best_residual_certified;
+        } else {
+          /* No usable ranking bound: retain the independent retry, including
+           * allocation failure and unsupported floating-point environments. */
+          ordinary_self_check_l2_verified=interval_csc_certificate((size_t)nloc,
+            solver->col_ptr,solver->row_idx,refine_a,brhs,xrhs,kernel_transpose,NULL,NULL);
+        }
+      }
+      if(ordinary_self_check_l2_contract && !ordinary_self_check_l2_verified &&
+         preserve_ordinary_best &&
+         private_lattice_recover(solver,refine_a,brhs,xrhs,kernel_transpose)) {
+        ordinary_self_check_l2_verified=1;
+        solver->low_rcond_solve_contract_state=2;
+        solver->solve_contract_probe=2;
+      }
+      if (!ordinary_self_check_l2_verified) {
+        /* Cold sufficient certificate against the original plain-frame
+           operator. It proves the public limit; it does not cache an answer
+           certificate or alter the normal 5e-9 refinement target. */
+        if (!cmap && !rinv && !solver->row_perm && !solver->user_col_perm &&
+            !solver->row_scale && !solver->col_scale &&
+            interval_csc_certificate((size_t)nloc, solver->col_ptr,
+                solver->row_idx, refine_a, brhs, xrhs, kernel_transpose,
+                NULL, NULL)) {
+          ordinary_self_check_l2_verified = 1;
         }
       }
       if (!ordinary_self_check_l2_verified) {
@@ -14075,10 +14468,9 @@ static int solve_impl(kls_solver *solver,
     }
     solver->stats.solve_seconds = kls_now_seconds() - start;
   }
-refine_skip:;
-
   solver->stats.solve_seconds = kls_now_seconds() - start;
-  if (ok && !transpose && nrhs == 1 && !solver->in_solve_refinement) {
+  if (ok && !transpose && nrhs == 1 && !solver->in_solve_refinement &&
+      !(solver->snb_group && solver->snb_group->active)) {
     /* The adaptive lifecycle is defined by the caller's operation, not by
        the orientation in which AUTO stored the matrix.  A normal solve on a
        transposed internal factor still belongs to the normal repeated-solve
@@ -14108,6 +14500,8 @@ int kls_solve(kls_solver *solver,
   if (solver != NULL && nrhs != 1 && solver->refactor_l_packed_valid) {
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
+    solver->refactor_l_packed_valid = 0;
+    solver->refactor_u_packed_valid = 0;
   }
   return solve_impl(solver, 0, nrhs, b, ldb, x, ldx);
 }
@@ -14125,6 +14519,10 @@ int kls_solve_transpose(kls_solver *solver,
        exact publication sweep before using the established implementation. */
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
+    /* Transfer ownership as well as publishing bytes: downstream native
+       recovery must not leave the previous packed deck authoritative. */
+    solver->refactor_l_packed_valid = 0;
+    solver->refactor_u_packed_valid = 0;
   }
   return solve_impl(solver, 1, nrhs, b, ldb, x, ldx);
 }
@@ -14229,7 +14627,7 @@ static int kls_compact_transpose_refactor_solve(kls_solver *solver,
   return status;
 }
 
-int kls_refactor_solve(kls_solver *solver,
+static int kls_refactor_solve_impl(kls_solver *solver,
                        const double *values,
                        int64_t nrhs,
                        const double *b,
@@ -14358,6 +14756,32 @@ int kls_refactor_solve(kls_solver *solver,
   solver->fused_refactor_solve_row_values = 0;
   solver->fused_refactor_solve_rhs = NULL;
   return solve_status;
+}
+
+#include "kls_snb_cycle.inc"
+
+int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
+    const double *b, int64_t ldb, double *x, int64_t ldx) {
+  if (!values) return KLS_ERR_INVALID_ARGUMENT;
+  double *saved = NULL;
+  int status = private_caller_rhs(s,nrhs,b,ldb,x,ldx,&saved);
+  if (status != KLS_OK) return status;
+  double *candidate = calloc((size_t)nrhs*(size_t)s->n,sizeof(double));
+  if (!candidate) { free(saved);return KLS_ERR_OUT_OF_MEMORY; }
+  /* Do not mark numeric updates as nested recovery: this API publishes a new
+   * caller matrix even when its unchanged-matrix shortcut bypasses solve. */
+  if (!s->private_caller_depth) s->private_cold_deadline = 0;
+  ++s->private_caller_depth;
+  status = private_refactor_solve_body(s,values,nrhs,saved,0,candidate,0);
+  status = private_caller_finish(s,0,nrhs,saved,candidate,0,status);
+  --s->private_caller_depth;
+  if (status != KLS_OK) s->verified_rhs_valid = 0;
+  if (status == KLS_OK)
+    for (int64_t k=0;k<nrhs;++k)
+      memcpy(x+(size_t)k*(ldx?ldx:s->n),candidate+(size_t)k*s->n,
+             (size_t)s->n*sizeof(double));
+  free(candidate);
+  return status;
 }
 
 int kls_get_stats(const kls_solver *solver, kls_stats *stats) {

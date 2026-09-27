@@ -1162,14 +1162,18 @@ static UF_long kls_native_transpose_solve(kls_solver *solver, double *out) {
   for (UF_long k = 0; k < n; ++k) {
     const UF_long len = numeric->Ulen[k];
     const UF_long *indices = (const UF_long *)(lu + numeric->Uip[k]);
-    const double *values = lu + numeric->Uip[k] + kls_klu_units_for_indices(len);
+    const double *values = solver->refactor_u_packed_valid
+      ? solver->refactor_u_packed_values[k]
+      : lu + numeric->Uip[k] + kls_klu_units_for_indices(len);
     work[k] = kls_compact_match_row_solve_dot(values, indices, work,
                                              0, len, work[k]) / diag[k];
   }
   for (UF_long k = n; k-- > 0;) {
     const UF_long len = numeric->Llen[k];
     const UF_long *indices = (const UF_long *)(lu + numeric->Lip[k]);
-    const double *values = lu + numeric->Lip[k] + kls_klu_units_for_indices(len);
+    const double *values = solver->refactor_l_packed_valid
+      ? solver->refactor_l_packed_values[k]
+      : lu + numeric->Lip[k] + kls_klu_units_for_indices(len);
     work[k] = kls_compact_match_row_solve_dot(values, indices, work,
                                              0, len, work[k]);
     out[numeric->Pnum[k]] = rs == NULL ? work[k] : work[k] / rs[k];
@@ -1194,18 +1198,26 @@ static UF_long kls_compact_transpose_solve(kls_solver *solver,
   const int narrow = solver->i16solve_l != NULL &&
     solver->i16solve_u != NULL && solver->i16solve_lx != NULL &&
     solver->i16solve_ux != NULL;
+  /* Storage ownership is fixed for this solve. Select the narrow-column
+     tables once, rather than branching on ownership for every equation. */
+  double *const *narrow_lx = solver->refactor_l_packed_valid
+    ? solver->refactor_l_packed_values : solver->i16solve_lx;
+  double *const *narrow_ux = solver->refactor_u_packed_valid
+    ? solver->refactor_u_packed_values : solver->i16solve_ux;
   if (!prepared) {
     for (UF_long k = 0; k < n; ++k) {
       double value = rhs[solver->symbolic->Q[k]];
       if (narrow) {
         const UF_long begin = solver->i16solve_uoff[k];
         const UF_long len = solver->i16solve_uoff[k + 1u] - begin;
-        value = kls_lean_i16_row_solve_dot(solver->i16solve_ux[k],
+        value = kls_lean_i16_row_solve_dot(narrow_ux[k],
                   solver->i16solve_u + begin, work, 0, len, value);
       } else {
         const UF_long len = numeric->Ulen[k];
-        const double *ux = (double *)numeric->LUbx[0] + numeric->Uip[k] +
-                          kls_klu_units_for_indices(len);
+        const double *ux = solver->refactor_u_packed_valid
+          ? solver->refactor_u_packed_values[k]
+          : (double *)numeric->LUbx[0] + numeric->Uip[k] +
+            kls_klu_units_for_indices(len);
         const int32_t *ui = solver->i32solve_u + solver->i32solve_uoff[k];
         for (UF_long p = 0; p < len; ++p)
           value -= ux[p] * work[ui[p]];
@@ -1218,12 +1230,14 @@ static UF_long kls_compact_transpose_solve(kls_solver *solver,
     if (narrow) {
       const UF_long begin = solver->i16solve_loff[k];
       const UF_long len = solver->i16solve_loff[k + 1u] - begin;
-      value = kls_lean_i16_row_solve_dot(solver->i16solve_lx[k],
+      value = kls_lean_i16_row_solve_dot(narrow_lx[k],
                 solver->i16solve_l + begin, work, 0, len, value);
     } else {
       const UF_long len = numeric->Llen[k];
-      const double *lx = (double *)numeric->LUbx[0] + numeric->Lip[k] +
-                        kls_klu_units_for_indices(len);
+      const double *lx = solver->refactor_l_packed_valid
+        ? solver->refactor_l_packed_values[k]
+        : (double *)numeric->LUbx[0] + numeric->Lip[k] +
+          kls_klu_units_for_indices(len);
       const int32_t *li = solver->i32solve_l + solver->i32solve_loff[k];
       for (UF_long p = 0; p < len; ++p)
         value -= lx[p] * work[li[p]];
@@ -1938,50 +1952,11 @@ static void kls_solve_contract_classify(kls_solver *solver,
     return;
   }
   kls_update_numeric_rcond_guard(solver);
-  if (solver->options.backend != KLS_BACKEND_SERIAL &&
-      solver->common.rcond > 0.0 &&
-      solver->common.rcond < sqrt(DBL_EPSILON)) {
-    /* Reciprocal pivot growth measures backward stability of the factor,
-       but cannot certify the forward effect of an almost singular pivot
-       sequence.  The inexpensive current-U diagonal ratio supplies that
-       missing numeric condition and takes precedence over profile bypasses
-       or a healthy rgrowth verdict. */
-    solver->solve_contract_probe =
-      solver->low_rcond_solve_contract_state == 1 ? 1 : 2;
-    solver->solve_contract_verified =
-      solver->low_rcond_solve_contract_state == 1;
-    return;
-  }
-
-  if (solver->options.backend == KLS_BACKEND_SERIAL &&
-      solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU) {
-    /* Explicit serial KLU-refactor mode keeps base KLU solve semantics.
-       The factor and refactor are the same full-precision KLU operations;
-       arming KLS's adaptive residual correction here turns every solve into
-       an SpMV plus two triangular solves.  AUTO/KLS paths retain that extra
-       contract protection, including every multi-thread execution. */
-    solver->solve_contract_probe = 1;
-    solver->solve_contract_verified = 1;
-    return;
-  }
-  trilinos_klu_l_common growth_common = solver->common;
-  if (!trilinos_klu_l_rgrowth(
-        solver->col_ptr, solver->row_idx,
-        (double *)numeric_values, solver->symbolic,
-        solver->numeric, &growth_common)) {
-    return;
-  }
-  const double thresh = 1.0e-6;
-  solver->solve_contract_probe =
-    growth_common.rgrowth < thresh && growth_common.rgrowth >= 0.0 ? 2 : 1;
-  if (solver->solve_contract_probe == 2) {
-    /* growth-armed corrections take the single-shot exit from the first
-       solve on: every solve still measures the raw residual (the SpMV
-       the correction is computed from), and a correction this class
-       cannot repair shows up in the caller's residual check rather than
-       costing every solve a verification sweep it always passes */
-    solver->solve_contract_verified = 1;
-  }
+  /* Private accuracy-first experiment: diagonal ratios and pivot growth
+   * cannot certify a particular RHS. Every eligible numeric carries a
+   * current-matrix residual contract; only checking the answer can pass it. */
+  solver->solve_contract_probe = 2;
+  solver->solve_contract_verified = 0;
 }
 
 /* A public factor call starts a new numeric epoch just as a public refactor
@@ -1993,12 +1968,12 @@ static void kls_solve_contract_classify(kls_solver *solver,
 static void kls_factor_solve_contract_classify(
   kls_solver *solver,
   const double *numeric_values) {
-  if (solver == NULL || numeric_values == NULL ||
-      solver->options.backend == KLS_BACKEND_SERIAL) {
+  if (solver == NULL || numeric_values == NULL) {
     return;
   }
   kls_solve_contract_classify(solver, numeric_values);
-  if (solver->solve_contract_probe != 2 || solver->nnz == 0u ||
+  if ((solver->solve_contract_probe != 2 &&
+       solver->solve_refine_values == NULL) || solver->nnz == 0u ||
       solver->nnz > (UF_long)(KLS_MAX_ALLOCATION / sizeof(double)) ||
       solver->row_perm != NULL || solver->row_scale != NULL ||
       solver->col_scale != NULL) {

@@ -13,6 +13,8 @@
 #include <time.h>
 #include <unistd.h>
 
+int kls_snb_calibrate_model(kls_snb_cost_model *model,uint64_t seed);
+
 typedef struct synthetic_matrix {
   int64_t n, nnz;
   int64_t *ptr, *rows;
@@ -229,7 +231,7 @@ static int pin_cpus(const char *list, int threads) {
 }
 
 static void usage(const char *name) {
-  fprintf(stderr, "Usage: %s --threads N --output FILE [--cpus C,C,...] [--seed N] [--force] [--self-test]\n", name);
+  fprintf(stderr, "Usage: %s --threads N --output FILE [--cpus C,C,...] [--seed N] [--force] [--self-test] [--snb-only]\n", name);
 }
 
 int main(int argc, char **argv) {
@@ -238,7 +240,7 @@ int main(int argc, char **argv) {
   fprintf(stderr, "kls-autotune currently supports Linux x86-64 only\n");
   return 2;
 #else
-  int threads = 0, force = 0, self_test = 0;
+  int threads = 0, force = 0, self_test = 0, snb_only = 0;
   const char *output = NULL, *cpus = NULL;
   uint64_t seed = UINT64_C(0x4b4c5354554e4531);
   for (int i = 1; i < argc; ++i) {
@@ -248,6 +250,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed = strtoull(argv[++i], NULL, 0);
     else if (!strcmp(argv[i], "--force")) force = 1;
     else if (!strcmp(argv[i], "--self-test")) self_test = 1;
+    else if (!strcmp(argv[i], "--snb-only")) snb_only = 1;
     else { usage(argv[0]); return 2; }
   }
   if (threads <= 0 || output == NULL || !pin_cpus(cpus, threads)) {
@@ -256,6 +259,15 @@ int main(int argc, char **argv) {
   if (!force && access(output, F_OK) == 0) {
     fprintf(stderr, "%s exists; pass --force to replace it\n", output);
     return 2;
+  }
+  if (snb_only) {
+    if (threads != 1 || self_test) { usage(argv[0]); return 2; }
+    kls_snb_cost_model model;
+    kls_tuning_values defaults; kls_tuning_defaults(&defaults);
+    if (!kls_snb_calibrate_model(&model,seed)) return 1;
+    const int status=kls_tuning_write_host_profile_model(output,threads,
+      &defaults,&model,seed,force,NULL);
+    return status==KLS_OK?0:1;
   }
   const int64_t full_sizes[] = {4096, 8192, 16384, 32768, 49152, 65536};
   const int full_widths[] = {1, 2, 4, 8, 16, 24};
@@ -310,8 +322,11 @@ int main(int argc, char **argv) {
   }
   unlink(candidate_path);
   kls_tuning_metadata metadata;
-  int status = kls_tuning_write_host_profile(output, threads, &best, seed,
-                                              force, &metadata);
+  /* The standard threshold search retains its validated legacy workload.
+     SNB grouping is an explicit --snb-only experiment until its separate
+     compound-cycle corpus validation qualifies it for this default flow. */
+  int status = kls_tuning_write_host_profile(output, threads, &best,
+                                            seed, force, &metadata);
   for (size_t i = 0; i < case_count; ++i) free_matrix(&cases[i]);
   if (status != KLS_OK) {
     fprintf(stderr, "cannot write profile: %s\n", kls_status_string(status));

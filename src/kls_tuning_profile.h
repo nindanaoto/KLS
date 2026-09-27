@@ -3,6 +3,13 @@
 
 #include <stdint.h>
 
+/* Costs are seconds per generated-kernel operation, never CPU defaults.
+   Kept separate from hot tuning fields to preserve solver field offsets. */
+typedef struct kls_snb_cost_model {
+  int enabled;
+  double narrow[3], dense[6], panel[4];
+} kls_snb_cost_model;
+
 typedef struct kls_tuning_values {
   unsigned row_batch_min_rows, row_batch_max_rows, row_small_sort_max;
   double row_dense_min_work, row_compact_panel_min_work;
@@ -25,6 +32,7 @@ typedef struct kls_tuning_metadata {
   uint64_t profile_id;
   int field_count;
   int threads;
+  kls_snb_cost_model snb_cost;
 } kls_tuning_metadata;
 
 void kls_tuning_defaults(kls_tuning_values *values);
@@ -36,5 +44,10 @@ int kls_tuning_write_host_profile(const char *path, int threads,
 int kls_tuning_load_host_profile(const char *path, int threads,
                                  kls_tuning_values *values,
                                  kls_tuning_metadata *metadata);
+int kls_tuning_write_host_profile_model(const char *path, int threads,
+                                  const kls_tuning_values *values,
+                                  const kls_snb_cost_model *model,
+                                  unsigned long long seed, int force,
+                                  kls_tuning_metadata *metadata);
 
 #endif

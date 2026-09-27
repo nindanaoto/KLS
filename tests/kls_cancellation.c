@@ -19,6 +19,10 @@ static int check_scaled_chain(int exponent, int zero_initial_rhs) {
   options.orientation = KLS_ORIENTATION_TRANSPOSE;
   kls_solver *solver = NULL;
   if (kls_create(&solver) != KLS_OK) return 1;
+  /* This fixture checks strict RHS-relative recovery and its condition probe. */
+  if (kls_set_accuracy_policy(solver,KLS_ACCURACY_STRICT_RHS_L2)!=KLS_OK) {
+    kls_destroy(solver);return 1;
+  }
   int status = kls_analyze_csr(solver, KLS_INDEX_INT32, 3, ptr, idx, 0,
                              &options);
   for (int epoch = 0; status == KLS_OK && epoch < 4; ++epoch) {

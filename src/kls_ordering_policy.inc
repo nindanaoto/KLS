@@ -9457,9 +9457,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          its own changed-value lifecycle, so retain its comparison even when
          exact-input reuse is disabled; the opt-out is deliberately local. */
       solver->prestatic_deferred = 1;
-      kls_prestatic_ordering_ctx = 0;
-      *elapsed += kls_now_seconds() - start;
-      return;
+      goto done;
     }
 #ifdef KLS_HAVE_SPRAL_SCALING
     if (large_spral_candidate) {
@@ -9486,8 +9484,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
          weak rows stay inline because the matched ordering is their
          reliable initial-factor path. */
       solver->prestatic_deferred = 1;
-      kls_prestatic_ordering_ctx = 0;
-      return;
+      goto done;
     }
     int use_medium_gate = 1;
 #ifdef KLS_HAVE_SPRAL_SCALING
@@ -9524,9 +9521,7 @@ static void maybe_select_pre_static_row_match(kls_solver *solver,
        factor repays matching in addition to avoiding the duplicate factor.
      */
     solver->prestatic_deferred = 1;
-    kls_prestatic_ordering_ctx = 0;
-    *elapsed += kls_now_seconds() - start;
-    return;
+    goto done;
   }
 
 matching_admitted:;

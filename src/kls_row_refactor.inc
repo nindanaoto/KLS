@@ -15749,7 +15749,10 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
         double *lx = NULL;
         UF_long lcol_len = 0u;
         kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
-        kls_scatter_subtract(x, li, lx, lcol_len, ujk);
+        /* Zero was checked above; retain row order without the shared
+           helper's manual unrolling and prefetch branches. */
+        for (UF_long p = 0u; p < lcol_len; ++p)
+          x[li[p]] -= lx[p] * ujk;
       }
     }
 
