@@ -31,6 +31,23 @@ int main(void) {
   fail_at=0;
   CHECK(kls_componentwise_certify(1,p,rows,a,b,x,0,NULL,&upper)==1);
   CHECK(live==0);
+  /* Exercise allocation faults in the fast proof as well as the residual
+   * path above, then in the interval fallback after a duplicate-coordinate
+   * fast miss. Every allocated scratch block must be released. */
+  for(fail_at=1;fail_at<=2;++fail_at) {
+    allocation=0;
+    CHECK(kls_componentwise_certify(1,p,rows,a,b,x,0,NULL,&upper)==-1);
+    CHECK(live==0);
+  }
+#if KLS_COMPONENTWISE_HAS_ACCUMULATED
+  int64_t dp[]={0,2},dr[]={0,0};double da[]={0.5,0.5};
+  for(fail_at=3;fail_at<=4;++fail_at) {
+    allocation=0;
+    CHECK(kls_componentwise_certify(1,dp,dr,da,b,x,0,NULL,&upper)==-1);
+    CHECK(live==0);
+  }
+#endif
+  fail_at=0;
   int rounding=fegetround();
   int modes[]={FE_UPWARD,FE_DOWNWARD,FE_TOWARDZERO};
   for(size_t i=0;i<sizeof(modes)/sizeof(modes[0]);++i) {
