@@ -132,6 +132,16 @@ reserve. Do not run performance measurements concurrently with builds or audits.
 
 ## Gates and remaining stages
 
+The subsequent private-workspace experiment was rejected by its benefit gate.
+All 336 timing runs completed; no regression gate failed, but confirmed target
+improvements were only 0.52%/0.28% (BJT, one/eight threads), 0.57%/0.11%
+(MOS13), and 0.31%/0.15% (mem_plus). The required incremental benefit was 2%.
+Its full test suite and standalone fault/concurrency sanitizer checks passed,
+but no fresh full capture audit was pursued for an unprofitable candidate.
+The implementation was removed rather than retaining extra production state.
+The frozen binary, source snapshot, rejected patch and observations remain under
+`/tmp/kls-refinement-first/certificate-workspace*` for reproducibility.
+
 - Accuracy: complete exact-rational audit of BJT, MOS13 and mem_plus at one and
   eight threads; every successful answer must satisfy the unchanged tolerance.
   Only MOS13 may have an explicitly matched rejection with verified recovery,
