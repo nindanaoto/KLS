@@ -1277,6 +1277,9 @@ struct kls_solver {
   int snb_group_disabled;
   /* Optional certificate traversal metadata; do not shift hot solver fields. */
   kls_componentwise_plan *componentwise_plan;
+  /* Published only through an idle pool's generation handshake. */
+  void (*componentwise_work)(void *,int);
+  void *componentwise_work_context;
 };
 
 struct kls_generic_nd_trial;
@@ -6445,6 +6448,10 @@ static void *kls_refactor_pool_worker_main(void *arg) {
     }
     seen_generation = generation;
 
+    if(shared->solver && shared->solver->componentwise_work) {
+      shared->solver->componentwise_work(shared->solver->componentwise_work_context,
+                                        (int)(worker-pool->workers));
+    } else {
     const UF_long nblocks = shared->symbolic->nblocks;
     const UF_long chunk = shared->block_chunk > 0 ? shared->block_chunk : 1u;
     for (;;) {
@@ -6477,6 +6484,7 @@ static void *kls_refactor_pool_worker_main(void *arg) {
       }
     }
 
+    }
     if (atomic_fetch_sub_explicit(&pool->active_workers, 1,
                                   memory_order_acq_rel) == 1) {
       pthread_mutex_lock(&shared->lock);
@@ -12800,6 +12808,8 @@ static int private_caller_rhs(kls_solver *s, int64_t nrhs, const double *b,
 
 static int private_solve_body(kls_solver *, int, int64_t, const double *, int64_t, double *, int64_t);
 
+#include "kls_componentwise_pool.inc"
+
 static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs,
     const double *b,double *x,int64_t ldx,int status) {
   if(status!=KLS_OK) return status; /* Never certify a failed kernel's output. */
@@ -12820,7 +12830,11 @@ static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs
       int certificate_threads=s->options.threads;
       if((s->refactor_pool && s->refactor_pool->created_count>0) ||
          (s->egraph_pool && s->egraph_pool->created_count>0)) certificate_threads=1;
-      int certified=s->options.threads>1
+      const int owned_threads=s->options.threads>1?private_componentwise_pool_threads(s):0;
+      int certified=owned_threads>1
+        ?kls_componentwise_certify_executor(&s->componentwise_plan,owned_threads,
+             a->n,a->p,a->rows,a->values,br,xr,transpose,&upper,private_componentwise_execute,s)
+        :s->options.threads>1
         ?kls_componentwise_certify_planned(&s->componentwise_plan,certificate_threads,
                                          a->n,a->p,a->rows,a->values,br,xr,transpose,&upper)
         :kls_componentwise_certify(a->n,a->p,a->rows,a->values,br,xr,transpose,NULL,&upper);

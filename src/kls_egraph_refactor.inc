@@ -4728,6 +4728,11 @@ static void kls_row_solve_worker_run(kls_egraph_refactor_worker *worker) {
 static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
   kls_egraph_refactor_worker *worker) {
   kls_egraph_refactor_shared *shared = worker->shared;
+  if(shared->solver && shared->solver->componentwise_work) {
+    shared->solver->componentwise_work(shared->solver->componentwise_work_context,
+                                      worker->tid);
+    return;
+  }
   kls_dense_help_self = worker;
   if (shared->solve_permute_mode) {
     const UF_long begin =

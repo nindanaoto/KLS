@@ -36,6 +36,17 @@ static int fault_round(void) {
 #define CHECK(c) do {if(!(c)) {fprintf(stderr,"line %d: %s\n",__LINE__,#c);return 1;}} while(0)
 
 typedef struct {kls_componentwise_plan *plan;int failed;} context;
+typedef struct {int calls,mode;} executor_context;
+static int test_executor(void *opaque,void (*work)(void *,int),void *job,int threads) {
+  executor_context *c=opaque;++c->calls;
+  if(c->mode==1) return 0;
+  for(int tid=threads-1;tid>=0;--tid) {
+    if(c->mode==2 && tid==1) fesetround(FE_UPWARD);
+    work(job,tid);
+    if(c->mode==2 && tid==1) fesetround(FE_TONEAREST);
+  }
+  return 1;
+}
 static void *independent(void *opaque) {
   context *c=opaque;
   int64_t p[]={0,2,4},r[]={0,1,0,1};double a[]={2,3,1,4},x[]={1,2};
@@ -58,6 +69,20 @@ int main(void) {
     kls_componentwise_plan_destroy(plan);CHECK(live==0);
   }
   fail_at=0;
+  kls_componentwise_plan *external=NULL;
+  executor_context executor={0};
+  for(int d=0;d<2;++d) for(int i=0;i<5;++i)
+    CHECK(kls_componentwise_certify_executor(&external,4,2,p,r,a,d?bt:b,x,d,&upper,
+              test_executor,&executor)==1);
+  CHECK(executor.calls>=2*KLS_CERTIFICATE_PROBE_PAIRS);
+  for(int mode=1;mode<=2;++mode) {
+    external->direction[0].choice=1;executor.mode=mode;
+    CHECK(kls_componentwise_certify_executor(&external,4,2,p,r,a,b,x,0,&upper,
+              test_executor,&executor)==1); /* unchanged safe fallback */
+    CHECK(external->eligible==-1 && fegetround()==FE_TONEAREST);
+    kls_componentwise_plan_reset(external);
+  }
+  kls_componentwise_plan_destroy(external);CHECK(live==0);
   /* Serial row requests must not launch even trial workers. The injected
    * unsupported worker would disable a plan if any parallel trial ran. */
   kls_componentwise_plan *serial_only=NULL;

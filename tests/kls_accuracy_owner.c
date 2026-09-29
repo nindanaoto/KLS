@@ -60,7 +60,21 @@ int main(void) {
     assert(entry(s,0,0)==3 && entry(s,1,1)==6);
     assert(kls_factor(s,a)==KLS_OK);
     saved=s->private_original;saved_values=saved->values;
-    /* Inject each allocation failure at the post-numeric publication boundary. */
+    /* A cache hit allocates only fresh values. Failure still invalidates the
+     * numeric epoch without changing the previously published snapshot. */
+    assert(saved->layout && saved->value_source);
+    s->private_original_valid=0;++s->private_numeric_depth;
+    allocation_countdown=0;
+    int cached_status=private_numeric_snapshot_finish(s,a,KLS_OK,1);
+    allocation_countdown=-1;
+    assert(cached_status==KLS_ERR_OUT_OF_MEMORY && !s->private_original_valid);
+    assert(s->private_original==saved && saved->values==saved_values);
+    assert(s->private_numeric_depth==0);
+    assert(kls_solve(s,1,b,0,x,0)==KLS_ERR_SOLVE_FAILED);
+    /* Disable optional metadata to retain coverage of every required rebuild
+     * allocation, rather than assuming that every update rebuilds structure. */
+    free(saved->layout);saved->layout=NULL;
+    free(saved->value_source);saved->value_source=NULL;
     for (int failure=0;failure<6;++failure) {
       s->private_original_valid=0;++s->private_numeric_depth;
       allocation_countdown=failure;
@@ -82,6 +96,6 @@ int main(void) {
     assert(kls_factor(s,a)==KLS_OK);
     kls_destroy(s);++configurations;
   }
-  printf("PASS snapshot ownership configurations=%d, six allocation failures each\n",configurations);
+  printf("PASS snapshot ownership configurations=%d, cached and six rebuild allocation failures each\n",configurations);
   return configurations==12 ? 0 : 1;
 }

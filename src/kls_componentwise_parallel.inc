@@ -11,6 +11,8 @@ struct kls_componentwise_plan {
   size_t *rowptr;
   int64_t *positions,*columns;
   int eligible,threads;
+  kls_componentwise_executor executor;
+  void *executor_context;
   struct {
     int samples,choice; /* 0 measuring, -1 serial rows, +1 parallel rows */
     double ratios[KLS_CERTIFICATE_PROBE_PAIRS];
@@ -99,6 +101,38 @@ static int componentwise_plan_row(const kls_componentwise_plan *plan,size_t row,
   return 1;
 }
 
+typedef struct {
+  long double upper;
+  int valid,environment;
+} componentwise_worker_result;
+typedef struct {
+  const kls_componentwise_plan *plan;
+  const int64_t *p,*rows;
+  const double *a,*b,*x;
+  int transpose,threads;
+  long double tolerance;
+  componentwise_worker_result *results;
+} componentwise_worker_job;
+
+static void componentwise_plan_worker(void *opaque,int tid) {
+  componentwise_worker_job *job=opaque;
+  if(tid<0 || tid>=job->threads) return;
+  componentwise_worker_result *out=job->results+tid;
+  out->environment=componentwise_plan_environment();
+  if(!out->environment) return;
+  out->valid=1;
+  /* Overflow-safe contiguous partition; each row keeps its original order. */
+  size_t q=job->plan->n/(size_t)job->threads,r=job->plan->n%(size_t)job->threads;
+  size_t first=q*(size_t)tid+(r<(size_t)tid?r:(size_t)tid);
+  size_t last=first+q+((size_t)tid<r);
+  for(size_t row=first;row<last;++row) {
+    long double bound;
+    if(!componentwise_plan_row(job->plan,row,job->p,job->rows,job->a,
+        job->b,job->x,job->transpose,job->tolerance,&bound)) out->valid=0;
+    else if(bound>out->upper) out->upper=bound;
+  }
+}
+
 static int componentwise_plan_run(const kls_componentwise_plan *plan,int threads,
     const int64_t *p,const int64_t *rows,const double *a,const double *b,
     const double *x,int transpose,long double *upper) {
@@ -107,6 +141,22 @@ static int componentwise_plan_run(const kls_componentwise_plan *plan,int threads
   *upper=INFINITY;
   const long double tolerance=interval_outward(
       1.0L/KLS_COMPONENTWISE_TOLERANCE_DENOMINATOR,-INFINITY);
+  if(threads>1 && plan->executor) {
+    if((size_t)threads>SIZE_MAX/sizeof(componentwise_worker_result)) return -2;
+    componentwise_worker_result *results=calloc((size_t)threads,sizeof(*results));
+    if(!results) return -2;
+    componentwise_worker_job job={plan,p,rows,a,b,x,transpose,threads,tolerance,results};
+    const int completed=plan->executor(plan->executor_context,componentwise_plan_worker,&job,threads);
+    for(int tid=0;tid<threads;++tid) {
+      environment &= results[tid].environment;
+      valid &= results[tid].valid;
+      if(results[tid].upper>maximum) maximum=results[tid].upper;
+    }
+    free(results);
+    if(!completed || !environment) return -2;
+    if(valid) *upper=maximum;
+    return valid;
+  }
   if(threads==1) {
     if(!componentwise_plan_environment()) return -2;
     for(size_t i=0;i<plan->n;++i) {
@@ -174,9 +224,10 @@ static int componentwise_plan_select(kls_componentwise_plan *plan,int threads,
 }
 #endif
 
-int kls_componentwise_certify_planned(kls_componentwise_plan **owner,int threads,
+int kls_componentwise_certify_executor(kls_componentwise_plan **owner,int threads,
     size_t n,const int64_t *p,const int64_t *rows,const double *a,
-    const double *b,const double *x,int transpose,long double *upper) {
+    const double *b,const double *x,int transpose,long double *upper,
+    kls_componentwise_executor executor,void *context) {
   if(upper) *upper=INFINITY;
 #if KLS_COMPONENTWISE_HAS_ACCUMULATED && defined(_OPENMP)
   if(owner && threads>=1 && n && p && b && x && upper &&
@@ -189,6 +240,10 @@ int kls_componentwise_certify_planned(kls_componentwise_plan **owner,int threads
       if(plan->eligible && (plan->n!=n || plan->nnz!=p[n])) kls_componentwise_plan_reset(plan);
       if(!plan->eligible) componentwise_plan_build(plan,n,p,rows);
       if(plan->eligible>0) {
+        if(plan->executor!=executor || plan->executor_context!=context) {
+          plan->executor=executor;plan->executor_context=context;
+          plan->threads=0; /* Reset both timing choices on executor changes. */
+        }
         /* An existing numerical worker team owns the CPU budget. In that
          * case the caller requests serial rows without starting OpenMP trials.
          * Otherwise even discarded trials can leave competing workers awake. */
@@ -201,7 +256,14 @@ int kls_componentwise_certify_planned(kls_componentwise_plan **owner,int threads
     }
   }
 #else
-  (void)owner;(void)threads;
+  (void)owner;(void)threads;(void)executor;(void)context;
 #endif
   return kls_componentwise_certify(n,p,rows,a,b,x,transpose,NULL,upper);
+}
+
+int kls_componentwise_certify_planned(kls_componentwise_plan **owner,int threads,
+    size_t n,const int64_t *p,const int64_t *rows,const double *a,
+    const double *b,const double *x,int transpose,long double *upper) {
+  return kls_componentwise_certify_executor(owner,threads,n,p,rows,a,b,x,
+                                          transpose,upper,NULL,NULL);
 }

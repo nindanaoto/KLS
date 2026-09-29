@@ -5,11 +5,18 @@ typedef struct private_original_operator {
   size_t n, nnz;
   int64_t *p, *rows;
   double *values;
+  /* Optional exact structural snapshot and caller-index gather map. Values
+   * and certificates are never cached across numeric updates. */
+  UF_long *layout;
+  int64_t *value_source;
+  unsigned map_flags;
+  int orientation;
 } private_original_operator;
 
 static void private_original_operator_free(private_original_operator *a) {
   if (!a) return;
   free(a->p); free(a->rows); free(a->values);
+  free(a->layout); free(a->value_source);
   memset(a, 0, sizeof(*a));
 }
 
@@ -24,7 +31,34 @@ static int private_original_operator_build(const kls_solver *s,
       (uintmax_t)s->nnz > SIZE_MAX / sizeof(double))
     return KLS_ERR_INVALID_ARGUMENT;
   const size_t n = (size_t)s->n, nnz = (size_t)s->nnz;
-  private_original_operator result = {n, nnz, NULL, NULL, NULL};
+  const unsigned flags=(s->row_perm?1u:0u)|(s->user_col_perm?2u:0u)|
+                       (s->input_to_csc?4u:0u);
+  if(out->layout && out->value_source && out->n==n && out->nnz==nnz &&
+     out->orientation==(int)s->orientation && out->map_flags==flags) {
+    const UF_long *saved=out->layout;
+    int same=!memcmp(saved,s->col_ptr,(n+1)*sizeof(*saved));saved+=n+1;
+    if(nnz) same &= !memcmp(saved,s->row_idx,nnz*sizeof(*saved));
+    saved+=nnz;
+    if(s->row_perm) same &= !memcmp(saved,s->row_perm,n*sizeof(*saved));
+    saved+=n;
+    if(s->user_col_perm) same &= !memcmp(saved,s->user_col_perm,n*sizeof(*saved));
+    saved+=n;
+    if(s->input_to_csc && nnz) same &= !memcmp(saved,s->input_to_csc,nnz*sizeof(*saved));
+    if(same) {
+      double *values=malloc((nnz?nnz:1)*sizeof(*values));
+      if(!values) return KLS_ERR_OUT_OF_MEMORY;
+      for(size_t k=0;k<nnz;++k) {
+        const double *value=caller_values+out->value_source[k];
+        if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED && !isfinite(*value)) {
+          free(values);return KLS_ERR_INVALID_ARGUMENT;
+        }
+        memcpy(values+k,value,sizeof(*values));
+      }
+      free(out->values);out->values=values;
+      return KLS_OK;
+    }
+  }
+  private_original_operator result = {.n=n,.nnz=nnz};
   int status = KLS_ERR_OUT_OF_MEMORY;
   int64_t *inverse_row = malloc(n * sizeof(*inverse_row));
   int64_t *cursor = malloc(n * sizeof(*cursor));
@@ -34,6 +68,17 @@ static int private_original_operator_build(const kls_solver *s,
   result.values = malloc((nnz ? nnz : 1) * sizeof(*result.values));
   if (!inverse_row || !cursor || !source || !result.p ||
       !result.rows || !result.values) goto done;
+  /* Optional acceleration: allocation failure retains the full rebuild path.
+   * Exact content comparisons also detect in-place permutation/map changes. */
+  const size_t capacity=SIZE_MAX/sizeof(UF_long);
+  if(n<=(capacity-1)/3 && nnz<=(capacity-1-3*n)/2) {
+    result.layout=malloc((3*n+2*nnz+1)*sizeof(*result.layout));
+    result.value_source=malloc((nnz?nnz:1)*sizeof(*result.value_source));
+    if(!result.layout || !result.value_source) {
+      free(result.layout);free(result.value_source);
+      result.layout=NULL;result.value_source=NULL;
+    }
+  }
   status = KLS_ERR_INVALID_ARGUMENT;
   if (s->col_ptr[0] != 0 || s->col_ptr[n] != s->nnz) goto done;
   for (size_t j = 0; j < n; ++j) {
@@ -79,7 +124,20 @@ static int private_original_operator_build(const kls_solver *s,
       if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED &&
          !isfinite(caller_values[source[k]])) goto done;
       memcpy(result.values + at, caller_values + source[k], sizeof(double));
+      if(result.value_source) result.value_source[at]=source[k];
     }
+  }
+  if(result.layout) {
+    UF_long *saved=result.layout;
+    memcpy(saved,s->col_ptr,(n+1)*sizeof(*saved));saved+=n+1;
+    if(nnz) memcpy(saved,s->row_idx,nnz*sizeof(*saved));
+    saved+=nnz;
+    if(s->row_perm) memcpy(saved,s->row_perm,n*sizeof(*saved));
+    saved+=n;
+    if(s->user_col_perm) memcpy(saved,s->user_col_perm,n*sizeof(*saved));
+    saved+=n;
+    if(s->input_to_csc && nnz) memcpy(saved,s->input_to_csc,nnz*sizeof(*saved));
+    result.map_flags=flags;result.orientation=s->orientation;
   }
   /* Positions in a certificate row plan refer to the caller CSC layout.
    * Validate that exact layout before retaining a plan across value updates;
