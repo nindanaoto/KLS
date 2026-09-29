@@ -185,3 +185,5 @@ int kls_componentwise_certify(size_t n, const int64_t *p,
 done:
   free(w);free(indices);return accepted;
 }
+
+#include "kls_componentwise_parallel.inc"

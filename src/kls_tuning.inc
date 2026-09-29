@@ -25,6 +25,9 @@
 #define KLS_COLD_LATTICE_REGULARIZER 1.0e-7
 #define KLS_COLD_LATTICE_MAX_STEPS 10000
 
+/* Bounded serial/parallel certificate timing trials; never an accuracy limit. */
+#define KLS_CERTIFICATE_PROBE_PAIRS 3
+
 /* Workload lifecycle and repeated-factorization admission. */
 #define KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES 4
 #define KLS_LEAN_SNODE_AVX512_MIN_TARGETS 32

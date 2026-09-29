@@ -31,11 +31,14 @@ class CertificateTests(unittest.TestCase):
         cls.bound_text = cls.lib.kls_test_bound
         cls.bound_text.argtypes = [C.POINTER(C.c_longdouble),C.c_char_p,C.c_size_t]
         cls.bound_text.restype = C.c_int
+        cls.parallel=cls.lib.kls_test_parallel
+        cls.parallel.argtypes=[*cls.check.argtypes,C.c_int]
+        cls.parallel.restype=C.c_int
 
     @classmethod
     def tearDownClass(cls): cls.temp.cleanup()
 
-    def compare(self,n,p,rows,a,b,x,transpose=False):
+    def compare(self,n,p,rows,a,b,x,transpose=False,parallel_threads=None):
         pp=(C.c_int64*len(p))(*p);rr=(C.c_int64*len(rows))(*rows)
         aa=(C.c_double*len(a))(*a);bb=(C.c_double*n)(*b);xx=(C.c_double*n)(*x)
         bound=C.c_longdouble()
@@ -66,7 +69,30 @@ class CertificateTests(unittest.TestCase):
         fast=self.fast(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(fast_bound))
         verify(fast,fast_bound)
         if fast==1:self.assertEqual(got,1)
+        if parallel_threads is not None:
+            parallel_bound=C.c_longdouble()
+            parallel=self.parallel(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(parallel_bound),parallel_threads)
+            verify(parallel,parallel_bound)
+            self.assertEqual(parallel,fast)
+            if fast==1:
+                left=C.create_string_buffer(128);right=C.create_string_buffer(128)
+                self.bound_text(C.byref(fast_bound),left,len(left))
+                self.bound_text(C.byref(parallel_bound),right,len(right))
+                self.assertEqual(left.value,right.value)
         return got,exact
+
+    def test_parallel_bounds(self):
+        if not self.lib.kls_test_parallel_available():self.skipTest('OpenMP fast proof unavailable')
+        for threads in (1,2,4,8):
+            for n in (1,3,31,65,257):
+                values=[math.ldexp(1.+(j%7)/8.,(j%31)-15) for j in range(n)]
+                total=sum(map(F,values),F(0));tol=F(1,10**8)
+                edge=float(total*(1+tol)/(1-tol))
+                for b0 in (float(total),math.nextafter(edge,-math.inf),edge,math.nextafter(edge,math.inf)):
+                    for trans in (False,True):
+                        p=[0,n]+[n]*(n-1) if trans else list(range(n+1))
+                        rows=list(range(n)) if trans else [0]*n
+                        self.compare(n,p,rows,values,[b0]+[0.]*(n-1),[1.]*n,trans,threads)
 
     def test_fast_dispatch(self):
         if not self.lib.kls_test_fast_available():self.skipTest('extended fast proof unavailable')

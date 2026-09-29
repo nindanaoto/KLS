@@ -11,6 +11,7 @@ static void *caller_calloc(size_t n,size_t size) {
 #define malloc caller_malloc
 #define calloc caller_calloc
 #define kls_componentwise_certify caller_certificate
+#define kls_componentwise_certify_planned caller_planned_certificate
 #define kls_accuracy_certify caller_strict_certificate
 #define kls_accuracy_lattice_recover caller_forbidden_lattice
 #define kls_accuracy_lattice_schedule caller_forbidden_schedule
@@ -18,12 +19,14 @@ static void *caller_calloc(size_t n,size_t size) {
 #undef malloc
 #undef calloc
 #undef kls_componentwise_certify
+#undef kls_componentwise_certify_planned
 #undef kls_accuracy_certify
 #undef kls_accuracy_lattice_recover
 #undef kls_accuracy_lattice_schedule
 #undef NDEBUG
 #include <assert.h>
 extern int kls_componentwise_certify(size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,double*,long double*);
+extern int kls_componentwise_certify_planned(kls_componentwise_plan**,int,size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,long double*);
 extern int kls_accuracy_certify(size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,double*);
 static int calls,residual_calls,strict_calls,reject_all,oom_call;
 /* Trap both external cold-search entrances, including recovery after forced
@@ -53,10 +56,19 @@ int caller_strict_certificate(size_t n,const int64_t *p,const int64_t *r,const d
     const double *b,const double *x,int transpose,double *upper) {
   ++strict_calls;return kls_accuracy_certify(n,p,r,a,b,x,transpose,upper);
 }
+int caller_planned_certificate(kls_componentwise_plan **plan,int threads,size_t n,
+    const int64_t *p,const int64_t *r,const double *a,const double *b,const double *x,
+    int transpose,long double *upper) {
+  ++calls;
+  if(calls==oom_call) return -1;
+  if(reject_all) {*upper=1;return 0;}
+  return kls_componentwise_certify_planned(plan,threads,n,p,r,a,b,x,transpose,upper);
+}
 int main(void) {
   int64_t p[]={0,1,2},r[]={0,1};double a[]={2,4};
+  for(int threads=1;threads<=8;threads+=7)
   for(int orientation=0;orientation<3;++orientation) for(int api=0;api<3;++api) {
-    kls_solver *s=NULL;kls_options o;kls_default_options(&o);o.orientation=orientation;o.threads=1;
+    kls_solver *s=NULL;kls_options o;kls_default_options(&o);o.orientation=orientation;o.threads=threads;
     assert(kls_create(&s)==KLS_OK);
     assert(kls_set_accuracy_policy(s,KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR)==KLS_OK);
     assert(kls_analyze_csc(s,KLS_INDEX_INT64,2,p,r,0,&o)==KLS_OK);
@@ -84,6 +96,17 @@ int main(void) {
     calls=0;double b[]={2,4},x[]={1,1};
     assert(private_componentwise_finish(s,0,1,b,x,0,KLS_ERR_SOLVE_FAILED)==KLS_ERR_SOLVE_FAILED);
     assert(calls==0); /* A failed kernel must never enter acceptance. */
+    kls_componentwise_plan *plan=s->componentwise_plan;
+    double updated[]={3,6},fresh_rhs[]={3,6};
+    assert(kls_refactor(s,updated)==KLS_OK);
+    assert(kls_solve(s,1,fresh_rhs,0,x,0)==KLS_OK && x[0]==1 && x[1]==1);
+    assert(s->componentwise_plan==plan);
+    /* Reanalysis replaces the caller layout even when dimensions agree. */
+    int64_t pp[]={0,2,3},rr[]={0,1,1};double aa[]={2,1,4},bb[]={2,5};
+    assert(kls_analyze_csc(s,KLS_INDEX_INT64,2,pp,rr,0,&o)==KLS_OK);
+    assert(!s->componentwise_plan);
+    assert(kls_factor(s,aa)==KLS_OK);
+    assert(kls_solve(s,1,bb,0,x,0)==KLS_OK && x[0]==1 && x[1]==1);
     kls_destroy(s);
   }
   puts("PASS componentwise caller: atomic faults, second RHS, correction budget, no strict gate");

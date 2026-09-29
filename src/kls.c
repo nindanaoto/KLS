@@ -22,6 +22,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "kls/kls.h"
+#include "kls_componentwise.h"
 
 #include <stdio.h>
 
@@ -1274,6 +1275,8 @@ struct kls_solver {
   struct kls_snb_group_cycle *snb_group;
   unsigned snb_group_epoch;
   int snb_group_disabled;
+  /* Optional certificate traversal metadata; do not shift hot solver fields. */
+  kls_componentwise_plan *componentwise_plan;
 };
 
 struct kls_generic_nd_trial;
@@ -7228,6 +7231,8 @@ static void kls_metis_race_abandon(kls_solver *solver);
 #include "kls_original_operator.inc"
 
 static void clear_matrix(kls_solver *solver) {
+  kls_componentwise_plan_destroy(solver->componentwise_plan);
+  solver->componentwise_plan=NULL;
   private_original_operator_free(solver->private_original);
   KLS_FREE_AND_NULL(solver->private_original);
   solver->private_original_valid = 0;
@@ -12793,7 +12798,6 @@ static int private_caller_rhs(kls_solver *s, int64_t nrhs, const double *b,
 
 #include "kls_caller_recovery.inc"
 
-#include "kls_componentwise.h"
 static int private_solve_body(kls_solver *, int, int64_t, const double *, int64_t, double *, int64_t);
 
 static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs,
@@ -12809,8 +12813,17 @@ static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs
     double *xr=x+(size_t)rhs*(size_t)ldx;
     for(int step=0;;++step) {
       long double upper;
-      int certified=kls_componentwise_certify(a->n,a->p,a->rows,a->values,
-                                             br,xr,transpose,NULL,&upper);
+      /* Do not launch a second worker runtime alongside the numerical pools:
+       * OpenMP workers may keep spinning after a short certificate and slow
+       * the following refactorization. Serial rows retain the traversal gain.
+       * Ordinary one-thread solves retain the stateless certificate path. */
+      int certificate_threads=s->options.threads;
+      if((s->refactor_pool && s->refactor_pool->created_count>0) ||
+         (s->egraph_pool && s->egraph_pool->created_count>0)) certificate_threads=1;
+      int certified=s->options.threads>1
+        ?kls_componentwise_certify_planned(&s->componentwise_plan,certificate_threads,
+                                         a->n,a->p,a->rows,a->values,br,xr,transpose,&upper)
+        :kls_componentwise_certify(a->n,a->p,a->rows,a->values,br,xr,transpose,NULL,&upper);
       if(certified==1) break;
       if(certified<0) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
       if(step==KLS_COMPONENTWISE_MAX_CORRECTIONS) {status=KLS_ERR_SOLVE_FAILED;goto done;}

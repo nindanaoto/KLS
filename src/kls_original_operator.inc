@@ -81,6 +81,13 @@ static int private_original_operator_build(const kls_solver *s,
       memcpy(result.values + at, caller_values + source[k], sizeof(double));
     }
   }
+  /* Positions in a certificate row plan refer to the caller CSC layout.
+   * Validate that exact layout before retaining a plan across value updates;
+   * pointer identity is insufficient because snapshots are replaced. */
+  if(out->n!=n || out->nnz!=nnz ||
+     memcmp(out->p,result.p,(n+1)*sizeof(*result.p)) ||
+     memcmp(out->rows,result.rows,nnz*sizeof(*result.rows)))
+    kls_componentwise_plan_reset(s->componentwise_plan);
   private_original_operator_free(out);
   *out = result;
   memset(&result, 0, sizeof(result));
