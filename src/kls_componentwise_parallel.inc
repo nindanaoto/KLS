@@ -1,6 +1,7 @@
 /* Optional row-owned execution of the same accumulated-error proof. This
  * module caches only CSC traversal positions, never values or certificates. */
 #include "kls_tuning.inc"
+#include <string.h>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -72,9 +73,59 @@ declined:
 
 /* This is the same per-row bound as the scatter proof above. Serial and
  * parallel execution call this same function in the same per-row order. */
+static int componentwise_binary64_normal_or_zero(double value) {
+  uint64_t bits;
+  memcpy(&bits,&value,sizeof(bits));
+  bits&=UINT64_C(0x7fffffffffffffff);
+  return bits==0 || (bits>=UINT64_C(0x0010000000000000) &&
+                    bits<UINT64_C(0x7ff0000000000000));
+}
+/* Sufficient binary64 proof with an extended-precision fallback. Volatile
+ * intermediates require separately rounded operations even with contraction
+ * enabled. Exceptional ranges fall back to the extended proof below. */
+static int componentwise_binary64_row(const kls_componentwise_plan *plan,size_t row,
+    const int64_t *p,const int64_t *rows,const double *a,const double *b,
+    const double *x,int transpose,long double tolerance,long double *upper) {
+  if(_mm_getcsr()&((1u<<15)|(1u<<6)|(3u<<13))) return 0;
+  double r=b[row],m=fabs(r);
+  if(!componentwise_binary64_normal_or_zero(r) || !isfinite(x[row])) return 0;
+  const size_t first=transpose?(size_t)p[row]:plan->rowptr[row];
+  const size_t last=transpose?(size_t)p[row+1]:plan->rowptr[row+1];
+  for(size_t k=first;k<last;++k) {
+    const size_t at=transpose?k:(size_t)plan->positions[k];
+    const size_t col=transpose?(size_t)rows[k]:(size_t)plan->columns[k];
+    const double av=a[at],xv=x[col];
+    if(!componentwise_binary64_normal_or_zero(av) ||
+       !componentwise_binary64_normal_or_zero(xv)) return 0;
+    volatile double product=av*xv;
+    if(!componentwise_binary64_normal_or_zero(product) ||
+       (product==0 && av!=0 && xv!=0)) return 0;
+    volatile double next_r=r-product,next_m=m+fabs(product);
+    if(!componentwise_binary64_normal_or_zero(next_r) ||
+       !componentwise_binary64_normal_or_zero(next_m)) return 0;
+    r=next_r;m=next_m;
+  }
+  if(m==0) {*upper=0;return r==0;}
+  /* Allow 2u per operation: a just-subnormal exact product can round up to
+   * DBL_MIN. For at most 2k operations, t=4ku and gamma/(1-gamma)=t/(1-2t).
+   * c=8(k+1)u<=1/4 ensures t<=1/8 and c dominates that error coefficient.
+   * Evaluate the bound in extended precision to retain exponent headroom. */
+  const long double c=4*((long double)(last-first)+1)*DBL_EPSILON;
+  if(!(c<=0.25L)) return 0;
+  const long double error=interval_outward(c*(long double)m,INFINITY);
+  const long double numerator=interval_outward(fabsl((long double)r)+error,INFINITY);
+  const long double denominator=interval_outward((long double)m-error,-INFINITY);
+  if(!(denominator>0) || !isfinite(numerator) ||
+     numerator>interval_outward(tolerance*denominator,-INFINITY)) return 0;
+  const long double ratio=interval_outward(numerator/denominator,INFINITY);
+  if(ratio>tolerance) return 0;
+  *upper=ratio;return 1;
+}
+
 static int componentwise_plan_row(const kls_componentwise_plan *plan,size_t row,
     const int64_t *p,const int64_t *rows,const double *a,const double *b,
     const double *x,int transpose,long double tolerance,long double *upper) {
+  if(componentwise_binary64_row(plan,row,p,rows,a,b,x,transpose,tolerance,upper)) return 1;
   volatile long double bj=(long double)b[row],xi=(long double)x[row];
   if(!isfinite(bj) || !isfinite(xi)) return 0;
   long double r=bj,magnitude=fabsl(bj);
@@ -120,6 +171,10 @@ static void componentwise_plan_worker(void *opaque,int tid) {
   componentwise_worker_result *out=job->results+tid;
   out->environment=componentwise_plan_environment();
   if(!out->environment) return;
+  /* Scope gradual underflow to certificate arithmetic, once per worker.
+   * Restore every MXCSR bit, including the caller's exception flags. */
+  const unsigned saved_csr=_mm_getcsr();
+  _mm_setcsr(saved_csr&~((1u<<15)|(1u<<6)));
   out->valid=1;
   /* Overflow-safe contiguous partition; each row keeps its original order. */
   size_t q=job->plan->n/(size_t)job->threads,r=job->plan->n%(size_t)job->threads;
@@ -131,6 +186,7 @@ static void componentwise_plan_worker(void *opaque,int tid) {
         job->b,job->x,job->transpose,job->tolerance,&bound)) out->valid=0;
     else if(bound>out->upper) out->upper=bound;
   }
+  _mm_setcsr(saved_csr);
 }
 
 static int componentwise_plan_run(const kls_componentwise_plan *plan,int threads,
@@ -159,22 +215,28 @@ static int componentwise_plan_run(const kls_componentwise_plan *plan,int threads
   }
   if(threads==1) {
     if(!componentwise_plan_environment()) return -2;
+    const unsigned saved_csr=_mm_getcsr();
+    _mm_setcsr(saved_csr&~((1u<<15)|(1u<<6)));
     for(size_t i=0;i<plan->n;++i) {
       long double bound;
       if(!componentwise_plan_row(plan,i,p,rows,a,b,x,transpose,tolerance,&bound)) {valid=0;continue;}
       if(bound>maximum) maximum=bound;
     }
+    _mm_setcsr(saved_csr);
   } else {
 #pragma omp parallel num_threads(threads) reduction(&:valid,environment) reduction(max:maximum)
     {
       const int supported=componentwise_plan_environment();
       environment&=supported;
+      const unsigned saved_csr=_mm_getcsr();
+      if(supported) _mm_setcsr(saved_csr&~((1u<<15)|(1u<<6)));
 #pragma omp for schedule(static)
       for(size_t i=0;i<plan->n;++i) {
         long double bound;
         if(!supported || !componentwise_plan_row(plan,i,p,rows,a,b,x,transpose,tolerance,&bound)) {valid=0;continue;}
         if(bound>maximum) maximum=bound;
       }
+      _mm_setcsr(saved_csr);
     }
   }
   if(!environment) return -2;

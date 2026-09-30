@@ -26,15 +26,22 @@ static void exercise(int family,int threads) {
   assert(!s->componentwise_work && !s->componentwise_work_context);
   assert(!private_componentwise_execute(s,count_worker,hits,threads+1));
   if(family) s->egraph_pool->shared.solve_permute_mode=0;
-  kls_componentwise_plan *plan=NULL;
+  kls_componentwise_plan *plan=NULL,*serial_plan=NULL;
   for(int tr=0;tr<2;++tr) for(int repeat=0;repeat<8;++repeat) {
     long double upper,reference;
     assert(kls_componentwise_certify_executor(&plan,threads,4,p,rows,a,tr?bt:b,x,tr,
              &upper,private_componentwise_execute,s)==1);
     assert(kls_componentwise_certify(4,p,rows,a,tr?bt:b,x,tr,NULL,&reference)==1);
+    /* These integer fixtures have exact zero residual. Different valid proof
+     * kernels need not report identical conservative upper bounds. Compare
+     * worker dispatch with the same row proof executed serially instead. */
+    assert(upper>=0 && upper<=1.0L/100000000.0L);
+    assert(kls_componentwise_certify_planned(&serial_plan,1,4,p,rows,a,tr?bt:b,x,tr,
+             &reference)==1);
     assert(upper==reference);
   }
   kls_componentwise_plan_destroy(plan);
+  kls_componentwise_plan_destroy(serial_plan);
   /* Exercise public certification, including strided multiple right sides.
    * The tiny matrix would not create a team itself; the fixture supplies one
    * of each family so dispatch coverage is independent of tuning thresholds. */

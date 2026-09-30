@@ -28,6 +28,9 @@ class CertificateTests(unittest.TestCase):
         cls.fast = cls.lib.kls_test_fast
         cls.fast.argtypes = cls.check.argtypes
         cls.fast.restype = C.c_int
+        cls.binary64 = cls.lib.kls_test_binary64
+        cls.binary64.argtypes = cls.check.argtypes
+        cls.binary64.restype = C.c_int
         cls.bound_text = cls.lib.kls_test_bound
         cls.bound_text.argtypes = [C.POINTER(C.c_longdouble),C.c_char_p,C.c_size_t]
         cls.bound_text.restype = C.c_int
@@ -68,17 +71,15 @@ class CertificateTests(unittest.TestCase):
         fast_bound=C.c_longdouble()
         fast=self.fast(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(fast_bound))
         verify(fast,fast_bound)
+        binary_bound=C.c_longdouble()
+        binary=self.binary64(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(binary_bound))
+        verify(binary,binary_bound)
         if fast==1:self.assertEqual(got,1)
         if parallel_threads is not None:
             parallel_bound=C.c_longdouble()
             parallel=self.parallel(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(parallel_bound),parallel_threads)
             verify(parallel,parallel_bound)
             self.assertEqual(parallel,fast)
-            if fast==1:
-                left=C.create_string_buffer(128);right=C.create_string_buffer(128)
-                self.bound_text(C.byref(fast_bound),left,len(left))
-                self.bound_text(C.byref(parallel_bound),right,len(right))
-                self.assertEqual(left.value,right.value)
         return got,exact
 
     def test_parallel_bounds(self):
@@ -104,6 +105,42 @@ class CertificateTests(unittest.TestCase):
         dp=(C.c_int64*2)(0,2);dr=(C.c_int64*2)(0,0);da=(C.c_double*2)(.5,.5)
         self.assertEqual(self.fast(1,dp,dr,da,bb,xx,0,None,C.byref(bound)),0)
         self.assertEqual(self.check(1,dp,dr,da,bb,xx,0,None,C.byref(bound)),1)
+
+    def test_binary64_dispatch_and_range_guards(self):
+        if not self.lib.kls_test_parallel_available():
+            self.skipTest('row proof unavailable')
+        self.assertEqual(self.lib.kls_test_binary64_classification(),1)
+        pp=(C.c_int64*2)(0,1);rr=(C.c_int64*1)(0)
+        bound=C.c_longdouble()
+        def call(a,b,x):
+            return self.binary64(1,pp,rr,(C.c_double*1)(a),
+                (C.c_double*1)(b),(C.c_double*1)(x),0,None,C.byref(bound))
+        self.assertEqual(call(1.,1.,1.),1)
+        self.assertEqual(call(0.,0.,1.),1)
+        self.assertEqual(call(math.ulp(0.),math.ulp(0.),1.),0)
+        self.assertEqual(call(2.**-1022,0.,2.**-1022),0)
+        self.assertEqual(call(2.**1023,1.,2.**1023),0)
+        # The exact product is subnormal but rounds to the smallest normal:
+        # its relative error can slightly exceed u. Check the reported bound
+        # against exact fractions rather than assuming the ordinary u model.
+        smallest_normal=2.**-1022
+        below_one=math.nextafter(1.,0.)
+        self.assertEqual(call(smallest_normal,smallest_normal,below_one),1)
+        for transpose in (False,True):
+            self.compare(1,[0,1],[0],[smallest_normal],[smallest_normal],
+                         [below_one],transpose,parallel_threads=2)
+        environment=self.lib.kls_test_binary64_environment
+        environment.argtypes=[C.c_int];environment.restype=C.c_int
+        self.assertEqual(environment(0),1)
+        for mode in range(1,6):
+            self.assertEqual(environment(mode),0)
+            self.assertEqual(environment(0),1)  # Each test restores the state.
+        scoped=self.lib.kls_test_binary64_scoped_environment
+        scoped.argtypes=[C.c_int,C.c_int,C.c_int];scoped.restype=C.c_int
+        for mode in (1,2,3):
+            for reject in (0,1):
+                for transpose in (0,1):
+                    self.assertEqual(scoped(mode,reject,transpose),1)
 
     def test_random_and_boundaries(self):
         rng=random.Random(5021)
