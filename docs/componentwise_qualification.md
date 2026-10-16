@@ -2426,3 +2426,56 @@ measured construction in a modeled batch gives 1.128697 and 1.089416. These
 modeled batches are not application timings. No favorable-subset selector or
 production integration follows from the correctness proofs. Decision:
 `build/componentwise-packed-verdict-runtime-operand-completed-cost-rejection-20261016/decision.json`.
+
+### Adapter recovery and contiguous coefficient import
+
+Xyce commit `7d578c3` checks the complete CSR graph before retaining analysis,
+preserves a reanalysis request after a changed graph, and applies column-map
+normalization in serial builds as well as MPI builds. Its permanent regression
+now changes columns and storage at the same matrix address while retaining
+row lengths. The original source fails the controls; corrected complete
+adapters pass 2,304 public recovery solves in native and ASan/UBSan contexts.
+A further permanent-test extension covers both optimized and unoptimized
+Epetra storage: all eight expected contexts pass, including 2,688 corrected
+solves and both retained original-source failure controls. Support/Epetra
+archives remain release builds; MPI multirank is unqualified.
+
+The separate coefficient-import candidates query fresh contiguous CSR pointers,
+check the complete graph, and retain an owned byte-exact coefficient snapshot.
+One retains per-row copying; the other compares and copies changed 64-byte
+chunks aligned to the owned destination. Both retain the checked row-view
+fallback. Neither selects circuits or caches coefficient pointers or answers.
+
+All four frontend arms completed the full 112-run instrumented circuit grid,
+with an independent waveform, step-count and raw-log review. Each arm makes
+72,142 solver calls per domain/thread setting, all through the direct local
+map path. Across the four settings, the cache-line candidate's value-update
+phase takes 0.325–0.501 seconds versus 1.147–1.190 for the original and
+2.003–2.434 for the graph-checked row-view baseline. These are instrumented
+phase totals, not competitive application timings. All arms share the same
+isolated qualified verdict-witness archive; the mapped-worker and ordinary-pool
+prototypes are absent. Plain binaries have no profiling wrappers.
+The balanced 462-observation uninstrumented frontend campaign is running and
+must receive terminal, absence and complete independent review before any
+performance decision. No frontend optimization has been integrated yet.
+Reviews:
+`build/xyce-normalized-csr-import-public-recovery-review-preparation-20261016/review.json`,
+`build/xyce-csr-import-storage-regression-review-preparation-20261016/review.json`,
+`build/xyce-normalized-csr-import-four-arm-api-review-preparation-20261016/review.json`.
+
+### Ordinary-pool caller participation
+
+An isolated core prototype gives ordinary BTF refactor worker zero to the
+caller and creates N−1 background threads. It shares that dispatch protocol
+with certificate callbacks, preserves block kernels and numerical dependency
+barriers, and restores caller affinity. Engine admission and first-factor
+scheduling remain unchanged. All 88 native/sanitizer runtime tests pass; an
+independent review confirms that only the main archive member changes.
+A separate lifecycle proof passes both builds: 48 total allocation failures,
+24 partial-startup failures and 600 repeated dispatches, with caller identity,
+background joins and affinity restoration checked. This is runtime evidence;
+full circuits, complete lifecycle cost, generality and peer timing remain
+required before integration.
+Reviews:
+`build/cooperative-ordinary-pool-runtime-review-preparation-20261016/review.json`,
+`build/cooperative-ordinary-pool-lifecycle-review-preparation-20261016/review.json`.
