@@ -69,6 +69,48 @@ int main(void) {
     kls_componentwise_plan_destroy(plan);CHECK(live==0);
   }
   fail_at=0;
+  /* Rejecting a partial row pass must still capture every correction entry
+   * through the full certificate, and must not calibrate on partial work. */
+  for(int transpose=0;transpose<2;++transpose) {
+    int64_t ep[]={0,1,2,3,4},er[]={0,1,2,3};
+    double ea[]={2,3,4,5},ex[]={1,2,3,4},eb[]={3,7,13,21};
+    double reference[4],*work=NULL;long double reference_upper;
+    kls_componentwise_plan *reject=NULL;executor_context rejection_executor={0};
+    CHECK(kls_componentwise_certify(4,ep,er,ea,eb,ex,transpose,
+              reference,&reference_upper)==0);
+    const unsigned saved_csr=_mm_getcsr();
+    _mm_setcsr(saved_csr|(1u<<15)|(1u<<6));
+    CHECK(kls_componentwise_certify_correction(&reject,2,4,ep,er,ea,eb,ex,
+              transpose,&upper,test_executor,&rejection_executor,&work)==0);
+    CHECK(_mm_getcsr()==(saved_csr|(1u<<15)|(1u<<6)));
+    _mm_setcsr(saved_csr);
+    CHECK(work && !memcmp(work,reference,sizeof(reference)) && upper==reference_upper);
+    CHECK(reject->eligible==1 && reject->direction[transpose].samples==0);
+    CHECK(rejection_executor.calls==0);
+    /* Exercise early rejection inside an already selected worker team. */
+    reject->direction[transpose].choice=1;
+    CHECK(kls_componentwise_certify_correction(&reject,2,4,ep,er,ea,eb,ex,
+              transpose,&upper,test_executor,&rejection_executor,&work)==0);
+    CHECK(rejection_executor.calls==1 && !memcmp(work,reference,sizeof(reference)));
+    CHECK(upper==reference_upper && fegetround()==FE_TONEAREST);
+    /* Direct OpenMP execution must cover every row with uneven ranges,
+     * empty ranges, and a runtime that may reduce the requested team. */
+    double exact_rhs[]={2,6,12,20};
+    reject->executor=NULL;reject->executor_context=NULL;
+    for(int dynamic=0;dynamic<2;++dynamic) {
+      omp_set_dynamic(dynamic);
+      for(int threads=3;threads<=8;threads+=5) {
+        long double serial,parallel;
+        CHECK(componentwise_plan_run(reject,1,ep,er,ea,exact_rhs,ex,transpose,&serial)==1);
+        CHECK(componentwise_plan_run(reject,threads,ep,er,ea,exact_rhs,ex,transpose,&parallel)==1);
+        CHECK(serial==parallel);
+        CHECK(componentwise_plan_run(reject,threads,ep,er,ea,eb,ex,transpose,&parallel)==0);
+        CHECK(isinf(parallel));
+      }
+    }
+    omp_set_dynamic(0);
+    fault_free(work);kls_componentwise_plan_destroy(reject);CHECK(live==0);
+  }
   kls_componentwise_plan *external=NULL;
   executor_context executor={0};
   for(int d=0;d<2;++d) for(int i=0;i<5;++i)

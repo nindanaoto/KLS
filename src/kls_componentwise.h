@@ -23,6 +23,14 @@ int kls_componentwise_certify_executor(kls_componentwise_plan **plan,int threads
     size_t n,const int64_t *p,const int64_t *rows,const double *a,
     const double *b,const double *x,int transpose,long double *upper,
     kls_componentwise_executor executor,void *context);
+/* Lazily allocate 2*n doubles at *correction when an interval pass is needed.
+ * On an uncertified return with finite *upper, its first n values contain the
+ * freshly computed correction RHS. The caller owns/frees the workspace, and
+ * may reuse it only at the same n. Each call checks the current values/RHS/x. */
+int kls_componentwise_certify_correction(kls_componentwise_plan **plan,int threads,
+    size_t n,const int64_t *p,const int64_t *rows,const double *a,
+    const double *b,const double *x,int transpose,long double *upper,
+    kls_componentwise_executor executor,void *context,double **correction);
 /* 1 certified, 0 not certified, -1 allocation failure. Residual, when
  * requested, is an ordinary double correction RHS, never a certificate. */
 int kls_componentwise_certify(size_t n, const int64_t *p,

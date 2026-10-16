@@ -89,9 +89,10 @@ done:
 #endif
 }
 
-int kls_componentwise_certify(size_t n, const int64_t *p,
+static int componentwise_certify_body(size_t n, const int64_t *p,
     const int64_t *rows, const double *a, const double *b, const double *x,
-    int transpose, double *residual, long double *upper) {
+    int transpose, double *residual, long double *upper, double **correction,
+    int accumulated_rejected) {
   if (upper) *upper=INFINITY;
 #if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
 #error Componentwise certification requires strict floating point semantics
@@ -110,16 +111,27 @@ int kls_componentwise_certify(size_t n, const int64_t *p,
   if (_mm_getcsr()&((1u<<15)|(1u<<6))) return 0;
 #endif
 #endif
-  if(!residual) {
+  if(!residual && !accumulated_rejected) {
     const int fast=componentwise_accumulated_certificate(n,p,rows,a,b,x,transpose,upper);
     if(fast!=0) return fast;
+  }
+  /* A missed fast proof already needs the interval pass. Capture its ordinary
+   * correction RHS in that same pass instead of repeating the calculation
+   * after rejection. The caller owns this workspace, never a certificate. */
+  const int capture=!residual && correction;
+  if(capture) {
+    if(!*correction) {
+      *correction=malloc((n?2*n:2)*sizeof(**correction));
+      if(!*correction) return -1;
+    }
+    residual=*correction;
   }
   long double *w=malloc((n?5*n:5)*sizeof(*w));
   size_t *indices=malloc((n?2*n:2)*sizeof(*indices));
   if (!w || !indices) { free(w);free(indices);return -1; }
   long double *lo=w,*hi=lo+n,*den=hi+n,*al=den+n,*ah=al+n;
   size_t *mark=indices,*touched=mark+n;
-  int accepted=0;
+  int accepted=0,correction_valid=1;
   for(size_t i=0;i<n;++i) {
     volatile long double bi=(long double)b[i],xi=(long double)x[i];
     if(!isfinite(bi)||!isfinite(xi)) goto done;
@@ -171,8 +183,10 @@ int kls_componentwise_certify(size_t n, const int64_t *p,
       const long double error=left>right?left:right;
       if(residual) {
         long double midpoint=lo[i]/2+hi[i]/2;
-        if(!isfinite(midpoint) || fabsl(midpoint)>DBL_MAX) {accepted=0;goto done;}
-        residual[i]=(double)midpoint;
+        if(!isfinite(midpoint) || fabsl(midpoint)>DBL_MAX) {
+          if(!capture) {accepted=0;goto done;}
+          correction_valid=0;
+        } else residual[i]=(double)midpoint;
       }
       if(error==0) continue;
       if(den[i]==0) {maximum=INFINITY;accepted=0;continue;}
@@ -181,9 +195,18 @@ int kls_componentwise_certify(size_t n, const int64_t *p,
       if(error>interval_outward(tolerance*den[i],-INFINITY)) accepted=0;
     }
     *upper=maximum;
+    /* An accurate answer does not need a representable correction RHS.
+     * Only failed checks require one before refinement can proceed. */
+    if(!accepted && !correction_valid) *upper=INFINITY;
   }
 done:
   free(w);free(indices);return accepted;
+}
+
+int kls_componentwise_certify(size_t n,const int64_t *p,
+    const int64_t *rows,const double *a,const double *b,const double *x,
+    int transpose,double *residual,long double *upper) {
+  return componentwise_certify_body(n,p,rows,a,b,x,transpose,residual,upper,NULL,0);
 }
 
 #include "kls_componentwise_parallel.inc"

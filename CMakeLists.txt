@@ -39,6 +39,7 @@ if(KLS_NATIVE_ARCH)
 endif()
 
 option(KLS_ENABLE_HOSTED_SIMD "Enable compiler SIMD pragmas and FMA contraction in KLS kernels" ON)
+find_package(OpenMP QUIET COMPONENTS C)
 
 option(KLS_BUILD_TESTS "Build KLS tests" ON)
 option(KLS_BUILD_BENCHMARKS "Build KLS benchmark tools" ON)
@@ -53,6 +54,7 @@ option(KLS_USE_SYSTEM_SPRAL "Use a system SPRAL library instead of the bundled s
 option(KLS_SYSTEM_SPRAL_LGPL_COMPATIBLE "Acknowledge that the selected system SPRAL library is redistributable with LGPL KLS" OFF)
 string(APPEND KLS_TUNING_FINGERPRINT_TEXT
   ";native=${KLS_NATIVE_ARCH};simd=${KLS_ENABLE_HOSTED_SIMD}"
+  ";openmp=${OpenMP_C_FOUND};openmp_flags=${OpenMP_C_FLAGS}"
   ";metis=${KLS_USE_SYSTEM_METIS};scotch=${KLS_ENABLE_SCOTCH}"
   ";spral=${KLS_ENABLE_SPRAL_SCALING}")
 string(SHA256 KLS_TUNING_BUILD_ID "${KLS_TUNING_FINGERPRINT_TEXT}")
@@ -511,6 +513,12 @@ target_link_libraries(kls
 target_link_libraries(kls
   PRIVATE
     kls_metis)
+# Certificate traversal and owned-worker execution must not depend on the
+# optional mt-METIS object being installed. Unsupported toolchains retain the
+# stateless certificate; the arithmetic contract is identical in either path.
+if(TARGET OpenMP::OpenMP_C)
+  target_link_libraries(kls PRIVATE OpenMP::OpenMP_C)
+endif()
 # Optional prebuilt mt-metis supplies threaded separator construction for
 # the deterministic NDP forest; build it once with its own configure/make.
 set(KLS_MTMETIS_LIB
@@ -758,6 +766,13 @@ if(KLS_BUILD_TESTS)
   endif()
   add_test(NAME kls_componentwise_parallel COMMAND kls_componentwise_parallel)
   set_tests_properties(kls_componentwise_parallel PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+  add_executable(kls_componentwise_correction tests/kls_componentwise_correction.c)
+  target_link_libraries(kls_componentwise_correction PRIVATE m)
+  if(TARGET OpenMP::OpenMP_C)
+    target_link_libraries(kls_componentwise_correction PRIVATE OpenMP::OpenMP_C)
+  endif()
+  add_test(NAME kls_componentwise_correction COMMAND kls_componentwise_correction)
+  set_tests_properties(kls_componentwise_correction PROPERTIES RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
   add_executable(kls_accuracy_schedule tests/kls_accuracy_schedule.c)
   target_link_libraries(kls_accuracy_schedule PRIVATE m)
   add_test(NAME kls_accuracy_schedule COMMAND kls_accuracy_schedule)

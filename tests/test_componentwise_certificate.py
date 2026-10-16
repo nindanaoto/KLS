@@ -28,15 +28,30 @@ class CertificateTests(unittest.TestCase):
         cls.fast = cls.lib.kls_test_fast
         cls.fast.argtypes = cls.check.argtypes
         cls.fast.restype = C.c_int
+        cls.extended_rows = cls.lib.kls_test_extended_rows
+        cls.extended_rows.argtypes = cls.check.argtypes
+        cls.extended_rows.restype = C.c_int
+        cls.interval_rows = cls.lib.kls_test_interval_rows
+        cls.interval_rows.argtypes = cls.check.argtypes
+        cls.interval_rows.restype = C.c_int
+        cls.interval_capture = cls.lib.kls_test_interval_capture
+        cls.interval_capture.argtypes = cls.check.argtypes
+        cls.interval_capture.restype = C.c_int
         cls.binary64 = cls.lib.kls_test_binary64
         cls.binary64.argtypes = cls.check.argtypes
         cls.binary64.restype = C.c_int
+        cls.capture = cls.lib.kls_test_capture
+        cls.capture.argtypes = cls.check.argtypes
+        cls.capture.restype = C.c_int
         cls.bound_text = cls.lib.kls_test_bound
         cls.bound_text.argtypes = [C.POINTER(C.c_longdouble),C.c_char_p,C.c_size_t]
         cls.bound_text.restype = C.c_int
         cls.parallel=cls.lib.kls_test_parallel
         cls.parallel.argtypes=[*cls.check.argtypes,C.c_int]
         cls.parallel.restype=C.c_int
+        cls.range_equivalence=cls.lib.kls_test_range_equivalence
+        cls.range_equivalence.argtypes=[*cls.check.argtypes[:7],C.c_int,C.c_int]
+        cls.range_equivalence.restype=C.c_int
 
     @classmethod
     def tearDownClass(cls): cls.temp.cleanup()
@@ -71,16 +86,67 @@ class CertificateTests(unittest.TestCase):
         fast_bound=C.c_longdouble()
         fast=self.fast(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(fast_bound))
         verify(fast,fast_bound)
+        extended_bound=C.c_longdouble()
+        extended=self.extended_rows(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(extended_bound))
+        if extended!=-2:
+            verify(extended,extended_bound)
+            self.assertEqual(extended,fast,('extended row/CSC verdict disagreement',p,rows,a,b,x,transpose))
+        row_bound=C.c_longdouble();reference_bound=C.c_longdouble()
+        row_residual=(C.c_double*n)();reference_residual=(C.c_double*n)()
+        interval=self.interval_rows(n,pp,rr,aa,bb,xx,int(transpose),row_residual,C.byref(row_bound))
+        if interval!=-2:
+            reference=self.interval_capture(n,pp,rr,aa,bb,xx,int(transpose),reference_residual,C.byref(reference_bound))
+            verify(interval,row_bound)
+            self.assertEqual(interval,reference,('full interval row/CSC verdict disagreement',p,rows,a,b,x,transpose))
+            def bound_text(upper):
+                text=C.create_string_buffer(128)
+                length=self.bound_text(C.byref(upper),text,len(text))
+                self.assertTrue(0<length<len(text))
+                return text.value
+            self.assertEqual(bound_text(row_bound),bound_text(reference_bound))
+            if interval==0 and b'inf' not in bound_text(row_bound).lower():
+                self.assertEqual(bytes(row_residual),bytes(reference_residual))
         binary_bound=C.c_longdouble()
         binary=self.binary64(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(binary_bound))
         verify(binary,binary_bound)
+        capture_bound=C.c_longdouble()
+        capture=self.capture(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(capture_bound))
+        verify(capture,capture_bound)
+        if got==1:self.assertEqual(capture,1)
         if fast==1:self.assertEqual(got,1)
         if parallel_threads is not None:
             parallel_bound=C.c_longdouble()
             parallel=self.parallel(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(parallel_bound),parallel_threads)
             verify(parallel,parallel_bound)
             self.assertEqual(parallel,fast)
+        range_equal=self.range_equivalence(n,pp,rr,aa,bb,xx,int(transpose),
+            parallel_threads or 1,0)
+        self.assertIn(range_equal,(-2,1))
         return got,exact
+
+    def test_mixed_range_reduction(self):
+        # A tiny product and an overflowing binary64 magnitude require the
+        # extended row proof; normal and empty rows use binary64 bounds.
+        tiny=math.ldexp(1.,-1023);huge=math.ldexp(1.,1023)
+        for n in (1,3,7,31,65):
+            a=[1.,tiny,huge/2]+[1.]*(max(0,n-3))
+            x=[1.,1.,2.]+[0.]*(max(0,n-3))
+            b=[1.,tiny*(1.+2e-9),huge]+[0.]*(max(0,n-3))
+            a=a[:n];x=x[:n];b=b[:n]
+            p=list(range(n+1));rows=list(range(n))
+            for reject in (False,True):
+                rhs=b.copy()
+                if reject:rhs[-1]=1. if x[-1]==0 else rhs[-1]*(1.+4e-8)
+                for transpose in (False,True):
+                    self.compare(n,p,rows,a,rhs,x,transpose)
+                    pp=(C.c_int64*(n+1))(*p);rr=(C.c_int64*n)(*rows)
+                    aa=(C.c_double*n)(*a);bb=(C.c_double*n)(*rhs);xx=(C.c_double*n)(*x)
+                    for threads in (1,2,3,8):
+                        for mode in (0,1,2,3):
+                            equal=self.range_equivalence(n,pp,rr,aa,bb,xx,
+                                int(transpose),threads,mode)
+                            if equal==-2:self.skipTest('row proof unavailable')
+                            self.assertEqual(equal,1,(n,reject,transpose,threads,mode))
 
     def test_parallel_bounds(self):
         if not self.lib.kls_test_parallel_available():self.skipTest('OpenMP fast proof unavailable')
@@ -226,6 +292,17 @@ class CertificateTests(unittest.TestCase):
                     p=[0,n]+[n]*(n-1) if trans else list(range(n+1))
                     rows=list(range(n)) if trans else [0]*n
                     self.compare(n,p,rows,values,[b0]+[0.]*(n-1),[1.]*n,trans)
+
+    def test_scaled_boundaries(self):
+        # Exercise outward bound arithmetic when its error/threshold is
+        # subnormal, and when the magnitude sum approaches binary64 overflow.
+        tol=F(1,10**8)
+        for exponent in (-1074,-1073,-1023,-1022,-1021,-1000,-500,0,500,1000,1022,1023):
+            scale=math.ldexp(1.,exponent)
+            edge=float(F(scale)*(1+tol)/(1-tol))
+            for b0 in (scale,math.nextafter(edge,-math.inf),edge,math.nextafter(edge,math.inf)):
+                for trans in (False,True):
+                    self.compare(1,[0,1],[0],[scale],[b0],[1.],trans)
 
 
 if __name__=='__main__':unittest.main()

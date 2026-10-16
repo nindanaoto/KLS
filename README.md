@@ -205,6 +205,10 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+CMake enables row-owned certification when the compiler provides OpenMP C
+support, independently of the optional mt-METIS build. Without OpenMP, it
+retains the stateless certificate with the same accuracy requirement.
+
 ### CPU tuning profiles
 
 KLS uses portable thresholds unless an application supplies a profile. On

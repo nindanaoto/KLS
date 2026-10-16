@@ -71,7 +71,8 @@ int kls_test_binary64_environment(int mode) {
   int64_t p[]={0,1},rows[]={0};double a[]={1},b[]={1},x[]={1};
   kls_componentwise_plan plan={0};long double upper;
   componentwise_plan_build(&plan,1,p,rows);
-  int result=componentwise_plan_environment() && componentwise_binary64_row(
+  int result=componentwise_plan_environment() &&
+      !(_mm_getcsr()&((1u<<15)|(1u<<6)|(3u<<13))) && componentwise_binary64_row(
       &plan,0,p,rows,a,b,x,0,1.0L/100000000,&upper);
   kls_componentwise_plan_reset(&plan);
   fesetenv(&saved);_mm_setcsr(csr);
@@ -87,7 +88,8 @@ int kls_test_binary64(size_t n,const int64_t *p,const int64_t *rows,
   (void)residual;*upper=INFINITY;
 #if KLS_COMPONENTWISE_HAS_ACCUMULATED && defined(_OPENMP)
   kls_componentwise_plan plan={0};
-  if(!componentwise_plan_environment()) return 0;
+  if(!componentwise_plan_environment() ||
+     (_mm_getcsr()&((1u<<15)|(1u<<6)|(3u<<13)))) return 0;
   componentwise_plan_build(&plan,n,p,rows);
   int result=plan.eligible>0;
   long double maximum=0,tolerance=interval_outward(
@@ -141,5 +143,115 @@ int kls_test_parallel(size_t n,const int64_t *p,const int64_t *rows,
 #else
   (void)n;(void)p;(void)rows;(void)a;(void)b;(void)x;(void)transpose;(void)threads;
   return 0;
+#endif
+}
+
+/* Differential access to the extended row proof alone. This verifies that
+ * a supported row rejection can skip the repeated accumulated CSC proof. */
+int kls_test_extended_rows(size_t n,const int64_t *p,const int64_t *rows,
+    const double *a,const double *b,const double *x,int transpose,
+    double *residual,long double *upper) {
+  (void)residual;*upper=INFINITY;
+#if KLS_COMPONENTWISE_HAS_ACCUMULATED && defined(_OPENMP)
+  kls_componentwise_plan plan={0};
+  if(!n) {*upper=0;return 1;}
+  if(!componentwise_plan_environment()) return 0;
+  componentwise_plan_build(&plan,n,p,rows);
+  int accepted=plan.eligible>0;long double maximum=0;
+  const long double tolerance=interval_outward(
+      1.0L/KLS_COMPONENTWISE_TOLERANCE_DENOMINATOR,-INFINITY);
+  if(accepted) for(size_t i=0;i<n;++i) {
+    long double bound;
+    if(!componentwise_plan_row(&plan,i,p,rows,a,b,x,transpose,0,tolerance,&bound))
+      {accepted=0;break;}
+    if(bound>maximum) maximum=bound;
+  }
+  kls_componentwise_plan_reset(&plan);
+  if(accepted) *upper=maximum;
+  return accepted;
+#else
+  (void)n;(void)p;(void)rows;(void)a;(void)b;(void)x;(void)transpose;
+  return -2; /* The optional row kernel is unavailable in this build. */
+#endif
+}
+
+/* Force both full traversals for exact bound/correction differential checks.
+ * Only an uncertified finite bound promises a usable correction workspace. */
+int kls_test_interval_capture(size_t n,const int64_t *p,const int64_t *rows,
+    const double *a,const double *b,const double *x,int transpose,
+    double *residual,long double *upper) {
+  double *work=NULL;
+  const int result=componentwise_certify_body(n,p,rows,a,b,x,transpose,
+      NULL,upper,&work,1);
+  if(residual && result==0 && isfinite(*upper)) memcpy(residual,work,n*sizeof(*work));
+  free(work);return result;
+}
+
+int kls_test_interval_rows(size_t n,const int64_t *p,const int64_t *rows,
+    const double *a,const double *b,const double *x,int transpose,
+    double *residual,long double *upper) {
+  *upper=INFINITY;
+#if KLS_COMPONENTWISE_HAS_ACCUMULATED && defined(_OPENMP)
+  if(!n) {*upper=0;return 1;}
+  kls_componentwise_plan plan={0};
+  componentwise_plan_build(&plan,n,p,rows);
+  double *work=NULL;
+  const int result=plan.eligible>0
+    ?componentwise_interval_rows(&plan,p,rows,a,b,x,transpose,upper,&work):-2;
+  if(residual && result==0 && isfinite(*upper)) memcpy(residual,work,n*sizeof(*work));
+  free(work);kls_componentwise_plan_reset(&plan);return result;
+#else
+  (void)n;(void)p;(void)rows;(void)a;(void)b;(void)x;(void)transpose;(void)residual;
+  return -2;
+#endif
+}
+
+int kls_test_capture(size_t n,const int64_t *p,const int64_t *rows,
+    const double *a,const double *b,const double *x,int transpose,
+    double *residual,long double *upper) {
+  kls_componentwise_plan *plan=NULL;double *work=NULL;
+  int result=kls_componentwise_certify_correction(&plan,2,n,p,rows,a,b,x,
+      transpose,upper,NULL,NULL,&work);
+  if(residual && work && isfinite(*upper)) memcpy(residual,work,n*sizeof(*work));
+  kls_componentwise_plan_destroy(plan);free(work);return result;
+}
+
+/* Draft audit: compare range execution with the prior scalar-row reduction.
+ * The scalar row interface retains the previous conversion/reduction order. */
+int kls_test_range_equivalence(size_t n,const int64_t *p,const int64_t *rows,
+    const double *a,const double *b,const double *x,int transpose,
+    int threads,int mode) {
+#if KLS_COMPONENTWISE_HAS_ACCUMULATED && defined(_OPENMP)
+  if(!n) return 1;
+  kls_componentwise_plan plan={0};
+  componentwise_plan_build(&plan,n,p,rows);
+  if(plan.eligible<=0) {kls_componentwise_plan_reset(&plan);return -2;}
+  if(mode==3) plan.executor=test_scoped_executor;
+  const unsigned saved=_mm_getcsr();
+  unsigned scoped=saved;
+  if(mode==1) scoped|=(1u<<15)|(1u<<6);
+  if(mode==2) scoped=(scoped&~(3u<<13))|(2u<<13);
+  _mm_setcsr(scoped&~((1u<<15)|(1u<<6)));
+  const int binary64_permitted=!(scoped&(3u<<13));
+  const long double tolerance=interval_outward(
+      1.0L/KLS_COMPONENTWISE_TOLERANCE_DENOMINATOR,-INFINITY);
+  long double expected=0,observed;
+  int reference=1;
+  for(size_t row=0;row<n;++row) {
+    long double bound;
+    if(!componentwise_plan_row(&plan,row,p,rows,a,b,x,transpose,
+        binary64_permitted,tolerance,&bound)) {reference=0;break;}
+    if(bound>expected) expected=bound;
+  }
+  if(!reference) expected=INFINITY;
+  _mm_setcsr(scoped);
+  const int actual=componentwise_plan_run(&plan,threads,p,rows,a,b,x,transpose,&observed);
+  const int restored=_mm_getcsr()==scoped;
+  _mm_setcsr(saved);
+  kls_componentwise_plan_reset(&plan);
+  return restored && reference==actual && expected==observed;
+#else
+  (void)n;(void)p;(void)rows;(void)a;(void)b;(void)x;
+  (void)transpose;(void)threads;(void)mode;return -2;
 #endif
 }
