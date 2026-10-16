@@ -2663,3 +2663,38 @@ Completed evidence:
 `build/certificate-job-idle-parking-startup-safe-api-review-preparation-20261016/review.json`,
 `build/certificate-job-idle-parking-startup-safe-spice-pair-review-preparation-20261016/review.json`,
 `build/certificate-job-idle-parking-startup-safe-completed-decision-20261016/decision.json`.
+
+### Eight-row register packet verdict experiment
+
+A separate isolated candidate traverses eight original rows in vector registers
+without coefficient packing or cached values. Masked gathers preserve each
+row's encounter order; an opaque masked multiply prevents FMA contraction.
+The original outward enclosure and lazy tolerance conversion remain. A failed
+packet restores the entry floating-point environment and replays the complete
+scalar range. Detailed-bound interfaces and current-operator ownership stay
+unchanged. Subnormal finite-check lanes also replay: an initial directed test
+found that bitwise vector finite checks omitted a scalar denormal flag. The
+failed source/test packages remain preserved.
+
+The corrected source passes 5,018 guarded comparisons in each of six contexts
+(native, Intel assembler syntax, generic fallback, no contraction, x87, and
+ASan/UBSan). Native exact-rational auditing covers 2,216 fixtures, 384,184
+comparisons, 98,144 accepted rows and 1,880 observed vector acceptances. Initial
+proof review checks the counter instrumentation inverse and unchanged scalar
+reference. These controls do not establish enabled-trap or complete solver
+qualification.
+
+The complete 2,304-observation cost grid retains all 144 groups per native and
+generic build, both orientations and all four numeric fixtures. Independent
+review reconstructs balanced order, bounds, immutable inputs and aggregates.
+Native candidate/baseline runtime geometric mean is **1.345856** (101 of 144
+groups slower); generic fallback is 1.000866. Including shared plan construction
+in each measured batch gives 1.180620 and 1.000934; this modeled metric is not
+whole-application timing. The register packet candidate is rejected. Do not
+rescue it by excluding failed verdicts, zero vectors or unfavorable shapes.
+No performance implementation from this experiment enters production.
+
+Evidence:
+`build/componentwise-eight-row-register-packet-initial-proof-review-preparation-20261016/review.json`,
+`build/componentwise-eight-row-register-packet-complete-cost-review-preparation-20261016/review.json`,
+`build/componentwise-eight-row-register-packet-completed-decision-20261016/decision.json`.
