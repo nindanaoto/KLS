@@ -2353,15 +2353,55 @@ with zero added failures. All 80 shared invalid observations remain retained;
 its overall generality performance aggregate is null. Evidence is in
 `build/componentwise-verdict-witness-completed-general-decision-20261016/decision.json`.
 
-The fresh 462-observation verdict-witness peer campaign is running in session
-67958. Qualification and performance conclusions must await its observed exit,
-controller absence, and complete independent review. Its controller is
-`build/componentwise-verdict-witness-restored-peer-spice-preparation-20261016/run_campaign.py`.
-The latest completed peer evidence does not establish the fastest-in-SPICE goal.
-No incomplete or favorable subset supplies an overall competitor comparison.
+The fresh verdict-witness peer campaign completed all 462 observations.
+Session 67958 exited zero, its controller and numerical children were absent,
+and an independent reviewer rechecked every raw log, waveform, qualification,
+comparison order and ratio. Every KLS run qualified. Two SubtreeLU MOS runs in
+llc96 at eight threads timed out; those observations remain invalid and the
+corresponding aggregate remains null. Of the 56 per-circuit/domain/thread/peer
+comparisons, 23 favor KLS, 32 favor the peer, and one lacks qualified peer
+coverage. The four suite ratios against the marker parent are 0.985845,
+0.987395, 0.984019 and 0.978584 (llc32 t1/t8, then llc96 t1/t8).
+These isolated gains do not establish the fastest-in-SPICE goal and must not
+be multiplied by the separate mapped-worker gains. No incomplete or favorable
+subset supplies an overall competitor comparison. The completed decision is
+`build/componentwise-verdict-witness-completed-peer-decision-20261016/decision.json`.
 
 CKTSO's installed license file was empty. Installing the packaged 719-byte
 license restored successful API calls and full-circuit qualification without
 changing the solver library, key contents, or clock. This was not evidence of
 license expiration. The installation review is
 `build/cktso-packaged-license-installation-20261015/review.json`.
+
+### Finer refactor diagnostics and narrow-edge prototype
+
+A diagnostic rebuilt only the main archive member and completed the full
+28-circuit/domain/thread grid. After observed terminal exit and process absence,
+an independent reviewer rechecked all counters, source/archive pins and fresh
+waveforms. It separates mapped/lean stages and ordinary supernode scatter,
+dependency waits, edge updates, division, diagonal updates and writeback.
+BJT's serial supernode edge updates remain the largest measured stage.
+Per-column clocks dominate several tiny mapped stages and alter low-work
+engine selection, so those totals cannot establish removable production cost.
+Worker elapsed sums also cannot be treated as wall time. This rejects a
+reciprocal-normalization change as the first optimization target.
+Review: `build/refactor-exclusive-stage-review-preparation-20261016/review.json`.
+
+The next isolated prototype shares producer loads and destination decoding
+across four independent target columns in narrow supernode edges. Each column
+retains producer/destination update order; zero-upper handling, wide arithmetic,
+scalar tails, allocations, barriers and publication remain unchanged. It adds
+no matrix-identity or shape-policy selector. The first byte-exact proof found
+a native-build NaN payload difference and is retained. The unchanged kernel
+then passed the complete 2,724,736-fixture grid in native, generic and optimized
+ASan/UBSan builds: finite results, infinities, signed zeros and exception flags
+match exactly; same-class NaN arithmetic payload/sign differences are counted.
+This permission does not apply to coefficient ownership or representation copies.
+The independent review covers 8,174,208 fixtures, including duplicate destinations,
+zeros, nonfinite/extreme values, rounding modes and guard pages. It supplies no
+public API, production first-fault ordering, or performance guarantee.
+Review: `build/snb-narrow-four-column-semantic-proof-corrected-review-preparation-20261016/review.json`.
+The full original 201,600-observation isolated cost grid is pending in
+`build/snb-narrow-four-column-complete-cost-layout-corrected-preparation-20261016`.
+Both timing arms use the same 112-byte block layout. Full runtime/API, generality
+and fresh peer qualification remain required before integration.
