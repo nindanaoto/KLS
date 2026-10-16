@@ -2639,3 +2639,27 @@ CPU savings for a crew that alternates numerical and certificate work.
 Reviews:
 `build/certificate-job-idle-parking-startup-safe-runtime-review-preparation-20261016/review.json`,
 `build/certificate-job-idle-parking-startup-safe-policy-review-preparation-20261016/review.json`.
+
+The corrected parking candidate subsequently passed all 28 original API/circuit
+checks and the complete 238-observation paired cost campaign (14 fresh KLU
+references and 224 timed observations). Independent review reconstructed all
+476 child-process edges, verified immutable inputs and balanced order, rechecked
+all 224 waveforms with the upstream verifier, and recomputed all four paired
+passes per circuit/domain/thread. Every observation qualified. The controller
+and reviewer both exited zero, with process absence recorded before review.
+
+Parking is **rejected for production**. Candidate/baseline suite geometric mean
+linear-solve-time ratios were 0.998652 and 1.012450 on llc32 at one and eight
+threads, and 1.000751 and 1.001285 on llc96. Eight-thread BJT was 5.50% slower
+on llc32; DAC was 3.13% and 3.22% slower across the two domains. The result
+does not justify selecting favorable circuits, changing acceptance rules or
+claiming idle CPU time as removable wall time. Preserve the separate startup
+race fix and the entire unsuccessful parking experiment. The legacy control
+retains documented C11 races: numerical qualification does not make it a
+race-free reference. Neither full generality nor fresh peer leadership is
+claimed for this rejected candidate.
+
+Completed evidence:
+`build/certificate-job-idle-parking-startup-safe-api-review-preparation-20261016/review.json`,
+`build/certificate-job-idle-parking-startup-safe-spice-pair-review-preparation-20261016/review.json`,
+`build/certificate-job-idle-parking-startup-safe-completed-decision-20261016/decision.json`.
