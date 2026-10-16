@@ -2455,9 +2455,25 @@ phase takes 0.325–0.501 seconds versus 1.147–1.190 for the original and
 phase totals, not competitive application timings. All arms share the same
 isolated qualified verdict-witness archive; the mapped-worker and ordinary-pool
 prototypes are absent. Plain binaries have no profiling wrappers.
-The balanced 462-observation uninstrumented frontend campaign is running and
-must receive terminal, absence and complete independent review before any
-performance decision. No frontend optimization has been integrated yet.
+The balanced 462-observation uninstrumented frontend campaign completed.
+Session 58968 exited zero; its controller and all 462 numerical children were
+absent before independent review. All observations qualified. Cache-line /
+original suite geometric-mean time ratios are 0.915480 and 0.912251 on llc32,
+then 0.905409 and 0.896196 on llc96, at one and eight threads. Against the
+correct graph-checked row-view baseline the ratios are 0.834658, 0.818478,
+0.827663 and 0.818528. These aggregate improvements cover every original
+circuit and four balanced passes. BJT's llc32 one-thread difference from the
+original is only 0.02%, so it should be treated as effectively flat.
+
+Xyce commit `a15e69e` integrates the exact qualified cache-line implementation
+and the optimized/unoptimized storage regression. The decision is
+`build/xyce-contiguous-cacheline-import-completed-decision-20261016/decision.json`.
+The full timing review is
+`build/xyce-normalized-csr-import-four-arm-spice-review-preparation-20261016/review.json`.
+No circuit/size/degree/domain selector was introduced. The measured shared core
+is still the isolated qualified verdict parent, so these results neither
+integrate the separate core experiments nor establish superiority over CKTSO
+and SubtreeLU. Fresh combined peer measurements remain required.
 Reviews:
 `build/xyce-normalized-csr-import-public-recovery-review-preparation-20261016/review.json`,
 `build/xyce-csr-import-storage-regression-review-preparation-20261016/review.json`,
