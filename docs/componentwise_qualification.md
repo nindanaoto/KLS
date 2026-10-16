@@ -2544,3 +2544,54 @@ Evidence:
 `build/egraph-native-worker-sampling-control-review-20261016/review.json`,
 `build/egraph-native-worker-grid-review-20261016/review.json`,
 `build/egraph-worker-completed-diagnostic-decision-20261016/decision.json`.
+
+Host hardware counters are unavailable: `perf stat -e cycles,instructions --
+true` fails with `perf_event_paranoid=4`. The optional diagnostic link object
+`scripts/profile_cpu_samples.c` provides bounded process-CPU instruction
+sampling on Linux x86-64 without inserting per-column clocks. Build it inside
+the Apptainer image, link the object into the diagnostic executable with
+`-ldl`, and set `KLS_CPU_SAMPLE_FILE` to a new capture path. After the process
+exits, run `python3 scripts/summarize_cpu_samples.py EXACT_EXECUTABLE CAPTURE`.
+Preserve that exact unstripped executable and the companion capture `.maps`
+file. The reader checks capture completeness and saturation, preserves external
+and unresolved samples, and records input hashes. Lock-free integer operations
+are the signal handler's only shared-state operations; output occurs after
+collection closes. An existing SIGPROF policy or timer disables the sampler.
+
+Positive controls cover disabled sampling, live concurrent work, preserved
+rounding modes, an existing signal policy, and PIE/non-PIE address resolution.
+Both live controls resolve every captured instruction to the deliberately busy
+function (178 and 202 samples). These checks qualify the tool, not solver
+performance. ITIMER_PROF is process-directed: signals can coalesce, thread
+selection can bias parallel profiles, and system CPU time is included. Do not
+infer wall-time savings or precise parallel load balance from sample shares.
+Control evidence:
+`build/cpu-signal-sampling-positive-control-20261016/review.json`.
+
+The first grid driver stopped on an unimported Path name in its capture-file
+check and remains preserved as failed. A fresh corrected full-28 package
+completed: session 88633 exited zero, its controller and executable were
+absent, and independent review qualified every original waveform, step count,
+API contract and complete unsaturated capture. It resolves 223,701 samples.
+The qualified parent archive is byte-identical; only the diagnostic link
+object is added. Against the completed plain-parent API profile, engine counts
+differ only on NEURON's bounded consultations, by 1–17 of 7,740 refactors.
+Those differences remain explicit in the review; sample shares do not prove
+unchanged timing or selection.
+
+The instruction addresses distinguish two different kinds of waiting.
+Of 3,329 samples in `kls_egraph_refactor_pool_worker_main`, 3,325 fall in its
+generation/shutdown polling and PAUSE loop, verified against the retained
+executable's disassembly. This includes retained certificate crews on serial
+numeric paths; it is not the numerical dependency-gate or pipeline-sleep cost
+measured above. On llc96 ram2k at eight threads, all 1,076 worker-main samples
+are in that idle loop. These counts establish executed idle work, not a
+wall-time saving. The next isolated candidate should test job-specific idle
+parking for certificate-only crew reuse while preserving bounded numerical
+reuse and explicit tuning. Its shared spin budget also needs atomic access;
+current workers read it concurrently with controller updates. No production
+idle-policy change or speedup claim follows before complete qualification.
+Evidence:
+`build/cpu-signal-sampled-grid-review-20261016/review.json`,
+`build/cpu-signal-sampled-grid-review-20261016/worker-main-hot-pc.txt`,
+`build/cpu-signal-sampled-numeric-priority-decision-20261016/decision.json`.
