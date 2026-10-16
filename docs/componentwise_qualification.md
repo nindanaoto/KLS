@@ -2401,7 +2401,28 @@ The independent review covers 8,174,208 fixtures, including duplicate destinatio
 zeros, nonfinite/extreme values, rounding modes and guard pages. It supplies no
 public API, production first-fault ordering, or performance guarantee.
 Review: `build/snb-narrow-four-column-semantic-proof-corrected-review-preparation-20261016/review.json`.
-The full original 201,600-observation isolated cost grid is pending in
-`build/snb-narrow-four-column-complete-cost-layout-corrected-preparation-20261016`.
-Both timing arms use the same 112-byte block layout. Full runtime/API, generality
-and fresh peer qualification remain required before integration.
+The full original 201,600-observation isolated cost grid completed. Both arms
+use the same 112-byte block layout. Candidate/baseline geometric mean cost is
+1.098424 in the native build and 1.005495 in the generic build; native narrow
+edges regress to 1.1686. The general prototype is rejected, without selecting
+favorable shapes or adding a benchmark-specific admission rule. Decision:
+`build/snb-narrow-four-column-completed-cost-rejection-20261016/decision.json`.
+
+### Packed certificate result
+
+A separate packed certificate prototype groups eight equal-degree rows while
+retaining the current operator, RHS and solution and unchanged scalar fallback.
+The final runtime-operand variant passed all seven arithmetic profiles with
+3,096,576 comparisons and 6,646,304 exact-reference rows. Six native/generic/
+sanitizer and literal/runtime-tolerance memory contexts also passed, including
+allocation faults, fresh inputs, guards and concurrent immutable readers.
+A compiler operand barrier was necessary to preserve scalar x87 exception flags
+when a caller supplies a constant tolerance. Earlier failures remain retained.
+
+The complete original 2,304-observation cost grid nevertheless rejects this
+prototype. Native kernel cost is 1.040869 of baseline, with 68 of 144 groups
+slower; generic kernel cost is 1.000529, with 63 slower. Including separately
+measured construction in a modeled batch gives 1.128697 and 1.089416. These
+modeled batches are not application timings. No favorable-subset selector or
+production integration follows from the correctness proofs. Decision:
+`build/componentwise-packed-verdict-runtime-operand-completed-cost-rejection-20261016/decision.json`.
