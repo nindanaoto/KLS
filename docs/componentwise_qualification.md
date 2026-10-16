@@ -2698,3 +2698,40 @@ Evidence:
 `build/componentwise-eight-row-register-packet-initial-proof-review-preparation-20261016/review.json`,
 `build/componentwise-eight-row-register-packet-complete-cost-review-preparation-20261016/review.json`,
 `build/componentwise-eight-row-register-packet-completed-decision-20261016/decision.json`.
+
+### Atomic EGraph idle budget, independent of parking
+
+The production EGraph pool now stores its adjustable worker spin budget in
+`atomic_uint`. Construction uses `atomic_init`; idle polling and controller
+updates use relaxed atomic accesses. The budget is only a waiting hint. The
+existing generation release/acquire still publishes jobs; idle thresholds,
+boost conditions, explicit-profile behavior and numerical bodies stay as before.
+The immutable ordinary-pool budget is unchanged. This correctness fix does not
+promote the rejected certificate parking policy or claim a speed improvement.
+
+The permanent startup regression also updates the budget concurrently with
+128 actual refactors across crews of two and eight, then checks known normal
+and transpose solutions. A root control reverting only atomic budget access
+reproduces the memory-TSan race between its writer and the idle worker. The
+fixed source passes native, ASan/UBSan and memory-TSan controls. Root
+componentwise sources are rebuilt in those controls; the five retained helper
+archive members are independently compared. The previously documented GCC
+IFUNC compatibility flag retains memory instrumentation and its deliberate
+race positive control. This is tested concurrency evidence, not universal
+race-freedom proof.
+
+Fresh root CMake registration contains **43 tests**, including the enhanced
+startup regression. All 43 pass in native and optimized ASan/UBSan contexts
+(86 total). An initial controller incorrectly expected 45 after the native
+43 passed, then stopped before sanitizer work. That failed wrapper is retained;
+a separate corrected controller reuses the exact native build, reruns its full
+43 and performs a fresh sanitizer build and full43. The historical isolated
+44-test suite contains two unpromoted caller-RHS fixtures absent from root;
+these counts must not be conflated. No root test is removed or weakened.
+Independent review checks source/binary pins, all child edges, raw race reports,
+full CTest logs and process absence after actual terminal exits.
+
+Evidence:
+`build/egraph-idle-budget-root-atomic-regression-preparation-20261016/completed.json`,
+`build/egraph-idle-budget-root-full-runtime-count-corrected-preparation-20261016/completed.json`,
+`build/egraph-idle-budget-root-atomic-review-preparation-20261016/review.json`.

@@ -6,6 +6,24 @@
 #undef NDEBUG
 #include <assert.h>
 
+typedef struct {
+  kls_egraph_refactor_pool *pool;
+  atomic_int stop;
+  atomic_ulong changes;
+} budget_writer;
+
+static void *update_idle_budget(void *argument) {
+  budget_writer *writer = argument;
+  unsigned next = 12345;
+  while (!atomic_load_explicit(&writer->stop, memory_order_acquire)) {
+    /* Assignment also supplies the deliberately racy unfixed control. */
+    writer->pool->worker_spin_iters = next;
+    next = next == 12345 ? 23456 : 12345;
+    atomic_fetch_add_explicit(&writer->changes, 1ul, memory_order_relaxed);
+  }
+  return NULL;
+}
+
 static void exercise(int crew) {
   enum { N = 128, NZ = 256 };
   int64_t ptr[N + 1], rows[NZ];
@@ -53,6 +71,25 @@ static void exercise(int crew) {
     assert(kls_solve_transpose(solver, 1, transpose_rhs, 0, answer, 0) == KLS_OK);
     for (int j = 0; j < N; ++j) assert(fabs(answer[j] - truth[j]) < 1e-12);
   }
+  budget_writer writer = {.pool = solver->egraph_pool};
+  atomic_init(&writer.stop, 0);
+  atomic_init(&writer.changes, 0ul);
+  pthread_t thread;
+  assert(pthread_create(&thread, NULL, update_idle_budget, &writer) == 0);
+  while (!atomic_load_explicit(&writer.changes, memory_order_relaxed))
+    kls_cpu_relax();
+  for (int repeat = 0; repeat < 64; ++repeat) {
+    double *numeric_values = NULL;
+    assert(prepare_numeric_values(solver, a, &numeric_values) == KLS_OK);
+    assert(kls_egraph_mapped_refactor(solver, numeric_values, 1) == 1);
+  }
+  atomic_store_explicit(&writer.stop, 1, memory_order_release);
+  assert(pthread_join(thread, NULL) == 0);
+  assert(atomic_load_explicit(&writer.changes, memory_order_relaxed) > 0);
+  assert(kls_solve(solver, 1, rhs, 0, answer, 0) == KLS_OK);
+  for (int j = 0; j < N; ++j) assert(fabs(answer[j] - truth[j]) < 1e-12);
+  assert(kls_solve_transpose(solver, 1, transpose_rhs, 0, answer, 0) == KLS_OK);
+  for (int j = 0; j < N; ++j) assert(fabs(answer[j] - truth[j]) < 1e-12);
   kls_destroy(solver);
 }
 
@@ -60,5 +97,6 @@ int main(void) {
   exercise(2);
   exercise(8);
   puts("PASS cold EGraph numerical startup: crews 2/8, normal/transpose, repeated destruction");
+  puts("PASS concurrent EGraph idle-budget updates: crews 2/8, 128 numeric refactors");
   return 0;
 }

@@ -5241,7 +5241,10 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
       if (generation != seen_generation) {
         break;
       }
-      if (spin < pool->worker_spin_iters) {
+      /* The controller can adjust this hint while an idle worker polls.
+         Job publication is still ordered by generation, not this budget. */
+      if (spin < atomic_load_explicit(&pool->worker_spin_iters,
+                                      memory_order_relaxed)) {
         spin++;
         kls_cpu_relax();
         continue;
@@ -5454,7 +5457,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
     const unsigned initial_spin =
       kls_symmetric_partial_diagonal_match_factor_cycle(solver)
         ? 100000u : solver->tuning.egraph_worker_spin_iters;
-    pool->worker_spin_iters = initial_spin;
+    atomic_init(&pool->worker_spin_iters, initial_spin);
   }
   atomic_init(&pool->shared.stop, 0);
   atomic_init(&pool->shared.cluster_barrier_generation, 0u);
@@ -7208,7 +7211,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   }
   if (!check_pivots && kls_repeated_update_workload(&solver->options) &&
       kls_pts_solve_available(solver) &&
-      pool->worker_spin_iters < 200000u) {
+      atomic_load_explicit(&pool->worker_spin_iters,
+                           memory_order_relaxed) < 200000u) {
     /* A retained EGraph crew is reused by the following solve/value phases
        and by the next numeric generation.  The generic pool default is
        deliberately short for isolated calls, but it expires before these
@@ -7220,7 +7224,8 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
        capability decision: serial solves plus row, lean, and direct numeric
        executors retain their independently selected idle policies, and the
        public override remains authoritative. */
-    pool->worker_spin_iters = 200000u;
+    atomic_store_explicit(&pool->worker_spin_iters, 200000u,
+                          memory_order_relaxed);
   }
   kls_egraph_refactor_shared *shared = &pool->shared;
 

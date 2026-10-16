@@ -1579,7 +1579,7 @@ struct kls_egraph_refactor_pool {
   atomic_int spin_completion;
   atomic_int shutdown;
   int caller_affinity_cpu;
-  unsigned worker_spin_iters;
+  atomic_uint worker_spin_iters;
   int conds_initialized;
   int lock_initialized;
   int barrier_initialized;
