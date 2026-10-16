@@ -721,7 +721,7 @@ if(KLS_BUILD_TESTS)
   add_executable(kls_snb_profile tests/kls_snb_profile.c)
   target_link_libraries(kls_snb_profile PRIVATE kls)
   add_test(NAME kls_snb_profile COMMAND kls_snb_profile)
-  set(KLS_PRIVATE_TESTS kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan)
+  set(KLS_PRIVATE_TESTS kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan kls_egraph_numeric_startup)
   set(KLS_ACCURACY_TESTS
     kls_accuracy_owner kls_accuracy_best kls_accuracy_gate kls_accuracy_recovery kls_componentwise_caller kls_application_managed kls_certificate_pool
     kls_accuracy_epochs kls_accuracy_frames kls_accuracy_rhs
@@ -744,7 +744,7 @@ if(KLS_BUILD_TESTS)
 
   set_tests_properties(${KLS_ACCURACY_TESTS} PROPERTIES
     RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
-  set_tests_properties(kls_egraph_batch_plan PROPERTIES
+  set_tests_properties(kls_egraph_batch_plan kls_egraph_numeric_startup PROPERTIES
     RUN_SERIAL TRUE TIMEOUT 120)
   add_executable(kls_accuracy_certificate tests/kls_accuracy_certificate.c)
   add_executable(kls_componentwise tests/kls_componentwise.c)

@@ -2595,3 +2595,47 @@ Evidence:
 `build/cpu-signal-sampled-grid-review-20261016/review.json`,
 `build/cpu-signal-sampled-grid-review-20261016/worker-main-hot-pc.txt`,
 `build/cpu-signal-sampled-numeric-priority-decision-20261016/decision.json`.
+
+### Cold EGraph startup and certificate-job parking
+
+The parking experiment exposed a separate startup race. Before acquiring its
+first generation, a background worker read `worker->shared`, which the
+controller can rewrite while preparing the first numerical job. The wait loop
+now uses the permanent `&pool->shared` descriptor. Per-job accesses retain their
+existing generation publication and completion boundaries. The root fix is
+separate from parking policy and changes no numerical kernel or accuracy gate.
+The permanent `kls_egraph_numeric_startup` regression repeatedly creates crews
+of two and eight, immediately performs a real numerical refactor, checks normal
+and transpose solutions of a nonsymmetric matrix, and destroys each crew.
+Its unfixed root control reproduces the race; the fixed root source passes
+native, ASan/UBSan and memory-access TSan builds. The root componentwise unit is
+rebuilt in those controls rather than borrowed from the isolated verdict core.
+Review: `build/egraph-startup-root-fix-regression-preparation-20261016/review.json`.
+
+GCC 15's generated IFUNC resolvers initially crashed before TSan initialization:
+disassembly shows resolver calls to `__tsan_func_entry/exit` during loader
+relocation. An independent minimal IFUNC program reproduces that failure.
+`--param=tsan-instrument-func-entry-exit=0` avoids these startup hooks while
+retaining memory-access instrumentation. A separate deliberate-race program
+still produces the expected TSan report. This compatibility context supplies
+memory-race evidence with reduced call-stack instrumentation; it does not
+convert the original startup failures into passes. Controls:
+`build/gcc-tsan-ifunc-entry-compatibility-controls-20261016/completed.json`.
+
+The isolated parking candidate makes its shared numeric spin budget atomic
+and captures a worker-local post-job hint before publishing completion.
+Certificate jobs park unless an explicit tuning profile is active; numerical
+jobs retain their bounded spin budget. Explicit profiles also bypass automatic
+initial/PTS budget boosts. The initial version passed all 88 runtime tests but
+failed the directed cold-start TSan check. It remains preserved. The corrected
+candidate passes all 88 runtime tests and independent directed controls in
+native, ASan/UBSan and memory-access TSan contexts. Together the three contexts
+exercise 3,000 certificate jobs, 3,000 loop numeric jobs plus six cold numeric
+jobs, concurrent atomic-budget updates, explicit profiles, 24 partial-startup
+faults, cleanup and known solutions. These checks qualify concurrency behavior
+in their tested scope. Full circuits, complete cost and generality remain
+required before any parking promotion; added wakeup cost may outweigh idle
+CPU savings for a crew that alternates numerical and certificate work.
+Reviews:
+`build/certificate-job-idle-parking-startup-safe-runtime-review-preparation-20261016/review.json`,
+`build/certificate-job-idle-parking-startup-safe-policy-review-preparation-20261016/review.json`.

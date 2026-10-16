@@ -5224,7 +5224,9 @@ static void kls_affinity_scope_leave(kls_affinity_scope *scope) {
 static void *kls_egraph_refactor_pool_worker_main(void *arg) {
   kls_egraph_refactor_worker *worker = (kls_egraph_refactor_worker *)arg;
   kls_egraph_refactor_pool *pool = worker->pool;
-  kls_egraph_refactor_shared *shared = worker->shared;
+  /* The wait descriptor is permanent. Per-job worker pointers are published
+     by the generation handshake and cannot be read before its first acquire. */
+  kls_egraph_refactor_shared *shared = &pool->shared;
   unsigned long seen_generation = 0;
 
   for (;;) {
