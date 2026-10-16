@@ -4,6 +4,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <fenv.h>
 #undef NDEBUG
 #include <assert.h>
 typedef int64_t UF_long;
@@ -33,6 +34,37 @@ static void compare(kls_solver *s,double *values,private_original_operator *out)
   assert(!memcmp(out->values,fresh.values,5*sizeof(double)));
   private_original_operator_free(&fresh);
 }
+static void representations(void) {
+  const uint64_t patterns[]={0,UINT64_C(0x8000000000000000),1,
+    UINT64_C(0x8000000000000001),UINT64_C(0x7ff0000000000000),
+    UINT64_C(0xfff0000000000000),UINT64_C(0x7ff8000000000123),
+    UINT64_C(0x7ff0000000000123),UINT64_C(0xffffffffffffffff)};
+  const int rounds[]={FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO};
+  for(int orientation=1;orientation<=2;++orientation)for(int flags=0;flags<8;++flags) {
+    UF_long p[]={0,2,3,5},r[]={0,2,1,0,2},rp[]={2,0,1},cp[]={1,2,0},map[]={2,0,4,1,3};
+    double a[5];
+    kls_solver solver={3,5,p,r,flags&1?rp:NULL,flags&2?cp:NULL,
+      flags&4?map:NULL,orientation,0,NULL};
+    private_original_operator out={0};
+    for(size_t offset=0;offset<sizeof(patterns)/sizeof(*patterns);++offset) {
+      for(size_t k=0;k<5;++k)memcpy(a+k,patterns+(offset+k)%9,sizeof(*a));
+      for(size_t mode=0;mode<4;++mode) {
+        assert(!fesetround(rounds[mode]));compare(&solver,a,&out);
+        compare(&solver,a,&out);assert(fegetround()==rounds[mode]);
+        /* A numeric update may read the snapshot that it replaces. */
+        double saved[5];memcpy(saved,out.values,sizeof(saved));
+        private_original_operator expected={0};
+        assert(private_original_operator_build(&solver,saved,&expected)==KLS_OK);
+        assert(private_original_operator_build(&solver,out.values,&out)==KLS_OK);
+        assert(!memcmp(out.values,expected.values,sizeof(saved)));
+        private_original_operator_free(&expected);
+      }
+    }
+    private_original_operator_free(&out);
+  }
+  assert(!fesetround(FE_TONEAREST));
+}
+
 int main(void) {
   for(int orientation=1;orientation<=2;++orientation) for(int flags=0;flags<8;++flags) {
     UF_long p[]={0,2,3,5},r[]={0,2,1,0,2},rp[]={2,0,1},cp[]={1,2,0},map[]={2,0,4,1,3};
@@ -68,5 +100,6 @@ int main(void) {
     }
     fail=0;
   }
+  representations();
   puts("PASS original-operator cache: changes, permutations, orientations, atomic failures");
 }

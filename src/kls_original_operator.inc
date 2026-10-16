@@ -20,6 +20,16 @@ static void private_original_operator_free(private_original_operator *a) {
   memset(a, 0, sizeof(*a));
 }
 
+/* Copy the object representation, including signed zeros and NaN payloads.
+ * These fixed-size byte stores avoid a fortified library call per entry in
+ * the gather loop; the allocation and validated source map bound the access. */
+static void private_original_operator_copy_value(double *destination,
+    const double *source) {
+  unsigned char *to=(unsigned char *)destination;
+  const unsigned char *from=(const unsigned char *)source;
+  for(size_t byte=0;byte<sizeof(*destination);++byte) to[byte]=from[byte];
+}
+
 static int private_original_operator_build(const kls_solver *s,
     const double *caller_values, private_original_operator *out) {
   if (!s || !out || !caller_values || s->n <= 0 || s->nnz < 0 ||
@@ -47,12 +57,20 @@ static int private_original_operator_build(const kls_solver *s,
     if(same) {
       double *values=malloc((nnz?nnz:1)*sizeof(*values));
       if(!values) return KLS_ERR_OUT_OF_MEMORY;
-      for(size_t k=0;k<nnz;++k) {
-        const double *value=caller_values+out->value_source[k];
-        if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED && !isfinite(*value)) {
-          free(values);return KLS_ERR_INVALID_ARGUMENT;
+      double *destination=values;
+      const double *end=values+nnz;
+      const int64_t *source=out->value_source;
+      if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) {
+        for(;destination!=end;++destination,++source) {
+          const double *value=caller_values+*source;
+          if(!isfinite(*value)) {
+            free(values);return KLS_ERR_INVALID_ARGUMENT;
+          }
+          private_original_operator_copy_value(destination,value);
         }
-        memcpy(values+k,value,sizeof(*values));
+      } else {
+        for(;destination!=end;++destination,++source)
+          private_original_operator_copy_value(destination,caller_values+*source);
       }
       free(out->values);out->values=values;
       return KLS_OK;
