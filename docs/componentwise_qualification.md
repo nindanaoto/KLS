@@ -2508,12 +2508,39 @@ and measured general parallel admission for currently serial routes before
 spending a full competitive campaign on that standalone prototype.
 Evidence: `build/completed-frontend-engine-usage-review-preparation-20261016/review.json`.
 
-The sampled EGraph diagnostic source has an independently checked exact inverse
-to the qualified verdict parent. Its future full-28 runner refuses to build
-until frontend timing and its independent review have both terminated. It
-samples worker wake/elapsed time, cluster barriers, outermost dependency gates
-including productive helper work, and actual pipeline sleeps. The original
-pause sleeps on its first failed poll and once per 4,096 polls thereafter;
-measure that policy before proposing a change. Source preparation supplies
-no runtime qualification or performance result. The categories overlap and
-cannot be summed as removable wall time.
+The first full-28 sampled EGraph diagnostic failed its measurement-coverage
+assertion: its guard incorrectly required optional packed factor storage.
+Independent raw-log and fresh waveform review qualified all 28 numerical runs,
+but absent samples supply no EGraph wait evidence. That failed package remains
+preserved. The corrected guard admits both native and packed numerical work
+while retaining auxiliary-mode exclusions, 128 warm jobs and one sample per
+64 jobs. Native and ASan/UBSan positive controls each execute 640 real unpacked
+EGraph refactors, cover crews of two and eight, assert positive sampling and
+check a known solution. Their independent review also preserves the inherited
+ordinary-pool, certificate, FENV and concurrent-owner assertions. An earlier
+control with a missing explicit return after renaming main remains unqualified.
+
+The corrected full-28 diagnostic completed with session 35577 exiting zero.
+Its controller and executable were absent before independent review rechecked
+all raw counters, input/archive pins, step counts and fresh waveforms. All 28
+runs qualify, with 30 post-warmup numerical samples across the two domains.
+The sampled EGraph pools each execute 1,145 numeric jobs on the eight-thread
+BJT case. No sampled pipeline sleep occurs. Dependency-gate durations are
+11.75% and 12.57% of worker elapsed sums on llc32 and llc96; cluster barriers
+are 5.72% and 6.34%, and worker wake durations are 1.44% and 1.25%. These
+categories overlap, gate time includes productive help, and sampled worker
+sums are neither removable wall time nor competitive timing. They do not
+establish that unsampled jobs never sleep or that barriers hide no imbalance.
+
+Across the complete grid, ordinary-pool lifetime counters record only two
+numeric and six certificate dispatches. Leave the existing sleep policy and
+ordinary-pool production implementation unchanged. Prioritize numerical
+kernel cost and general structural parallel admission for serial routes;
+avoid repeating per-column clock instrumentation that changes low-work engine
+selection. Retained optimizations still require complete combined peer timing
+and independent confirmation before declaring the fastest-in-SPICE goal met.
+Evidence:
+`build/egraph-worker-sampling-failed-coverage-review-20261016/review.json`,
+`build/egraph-native-worker-sampling-control-review-20261016/review.json`,
+`build/egraph-native-worker-grid-review-20261016/review.json`,
+`build/egraph-worker-completed-diagnostic-decision-20261016/decision.json`.
