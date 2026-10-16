@@ -2479,3 +2479,25 @@ required before integration.
 Reviews:
 `build/cooperative-ordinary-pool-runtime-review-preparation-20261016/review.json`,
 `build/cooperative-ordinary-pool-lifecycle-review-preparation-20261016/review.json`.
+
+The completed frontend diagnostic also constrains the next core experiment.
+An independent reconstruction of all 112 reviewed raw logs finds zero
+ordinary-pool public refactor events in every frontend arm. Each arm records
+2,290 EGraph events, all on BJT at eight threads (1,145 per CPU domain).
+Those counters cover public refactor/refactor-solve calls; first-factor/repair
+pool construction and later certificate reuse have separate scope. Caller
+cooperation alone therefore has no demonstrated benefit on the measured
+recurring refactor paths. Prioritize sampled EGraph waits/worker imbalance
+and measured general parallel admission for currently serial routes before
+spending a full competitive campaign on that standalone prototype.
+Evidence: `build/completed-frontend-engine-usage-review-preparation-20261016/review.json`.
+
+The sampled EGraph diagnostic source has an independently checked exact inverse
+to the qualified verdict parent. Its future full-28 runner refuses to build
+until frontend timing and its independent review have both terminated. It
+samples worker wake/elapsed time, cluster barriers, outermost dependency gates
+including productive helper work, and actual pipeline sleeps. The original
+pause sleeps on its first failed poll and once per 4,096 polls thereafter;
+measure that policy before proposing a change. Source preparation supplies
+no runtime qualification or performance result. The categories overlap and
+cannot be summed as removable wall time.
