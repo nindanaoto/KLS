@@ -5380,6 +5380,8 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   if (solver == NULL || thread_count < 2) {
     return NULL;
   }
+  kls_componentwise_team_destroy(solver->componentwise_team);
+  solver->componentwise_team=NULL;
   if (solver->egraph_pool != NULL &&
       solver->egraph_pool->thread_count != thread_count) {
     destroy_egraph_refactor_pool(solver);

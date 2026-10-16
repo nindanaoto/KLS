@@ -10,23 +10,22 @@ static void *caller_calloc(size_t n,size_t size) {
 }
 #define malloc caller_malloc
 #define calloc caller_calloc
-#define kls_componentwise_certify caller_certificate
-#define kls_componentwise_certify_planned caller_planned_certificate
+#define kls_componentwise_certify_correction caller_correction_certificate
 #define kls_accuracy_certify caller_strict_certificate
 #define kls_accuracy_lattice_recover caller_forbidden_lattice
 #define kls_accuracy_lattice_schedule caller_forbidden_schedule
 #include "../src/kls.c"
 #undef malloc
 #undef calloc
-#undef kls_componentwise_certify
-#undef kls_componentwise_certify_planned
+#undef kls_componentwise_certify_correction
 #undef kls_accuracy_certify
 #undef kls_accuracy_lattice_recover
 #undef kls_accuracy_lattice_schedule
 #undef NDEBUG
 #include <assert.h>
-extern int kls_componentwise_certify(size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,double*,long double*);
-extern int kls_componentwise_certify_planned(kls_componentwise_plan**,int,size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,long double*);
+extern int kls_componentwise_certify_correction(kls_componentwise_plan**,int,size_t,
+    const int64_t*,const int64_t*,const double*,const double*,const double*,int,
+    long double*,kls_componentwise_executor,void*,double**);
 extern int kls_accuracy_certify(size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,double*);
 static int calls,residual_calls,strict_calls,reject_all,oom_call;
 /* Trap both external cold-search entrances, including recovery after forced
@@ -41,28 +40,24 @@ int caller_forbidden_schedule(int n,const int64_t *p,const int64_t *r,const doub
   (void)n;(void)p;(void)r;(void)a;(void)b;(void)x;(void)first;(void)last;
   (void)sweeps;(void)limit;(void)reg;(void)deadline;(void)count;abort();
 }
-int caller_certificate(size_t n,const int64_t *p,const int64_t *r,const double *a,
-    const double *b,const double *x,int transpose,double *res,long double *upper) {
-  ++calls;residual_calls+=res!=NULL;
+int caller_correction_certificate(kls_componentwise_plan **plan,int threads,size_t n,
+    const int64_t *p,const int64_t *r,const double *a,const double *b,
+    const double *x,int transpose,long double *upper,
+    kls_componentwise_executor executor,void *context,double **work) {
+  ++calls;
   if(calls==oom_call) return -1;
   if(reject_all) {
     *upper=1;
-    if(res) memset(res,0,n*sizeof(*res));
+    if(!*work) {*work=malloc(2*n*sizeof(**work));if(!*work) return -1;}
+    memset(*work,0,n*sizeof(**work));++residual_calls;
     return 0;
   }
-  return kls_componentwise_certify(n,p,r,a,b,x,transpose,res,upper);
+  return kls_componentwise_certify_correction(plan,threads,n,p,r,a,b,x,
+      transpose,upper,executor,context,work);
 }
 int caller_strict_certificate(size_t n,const int64_t *p,const int64_t *r,const double *a,
     const double *b,const double *x,int transpose,double *upper) {
   ++strict_calls;return kls_accuracy_certify(n,p,r,a,b,x,transpose,upper);
-}
-int caller_planned_certificate(kls_componentwise_plan **plan,int threads,size_t n,
-    const int64_t *p,const int64_t *r,const double *a,const double *b,const double *x,
-    int transpose,long double *upper) {
-  ++calls;
-  if(calls==oom_call) return -1;
-  if(reject_all) {*upper=1;return 0;}
-  return kls_componentwise_certify_planned(plan,threads,n,p,r,a,b,x,transpose,upper);
 }
 int main(void) {
   int64_t p[]={0,1,2},r[]={0,1};double a[]={2,4};
@@ -85,8 +80,8 @@ int main(void) {
       if(fault<4) assert(status==KLS_ERR_OUT_OF_MEMORY);
       else if(fault==4) {
         assert(status==KLS_ERR_SOLVE_FAILED);
-        assert(residual_calls==KLS_COMPONENTWISE_MAX_CORRECTIONS);
-        assert(calls==1+2*KLS_COMPONENTWISE_MAX_CORRECTIONS);
+        assert(residual_calls==1+KLS_COMPONENTWISE_MAX_CORRECTIONS);
+        assert(calls==1+KLS_COMPONENTWISE_MAX_CORRECTIONS);
       } else {
         assert(status==KLS_OK && calls==2 && residual_calls==0);
         assert(x[0]==1 && x[1]==1 && x[2]==77 && x[3]==2 && x[4]==2 && x[5]==88);

@@ -55,3 +55,32 @@ static int private_componentwise_execute(void *opaque,
   }
   return 1;
 }
+
+/* Called lazily by a supported row certificate's parallel trial. Unsupported
+ * environments and formats never construct this team. Creation failure uses
+ * serial partitions of the same proof and lets the ordinary timing choice
+ * select serial rows; it must not turn an optional accelerator into failure. */
+static int private_componentwise_execute_dedicated(void *opaque,
+    void (*work)(void *,int),void *job,int threads) {
+  kls_solver *s=opaque;
+  if(!s || !work || threads<=1 || threads!=s->options.threads ||
+     s->componentwise_work ||
+     (s->refactor_pool && s->refactor_pool->created_count>0) ||
+     (s->egraph_pool && s->egraph_pool->created_count>0)) return 0;
+  if(s->componentwise_team && s->componentwise_team->count!=threads) {
+    kls_componentwise_team_destroy(s->componentwise_team);
+    s->componentwise_team=NULL;s->componentwise_team_declined=0;
+  }
+  if(!s->componentwise_team && !s->componentwise_team_declined) {
+    s->componentwise_team=kls_componentwise_team_create(threads);
+    if(!s->componentwise_team) s->componentwise_team_declined=1;
+  }
+  s->componentwise_work=work;s->componentwise_work_context=job;
+  int completed=1;
+  if(s->componentwise_team)
+    completed=kls_componentwise_team_execute(s->componentwise_team,work,job,threads);
+  else
+    for(int tid=0;tid<threads;++tid) work(job,tid);
+  s->componentwise_work=NULL;s->componentwise_work_context=NULL;
+  return completed;
+}

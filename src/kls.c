@@ -1280,6 +1280,8 @@ struct kls_solver {
   /* Published only through an idle pool's generation handshake. */
   void (*componentwise_work)(void *,int);
   void *componentwise_work_context;
+  struct kls_componentwise_team *componentwise_team;
+  int componentwise_team_declined;
 };
 
 struct kls_generic_nd_trial;
@@ -1948,6 +1950,8 @@ static int kls_try_row_first_rebuild_rejected_block(
   UF_long old_lnz_block,
   UF_long old_unz_block,
   UF_long *pblock_out);
+#include "kls_componentwise_team.inc"
+
 static void destroy_egraph_refactor_pool(kls_solver *solver);
 static void kls_egraph_pool_dispatch_and_wait(
   kls_egraph_refactor_pool *pool,
@@ -6535,6 +6539,8 @@ static int ensure_refactor_pool(kls_solver *solver, int thread_count) {
   if (solver == NULL || solver->symbolic == NULL || thread_count < 2) {
     return 0;
   }
+  kls_componentwise_team_destroy(solver->componentwise_team);
+  solver->componentwise_team=NULL;
   if (solver->refactor_pool != NULL &&
       (solver->refactor_pool->thread_count != thread_count ||
        solver->refactor_pool->maxblock < solver->symbolic->maxblock)) {
@@ -7239,6 +7245,9 @@ static void kls_metis_race_abandon(kls_solver *solver);
 #include "kls_original_operator.inc"
 
 static void clear_matrix(kls_solver *solver) {
+  kls_componentwise_team_destroy(solver->componentwise_team);
+  solver->componentwise_team=NULL;
+  solver->componentwise_team_declined=0;
   kls_componentwise_plan_destroy(solver->componentwise_plan);
   solver->componentwise_plan=NULL;
   private_original_operator_free(solver->private_original);
@@ -12824,33 +12833,31 @@ static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs
     for(int step=0;;++step) {
       long double upper;
       /* Do not launch a second worker runtime alongside the numerical pools:
-       * OpenMP workers may keep spinning after a short certificate and slow
-       * the following refactorization. Serial rows retain the traversal gain.
-       * Ordinary one-thread solves retain the stateless certificate path. */
+       * Reuse a numerical team, or let certificate-only workers sleep between
+       * checks so the following refactorization owns its requested CPU budget.
+       * One-thread solves use the same cached traversal without workers. */
       int certificate_threads=s->options.threads;
       if((s->refactor_pool && s->refactor_pool->created_count>0) ||
          (s->egraph_pool && s->egraph_pool->created_count>0)) certificate_threads=1;
       const int owned_threads=s->options.threads>1?private_componentwise_pool_threads(s):0;
-      int certified=owned_threads>1
-        ?kls_componentwise_certify_executor(&s->componentwise_plan,owned_threads,
-             a->n,a->p,a->rows,a->values,br,xr,transpose,&upper,private_componentwise_execute,s)
-        :s->options.threads>1
-        ?kls_componentwise_certify_planned(&s->componentwise_plan,certificate_threads,
-                                         a->n,a->p,a->rows,a->values,br,xr,transpose,&upper)
-        :kls_componentwise_certify(a->n,a->p,a->rows,a->values,br,xr,transpose,NULL,&upper);
+      if(certificate_threads==1 && s->componentwise_team) {
+        kls_componentwise_team_destroy(s->componentwise_team);
+        s->componentwise_team=NULL;
+      }
+      kls_componentwise_executor executor=owned_threads>1
+        ?private_componentwise_execute
+        :certificate_threads>1?private_componentwise_execute_dedicated:NULL;
+      int certified=kls_componentwise_certify_correction(
+          &s->componentwise_plan,
+          owned_threads>1?owned_threads:certificate_threads,
+          a->n,a->p,a->rows,a->values,br,xr,transpose,&upper,
+          executor,executor?s:NULL,&work);
       if(certified==1) break;
       if(certified<0) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
       if(step==KLS_COMPONENTWISE_MAX_CORRECTIONS) {status=KLS_ERR_SOLVE_FAILED;goto done;}
-      if(!work) {
-        if(a->n>SIZE_MAX/(2*sizeof(double))) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
-        work=malloc(2*a->n*sizeof(*work));
-        if(!work) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
-      }
-      /* A nonfinite bound means no usable residual, not a large safe bound. */
-      certified=kls_componentwise_certify(a->n,a->p,a->rows,a->values,
-                                         br,xr,transpose,work,&upper);
-      if(certified<0) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
-      if(!isfinite(upper)) {status=KLS_ERR_SOLVE_FAILED;goto done;}
+      /* The failed interval check captured the correction RHS in the same
+       * pass. A nonfinite bound still means no usable residual. */
+      if(!work || !isfinite(upper)) {status=KLS_ERR_SOLVE_FAILED;goto done;}
       int old_refinement=s->in_solve_refinement;
       s->in_solve_refinement=1;
       ++s->private_solve_depth;
