@@ -2336,15 +2336,28 @@ promotion change follows.
 Failure: `build/caller-order-snapshot-integration-runtime-first-failure-review-20261013/review.json`.
 Corrected preflight: `build/caller-order-snapshot-integration-runtime-adapter-preflight-review-20261013/review.json`.
 
-## Qualification status, 2026-10-16
+## Qualification status, 2026-10-17
 
-The committed source contains the row/correction certificate and sleeping-worker
-implementation described above. Later verdict-witness, mapped-worker,
-caller-order snapshot, and packed-vector experiments remain isolated under
-`build/`; committing this source does not integrate or promote those candidates.
-Production componentwise verification remains enabled. The complete
+Main numerical source remains at `2754413`, including the EGraph startup and
+atomic idle-budget fixes. Xyce's qualified cacheline import is committed as
+`a15e69e`. Production componentwise verification remains enabled. The complete
 application-managed comparison added 24 qualification failures, so its
 default-off proposal was rejected.
+
+The current-root certificate integration is committed separately on
+`work/certificate-verdict-root-20261017` (`e3cc481`, `24dc56f`). Independent
+review passes all 43 native and 43 optimized ASan/UBSan tests and all 28
+circuit/API settings, covering 288,650 certificate calls. Its native
+componentwise object is byte-identical to the earlier qualified verdict
+object. A fresh complete 238-observation paired cost campaign is running;
+current-root performance, broader-corpus and peer qualification remain pending.
+The separate unused-L2-copy guards are committed on
+`work/componentwise-l2-copy-guards-20261017` (`2f051ec`). All runtime/API checks
+and both complete 238-observation campaigns qualify, with small per-case cost
+regressions retained separately; the full 110-matrix stage remains pending.
+Neither branch is promoted to production. Mapped-worker, caller-order snapshot
+and packed-vector experiments remain separate; their gains are not combined
+into a claimed speedup. The fastest-in-SPICE objective remains unmet.
 
 The caller-order snapshot integration remains held after two added Hamrle3
 timeouts in its complete generality campaign. The isolated verdict-witness
