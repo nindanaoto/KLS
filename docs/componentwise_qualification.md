@@ -3211,3 +3211,15 @@ identical dependencies inside Apptainer. This is preparation for the complete
 Evidence:
 `build/componentwise-inner-l2-copy-elision-root-two-campaign-decision-20261017/decision.json`,
 `build/componentwise-inner-l2-copy-elision-root-broad-build-review-preparation-20261017/review.json`.
+
+An independent full238 confirmation is also prepared for root certificate
+candidate `24dc56f`. It uses the same qualified plain executables, all seven
+circuits, both CPU domains, threads one/eight, four balanced pairs and fresh
+KLU references. Domain/circuit order and balanced arm phase complement the
+first root campaign. Its complete results must remain separate from that
+campaign and from the `76b0aa3` parent/child experiment. In particular, the
+first campaign's NEURON llc96/eight-thread regression remains unresolved.
+Both freezing and execution require closure of the current copy-elision
+broad run and its independent review. Only controller/reviewer source has
+been prepared and parsed; no confirmation observations exist yet. Evidence:
+`build/componentwise-verdict-witness-root-confirmation-preparation-20261017/source-preparation.json`.
