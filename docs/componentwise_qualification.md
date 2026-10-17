@@ -3133,3 +3133,37 @@ launched alongside that timing; its frozen binaries remain unchanged.
 Evidence:
 `build/late-unchanged-owned-snapshot-root-source-preparation-20261017/preparation.json`,
 `build/late-unchanged-owned-snapshot-root-controls-preparation-20261017/run.py`.
+
+### Complete re-audit cost and late-equality comparator controls, 2026-10-17
+
+The geometric re-audit campaign closes with actual controller exit zero and
+all 476 recorded child edges absent. Independent review qualifies every one
+of the original 238 observations and reconstructs the complete balanced grid,
+fresh references, waveforms, steps, source pins and raw ratios. Against parent
+`24dc56f`, candidate `76b0aa3` has suite geometric means 0.992599/0.999433 on
+llc96 at one/eight threads and 0.991717/0.985752 on llc32. Nineteen of 28 cell
+medians improve. Every other cell and every raw pair remains included.
+
+NEURON on llc96/eight threads is near parity (median 0.999354; pairs 1.008233,
+0.995817, 1.002891, 0.995535). On llc32/eight threads its median is 0.974221,
+with mixed pairs 0.882435, 0.940542, 1.123314 and 1.007900. This single
+parent/child campaign does not establish a remedy for the earlier 3.46%
+root2754413 regression. No ratios are multiplied or pooled with the earlier
+root comparison. Production promotion remains held; independent confirmation,
+direct root comparison and broader qualification are incomplete. The next
+priority is qualification of the independent late-equality optimization.
+Evidence:
+`build/certificate-warm-selection-root-spice-pair-review-preparation-20261017/review.json`,
+`build/certificate-warm-selection-root-completed-cost-decision-20261017/decision.json`.
+
+After that timing and its review close, all six parent/late-equality standalone
+comparator contexts pass (native, generic and optimized ASan/UBSan).
+Independent review confirms their complete source archives, six-file delta,
+compiler inputs, executable hashes, logs and all 24 child edges. They exercise
+exact bit equality, slot/layout changes and rounding/exception preservation;
+they do not establish numeric-epoch integration or a performance benefit.
+The fresh complete solver controller subsequently passes its 43 native tests
+and starts the optimized sanitizer build. Complete runtime qualification
+remains pending that suite and independent review.
+Evidence:
+`build/late-unchanged-owned-snapshot-root-controls-review-preparation-20261017/review.json`.
