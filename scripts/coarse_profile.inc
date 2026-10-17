@@ -14,9 +14,12 @@ typedef struct kls_coarse_scope {
   struct kls_coarse_scope *parent;
   uint64_t start, children;
   unsigned slot;
+  int in_api, api_root;
 } kls_coarse_scope;
 typedef struct {
   _Atomic uint64_t calls, threads, inclusive_ns, exclusive_ns;
+  _Atomic uint64_t api_calls, api_inclusive_ns, api_exclusive_ns;
+  _Atomic uint64_t api_root_calls, api_root_inclusive_ns;
   _Atomic uint64_t allocation_calls, requested_bytes, allocation_failures;
   _Atomic uint64_t free_calls;
 } kls_coarse_totals;
@@ -45,9 +48,15 @@ static uint64_t kls_coarse_now(void) {
 
 static void kls_coarse_enter(kls_coarse_scope *s, unsigned slot) {
   *s = (kls_coarse_scope){.parent = kls_coarse_top,
-                          .start = kls_coarse_now(), .slot = slot};
+                          .start = kls_coarse_now(), .slot = slot,
+                          .in_api = (kls_coarse_top && kls_coarse_top->in_api) ||
+                                    kls_coarse_roles[slot][0] == 'a',
+                          .api_root = !(kls_coarse_top && kls_coarse_top->in_api) &&
+                                      kls_coarse_roles[slot][0] == 'a'};
   kls_coarse_top = s;
   kls_coarse_add(&kls_coarse_data[slot].calls, 1);
+  if (s->in_api) kls_coarse_add(&kls_coarse_data[slot].api_calls, 1);
+  if (s->api_root) kls_coarse_add(&kls_coarse_data[slot].api_root_calls, 1);
   uint64_t mask = UINT64_C(1) << slot;
   if (!(kls_coarse_seen & mask)) {
     kls_coarse_seen |= mask;
@@ -65,6 +74,13 @@ static void kls_coarse_leave(kls_coarse_scope *s) {
     kls_coarse_add(&kls_coarse_data[s->slot].inclusive_ns, elapsed);
     kls_coarse_add(&kls_coarse_data[s->slot].exclusive_ns,
                    elapsed - s->children);
+    if (s->in_api) {
+      kls_coarse_add(&kls_coarse_data[s->slot].api_inclusive_ns, elapsed);
+      kls_coarse_add(&kls_coarse_data[s->slot].api_exclusive_ns,
+                     elapsed - s->children);
+    }
+    if (s->api_root)
+      kls_coarse_add(&kls_coarse_data[s->slot].api_root_inclusive_ns, elapsed);
     if (s->parent) {
       if (s->parent->children > UINT64_MAX - elapsed)
         kls_coarse_add(&kls_coarse_errors, 1);
@@ -133,7 +149,9 @@ __attribute__((destructor)) static void kls_coarse_report(void) {
     kls_coarse_totals *d = &kls_coarse_data[i];
     fprintf(stderr, "kls_coarse slot=%u name=%s role=%s calls=%llu threads=%llu "
       "inclusive_ns=%llu exclusive_ns=%llu allocation_calls=%llu "
-      "requested_bytes=%llu allocation_failures=%llu free_calls=%llu\n", i,
+      "requested_bytes=%llu allocation_failures=%llu free_calls=%llu "
+      "api_calls=%llu api_inclusive_ns=%llu api_exclusive_ns=%llu "
+      "api_root_calls=%llu api_root_inclusive_ns=%llu\n", i,
       kls_coarse_names[i], kls_coarse_roles[i],
       (unsigned long long)atomic_load(&d->calls),
       (unsigned long long)atomic_load(&d->threads),
@@ -142,7 +160,12 @@ __attribute__((destructor)) static void kls_coarse_report(void) {
       (unsigned long long)atomic_load(&d->allocation_calls),
       (unsigned long long)atomic_load(&d->requested_bytes),
       (unsigned long long)atomic_load(&d->allocation_failures),
-      (unsigned long long)atomic_load(&d->free_calls));
+      (unsigned long long)atomic_load(&d->free_calls),
+      (unsigned long long)atomic_load(&d->api_calls),
+      (unsigned long long)atomic_load(&d->api_inclusive_ns),
+      (unsigned long long)atomic_load(&d->api_exclusive_ns),
+      (unsigned long long)atomic_load(&d->api_root_calls),
+      (unsigned long long)atomic_load(&d->api_root_inclusive_ns));
   }
   fprintf(stderr, "kls_coarse_summary errors=%llu\n",
     (unsigned long long)atomic_load(&kls_coarse_errors));

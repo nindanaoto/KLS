@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #define KLS_COARSE_COUNT 3
 static const char *const kls_coarse_names[] = {"owner", "child", "worker"};
-static const char *const kls_coarse_roles[] = {"caller", "caller", "worker"};
+static const char *const kls_coarse_roles[] = {"api", "caller", "worker"};
 #include "../scripts/coarse_profile.inc"
 #include <assert.h>
 #include <fenv.h>
@@ -71,6 +71,14 @@ int main(void) {
   assert(atomic_load(&kls_coarse_data[0].calls) == 1);
   assert(atomic_load(&kls_coarse_data[1].calls) == 456);
   assert(atomic_load(&kls_coarse_data[1].threads) == 3);
+  assert(atomic_load(&kls_coarse_data[1].api_calls) == 256);
+  assert(atomic_load(&kls_coarse_data[2].api_calls) == 0);
+  assert(atomic_load(&kls_coarse_data[0].api_calls) == 1);
+  assert(atomic_load(&kls_coarse_data[0].api_root_calls) == 1);
+  assert(atomic_load(&kls_coarse_data[1].api_root_calls) == 0);
+  assert(atomic_load(&kls_coarse_data[0].api_inclusive_ns) ==
+         atomic_load(&kls_coarse_data[0].api_exclusive_ns) +
+         atomic_load(&kls_coarse_data[1].api_inclusive_ns));
   assert(atomic_load(&kls_coarse_data[1].allocation_calls) == 5 * 456);
   assert(atomic_load(&kls_coarse_data[1].requested_bytes) == 257 * 456);
   assert(atomic_load(&kls_coarse_data[1].free_calls) == 4 * 456);

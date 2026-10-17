@@ -15,7 +15,12 @@ import tarfile
 
 SCOPES = {
     "kls.c": [
-        ("kls_refactor_solve", "caller"),
+        ("kls_refactor_solve", "api"),
+        ("kls_analyze_csr", "api"),
+        ("kls_factor", "api"),
+        ("kls_refactor", "api"),
+        ("kls_solve", "api"),
+        ("kls_solve_transpose", "api"),
         ("private_refactor_body", "caller"),
         ("private_factor_body", "caller"),
         ("private_numeric_snapshot_finish", "caller"),
@@ -148,7 +153,7 @@ def main():
         "tool_sha256": {str(p.resolve()): sha(p) for p in (Path(__file__), helper)},
         "source_sha256": {str(p): sha(p) for p in source.rglob("*") if p.is_file()},
         "allocator_wrappers": ["malloc", "calloc", "realloc", "free", "aligned_alloc", "posix_memalign"],
-        "limits": "Diagnostic only. No per-column clocks. Worker times overlap and are not caller wall time. Threads counts thread lifetimes entering a scope, not simultaneous occupancy. Allocation requests cover wrapped link boundaries, not live/process memory. No speed claim from instrumented execution.",
+        "limits": "Diagnostic only. No per-column clocks. Worker times overlap and are not caller wall time. api_* identifies this thread's active public-API ancestry, including caller worker-zero execution, excluding background workers. Threads counts thread lifetimes entering a scope, not simultaneous occupancy. Allocation requests cover wrapped link boundaries, not live/process memory. No speed claim from instrumented execution.",
     }
     (out / "source-receipt.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"Prepared {len(records)} coarse scopes from {revision} at {source}")
