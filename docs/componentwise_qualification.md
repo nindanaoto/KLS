@@ -3013,6 +3013,9 @@ independent review checks all 24 child edges, source pins and logs. Each
 candidate context checks 144 identity and 144 nonidentity snapshots, with
 32 caller-order and 256 canonical interpretations. This is constructor
 qualification only; no complete-solver or speedup claim follows.
+The exact source is preserved on `work/caller-order-identity-layout-root-20261017`
+as separate parent snapshot commit `fea844d` and identity-access commit
+`d4089e9`. Neither is merged into production.
 Evidence:
 `build/caller-order-snapshot-identity-layout-root-controls-preparation-20261017/failure-review.json`,
 `build/caller-order-snapshot-identity-layout-root-coverage-scratch-corrected-controls-review-preparation-20261017/review.json`.
