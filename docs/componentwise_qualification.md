@@ -3251,6 +3251,33 @@ promotion. Evidence:
 `build/componentwise-verdict-witness-root-confirmation-review-preparation-20261017/review.json`,
 `build/componentwise-verdict-witness-root-two-campaign-decision-20261017/decision.json`.
 
+### Dyadic private and post-loop controls completed, 2026-10-17
+
+Candidate `d786a14` completes all six parent/candidate private control
+contexts (native, generic and optimized ASan/UBSan). Actual controller exit is
+zero and all 24 child edges close; independent review reconstructs the full
+committed source archives and exact two-file delta. These are private fixture
+controls, not a complete solver suite.
+
+The separate parent post-loop probe subsequently completes native, generic
+and sanitizer contexts at O0/O3, with actual exit zero and all 26 child edges
+closed. Independent review confirms all 39813120 comparisons: each context
+has 6635520 comparisons, 338688 newly admitted tuples and 6296832 declines.
+Verdicts, bound bytes and x87/SSE sticky flags match the extracted parent
+post-loop statements throughout. All six contexts produce the same digest.
+Independent rational checks also verify the parent-acceptance inequalities
+under the stated normal-rounding and ULP-step lemmas. This is not a formal
+proof of the complete solver.
+
+These controls assume an already-ready tolerance cache. Whole-row/range and
+original-conversion controls, complete solver integration, application
+opportunity and cost remain separate. The next stage is complete whole-range
+microcost against parent `24dc56f`, preserving all fixture groups and both
+compiler profiles. No production promotion or speed benefit follows from
+the arithmetic controls. Evidence:
+`build/certificate-dyadic-margin-root-controls-review-preparation-20261017/review.json`,
+`build/certificate-dyadic-margin-root-post-proof-review-preparation-20261017/review.json`.
+
 ### Dyadic certificate margin prototype, source only, 2026-10-17
 
 Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
