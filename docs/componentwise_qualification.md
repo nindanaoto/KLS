@@ -3948,3 +3948,53 @@ proves row execution or a speedup. No automatic caller or broader selector is
 added. Production numerical source remains2754413 and default verification stays
 enabled. Complete candidate runtime/API/cost gates, all56 peer cells and a
 separate complete confirmation remain required.
+
+
+The private row paired-cycle path is now implemented and qualified on
+`work/row-paired-cycles-root-20261017` (same experimental worktree; final code
+checkpoint259c4d6). It borrows the enclosing API frame's saved RHS and separate
+output, performs real incumbent/row/incumbent numerics on the current caller A,
+and uses the unchanged caller certificate/recovery postlude. A private repeat
+counter defeats generic/tiny unchanged shortcuts; forced input-cache lifecycle
+now invalidates before writes and republishes after success, with A/B/A controls.
+Empty L/U stream publication is fixed generally, including singleton and both
+triangular directions. Metadata moves never substitute for the mandatory final
+full recomputation. Expired/failed/stale restoration retires old metadata, and
+cleanup plus recovery still run and are charged. Candidate answers stay private.
+
+Shared public-path sourceee53d8e passes all51 CTests each native and optimized
+ASan/UBSan (102 full-suite executions), plus one paired preflight per context.
+Independent source inversion preserves numeric/caller postlude operations apart
+from the explicit forced-input guards and empty-stream publication fix. The
+final259c4d6 delta changes only the private pair module and fixture; public-path
+source and CMake remain identical. It separately passes the paired fixture each
+context, not the full51 again. Each final run covers214 paired cases:128 ordinary
+format/orientation/thread/scale/hint/BTF/RHS configurations,32 triangular, two
+singleton, two dense, five independent-component cases (four dispatching eight
+effective row threads and a serial control),16 fault cases,28 observed expiry
+edges and the reference cycle for that sweep. It additionally covers2068/1048
+packed restoration expiry cutoffs on513-column/258-row dense fixtures and all
+four authority combinations, without allocations or live-factor/metadata writes.
+The collector retains151 stable-path pairs; post-certification storage/value
+changes invalidate samples. These are injected test clocks, not speed evidence.
+
+Reviews confirm exact sources/four dependencies, assertions, all50 parent CTest
+names retained, actual CTest commands (including eight script-based tests),
+executable/script/log hashes, all20 full-run and12 final-focused child edges
+closed, actual zero exits and absent PIDs:
+`build/row-paired-cycles-packed-empty-columns-full-runtime-command-review-preparation-20261017/review.json`,
+`build/row-paired-cycles-final-workers-focused-runtime-review-preparation-20261017/review.json`,
+and `build/row-paired-cycles-source-review-preparation-20261017/review.json`.
+Failed compilation/preflight packages and mistaken review artifact assumptions
+are preserved; corrected evidence comes from fresh packages. The flushed
+preflight diagnostics identified singleton publication, not an expiry failure.
+
+The next work is automatic integration: exclusive lease ownership, funded
+persistent preparation, worker/thread-bound payload accounting, repeated
+samples and payback using actual observed updates, and safe adoption/retirement.
+Full elapsed setup/execution/recovery is charged by the prototype now, but later
+worker allocations are not all inside the serial payload-byte cap; no hard
+realtime/RSS bound is claimed. Actual SNB/EGraph/packed-incumbent campaign routes
+need live coverage. No automatic selector, API cost, Xyce or peer qualification
+is claimed. Production numerical source stays2754413, verification stays enabled,
+and all56 peer cells plus separate complete confirmation remain required.
