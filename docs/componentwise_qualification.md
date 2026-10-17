@@ -3251,3 +3251,17 @@ a remedy for the root candidate's NEURON regression. No L2-copy guards,
 geometric re-audit or parking changes are stacked. Source evidence:
 `build/certificate-dyadic-margin-root-controls-preparation-20261017/source-review.json`,
 `build/certificate-dyadic-margin-root-controls-preparation-20261017/source-only-policy.json`.
+
+Additional post-loop equivalence controls are prepared, also unexecuted.
+After the six private controls and independent review close, their source
+preparer extracts the exact parent post-loop statements and checks they match
+the candidate fallback. The probe covers all 64 SSE sticky combinations,
+degree/exponent/tolerance and adjacent residual boundaries, including NaNs
+and subnormals: 6635520 comparisons in each of native, generic and sanitizer
+contexts at O0/O3. It compares verdict, bound bytes and x87/SSE sticky flags.
+An independent rational check bounds the parent's rounded enclosure and
+requires every newly admitted tuple to pass that parent enclosure. No C
+compilation, algebra execution or probe result exists yet. These controls
+concern an already-ready tolerance cache; complete rows, first conversion,
+worker integration and full cost remain separate gates. Evidence:
+`build/certificate-dyadic-margin-root-post-proof-preparation-20261017/source-only-policy.json`.
