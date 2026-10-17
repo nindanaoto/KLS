@@ -2847,3 +2847,36 @@ componentwise verification and all failures. The first campaign's unexplained
 mem_plus regression remains evidence regardless of the confirmation result;
 no result is pooled or replaced. Broader-corpus and fresh peer qualification
 remain outstanding before any production or fastest-in-SPICE claim.
+
+The independent copy-guard confirmation is now running in its own package:
+`build/componentwise-inner-l2-copy-elision-root-confirmation-preparation-20261017`.
+The original full-110-matrix/1,760-observation broad controller, linker and
+reviewer are prepared separately with exact root-qualified core archives and
+one unchanged general driver. They are unexecuted; the closed confirmation
+review and an advance-stage decision are prerequisites. No result follows
+from preparing those sources.
+
+The next independent core integration candidate rebases the earlier qualified
+coefficient-domain/tolerance-cache/verdict work onto root `2754413`. The exact
+certificate sources are preserved; the root EGraph declaration remains atomic
+and its startup/publication and idle-budget implementation remain byte-exact.
+This changes five solver source files (including two new private includes),
+plus two existing test adapters: the caller fault hook follows the actual new
+verdict boundary and internal eligibility assertions use its validated domain
+state. Existing fault/correction/worker assertions and the root 43-test suite
+remain. There are no unused-L2-copy guards, mapped specialization or parking
+changes in this source. An initial source-only preflight incorrectly assumed
+one idle-budget field; the preserved correction scopes the atomic declaration
+to EGraph and leaves the ordinary pool unchanged. No build or numerical test
+ran in that failed preparation.
+
+Corrected source capsule:
+`build/componentwise-verdict-witness-root-rebase-source-corrected-preparation-20261017/preparation.json`.
+A separate full native/optimized-ASanUBSan 43+43 runtime controller is prepared,
+not executed, under
+`build/componentwise-verdict-witness-root-full-runtime-preparation-20261017`.
+Historical isolated correctness, broad and peer results motivate this rebase;
+they do not qualify the current-root combination or establish a speedup over
+root. Fresh root runtime, API, complete timing, generality and peer checks
+remain required. No concurrent build or proof may run during the live
+uninstrumented confirmation.
