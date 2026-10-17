@@ -3278,6 +3278,32 @@ the arithmetic controls. Evidence:
 `build/certificate-dyadic-margin-root-controls-review-preparation-20261017/review.json`,
 `build/certificate-dyadic-margin-root-post-proof-review-preparation-20261017/review.json`.
 
+### Complete dyadic microcost, mixed result, 2026-10-17
+
+Both native/generic binaries compile before either timing starts. Actual
+controller exit is zero, all eight child edges close, and independent review
+reconstructs all 2304 observations and the complete balanced grid. Baseline
+uses the full committed parent verdict path, not its earlier detailed-bound
+predecessor. All original 144 groups per build, iteration counts and timed
+calls remain; symmetric entry-CSR recording and stronger untimed bound/FP
+checks (precision clear/set) are explicit benchmark additions.
+
+Candidate/parent geometric means are 0.897362 native and 0.869610 generic.
+This is mixed: 79/144 native and 83/144 generic medians regress; 45 and 53
+respectively exceed 1.02. The maximum medians are 1.284745 and 1.270780.
+Every group and every raw pair remains included. All timed entries have SSE
+precision sticky set naturally by the retained timing clock; cold-entry
+performance is not established. No favorable fixture, shape, size,
+orientation or compiler subset is used to rescue or select the implementation.
+
+The unchanged whole candidate may advance to independent range/mixed-order,
+raw-tolerance and zero-denominator controls, followed by complete solver/API
+and paired application qualification. Aggregate microcost gains do not
+override those gates or establish application benefit. No numerical source
+is promoted. Evidence:
+`build/certificate-dyadic-margin-root-full-grid-micro-review-preparation-20261017/review.json`,
+`build/certificate-dyadic-margin-root-completed-micro-decision-20261017/decision.json`.
+
 ### Dyadic certificate margin prototype, source only, 2026-10-17
 
 Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
