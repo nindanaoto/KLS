@@ -3078,3 +3078,16 @@ dependency submodules. The source is still held from production; the fresh
 28-setting API gate and the separate full238 parent/child cost gate follow.
 Evidence:
 `build/certificate-warm-selection-root-full-runtime-review-preparation-20261017/review.json`.
+
+The fresh API gate also completes and is independently reviewed: all 28
+settings qualify, with 288,647 outer certificate calls through the private
+verdict interface, zero legacy outer calls, and complete waveform/step checks.
+Plain parent/child links differ only in the core archive and output paths;
+both retain the same committed adapter and shared dependency archives, with
+no diagnostic wrappers in either plain executable. The exact whole candidate
+advances to a fresh full238 paired cost campaign against parent `24dc56f`.
+This campaign is separate from the earlier root2754413 comparison. No cost
+result, production promotion, generality or peer superiority is inferred.
+Evidence:
+`build/certificate-warm-selection-root-api-review-preparation-20261017/review.json`,
+`build/certificate-warm-selection-root-spice-pair-preparation-20261017/stage-decision.json`.
