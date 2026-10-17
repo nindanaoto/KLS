@@ -3304,6 +3304,32 @@ is promoted. Evidence:
 `build/certificate-dyadic-margin-root-full-grid-micro-review-preparation-20261017/review.json`,
 `build/certificate-dyadic-margin-root-completed-micro-decision-20261017/decision.json`.
 
+### Dyadic raw range and mixed-order controls completed, 2026-10-17
+
+Fresh parent/child private-verdict probes complete all twelve compiler
+contexts, including O0/O1/O2/O3/Og/Os, generic/native, x87 arithmetic,
+Intel assembly, separate rounding and no-integer128 builds. Actual exit is
+zero and all 96 child edges close. Independent review confirms 428752 range
+comparisons in each context, totaling 5145024 matching status, bound-byte,
+MXCSR and x87 sticky observations. Each context retains all 372 fixtures,
+including the existing ordered, mixed, same-bin and zero-denominator families.
+
+Raw coverage includes 57 actual 80-bit tolerances, all rounding directions,
+x87 precision 24/53/64, and all 64 prior sticky combinations in each unit
+separately plus both units all-set. Independent readers reconstruct complete
+compact traces and actual argument bytes, and verify 443328 supported
+diagonal error bounds using exact fractions. Unsupported environments and
+raw tolerances establish parent/child equivalence, not new accuracy support.
+This remains private-range qualification, separate from public correction,
+complete solver, generality and application cost gates.
+
+The exact committed child and four unchanged dependency archives are then
+materialized for the fresh complete 43-native/43-sanitizer runtime gate.
+That gate is running; no runtime result or production promotion is inferred.
+Evidence:
+`build/certificate-dyadic-margin-root-raw-range-review-preparation-20261017/review.json`,
+`build/certificate-dyadic-margin-root-full-runtime-preparation-20261017/full-source-preparation.json`.
+
 ### Dyadic certificate margin prototype, source only, 2026-10-17
 
 Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
