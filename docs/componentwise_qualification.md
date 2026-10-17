@@ -3361,6 +3361,28 @@ Evidence:
 `build/certificate-dyadic-margin-root-api-review-preparation-20261017/review.json`,
 `build/certificate-dyadic-margin-root-spice-pair-preparation-20261017/stage-decision.json`.
 
+### Dyadic whole-application cost rejected, 2026-10-17
+
+The complete238 campaign closes with actual exit zero and all 476 recorded
+child edges absent. Independent review qualifies every observation and
+reconstructs the original complete balanced grid, fresh references, waveforms,
+steps, pins and all raw pairs. Against parent `24dc56f`, child `d786a14` has
+suite ratios 1.033170/1.032476 on llc96 at one/eight threads and
+1.029167/1.031749 on llc32. Only 7/28 cell medians improve. The full results,
+including every regression, remain preserved.
+
+The whole child is rejected for production and does not advance to broad
+validation. No favorable case, fixture, compiler or thread subset rescues it.
+Numerical/FP qualification remains valid evidence for that scope, but its
+warm-clock microcost gains did not transfer to the application. The cause is
+not established. Parent `24dc56f`, whose application benefit was independently
+confirmed, remains the best qualified certificate candidate. A fresh complete
+CKTSO/SubtreeLU comparison is the next priority; neither older peer ranks nor
+products of unrelated campaign ratios establish current leadership.
+Evidence:
+`build/certificate-dyadic-margin-root-spice-pair-review-preparation-20261017/review.json`,
+`build/certificate-dyadic-margin-root-completed-cost-decision-20261017/decision.json`.
+
 ### Dyadic certificate margin prototype, source only, 2026-10-17
 
 Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
