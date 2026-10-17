@@ -3182,3 +3182,32 @@ or peer leadership follows from these runtime results.
 Evidence:
 `build/late-unchanged-owned-snapshot-root-full-runtime-review-preparation-20261017/review.json`,
 `build/late-unchanged-owned-snapshot-root-certificate-object-identity-20261017/identity.json`.
+
+### Late-equality application gate and next validation stage, 2026-10-17
+
+The fresh full28 API gate qualifies every setting and all 288650 certificate
+calls. Independent review closes the actual controller and children, waveform
+and step checks, source pins and matched links. However, every setting records
+zero unchanged-factor reuse. Every public refactor is a combined refactor/solve.
+The committed Xyce adapter explains this: `updateValues_` compares every value
+byte, and `refactorSolve_` already calls `kls_solve` directly when values are
+unchanged. Changed values alone reach the combined refactor API.
+
+Candidate `4394fdf` is therefore shelved for the current SPICE goal. Its source
+and correctness evidence remain available; the prepared full238 timing is not
+launched. Removing the existing adapter optimization would manufacture an
+opportunity rather than improve the application. No performance benefit or
+overhead has been measured for this prototype. Evidence:
+`build/late-unchanged-owned-snapshot-root-api-review-preparation-20261017/review.json`,
+`build/late-unchanged-owned-snapshot-root-no-application-opportunity-decision-20261017/decision.json`.
+
+The next executable stage is broader qualification of the independent
+inner-L2 copy-elision candidate `2f051ec`. Both complete SPICE campaigns have
+already qualified all observations; all eight separate suite aggregates
+improve, while their cell regressions remain recorded. Broad binaries now
+link the exact qualified root/candidate archives with an identical driver and
+identical dependencies inside Apptainer. This is preparation for the complete
+110-matrix control, not broader qualification or production promotion.
+Evidence:
+`build/componentwise-inner-l2-copy-elision-root-two-campaign-decision-20261017/decision.json`,
+`build/componentwise-inner-l2-copy-elision-root-broad-build-review-preparation-20261017/review.json`.
