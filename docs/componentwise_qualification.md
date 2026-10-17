@@ -3998,3 +3998,63 @@ realtime/RSS bound is claimed. Actual SNB/EGraph/packed-incumbent campaign route
 need live coverage. No automatic selector, API cost, Xyce or peer qualification
 is claimed. Production numerical source stays2754413, verification stays enabled,
 and all56 peer cells plus separate complete confirmation remain required.
+
+
+### Funded automatic row search, complete correctness qualification
+
+The automatic caller is implemented on `work/row-funded-search-root-20261017`
+in `build/observed-exploration-budget-root-worktree-20261017`. Final code is
+4193d10; implementation/qualification notes are committed separately. This is
+an experimental branch. Production numerical source remains2754413.
+
+The outer combined API owns its saved RHS and output. An exclusive fixed lease
+funds persistent serial preparation and four verified current-A row/incumbent
+comparisons. Median savings must exceed the existing2%/1 microsecond margin
+and repay twice the measured search debt using actual observed updates and
+caller-declared reuse. Incumbent-engine changes discard waiting samples without
+forgiving debt. Storage changes retire the decision; analysis disposes it.
+Insufficient funding takes no search clocks or allocations. Adopted row failures
+perform verified incumbent recovery even without optional credit. No circuit
+identity, CPU-domain label or new dimension-range selector is added.
+
+Forced comparison now mirrors the ordinary input-cache transition, preserving
+the settled incumbent's normal dispatch. Qualification exposed and fixed stale
+row copies after native KLU updates and analogous SNB/EGraph handoffs. EGraph
+also retains existing packed authority independently of new-admission policy;
+it cannot overwrite a fresh native update with an old valid packed copy.
+Compact-panel copies are invalidated when their row values change. The1e-8
+componentwise tolerance and1e-10 known-solution assertions are unchanged.
+
+Final source4193d10 passes all52 CTests each native and optimized ASan/UBSan
+(104 full-suite executions), plus one initial search preflight each. The fixture
+covers128 adoption configurations and eight additional refusal/fault/cache/
+incumbent-change modes, aliases/strides, real public adopted calls, mandatory
+allocation-failure recovery, factor-version retirement and analyze reset. Six
+actual SNB/packed-EGraph configurations execute three changed updates each.
+Thirty-two independent components meet the unchanged eight-worker EGraph gate.
+Injected clocks establish no performance result.
+
+Independent review confirms exact source/four dependencies, assertions, real
+CTest commands and executable/script hashes, all51 parent names retained,
+all20 child edges closed, actual zero exits and absent PIDs:
+`build/row-funded-search-verified-guard-full-runtime-review-preparation-20261017/review.json`.
+The intermediate source7400eac also passed the complete native/sanitizer suite
+and four initial pair/search checks:
+`build/row-funded-search-packed-authority-full-runtime-review-preparation-20261017/review.json`.
+Failed runs remain preserved; corrected fixtures use fresh packages. Failures
+include an incorrect public-factor replacement assumption, missing test snapshot
+frame, insufficient test graph width, and an unjustified first-trial sample
+assumption, alongside the actual stale-row/packed-authority defects.
+
+Measured preparation/setup/execution/recovery time is charged. State, serial
+preparation and trial output use checked payload requests; worker/kernel
+allocations retain their existing library limits. A complete search-memory cap
+and hard realtime/RSS guarantee are not established. See the experimental
+branch's docs/row_metadata_ownership.md for ownership and qualification details.
+
+The exact final native archive is now running the complete28 circuit/API
+diagnostic against parent24dc56f, with the same committed adapter/dependencies.
+The complete238-observation cost comparison is prepared but unexecuted. Complete
+API/cost qualification, all56 live peer cells and separate complete confirmation
+remain required. Verification remains enabled. No fastest or production
+promotion claim follows from the correctness controls.
