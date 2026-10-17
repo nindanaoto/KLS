@@ -3559,3 +3559,50 @@ Evidence:
 `build/root24-coarse-profile-api-lineage-controls-20261017/review.json`,
 `build/root24-coarse-execution-api-lineage-api-review-preparation-20261017/review.json`,
 `build/root24-coarse-execution-completed-priority-decision-20261017/decision.json`.
+
+### Observed-work exploration funding implemented, 2026-10-17
+
+The isolated branch `work/observed-exploration-budget-root-20261017` adds private
+per-instance work accounting and a shared reservation ledger. Commits `46fa8cc`
+and `a6df368` implement the ledger and its first SNB consumer; `5dbae38` corrects
+the fixture constructor and exercises real zero-hint observation. The initial
+integration attempt compiled the solver archive but failed while compiling the
+new fixture. That attempt is retained and claims no runtime qualification.
+
+The corrected exact candidate passes45 native and45 optimized ASan/UBSan suite
+checks, retaining all43 parent tests in each context. The initial three focused
+checks also pass in each context. Independent review checks source/dependency
+archives, active assertions, unchanged public header/dedicated certificate
+sources and every child edge. Five standalone budget contexts additionally
+cover integer timing conversion, rounding/sticky flags, reservations, stale
+leases, overflow and per-instance independence. The lifecycle fixture checks
+successful external-call counting, internal-call exclusion, failures, both
+orientations and formats, reset, immutable hints and actual zero-hint work.
+
+Funding uses observed successful external work and optional immutable caller
+hints. One active reservation fixes an experiment's allowance. Rejected work
+and deadline overshoot remain charged; observation monitoring itself must be
+funded. Ordinary bookkeeping reuses existing timings and adds no sampling
+clock or allocation. SNB is the first consumer; other adaptive engines still
+use their existing policy. This is not yet a global exploration-cost bound
+across all engines, a memory cap or broader row admission.
+
+All28 Xyce API settings pass independent waveform, step, certificate, binary
+and source checks. The plain parent24/candidate5d binaries use the same
+committed adapter and shared dependencies. Default current-operator verification
+remains enabled. The first independent API reviewer completed but its exec
+terminal handle was lost during context truncation; its package is preserved.
+A fresh independent closure reviewer repeats the checks without repeating the
+numerical campaign, reaches actual exit zero and is confirmed absent.
+
+A complete238 paired application-cost comparison against parent24 is running.
+No partial timing results are assessed. This foundation is unpromoted; it makes
+no speedup, generality or peer-leadership claim. Transactional row ownership,
+resource accounting and paired verified trials remain prerequisites to broader
+row admission. A separate parent24 snapshot-storage-reuse candidate `ed555c5`
+is source-prepared only; its tests are queued until timing and independent
+review close.
+Evidence:
+`build/observed-exploration-budget-controls-preparation-20261017/review.json`,
+`build/observed-exploration-budget-fixture-corrected-full-runtime-review-preparation-20261017/review.json`,
+`build/observed-exploration-budget-api-closure-review-preparation-20261017/review.json`.
