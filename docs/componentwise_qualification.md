@@ -2943,3 +2943,25 @@ Evidence:
 `build/componentwise-inner-l2-copy-elision-root-confirmation-review-preparation-20261017/review.json`,
 `build/componentwise-inner-l2-copy-elision-root-two-campaign-decision-20261017/decision.json`,
 `build/componentwise-inner-l2-copy-elision-root-two-campaign-decision-20261017/integration-branch.json`.
+
+### General row-admission source finding, 2026-10-17
+
+Read-only inspection identifies a remaining dimension-based automatic row gate:
+`kls_auto_row_refactor_high_work_candidate` requires 300,000–800,000 rows and
+at least 1e8 dependency work. A second preparation cutoff cites a measured
+setup on rajat03 and the sizes of prior adopters. These cutoffs are not a
+representation-validity argument and may prevent the existing paired
+row/column tournament from examining other profitable structures. No speedup
+from removing them is established.
+
+The preparation path needs more than a changed predicate. Both general and
+parallel pattern builders may free retained row metadata before constructing
+the replacement, and neither accepts a preparation budget/deadline. Moving
+construction later also requires checking packed/native factor authority
+before seeding from retained value-pointer mirrors. A general replacement
+must price complete preparation and publication over the caller-declared
+lifecycle, preserve usable incumbent state when a bounded attempt declines,
+and retain the existing measured refactor-plus-solve acceptance and re-audit.
+Cancellation/OOM and factor freshness need directed controls before broader
+admission. No numerical source or live timing input changes in this audit.
+Evidence: `build/row-admission-general-resource-source-audit-20261017/audit.json`.
