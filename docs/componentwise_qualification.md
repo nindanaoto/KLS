@@ -2794,3 +2794,33 @@ instrumentation has an exact inverse, but real-edge construction, full numeric
 integration, unmasked traps, performance and generality remain unqualified.
 Raw review:
 `build/snb-narrow-row-vector-first-proof-review-preparation-20261017/review.json`.
+
+The matched full-28-per-arm diagnostic subsequently completed all 56 settings.
+Both arms use one freshly compiled six-function wrapper object, the same
+cacheline adapter and the same dependencies. Independent review reconstructs
+all 118 compiler/linker/circuit child edges, source/binary pins, full-grid order,
+raw counters and fresh waveforms. Every setting qualifies. Reported call counts
+for mem_plus are identical between arms. Differences occur only in NEURON's
+mapped/native-KLU path counts, by 1–14 of 7,740 refactors per setting. These
+instrumented observations do not explain or retrospectively attribute the plain
+4.39% regression. Copy removal remains held; any confirmation must retain the
+whole original paired grid in a fresh campaign. Matched review:
+`build/componentwise-inner-l2-copy-elision-root-matched-api-review-preparation-20261017/review.json`.
+
+The separate row-vector prototype now also passes 2,728,320 whole-edge fixtures
+in each of native, generic and optimized ASan/UBSan builds (8,184,960 total).
+The source capsule extracts the current root edge/supernode/block declarations,
+unchanged dense-product helper and complete edge arithmetic. Reversing the one
+new narrow-row helper call restores the original edge body byte-for-byte. The
+full original semantic grid is retained, with extra FTZ/DAZ cases at row heights
+8, 9, 15 and 16 to exercise vectors and tails. Finite/infinity/signed-zero bits,
+nonfinite quiet/signaling class, raw MXCSR/C exception flags, protected pages
+and producer bytes agree. Native arithmetic differs in 103,860,144 NaN payload
+words across 230,208 fixtures; those differences are counted, not treated as
+bit identity. Generic and sanitizer comparisons report none. This establishes
+raw bounded-edge arithmetic, not real-matrix construction, unmasked traps,
+no-contract behavior or full solver correctness. The original unfiltered
+201,600-observation cost grid is prepared/running separately; no kernel speed
+claim follows before its actual terminal and independent full-grid review.
+Whole-edge review:
+`build/snb-narrow-row-vector-edge-review-preparation-20261017/review.json`.
