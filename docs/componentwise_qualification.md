@@ -2880,3 +2880,27 @@ they do not qualify the current-root combination or establish a speedup over
 root. Fresh root runtime, API, complete timing, generality and peer checks
 remain required. No concurrent build or proof may run during the live
 uninstrumented confirmation.
+
+The root certificate rebase is now also committed on the isolated branch
+`work/certificate-verdict-root-20261017`, based on `2754413`, in two chunks:
+`e3cc481` carries the validated binary64 degree/underflow machinery and
+range-local tolerance reuse; `24dc56f` adds the private affirmative verdict
+path when the caller does not consume an accepted bound. Every source,
+public header and existing test file in its clean sparse worktree matches
+the pinned corrected capsule. The branch retains both root EGraph fixes.
+Main numerical code remains unchanged, and these commits are not a current-root
+runtime, performance or generality qualification. Runtime, API, full-238 and
+full-1,760 controllers/reviewers are prepared separately and remain unexecuted.
+Branch/source receipt:
+`build/componentwise-verdict-witness-root-rebase-source-corrected-preparation-20261017/integration-branch.json`.
+
+A read-only SubtreeLU upstream/API check finds installed clean revision
+`9930fd2cadff043f44bd0c9b48a63403f6ed218e` equal to a fresh official main-ref
+lookup. Xyce supplies zero-based CSR and null permutation arguments for
+analysis, then factorizes, refactorizes changed values and solves in the
+sequence documented by the official repository. This limited source check
+finds no newer main revision or sequence mismatch; it does not diagnose or
+resolve the prior two MOS eight-thread timeouts. They and the incomplete peer
+comparison remain unqualified. Evidence:
+`build/subtreelu-upstream-and-api-source-check-20261017/source-check.json`.
+Official guidance: https://github.com/THU-numbda/SubtreeLU#usage-of-the-library.
