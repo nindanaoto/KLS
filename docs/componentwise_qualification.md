@@ -3910,3 +3910,41 @@ worker setup must be charged. No automatic admission, API cost, Xyce, speed or
 peer qualification follows. Production numerical code stays2754413, default
 verification stays enabled, and all56 peer cells plus a separate complete
 confirmation remain required.
+
+
+Bounded detached value refresh is now implemented and qualified on experimental
+branch `work/row-metadata-value-refresh-root-20261017`, code checkpoint13968f8
+(worktree `build/observed-exploration-budget-root-worktree-20261017`). Native
+authority and a current storage binding are explicit preconditions. The helper
+allocates nothing and preserves live metadata/factors and crew/scratch state.
+It copies row and sorted-L values, invalidates packed/panel authority and solve
+readiness, accounts elapsed work, and publishes a current value binding only
+after final budget/version checks. Interrupted work remains unbound and retryable.
+
+The frozen076f28e source passes five focused checks per native and optimized
+ASan/UBSan context. Its actual37 refresh configurations are recorded accurately
+by review despite an incorrect69 summary in that test version. Final13968f8
+adds hinted/unhinted coverage, portable-C fixes, storage boundaries, guards and
+FP controls. Its refresh fixture passes separately in both contexts:69
+configurations,128 FP mask/rounding combinations and646 cutoffs each for expiry,
+clock failure and value-version changes, plus packed-address rejection and
+stale retirement. Review confirms exact source/four dependencies, assertions,
+all49 parent CTest names retained plus the new test, unchanged prior numerical
+operations by source inversion, and all12 child edges closed per run with
+actual zero exits and absent PIDs. This does not repeat a full50-test suite.
+Evidence:
+`build/row-metadata-value-refresh-fixture-focused-runtime-review-preparation-20261017/review.json`
+and
+`build/row-metadata-value-refresh-final-pinned-focused-runtime-review-preparation-20261017/review.json`.
+A mistaken final archive pin was rejected before any compiler/test child; the
+failed package is preserved and the corrected run uses a fresh package.
+
+The next blocker is complete paired-trial coordination: explicit attempt
+versioning for real private kernels, current-operator publication, saved caller
+RHS ownership, funded worker setup and refresh, actual incumbent-last
+recomputation, unchanged-tolerance current-A/RHS certification and recovery/debt
+accounting. Metadata refresh alone neither restores numerical trial writes nor
+proves row execution or a speedup. No automatic caller or broader selector is
+added. Production numerical source remains2754413 and default verification stays
+enabled. Complete candidate runtime/API/cost gates, all56 peer cells and a
+separate complete confirmation remain required.
