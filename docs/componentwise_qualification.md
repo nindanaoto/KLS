@@ -3091,3 +3091,45 @@ result, production promotion, generality or peer superiority is inferred.
 Evidence:
 `build/certificate-warm-selection-root-api-review-preparation-20261017/review.json`,
 `build/certificate-warm-selection-root-spice-pair-preparation-20261017/stage-decision.json`.
+
+### End-to-end row preparation and late equality source work, 2026-10-17
+
+While the isolated re-audit candidate runs its complete paired timing grid,
+read-only inspection refines the row-admission blocker. The lower-bound
+estimator itself builds refactor maps and native LU pointer caches, allocates
+row counts and scans the factors before row-pattern construction starts.
+The row destructor also owns lean/compact input maps and scheduling state;
+`compact_match_offdiag_user_pos`, for example, participates in direct caller
+value admission and off-diagonal refresh. Parallel construction publishes a
+stack job and the real solver into its retained worker pool. Its finisher
+publishes base arrays before all auxiliary construction has completed. A
+builder-only timeout or shallow solver clone therefore does not establish
+bounded preparation with a usable incumbent. Dimension gates remain unchanged.
+Source-pinned evidence:
+`build/row-admission-end-to-end-ownership-audit-20261017/audit.json`.
+
+A separate, smaller prototype uses the existing owned original-system snapshot
+to re-examine exact equality after the raw unchanged-input cache declines its
+first changed update. Failed scans back off geometrically. A positive result
+compares every current caller value byte and the complete saved layout, and
+requires the preceding successful public numeric epoch with no intervening
+numeric/recovery entry. It dispatches the existing unchanged-factor executor;
+current RHS/solution verification and fresh snapshot publication remain.
+No additional per-update value snapshot is introduced. The prototype captures
+x87 control and SSE control modes and requires a match; sticky exception flags
+are excluded. Platforms without complete control capture retain ordinary
+refactoring. It assumes canonical owned snapshot values and needs an explicit
+adapter before combining with a caller-order snapshot variant.
+
+The code and directed controls are committed as `356d27d` and `4394fdf` on
+`work/late-unchanged-owned-snapshot-root-20261017`, based independently on
+root2754413. Controls cover a first changed update followed by equality, fresh
+RHSs, combined calls, CSR/CSC, both orientations, scaling, failed updates,
+numeric/recovery epochs, control-mode changes and counter saturation. This is
+source-only work: neither commit has been compiled or tested. The prepared
+six-context comparator runner waits for the live paired timing and its
+independent review to close. No compiler, test, profiler or numeric proof is
+launched alongside that timing; its frozen binaries remain unchanged.
+Evidence:
+`build/late-unchanged-owned-snapshot-root-source-preparation-20261017/preparation.json`,
+`build/late-unchanged-owned-snapshot-root-controls-preparation-20261017/run.py`.
