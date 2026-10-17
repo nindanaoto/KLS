@@ -2735,3 +2735,62 @@ Evidence:
 `build/egraph-idle-budget-root-atomic-regression-preparation-20261016/completed.json`,
 `build/egraph-idle-budget-root-full-runtime-count-corrected-preparation-20261016/completed.json`,
 `build/egraph-idle-budget-root-atomic-review-preparation-20261016/review.json`.
+
+### Unused inner L2 snapshots: full cost completed, candidate held
+
+A separate candidate against committed root `2754413` adds six semantic guards
+that skip duplicate snapshots used only by the disabled strict-RHS-L2 path
+when the locked componentwise policy is active. It preserves allocations,
+canonical owned-current-operator data, numeric bodies and public interfaces.
+It does not stack the verdict-witness, mapped-worker or parking prototypes.
+Native and optimized ASan/UBSan root suites pass all 43 registered tests each.
+Poison/page-guard controls preserve the full 960-epoch grid per build/arm:
+240 round-to-nearest successes and 720 existing unsupported-rounding
+rejections with unchanged outputs. Exact rational review confirms every
+successful residual and bit-identical baseline/candidate outputs. The original
+fixture's incorrect assumption that all rounding modes must succeed, and its
+diagnostics, remain preserved.
+
+All 28 original circuit/domain/thread API settings qualify with 288,650
+certificate calls. Fresh root-compatible diagnostic wrappers are confined to
+the profiling executable; both plain arms share the committed cacheline Xyce
+adapter and dependency archives. Independent review verifies that their link
+commands differ only in core archive and output paths.
+
+The complete 238-observation paired campaign then qualifies every observation:
+14 fresh KLU references plus 224 timed observations, four balanced passes per
+circuit/domain/thread. The actual controller exit is zero, all 238 child
+processes are absent, and independent review reconstructs all 476 child edges,
+raw logs, current input hashes, fresh waveform checks, step counts and ratios.
+Candidate/baseline suite geometric mean linear-solve-time ratios are 0.989565
+and 0.981619 on llc32 at one and eight threads, and 0.992559 and 0.997187 on
+llc96. Twenty-seven of 28 cell medians improve, but llc96/eight-thread mem_plus
+regresses: its four ratios are 0.993008, 1.032280, 1.055488 and 1.067632,
+with median 1.043884. That case remains included in every aggregate.
+
+The candidate is **held**, with no production promotion, broader-corpus or
+peer-leadership claim. A matched full-28-per-arm API diagnostic is prepared to
+compare engine counts under identical instrumentation. Such diagnostics can
+change bounded timing consultations and cannot retrospectively prove the cause
+of a plain timing regression. Any independent timing confirmation must use a
+fresh complete balanced campaign; no favorable subset or case-specific selector
+is authorized by these results.
+
+Evidence:
+`build/componentwise-inner-l2-copy-elision-root-runtime-review-preparation-20261017/review.json`,
+`build/componentwise-inner-l2-copy-elision-root-fp-contract-review-preparation-20261016/review.json`,
+`build/componentwise-inner-l2-copy-elision-root-api-review-preparation-20261017/review.json`,
+`build/componentwise-inner-l2-copy-elision-root-spice-pair-review-preparation-20261017/review.json`,
+`build/componentwise-inner-l2-copy-elision-root-completed-cost-decision-20261017/decision.json`.
+
+The next isolated row-vector helper remains outside production. Raw controls
+cover 195,842 comparisons in each of six native/generic/feature-subset/sanitizer
+contexts (1,175,052 total), with explicit within-packet collision replay,
+cross-packet repeats, signed indices, tails, IEEE values and protected pages.
+Finite/signed-zero output bits and FP status match the production-contracted
+scalar loop. Native and minimal F/CD/VL contexts each record 78,304 differing
+written NaN payloads; no bit-identical NaN propagation is claimed. Source
+instrumentation has an exact inverse, but real-edge construction, full numeric
+integration, unmasked traps, performance and generality remain unqualified.
+Raw review:
+`build/snb-narrow-row-vector-first-proof-review-preparation-20261017/review.json`.
