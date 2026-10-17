@@ -3651,9 +3651,16 @@ at `c84664f` uses generic serial metadata preparation to retain the incumbent
 crew, while preserving the legacy parallel-capable builder body at its existing
 callers. Its new fixture covers zero/repeated hints, native factor and crew
 preservation, BTF off-diagonals and allocation faults. It also includes the
-exploration header in tuning-profile fingerprints. Full94 native/SAN execution
-is underway; no completed qualification is claimed for this child yet. Its
-helper has no automatic caller. A source-only inventory identifies21 directly
+exploration header in tuning-profile fingerprints. All47 native and47 optimized
+ASan/UBSan suite checks, plus five initial focused checks in each context, now
+pass. Independent review confirms exact source/dependencies, every parent test,
+active assertions, all20 child edges, the inverse-exact legacy builder body at
+allow_parallel=1 and absence of any automatic constructor caller. Actual runtime
+and reviewer execution terminate zero with recorded PIDs absent. Evidence:
+`build/detached-row-constructor-full-runtime-review-preparation-20261017/review.json`.
+This qualifies construction-only controls, not bounded resource/cancellation,
+current-value/storage epochs, complete engine trials or a performance/admission
+change. Its helper still has no automatic caller. A source-only inventory identifies21 directly
 allocating helpers for the next explicit resource context; that inventory is
 not a semantic proof of a complete cap. Bounds, cooperative cancellation,
 epochs, verified full-cycle trials and broader admission remain outstanding.
