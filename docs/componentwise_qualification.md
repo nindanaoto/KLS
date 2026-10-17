@@ -3507,3 +3507,55 @@ remains enabled; root24 broader qualification and promotion remain pending.
 Evidence:
 `build/componentwise-verdict-witness-root-peer-spice-review-preparation-20261017/review.json`,
 `build/componentwise-verdict-witness-root-peer-completed-decision-20261017/decision.json`.
+
+
+### Current-root coarse execution diagnostics implemented, 2026-10-17
+
+Commits `e53e8a7` and `274ccf8` add a standalone source preparer and diagnostic
+helper, plus controls for nested scopes, early returns, three thread lifetimes,
+allocation requests and all64 SSE sticky combinations under four rounding
+modes. Native, generic and optimized ASan/UBSan controls pass. Integer clocks
+preserve errno and tested x87/SSE state. These tools are not included in an
+ordinary production build and change no public API or solver layout.
+
+The first complete28 diagnostic passes its API and independent waveform checks.
+It retains32 function/job scopes. Review then identifies a necessary distinction:
+worker zero can execute on the public caller thread. That completed attempt and
+its exact historical tool bytes remain retained. The extended helper tracks
+same-thread public-API ancestry separately from background workers, adds API
+root scopes and checks an exact partition: summed API-thread exclusive time
+equals summed outermost API-scope time. Distinct thread counts describe thread
+lifetimes entering scopes, not simultaneous occupancy or arithmetic utilization.
+
+A fresh full28 extended diagnostic passes independent raw-log, waveform, step,
+input/binary pin and process-ledger review. All1036 coarse records and all28
+exact API-thread partitions reconstruct. Both full diagnostics close with
+actual exit zero, all56 child edges closed and reviewers absent. The extended
+source recovers all33 original src/include Git blobs after removing diagnostic
+insertions; only kls.c.o changes in the seven-member root24 archive. Other core
+objects, the committed adapter and dependencies remain pinned. Allocation
+requests cover wrapped link boundaries, not retained or process memory.
+
+In the extended instrumented run, mapped refactor occupies about57--68% of
+parallel RAM/memory/DAC API-thread time. Their retained crew enters only a small
+number of initial numeric trials while steady execution remains mapped. Serial
+BJT spends about84--88% in SNB refactor; parallel BJT spends about20% in native
+transpose solve. Operator snapshot preparation also requests roughly one value
+allocation per update and occupies about7--13% in several remaining gaps.
+These proportions identify execution targets, not removable-cost guarantees:
+instrumentation can alter adaptive choices and independent API calls may overlap.
+Worker totals must not be treated as caller wall time.
+
+Next implementation: private observed-work accounting and a shared bounded
+exploration ledger, preserving immutable caller hints and zero-hint initial
+analysis policy. Existing declined-row complete-cycle re-audits already exist;
+do not duplicate them or force a sampled loser. Budgeted row construction must
+preserve row/lean/compact and off-diagonal map ownership, join real-owner pool
+jobs, charge map/cache work before estimation, and establish native/packed value
+authority before seeding. Broader admission remains held until rollback, OOM and
+cancellation controls pass. No algorithmic speedup, generality, promotion or
+fastest claim follows from these diagnostic implementations.
+Evidence:
+`build/root24-coarse-profile-api-lineage-controls-20261017/review.json`,
+`build/root24-coarse-execution-api-lineage-api-review-preparation-20261017/review.json`,
+`build/root24-coarse-execution-completed-priority-decision-20261017/decision.json`.
