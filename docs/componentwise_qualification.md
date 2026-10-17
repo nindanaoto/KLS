@@ -2904,3 +2904,29 @@ resolve the prior two MOS eight-thread timeouts. They and the incomplete peer
 comparison remain unqualified. Evidence:
 `build/subtreelu-upstream-and-api-source-check-20261017/source-check.json`.
 Official guidance: https://github.com/THU-numbda/SubtreeLU#usage-of-the-library.
+
+The independent copy-guard confirmation completed all 238 observations with
+actual zero exit, controller absence and all 476 numerical child edges closed
+and absent. Independent review reconstructs the reversed domain/circuit order,
+shifted balanced arm phase, all fresh waveforms, step counts, raw logs and input
+pins. Every observation qualifies. Candidate/baseline suite geometric means
+are 0.991751 and 0.986136 on llc32 at one/eight threads, and 0.991316 and
+0.989396 on llc96. Twenty-five of 28 cell medians improve. The original
+llc96/eight-thread mem_plus regression does not recur (confirmation 0.995417),
+but mux regresses by 0.53% on llc32/one thread, 1.12% on llc32/eight threads
+and 0.66% on llc96/eight threads. The first campaign, these three regressions,
+and every raw pair remain included separately; no campaign or case results
+are pooled or replaced. No cell is slower in both campaigns. This does not
+explain the original regression or establish absence of regressions.
+
+Both complete campaigns qualify every observation and all eight separate suite
+aggregates improve, so the whole unchanged candidate advances only to broader
+validation. It remains held from production. The exact four-file/six-guard
+source is committed independently as `2f051ec` on
+`work/componentwise-l2-copy-guards-20261017`; it is not combined with the
+certificate branch. Its full-110-matrix controller remains prepared, not run.
+The independent root certificate native/ASanUBSan suite is executing first.
+Evidence:
+`build/componentwise-inner-l2-copy-elision-root-confirmation-review-preparation-20261017/review.json`,
+`build/componentwise-inner-l2-copy-elision-root-two-campaign-decision-20261017/decision.json`,
+`build/componentwise-inner-l2-copy-elision-root-two-campaign-decision-20261017/integration-branch.json`.
