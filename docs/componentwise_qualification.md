@@ -3019,3 +3019,52 @@ as separate parent snapshot commit `fea844d` and identity-access commit
 Evidence:
 `build/caller-order-snapshot-identity-layout-root-controls-preparation-20261017/failure-review.json`,
 `build/caller-order-snapshot-identity-layout-root-coverage-scratch-corrected-controls-review-preparation-20261017/review.json`.
+
+### Matched certificate plan diagnostic and bounded re-audit, 2026-10-17
+
+All 56 matched baseline/candidate diagnostic runs complete and independently
+qualify. The same seven-function wrapper object and shared dependencies are
+used in both arms. Two exact, separately named private plan layouts are read
+with `memcpy` after the certificate timer stops; the resolved private verdict
+symbol determines the layout. The review reconstructs all 118 child edges,
+all waveforms and step counts, raw counters and source/layout pins.
+
+NEURON on llc96/eight threads records 7,739 parallel-choice states and two
+undecided states in both arms. On llc32/eight threads, the baseline records
+7,739 parallel-choice states whereas the candidate records 7,739 serial-choice
+states, with two undecided states each. Those post-call states describe the
+retained choice, not necessarily the execution of the call that just decided
+it. The llc96/eight-thread mapped/KLU refactor counts also differ: 7,718/22
+for baseline and 7,701/39 for candidate. Smaller mapped/KLU count differences
+occur in the other NEURON settings. Other circuits retain matching numerical
+refactor-path counts; llc32/eight-thread BJT has three additional candidate
+certificate calls/misses. Instrumentation may affect adaptive decisions.
+These observations do not establish the cause of the preceding plain timing
+regression, and do not justify a NEURON-specific selector.
+
+The next isolated candidate, `76b0aa3` on
+`work/certificate-warm-selection-root-20261017`, adds general geometric
+re-audits to the qualified certificate parent `24dc56f`. The initial choice
+expires after three accepted uses, then after six, twelve, and successively
+doubled use intervals. Each re-audit retains the existing three balanced
+serial/parallel probe pairs and proof-disagreement checks. Rejected proofs
+do not advance the use counter. Intervals saturate without wrapping, and
+thread/executor/output-contract changes reset timing history. Serial-only
+requests continue to avoid worker probes. No matrix name, dimension window,
+case-specific threshold or verification relaxation is introduced.
+
+The two-file source change and directed controls are committed separately.
+Parent and candidate pass all six native, generic and optimized ASan/UBSan
+plan contexts, independently reviewed. The new fixture checks a deterministic
+cold/warm cost reversal using real proof arithmetic, changing current values,
+fresh rejection, a logarithmic probe budget, counter saturation and declined
+executor fallback. This is private plan qualification, not a speedup claim.
+Fresh full solver native/ASanUBSan suites are the next gate. The first full
+configure stopped because a Git archive leaves dependency gitlinks empty;
+that package is retained. Its fresh replacement materializes the four exact
+existing dependency commits and pins their archived contents. No dependency
+version changes or solver results are inferred from the failed configure.
+Evidence:
+`build/componentwise-verdict-witness-root-matched-plan-review-20261017/review.json`,
+`build/componentwise-verdict-witness-root-matched-plan-review-20261017/decision.json`,
+`build/certificate-warm-selection-root-controls-review-preparation-20261017/review.json`.
