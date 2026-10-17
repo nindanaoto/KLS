@@ -3600,8 +3600,12 @@ No partial timing results are assessed. This foundation is unpromoted; it makes
 no speedup, generality or peer-leadership claim. Transactional row ownership,
 resource accounting and paired verified trials remain prerequisites to broader
 row admission. A separate parent24 snapshot-storage-reuse candidate `ed555c5`
-is source-prepared only; its tests are queued until timing and independent
-review close.
+was source-prepared, then shelved before compilation after finding the retained
+Oct12/13 experiment of the same hypothesis. Even its improved copy-contract
+implementation had no aggregate benefit in the complete238 comparison. The new
+source branch is retained but has no new runtime qualification, and its prepared
+controllers refuse execution. Do not repeat this rejected experiment without
+new causal evidence. See `build/original-snapshot-reuse-source-only-shelving-20261017/decision.json`.
 Evidence:
 `build/observed-exploration-budget-controls-preparation-20261017/review.json`,
 `build/observed-exploration-budget-fixture-corrected-full-runtime-review-preparation-20261017/review.json`,
