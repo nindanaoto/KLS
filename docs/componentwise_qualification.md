@@ -3664,3 +3664,46 @@ change. Its helper still has no automatic caller. A source-only inventory identi
 allocating helpers for the next explicit resource context; that inventory is
 not a semantic proof of a complete cap. Bounds, cooperative cancellation,
 epochs, verified full-cycle trials and broader admission remain outstanding.
+
+### Caller-owned row preparation budgets implemented, 2026-10-17
+
+The isolated `work/bounded-row-preparation-root-20261017` branch adds a
+lease-bound preparation context (`d7e844c`) and real rollback controls
+(`6fe3b74`). The serial path routes98 explicit allocation sites through checked
+count/size accounting. Five helpers receive the context explicitly; solver-aware
+helpers use a scoped cold-tail pointer and the row-level job carries its context.
+No process-global/TLS state or new unlimited-path sampling clock is introduced.
+Grants remain fixed, allocation attempts/temporary storage receive no refunds,
+and measured cleanup and deadline overshoot remain debited. Unreadable/backward
+clocks disable further optional funding; stale frames cannot mutate a new lease.
+The scoped pointer remains installed through cleanup and blocks reentrant frames.
+
+The real constructor fixture sweeps every recorded cumulative-payload boundary,
+every clock cutoff including final accounting, and each intercepted allocator
+failure across64 format/orientation/thread/scale/hint/BTF configurations. It
+checks the unlimited pattern, all incumbent ownership fields, native LU/Offx/
+permutations, crew/scratch identity and current caller solves after rejection.
+The limited-constructor, unlimited-constructor and pure-budget fixtures all pass
+native and optimized ASan/UBSan: six selected test executions. Independent review
+checks committed source/dependency archives, assertions, all12 child edges and
+unchanged ordinary public bodies/dedicated numeric/certificate sources. An
+independent argument audit preserves the original allocation operands at all98
+rewritten sites. The initial preparation stopped before archive/compilation on a
+cwd-relative historical hash; it is retained. A fresh package resolves the two
+known historical path prefixes explicitly without changing the numerical source.
+
+A test-only follow-up `02373f2` passes all128 standard exception-mask/rounding
+combinations in five compiler contexts (native, generic, O0, x87 and optimized
+ASan/UBSan). Its resource headers match the focused constructor candidate. All
+executions/reviewers exit zero and their recorded PIDs are absent. Evidence:
+`build/bounded-row-preparation-focused-runtime-review-preparation-20261017/review.json`,
+`build/bounded-row-preparation-allocation-arguments-review-20261017/review.json`,
+`build/row-preparation-budget-fp-masks-controls-review-preparation-20261017/review.json`.
+
+This is focused qualification, not a full49-test suite or Xyce/cost result.
+Cancellation checks currently cover allocations and batched root/input-cleanup/
+row-level scans; other helper phases/library calls can overshoot. Requested
+payload excludes allocator bookkeeping, sorting scratch, stack use and RSS.
+Complete cancellation/scratch coverage, storage/value epoch retirement and
+verified complete-cycle trials remain before automatic admission. No dimension
+gates, default verification, production promotion or peer-leadership claim change.
