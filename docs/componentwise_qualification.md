@@ -3330,6 +3330,19 @@ Evidence:
 `build/certificate-dyadic-margin-root-raw-range-review-preparation-20261017/review.json`,
 `build/certificate-dyadic-margin-root-full-runtime-preparation-20261017/full-source-preparation.json`.
 
+The complete dyadic solver gate subsequently closes with actual exit zero
+and all twelve child edges absent. Independent review confirms every one
+of the 43 native and 43 optimized ASan/UBSan tests, the unchanged root test
+grid, exact committed source and four unchanged dependency archives. Both
+builds retain the existing accuracy policy and root worker race fixes.
+This is complete runtime qualification, not broader matrix or performance
+qualification. The full28 Xyce API gate is now launched, using the current
+child source headers, qualified parent core, shared dependency/adapter objects
+and fresh KLU references from the completed root confirmation. Seven wrappers
+are confined to the diagnostic executable; both plain arms have none.
+Evidence:
+`build/certificate-dyadic-margin-root-full-runtime-review-preparation-20261017/review.json`.
+
 ### Dyadic certificate margin prototype, source only, 2026-10-17
 
 Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
