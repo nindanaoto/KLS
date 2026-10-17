@@ -3595,11 +3595,22 @@ terminal handle was lost during context truncation; its package is preserved.
 A fresh independent closure reviewer repeats the checks without repeating the
 numerical campaign, reaches actual exit zero and is confirmed absent.
 
-A complete238 paired application-cost comparison against parent24 is running.
-No partial timing results are assessed. This foundation is unpromoted; it makes
-no speedup, generality or peer-leadership claim. Transactional row ownership,
+The complete238 paired application-cost comparison against parent24 and its
+independent review finish with actual exit zero, all476 child edges closed,
+and controllers/reviewer absent. All238 observations qualify. The candidate is
+faster in23 of28 cells and slower in five, retaining every raw pair. Full-case
+candidate/parent geometric means are0.990576 (llc96 t1),0.971570 (llc96 t8),
+0.995024 (llc32 t1) and0.976490 (llc32 t8). All14 parallel medians improve.
+Serial regressions remain: NEURON +0.673%/+0.134% and BJT +0.209%/+0.346%
+(llc96/llc32), plus MOS llc32 +1.601%. No slower cell is removed or given a
+special selector. The suite gains establish no causal decomposition or all-cell
+advantage. This foundation remains unpromoted; generality, current-peer and
+separate full confirmation gates remain outstanding. Transactional row ownership,
 resource accounting and paired verified trials remain prerequisites to broader
-row admission. A separate parent24 snapshot-storage-reuse candidate `ed555c5`
+row admission. Completed evidence:
+`build/observed-exploration-budget-spice-pair-review-preparation-20261017/review.json`,
+`build/observed-exploration-budget-completed-cost-decision-20261017/decision.json`.
+ A separate parent24 snapshot-storage-reuse candidate `ed555c5`
 was source-prepared, then shelved before compilation after finding the retained
 Oct12/13 experiment of the same hypothesis. Even its improved copy-contract
 implementation had no aggregate benefit in the complete238 comparison. The new
