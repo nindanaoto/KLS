@@ -3785,3 +3785,43 @@ refactor-plus-solve trials and general automatic admission. Full-suite/API/cost
 qualification, all56 peer cells and a separate complete confirmation remain.
 This helper qualification is not a performance result; production numerical code
 remains2754413.
+
+
+The isolated `work/row-preparation-finish-cancellation-root-20261017` implementation
+`37f0b24` checks all28 for-loops and three while-loops in final row metadata
+assembly. Cancellation cleanup distinguishes local arrays from arrays already
+owned by the candidate. The bounded row-shape comparator checks in256-index
+chunks; unlimited callers retain the prior memcmp path and allocation behavior.
+
+The qualified2348b9f fixture covers69 constructor configurations, including two
+actual33-row dense panel builds with scoped test-only thresholds restored before
+public solves. Each dense case builds compact storage normally and accepts two
+valid missing-panel fallbacks over86 intercepted allocation cuts. Every accepted
+OOM candidate's base pattern matches the unlimited reference, while incumbent
+metadata, native factor hash, crew and current public solves are preserved.
+Six direct helper families include equal/late-mismatching257-entry shapes and
+exercise1667 clock,18 payload and18 allocator cutoffs per context. All three
+focused tests pass native and optimized ASan/UBSan (six executions), with equal
+direct and fallback records:
+`build/bounded-row-preparation-finish-optional-fallback-focused-runtime-review-preparation-20261017/review.json`.
+Independent review also checks exact source/four dependencies, all12 closed
+child edges, actual zero exits/absent PIDs, assertions, executable/log hashes and
+unchanged public/numeric/certificate sources. Source audits preserve all98
+allocation operands, finish operations and the unlimited comparison path:
+`build/bounded-row-preparation-finish-allocation-review-20261017/review.json` and
+`build/bounded-row-preparation-finish-inverse-review-20261017/review.json`.
+
+The first executed fixture stopped on an overstrong assertion requiring optional
+compact storage even during intercepted allocation failure. Its failed package
+is retained; the correction keeps unfaulted coverage assertions and verifies the
+accepted fallback patterns, with byte-identical numerical source. Details:
+`build/bounded-row-preparation-finish-shapes-focused-runtime-preparation-20261017/failure-analysis.json`.
+The corrected execution used fresh source/build/runtime packages. An earlier
+archive-only package was never compiled.
+
+Dense-tail/slice/segment/sparse-level partition cancellation, final preparation
+closure review, storage/value validity, verified complete refactor-plus-solve
+trials and general automatic admission remain unfinished. Full-suite/API/cost
+gates, all56 peer cells and a separate complete confirmation are still required.
+Production numerical code stays2754413 and default verification remains enabled;
+this is focused construction qualification, with no speed claim.
