@@ -3621,3 +3621,39 @@ Evidence:
 `build/observed-exploration-budget-controls-preparation-20261017/review.json`,
 `build/observed-exploration-budget-fixture-corrected-full-runtime-review-preparation-20261017/review.json`,
 `build/observed-exploration-budget-api-closure-review-preparation-20261017/review.json`.
+
+### Detached row/lean ownership qualified, 2026-10-17
+
+The isolated `work/row-metadata-owner-root-20261017` branch at `ca36e74`
+implements a typed, move-only metadata owner. It exchanges the complete303-field
+footprint of the row/solve-partition, input-map and LU-cache destructors while
+leaving the solver and pool as their real owners. The footprint includes lean
+scheduling aliases, both transpose plans and the off-diagonal maps replaced
+outside the old row destructor. Disposal preserves the incumbent while freeing
+candidate state and never dereferences borrowed factor values. This alone is
+not a constructor/cancellation or factor-storage/value-epoch transaction.
+
+The exact candidate passes46 native and46 optimized ASan/UBSan suite checks,
+plus four initial focused checks in each context. Independent review confirms
+all45 parent tests remain, every test name/log, source and dependency archives,
+active new-fixture assertions, all303 direct destructor fields, unchanged public
+header/dedicated certificate sources and all20 child edges. The native/SAN
+fixture stages real lean/row constructors through intercepted allocation
+failures across formats, orientations, threads and scaling, including coupled
+two-block BTF maps. It checks the incumbent field by field and solves current A
+after cleanup. Actual execution and review terminate zero with their recorded
+PIDs absent. The kls.c change is only an inactive private include; there is no
+automatic execution-path caller or wider admission. Evidence:
+`build/row-metadata-owner-full-runtime-review-preparation-20261017/review.json`.
+
+A separate construction-only child on `work/detached-row-constructor-root-20261017`
+at `c84664f` uses generic serial metadata preparation to retain the incumbent
+crew, while preserving the legacy parallel-capable builder body at its existing
+callers. Its new fixture covers zero/repeated hints, native factor and crew
+preservation, BTF off-diagonals and allocation faults. It also includes the
+exploration header in tuning-profile fingerprints. Full94 native/SAN execution
+is underway; no completed qualification is claimed for this child yet. Its
+helper has no automatic caller. A source-only inventory identifies21 directly
+allocating helpers for the next explicit resource context; that inventory is
+not a semantic proof of a complete cap. Bounds, cooperative cancellation,
+epochs, verified full-cycle trials and broader admission remain outstanding.
