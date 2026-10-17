@@ -2965,3 +2965,54 @@ and retain the existing measured refactor-plus-solve acceptance and re-audit.
 Cancellation/OOM and factor freshness need directed controls before broader
 admission. No numerical source or live timing input changes in this audit.
 Evidence: `build/row-admission-general-resource-source-audit-20261017/audit.json`.
+
+### Complete root certificate cost gate, 2026-10-17
+
+The certificate branch (`e3cc481`, `24dc56f`) completes the fresh root-native
+43-test suite, optimized ASan/UBSan 43-test suite, and all 28 API settings.
+Its complete paired circuit campaign and independent review are now closed:
+all 238 observations qualify, including 14 fresh KLU references and 224 timed
+runs covering every circuit/domain/thread setting with four balanced pairs.
+Candidate/baseline suite geometric means are 0.718491 and 0.835299 on llc32
+at one/eight threads, and 0.702081 and 0.832481 on llc96. These are comparisons
+with root2754413, not new gains over the earlier isolated verdict candidate
+or comparisons with either peer solver.
+
+Twenty-seven of 28 cell medians improve. NEURON/rallpack3 on llc96/eight
+threads consistently regresses: median 1.034608, individual pair ratios
+1.036760, 1.035606, 1.028744 and 1.033611. Its llc32/eight-thread result
+is mixed (0.891502, 1.026211, 1.023063, 0.909794). Every pair remains in the
+decision. Production promotion and broader qualification remain held while
+a matched full-grid diagnostic examines certificate execution choices.
+Cold calibration is a hypothesis, not an established cause. Verification
+remains enabled; no circuit, dimension or measured-result selector is added.
+Evidence:
+`build/componentwise-verdict-witness-root-spice-pair-review-preparation-20261017/review.json`,
+`build/componentwise-verdict-witness-root-completed-cost-decision-20261017/decision.json`.
+
+### Identity-layout snapshot constructor controls, 2026-10-17
+
+A separate caller-order snapshot prototype detects an identity value-source
+map by checking every validated slot. Fresh owned caller bytes can then be
+used as canonical bytes without indirect reads. Nonidentity maps retain
+their existing interpretation. This prototype is separate from the verdict
+and inner-L2-copy branches; its parent still needs fresh complete root
+qualification.
+
+The constructor fixture covers both orientations, identity/nonidentity slot
+maps, all four rounding modes, three accuracy policies, fresh value epochs,
+in-place map changes, allocation failures and canonical allocation fallback.
+The first run failed its final expected coverage count: fallback checks had
+incorrectly been counted as mapped. All preceding semantic assertions passed.
+That failed package is preserved, including the unavailable original tool
+terminal receipt; no successful controller exit is inferred. A corrected
+preparation then stopped before compilation because its scratch path still
+named the earlier run. It is also retained. A fresh corrected package passes
+all six parent/candidate native, generic and optimized ASan/UBSan contexts;
+independent review checks all 24 child edges, source pins and logs. Each
+candidate context checks 144 identity and 144 nonidentity snapshots, with
+32 caller-order and 256 canonical interpretations. This is constructor
+qualification only; no complete-solver or speedup claim follows.
+Evidence:
+`build/caller-order-snapshot-identity-layout-root-controls-preparation-20261017/failure-review.json`,
+`build/caller-order-snapshot-identity-layout-root-coverage-scratch-corrected-controls-review-preparation-20261017/review.json`.
