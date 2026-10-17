@@ -2824,3 +2824,26 @@ no-contract behavior or full solver correctness. The original unfiltered
 claim follows before its actual terminal and independent full-grid review.
 Whole-edge review:
 `build/snb-narrow-row-vector-edge-review-preparation-20261017/review.json`.
+
+The row-vector prototype's complete 201,600-observation cost run subsequently
+finished with actual zero exit and all eight compiler/timing child edges closed
+and absent. Independent review checks the exact original 12,600 shapes, four
+balanced pairs, identical 112-byte root block types, raw flags/bytes, source and
+binary pins, and every aggregate. Native candidate/baseline geometric mean cost
+is 1.275525, with 10,293 of 12,600 shape medians slower; generic cost is 1.000627.
+The entire preexisting narrow branch (7,560 shapes, without exclusions) costs
+1.498855 natively; the unchanged wide control costs 1.001342. This general
+helper is rejected. Correctness controls do not justify a production promotion,
+a favorable-shape selector, a full solver claim or a peer-leadership claim.
+Review and preserved decision:
+`build/snb-narrow-row-vector-complete-cost-review-preparation-20261017/review.json`,
+`build/snb-narrow-row-vector-completed-cost-rejection-20261017/decision.json`.
+
+The six unused-inner-L2-copy guards remain held. A fresh independent complete
+238-observation confirmation is prepared using the same qualified plain
+binaries, reversed domain/circuit order and a shifted balanced arm phase.
+It retains every circuit, both thread counts, fresh KLU references, default
+componentwise verification and all failures. The first campaign's unexplained
+mem_plus regression remains evidence regardless of the confirmation result;
+no result is pooled or replaced. Broader-corpus and fresh peer qualification
+remain outstanding before any production or fastest-in-SPICE claim.
