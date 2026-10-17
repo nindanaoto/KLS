@@ -3728,3 +3728,29 @@ construction qualification, not a full49-test suite, API or performance result.
 Production numerical code stays at2754413. Remaining integration requires
 cancellation in other helper scans, distinct storage/value validity, verified
 complete refactor-plus-solve trials, then the full peer grid and confirmation.
+
+
+The isolated `work/row-preparation-scan-cancellation-root-20261017` follow-up
+`8f353be` adds cooperative cancellation and local cleanup in seven map, L/U32-bit
+cache, factor-pointer and transpose-plan helpers. Ordinary callers take no new
+sampling clock. The limited constructor retains complete-candidate rejection;
+this does not introduce an automatic caller or change verification policy.
+
+All three focused tests passed native and optimized ASan/UBSan (six executions).
+The real-constructor fixture now covers67 configurations, including two513-column
+cases crossing batched scan boundaries. Failure sweeps retain the unlimited
+pattern, incumbent metadata, native factor hash, crew and current public solves.
+A fresh independent source/runtime review passes:
+`build/bounded-row-preparation-scans-focused-runtime-review-preparation-20261017/review.json`.
+All12 child edges and controllers closed zero and are absent. Separate source
+reviews preserve all98 allocation operands and show inverse equivalence of the
+seven changed helpers with byte-identical source outside those helpers:
+`build/bounded-row-preparation-scans-source-review-20261017/review.json` and
+`build/bounded-row-preparation-scans-inverse-review-20261017/review.json`.
+
+This is focused preparation qualification, not complete helper-branch coverage,
+a full49-test suite, API validation or a speed result. Remaining work includes
+dependency/group, panel and partition scan review, storage/value validity,
+verified complete refactor-plus-solve trials and general automatic admission,
+then the full56 peer cells and a separate complete confirmation. Production
+numerical code remains2754413; default verification stays enabled.
