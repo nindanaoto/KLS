@@ -3068,3 +3068,13 @@ Evidence:
 `build/componentwise-verdict-witness-root-matched-plan-review-20261017/review.json`,
 `build/componentwise-verdict-witness-root-matched-plan-review-20261017/decision.json`,
 `build/certificate-warm-selection-root-controls-review-preparation-20261017/review.json`.
+
+The corrected full runtime subsequently completes with actual controller exit
+zero and all recorded children absent. Independent review confirms all 43
+native and 43 optimized ASan/UBSan tests in the unchanged root test grid,
+including the new warm-selection fixture assertions. It also reconstructs
+the committed candidate source and the archived contents of the four pinned
+dependency submodules. The source is still held from production; the fresh
+28-setting API gate and the separate full238 parent/child cost gate follow.
+Evidence:
+`build/certificate-warm-selection-root-full-runtime-review-preparation-20261017/review.json`.
