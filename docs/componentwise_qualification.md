@@ -3224,6 +3224,33 @@ broad run and its independent review. Only controller/reviewer source has
 been prepared and parsed; no confirmation observations exist yet. Evidence:
 `build/componentwise-verdict-witness-root-confirmation-preparation-20261017/source-preparation.json`.
 
+### Complete independent root certificate confirmation, 2026-10-17
+
+The fresh confirmation closes with actual controller exit zero, all 476 child
+edges closed and the controller absent. Independent review subsequently closes
+with exit zero and qualifies all 238 observations, including fresh waveform
+and step checks and the complete unique balanced grid. The same qualified
+plain executable contents, original netlists and verifier are used in both
+root campaigns. All 28 confirmation cell medians improve. Suite ratios are
+0.723104/0.833566 on llc32 at one/eight threads and 0.706363/0.819013 on llc96.
+
+The original NEURON llc96/eight-thread median 1.034608, with all four pairs
+slower, remains retained. Confirmation median is 0.907374, with pairs
+0.898203, 0.900756, 1.032787 and 0.913991. That regression is not reproduced
+at the median and remains unexplained. NEURON llc32/eight threads remains
+mixed, with confirmation median 0.967237. No cell median is slower in both
+campaigns; all eight separate suite aggregates improve. Neither raw pairs nor
+campaign aggregates are pooled, replaced or multiplied with older experiments.
+
+Candidate `24dc56f` has independently confirmed application benefit and is
+eligible for broader validation. Production promotion, broader qualification
+and current CKTSO/SubtreeLU leadership remain unproven. Short independent
+arithmetic/FP controls for the dyadic child precede choosing the whole candidate
+for expensive broader/peer validation; there is no source stacking or automatic
+promotion. Evidence:
+`build/componentwise-verdict-witness-root-confirmation-review-preparation-20261017/review.json`,
+`build/componentwise-verdict-witness-root-two-campaign-decision-20261017/decision.json`.
+
 ### Dyadic certificate margin prototype, source only, 2026-10-17
 
 Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
