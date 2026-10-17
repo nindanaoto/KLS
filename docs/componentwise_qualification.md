@@ -3866,3 +3866,47 @@ admission remain unfinished. Later worker/thread-bound setup is outside this
 serial preparation slice. Full-suite/API/cost qualification, all56 peer cells and
 a separate complete confirmation are still required. Production numerical code
 remains2754413 and default verification remains enabled; no speedup is claimed.
+
+
+The isolated `work/row-metadata-epochs-root-20261017` implementation3cf77a2 binds
+detached metadata to separate storage/layout and value-attempt tokens. It uses
+caller-thread hooks at live numeric release/adoption, sorting, block repair and
+predicted repack/pivot fill; pure metadata cleanup does not advance them. Valid
+numeric attempts conservatively invalidate copied values, including failed/no-op
+attempts. Tokens persist through reanalysis and saturate fail-closed for optional
+exchange, while ordinary numeric operations continue. Stale disposal remains
+metadata-only and preserves the incumbent. No active ROW repair vehicle is
+removed by the new hooks.
+
+The4477456 hook/fixture source passes all49 runtime tests each native and optimized
+ASan/UBSan (98 executions), plus four initial focused tests per context. Its new
+owner controls exercise20 real lifecycle cases and128 FP mask/rounding states.
+Native runs observe both value updates retaining storage and replacement reusing
+the numeric object's address, with stale exchange rejected. Actual same-numeric
+block LU replacement, repair OOM, release, reanalysis, metadata-only cleanup,
+invalid calls and overflow are covered. The69 constructor configurations and12
+direct preparation families remain qualified.
+
+The finalc8cb8c3 refinement checks versions before comparing stored integer numeric
+identities and uses integer address snapshots in tests. This exact two-file delta
+changes only the private owner guard/test snapshots; public numeric hook files
+are byte-identical to4477456. It separately passes four focused owner/constructor/
+preparation/budget tests each native and optimized ASan/UBSan (eight executions).
+The final refinement did not repeat the full49 suite. Independent reviews verify
+source/four dependencies, assertions, executable/log hashes, all49 retained CTest
+names, all20 full-run and12 final-focused child edges closed, actual zero exits
+and absent PIDs:
+`build/row-metadata-epochs-full-runtime-review-preparation-20261017/review.json` and
+`build/row-metadata-epochs-integer-identity-focused-runtime-review-preparation-20261017/review.json`.
+Source inversion preserves prior numerical operations, all303 payload fields,
+swap/disposal bodies, public headers and dedicated certificate sources:
+`build/row-metadata-epochs-source-review-20261017/review.json`.
+
+Strict epoch rejection is not stale-value refresh or a trial coordinator. Reusing
+geometry across updates, establishing native authority, explicit versioning for
+direct private-kernel trials, incumbent-last recomputation and current-A/RHS
+certification at unchanged tolerance remain required. Cleanup/recovery and later
+worker setup must be charged. No automatic admission, API cost, Xyce, speed or
+peer qualification follows. Production numerical code stays2754413, default
+verification stays enabled, and all56 peer cells plus a separate complete
+confirmation remain required.
