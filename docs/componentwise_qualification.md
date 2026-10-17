@@ -3167,3 +3167,18 @@ and starts the optimized sanitizer build. Complete runtime qualification
 remains pending that suite and independent review.
 Evidence:
 `build/late-unchanged-owned-snapshot-root-controls-review-preparation-20261017/review.json`.
+
+The late-equality controller subsequently completes both complete solver
+suites with actual exit zero and all recorded children absent. Independent
+review confirms all 43 native and 43 optimized ASan/UBSan tests, the unchanged
+root test grid, committed six-file source delta and exact dependency archives.
+This includes the public-API reuse/RHS/layout/epoch controls. Separate native
+archive inspection finds both `kls_componentwise.c.o` and
+`kls_accuracy_certificate.c.o` byte-identical to their root2754413 objects.
+That is evidence about those arithmetic implementations, not a substitute for
+caller freshness or runtime checks. The fresh full28 API/waveform gate and
+full238 paired cost gate remain the next stages; no performance, generality
+or peer leadership follows from these runtime results.
+Evidence:
+`build/late-unchanged-owned-snapshot-root-full-runtime-review-preparation-20261017/review.json`,
+`build/late-unchanged-owned-snapshot-root-certificate-object-identity-20261017/identity.json`.
