@@ -3452,3 +3452,29 @@ gate; their unrelated broad-completion gate likewise becomes cancellation
 closure. No test or timing job overlaps the stopped broad campaign. Evidence:
 `build/componentwise-inner-l2-copy-elision-root-broad-priority-cancellation-20261017/review.json`,
 `build/componentwise-verdict-witness-root-confirmation-preparation-20261017/source-preparation.json`.
+
+
+### Fresh root24 full peer comparison launched, 2026-10-17
+
+Qualified certificate candidate `24dc56f` now has a fresh complete four-arm
+comparison running against production root `2754413`, CKTSO and SubtreeLU.
+Its prerequisite reviews cover 86 runtime tests, API28 and two separate
+complete238 root comparisons. The rejected dyadic child is not included.
+The same matched plain root binaries and committed normalized/cacheline
+adapter are used; production componentwise verification remains enabled.
+
+The fixed grid retains all seven original circuits, both CPU domains,
+threads one/eight, four balanced passes and fourteen fresh KLU references:
+462 observations and 924 child ledger edges. Each arm occupies each position
+once per cell. Original controls, strict waveform/step gates and 1800-second
+timeouts remain. The restored 719-byte packaged CKTSO key and both original
+peer libraries are pinned. No failure is omitted or retried for performance.
+
+Actual exec session56426/controller1863947 owns this attempt. No compiler,
+test or profiler overlaps its timing. Progress inspection is limited to
+counts and process liveness. Result assessment requires the actual terminal,
+controller/child absence and a separate independent review. Root24 broader
+matrix qualification is still pending; neither this diagnostic nor previous
+peer ranks establishes production readiness or all-cell leadership. Evidence:
+`build/componentwise-verdict-witness-root-peer-spice-preparation-20261017/preparation-receipt.json`,
+`build/componentwise-verdict-witness-root-peer-spice-review-preparation-20261017/review.py`.
