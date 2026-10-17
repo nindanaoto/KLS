@@ -3825,3 +3825,44 @@ trials and general automatic admission remain unfinished. Full-suite/API/cost
 gates, all56 peer cells and a separate complete confirmation are still required.
 Production numerical code stays2754413 and default verification remains enabled;
 this is focused construction qualification, with no speed claim.
+
+
+The isolated `work/row-preparation-partition-cancellation-root-20261017` changes
+`cc74ca8` (implementation) and `620e666` (controls) extend cancellation to the
+remaining dense-tail, slice, segment and sparse-level preparation scans and stop
+partition/transpose drivers between failed phases. Local arrays are released
+before publication. Source inversion reproduces all seven changed helper bodies
+apart from added checks/cleanup and pointer declaration moves, with byte-identical
+source outside them; all98 allocation operands remain preserved.
+
+Six new513-row direct controls exercise lower/upper levels and segment splits,
+dense-tail selection and slice bounds, using valid test tuning and known expected
+geometry plus unlimited comparison. All12 direct families pass1740 clock,29
+payload and29 allocator cutoffs in each native and optimized ASan/UBSan context,
+with identical records. The69 constructor configurations and two valid panel
+fallbacks per dense case also pass. Three selected tests pass each context
+(six executions). Independent review checks source/four dependencies, assertions,
+executable/log hashes, all12 closed child edges, actual zero exits/absent PIDs
+and unchanged public/numeric/certificate sources:
+`build/bounded-row-preparation-partition-focused-runtime-review-preparation-20261017/review.json`.
+Source evidence:
+`build/bounded-row-preparation-partition-allocation-review-20261017/review.json` and
+`build/bounded-row-preparation-partition-inverse-review-20261017/review.json`.
+
+The known serial source slice has also been reviewed:57 helper bodies contain144
+cooperatively checked loops and three halving binary-search leaves. Explicit
+mode0/0 guards exclude parallel/lean builders, the legacy aligned allocator is
+replaced in this slice, and bounded sorts avoid libc sorting scratch. Fixed
+macros/atomic initialization and bulk memory/free operations remain explicit:
+`build/bounded-row-preparation-serial-path-closure-review-20261017/review.json`.
+This is a scoped source review, not a formal preprocessed callgraph proof,
+exhaustive branch coverage, hard deadline or RSS bound; opaque library/callback
+latency and cleanup overshoot remain charged. The retained first source-review
+attempt stopped on a missing prior terminal receipt and was replaced after the
+actual zero source-audit receipts were recorded; no numerical result was retried.
+
+Storage/value validity, verified complete-cycle trials and general automatic
+admission remain unfinished. Later worker/thread-bound setup is outside this
+serial preparation slice. Full-suite/API/cost qualification, all56 peer cells and
+a separate complete confirmation are still required. Production numerical code
+remains2754413 and default verification remains enabled; no speedup is claimed.
