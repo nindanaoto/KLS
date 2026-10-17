@@ -4074,3 +4074,23 @@ adoption decisions. Diagnostic-only integer counter insertions have an exact
 source inverse to4193d10 and use one end-of-process report; numerical bodies and
 policy conditions remain unchanged. Adaptive timings may be affected, so those
 diagnostics will not establish a speedup or authorize production promotion.
+
+
+The full28 decision diagnostic now passes independent inverse-source, archive,
+waveform and closure review:
+`build/row-funded-search-decision-api-review-preparation-20261017/review.json`.
+It records288540 entries,171836 funding refusals,85 constructor attempts and52
+constructor time exhaustions. There are46 verified pairs and ten complete
+sample sets rejected by the existing savings margin; no positive payback,
+exchange or adopted cycle occurs. The counter does not distinguish a slower
+median from failing the absolute/relative minimum. Instrumentation may affect
+adaptive decisions, so these counts establish no uninstrumented speed result.
+An initialized incumbent-result sentinel must not be labeled a public failure.
+
+Preparation/comparison expense and incomplete or unprofitable samples now take
+priority over wider admission or a cost campaign. General next work concerns
+minimal/shared/resumable epoch-guarded metadata preparation, pricing mandatory
+useful work once, and separating rejection by funding, stability and margin.
+No tolerances, corpus coverage or production default change. The cost campaign
+has not launched; production remains2754413. Completed decision:
+`build/row-funded-search-decision-completed-priority-20261017/decision.json`.
