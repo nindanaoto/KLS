@@ -3223,3 +3223,31 @@ Both freezing and execution require closure of the current copy-elision
 broad run and its independent review. Only controller/reviewer source has
 been prepared and parsed; no confirmation observations exist yet. Evidence:
 `build/componentwise-verdict-witness-root-confirmation-preparation-20261017/source-preparation.json`.
+
+### Dyadic certificate margin prototype, source only, 2026-10-17
+
+Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
+acceptance test after the unchanged current-row residual/magnitude loop.
+With dyadic `t <= tolerance64 <= 1`, it requires coefficient `c <= t/8`
+and residual magnitude at most `t/4` times the lower power of two of the
+computed magnitude. The proposed inherited enclosure then gives an error
+ratio at most `2*t/3`. A declined test keeps the byte-identical ordinary
+post-loop source. No circuit, thread, dimension or compiler selector is added.
+
+The new test requires the tolerance cache already initialized at its original
+conversion point. It also requires range-entry SSE inexact already sticky,
+computed magnitude at least `2^-972`, and a normal or exactly zero residual.
+These arithmetic restrictions are intended to preserve the skipped enclosure's
+FP side effects. They remain proof obligations, not a claim of qualification.
+Directed source controls cover exact threshold adjacency, degree/exponent
+boundaries, subnormal/NaN declines and all 64 SSE sticky combinations.
+
+Neither candidate nor controls have been compiled or executed. The prepared
+native/generic/optimized-sanitizer runner waits for the current broad campaign
+and its review, then independent root confirmation and its review. Exact
+arithmetic, parent post-loop equivalence, all rounding/raw-tolerance controls
+and complete cost evidence remain required. This prototype is not evidence of
+a remedy for the root candidate's NEURON regression. No L2-copy guards,
+geometric re-audit or parking changes are stacked. Source evidence:
+`build/certificate-dyadic-margin-root-controls-preparation-20261017/source-review.json`,
+`build/certificate-dyadic-margin-root-controls-preparation-20261017/source-only-policy.json`.
