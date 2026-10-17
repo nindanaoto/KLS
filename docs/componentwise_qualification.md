@@ -3754,3 +3754,34 @@ dependency/group, panel and partition scan review, storage/value validity,
 verified complete refactor-plus-solve trials and general automatic admission,
 then the full56 peer cells and a separate complete confirmation. Production
 numerical code remains2754413; default verification stays enabled.
+
+
+The isolated `work/row-preparation-group-cancellation-root-20261017` changes
+`0680500` (implementation) and `d4a60ea` (direct controls) extend cancellation to
+twelve group DAG, dependency, compact-panel, producer-run, segment-target,
+classification and work/order helper bodies. Serial jobs and three leaf helpers
+carry the caller-owned context explicitly. Unlimited callers sample no new
+clock; production selection and default verification are unchanged.
+
+Five direct metadata families now reach branches absent from sparse fixtures,
+including a257-entry producer run, actual compact storage and target cleanup.
+Successful outputs match unlimited helpers; input hashes stay unchanged. Each
+native and optimized ASan/UBSan context passes1661 observed clock cutoffs,
+18 payload boundaries and18 allocator cutoffs across these families, alongside
+all67 real-constructor configurations. Three selected tests pass per context
+(six executions). The independent review checks identical direct records,
+source/four dependencies, all12 closed child edges, actual zero exits/absent
+PIDs, active assertions, executable/log hashes and unchanged public/numeric/
+certificate sources:
+`build/bounded-row-preparation-groups-focused-runtime-review-preparation-20261017/review.json`.
+Separate source audits preserve all98 allocation operands and inverse equivalence
+of the twelve changed helper bodies, with only explicit context wiring outside:
+`build/bounded-row-preparation-groups-allocation-review-20261017/review.json` and
+`build/bounded-row-preparation-groups-inverse-review-20261017/review.json`.
+
+Remaining work includes cancellation across finish-stage local/solver ownership
+transitions and solve-partition helpers, storage/value validity, verified complete
+refactor-plus-solve trials and general automatic admission. Full-suite/API/cost
+qualification, all56 peer cells and a separate complete confirmation remain.
+This helper qualification is not a performance result; production numerical code
+remains2754413.
