@@ -3478,3 +3478,32 @@ matrix qualification is still pending; neither this diagnostic nor previous
 peer ranks establishes production readiness or all-cell leadership. Evidence:
 `build/componentwise-verdict-witness-root-peer-spice-preparation-20261017/preparation-receipt.json`,
 `build/componentwise-verdict-witness-root-peer-spice-review-preparation-20261017/review.py`.
+
+
+### Complete current-root peer gap, 2026-10-17
+
+The full462 root24 four-arm campaign has actual exit zero, all924 recorded
+child edges closed and every recorded PID absent. Its prepared independent
+review subsequently closes with actual exit zero and rechecks the complete
+order, pins, raw logs, waveforms and ratios. All KLS observations qualify.
+KLS wins22 of56 peer cells, loses32 and has2 unqualified peer cells. Three
+SubtreeLU MOS13/eight-thread observations time out: one on llc96 and two on
+llc32. All remain retained; both corresponding aggregates are null.
+
+Against CKTSO, root24 suite ratios are1.197380/0.662748 on llc96 at one/eight
+threads and1.236668/0.675070 on llc32. Against SubtreeLU, one-thread ratios
+are0.723907/0.706286 on llc96/llc32; eight-thread complete aggregates are null.
+Every one-thread CKTSO cell remains slower. Parallel RAM, memory, DAC and BJT
+remain gaps; SubtreeLU also wins parallel NEURON. Neither isolated root gains
+nor favorable aggregates establish the required56 independently confirmed wins.
+
+The implementation priority is current-root coarse diagnostics, observed-cycle
+funding for deferred engines and transactional row preparation before removing
+size/work admission windows. Numeric/solve execution is a necessary target:
+existing root24 diagnostics put about75--81% of parallel RAM/memory/DAC API time
+outside solve and only8--12% in certification. These instrumented proportions
+are diagnostic evidence, not removable wall-time guarantees. Default verification
+remains enabled; root24 broader qualification and promotion remain pending.
+Evidence:
+`build/componentwise-verdict-witness-root-peer-spice-review-preparation-20261017/review.json`,
+`build/componentwise-verdict-witness-root-peer-completed-decision-20261017/decision.json`.
