@@ -3265,3 +3265,31 @@ compilation, algebra execution or probe result exists yet. These controls
 concern an already-ready tolerance cache; complete rows, first conversion,
 worker integration and full cost remain separate gates. Evidence:
 `build/certificate-dyadic-margin-root-post-proof-preparation-20261017/source-only-policy.json`.
+
+### Compute priority changed; broad attempt preserved incomplete, 2026-10-17
+
+The copy-elision broad attempt is explicitly cancelled to prioritize the
+substantive root certificate confirmation. The decision uses completed,
+independently reviewed evidence: the first root certificate comparison has
+suite ratios 0.702--0.835 and 27/28 improved medians, with its NEURON
+regression unresolved; the two complete copy-elision comparisons have roughly
+1--2% suite gains. No partial broad timing or qualification is assessed to
+make this scheduling decision. The first certificate comparison is reviewed,
+not independently repeat-confirmed; its complete confirmation is the next job.
+
+Actual broad-controller exit is 130. Independent closure review verifies all
+recorded children and observed descendants absent, no frozen native process
+remaining, and all frozen campaign inputs unchanged. All 231 completed
+observations, 463 ledger edges and the interrupted child remain preserved.
+The last start has external cancellation closure rather than a fabricated
+successful terminal edge. This incomplete attempt establishes neither broad
+generality nor performance; copy-elision promotion remains held.
+
+Before freezing, the unexecuted root confirmation preparation is revised to
+require this cancellation review. Its original prepared versions are retained.
+The complete238 grid, binaries, verification, references and balanced order
+remain unchanged. Dyadic controls retain the subsequent root confirmation
+gate; their unrelated broad-completion gate likewise becomes cancellation
+closure. No test or timing job overlaps the stopped broad campaign. Evidence:
+`build/componentwise-inner-l2-copy-elision-root-broad-priority-cancellation-20261017/review.json`,
+`build/componentwise-verdict-witness-root-confirmation-preparation-20261017/source-preparation.json`.
