@@ -4058,3 +4058,19 @@ The complete238-observation cost comparison is prepared but unexecuted. Complete
 API/cost qualification, all56 live peer cells and separate complete confirmation
 remain required. Verification remains enabled. No fastest or production
 promotion claim follows from the correctness controls.
+
+
+The exact4193d10 native archive now passes all28 circuit/API settings, with
+288808 certificate calls and unchanged tolerances. Independent waveform, step,
+certificate, matched-link and process-closure review is complete:
+`build/row-funded-search-api-closure-review-preparation-20261017/review.json`.
+All56 API and six build child edges are closed; actual terminal exits are zero.
+
+The reviewed profiles contain zero exposed accepted ROW dispatches across all28
+settings. Automatic row selection has therefore demonstrated no workload
+benefit here. The238-observation cost campaign is prepared but has not started;
+it is held pending a full28 diagnostic of funding, construction, comparison and
+adoption decisions. Diagnostic-only integer counter insertions have an exact
+source inverse to4193d10 and use one end-of-process report; numerical bodies and
+policy conditions remain unchanged. Adaptive timings may be affected, so those
+diagnostics will not establish a speedup or authorize production promotion.
