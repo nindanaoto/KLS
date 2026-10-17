@@ -3343,6 +3343,24 @@ are confined to the diagnostic executable; both plain arms have none.
 Evidence:
 `build/certificate-dyadic-margin-root-full-runtime-review-preparation-20261017/review.json`.
 
+The full28 dyadic API gate subsequently closes with actual exit zero, its
+build controller absent and all 64 recorded build/numeric child edges closed.
+Independent review qualifies every setting, fresh-reference waveform/step
+checks and all 288650 certificate calls (all verdict, zero legacy). Matched
+plain links differ only in core archive and output paths; both have no
+diagnostic wrappers. This establishes application numerical/API qualification,
+not a speed benefit from the new helper.
+
+The unchanged whole child now advances to the complete238 paired cost grid
+against parent `24dc56f`: all seven circuits, both CPU domains, one/eight
+threads, four balanced pairs per cell and fourteen fresh KLU references.
+No microbenchmark group or case is used to select a different implementation.
+No compiler, test or profiler runs alongside uninstrumented timing; assessment
+waits for actual terminal, complete child closure and independent review.
+Evidence:
+`build/certificate-dyadic-margin-root-api-review-preparation-20261017/review.json`,
+`build/certificate-dyadic-margin-root-spice-pair-preparation-20261017/stage-decision.json`.
+
 ### Dyadic certificate margin prototype, source only, 2026-10-17
 
 Isolated commit `d786a14`, based on `24dc56f`, adds an integer sufficient
