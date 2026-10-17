@@ -3707,3 +3707,24 @@ payload excludes allocator bookkeeping, sorting scratch, stack use and RSS.
 Complete cancellation/scratch coverage, storage/value epoch retirement and
 verified complete-cycle trials remain before automatic admission. No dimension
 gates, default verification, production promotion or peer-leadership claim change.
+
+
+The isolated `work/bounded-row-preparation-scratch-root-20261017` follow-up
+`5a6c3fa` bounds sorting scratch in the two reached preparation sort paths using
+an allocation-free heap sort with cooperative checks. Unlimited callers retain
+libc qsort. Cancellation also cleans up sorted-L cache temporaries and cached
+work-sort entries. No public admission or default-verification policy changes.
+
+All five standalone compiler/FP controls passed, including exact qsort comparison,
+all observed clock cutoffs, record preservation and no sort allocations. Three
+focused tests each passed native and optimized ASan/UBSan. The real-constructor
+fixture now covers65 configurations: the added BTF case asserts sorted-L cache
+construction with a nontrivial column using test-only work estimates restored
+before public solves. Independent closure/source reviews passed:
+`build/row-preparation-sort-controls-review-preparation-20261017/review.json` and
+`build/bounded-row-preparation-sort-focused-runtime-review-preparation-20261017/review.json`.
+All controller/child processes exited zero and are absent. This is limited
+construction qualification, not a full49-test suite, API or performance result.
+Production numerical code stays at2754413. Remaining integration requires
+cancellation in other helper scans, distinct storage/value validity, verified
+complete refactor-plus-solve trials, then the full peer grid and confirmation.
