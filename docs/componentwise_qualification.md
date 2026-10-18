@@ -4134,3 +4134,43 @@ fraction, deadlines, sample count, margins, payback and recovery remain as befor
 Focused/full native checks pass; a fresh complete53-test sanitizer gate is in
 progress. No performance conclusion follows. Production numerical source and
 verification are unchanged; complete cost/all56 peers/confirmation remain.
+
+
+Code7ae90e3 has completed qualification: all53 CTests pass in both native and
+optimized ASan/UBSan builds (106 full-suite checks plus two focused checks).
+All28 original circuit/domain/thread API settings also pass, with288892 current
+operator certificate calls, unchanged waveform/step tolerances and zero exposed
+accepted ROW dispatches. Independent closure reviews verify exact sources,
+dependencies, actual controller exits and absent controller/child PIDs:
+`build/row-phase-reservation-full-runtime-review-preparation-20261018/review.json`
+and `build/row-phase-reservation-api-closure-review-preparation-20261018/review.json`.
+
+A separate diagnostic derivative of that exact source now records the existing
+four-sample medians and the original payback rejection branch, without adding
+clocks or changing numerical/policy conditions. Its source edits reverse exactly
+to7ae90e3; only the main member changes in the seven-member archive. All28 cells
+pass independent waveform, step and certificate rechecks, with56 API and six
+build child edges closed. Review and actual zero/absent-PID receipts are under
+`build/row-phase-decision-state-api-review-preparation-20261018`.
+
+All11 complete sample sets reject because the row path is slower than the
+incumbent: sampled median ratios range1.9561--14.7307. None rejects solely on the
+absolute1us or relative2% savings margin. This rules out lowering those margins
+as a remedy for these completed sets; it does not characterize incomplete sets.
+Across the diagnostic125 candidates start and44 pairs verify; remaining pair
+reasons include funding, path changes and storage/restoration invalidation.
+Reasons overlap, and the incumbent-failed counter includes an unexecuted
+sentinel, not public solve failures. Diagnostic instrumentation can affect
+adaptive choices; these are not uninstrumented application speed results.
+
+The next implementation priority is numerical execution cost. Audit generic
+serial worker initialization and scratch lifetime, and the row numeric work
+against the optimized incumbent, before further reservation-only changes.
+Preserve the complete kernel, general applicability, current-operator checks,
+measured debt and mandatory recovery. The paper review supports amortizing
+preparation and work-balanced subtree scheduling, but does not establish that
+runtime verification can safely be disabled. Verification remains enabled.
+No uninstrumented cost campaign has run for this source, and production
+numerical source2754413 is unchanged. All56 peer cells and a separate complete
+confirmation remain required for the fastest claim. Completed decision:
+`build/row-phase-reservation-completed-priority-20261018/decision.json`.
