@@ -4816,3 +4816,21 @@ future-use selector is added; numerical kernels and thresholds are unchanged.
 Fresh full92 plus8 runtime,28 API and complete cost qualification are required.
 Production2754413/default verification/tolerances remain; all56 peer cells and
 separate full confirmation remain required and unmet.
+
+
+Candidate3ba29c9 passes full46 native plus46 optimized ASan/UBSan tests and eight
+focused checks. Independent source review proves exact extraction of the
+qualified parallel orchestration, unchanged tests/numerical bodies/thresholds
+and interfaces, plus native noinline helper retention. Native public wrapper
+size is578 bytes versus5722 in e4db221 and490 in root24; this is code-size
+evidence, not performance proof. All20 runtime child edges close after actual
+exit0 and absent PIDs. Review:
+`build/egraph-outlined-cycle-selection-full-runtime-review-preparation-20261018`.
+All28 API settings independently qualify, retaining waveforms/steps, seven
+original wrappers and matched plain links. All62 API/build child edges close
+after actual exit0 and absent PIDs. Review:
+`build/egraph-outlined-cycle-selection-api-review-preparation-20261018`.
+Decision: `build/egraph-outlined-cycle-selection-completed-correctness-20261018/decision.json`.
+Next is the original full238 balanced uninstrumented comparison, without source
+changes or concurrent heavy work. Production2754413/default verification and
+tolerances remain; all56 peer cells and separate full confirmation are unmet.
