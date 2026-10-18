@@ -4333,3 +4333,30 @@ adds a frozen root24 product oracle and protected-page differential tests for
 rounding, FTZ/DAZ, padded B, gapped producers, row offsets and nonfinite values.
 Native/sanitized qualification is pending. No source promotion, timing claim,
 verification change or dimension/circuit/domain selector follows.
+
+
+Candidate593dcf0 completes independent correctness qualification: all43 parent
+test names pass native and optimized AddressSanitizer/UndefinedBehaviorSanitizer
+(86 full tests), plus both initial SNB tests in each context. Each context
+passes342720 protected frozen-parent comparisons across four rounding modes,
+four FTZ/DAZ modes, row offsets, padded B, gapped producers and IEEE exceptional
+inputs. Both report zero differing NaN payload words; finite/infinity/zero bits
+and C/raw exception flags agree. The frozen oracle is the exact root24 function
+with only its symbol renamed and one trailing separator blank line omitted.
+Two private non-AVX512 controls pass with x86-64-v3, AVX512F absent and no ZMM or
+opmask instructions in the checked product symbols. This is private kernel-path
+evidence, not complete portable-application qualification.
+
+All28 original API/circuit settings also qualify with288650 certificate calls,
+independent waveform/step rechecks, the same seven API wrappers, and matched plain
+links sharing the committed adapter and dependencies. All other src/include
+bytes and solver/metadata layouts remain root24. Actual controller/reviewer
+exits are zero and all child edges close with PIDs absent. Reviews:
+`build/snb-eight-column-product-full-runtime-review-preparation-20261018`,
+`build/snb-eight-column-product-portable-review-preparation-20261018`, and
+`build/snb-eight-column-product-api-closure-review-preparation-20261018`.
+Decision: `build/snb-eight-column-product-completed-correctness-20261018/decision.json`.
+The candidate is qualified for full238 uninstrumented paired cost only. No
+speedup or peer leadership is established, and production source2754413 and
+default verification remain unchanged. All56 peer cells and a separate complete
+confirmation remain necessary for the fastest goal.
