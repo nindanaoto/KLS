@@ -4360,3 +4360,24 @@ The candidate is qualified for full238 uninstrumented paired cost only. No
 speedup or peer leadership is established, and production source2754413 and
 default verification remain unchanged. All56 peer cells and a separate complete
 confirmation remain necessary for the fastest goal.
+
+
+The first complete238 paired cost of candidate593dcf0 is terminal and
+independently reviewed: all238 observations qualify, all28 original settings
+have four balanced pairs, all476 child edges close, and controller/reviewer
+PIDs are absent after actual zero exits. Serial BJT improves in all four pairs
+in each domain; candidate/parent medians are0.9811196712 (llc96) and0.9835459270
+(llc32), reductions1.8880% and1.6454%. This is a modest whole-application gain,
+not the42.328% modeled L-load reduction and not exclusive kernel CPU evidence.
+
+The complete grid has16 faster cell medians and12 slower. Every MOS setting has
+a slower median (1.00264 to1.01164), while serial RAM medians are1.00443/1.00589;
+eight-thread NEURON pairs vary substantially. These regressions and variation
+remain part of the decision. No aggregate or selected target can establish
+unconditional promotion. Candidate593dcf0 remains isolated, with production
+source2754413 and verification unchanged. A separate full238 confirmation is
+prepared, followed by the complete56 peer grid and separate full confirmation
+before any fastest claim. No circuit/domain/dimension rescue selector is added.
+Review and completed decision:
+`build/snb-eight-column-product-spice-pair-review-preparation-20261018/review.json`
+and `build/snb-eight-column-product-completed-cost-decision-20261018/decision.json`.
