@@ -4646,3 +4646,40 @@ do not import unrelated unmeasured row-policy changes. The control remains
 isolated and production2754413/default verification/tolerances stay unchanged.
 All56 peer cells and a separate complete confirmation remain mandatory and
 unmet for the fastest goal.
+
+
+The selector is isolated as0a41f32 on
+`work/egraph-observed-cycle-selection-root-20261018`, based on qualifiedc059.
+The scoped override now requires a caller-owned cycle flag. The combined API
+uses its validated, saved RHS and existing output scratch for complete cycles
+against the same actual matrix/RHS. Every arm calls the unchanged caller
+certificate body through a borrowed-RHS split; the trial returns the incumbent
+last. A failed adopted numeric retires further optional exploration and follows
+mandatory incumbent/full-factor recovery. Unsupported and unfunded calls retain
+the ordinary path; all RHS layouts and accuracy policies retain their contract.
+
+A cold tail state reuses the qualified integer exploration ledger exactly.
+Successful existing factor/update/solve measurements fund at most2% optional
+work; trials cannot fund themselves. The fixed lease is checked between whole
+verified cycles, never inside numeric kernels: this is cooperative cancellation,
+not a hard latency/RSS guarantee. Cold preparation, comparisons, certificates,
+transition publication, cleanup and actual overshoot remain debt; only one
+useful incumbent cycle can be credited. Four verified pairs and the existing
+savings/payback margins govern adoption. Epoch, engine, crew, orientation,
+accuracy and RHS-count changes discard comparison evidence without refunding
+spent work. No case, domain, dimension band or invented forecast selects an arm.
+The selector adds no allocation site or unfunded sampling clock; its appended
+private state preserves the established hot solver prefix.
+
+The native preflight reports all46 tests and four initial focused checks
+passing, including real known solutions for crews2/8 under injected policy
+clocks: adoption, measured loss, budget overshoot, clock failure, unsupported
+challenger, incumbent restoration, invalid argument, padded RHS and epoch/frame
+invalidation. The copied budget fixture covers an independent conversion oracle,
+FP state, shared funding, stale leases, reset and overflow. Injected history and
+clocks test branch correctness, not speed. The optimized ASan/UBSan run is still
+active in `build/egraph-observed-cycle-selection-full-runtime-preparation-20261018`.
+Actual complete runtime closure, independent artifact review, complete28 API,
+application cost, full peer grid and separate confirmation are still required;
+no promotion or fastest claim follows from this preflight. Production2754413,
+default verification and tolerances remain unchanged.
