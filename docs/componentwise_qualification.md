@@ -5070,3 +5070,37 @@ bodies. No warning was suppressed. Evidence and limits are in
 Full core, portable library, Xyce API, complete cost/peer grids and confirmation
 remain pending. No speed gain or promotion is established. The two numerical
 research commits remain separate for causal cost comparisons.
+
+### Portable batch FMA dispatch and corrected candidates (2026-10-18)
+
+The first complete retained-factor-stream run at `3230492` passed all46
+native and all46 optimized ASan/UBSan tests, but failed one of46 fully
+portable tests: the unchanged exact batch-fusion comparison. The same
+failure reproduces on parent `3ba29c9` with the portable flags and unchanged
+worker/dependency archives. The137/138 result is retained as a failed full
+qualification, not attributed to compact streams or counted as a pass.
+
+On this GCC/x86 build, the independent cached consumer has a dispatched
+x86-64-v4 clone with fused multiply/add instructions; the pair and multi
+consumers previously had only generic separate multiply/add instructions.
+Commit `5d1dfad` adds matching conditional target clones to those two fused
+consumers. Arithmetic bodies, reduction order, the exact test comparison,
+tolerances, admission policy and budgets are unchanged. Native FMA builds
+retain direct calls. This addresses a general portable dispatch mismatch;
+it has no circuit, matrix-size or benchmark selector.
+
+The original exact batch test passes native, optimized ASan/UBSan and
+portable focused contexts. Independent review checks the unchanged source
+bodies, native direct symbols, portable fused clones/instructions, actual
+process closure and hashes, and preserves the failing parent control.
+Evidence is in `build/portable-batch-parent-reproduction-20261018`,
+`build/lean-retained-factor-stream-portable-failure-review-v2-20261018`,
+`build/portable-batch-fma-dispatch-focused-20261018` and
+`build/portable-batch-fma-dispatch-focused-review-20261018`.
+
+The fix is committed separately, then applied independently to compact
+streams (`c2b2956`) and SNB row tiling (`1311dc7`). Fresh full138 packages
+use frozen source archives and preserve the original failed/executed
+packages. Full core qualification, API/circuit checks, held-out matrices
+and uninstrumented comparisons remain required before either performance
+change can be promoted. Certified production/default policy is unchanged.
