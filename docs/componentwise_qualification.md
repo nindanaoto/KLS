@@ -4310,3 +4310,26 @@ original scatter unless independent evidence supports replacing it, retains
 producer order and exception behavior, and receives fresh full correctness,
 API and uninstrumented cost gates. No circuit/domain/dimension rescue selector,
 verification change, peer result, production promotion or fastest claim follows.
+
+
+The completed caller-only product-tile census qualifies all28 original API
+settings with independent waveform/step checks, exact instrumentation inverse,
+and terminal controller/reviewer receipts. Serial BJT in each domain completes
+1145 SNB cycles. Its weighted wide products number1814740270;1662347640
+(91.6025%) fall in full eight-column tiles. The source-level L-load model falls
+from10336108505 to5961044040 (42.3280%) for an eight/four/scalar column tiling.
+Consecutive eight-row destination tiles cover56.0553% of product outputs, much
+more than wholly contiguous edges, but no destination update is changed by the
+next prototype. These are geometry and logical-load counts, not measured DRAM
+traffic, exclusive CPU cost or demonstrated speedup. Census review and decision:
+`build/snb-product-tiles-census-api-review-preparation-20261018/review.json` and
+`build/snb-product-tiles-census-completed-priority-20261018/decision.json`.
+
+The isolated branch `work/snb-eight-column-product-root-20261018` starts directly
+at root24dc56f, excluding the rejected masked-scatter change. Commit1007710
+reuses each L vector across eight independent columns, retaining producer order,
+T scratch, original scatter and the existing four/scalar remainder. Commit593dcf0
+adds a frozen root24 product oracle and protected-page differential tests for
+rounding, FTZ/DAZ, padded B, gapped producers, row offsets and nonfinite values.
+Native/sanitized qualification is pending. No source promotion, timing claim,
+verification change or dimension/circuit/domain selector follows.
