@@ -4785,3 +4785,34 @@ Decision: `build/egraph-inactive-cycle-selection-completed-correctness-20261018/
 The original full238 balanced uninstrumented cost grid is next, with source
 frozen and no concurrent heavy work. No performance, peer or promotion claim
 follows from these correctness gates. Production2754413 and verification remain.
+
+
+Candidatee4db221 completes full238 cost and independent review with actual
+exit0/controller/reviewer/child PIDs absent, all238 qualified and all28 balanced
+cells complete. Review: `build/egraph-inactive-cycle-selection-spice-pair-review-preparation-20261018`.
+Candidate/root24 median linear-solver time ratios (lower is faster):
+
+| Circuit | LLC96, 1 thread | LLC96, 8 threads | LLC32, 1 thread | LLC32, 8 threads |
+|---|---:|---:|---:|---:|
+| CircuitSim90/MOS2_LARGE/ram2k.cir | 1.000673 | 0.720816 | 0.999118 | 0.761054 |
+| NEURON/rallpack3.cir | 0.999681 | 1.001399 | 0.995198 | 1.003255 |
+| CircuitSim90/MOS2_LARGE/dac.cir | 0.990300 | 0.925465 | 0.992233 | 0.935977 |
+| CircuitSim90/MOS2/mux8.cir | 0.993011 | 0.986122 | 0.994921 | 0.993080 |
+| CircuitSim90/MOS2_LARGE/mem_plus.cir | 0.991566 | 0.742242 | 1.002442 | 0.831727 |
+| MOS13_IC/invert50_mos1.cir | 1.021179 | 1.006949 | 1.001189 | 1.000096 |
+| PDE_2D_BJT/invertbjt.cir | 1.003531 | 1.000564 | 1.003527 | 0.991888 |
+
+Hold promotion: serial MOS remains mixed across domains and is2.1% slower in
+LLC96. The guard cleanup does not establish regression removal. Parallel RAM,
+mem_plus and DAC gains persist; NEURON avoids the static-floor slowdown.
+Decision: `build/egraph-inactive-cycle-selection-completed-cost-decision-20261018/decision.json`.
+Native nm symbol sizes show kls_refactor_solve grows from490 bytes in root24
+to5722 in e4db221, with no standalone kls_egraph_cycle_try symbol: the optional
+selector is inlined into the common API. This establishes code growth, not
+exclusive timing causality. The next general candidate extracts unchanged
+parallel orchestration into a noinline helper, leaving the ordinary serial
+body/finish sequence in the public wrapper. No circuit, domain, dimension or
+future-use selector is added; numerical kernels and thresholds are unchanged.
+Fresh full92 plus8 runtime,28 API and complete cost qualification are required.
+Production2754413/default verification/tolerances remain; all56 peer cells and
+separate full confirmation remain required and unmet.
