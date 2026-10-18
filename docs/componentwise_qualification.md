@@ -4575,3 +4575,34 @@ automatic challenger must fund complete-cycle exploration from observed work
 and demonstrate general selection, complete application cost and all56 peer
 cells followed by separate full confirmation. Production numerical2754413,
 default verification and tolerances remain unchanged.
+
+
+Research controlc059cc3 on `work/egraph-resource-floor-control-root-20261018`
+wraps the exact937 dispatcher body. Only unchecked parallel calls temporarily
+set the existing EGraph size/work floors to zero; both tuning values restore
+after every body return. Serial/checked dispatch and all structural capability,
+pivot, repair and verification gates remain. No new clock, allocator, layout,
+arithmetic, tolerance, forecast or case selector is added. This is an isolated
+engine-potential experiment, not a production admission policy.
+
+Full44 native and44 optimized ASan/UBSan tests plus four initial focused checks
+pass. The startup fixture proves supported EGraph dispatch with deliberately
+blocking floors, restoration, checked fallback and normal/transpose known
+solutions for crews2/8. Independent review proves the exact dispatcher body,
+all other source/include bytes against937, original43 parent test names plus
+the packed lifecycle fixture, and all20 child edges closed after actual zero
+controller/reviewer exits and absent PIDs. Review:
+`build/egraph-resource-floor-control-full-runtime-review-preparation-20261018`.
+
+All28 original API settings independently qualify with288650 certificates,
+matching waveforms/steps, matched plain links, unchanged adapter/dependencies
+and original seven wrappers; all62 child edges close. Review:
+`build/egraph-resource-floor-control-api-review-preparation-20261018`.
+Eight-thread mem_plus1200, DAC514, RAM5796 and NEURON7740 updates per domain
+now select EGraph; BJT remains EGraph and small MOS/mux retain their earlier
+paths. Counts establish coverage, not speed. Decision:
+`build/egraph-resource-floor-control-completed-correctness-20261018/decision.json`.
+The complete238 uninstrumented paired cost gate is next. Do not promote static
+floor removal: a useful engine would still need a general observed-work funded
+selection policy and complete cost validation. Production2754413 remains;
+all56 peer cells and separate complete confirmation remain unmet.
