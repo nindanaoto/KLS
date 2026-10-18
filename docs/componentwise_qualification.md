@@ -4906,3 +4906,43 @@ NEURON against SubtreeLU at eight threads in LLC32: ratio1.657988, requiring
 cleanup as a sufficient route to the goal. Decision:
 `build/egraph-outlined-cycle-selection-peer-completed-decision-20261018/decision.json`.
 Production2754413/default certification/tolerances remain unchanged.
+
+### Explicit Xyce accuracy policy after peer-policy audit (2026-10-18)
+
+The CKTSO user guide Version20260321 §5.6 documents forward/backward
+substitution. Its demo computes a residual after Solve and describes that
+check as unnecessary in circuit simulation. SubtreeLU's demo checks a known
+solution externally; the paper's accuracy experiments are offline validation.
+The Xyce third-party adapter adds no public residual certificate. Both peer
+numerical libraries are closed binaries here, so undocumented internal checks
+are not proven absent. These findings support a separately reported
+application-managed experiment, not a claim of identical guarantees or a
+production default change. Primary-source hashes and limits are retained in
+`build/peer-accuracy-policy-audit-20261018/audit.json`.
+
+Xyce research commit `67d9590` exposes `KLS_ACCURACY_POLICY` with the existing
+COMPONENTWISE_BACKWARD_ERROR default and explicit STRICT_RHS_L2 and
+APPLICATION_MANAGED modes. Invalid values fail before altering retained
+options/factors. The policy is applied before analysis of each new solver;
+changing options follows normal factor destruction/reanalysis. The adapter's
+object layout and KLS numerical source are unchanged. Application-managed
+mode retains finite/kernel error checks but provides no certified residual
+bound or certificate-driven correction; integration tolerances are unchanged.
+
+Fresh real Epetra adapter tests passed in native and optimized ASan/UBSan
+builds: 192 fixtures and 1,344 solves per build, with all 768 analysis-time
+policy readbacks checked. Coverage includes omission/explicit defaults,
+quoted/lowercase names, rejected invalid requests preserving usable factors,
+live policy changes/restoring omission, graph/value changes, refactor on/off,
+factor reuse, normal/transpose, one/two RHS and both storage/map variants.
+The metadata registration translation unit also compiled in both profiles.
+The unchanged 3ba29c9 core's prior 46+46 tests are inherited, not fresh tests.
+Xyce support dependencies remain release builds; MPI multi-rank, real-netlist
+registration, full SPICE modes, cost comparisons and promotion remain pending.
+
+Artifacts: `build/xyce-accuracy-policy-adapter-qualification-v2-20261018` and
+`build/xyce-accuracy-policy-adapter-review-v2-20261018`. Actual controller and
+reviewer exits and absent PIDs were checked before accepting results. The
+original failed launcher and reviewer packages are preserved: one retained a
+compiler in its run command; the other used an incorrect header-compare path.
+Neither failure was a numerical test failure. No fastest claim is supported.
