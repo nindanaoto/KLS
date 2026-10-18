@@ -4946,3 +4946,38 @@ reviewer exits and absent PIDs were checked before accepting results. The
 original failed launcher and reviewer packages are preserved: one retained a
 compiler in its run command; the other used an incorrect header-compare path.
 Neither failure was a numerical test failure. No fastest claim is supported.
+
+### Retained factor streams in the lean refactor candidate (2026-10-18)
+
+Research commit `3230492` changes only the lean single-block map32 numerical
+function and its private transpose fixture. When the existing compact solve
+cache is ready, refactorization borrows its validated uint16 indices and
+native factor-value pointers. It allocates no new representation, changes no
+admission policy, and retains the native factor walk when that cache is
+unavailable. Producer and destination order, pivot handling, current-value
+scaling and the caller's accuracy policy are preserved. Numeric replacement
+and panel teardown already invalidate these solve caches; block repair also
+invalidates them. Public headers and solver object layout are unchanged.
+
+Fresh focused native, optimized ASan/UBSan and generic-main-kernel checks
+passed, followed by a separate review with actual exit/PID closure and hash
+revalidation. The fixture compares initialized factor values, diagonals,
+scales and fused partial results exactly against the native fallback. It also
+checks known solutions across changed values, full factor rebuilds,
+reanalysis, wide-index fallback and singular rejection. The generic context
+uses unchanged native dependency/worker archives and is not a full portable
+library qualification. Full core, Xyce API, cost and peer gates remain pending.
+No speed benefit or promotion is established.
+
+Artifacts: `build/lean-retained-factor-stream-focused-20261018` and
+`build/lean-retained-factor-stream-focused-review-20261018`. These correctness
+checks overlapped the live strict-policy diagnostic on logical CPU24. A later
+topology check found CPU24 is CPU8's SMT sibling: disjoint masks did not give
+physical isolation. All overlapping diagnostic timings are excluded from
+speed comparisons. Earlier complete default/componentwise grids preceded
+this overlap, but still require the campaign's independent review before
+interpretation. The original executed packages remain unchanged; correction
+and topology evidence are in
+`build/lean-retained-factor-stream-overlap-topology-correction-20261018`.
+Broader builds and uninstrumented timing are deferred until the live campaign
+closes. Its source/binary/input hashes were rechecked and remain unchanged.
