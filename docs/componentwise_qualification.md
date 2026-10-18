@@ -4475,3 +4475,32 @@ circuit identity, new dimension band, tolerance or verification change is
 introduced. This is an unqualified source proposal until fresh lifecycle/full
 correctness, API and complete paired cost evidence supports it; all56 peer
 cells and separate complete confirmation remain required for the fastest goal.
+
+
+The packed-LU proposal is isolated on branch
+`work/packed-lu-monotonic-cache-root-20261018`, based directly on root24.
+Numerical source0db9dd2 removes the absolute LLC ceiling, preserves the existing
+five-eighths payload budget with overflow-safe arithmetic, and ports the prior
+qualified retained-owner guard. Wider admission executes existing cold deck
+allocations and may retain more memory; all preparation must count in cost.
+No new allocation call site, layout field, clock or verification change exists.
+
+Fixture commitsfd9fe38 and937bd39 correct two direct-executor test assumptions:
+retire/refresh solve metadata around changed numerics, and reestablish a
+current packed copy before each tested refusal after a public transpose solve
+legitimately synchronizes and retires its preceding owner. The unchanged fd
+numeric source's ownership trace records that exact normal/transpose boundary.
+Both failed initial packages and the diagnostic abort remain preserved; neither
+supplies full correctness evidence. Trace:
+`build/packed-lu-monotonic-cache-fixture-ownership-trace-20261018`.
+
+The fresh lifecycle package for937bd39 passes both initial native checks:
+621075 exact payload comparisons with overflow and monotonicity assertions,
+16 ownership configurations (crews2/8, BTF0/1, scale0/2, normal/transposed
+factor frame), four changed updates each, coefficient assertions and normal,
+transpose, padded multiple-RHS known solutions, plus reanalysis cleanup;
+the existing EGraph startup test also passes. Full44 native and optimized
+ASan/UBSan qualification is running in
+`build/packed-lu-monotonic-cache-lifecycle-full-runtime-preparation-20261018`.
+No full-suite, sanitizer, API, application-cost, peer or promotion claim follows
+from this native preflight. The production numerical source remains2754413.
