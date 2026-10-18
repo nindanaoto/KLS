@@ -4606,3 +4606,43 @@ The complete238 uninstrumented paired cost gate is next. Do not promote static
 floor removal: a useful engine would still need a general observed-work funded
 selection policy and complete cost validation. Production2754413 remains;
 all56 peer cells and separate complete confirmation remain unmet.
+
+
+The complete238 scoped-floor cost campaign now closes after actual controller
+exit0, all476 child edges reconstructed and controller/child PIDs absent. Its
+independent review also exits0 with PID absent, rechecks all waveforms, exact
+frozen binaries, source pins and the complete unique balanced28-cell grid;
+all238 observations qualify. Review:
+`build/egraph-resource-floor-control-spice-pair-review-preparation-20261018`.
+Decision: `build/egraph-resource-floor-control-completed-cost-decision-20261018/decision.json`.
+
+Eight-thread candidate/root median ratios (four pairs each) are:
+
+| Circuit | LLC96 | LLC32 |
+| --- | ---: | ---: |
+| RAM | 0.695093 | 0.771036 |
+| mem_plus | 0.636371 | 0.755676 |
+| DAC | 0.756580 | 0.795357 |
+| NEURON | 2.805003 | 2.882453 |
+| mux | 0.972556 | 0.994804 |
+| MOS | 0.992941 | 0.982933 |
+| BJT | 0.990775 | 0.996735 |
+
+All four pairs improve on parallel RAM, mem_plus and DAC in each domain; all
+four worsen on NEURON. Serial medians are near parity/mixed (0.988515--1.014617),
+not a serial performance feature. Retain every cell rather than promoting an
+aggregate. One complete campaign establishes this measured control outcome;
+it neither confirms peer superiority nor justifies unconditional floor removal.
+
+Implement the next candidate as a complete-cycle selector. Its allowance must
+come from successful observed external work or explicit hints; trials cannot
+finance themselves. Scope the floor override to the selected call and restore
+tuning, charge cold preparation/comparisons/cleanup, compare verified cycles
+using the same actual matrix/RHS, restore the incumbent after failure or budget
+exhaustion, and discard evidence when the incumbent, factor geometry or RHS
+frame changes. Preserve invalid-argument-before-mutation, all RHS shapes and
+accuracy policies. Reuse qualified integer budget accounting where possible;
+do not import unrelated unmeasured row-policy changes. The control remains
+isolated and production2754413/default verification/tolerances stay unchanged.
+All56 peer cells and a separate complete confirmation remain mandatory and
+unmet for the fastest goal.
