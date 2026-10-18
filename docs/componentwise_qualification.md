@@ -4864,3 +4864,45 @@ all peer failures/timeouts and original1800-second limits; no inherited ratios.
 This is a diagnostic, not promotion or confirmation. All56 qualified peer cells
 and a separate full confirmation remain required and unmet. Production2754413,
 default verification and tolerances remain unchanged.
+
+
+Candidate3ba29c9 completes the original full462 four-arm peer diagnostic. Actual
+runtime and independent reviewer exit0; controller/reviewer and all child groups
+are absent, with all924 edges closed. All112 candidate,112 root24 baseline and
+14 KLU observations qualify. Three retained SubtreeLU MOS eight-thread timeouts
+leave two peer cells unqualified. Candidate wins25 peer cells and loses29; no
+fastest or promotion claim follows. Review:
+`build/egraph-outlined-cycle-selection-peer-spice-review-preparation-20261018`.
+Median candidate/peer linear time ratios, below1 faster; an unqualified cell
+is shown explicitly and never counted as a win:
+
+llc96
+
+| Circuit | CKTSO, 1 thread | SubtreeLU, 1 thread | CKTSO, 8 threads | SubtreeLU, 8 threads |
+|---|---:|---:|---:|---:|
+| CircuitSim90/MOS2_LARGE/ram2k.cir | 1.053689 | 0.634112 | 1.126695 | 0.889023 |
+| NEURON/rallpack3.cir | 1.474429 | 0.796894 | 0.277816 | 1.578153 |
+| CircuitSim90/MOS2_LARGE/dac.cir | 1.125498 | 0.600520 | 1.427934 | 1.233986 |
+| CircuitSim90/MOS2/mux8.cir | 1.296948 | 0.829545 | 0.263578 | 0.519032 |
+| CircuitSim90/MOS2_LARGE/mem_plus.cir | 1.165599 | 0.693703 | 1.142811 | 1.184682 |
+| MOS13_IC/invert50_mos1.cir | 1.236322 | 0.870968 | 0.202653 | unqualified |
+| PDE_2D_BJT/invertbjt.cir | 1.048992 | 0.675393 | 1.226773 | 1.309512 |
+
+llc32
+
+| Circuit | CKTSO, 1 thread | SubtreeLU, 1 thread | CKTSO, 8 threads | SubtreeLU, 8 threads |
+|---|---:|---:|---:|---:|
+| CircuitSim90/MOS2_LARGE/ram2k.cir | 1.083011 | 0.543024 | 0.980897 | 0.831441 |
+| NEURON/rallpack3.cir | 1.431573 | 0.779637 | 0.307344 | 1.657988 |
+| CircuitSim90/MOS2_LARGE/dac.cir | 1.161125 | 0.612947 | 1.060051 | 1.285125 |
+| CircuitSim90/MOS2/mux8.cir | 1.294718 | 0.819214 | 0.240175 | 0.503975 |
+| CircuitSim90/MOS2_LARGE/mem_plus.cir | 1.342029 | 0.674287 | 1.136632 | 1.432427 |
+| MOS13_IC/invert50_mos1.cir | 1.244515 | 0.869051 | 0.192811 | unqualified |
+| PDE_2D_BJT/invertbjt.cir | 1.157948 | 0.746933 | 1.192846 | 1.417201 |
+
+All serial CKTSO cells remain losses. The largest remaining qualified gap is
+NEURON against SubtreeLU at eight threads in LLC32: ratio1.657988, requiring
+39.69% less time to reach parity. This rules out treating further wrapper
+cleanup as a sufficient route to the goal. Decision:
+`build/egraph-outlined-cycle-selection-peer-completed-decision-20261018/decision.json`.
+Production2754413/default certification/tolerances remain unchanged.
