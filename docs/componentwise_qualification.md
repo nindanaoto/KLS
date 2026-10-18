@@ -4504,3 +4504,45 @@ ASan/UBSan qualification is running in
 `build/packed-lu-monotonic-cache-lifecycle-full-runtime-preparation-20261018`.
 No full-suite, sanitizer, API, application-cost, peer or promotion claim follows
 from this native preflight. The production numerical source remains2754413.
+
+
+Candidate937bd39 completes the fresh full44 native and44 optimized ASan/UBSan
+suites (88 full tests), both initial focused checks each, and independent
+artifact review. All43 parent names remain; all20 child edges close and actual
+controller/reviewer exits are zero with PIDs absent. Each build executes all16
+packed lifecycle contexts, four changed updates each, coefficient assertions,
+normal/transpose/padded multiple-RHS known solutions and reanalysis, plus621075
+exact payload comparisons with overflow and cache monotonicity checks.
+Review: `build/packed-lu-monotonic-cache-lifecycle-full-runtime-review-preparation-20261018`.
+
+A separate negative control restores only the old ownership guard in the same
+corrected fixture/source. It aborts at the intended stale packed U-coefficient
+assertion when admission is refused; the corrected candidate passes. The actual
+control controller exits zero (expected child SIGABRT), all six child edges
+close and PIDs are absent; an independent review proves the one-block source
+inverse and unchanged fixture. This establishes that specific ownership refusal
+counterexample, not performance or broader public reachability. Review:
+`build/packed-lu-retained-authority-negative-control-review-preparation-20261018`.
+
+The candidate also completes all28 original API/circuit settings with288650
+certificate calls. Independent rechecks preserve waveforms/steps, seven API
+wrappers, the committed adapter/shared dependencies and matched plain links.
+All62 API/build edges close after actual zero exits and absent controller/child
+PIDs. Review: `build/packed-lu-monotonic-cache-api-closure-review-preparation-20261018`.
+Decision: `build/packed-lu-monotonic-cache-completed-correctness-20261018/decision.json`.
+No uninstrumented application timing or promotion follows from these gates.
+
+The next complete28 diagnostic resolves the shared mapped path label into
+actual entry/return counts for lean BTF maps, generic mapped, EGraph, PTS,
+compact-map/KLU tournament, serial KLU and block-pool dispatch. It also records
+packed admission reasons, current ownership transitions and observed factor/
+block size maxima. Source957d93d is isolated on
+`work/packed-lu-backend-census-root-20261018`; a multi-module inverse restores
+qualified937 exactly. No worker hooks, clocks, allocations, numeric writes,
+layout or policy changes are added. Counters include internal candidates and
+recovery and can perturb adaptive choices; counts/maxima cannot establish
+exclusive CPU cost or speedup. All three public numeric entry totals must
+reconcile with the original seven-wrapper profiler, and every original setting
+must retain waveform/step/certificate checks. Production source2754413 and
+default verification remain unchanged; all56 peer cells and a separate full
+confirmation remain required for the fastest goal.
