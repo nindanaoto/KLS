@@ -4683,3 +4683,37 @@ Actual complete runtime closure, independent artifact review, complete28 API,
 application cost, full peer grid and separate confirmation are still required;
 no promotion or fastest claim follows from this preflight. Production2754413,
 default verification and tolerances remain unchanged.
+
+
+Selector0a41f32 completes all46 native and46 optimized ASan/UBSan tests plus
+eight focused checks and independent review. All44 parent names, hot-field
+prefix bytes, exact dispatcher/certificate bodies, public headers and worker
+modules are preserved; all20 child edges close after actual zero exits and
+absent controller/reviewer/child PIDs. Review:
+`build/egraph-observed-cycle-selection-full-runtime-review-preparation-20261018`.
+All28 original API/circuit settings also independently qualify with288706
+certificate calls, matching waveforms/steps and exact matched binaries;
+all62 child edges close after actual zero exits/PID absence. Review:
+`build/egraph-observed-cycle-selection-api-review-preparation-20261018`.
+
+Observed eight-thread public EGraph counts are RAM5289/5301 and mem_plus694/730
+on LLC32/96, respectively, out of5796 and1200 updates. NEURON remains on its
+prior mapped/KLU paths; DAC stays mapped for all514 updates. BJT remains EGraph;
+small MOS/mux retain their prior paths. These counts establish automatic
+selection coverage and correctness, not uninstrumented performance.
+Decision: `build/egraph-observed-cycle-selection-completed-correctness-20261018/decision.json`.
+
+Before spending a cost campaign on0a41, source review finds a redundant leading
+incumbent cycle in each optional comparison. The arms already refactor, solve
+and certify the same actual A/RHS, and the final incumbent restores current
+state and supplies the caller answer. The extra leading incumbent answer is
+overwritten. Candidate062674d removes only that pass and adjusts the private
+injected clock schedule, retaining publication before the challenger, mandatory
+final incumbent/full-factor recovery, budget debt, evidence invalidation and
+all policy thresholds. The previous successful external cycle identifies the
+incumbent engine; a changed final engine discards the pair. No corpus selector,
+forecast or threshold retuning is introduced. Fresh full92 plus8 focused gates
+are running in `build/egraph-paired-cycle-selection-full-runtime-preparation-20261018`.
+No cost campaign ran for0a41, and062674d has no qualification yet. Production
+2754413/default verification/tolerances remain; all56 peer cells and separate
+complete confirmation remain required and unmet.
