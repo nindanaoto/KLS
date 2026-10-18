@@ -4229,3 +4229,57 @@ terminal/PID closure and independent review before interpretation. Geometry
 counts indicate potential logical traffic, not measured CPU cost or speedup.
 Production numerical source2754413 and default verification remain unchanged;
 all56 peer cells and a separate complete confirmation remain required.
+
+
+The full28 root24 SNB destination census has completed with independent source,
+archive, process, waveform, step and certificate review (288650 certificate
+calls). Sustained public SNB dispatch occurs in the two serial BJT cells:
+1144 public updates and1145 completed SNB cycles per cell. Each retained layout
+has1584926 wide-product output values per cycle, of which29456 (1.8585%) belong
+to fully consecutive destination edges. Fully valid edges account for1489791
+(93.9975%) of those values. A contiguity-only path would cover little of this
+logical traffic. This is geometry evidence, not a measured CPU-cost bound.
+Review and decision:
+`build/snb-destination-census-api-review-preparation-20261018/review.json` and
+`build/snb-destination-census-completed-priority-20261018/decision.json`.
+
+A general sparse destination prototype is now code074066f on
+`work/snb-fused-scatter-root-20261018` in
+`build/certificate-verdict-root-worktree-20261017`. It computes the original
+producer-ordered dense product and immediately updates arbitrary canonical
+sparse destinations using masked gathers/subtractions/scatters. Holes still
+participate in product arithmetic, preserving its exceptions; target arithmetic
+and address accesses remain masked. A register-only compiler boundary preserves
+the binary64 rounding formerly imposed by storing T, preventing contraction
+of the final subtraction into a product. Distinct builder row-map destinations
+and their separation from the solved B source justify immediate updates.
+Ordinary and cooperative row-sliced calls use the helper with existing barriers.
+The portable path retains the original product and scalar scatter. No clocks,
+allocations, selectors, layouts, tolerances or verification policy change.
+
+The corrected source passes all43 parent CTests in both native and optimized
+ASan/UBSan builds (86 full checks plus four focused checks). The extended edge
+fixture includes irregular destinations and holes; the guarded fixture executes
+65280 cases per context with source/index/target page boundaries, four rounding
+modes, five finite/nonfinite/range patterns and whole/split row slices, checking
+stored bits and exception flags. Two additional private-kernel controls compile
+for x86-64-v3 without AVX512F, pass the same guarded cases, and have no ZMM/opmask
+registers in their product/scatter symbols. This is portable-kernel-path evidence,
+not a complete portable-application qualification. The initial prototype package
+had an erroneous fixture initialization bound; its native passes are explicitly
+invalid. It was stopped and preserved, and only the fresh corrected074066f
+package is used for qualification.
+
+The corrected archive also passes all28 original circuit/API settings with
+288647 certificate calls, independent waveform/step rechecks and matching
+plain binary links. Reviews and actual zero/absent-PID receipts:
+`build/snb-fused-scatter-corrected-full-runtime-review-preparation-20261018`,
+`build/snb-fused-scatter-corrected-portable-review-preparation-20261018`, and
+`build/snb-fused-scatter-corrected-api-closure-review-preparation-20261018`.
+Completed correctness decision:
+`build/snb-fused-scatter-corrected-completed-correctness-20261018/decision.json`.
+The full238 paired cost package is prepared for four balanced passes against
+root24 over every original case/domain/thread setting, plus14 KLU references.
+No speedup, peer superiority or production promotion follows from these gates.
+Production numerical source2754413 and default verification remain unchanged;
+all56 peer cells and a separate complete confirmation remain mandatory.
