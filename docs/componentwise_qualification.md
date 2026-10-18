@@ -4770,3 +4770,18 @@ not established as the exclusive cause of MOS timing. Fresh full92 plus8
 qualification precedes API and full-grid cost checks. Production2754413, default
 verification and tolerances remain. All56 peer cells and separate full
 confirmation remain required and unmet.
+
+
+Candidatee4db221 passes all46 native and46 optimized ASan/UBSan tests plus eight
+focused checks. Independent review confirms the exact two-file guard change,
+unchanged tests, numerical bodies, policy thresholds, hot prefix and public/worker
+interfaces. All20 runtime child edges close after actual exit0 and absent PIDs.
+Review: `build/egraph-inactive-cycle-selection-full-runtime-review-preparation-20261018`.
+All28 API settings also independently qualify with matching waveforms/steps,
+original seven wrappers and matched plain links; all62 API/build child edges
+close after actual exit0 and absent PIDs. Review:
+`build/egraph-inactive-cycle-selection-api-review-preparation-20261018`.
+Decision: `build/egraph-inactive-cycle-selection-completed-correctness-20261018/decision.json`.
+The original full238 balanced uninstrumented cost grid is next, with source
+frozen and no concurrent heavy work. No performance, peer or promotion claim
+follows from these correctness gates. Production2754413 and verification remain.
