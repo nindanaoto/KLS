@@ -4717,3 +4717,27 @@ are running in `build/egraph-paired-cycle-selection-full-runtime-preparation-202
 No cost campaign ran for0a41, and062674d has no qualification yet. Production
 2754413/default verification/tolerances remain; all56 peer cells and separate
 complete confirmation remain required and unmet.
+
+
+Candidate062674d completes fresh full46 native and46 optimized ASan/UBSan tests
+plus eight focused checks, with actual controller exit0, all20 child edges
+closed and PIDs absent. Independent review exits0/PID absent and preserves all46
+parent names, exact unchanged sources except the pair sequence, unchanged
+thresholds, original dispatcher/certificate bodies, hot prefix and public/worker
+interfaces. The fixture changes only its injected clock schedule. Review:
+`build/egraph-paired-cycle-selection-full-runtime-review-preparation-20261018`.
+
+All28 API settings independently qualify with288679 certificates and unchanged
+waveforms, steps, seven wrappers, matched plain links and adapter/dependencies.
+All62 child edges close after actual zero exits/PID absence. Review:
+`build/egraph-paired-cycle-selection-api-review-preparation-20261018`.
+Eight-thread public EGraph counts (LLC32/96) are mem_plus848/884 of1200, DAC0/180
+of514, and RAM0/5467 of5796. NEURON retains mapped/KLU, BJT retains EGraph and
+MOS/mux retain their prior paths. These are single instrumented-run selection
+observations, not speed or reliable adoption guarantees; retain the varying RAM
+and DAC outcomes explicitly. No static domain/circuit admission is justified.
+Decision: `build/egraph-paired-cycle-selection-completed-correctness-20261018/decision.json`.
+The next gate is the original full238 balanced uninstrumented cost comparison
+against root24. No source changes, filtering or simultaneous heavy builds/tests
+are permitted during it. Production2754413/default verification/tolerances stay;
+all56 peer cells and separate full confirmation remain unmet.
