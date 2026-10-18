@@ -4546,3 +4546,32 @@ reconcile with the original seven-wrapper profiler, and every original setting
 must retain waveform/step/certificate checks. Production source2754413 and
 default verification remain unchanged; all56 peer cells and a separate full
 confirmation remain required for the fastest goal.
+
+
+The complete28 backend census957d93d and independent review now close with
+288645 certificate calls, exact reconciliation of all three public numeric
+entry totals, unchanged waveform/step gates and all62 child edges closed.
+Actual controller/reviewer exits are zero and their PIDs are absent. Review:
+`build/packed-lu-backend-census-api-review-preparation-20261018`.
+Every setting has zero accepted packed admissions and zero observed packed
+owners. Eight-thread BJT enters EGraph1145 times per domain and every packed
+admission declines as not_repeated: the default adapter supplies no lifecycle
+forecast. Correctness-qualified937bd39 remains isolated; no cost campaign is
+justified for an unused policy. Decision:
+`build/packed-lu-backend-census-completed-priority-20261018/decision.json`.
+
+The counters identify caller-level engines and factor/block maxima, not every
+subordinate mapped body or exclusive CPU fractions. In particular the current
+census omits lean-single-block, row and serial-tail bodies and a mapped-BTF
+post-gate marker. Historical BTF/lean attribution is supporting context only.
+RAM, mem_plus and DAC remain recurring mapped work with one dominant block;
+PTS probes decline. Do not turn zero forecast hints into invented future work.
+
+The next isolated exploratory control relaxes EGraph resource floors only
+inside unchecked parallel refactors, restoring tuning on return while retaining
+capability, pivot, repair and verification contracts. It tests engine potential;
+a global floor bypass is not a production selection policy. Any eventual
+automatic challenger must fund complete-cycle exploration from observed work
+and demonstrate general selection, complete application cost and all56 peer
+cells followed by separate full confirmation. Production numerical2754413,
+default verification and tolerances remain unchanged.
