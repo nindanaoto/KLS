@@ -4381,3 +4381,51 @@ before any fastest claim. No circuit/domain/dimension rescue selector is added.
 Review and completed decision:
 `build/snb-eight-column-product-spice-pair-review-preparation-20261018/review.json`
 and `build/snb-eight-column-product-completed-cost-decision-20261018/decision.json`.
+
+
+The separate full238 confirmation of593dcf0 is terminal and independently
+reviewed. All238 observations qualify, all476 child edges close, and the actual
+controller/reviewer exits are zero with PIDs absent. Serial BJT medians are
+0.9836230670 (llc96) and0.9865475913 (llc32): reductions1.6377% and1.3452%.
+Together the two complete campaigns qualify476 application observations and
+all16 serial target pairs improve. This supports a modest repeatable target
+gain. The first campaign's MOS median regressions reverse in confirmation;
+they are not established persistent regressions. Conversely llc32 RAM and
+eight-thread mux medians are slower in both campaigns. Retain every setting
+and pair; neither aggregate medians nor the target alone establishes a broad
+speedup or unconditional production promotion. Eight-column products remain
+a qualified building block, isolated from production. Review and decision:
+`build/snb-eight-column-product-confirmation-review-preparation-20261018/review.json`
+and `build/snb-eight-column-product-two-campaign-decision-20261018/decision.json`.
+
+A1-2% serial SNB gain does not resolve the larger parallel mapped-refactor
+blocker. The next diagnostic should measure exact caller-input bit changes
+and their conservative closure through the retained column dependency graph.
+The CKTSO paper's EGraph discussion (local text lines220-247) distinguishes
+exact fixed-pivot dependencies from ETree bounds under changing pivots. This
+motivates measuring retained-graph closure; neither paper establishes that
+KLS may skip an unchanged column without further numeric proof.
+
+The diagnostic must observe all original28 API/circuit settings, including
+standalone refactor and combined refactor/solve entry points without counting
+nested recovery twice. Compare each current input with the preceding successful
+public numeric update. Validate the caller-to-internal value bijection, separate
+BTF off-block value changes, seed diagonal-block columns with changed inputs,
+and propagate through retained U-column predecessors in topological order.
+For dynamic KLU row scaling, conservatively seed every diagonal-block input
+using any row with a changed input; static external scaling does not justify
+ignoring this coupling. Report both column counts and structural update-slot
+weights, available/unavailable entry coverage, failures and overflow. These are
+geometry/work models, not measured CPU savings or proof that reuse is safe.
+
+Keep this census caller-only in an isolated root24-derived source package:
+no worker hooks, solver/metadata layout changes, numerical writes, new clocks,
+policy decisions, tolerance changes or verification changes. Prove its exact
+source inverse and independently recheck all28 waveforms/steps/certificates.
+Only useful complete-grid coverage justifies implementing a numerical reuse
+path. Such a path must separately prove scaled/transformed coordinates, current
+operator identity, pivot/repair invalidation, retained-factor consistency and
+conservative rejection before full correctness and application cost gates.
+The full56 peer cells and a separate complete confirmation remain mandatory
+before the fastest goal; no new peer leadership or production promotion is
+claimed by either the tile result or this diagnostic plan.
