@@ -5104,3 +5104,69 @@ use frozen source archives and preserve the original failed/executed
 packages. Full core qualification, API/circuit checks, held-out matrices
 and uninstrumented comparisons remain required before either performance
 change can be promoted. Certified production/default policy is unchanged.
+
+### Retained-stream full correctness and API qualification (2026-10-18)
+
+Candidate `c2b2956` passes all138 complete core tests:46 native,46 optimized
+ASan/UBSan and46 fully portable, plus four initial guards in each profile.
+The frozen source combines the separately committed retained compact stream
+consumer with portable batch target consistency; the original exact batch
+comparison is unchanged. All30 child edges/process groups and the controller
+closed before independent artifact review. The reviewer then exited zero,
+was absent, and all checked source/archive/binary hashes were revalidated.
+Evidence: `build/lean-factor-stream-portable-fma-full-runtime-preparation-20261018`
+and `build/lean-factor-stream-portable-fma-full-runtime-review-20261018`.
+
+All28 original Xyce circuit/API settings also pass independent waveform,
+step/end, linear-failure and seven-wrapper checks, with288678 current-operator
+certificate calls. Matched plain links differ only in core/output paths from
+parent3ba29c9. All62 runtime/build child edges and groups closed before the
+reviewer exited zero and its hashes were rechecked. These instrumented runs
+overlap explicitly recorded correctness/diagnostic work; their timings are
+excluded from comparative performance evidence. Evidence:
+`build/lean-factor-stream-portable-fma-api-preparation-20261018` and
+`build/lean-factor-stream-portable-fma-api-review-20261018`.
+
+The SNB candidate `1311dc7` remains separate. Its first launcher stopped
+before controller startup/build because its required overlap-policy record
+was missing. That attempt is preserved. The fresh v2 package records the
+only allowed overlapping instrumented/correctness jobs and retains the same
+frozen numerical source,46 tests, flags, budgets and qualification gates.
+It makes no timing claims. Complete core/API review and uninstrumented cost
+qualification remain pending for SNB. Neither candidate is promoted.
+
+### SubtreeLU complete-call capture qualification (2026-10-18)
+
+Commit `40a0ac9` adds optional diagnostic capture, strict replay and a small
+fixture; it changes neither KLS nor the peer adapter/library. Eight fixture
+configurations qualify original-library statuses, input/output bytes,
+immediate FP state and errno, singular recovery and in-place solves. Strict
+replay preserves original rejections/errors,26 malformed streams invoke no
+solver API, and trailing entries remain explicitly unreturned. Supplemental
+checks cover empty-nnz pointer flags. See `docs/subtreelu_callstream.md`.
+
+The full original MOS diagnostic completes all16 predeclared runs: API team8,
+OpenMP1/8, both domains, four trials. Independent review verifies all16
+generations, raw stream/log boundaries, file extents and all11 completed
+waveforms/step counts. Five capped runs retain a complete entry to refactor
+call56 with no return. Each preserves refactor53 returning E_SINGULAR(-3),
+factor54 success, and solve55 success. Stalls occur with both OpenMP settings;
+changing that environment alone is not a fix. These are120-second diagnostic
+caps with instrumentation/concurrent correctness work, not the original
+1800-second competitive observations or a speed result.
+
+The original review attempt omitted the independent verifier's input-netlist
+copy and stopped. Its failure is retained; v2 only repairs verifier setup,
+then rechecks the complete set. Runtime and reviewer zero exits, PID/group
+absence and hashes are checked before interpretation. Evidence:
+`build/subtreelu-mos13-callstream-diagnostic-20261018` and
+`build/subtreelu-mos13-callstream-review-v2-20261018`.
+
+A separate predeclared standalone diagnostic replays the lexicographically
+first captured trailing stream with exact completed statuses/outputs, both
+domains and OpenMP1/8. A fresh return from the captured unreturned call is
+labelled as a new result, never a captured success. Constructor history,
+cross-call addresses and internal scheduling remain outside replay scope.
+No library/adapter recovery change, timeout win, peer promotion or fastest
+claim follows from capture alone. All56 peer wins plus separate confirmation
+remain required and unmet.
