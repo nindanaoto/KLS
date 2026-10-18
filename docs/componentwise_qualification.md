@@ -4429,3 +4429,49 @@ conservative rejection before full correctness and application cost gates.
 The full56 peer cells and a separate complete confirmation remain mandatory
 before the fastest goal; no new peer leadership or production promotion is
 claimed by either the tile result or this diagnostic plan.
+
+
+The caller-only input-closure census is implemented on isolated root24 branch
+`work/mapped-input-closure-census-root-20261018`, commit7fbd73f. Native and
+optimized ASan/UBSan private fixtures each pass8192 independent queue-reference
+DAG cases, BTF off-block/scaling coupling, bad-map/DAG rejection, nested-call
+suppression, failed-update invalidation, pointer reuse and unchanged FP flags.
+Independent review proves the exact source inverse; all other src/include
+bytes remain root24, with no solver-layout, worker, clock, numeric or policy
+change. The fixture translation unit uses native support libraries; this is
+not full sanitized-application qualification.
+
+The full28 API/circuit campaign is terminal and independently reviewed. All
+cells qualify with288647 certificate calls, exact seven-wrapper call-count
+reconciliation, fresh waveform/step checks, only the main archive member
+changed, all62 API/build edges closed, and actual zero controller/reviewer
+exits with PIDs absent. Every MOS setting includes seven failed numeric
+attempts followed by successful circuit recovery; they remain explicitly
+recorded. No malformed map/DAG, tracking loss, overflow or OOM is reported.
+Reviews: `build/mapped-input-closure-census-fixture-review-preparation-20261018`
+and `build/mapped-input-closure-census-api-review-preparation-20261018`.
+
+The modeled affected update-slot fraction in mapped mem_plus is99.1795%
+(serial) and99.1893% (eight threads), DAC99.9459%, and RAM99.9049-99.9050%,
+in both domains. Raw input changes already seed91-98% of their factor columns.
+Do not implement selective skipping for these main mapped targets: little
+potential remains even before scans, snapshots and bookkeeping. MOS, mux and
+NEURON have no available retained entry graph in this census, so this is not
+a proof about their reuse potential. Counts describe pre-call retained-graph
+geometry; repair/selection may replace it, and the counts prove neither a
+numerical reuse contract nor executed FLOPs, exclusive CPU cost or speedup.
+Decision: `build/mapped-input-closure-census-completed-priority-20261018/decision.json`.
+
+A separate source inspection finds that packed-LU admission rejects every LLC
+above64MiB before checking whether its factor payload fits. Historical comment
+8d5abf09^ records an empirical preference for native storage on large caches;
+the current comment retains only the fit rationale. The next isolated candidate
+will remove that absolute capacity ceiling and retain an overflow-safe payload
+budget that is monotone in available cache. Existing packed authority must also
+survive a later admission refusal, using the independently qualified ownership
+fix from the row-funded research branch rather than silently writing native
+values while stale packed values remain authoritative. No CPU/domain label,
+circuit identity, new dimension band, tolerance or verification change is
+introduced. This is an unqualified source proposal until fresh lifecycle/full
+correctness, API and complete paired cost evidence supports it; all56 peer
+cells and separate complete confirmation remain required for the fastest goal.
