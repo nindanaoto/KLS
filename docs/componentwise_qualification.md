@@ -4094,3 +4094,43 @@ useful work once, and separating rejection by funding, stability and margin.
 No tolerances, corpus coverage or production default change. The cost campaign
 has not launched; production remains2754413. Completed decision:
 `build/row-funded-search-decision-completed-priority-20261017/decision.json`.
+
+
+### Native-authority serial row preparation
+
+Code40f521c on `work/row-native-preparation-root-20261017` reads retained LU and
+internal CSC directly, avoiding generic map/cache construction solely for the
+row transpose. It retains the complete group/solve finisher, numerical kernels,
+incumbent/crew ownership and original-constructor fallback. There is no new
+circuit/domain/dimension/reuse selector. All new allocation and scan work uses
+the existing checked preparation context.
+
+All53 tests pass each native/optimizedASanUBSan (106 full-suite executions),
+plus two initial search/native-preparation checks each. All52 parent names
+remain. The71-configuration differential/fault fixture proves the same row
+geometry, unchanged incumbent/native factor/crew before execution and three
+actual changed-A two-RHS cycles, including eight effective workers. Requested
+payload is18--30% lower than the old constructor. All19241 observed expiry,
+5076 payload and5076 physical allocation cutoffs pass per context. This is a
+payload-request result, not a peak-RSS or speed claim. Runtime review:
+`build/row-native-preparation-full-runtime-review-preparation-20261017/review.json`.
+
+The exact native archive also passes all28 original circuit/API settings,
+with288823 certificate calls, unchanged tolerances, independently rechecked
+waveforms/steps, same adapter/dependencies and matched root24 links. All56 API/
+six build child edges, actual zero exits and absent PIDs are reviewed:
+`build/row-native-preparation-api-closure-review-preparation-20261018/review.json`.
+The profiles still expose zero accepted ROW dispatches. Whole-application cost
+and peer superiority remain unproved; the cost campaign has not launched.
+Completed decision:
+`build/row-native-preparation-completed-priority-20261018/decision.json`.
+
+The next code7ae90e3, on `work/row-phase-reservation-root-20261018` in the same
+experimental worktree, separates one-time construction and recurring-comparison
+reservation estimates. A completed candidate no longer requests its cold
+construction high-watermark again. It uses existing budget readings and resets
+phase estimates for a new factor-storage epoch, preserving all debt. Funding
+fraction, deadlines, sample count, margins, payback and recovery remain as before.
+Focused/full native checks pass; a fresh complete53-test sanitizer gate is in
+progress. No performance conclusion follows. Production numerical source and
+verification are unchanged; complete cost/all56 peers/confirmation remain.
