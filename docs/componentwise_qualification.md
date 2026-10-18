@@ -4981,3 +4981,55 @@ and topology evidence are in
 `build/lean-retained-factor-stream-overlap-topology-correction-20261018`.
 Broader builds and uninstrumented timing are deferred until the live campaign
 closes. Its source/binary/input hashes were rechecked and remain unchanged.
+
+### Complete accuracy-mode checks and current phase profiles (2026-10-18)
+
+The full112 campaign and independent review both exited zero, with controller
+and reviewer absence, all224 runtime child edges and process-group closure
+checked before interpretation. Qualification was28/28 for omitted/default,
+28/28 for explicit componentwise,28/28 for application-managed, and20/28
+for strict RHS-relative L2. All eight failures are retained: strict MOS at
+both crews/domains logged five linear-solve failures despite matching step
+counts and passing upstream waveform comparison; strict memory runs logged
+a linear failure and changed step counts and waveforms. No failure was
+converted into a win or repaired by weakening tolerances.
+
+Application-managed remains explicitly selectable and separately labelled.
+These full-circuit checks do not provide its missing certified residual
+contract. The default remains COMPONENTWISE_BACKWARD_ERROR. Mode readbacks
+were checked before every analysis; netlists differ only in the requested
+accuracy option. Original complete circuits, waveform and step/end gates
+remain in force.
+
+The complete28-cell default phase grid below uses exclusive time within
+caller API ancestry, including worker-zero execution and waits. Percentages
+are diagnostic, rounded to integers; clock instrumentation can perturb
+adaptive selection. Background worker intervals overlap and are not removable
+wall time. All112 are instrumented diagnostics, never uninstrumented speed
+evidence. Strict comparative timings are explicitly excluded because of
+the recorded SMT overlap. The default and explicit componentwise grids
+preceded that overlap. Each cell lists its two largest instrumented scopes.
+
+| Case | LLC96,1 | LLC96,8 | LLC32,1 | LLC32,8 |
+| --- | --- | --- | --- | --- |
+| invertbjt | SNB 88%, transpose solve 8% | EGraph 72%, transpose solve 20% | SNB 84%, transpose solve 11% | EGraph 71%, transpose solve 21% |
+| invert50_mos1 | refactor 33%, solve 24% | refactor 34%, certificate 23% | refactor 34%, certificate 23% | refactor 34%, certificate 23% |
+| mem_plus | mapped 63%, certificate 16% | EGraph 30%, mapped 25% | mapped 56%, certificate 18% | EGraph 24%, mapped 23% |
+| mux8 | refactor 36%, certificate 22% | refactor 36%, certificate 22% | refactor 37%, certificate 22% | refactor 37%, certificate 22% |
+| dac | mapped 55%, certificate 18% | mapped 43%, solve 14% | mapped 54%, certificate 18% | mapped 43%, solve 14% |
+| rallpack3 | lean 45%, certificate 31% | lean 45%, certificate 31% | lean 45%, certificate 32% | lean 46%, certificate 32% |
+| ram2k | mapped 58%, certificate 19% | EGraph 41%, solve 24% | mapped 50%, certificate 19% | EGraph 37%, solve 21% |
+
+This supports qualifying the existing lean factor-stream candidate3230492
+and isolated SNB row-tile candidate. It also replaces the older assumption
+that the eight-thread RAM/memory path remains wholly mapped: the current
+selector exposes substantial EGraph work, alongside solve/snapshot costs.
+Next representation/scheduling work must use a fresh actual-owner census;
+the previously unused packed-policy admission stays parked meanwhile.
+
+Artifacts: `build/outlined-accuracy-policy-full-modes-profile-20261018`,
+`build/outlined-accuracy-policy-full-modes-review-20261018`, and
+`build/outlined-accuracy-policy-completed-decision-20261018/decision.json`.
+No numerical promotion, uninstrumented mode speedup or peer superiority is
+established. All56 qualified peer wins plus separate confirmation remain
+unproven.
