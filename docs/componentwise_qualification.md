@@ -4283,3 +4283,30 @@ root24 over every original case/domain/thread setting, plus14 KLU references.
 No speedup, peer superiority or production promotion follows from these gates.
 Production numerical source2754413 and default verification remain unchanged;
 all56 peer cells and a separate complete confirmation remain mandatory.
+
+
+The complete238 paired campaign for fused sparse destination code074066f is
+finished and independently reviewed. All observations qualify, all476 child
+edges close, actual controller/reviewer exits are zero and their PIDs are absent.
+Every original28 setting has all four balanced pairs. The intended sustained
+SNB target regresses: serial BJT candidate/baseline medians are1.0570807 on
+llc96 and1.0649930 on llc32, with all four pairs slower in each domain. Across
+the complete grid22 medians improve and six regress; those other medians do not
+rescue a regression in the intended numerical work. Group geometric means are
+1.0021325/0.9890547 (llc96 serial/eight threads) and1.0023697/1.0039417 (llc32).
+Whole-application timing establishes the cost result, not an exclusive CPU
+attribution to individual gather/scatter instructions. Code074066f is rejected
+for promotion; its qualified artifacts and commits remain negative evidence.
+Review and completed decision:
+`build/snb-fused-scatter-corrected-spice-pair-review-preparation-20261018/review.json`
+and `build/snb-fused-scatter-corrected-completed-cost-decision-20261018/decision.json`.
+
+The next measurement returns to the best qualified root24dc56f. Count coverage
+of eight-column product tiles and the corresponding logical L-value loads
+versus existing four-column tiles, and characterize consecutive eight-row
+subtiles inside irregular destination edges. This distinguishes useful load
+reuse from the rejected masked destination update. Any next kernel keeps the
+original scatter unless independent evidence supports replacing it, retains
+producer order and exception behavior, and receives fresh full correctness,
+API and uninstrumented cost gates. No circuit/domain/dimension rescue selector,
+verification change, peer result, production promotion or fastest claim follows.
