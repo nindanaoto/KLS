@@ -4834,3 +4834,33 @@ Decision: `build/egraph-outlined-cycle-selection-completed-correctness-20261018/
 Next is the original full238 balanced uninstrumented comparison, without source
 changes or concurrent heavy work. Production2754413/default verification and
 tolerances remain; all56 peer cells and separate full confirmation are unmet.
+
+
+Candidate3ba29c9 completes full238 cost and independent review with actual
+exit0 and absent controller/reviewer/child PIDs. All238 observations qualify;
+all28 balanced cells retain four pairs. Review:
+`build/egraph-outlined-cycle-selection-spice-pair-review-preparation-20261018`.
+Candidate/root24 median linear-solver time ratios (lower is faster):
+
+| Circuit | LLC96, 1 thread | LLC96, 8 threads | LLC32, 1 thread | LLC32, 8 threads |
+|---|---:|---:|---:|---:|
+| CircuitSim90/MOS2_LARGE/ram2k.cir | 0.997192 | 0.715738 | 1.000670 | 0.763937 |
+| NEURON/rallpack3.cir | 1.003853 | 0.939570 | 1.001043 | 0.937859 |
+| CircuitSim90/MOS2_LARGE/dac.cir | 0.986370 | 0.941770 | 0.983333 | 0.962339 |
+| CircuitSim90/MOS2/mux8.cir | 0.990363 | 0.994252 | 1.006680 | 0.994212 |
+| CircuitSim90/MOS2_LARGE/mem_plus.cir | 0.988053 | 0.723333 | 0.993109 | 0.833215 |
+| MOS13_IC/invert50_mos1.cir | 1.009157 | 0.997805 | 0.990065 | 1.007148 |
+| PDE_2D_BJT/invertbjt.cir | 1.001494 | 0.981441 | 1.003873 | 0.996218 |
+
+Parallel RAM/mem/DAC gains persist. Serial MOS is0.9% slower LLC96 and1.0%
+faster LLC32; small other regressions and variable NEURON pairs remain visible.
+Native wrapper shrink is established, but universal improvement and exclusive
+timing causality are not. Do not tune thresholds/case selectors to these cells.
+Decision: `build/egraph-outlined-cycle-selection-completed-cost-decision-20261018/decision.json`.
+Retain3ba29c9 as a qualified research candidate for the complete four-arm peer
+diagnostic: root24/3ba29c9/CKTSO/SubtreeLU, all7 circuits, both domains, threads1/8,
+four balanced passes plus14 fresh KLU references (462 observations). Preserve
+all peer failures/timeouts and original1800-second limits; no inherited ratios.
+This is a diagnostic, not promotion or confirmation. All56 qualified peer cells
+and a separate full confirmation remain required and unmet. Production2754413,
+default verification and tolerances remain unchanged.
