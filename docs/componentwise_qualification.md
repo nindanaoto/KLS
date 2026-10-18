@@ -4174,3 +4174,58 @@ No uninstrumented cost campaign has run for this source, and production
 numerical source2754413 is unchanged. All56 peer cells and a separate complete
 confirmation remain required for the fastest claim. Completed decision:
 `build/row-phase-reservation-completed-priority-20261018/decision.json`.
+
+
+Serial row execution now retains its five worker scratch capacities between
+updates on `work/row-serial-scratch-root-20261018`: numerical codece2da22, final
+NaN-poison fixture514a4bc. Each call still constructs fresh shared state and
+telemetry and performs the original numerical operations. Only temporary buffer
+pointers/capacities move into and back out of the local worker. free_numeric
+releases and clears them; parallel and prefix-repair workers retain their
+existing independent ownership. The new field sits at the cold tail: a source
+layout proof verifies every original solver field declaration is an exact
+prefix of the new structure, preserving existing offsets. No circuit, dimension,
+CPU-domain or hint selector, new clock, funding grant or numerical shortcut is
+introduced. Retained memory lasts until numeric cleanup; a process-RSS bound
+is not claimed.
+
+The corrected numerical code passes all54 CTests in native and optimized
+ASan/UBSan builds (108 full-suite checks plus two initial focused checks).
+The stronger test-only514a4bc source differs only in its fixture, with identical
+numerical/dependency sources and flags. Both new executions pass24 configurations
+covering CSR/CSC, normal/transpose, unscaled/scaled, BTF, dense and independent
+component shapes. Each context checks192 certified RHS across96 changed-A
+updates,120 failed buffer-growth attempts, NaN-poisoned floating scratch,
+nonzero byte/index/object poison, zero warm numeric reallocations including
+fresh realloc(NULL) requests, and free_numeric/re-analysis/destruction cleanup.
+Independent reviews and actual zero/absent-PID receipts:
+`build/row-serial-scratch-cold-tail-idle-full-runtime-review-preparation-20261018`
+and `build/row-serial-scratch-nan-runtime-review-preparation-20261018`.
+
+The exact corrected archive also passes all28 original circuit/API settings,
+with288878 current-operator certificate calls and independent waveform/step
+rechecks, matched links, unchanged adapter/dependencies/tolerances and all56 API
+plus six build child edges closed. Review:
+`build/row-serial-scratch-cold-tail-idle-api-closure-review-preparation-20261018/review.json`.
+There are zero accepted ROW dispatches; an application speedup is not proved.
+Some instrumented API qualification overlaps a test-only compiler, so those
+instrumented times are not cost evidence. No uninstrumented cost/peer campaign
+or production promotion follows. Completed decision:
+`build/row-serial-scratch-completed-priority-20261018/decision.json`.
+
+Performance investigation now returns to the default incumbent, with a separate
+full28 SNB destination census on the best qualified root24dc56f. It describes
+completed-build geometry and counts actual caller-side prelude/completion uses,
+including unselected builds and internal cycles. The source reverses exactly to
+root24, every other source file is identical, and it adds no timing reads or
+worker hooks. The census asks whether wide edges have fully valid consecutive
+producer-below destinations, allowing an experiment that computes the same
+dense product and immediately subtracts it from the target panel. This could
+remove T temporary store/load traffic while retaining producer accumulation and
+edge order; it needs alias/exception/layout/crew proofs and complete correctness,
+API and cost gates. The census is running in
+`build/snb-destination-census-api-preparation-20261018`; results require actual
+terminal/PID closure and independent review before interpretation. Geometry
+counts indicate potential logical traffic, not measured CPU cost or speedup.
+Production numerical source2754413 and default verification remain unchanged;
+all56 peer cells and a separate complete confirmation remain required.
