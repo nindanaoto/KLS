@@ -5033,3 +5033,40 @@ Artifacts: `build/outlined-accuracy-policy-full-modes-profile-20261018`,
 No numerical promotion, uninstrumented mode speedup or peer superiority is
 established. All56 qualified peer wins plus separate confirmation remain
 unproven.
+
+### SNB row tiling focused qualification (2026-10-18)
+
+Research commit `36d7ff0` prepares a per-edge row bound targeting a32KiB
+streaming working set and shares a tiled product/scatter consumer between
+serial and cooperative dense updates. It retains the original four-column
+product body, producer/destination reduction order, scratch allocations,
+allocator budgets and crew-barrier sites. Bounds depend on operation shape,
+with no circuit or CPU-domain selector. The calibration fixture prepares the
+same cached bound outside its timed kernel. Full calibrator build/validation
+is still pending.
+
+All12 focused contexts passed and were independently reviewed: product,
+builder, masked-bound and triangular-update fixtures in native, optimized
+ASan/UBSan and generic-main-kernel builds. The new oracle compares exact
+outputs, standard floating-point exception flags and scratch canaries against
+the original full-range product/scatter, across tile boundaries, partial
+worker ranges, gapped subcolumns, absent destinations, four rounding modes
+and available FTZ/DAZ states. Builder checks require actual edge coverage and
+verify that early scatter cannot overwrite the current upper input block.
+The product body was independently compared with the parent, and all original
+barrier sites remain. The generic context inherits native worker/dependency
+archives and is not full portable-library qualification.
+
+The review classifies every compiler warning. A new GCC inliner array-bounds
+warning occurs only in the triangular-only fixture's unused scratch path:
+producer below=0, the caller returns before the dense consumer, and the
+consumer independently returns for the empty range. All three runtime
+contexts passed that guard-page/exception fixture. Existing feature-macro and
+allocation-range warnings originate in unchanged core or allocator-wrapper
+bodies. No warning was suppressed. Evidence and limits are in
+`build/snb-cache-row-tile-focused-preparation-20261018` and
+`build/snb-cache-row-tile-focused-review-20261018`.
+
+Full core, portable library, Xyce API, complete cost/peer grids and confirmation
+remain pending. No speed gain or promotion is established. The two numerical
+research commits remain separate for causal cost comparisons.
