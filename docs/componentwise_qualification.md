@@ -4741,3 +4741,32 @@ The next gate is the original full238 balanced uninstrumented cost comparison
 against root24. No source changes, filtering or simultaneous heavy builds/tests
 are permitted during it. Production2754413/default verification/tolerances stay;
 all56 peer cells and separate full confirmation remain unmet.
+
+
+Candidate062674d completes the full238 uninstrumented comparison; all observations
+qualify and all28 balanced cells retain four pairs. Runtime and independent
+review exit0 with controller/child PIDs absent. Review:
+`build/egraph-paired-cycle-selection-spice-pair-review-preparation-20261018`.
+Candidate/root24 median linear-solver time ratios (lower is faster):
+
+| Circuit | LLC96, 1 thread | LLC96, 8 threads | LLC32, 1 thread | LLC32, 8 threads |
+|---|---:|---:|---:|---:|
+| CircuitSim90/MOS2_LARGE/ram2k.cir | 0.996809 | 0.709257 | 0.997849 | 0.779632 |
+| NEURON/rallpack3.cir | 0.998197 | 1.003646 | 0.996073 | 1.004440 |
+| CircuitSim90/MOS2_LARGE/dac.cir | 0.989919 | 0.914918 | 0.990565 | 0.927865 |
+| CircuitSim90/MOS2/mux8.cir | 0.975897 | 1.002080 | 0.976928 | 0.986557 |
+| CircuitSim90/MOS2_LARGE/mem_plus.cir | 0.990059 | 0.728418 | 0.986751 | 0.829487 |
+| MOS13_IC/invert50_mos1.cir | 1.016802 | 1.000484 | 1.015647 | 0.999660 |
+| PDE_2D_BJT/invertbjt.cir | 1.002099 | 1.004419 | 1.000373 | 1.001637 |
+
+Hold promotion: serial MOS is slower in both domains. The selector preserves
+the large parallel RAM/mem gains and avoids the rejected static-control NEURON
+slowdown. Decision: `build/egraph-paired-cycle-selection-completed-cost-decision-20261018/decision.json`.
+Candidatee4db221 only moves cold repeat checks after hot eligibility checks and
+guards budget reads/debit accounting with outer parallel-call eligibility.
+These are general inactive-path changes, with unchanged numerical bodies,
+selector thresholds, tests and public interfaces. Avoidable source reads are
+not established as the exclusive cause of MOS timing. Fresh full92 plus8
+qualification precedes API and full-grid cost checks. Production2754413, default
+verification and tolerances remain. All56 peer cells and separate full
+confirmation remain required and unmet.
