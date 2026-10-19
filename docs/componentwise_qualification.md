@@ -5728,3 +5728,54 @@ disabling, selective repeat, combination or production numerical promotion is
 justified. Snapshot reuse, typed views and SIMD still require their independent
 whole-application costs. This rejection does not establish a cause, generality,
 peer leadership or the fastest-KLS objective.
+
+### Snapshot reuse cost rejection and complete-object copy revision (2026-10-19)
+
+Snapshot reuse `f72bcb1` completes all 238 isolated observations against
+corrected baseline `036aba3`. All 28 settings, four balanced pairs per setting,
+and 14 fresh KLU references qualify. The runtime controller exits zero and all
+476 child edges/process groups close. Independent review reconstructs the
+complete grid, repeats all 224 comparison waveforms and reproduces every ratio.
+It exits zero, is absent, and all 732 checked hashes are revalidated. Evidence:
+`build/original-frame-reuse-v2-spice-pair-20261019`,
+`build/xyce-original-frame-reuse-v2-pair-campaign-20261019`, and
+`build/original-frame-reuse-v2-spice-pair-review-20261019`.
+
+Both incremental gates fail. No setting reaches 2% median improvement; the best
+ratio is 0.986254 (1.37% gain), and the worst is 1.222085 (22.21% regression).
+Twenty-five of 28 settings regress by more than 2%. Domain/thread geometric
+means are 1.119295, 1.151119, 1.100802 and 1.113820 for LLC96 threads 1/8 and
+LLC32 threads 1/8. Keep every observation and the separately closed decision
+`build/original-frame-reuse-v2-spice-pair-decision-20261019`; no subset,
+case-specific disabling, selective repeat, combination or promotion is allowed.
+
+Static inspection identifies a concrete code-generation mechanism: the rejected
+cache-hit gather copies each double with eight separate byte loads and stores.
+Storage reuse removes the compiler-visible non-alias property of the previous
+fresh allocation. This is static evidence, not proof that it explains the entire
+measured regression. The original objects, archives and assembly are pinned in
+`build/original-frame-reuse-v2-copy-codegen-audit-20261019` and checked against
+the independently qualified archives.
+
+Fresh research commit `797487d` changes only the representation-copy helper to
+fixed-size `memmove`. It preserves NaN payloads and signed zeros without reading
+a floating value, and adds no alias precondition. Whole-stream overlaps still
+use the unchanged transactional gather; all layout, range, allocation-failure,
+finite-value and epoch rules remain unchanged. The original rejected source and
+packages are untouched. All existing cache/representation/alias/fault cases pass
+in native, optimized ASan/UBSan and portable focused profiles. The native
+production translation unit also compiles without warnings. Independent review
+confirms the exact one-helper change and a gather loop with one complete value
+load/store, no per-entry memmove call, and eight fewer byte-load sites. Runtime
+and reviewer exit zero; all 16 child edges/groups close, and all 3333 reviewed
+hashes are revalidated. Evidence:
+`build/original-frame-reuse-object-copy-v3-focused-20261019` and
+`build/original-frame-reuse-object-copy-v3-focused-review-20261019`.
+
+A fresh full-source package is prepared in
+`build/original-frame-reuse-object-copy-v3-full-runtime-20261019`; it has not run.
+The new revision still needs full 141 core tests, independent review, all 28 API
+settings and a fresh complete 238 cost campaign. No recovered application
+performance, production promotion, generalization or peer leadership is claimed.
+Typed-view and original SIMD costs remain independent and pending. All 56 peer
+wins with a separate complete confirmation remain necessary for the goal.
