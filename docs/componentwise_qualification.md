@@ -6446,3 +6446,44 @@ prepared. Complete core, API28, actual activation and whole-application cost
 remain pending. This prototype is separate from caller-frame `2a01c77` and
 its verified 33/56 peer wins. No performance, broader generality, production
 or fastest claim follows from focused correctness.
+
+
+### Static dependency scheduler completes core and targeted race checks (2026-10-19)
+
+The isolated `e14c171` revision passes all 141 core tests and 18 original
+guards across native, optimized ASan/UBSan and portable builds. Runtime and
+independent v9 review both exit zero; controllers and all 30 runtime child
+edges/process groups close, and all 2721 review hashes revalidate. Every
+original test and guard remains, with unchanged numerical defaults, budgets
+and accuracy assertions. Evidence:
+`build/egraph-static-cluster-dependencies-v2-full-runtime-20261019` and
+`build/egraph-static-cluster-dependencies-v2-full-runtime-review-20261019`.
+
+An additional root/fixture ThreadSanitizer diagnostic initially segfaults
+without output in both corrected baseline and candidate. A minimal standalone
+control reproduces this before `main` only when GCC TSan and `target_clones`
+are combined; plain CPU clones and TSan without clones pass. The generated
+IFUNC resolver calls `__tsan_func_entry` before CPU initialization. Controls
+with the original dependency libraries and immediate binding also pass.
+The original failed artifacts remain. Its last tool output was truncated,
+so the actual tool terminal is explicitly unknown; separate closure verifies
+the controller, all 12 child edges/process groups and input hashes.
+
+A fresh diagnostic disables function-entry/exit stack hooks using
+`--param=tsan-instrument-func-entry-exit=0`, retaining memory-access
+instrumentation. The cloned minimal control then passes, and a deliberately
+racy pthread control still reports a data race and exits 66. Both strict
+solver fixtures subsequently pass, including all four new dependency contexts
+per arm and the existing idle-budget/startup checks, without TSan warnings.
+The actual runtime exits zero and all 12 child edges/process groups close.
+Fresh independent review exits zero and revalidates 145 hashes. A first
+reviewer path-normalization assertion failure is retained separately.
+Evidence: `build/tsan-ifunc-startup-control-20261019`,
+`build/tsan-ifunc-memory-check-control-20261019`,
+`build/egraph-static-cluster-dependencies-v2-tsan-entry-off-20261019` and
+`build/egraph-static-cluster-dependencies-v2-tsan-entry-off-review-v2-20261019`.
+This is targeted memory-access checking of root/fixture code; dependency
+archives remain uninstrumented. Production source and compiler flags are
+unchanged. It does not establish complete-program race freedom, real-circuit
+activation or a speedup. Standard API28, separate branch activation and
+complete application-cost comparisons remain required.
