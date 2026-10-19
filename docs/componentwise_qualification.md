@@ -5702,3 +5702,29 @@ script are prepared before timing. No source edits, builds or diagnostics may
 overlap those comparisons. Cost decisions, separate confirmation, broader
 validation and all56 qualified peer wins with complete confirmation remain
 outstanding. No numerical production promotion or fastest claim follows.
+
+### Work-partition complete cost rejection (2026-10-19)
+
+Independent certificate work partitions `01e2eea` complete all 238 isolated
+observations against corrected baseline `036aba3`: all 28 settings, four
+balanced pairs per setting and 14 fresh KLU references. Every observation
+qualifies. The runtime controller exits zero and all 476 child edges/process
+groups close. Separate review reconstructs the complete unique balanced grid,
+reruns all 224 comparison waveforms, checks completion/steps/finite values and
+reproduces every ratio. It exits zero, is absent, and all 732 checked hashes
+are revalidated. Evidence: `build/certificate-work-partitions-spice-pair-20261019`,
+`build/xyce-certificate-work-partitions-pair-campaign-20261019` and
+`build/certificate-work-partitions-spice-pair-review-20261019`.
+
+The unchanged complete-grid incremental gate rejects adoption: no setting
+reaches 2% median improvement. The best median candidate/baseline ratio is
+0.984599 (1.54% improvement); the worst is 1.017555 (1.76% regression), so the
+2% regression gate passes. Domain/thread geometric means are
+1.005777, 1.004154, 1.001267 and 0.993939 for LLC96 threads 1/8 and LLC32 threads 1/8.
+These aggregates do not override the per-setting gate. The separately closed
+decision is `build/certificate-work-partitions-spice-pair-decision-20261019`.
+Keep the implementation and all observations; no favorable subset, case-specific
+disabling, selective repeat, combination or production numerical promotion is
+justified. Snapshot reuse, typed views and SIMD still require their independent
+whole-application costs. This rejection does not establish a cause, generality,
+peer leadership or the fastest-KLS objective.
