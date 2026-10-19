@@ -5490,3 +5490,61 @@ candidates. Correctness-build overlap is explicitly recorded and all times are
 excluded. Full core/API reviews, isolated238 cost, generalization and the final
 56-peer-win plus separate-confirmation gates remain required. Production
 numerical source, default certificate, tolerances and all budgets are unchanged.
+
+### Work-partition core closure and independent SIMD certificate candidate (2026-10-19)
+
+Certificate work partitions `01e2eea` complete all141 core tests (47 native,
+47 optimized ASan/UBSan,47 fully portable), plus18 initial guards. Actual
+runtime exit is zero and all30 child edges/process groups close. Separate
+review checks source composition, every inherited test name, compile flags,
+archives, dependency pins and all outputs; it exits zero, its PID is absent,
+and all2723 checked hashes are revalidated. Evidence:
+`build/certificate-work-partitions-full-runtime-20261019` and
+`build/certificate-work-partitions-full-runtime-review-20261019`.
+The fresh full28 Xyce API/link campaign is instrumented correctness work with
+explicit build overlap. Its times cannot establish a speedup. Original default
+accuracy, budgets and the separate isolated238/holdout/peer gates remain.
+
+Separate candidate `f4d2da3`, directly on corrected baseline036aba3, computes
+four independent certificate rows in AVX2 lanes. It changes only the private
+verdict path; detailed-bound interfaces and the old scalar witness remain.
+Every lane follows the original entry order and uses explicit separately
+rounded multiply/subtract/add instructions. The existing scalar witness
+expressions enclose the resulting sums, including the unchanged additive
+underflow budget, zero-product check, tolerance conversion, extended fallback
+and replay rules. Only already-validated exact-degree-domain plans and a
+supported masked-trap, nearest-rounding, gradual-underflow environment enter
+this path. Unsupported CPU/environment and short ranges retain the scalar
+executor. No values, certificates or new metadata are retained across calls,
+and no allocation, tolerance, correction allowance or selection budget changes.
+
+The new SIMD fixture compares1740 ranges per active profile against the
+unchanged scalar witness, including irregular/empty rows, both directions,
+tails against read-only guard pages, exceptional/subnormal inputs, x87 flags,
+unmasked-overflow fallback, public changed-value epochs, corrections and
+OpenMP/external worker dispatch. Native, optimized ASan/UBSan and portable
+profiles pass. Existing parallel and correction fixtures also pass in all four
+profiles, including the no-OpenMP serial fallback:12 actual fixture contexts.
+Independent review and PID/hash closure complete. Native and portable raw
+kernels contain separate packed operations, no FMA or AVX-512, and no call
+except the compiler's stack-canary-failure branch. Evidence:
+`build/certificate-avx2-rows-focused-v4-20261019` and
+`build/certificate-avx2-rows-focused-review-v5-20261019`.
+
+The initial intrinsic implementation fails native compilation because the
+always-inline intrinsic definitions inherit wider translation-unit target
+flags. A fresh vector-object revision exposes the same mismatch in fortified
+memcpy wrappers. Both failures remain preserved, with actual exits and closed
+child groups. The next revision uses fixed-size compiler builtins at the
+narrow target boundary and passes12 contexts; a fresh fixture-only revision
+adds public epoch/correction tests. Production bytes of those two successful
+revisions are identical. The first instruction reviewer also remains failed:
+it rejected the stack-canary-failure call; the later review explicitly records
+that sole failure-only call instead of allowing arbitrary helper calls.
+
+A fresh full-source package registers the SIMD fixture as the48th test,
+retaining all47 inherited tests in every profile. Full144 integration, Xyce,
+isolated cost, generalization and complete peer confirmation remain pending.
+Do not combine this candidate with work partitions, snapshot reuse or typed
+factor views before separate performance qualification. No fastest claim or
+production numerical promotion follows from focused correctness.
