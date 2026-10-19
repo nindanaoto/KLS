@@ -5170,3 +5170,81 @@ cross-call addresses and internal scheduling remain outside replay scope.
 No library/adapter recovery change, timeout win, peer promotion or fastest
 claim follows from capture alone. All56 peer wins plus separate confirmation
 remain required and unmet.
+
+### Dense-help stack-context lifetime repair (2026-10-19)
+
+The isolated SNB candidate `1311dc7` passed its46 native tests, then its
+optimized ASan/UBSan run failed `kls_smoke` with a stack-use-after-return in
+`kls_dense_help_try`. The helper inspected a published stack context before
+announcing itself in `dense_help_inflight`; the publisher could withdraw,
+observe no readers, and return first. That source is byte-identical to parent
+`3ba29c9`, so this is an inherited protocol defect, without evidence that SNB
+arithmetic caused it. Portable execution did not start. The failed package,
+actual nonzero exit, child/process-group closure and independent failure
+review are retained under
+`build/snb-row-tile-portable-fma-full-runtime-v2-preparation-20261018` and
+`build/dense-help-lifetime-failure-review-20261018`.
+
+Separate commit `036aba3`, based on portable-dispatch fix `5d1dfad`, pins a
+reader before any context inspection or help-workspace allocation. Reader
+pins, active publication/withdrawal and all three publisher drains share a
+sequentially consistent order. This prevents the reader and publisher from
+both missing the other's announcement, which acquire/release operations on
+separate atomics alone do not prevent. Arithmetic, row claims, dependency
+rules, scratch budgets and public layouts are unchanged; the inactive fast
+return remains.
+
+A Linux regression fixture pauses the actual helper immediately after its
+context-pointer load. It checks that the publisher cannot return until the
+reader releases its pin. The parent negative control deterministically
+reproduces ASan stack-use-after-return; fixed native, optimized ASan/UBSan
+and fully portable contexts pass. The fixture adds no production hooks or
+sleep-based scheduling assumptions. Focused execution and independent
+source/artifact review are closed, including actual zero exits, process
+absence and hash rechecks. Evidence:
+`build/dense-help-context-lifetime-focused-v2-20261018` and
+`build/dense-help-context-lifetime-focused-review-v2-20261019`. Earlier fixture
+compile and reviewer warning-classification failures remain preserved in
+separate packages.
+
+The lifetime fix is applied separately to the retained-stream candidate
+(`7addc94`) and SNB row-tile candidate (`4534485`). Fresh frozen full-core
+qualification of corrected baseline `036aba3` and both candidates is running:
+47 tests per native, optimized ASan/UBSan and fully portable profile, with
+six initial guards per profile. Full141 results, independent review, fresh
+28-setting Xyce API checks and separate uninstrumented238-observation paired
+cost remain pending. The two candidate launchers initially rejected a
+relative script path before starting any controller/build; those launch
+failures are preserved, and fresh v2 candidate packages correct only that
+check. No failed numerical run is retried in place. The old unfixed cost
+package must not be used. Neither performance candidate is promoted and the
+certified componentwise default remains enabled.
+
+### SubtreeLU recovery candidate diagnostic (2026-10-19)
+
+The standalone replay of an original trailing call stream reproduced one
+stall after every completed status/output had matched. Six fresh executions
+returned E_SINGULAR at the originally unreturned call; one stopped at an
+earlier solution-byte mismatch. All outcomes remain explicit, without a
+tolerance waiver. Replay excludes constructor history, cross-call addresses
+and internal scheduling, so it does not uniquely identify the internal cause.
+Evidence: `build/subtreelu-captured-stall-replay-20261018` and its independent
+`build/subtreelu-captured-stall-replay-review-20261018`.
+
+Separate Xyce candidate `343c527` rebuilds SubtreeLU analysis before full
+factorization whenever a fixed-pattern refactor fails. It preserves the
+current matrix/options and applies to every such failure, with no circuit,
+size or thread selector. Matched builds differ only in the replacement
+adapter object; the baseline executable is byte-identical to the original
+peer driver. The same16-run MOS diagnostic now completes16 waveforms with
+matching steps and no120-second cap, capturing80 generations including64
+recoveries. Execution/build closure and independent reviews are complete:
+`build/subtreelu-failed-refactor-reanalysis-build-review-v2-20261018` and
+`build/subtreelu-reanalysis-recovery-mos13-review-20261018`.
+
+These instrumented, overlapping diagnostic results establish neither cost
+nor peer superiority. Broader native/sanitized adapter and full-circuit
+qualification are still required before this recovery candidate can replace
+the peer adapter. Original stalls and benchmark timeouts are retained; main
+Xyce and the original linked archive remain unchanged. All56 qualified peer
+wins and a separate complete confirmation remain unmet.
