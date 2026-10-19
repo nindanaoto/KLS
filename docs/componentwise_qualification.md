@@ -5548,3 +5548,29 @@ isolated cost, generalization and complete peer confirmation remain pending.
 Do not combine this candidate with work partitions, snapshot reuse or typed
 factor views before separate performance qualification. No fastest claim or
 production numerical promotion follows from focused correctness.
+
+### Partition API closure before isolated cost (2026-10-19)
+
+Work-partition candidate `01e2eea` completes all28 original Xyce/API settings
+with288677 current-operator certificate calls. Actual runtime exit is zero;
+the controller and all62 runtime/build child edges/process groups close.
+Separate review reruns all28 waveform comparisons, checks unchanged steps and
+completion/failure gates, verifies the seven original wrappers and matched
+plain links, exits zero, and has all193 checked hashes revalidated after PID
+absence. Evidence: `build/certificate-work-partitions-api-20261019` and
+`build/certificate-work-partitions-api-review-20261019`. Instrumented execution
+overlaps only the named correctness builds; all its times are excluded. The
+fresh isolated238 comparison is ready only after all other heavy jobs close.
+
+The first SIMD full-source launch is stopped by its startup isolation check
+when the independent partition API reviewer starts before that check completes.
+No controller PID or configure/build/test child was published by that failed
+launch; its actual tool exit1, absent matching command line, zero child edges,
+and incomplete PID provenance are explicitly recorded. Keep that source and
+failed preflight. A fresh v2 full-source/runtime package contains the identical
+`f4d2da3` numerical commit and explicitly permits the named correctness reviewer.
+It starts successfully and publishes its controller before further job launches.
+This startup correction supplies no numerical or performance result. The two
+other independent candidates remain in full-core qualification. All production
+accuracy, memory/cache/exploration limits and the full56-peer-win plus separate
+complete confirmation requirement remain unchanged.
