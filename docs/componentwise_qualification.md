@@ -6110,3 +6110,46 @@ assertion before any controller write/run is preserved separately, with a fresh
 v2 package prepared. No production or performance claim follows from the
 owned-frame focused tests. Generalization, all 56 qualified peer wins and a
 separate complete confirmation remain required.
+
+
+### Owned caller frame complete core and API closure (2026-10-19)
+
+Revision `2a01c77` passes all 141 complete core tests and 18 initial guards:
+47 tests each in native, optimized ASan/UBSan and fully portable builds.
+The actual runtime exits zero; its controller is absent and all 30 child
+edges/process groups close. Independent v8 review checks the exact source/
+fixture composition, frozen source/dependency archives, complete test names,
+new 288-configuration owner coverage and all profiles. Its actual exit is
+zero and PID absent; all 2723 hashes are revalidated. Evidence:
+`build/owned-caller-input-frame-v1-full-runtime-20261019` and
+`build/owned-caller-input-frame-v1-full-runtime-review-20261019`.
+
+All 28 original API settings then qualify. Independent review reruns waveform
+checks and verifies the same committed adapter/dependencies and matched plain
+links, with wrappers present only in the profile executable. All 288680
+certificate calls use the verdict interface, without certificate or statistics
+errors. Runtime exits zero and closes all 62 child edges/process groups. The
+reviewer exits zero and is absent; all 193 hashes are revalidated. Evidence:
+`build/owned-caller-input-frame-v1-api-20261019` and
+`build/owned-caller-input-frame-v1-api-review-20261019`.
+Instrumented times are excluded from performance conclusions.
+
+The existing seven-wrapper profile already contains per-public-call reported
+refactor-path counts. Revalidating the archived corrected-baseline API review
+(192 hashes) shows EGraph for all 1145 BJT eight-thread calls in both domains.
+The new profile also reports EGraph frequently for memory and RAM, unlike that
+older profile. These are diagnostic/adaptive path observations, without proof
+of the same choices in plain timing, exact cluster/private mode, all internal
+attempts or removable synchronization time. No added telemetry or diagnostic
+rerun is needed; no route is forced from these observations.
+
+The owned-frame complete-238 receipt is now frozen for its first isolated
+comparison against `036aba3`. Separately, the initial successful snapshot-copy
+revision `797487d` has its fresh confirmation-v2 receipt frozen, with all 28
+settings/four balanced pairs/14 fresh references and reversed domain/circuit/
+starting-arm order. Neither new cost controller has executed at this checkpoint.
+The owned-frame cost runs first, with the copy confirmation separate afterward.
+All source edits/builds/reviewers must finish before comparative timing. No
+candidate combination, source selector exception or production promotion is
+introduced. Broader generalization, all 56 qualified peer wins and separate
+complete confirmation remain open.
