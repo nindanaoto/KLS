@@ -6365,3 +6365,84 @@ Neither this rejection nor the earlier `0634349` proof-range rejection is
 borrowed as its result. Broader generalization and all 56 qualified peer wins
 with separate full confirmation remain required; the confirmed caller-frame
 `2a01c77` stays separate at 33 peer wins / 23 losses.
+
+
+### Packed affirmative proof also fails complete cost gate (2026-10-19)
+
+The isolated `a8f6f65` versus `036aba3` comparison completes all 238 original
+observations, all qualified. Runtime exits zero and all 476 child edges/process
+groups close. Separate review reconstructs every original setting/trial,
+rechecks paired waveforms and recomputes all ratios; its actual exit is zero,
+PID absent and all 732 hashes revalidate. The unchanged v5 decision exits zero
+with a truthful null session ID, PID absent and all five hashes revalidate.
+Evidence: `build/certificate-avx2-verdict-proof-spice-pair-20261019`, its
+`-review-20261019` and `-decision-20261019` packages.
+
+The original gate rejects the implementation: 16 of 28 medians regress more
+than 2%, with only one median gain beyond 2%. Geometric means are 1.05775525 /
+1.06198665 on LLC96 at threads 1 / 8 and 1.05491797 / 1.05992178 on LLC32.
+The worst median is eight-thread NEURON / LLC96 at 1.22359162; all four
+ratios are slower (1.14845991, 1.13217536, 1.29872332, 1.31035355).
+The best median, eight-thread DAC / LLC32 at 0.97776966, has mixed trials
+0.95652619, 1.09779984, 0.99901312 and 0.94712369, so it does not establish
+a stable 2.2% gain. These results are separate from the four-row and range
+implementations. All original cells/trials remain, without selector changes,
+subset repeats or combination with the confirmed caller-frame optimization.
+No new SIMD variant or production promotion follows from this rejection.
+
+
+### Static EGraph dependency-publication prototype passes focused checks (2026-10-19)
+
+Isolated feature `2625c3d`, based on corrected `036aba3`, replaces intermediate
+level joins in the ordinary unchecked cluster only when its exact cached
+level/thread partitions and existing nonzero completion generation are
+available. Each column waits for its actual U predecessors and publishes
+completion with release ordering; readers acquire that publication. The
+workers retain ascending numeric-level order, so dependency and worker-order
+edges remain acyclic. The final cluster join precedes the existing claimed
+pipeline. Checked-pivot, private, premarked and unsupported routes retain
+their established barriers. No new fields, queues, bitmaps, worker scratch,
+size/work thresholds or numeric/cache/exploration budgets are introduced.
+The source skips early premarking and clears its pending sample on the new
+route, preventing asynchronous timings from being charged to the old
+barrier-based publication experiment. Scalar numerical kernels, owner
+contracts, accuracy defaults and reference proofs remain unchanged.
+
+The new startup fixture uses unequal dense blocks feeding a common tail,
+checks actual cross-worker U dependencies and current-matrix normal/transpose
+multi-RHS answers with padding, generation wrap, checked fallback and singular
+stop/recovery. All inherited startup and cycle-policy assertions remain.
+The first focused native run fails a strict answer check. A separate unchanged
+baseline control fails at the same first epoch, row and exact value
+(0.62499999985433752 versus 0.625). The test called the inner numeric kernel
+without the resource dispatcher's reciprocal-epoch invalidation. Both failed
+test exits and the diagnostic controller's successful observation exit remain;
+they are not passing qualification. An earlier source-only runner generator
+syntax failure before any compile is also retained separately.
+
+Fixture-only revision `e14c171` enters through the real numeric resource
+dispatcher, retaining the numerical assertion and tolerance. The unchanged
+baseline then passes all four new native contexts. The candidate starts a
+fresh complete focused cohort: extended startup and unchanged cycle-policy
+fixtures in native, optimized ASan/UBSan and portable builds. All six contexts
+and 18 steps pass; runtime exits zero and all 36 child edges/process groups
+close. The two sanitizer allocation-range warnings match the qualified,
+byte-identical `kls_first_factor.inc` baseline context.
+
+Independent focused review reconstructs the exact scheduling-only source
+composition, verifies unchanged legacy assertions, actual new-root source
+inclusion, old root archive-member exclusion, exact per-profile flags/common
+dependencies and unchanged baseline outputs. Its actual exit is zero, PID
+absent and all 2860 hashes revalidate. Evidence:
+`build/egraph-static-cluster-dependencies-v1-focused-v2-20261019`,
+`build/egraph-static-cluster-dependencies-v1-native-control-20261019`,
+`build/egraph-static-cluster-dependencies-v2-baseline-fixture-control-20261019`,
+`build/egraph-static-cluster-dependencies-v2-focused-20261019` and
+`build/egraph-static-cluster-dependencies-v2-focused-review-20261019`.
+
+Fresh immutable source/dependency preparation for the full 141 core tests and
+18 original guards is complete (2549 files); a new independent v9 reviewer is
+prepared. Complete core, API28, actual activation and whole-application cost
+remain pending. This prototype is separate from caller-frame `2a01c77` and
+its verified 33/56 peer wins. No performance, broader generality, production
+or fastest claim follows from focused correctness.
