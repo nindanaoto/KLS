@@ -6011,3 +6011,46 @@ does not supply their cost verdicts. The separately qualified complete-object
 snapshot copy `797487d` is next for its own complete-238 comparison against
 `036aba3`. All 56 qualified peer wins, broader generalization and a separate
 complete confirmation remain open.
+
+
+### Complete-object copy passes first complete cost gate (2026-10-19)
+
+Snapshot-copy correction `797487d` completes its isolated 238-observation
+comparison against `036aba3`. All original 28 settings, four balanced pairs
+per setting and 14 fresh KLU references are retained and qualified. Runtime
+exits zero, its controller is absent and all 476 child edges/process groups
+close. Independent review reconstructs the exact grid, step/time parsing and
+all 224 waveform comparisons. Its actual exit is zero and PID absent; all
+732 hashes are revalidated. Evidence:
+`build/original-frame-reuse-object-copy-v3-spice-pair-20261019` and
+`build/original-frame-reuse-object-copy-v3-spice-pair-review-20261019`.
+
+The unchanged incremental gate passes: five settings improve at least 2%,
+and no setting regresses more than 2%. Candidate/baseline geometric means
+are 0.99529804 / 0.99861452 on LLC96 at threads 1 / 8 and 0.98446927 /
+0.97465074 on LLC32. The best median, BJT / LLC32 / eight threads, is
+0.91122409, with individual ratios 1.00016028, 0.94356917, 0.87887901 and
+0.84635364. This spread and the nearly neutral first pair prevent a claim
+of a stable 8.9% gain. The worst median is BJT / LLC96 / eight threads at
+1.00272118. Every cell and trial remains available; no selective repeats or
+case-specific exception is introduced.
+
+The fixed v3 decision exits zero with a truthful null-session direct terminal;
+its PID is absent and all five decision hashes close. Evidence:
+`build/original-frame-reuse-object-copy-v3-spice-pair-decision-20261019`.
+A fresh independent complete-238 confirmation and broader generalization are
+required before adoption. No production or peer-superiority result follows
+from this first incremental pass.
+
+Read-only ownership review also identifies an independent general prototype:
+retain the original public CSC/CSR input pattern at analysis, then publish
+fresh values by whole-stream copy. This removes recurring inverse-map gathers
+and comparisons without treating pointer identity as structural proof. CSR is
+CSC of the transpose, so certificates and isolated recovery must combine the
+requested operation with storage orientation; backend correction solves keep
+the original requested operation. The existing conservative private capture
+helper, scalar proof, tolerances, budgets and failed-epoch contract remain.
+Source inspection covers both public input formats, index types/bases,
+analysis cleanup, original-data consumers and separate cold-recovery solvers.
+This is a design finding, not implemented or performance-qualified evidence.
+All 56 qualified peer wins and a separate complete confirmation remain open.
