@@ -5431,3 +5431,62 @@ These are retained final states and cumulative counters of that diagnostic,
 not per-call time ownership. ELF layout and cleanup IO can affect adaptive
 choices. Prior instrumented call ancestry and these final states do not prove
 removable time. The default certificate and numerical library are unchanged.
+
+### Paper-guided recurring-cost implementation begins (2026-10-19)
+
+Independent snapshot-reuse candidate `fa47ee8` reuses the existing owned
+original-operator value buffer only after exact layout validation and a
+nonoverlapping source-range proof. It adds no persistent buffer, index map,
+arithmetic change or admission threshold. Overlapping sources retain allocation
+and transactional gathering. Application-managed nonfinite rejection validates
+all values before changing a reused snapshot; certified policies preserve exact
+object representations. The expanded original cache fixture passes native,
+optimized ASan/UBSan and portable profiles, with closed independent review:
+`build/original-frame-reuse-focused{,-review}-20261019`.
+
+Its original full-native run retains46 passes and one failed owner fixture:
+that test assumed a cached update must allocate. Preserve the complete failure;
+do not advance its unexecuted API/cost drafts. Fresh revision `f72bcb1` changes
+only the owner fixture, requiring allocation-free success while retaining an
+actual overlapping-source allocation failure and all six original rebuild
+failures. Public-epoch invalidation, saved snapshots and failed subsequent
+solves remain checked. All three owner profiles pass and separate review closes:
+`build/original-frame-reuse-owner-focused-v2-20261019` and
+`build/original-frame-reuse-owner-focused-review-v3-20261019`.
+The earlier reviewer that stopped on an unclassified allocator warning is
+retained. Its warning is emitted at unchanged owner_calloc, explicitly inlined
+from unchanged first-factor line2374; the later review records the complete
+provenance rather than suppressing it. Full47x3 qualification uses a fresh v2
+source/runtime package with the owner fixture among its initial guards.
+
+Separate typed-view candidate `a782778` dispatches native versus already-ready
+16-bit factor indices once after map preparation. The two out-of-line kernels
+share one source template, and native preprocessing reproduces the corrected
+baseline's kernel body byte-for-byte. No per-entry index-kind branch, new
+cache builder, allocation, persistent layout or policy threshold is added.
+The inherited exact-factor/scale/fused-RHS fixture retains its original cases
+and now checks all six missing-view fields plus an unavailable readiness state.
+Native, optimized ASan/UBSan and portable implementation/dependency profiles
+pass, then separate review closes with checked hashes:
+`build/typed-lean-factor-view-focused-v3-20261019` and
+`build/typed-lean-factor-view-focused-review-v4-20261019`.
+
+The first typed implementation and its fresh diagnostic revision fail exact
+fused-RHS comparisons and remain preserved. GCC emits asymmetric constant-flag
+native clones; the diagnostic locates first differences in fused RHS values.
+The v3 intervention adds GCC noclone to both typed kernels, retains bitwise
+comparisons and passes all three profiles. No tolerance is relaxed. The first
+reviewer that confused sanitizer cold partitions with clones also remains;
+the later review permits only those named sanitizer partitions and rejects
+constant-propagation clones. This establishes the focused rounding fix, not
+the cause of the earlier retained-stream performance regression.
+
+Static audit `build/lean-streams-codegen-audit-20261019/audit.json` records
+3212 versus3736 bytes,672 versus769 instructions and86 versus104 conditional
+branches for baseline036aba3 versus rejected7addc94 hot functions. These are
+static differences, not execution counts, stall measurements or removable time.
+Snapshot reuse, typed views and certificate work partitions remain separate
+candidates. Correctness-build overlap is explicitly recorded and all times are
+excluded. Full core/API reviews, isolated238 cost, generalization and the final
+56-peer-win plus separate-confirmation gates remain required. Production
+numerical source, default certificate, tolerances and all budgets are unchanged.
