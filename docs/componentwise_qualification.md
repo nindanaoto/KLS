@@ -5936,3 +5936,44 @@ Full 144 qualification is running in a fresh source package. This is research
 implementation and focused correctness evidence, without a performance or
 production promotion result. All 56 qualified peer wins and a separate complete
 confirmation remain necessary.
+
+
+### Range-level SIMD integration closure (2026-10-19)
+
+Research revision `0634349` passes all 144 core tests and 18 initial guards:
+48 tests each in native, optimized ASan/UBSan and fully portable builds. Its
+runtime exits zero, the controller is absent and all 30 child edges/process
+groups close. Independent v7 review verifies frozen archives, dependency pins,
+unchanged parent fixtures, the exact focused-change composition and all build
+profiles. The reviewer exits zero and is absent; 2732 hashes are revalidated.
+Evidence: `build/certificate-avx2-verdict-proof-range-v2-full-runtime-20261019`
+and `build/certificate-avx2-verdict-proof-range-v2-full-runtime-review-20261019`.
+
+Actual portable binaries also pass all six supplemental Haswell/Nehalem
+fixture contexts and both capability probes inside Apptainer/QEMU. Haswell
+activates AVX2 without AVX-512 and runs 20000 proof-boundary groups; Nehalem
+uses the scalar fallback. Both retain the 1740 range comparisons. Exact QEMU
+HLE/RTM warnings are retained. Runtime and separate review exit zero and close;
+27 hashes are revalidated. This establishes emulated correctness, without a
+physical old-CPU hardware or performance claim. Evidence:
+`build/certificate-avx2-verdict-proof-range-v2-emulated-runtime-20261019` and
+`build/certificate-avx2-verdict-proof-range-v2-emulated-review-20261019`.
+
+The full 28-setting API campaign and independent waveform rechecks pass.
+All 288680 certificate calls use the verdict interface, with no certificate or
+statistics errors. Matched plain binaries contain no wrappers and differ only
+in root core/output link arguments; the adapter and shared dependencies remain
+pinned. Runtime exits zero and closes all 62 child edges/process groups. The
+reviewer exits zero and is absent; all 193 hashes are revalidated. Evidence:
+`build/certificate-avx2-verdict-proof-range-v2-api-20261019` and
+`build/certificate-avx2-verdict-proof-range-v2-api-review-20261019`.
+Instrumented and overlapped times are excluded from performance conclusions.
+
+The next comparison is the candidate's fresh complete 238-observation cost
+campaign against corrected baseline `036aba3`, followed separately by the
+complete-object snapshot-copy revision. Both retain all original 28 settings,
+four balanced pairs per setting, 14 fresh KLU references and default current-
+operator certification. No builds, source edits or heavy diagnostics may
+coincide with these measurements. No performance verdict or production
+promotion follows from the correctness results. Broader generalization,
+all 56 qualified peer wins and a separate complete confirmation remain open.
