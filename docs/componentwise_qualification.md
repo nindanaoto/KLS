@@ -6571,3 +6571,60 @@ unchanged. Feature/test commits `2625c3d` / `e14c171` remain isolated research
 artifacts. The confirmed caller-frame `2a01c77` remains separate at 33 peer
 wins / 23 losses; broader generalization and all 56 qualified peer wins with
 independent complete confirmation are still required for a fastest claim.
+
+
+### Compact solve prewarm ownership correction (2026-10-19)
+
+The owned-values reuse prototype `b5ba1df` exposes a LeakSanitizer failure:
+110 bytes in 13 allocations made by the background compact solve-cache
+builder. Its failed focused package remains intact. Four alternating
+diagnostic runs of each unchanged parent/candidate binary subsequently pass;
+those reruns do not erase the original failure or establish race freedom.
+
+The parent can enter serial solve-cache preparation before joining the worker
+preparing that same cache. Research commit `396b60c`, based on caller-frame
+`2a01c77`, joins that worker before serial preparation can build or invalidate
+its cache. Larger deferred preparation retains its existing overlap. No
+numerical kernel, verification bound, default, selector or exploration budget
+changes. The correction remains on its research branch.
+
+A deterministic owner fixture delays the worker until join and checks that
+the main thread has not published cache state meanwhile. The initial fixture
+could also gate one-thread jobs that return without preparing a cache. The
+tighter fixture in `cdb5e15` / `7c5e94a` explicitly excludes those jobs, leaving
+the parent/fixed production sources byte-identical to `2a01c77` / `396b60c`.
+The parent fails with an explicit eight-worker diagnostic; the fixed source
+passes the identical fixture, including 168 productive delays, all 288 caller
+frame configurations and the original 12 ownership configurations. Expected
+parent SIGABRT, fixed success, controller/group closure and all 4979 hashes
+are independently checked in
+`build/compact-prewarm-productive-worker-control-v1-20261019` and its
+`-review-20261019` package.
+
+The isolated correction completes all 141 full tests and all 18 guards across
+native, optimized ASan/UBSan and portable builds. All 30 child edges and
+process groups close. Independent review checks exact archived sources,
+dependencies, all inherited test names/assertions, the tighter ownership
+control and 7698 hashes. Evidence:
+`build/compact-solve-prewarm-join-v2-full-runtime-20261019` and
+`build/compact-solve-prewarm-join-v2-full-runtime-review-20261019`.
+Whole-circuit API qualification and application-cost evidence remain pending;
+whole-library correctness alone does not establish a speedup or adoption.
+
+Two separate performance hypotheses use the corrected parent: `dae6e87`
+reuses owned value storage while copying current values on every successful
+epoch, and `ac977e3` specializes scalar mapped L scatters of lengths one/two
+while retaining the long-column loop and update order. Their independent
+focused checks pass six and three contexts respectively; the latter retains
+all 142 compact-kernel cases per profile. Full-core/API and serialized cost
+qualification are still pending. They are not combined or promoted.
+
+The original broad 110-matrix / 1760-observation run continues with every
+trial/failure and its original limits retained. It is explicitly coverage
+only: every timing, including the completed prefix, is excluded from speed
+claims under `build/owned-caller-frame-broad-coverage-only-scheduling-20261019`
+and subsequent CPU-slot decisions. Independent correctness jobs can therefore
+use disjoint physical CPU pairs. Comparative cost/peer timing still waits for
+all coverage/correctness controllers and child groups to close. The eight
+first-domain Hamrle3 timeouts provide no verified numerical result or speed
+ratio. No complete-corpus speed aggregate or fastest claim follows.
