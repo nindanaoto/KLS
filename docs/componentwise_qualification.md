@@ -5340,3 +5340,32 @@ paired campaigns compare each separate performance candidate against the
 corrected baseline, one campaign at a time with no source edits, builds or
 diagnostics during timing. Broader generalization and fresh peer/confirmation
 gates remain required; no superiority or promotion follows from API closure.
+
+### Retained-stream complete cost rejects adoption (2026-10-19)
+
+The fresh isolated238-observation campaign for retained streams `7addc94`
+against corrected baseline `036aba3` completes all original28 cells and
+four balanced pairs per cell, with14 fresh KLU references. All238 observations
+qualify. Runtime controller and476 child edges/process groups close before
+independent review; the reviewer then exits zero, is absent, and all732 checked
+hashes are revalidated. All224 candidate/baseline waveforms are independently
+rechecked, and every paired ratio and aggregate is reconstructed. Evidence:
+`build/lean-streams-lifetime-spice-pair-20261019`,
+`build/xyce-lean-streams-lifetime-pair-campaign-20261019`, and
+`build/lean-streams-lifetime-spice-pair-review-20261019`.
+
+Adoption is rejected as implemented. The four NEURON medians are1.07450,
+1.07852,1.08293 and1.07682 (candidate/baseline), a7.45--8.29% regression.
+All other24 medians are within2% of baseline; the best improvement is1.70%,
+so no cell reaches the2% incremental improvement gate. The four domain/thread
+geomeans are0.95--1.38% slower. Correctness does not compensate for this
+complete cost result. No circuit-specific exception, filtered aggregate or
+selective repeat is introduced, and this implementation will not be combined
+with the independent SNB candidate. A general hot-loop/ownership cause remains
+to be investigated rather than assumed. The source, successful correctness
+qualifications and complete negative timing result remain preserved. Decision:
+`build/lean-streams-lifetime-spice-pair-decision-20261019/decision.json`.
+
+SNB `4534485` is next for its own isolated238 comparison against the same
+corrected baseline. The certified default, existing budgets and broader
+holdout/peer/confirmation gates remain unchanged. KLS is not yet fastest.
