@@ -5285,3 +5285,38 @@ not separate standalone verdict/interval fixtures. Full47-profile integration,
 Xyce API, held-out matrices and whole-application cost remain pending. The
 candidate is separate from retained streams and SNB; it makes no speed claim
 and is not promoted.
+
+### Lifetime-fixed full core and broader recovery qualification (2026-10-19)
+
+Corrected baseline `036aba3`, retained-stream candidate `7addc94` and SNB
+row-tile candidate `4534485` each pass all141 full core tests:47 native,
+47 optimized ASan/UBSan and47 fully portable, plus18 initial guards per
+variant. All runtime controllers and90 child edges/process groups closed.
+Each separate reviewer exited zero, was absent, and had every checked
+source/archive/test/binary hash revalidated. Reviews also verify exact
+composition of the separately focused changes and retention of every46
+parent test name plus the new lifetime fixture. Existing warnings remain
+visible; their six message classes already occur in the earlier qualified
+full138 logs. Evidence is in `build/{baseline,lean-streams,snb-tile}-lifetime-full-runtime-review-20261019`
+and `build/lifetime-fixed-core-warning-audit-20261019`.
+
+SubtreeLU recovery `343c527` also passes the broader56 circuit observations:
+all seven original circuits, both cache domains, one/eight requested threads,
+with both native driver and optimized ASan/UBSan adapter builds. All steps,
+completion markers and waveforms qualify; independent review reruns all56
+waveform comparisons. The runtime's116 child edges/process groups and its
+controller close, then the reviewer exits zero and all checked hashes are
+revalidated. The closed peer library and existing application/dependency
+objects remain uninstrumented; this is adapter-boundary and circuit
+qualification, not a complete vendor memory-safety claim. Evidence:
+`build/subtreelu-recovery-full-circuit-correctness-20261019` and
+`build/subtreelu-recovery-full-circuit-correctness-review-20261019`.
+
+These are correctness observations with explicitly recorded overlap, without
+comparative timing evidence. Fresh full28 Xyce API checks for each corrected
+KLS variant have started. The paired238 cost campaigns remain unexecuted;
+these require closed API reviews and an otherwise quiet machine. The separate
+work-partition candidate `01e2eea` has only its focused qualification; its
+full-core source package is prepared and queued after these comparisons.
+Production/default accuracy and numerical source are unchanged. No candidate
+is promoted and the56-peer-win plus separate-confirmation goal remains unmet.
