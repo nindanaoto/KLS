@@ -6192,3 +6192,37 @@ references. Existing native recovery-object validation can support fresh
 matched plain links after its artifacts are rechecked; the immutable shared
 Xyce archive remains untouched. Broader generalization, all 56 qualified
 candidate peer wins and separate complete confirmation remain open.
+
+
+### Owned frame confirmation frozen and matched peer links ready (2026-10-19)
+
+A fresh independent complete-238 confirmation is frozen for `2a01c77` versus
+`036aba3`. It retains all 28 settings, four balanced pairs and 14 fresh KLU
+references. Relative to the initial campaign it reverses domain order,
+restores forward circuit order and flips the initial balanced arm phase.
+The initial closed all-238 decision is an explicit prerequisite. No code,
+accuracy, budget, qualification threshold or population changes. Evidence:
+`build/owned-caller-input-frame-v1-confirmation-spice-pair-20261019` and its
+prepared separate reviewer. The fresh v5 decision source adds only this
+confirmation identity to the same fixed complete-grid gate; v4 stays immutable.
+The confirmation controller remains unexecuted at this checkpoint.
+
+Fresh matched native plain binaries also link corrected root `036aba3` and
+candidate `2a01c77` with the previously qualified `343c527` SubtreeLU recovery
+object before the shared Xyce archive. All prerequisite source/build/circuit
+review hashes are revalidated. The shared archive, cacheline KLS adapter and
+dependencies remain unchanged; the old third-party adapter archive member is
+excluded, and profiling wrappers are absent. Both links exit zero and all
+four build edges/process groups close. Separate review independently checks
+commands, source/object identity, maps, symbols, common dependencies and output
+hashes. Its actual exit is zero and PID absent; all 1136 hashes are revalidated.
+Evidence: `build/owned-caller-input-frame-v1-peer-link-20261019` and
+`build/owned-caller-input-frame-v1-peer-link-review-20261019`.
+
+These are link-preparation results, without a new peer circuit/performance
+score. The complete four-arm 462-observation peer comparison and a separate
+complete confirmation remain. The older `797487d` confirmation receipt stays
+frozen/unexecuted while the broader initial `2a01c77` improvement receives
+priority. No source combination or production promotion follows from either
+initial pass. No builds, source edits or heavy diagnostics may overlap the
+upcoming isolated confirmation.
