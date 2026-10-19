@@ -6628,3 +6628,55 @@ use disjoint physical CPU pairs. Comparative cost/peer timing still waits for
 all coverage/correctness controllers and child groups to close. The eight
 first-domain Hamrle3 timeouts provide no verified numerical result or speed
 ratio. No complete-corpus speed aggregate or fastest claim follows.
+
+### Ordered metadata preparation supersedes the partial join (2026-10-19)
+
+The numerical qualification above does not establish safe shared-state
+ownership. Ungated ThreadSanitizer control reproduces a row-pattern read/free
+race in `396b60c`, after its solve-cache race was fixed. Joining both initial
+builders (`fd94982`) passes focused and root-only TSan checks, but source audit
+finds another shared-state dependency: KLU diagnostics writes `Common->flops`
+and status while preparation policies can read the same object. The earlier
+TSan dependency archive was native, so that check could not cover those
+accesses. Deferred map, schedule and solve-cache publishing also needs explicit
+ordering. Neither partial join is eligible for adoption. In the earlier
+control, the eight-worker diagnostic describes the configured solver crew;
+it does not mean eight solve-cache builder threads were launched.
+
+Research commit `a67c32d` orders mutable metadata preparation on the caller,
+after diagnostics and factor-layout mutations, and orders deferred map,
+schedule and solve preparation through their existing serial construction
+paths. Resource preparation finishes before the factorization can request the
+same pool. Numerical worker parallelism and internal parallel construction
+remain enabled. Trial timing includes resource construction. No verification
+default, bound, numerical/cache/exploration budget, workload selector or public
+field changes.
+
+Six focused native/optimized ASan-UBSan/portable contexts independently pass.
+The owner fixture runs all 288 caller-frame configurations both ungated and
+with its gate enabled, plus the original 12 ownership configurations; ordered
+metadata construction starts zero delayed jobs. A stronger paired TSan control
+instruments both the root and the original DLONG KLU diagnostics source, with
+a known-race positive control. Parent `396b60c` reproduces the row-map race;
+`a67c32d` passes the identical fixture without a TSan warning. That warning is
+not attributed to `Common->flops`; the diagnostics dependency is a separate
+source-audit finding. Other dependencies remain native, so this is a scoped
+check rather than a whole-program race-freedom claim. Independent reviews
+close 4330 focused and 1544 TSan input hashes in
+`build/ordered-numeric-preparation-v1-focused-review-20261019` and
+`build/ordered-numeric-preparation-v1-tsan-review-20261019`.
+
+The ordered candidate's complete 141-test/18-guard qualification is running.
+The earlier value-reuse `dae6e87` and short-L `ac977e3` candidates independently
+pass their full 141 tests and 18 guards (7700 and 7703 reviewed hashes), but
+inherit the known unsafe parent. Their numerical results remain recorded;
+API/performance promotion is held. Separate commits `44850b5` (owned-value
+reuse) and `2c16372` (short-L scatter), each directly based on `a67c32d`, retain
+their original optimization and tests. They require fresh qualification; no
+old result or unsafe baseline is substituted. Prepared API packages based on
+the partial fix are explicitly superseded and blocked from launching.
+
+No speedup or production adoption follows from these correctness checks. The
+last qualified peer result remains 33 wins / 23 losses / zero unqualified
+cells. The original broad run continues as coverage only with all timings
+excluded; comparative cost and peer runs wait for controller/group closure.
