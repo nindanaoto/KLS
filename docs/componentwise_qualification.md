@@ -5977,3 +5977,37 @@ operator certification. No builds, source edits or heavy diagnostics may
 coincide with these measurements. No performance verdict or production
 promotion follows from the correctness results. Broader generalization,
 all 56 qualified peer wins and a separate complete confirmation remain open.
+
+
+### Range-level SIMD complete cost rejection (2026-10-19)
+
+The isolated full-238 comparison for `0634349` completes with every observation
+qualified. It retains all 28 original domain/thread/circuit settings, four
+balanced pairs per setting and 14 fresh KLU references. Runtime exits zero,
+the controller is absent and all 476 child edges/process groups close.
+Independent review reconstructs the exact unique grid, all parsed step/time
+results and all 224 paired waveform comparisons. Its actual exit is zero,
+its PID is absent and all 732 checked hashes are revalidated. Evidence:
+`build/certificate-avx2-verdict-proof-range-v2-spice-pair-20261019` and
+`build/certificate-avx2-verdict-proof-range-v2-spice-pair-review-20261019`.
+
+The unchanged complete-grid gate rejects adoption. Two settings improve by
+at least 2%, while 13 of 28 regress by more than 2%. Candidate/baseline
+geometric means are 1.03920648 / 1.02282862 on LLC96 at threads 1 / 8 and
+1.03184271 / 1.02527515 on LLC32. The best median is memory / LLC32 / eight
+threads at 0.95160690, with all four paired ratios below one. The worst is
+mux / LLC96 / one thread at 1.11573519, with all four ratios above one
+(1.14283008, 1.12190720, 1.06752469, 1.10956317). This is a complete cost
+rejection despite the closed correctness qualifications and reduced function
+call boundary. Static instruction savings did not produce a general SPICE win.
+
+The fixed v3 decision process exits zero; its direct tool terminal is recorded
+with null session ID, its PID is absent and all five decision hashes close.
+Evidence: `build/certificate-avx2-verdict-proof-range-v2-spice-pair-decision-20261019`.
+There is no circuit-specific disabling, selective repeat, new selector,
+threshold change or production promotion. Raw row-SIMD `f4d2da3` and parent
+proof `a8f6f65` retain their unexecuted whole-cost packages; this experiment
+does not supply their cost verdicts. The separately qualified complete-object
+snapshot copy `797487d` is next for its own complete-238 comparison against
+`036aba3`. All 56 qualified peer wins, broader generalization and a separate
+complete confirmation remain open.
