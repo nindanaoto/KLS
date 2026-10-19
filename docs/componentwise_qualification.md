@@ -5248,3 +5248,40 @@ qualification are still required before this recovery candidate can replace
 the peer adapter. Original stalls and benchmark timeouts are retained; main
 Xyce and the original linked archive remain unchanged. All56 qualified peer
 wins and a separate complete confirmation remain unmet.
+
+### Certificate work-balanced partition candidate (2026-10-19)
+
+Inspection of corrected baseline `036aba3` confirms that certificate callbacks
+already reuse existing numerical workers. Their contiguous ranges still
+contain equal numbers of rows, even when row degrees differ substantially.
+Independent candidate `01e2eea` balances an integer prefix of rows plus
+nonzeros, using the existing immutable row offsets or CSC column pointers for
+the requested direction. A binary search finds each boundary; no row is split,
+no new metadata is allocated, and overflow retains the old row partition.
+OpenMP uses its actual team size, including dynamic reductions. Per-row
+arithmetic, acceptance, deterministic maximum, worker ownership, floating-point
+environment handling, calibration and memory budgets are unchanged.
+
+The expanded existing parallel certificate fixture checks exact row coverage,
+contiguous ranges, a maximum-work bound, empty worker ranges, an irregular
+pattern, both directions, exact serial/parallel certificate bounds and actual
+dynamic teams, alongside its original allocator/environment faults, rejection,
+correction, lifecycle and independent-context tests. Native, optimized
+ASan/UBSan and portable profiles pass; the no-OpenMP portable profile checks
+only the unchanged serial fallback. Independent review reconstructs the
+original production source byte-for-byte after removing the helper and two
+range substitutions, and verifies that the original fixture body is retained.
+Runtime/reviewer zero exits, process absence and all hashes are closed.
+Evidence: `build/certificate-work-partitions-focused-v2-20261019` and
+`build/certificate-work-partitions-focused-review-20261019`.
+
+The initial fixture stopped before partition execution because it assumed
+ready eligibility exactly1, while the existing degree-domain proof may return2.
+Its allocation also bypassed the fixture's accounting wrapper. The failed
+package/worktree is preserved; v2 fixes fixture setup without changing the
+production partition bytes. An explicit scope clarification records that the
+executed command list contains one expanded parallel fixture in four profiles,
+not separate standalone verdict/interval fixtures. Full47-profile integration,
+Xyce API, held-out matrices and whole-application cost remain pending. The
+candidate is separate from retained streams and SNB; it makes no speed claim
+and is not promoted.
