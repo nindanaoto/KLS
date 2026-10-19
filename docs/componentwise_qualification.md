@@ -6153,3 +6153,42 @@ All source edits/builds/reviewers must finish before comparative timing. No
 candidate combination, source selector exception or production promotion is
 introduced. Broader generalization, all 56 qualified peer wins and separate
 complete confirmation remain open.
+
+
+### Owned caller frame first complete cost passes (2026-10-19)
+
+The isolated `2a01c77` versus `036aba3` campaign completes all 238 observations:
+all 28 original settings, four balanced pairs per setting and 14 fresh KLU
+references. Every observation qualifies. Runtime exits zero, its controller
+is absent and all 476 child edges/process groups close. Independent review
+reconstructs the exact unique grid, parsed steps/times and all 224 paired
+waveform comparisons. Its actual exit is zero, its PID is absent and all
+732 hashes are revalidated. Evidence:
+`build/owned-caller-input-frame-v1-spice-pair-20261019` and
+`build/owned-caller-input-frame-v1-spice-pair-review-20261019`.
+
+The unchanged incremental gate passes. All 28 medians improve, and 26 improve
+at least 2%. Candidate/baseline geometric means are 0.92422445 / 0.91448163
+on LLC96 at threads 1 / 8 and 0.90410505 / 0.90357117 on LLC32. The best
+median is memory / LLC32 / eight threads at 0.82565735; its four ratios are
+0.81639052, 0.83244113, 0.82287026 and 0.82844445. The smallest median gain
+is BJT / LLC96 / one thread at 0.99222465, with all four ratios below one.
+All cells/trials remain retained, without filtering or source selectors.
+
+The fixed v4 decision exits zero. Its direct terminal has a truthful null
+session ID, its PID is absent and all five decision hashes are revalidated.
+Evidence: `build/owned-caller-input-frame-v1-spice-pair-decision-20261019`.
+This establishes an initial incremental win, not production/peer leadership.
+A fresh complete confirmation with opposite domain/case/starting-arm order is
+prioritized because this improvement is broader/larger than the separately
+measured `797487d` reuse correction. That older confirmation receipt remains
+frozen and unexecuted; its result is not borrowed or combined with this one.
+
+After confirmation and prerequisites, refresh the complete peer comparison
+using corrected SubtreeLU recovery `343c527`. The established four-arm/four-
+pass protocol balances baseline KLS, candidate KLS, CKTSO and SubtreeLU across
+all four positions per setting: 448 solver observations plus 14 fresh KLU
+references. Existing native recovery-object validation can support fresh
+matched plain links after its artifacts are rechecked; the immutable shared
+Xyce archive remains untouched. Broader generalization, all 56 qualified
+candidate peer wins and separate complete confirmation remain open.
