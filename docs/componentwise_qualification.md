@@ -5681,3 +5681,24 @@ original-operator certification remains enabled. This closes core correctness
 only; API closure, isolated complete238 cost, generalization and full56 peer
 wins with a separate complete confirmation remain required. No candidate
 combination or production numerical promotion follows from this result.
+
+### SIMD API closure and complete cost preparation (2026-10-19)
+
+SIMD certificate `f4d2da3` completes all28 original Xyce/API settings with
+288675 current-operator certificate calls. Actual runtime exit is zero; its
+controller and all62 runtime/build child edges/process groups close. Separate
+review repeats all28 waveform comparisons and checks unchanged steps,
+completion/failure gates, the original seven wrappers and matched plain links.
+That reviewer exits zero, is absent, and has all193 checked hashes revalidated.
+Evidence: `build/certificate-avx2-rows-api-20261019` and
+`build/certificate-avx2-rows-api-review-20261019`. These diagnostic times remain
+excluded from comparative speed evidence.
+
+All four independent candidates now have their own closed core/API reviews.
+The complete238 paired-cost packages preserve all28 original settings, four
+balanced pairs and14 fresh KLU references. Separate complete-grid reviewers
+and the existing incremental2% benefit/no-more-than2% regression decision
+script are prepared before timing. No source edits, builds or diagnostics may
+overlap those comparisons. Cost decisions, separate confirmation, broader
+validation and all56 qualified peer wins with complete confirmation remain
+outstanding. No numerical production promotion or fastest claim follows.
