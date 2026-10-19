@@ -5320,3 +5320,23 @@ work-partition candidate `01e2eea` has only its focused qualification; its
 full-core source package is prepared and queued after these comparisons.
 Production/default accuracy and numerical source are unchanged. No candidate
 is promoted and the56-peer-win plus separate-confirmation goal remains unmet.
+
+### Corrected-baseline API closure before paired timing (2026-10-19)
+
+Baseline `036aba3`, retained streams `7addc94` and SNB row tiling `4534485`
+each pass all28 original Xyce circuit/API settings, with288676,288677 and
+288679 current-operator certificate calls respectively. Separate independent
+reviews recheck all waveforms, successful/failed steps, completion and
+linear-failure gates, the seven diagnostic wrappers, and matched plain links
+whose core/output paths are the only differences. The certified componentwise
+default and original adapter/dependency bytes are retained. Runtime/build
+controllers and186 child edges/process groups close; all three reviewers then
+exit zero, are absent, and have their checked hashes revalidated. Evidence:
+`build/{baseline,lean-streams,snb-tile}-lifetime-api-review-20261019`.
+
+These instrumented correctness observations overlap only the explicitly named
+correctness cohort, and their times are excluded. The two frozen238-observation
+paired campaigns compare each separate performance candidate against the
+corrected baseline, one campaign at a time with no source edits, builds or
+diagnostics during timing. Broader generalization and fresh peer/confirmation
+gates remain required; no superiority or promotion follows from API closure.
