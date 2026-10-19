@@ -5812,3 +5812,50 @@ computation while retaining scalar per-row accumulation, unchanged current
 operator/tolerance proofs and full fallback. Snapshot object-copy correction
 `797487d` separately retains focused qualification and pending full integration.
 No combination, generalization, peer leadership or fastest claim follows.
+
+### Packed certificate enclosure with ordered scalar sums (2026-10-19)
+
+Fresh research commit `a8f6f65` retains scalar per-row product/subtract/add
+encounter order and computes four affirmative error enclosures with AVX2.
+This evaluates the bound work instead of packing uneven row streams. It reads
+current A, b and x on every call and adds no persistent metadata, allocation,
+resource budget, matrix selector or tolerance change. The range first executes
+unchanged scalar rows until the existing tolerance cache becomes ready at its
+original first-use guard. Declining packed proofs reuse the unchanged scalar
+proof and extended/replay fallback. Zero rows retain the exact-product recheck;
+unsupported CPUs/environments retain the original scalar range.
+
+All 12 focused contexts pass. Native, optimized ASan/UBSan and portable profiles
+each retain all 1740 original range comparisons, guard-page tails, exceptional
+values, x87 flags, current public epochs/corrections and worker/executor cases.
+Each additionally passes 20000 differential sum/degree boundary groups, including
+near-domain-limit degrees and explicit invalid/zero cases, with at least 2000
+affirmative and 10000 declining groups. Existing parallel/correction fixtures
+also pass in all four profiles; no-OpenMP remains scalar fallback only. Runtime
+exits zero and all 48 child edges/process groups close. Evidence:
+`build/certificate-avx2-verdict-proof-focused-20261019`.
+
+Independent review confirms unchanged scalar/detailed-bound paths, the original
+scalar proof body and fixture checks, lazy conversion, and no retained allocation.
+Native/portable target helpers have explicit scalar accumulation and packed bound
+instructions, no FMA, AVX-512, x87 arithmetic or per-entry calls; the only allowed
+calls are compiler stack-canary failures. The first reviewer rejects unclassified
+fixture warnings and is preserved with its actual exit. A fresh reviewer compares
+all warnings and their source bytes with the previously qualified unchanged
+fixture context instead of suppressing them. It exits zero, is absent, and all
+146 checked hashes are revalidated. Evidence:
+`build/certificate-avx2-verdict-proof-focused-review-20261019` and
+`build/certificate-avx2-verdict-proof-focused-review-v2-20261019`.
+
+Full 144 core qualification is running in
+`build/certificate-avx2-verdict-proof-full-runtime-20261019`. Separately,
+`797487d` is running full 141 qualification in
+`build/original-frame-reuse-object-copy-v3-full-runtime-v2-20261019`; its first
+prepared package remains unexecuted, superseded only to declare this correctness
+cohort. The numerical revision is identical. Both startup controllers are
+confirmed live; all overlapped times are excluded. The copy revision has passed
+its native suite and native/sanitizer initial guards at this checkpoint.
+Neither new revision has complete core/API, performance, generalization, peer or
+promotion qualification. The original row-sum SIMD application's cost package
+remains frozen and unexecuted, with no cost verdict. All 56 qualified peer wins
+and a separate complete confirmation remain required.
