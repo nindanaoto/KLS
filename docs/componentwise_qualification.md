@@ -6272,3 +6272,59 @@ checkpoint. All failures/timeouts remain; no retries, circuit selectors,
 source combination, budget increase or production promotion follows.
 Broader 110-matrix generalization, all 56 qualified peer wins and a separate
 complete peer confirmation remain required for the fastest claim.
+
+
+### Owned frame complete corrected-peer comparison: 33 wins, 23 gaps (2026-10-19)
+
+The fresh four-arm campaign completes all 462 original observations: 28
+settings, four cyclically balanced passes, baseline/candidate KLS, CKTSO,
+corrected SubtreeLU and 14 fresh KLU references. Every observation qualifies.
+The actual controller exits zero and all 924 child edges/process groups close.
+The separate reviewer reconstructs the exact grid and parsed steps/times,
+rechecks every waveform comparison and recomputes every ratio. Its actual
+exit is zero, PID absent and all 1419 hashes revalidate. The fixed full-grid
+decision exits zero with a truthful null session ID; PID absent and all five
+decision hashes revalidate. Evidence:
+`build/owned-caller-input-frame-v1-peer-spice-20261019`,
+`build/owned-caller-input-frame-v1-peer-spice-review-20261019` and
+`build/owned-caller-input-frame-v1-peer-spice-decision-20261019`.
+
+Candidate `2a01c77` wins 33 of 56 qualified peer cells and loses 23, with no
+unqualified cells. It remains unpromoted and the fastest goal is unachieved.
+The corrected `343c527` SubtreeLU recovery applies to both matched native
+links. Earlier scores with different peer recovery are not treated as a
+controlled before/after count. All 28 medians against corrected KLS `036aba3`
+improve again, ranging from 0.78857142 to 0.99174407. Their geometric means
+are 0.92451829 / 0.91054852 on LLC96 at threads 1 / 8 and 0.90065373 /
+0.89171149 on LLC32, consistent with the separate incremental campaigns.
+
+The largest remaining peer gaps are NEURON against SubtreeLU at eight threads
+(ratios 1.544915 / 1.542198 on LLC96 / LLC32) and BJT against SubtreeLU at
+eight threads (1.270333 / 1.291351). The one-thread CKTSO geometric means are
+1.10292008 / 1.11827123; individual losses cover BJT, MOS, memory, mux, DAC
+and NEURON. Remaining eight-thread losses also include memory and DAC.
+All cells and all four raw trial ratios remain in the decision; an aggregate
+win against one competitor does not replace the all-56 requirement.
+
+The already qualified general AVX2 four-row certificate revision `f4d2da3`
+receives its first full-238 cost measurement next. The existing 144 core
+checks, API28 and emulated fallback reviews and immutable preparation pins
+are revalidated. This tests the unmeasured row-accumulation mechanism without
+combining the owned-frame change or borrowing a result from the rejected
+`0634349` proof-range implementation. Existing numerical bounds, defaults,
+CPU/floating-point capability gates and all original cost cells remain.
+The current profile identifies meaningful certificate cost in the smaller
+solve-heavy paths, while BJT also requires work outside certificate checking;
+profile times are diagnostic, not peer performance measurements.
+
+Separately, fresh matched broad benchmark links for `036aba3` / `2a01c77`
+complete with byte-identical drivers, exact qualified cores and common baseline
+dependencies. Both links exit zero and all four build edges/process groups
+close. Separate review exits zero, PID absent and all 28 hashes revalidate.
+The full original 110-matrix, two-domain, four-pair, 100-system lifecycle
+protocol (1760 observations) and independent reviewer are pinned but remain
+unexecuted while the next general SPICE mechanism is measured. Evidence:
+`build/owned-caller-input-frame-v1-broad-build-20261019`,
+`build/owned-caller-input-frame-v1-broad-build-review-20261019` and
+`build/owned-caller-input-frame-v1-broad-campaign-20261019`.
+No generality, production or fastest claim follows from link preparation.
