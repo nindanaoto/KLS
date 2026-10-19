@@ -5639,3 +5639,26 @@ SIMD candidate remains in full144 core qualification. Keep all four independent
 until their separate whole-application cost decisions; certified accuracy,
 existing resource budgets and unrestricted pivot recovery remain unchanged.
 No production numerical promotion or fastest claim follows from these closures.
+
+### Supplemental emulated scalar fallback (2026-10-19)
+
+The unchanged portable SIMD-certificate, parallel-certificate and correction
+fixtures also pass inside Apptainer under QEMU10.2.1 with the Nehalem CPU model.
+An independent compiled capability probe confirms AVX, AVX2 and FMA are all
+absent in that same execution configuration. The SIMD fixture performs1740
+range comparisons through scalar dispatch, including guarded tails, exceptional
+values and public epochs/corrections. This supplements the native capable-CPU
+and unsupported-floating-environment tests; it does not qualify physical
+non-AVX2 hardware or supply performance evidence.
+
+QEMU is downloaded and extracted into a fresh temporary directory entirely
+inside Apptainer, with private APT state; neither host packages nor the frozen
+image are modified. Preparation and runtime controllers exit zero and their
+18 combined child edges/groups close. A separate reviewer reconstructs the
+commands, verifies the capability result and all three fixture logs, exits zero,
+is absent, and has all157 checked hashes revalidated. Evidence:
+`build/certificate-avx2-nonavx2-dependency-20261019`,
+`build/certificate-avx2-nonavx2-runtime-20261019` and
+`build/certificate-avx2-nonavx2-review-20261019`. No numerical source changes,
+full-core/API completion, production promotion or peer claims follow from this
+supplemental emulation check.
