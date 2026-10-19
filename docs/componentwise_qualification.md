@@ -6535,3 +6535,39 @@ zero-activation settings, remain in the upcoming plain-binary cost comparison.
 No caller/default, pivot-check, size, workload or CPU selector is changed.
 All instrumented timing remains excluded. Actual activation establishes
 neither an application speedup nor a solution to NEURON's separate gap.
+
+
+### Static dependency publication fails complete application-cost gate (2026-10-19)
+
+The isolated `e14c171` versus corrected `036aba3` plain-binary comparison
+completes all 238 original observations, all numerically qualified, with
+unchanged inputs. The runtime exits zero, its controller is absent and all
+476 child edges/process groups close. Separate review reconstructs the
+complete unique balanced grid, independently rechecks all 224 paired
+waveforms, and recomputes every original median. Review exits zero with
+739 hashes revalidated. The unchanged decision gate exits zero with a
+truthful null session ID, absent PID and all five hashes revalidated.
+Evidence: `build/egraph-static-cluster-dependencies-v2-spice-pair-20261019`,
+`build/egraph-static-cluster-dependencies-v2-spice-pair-review-20261019` and
+`build/egraph-static-cluster-dependencies-v2-spice-pair-decision-20261019`.
+
+The fixed gate rejects the implementation: five of 28 medians regress more
+than 2%, with only one median gain beyond 2%; 12 medians are faster at all.
+Geometric means are 1.00392099 / 0.99803952 on LLC96 at threads 1 / 8 and
+1.00512087 / 1.03131630 on LLC32. The worst median is eight-thread BJT /
+LLC32 at 1.09447064, with trial ratios 1.00447824, 1.16522405, 1.16046346
+and 1.02847782. The best median is eight-thread DAC / LLC96 at 0.97441112;
+its trials 0.97831486, 0.97050737, 1.04345169 and 0.86476900 are mixed,
+so it does not establish a stable 2.6% improvement.
+
+The scheduling proof, strict correctness and separate actual-activation
+census remain valid, but removing intermediate level joins alone does not
+produce a consistent complete-application gain. The profile timings are not
+used to explain away the plain result or infer removable synchronization
+cost. No workload/size/CPU selector, lowered floor, selective repeat, source
+combination or production promotion follows. Checked fallbacks, current-
+operator verification defaults and numerical/cache/exploration budgets are
+unchanged. Feature/test commits `2625c3d` / `e14c171` remain isolated research
+artifacts. The confirmed caller-frame `2a01c77` remains separate at 33 peer
+wins / 23 losses; broader generalization and all 56 qualified peer wins with
+independent complete confirmation are still required for a fastest claim.
