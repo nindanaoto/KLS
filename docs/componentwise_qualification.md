@@ -5662,3 +5662,22 @@ is absent, and has all157 checked hashes revalidated. Evidence:
 `build/certificate-avx2-nonavx2-review-20261019`. No numerical source changes,
 full-core/API completion, production promotion or peer claims follow from this
 supplemental emulation check.
+
+### SIMD full core closure (2026-10-19)
+
+SIMD certificate candidate `f4d2da3` completes all144 core tests: all48 tests
+in native, optimized ASan/UBSan and fully portable profiles, plus18 initial
+guards. Its runtime controller exits zero and is absent, with all30 child
+edges/process groups closed. Independent review confirms the exact focused
+composition, all47 inherited test names plus the new SIMD fixture per profile,
+flags, dependency/source pins, archives and logs. The reviewer exits zero and
+is absent; all2728 checked hashes are revalidated. Evidence:
+`build/certificate-avx2-rows-full-runtime-v2-20261019` and
+`build/certificate-avx2-rows-full-runtime-review-20261019`.
+
+The matched Xyce baseline, candidate and separately instrumented diagnostic
+links now enter their fresh full28 circuit/API campaign. Default current
+original-operator certification remains enabled. This closes core correctness
+only; API closure, isolated complete238 cost, generalization and full56 peer
+wins with a separate complete confirmation remain required. No candidate
+combination or production numerical promotion follows from this result.
