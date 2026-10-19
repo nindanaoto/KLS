@@ -5779,3 +5779,36 @@ settings and a fresh complete 238 cost campaign. No recovered application
 performance, production promotion, generalization or peer leadership is claimed.
 Typed-view and original SIMD costs remain independent and pending. All 56 peer
 wins with a separate complete confirmation remain necessary for the goal.
+
+### Typed-view complete cost rejection (2026-10-19)
+
+Typed factor views `a782778` complete all 238 isolated observations against
+corrected baseline `036aba3`, with all 28 settings, four balanced pairs and
+14 fresh KLU references retained. Every observation qualifies. Runtime exits
+zero, and all 476 child edges/process groups close. Independent review repeats
+all 224 comparison waveforms, reconstructs the complete balanced grid and
+reproduces all ratios. The reviewer exits zero, is absent, and all 732 checked
+hashes are revalidated. Evidence:
+`build/typed-lean-factor-view-v3-spice-pair-20261019`,
+`build/xyce-typed-lean-factor-view-v3-pair-campaign-20261019`, and
+`build/typed-lean-factor-view-v3-spice-pair-review-20261019`.
+
+The improvement gate passes but the regression gate fails. Best median ratio
+is 0.939247 (6.08% gain), on LLC96 eight-thread NEURON, with mixed individual
+ratios 0.878682, 1.125395, 0.861325 and 0.999812. Worst median ratio is 1.052170
+(5.22% regression), on LLC32 eight-thread RAM, with ratios 0.985194, 1.081688,
+1.022652 and 1.323128. LLC32 eight-thread MOS also regresses 2.60%, with all four
+pairs slower. Domain/thread geometric means are 0.997817, 0.995039, 1.002295 and
+1.009771 for LLC96 threads 1/8 and LLC32 threads 1/8. Aggregates and favorable
+cells do not override the complete-grid gate. The separately closed decision is
+`build/typed-lean-factor-view-v3-spice-pair-decision-20261019`. Preserve this
+rejection without case-specific disabling, selective repeats or promotion.
+
+All three initial non-SIMD implementations now have complete cost decisions
+and remain unpromoted. The original row-sum SIMD candidate retains its closed
+core/API reviews and frozen, unexecuted application-cost package; it has no
+application-cost verdict. Further general work will evaluate SIMD error-bound
+computation while retaining scalar per-row accumulation, unchanged current
+operator/tolerance proofs and full fallback. Snapshot object-copy correction
+`797487d` separately retains focused qualification and pending full integration.
+No combination, generalization, peer leadership or fastest claim follows.
