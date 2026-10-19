@@ -5369,3 +5369,34 @@ qualifications and complete negative timing result remain preserved. Decision:
 SNB `4534485` is next for its own isolated238 comparison against the same
 corrected baseline. The certified default, existing budgets and broader
 holdout/peer/confirmation gates remain unchanged. KLS is not yet fastest.
+
+### SNB row-tile complete cost rejects adoption (2026-10-19)
+
+SNB candidate `4534485` completes its separate isolated238-observation
+comparison against corrected baseline `036aba3`. All28 original cells retain
+four balanced pairs and14 fresh KLU references; all238 observations qualify.
+The runtime controller and476 child edges/process groups close before review.
+Independent review reconstructs all ratios and224 waveform rechecks, exits
+zero, is absent, and has all732 checked hashes revalidated. Evidence:
+`build/snb-tile-lifetime-spice-pair-20261019`,
+`build/xyce-snb-tile-lifetime-pair-campaign-20261019`, and
+`build/snb-tile-lifetime-spice-pair-review-20261019`.
+
+Adoption is rejected as implemented. Mux8 at eight threads on the32MB domain
+has median candidate/baseline ratio1.02691, exceeding the2% regression gate;
+all four pairs are slower (1.01575,1.04772,1.02274,1.03107). Serial BJT medians
+are0.99869 and0.99806, below0.2% improvement despite its earlier diagnostic
+SNB ancestry. The best median,0.93678 for NEURON8/32MB, combines pairs0.99524,
+0.87833,1.13519,0.87804; it is not a consistent tile-locality result. BJT8/32MB
+also has mixed pair signs. Three domain/thread geomeans are0.11--0.28% slower;
+the fourth is1.16% faster. Aggregates do not override the failed cell gate.
+Decision: `build/snb-tile-lifetime-spice-pair-decision-20261019/decision.json`.
+
+Both isolated proposals now have complete negative adoption decisions. Keep
+them separate and unpromoted, preserve all data, and introduce no circuit or
+CPU-domain exceptions. Before further kernel changes, obtain fresh structural
+and execution-owner evidence and compare actual generated code; earlier
+instrumented ancestry fractions alone do not identify removable time. The
+work-partition candidate `01e2eea` remains focused-qualified with a prepared,
+unexecuted full-core package; prioritize its next gate from this new evidence.
+Production source, certified accuracy and all budgets remain unchanged.
