@@ -5892,3 +5892,47 @@ claim. Proof variant `a8f6f65` remains in full 144 qualification. No API,
 performance, generalization, peer or promotion result follows from preparation
 or partial tests; all 56 qualified peer wins and separate complete confirmation
 remain necessary.
+
+
+### Proof and copy integration closure; range dispatch (2026-10-19)
+
+Proof revision `a8f6f65` completes all 144 core tests and 18 initial guards.
+Its separate review closes with 2730 hashes revalidated. Supplemental emulation
+runs the actual portable binaries: Haswell exercises AVX2 without AVX-512,
+including 20000 proof groups; Nehalem exercises scalar fallback. Both pass the
+three certificate fixtures and capability probes. The exact QEMU HLE/RTM
+warnings remain recorded; this provides emulated correctness evidence only.
+The independent emulation review closes with 29 hashes revalidated. Evidence:
+`build/certificate-avx2-verdict-proof-full-runtime-review-20261019` and
+`build/certificate-avx2-verdict-proof-emulated-review-20261019`.
+
+Both `797487d` and `a8f6f65` complete their full 28-case API campaigns and
+independent waveform/matched-link reviews. Certificate calls total 288675 and
+288677 respectively, with no certificate or statistics errors. Each reviewer
+exits zero, is absent, and its 193 hashes are revalidated. Instrumented and
+overlapped times remain excluded. Their fresh complete-238 cost receipts are
+frozen, but neither cost controller has executed. Evidence:
+`build/original-frame-reuse-object-copy-v3-api-review-20261019` and
+`build/certificate-avx2-verdict-proof-api-review-20261019`.
+
+Research commit `0634349` changes only the ISA target boundary: the unchanged
+four-row accumulation/proof helper is inlined into one AVX2 function per range.
+This removes the function call and frame setup per four-row group. The actual
+performance benefit is unmeasured. There is no new selector, tolerance,
+allocation, retained metadata or memory budget, and the fixture is byte-identical
+to `a8f6f65`. Scalar prefix, tails and declining-proof fallback remain intact.
+
+All 12 focused contexts pass, including native, optimized sanitizer, portable
+and serial fallback. Independent review confirms exact source composition and
+native/portable instruction boundaries: no FMA or AVX-512; the range function
+can call the legacy prefix/tail/fallback helpers, while the packed proof wrapper
+retains its pure arithmetic audit. The first review's tool result was truncated
+before its actual terminal was observed; its output and provenance limitation
+are preserved. A fresh reviewer independently exits zero, is absent and closes
+146 hashes. Evidence:
+`build/certificate-avx2-verdict-proof-range-v2-focused-20261019` and
+`build/certificate-avx2-verdict-proof-range-v2-focused-review-v2-20261019`.
+Full 144 qualification is running in a fresh source package. This is research
+implementation and focused correctness evidence, without a performance or
+production promotion result. All 56 qualified peer wins and a separate complete
+confirmation remain necessary.
