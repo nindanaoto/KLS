@@ -5400,3 +5400,34 @@ instrumented ancestry fractions alone do not identify removable time. The
 work-partition candidate `01e2eea` remains focused-qualified with a prepared,
 unexecuted full-core package; prioritize its next gate from this new evidence.
 Production source, certified accuracy and all budgets remain unchanged.
+
+### Destroy-only retained-state diagnostic (2026-10-19)
+
+The optional `bench/kls_exit_owner.c` link object wraps only external
+`kls_destroy` calls. It requests an existing statistics prefix once before
+real destruction, preserves the caller's errno and floating-point environment
+before entering the real destructor, and retains the destructor's effects.
+The fixture checks128 contexts plus an unmasked-invalid trap in each native,
+optimized ASan/UBSan and portable profile. Independent focused review passes.
+Matched-link review proves the plain control byte-identical to qualified
+baseline036aba3 and all six wrapped call sites confined to the Xyce adapter;
+no recurring numerical call or internal core destruction is wrapped.
+
+All28 original circuit configurations finish with zero child exit status,
+matching steps and waveforms. Separate review reconstructs every snapshot and
+reruns all28 waveform comparisons; all56 child edges and process groups close.
+The reviewer exits zero and its checked hashes are revalidated. Evidence:
+`build/exit-owner-census-{focused,build,circuits}-20261019` and their matching
+`-review-20261019` packages. The original circuit-controller exec session handle
+was lost in truncated tool output. Its completion file and absent PID remain,
+but its tool exit status cannot be recovered and is explicitly null in the
+review. No runtime-tool closure is fabricated and no performance or promotion
+qualification follows.
+
+Final snapshots retain mapped numerics for NEURON and several serial cases,
+EGraph for several eight-thread cases, SNB for serial BJT, and native KLU for
+the tiny MOS/mux cases. Row-executor run counters are zero in these snapshots.
+These are retained final states and cumulative counters of that diagnostic,
+not per-call time ownership. ELF layout and cleanup IO can affect adaptive
+choices. Prior instrumented call ancestry and these final states do not prove
+removable time. The default certificate and numerical library are unchanged.
