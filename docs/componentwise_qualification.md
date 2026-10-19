@@ -5859,3 +5859,36 @@ Neither new revision has complete core/API, performance, generalization, peer or
 promotion qualification. The original row-sum SIMD application's cost package
 remains frozen and unexecuted, with no cost verdict. All 56 qualified peer wins
 and a separate complete confirmation remain required.
+
+### Complete-object copy core closure and next packages (2026-10-19)
+
+Copy correction `797487d` completes all 141 core tests and 18 initial guards.
+The runtime exits zero, its controller is absent, and all 30 child edges/process
+groups close. Separate review checks the exact focused-change composition,
+all 47 inherited names in each profile, optimized sanitizer/portable flags,
+archives, source/dependency pins and logs. The reviewer exits zero and is absent;
+all 2727 checked hashes are revalidated. Evidence:
+`build/original-frame-reuse-object-copy-v3-full-runtime-v2-20261019` and
+`build/original-frame-reuse-object-copy-v3-full-runtime-review-20261019`.
+This establishes core correctness, not recovery of the rejected revision's
+application performance.
+
+New source-only API, cost and independent-review packages are prepared for both
+`797487d` and proof variant `a8f6f65`, under their
+`original-frame-reuse-object-copy-v3-*` and `certificate-avx2-verdict-proof-*`
+package names. They retain their respective full 141/144 gates, matched plain
+links, all 28 API settings and complete 238 cost grids. The existing decision
+script remains immutable; an unexecuted v2 adds only these two commit identities
+and retains the same complete-grid thresholds. Source syntax, new paths/commits
+and full-test gates are checked. None of these new API/cost controllers has run.
+
+The prepared supplemental emulation source uses actual full-core-reviewed
+portable binaries and capability probes: Haswell must expose AVX2/FMA with no
+AVX-512, while Nehalem must expose no AVX/AVX2/FMA/AVX-512 and use scalar fallback.
+Both CPU models will run all three certificate fixtures inside Apptainer with
+the previously pinned QEMU dependency. It waits for both core reviews to close
+and supplies emulated correctness only, without a physical-hardware or timing
+claim. Proof variant `a8f6f65` remains in full 144 qualification. No API,
+performance, generalization, peer or promotion result follows from preparation
+or partial tests; all 56 qualified peer wins and separate complete confirmation
+remain necessary.
