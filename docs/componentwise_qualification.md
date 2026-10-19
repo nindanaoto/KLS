@@ -6054,3 +6054,59 @@ Source inspection covers both public input formats, index types/bases,
 analysis cleanup, original-data consumers and separate cold-recovery solvers.
 This is a design finding, not implemented or performance-qualified evidence.
 All 56 qualified peer wins and a separate complete confirmation remain open.
+
+
+### Owned caller compressed-input frame implementation (2026-10-19)
+
+Independent research commit `2a01c77`, based on corrected `036aba3`, owns an
+original CSC or CSR pattern during successful public analysis. Each successful
+public numeric epoch copies the fresh caller values in their original input
+order into new snapshot storage. This removes the inverse-map gather and five
+recurring structural comparisons from the owned path. No numerical values or
+certificates are reused. Optional pattern-preparation failure retains the old
+exact-map capture, whose complete body remains byte-identical. The reserved
+private map flag and existing orientation field carry ownership/format; no new
+solver/object fields or configured memory/cache/exploration budgets are added.
+
+CSR represents CSC of the transpose. Certificates and isolated strict recovery
+therefore combine snapshot storage orientation with the requested operation;
+backend correction solves retain the original requested operation. All
+componentwise proof/reference source remains byte-identical. Preparation time
+is included in analysis accounting, and numeric publication stays transactional
+with prior-snapshot alias support and application-managed finite precommit.
+
+All six focused contexts pass: extended complete-root owner fixture and the
+unchanged conservative cache fixture in native, optimized ASan/UBSan and
+portable builds. Each owner profile runs all 288 combinations of input format,
+index width/base, backend orientation, accuracy policy, thread count and
+scaling. A nonsymmetric matrix checks normal/transpose solves, freed caller
+pattern arrays, fresh values, aliasing, strides and CSR cold recovery. Raw
+signaling-NaN/negative-zero bits, floating-point flags, optional allocation
+failures and failed-epoch publication are checked. All 12 inherited owner
+configurations and six required legacy rebuild allocation failures per
+configuration remain. The metadata assertions now distinguish unpublished
+owned structure from numerical data; forced legacy fault tests explicitly
+clear the new capability.
+
+Runtime exits zero and all 24 child edges/process groups close. The first
+reviewer's assertion assumes canonical compiler dependency paths and fails on
+GCC's `tests/../src` spelling; its actual failed exit is retained. A fresh
+reviewer canonicalizes those paths while retaining all original hash checks.
+It verifies exact source composition, unchanged legacy fixture assertions,
+absence of the baseline root archive member from the focused links, redirected
+build outputs and the unchanged qualified warning contexts. The reviewer
+exits zero and is absent; all 3547 hashes are revalidated. Evidence:
+`build/owned-caller-input-frame-v1-focused-20261019`,
+`build/owned-caller-input-frame-v1-focused-review-20261019` and
+`build/owned-caller-input-frame-v1-focused-review-v2-20261019`.
+
+Fresh full 141 core qualification with 18 guards is running. New API/cost and
+independent-review sources are prepared but unexecuted. This candidate does not
+combine the separately measured `797487d` buffer reuse. That candidate's fresh
+complete-238 confirmation sources use reversed domain order, forward original
+circuit order and opposite balanced starting phase, with the same complete
+grid and thresholds. They remain unexecuted; an initial source-only preparation
+assertion before any controller write/run is preserved separately, with a fresh
+v2 package prepared. No production or performance claim follows from the
+owned-frame focused tests. Generalization, all 56 qualified peer wins and a
+separate complete confirmation remain required.
