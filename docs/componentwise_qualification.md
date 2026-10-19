@@ -6328,3 +6328,40 @@ unexecuted while the next general SPICE mechanism is measured. Evidence:
 `build/owned-caller-input-frame-v1-broad-build-review-20261019` and
 `build/owned-caller-input-frame-v1-broad-campaign-20261019`.
 No generality, production or fastest claim follows from link preparation.
+
+
+### Four-row AVX2 accumulation fails complete cost gate (2026-10-19)
+
+Revision `f4d2da3` completes its first isolated full-238 comparison against
+corrected `036aba3`: all original 28 settings, four balanced pairs and 14
+fresh KLU references. Every observation qualifies. Runtime exits zero and
+all 476 child edges/process groups close. The separate reviewer reconstructs
+the complete grid, reruns every paired waveform check and recomputes all
+ratios. Its actual exit is zero, PID absent and all 732 hashes revalidate.
+The immutable v5 decision exits zero with a truthful null session ID; PID
+absent and all five decision hashes revalidate. Evidence:
+`build/certificate-avx2-rows-spice-pair-20261019`,
+`build/certificate-avx2-rows-spice-pair-review-20261019` and
+`build/certificate-avx2-rows-spice-pair-decision-20261019`.
+
+The original cost gate rejects the implementation. Twenty-five of 28 medians
+regress more than 2%; 26 regress at all. Geometric means are 1.40820465 /
+1.21224067 on LLC96 at threads 1 / 8 and 1.37477268 / 1.22962541 on LLC32.
+The worst median is one-thread NEURON / LLC32 at 1.73495555, with all four
+ratios between 1.73088784 and 1.74024864. The single median gain beyond 2%
+is eight-thread NEURON / LLC96 at 0.97173507; its trials are 0.96798901,
+1.11808332, 0.96811055 and 0.97535958, so it does not establish a stable
+2.8% gain. All cells/trials remain. No circuit/degree selector, selective
+repeat, source combination or production promotion rescues this result.
+
+The separate `a8f6f65` proof-vectorization revision still has no whole-cost
+verdict. Source inspection confirms that its module has replaced the failed
+four-row vector accumulation helper with scalar-ordered row accumulation
+and packed affirmative proofs. Its already closed full144/API28 reviews,
+29-hash six-context emulated review and immutable cost preparation pins are
+revalidated. It receives a first independent full-238 cost comparison next,
+with unchanged numerical bounds, defaults, budgets and complete population.
+Neither this rejection nor the earlier `0634349` proof-range rejection is
+borrowed as its result. Broader generalization and all 56 qualified peer wins
+with separate full confirmation remain required; the confirmed caller-frame
+`2a01c77` stays separate at 33 peer wins / 23 losses.
