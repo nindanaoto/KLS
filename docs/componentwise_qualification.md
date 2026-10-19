@@ -6226,3 +6226,49 @@ frozen/unexecuted while the broader initial `2a01c77` improvement receives
 priority. No source combination or production promotion follows from either
 initial pass. No builds, source edits or heavy diagnostics may overlap the
 upcoming isolated confirmation.
+
+
+### Owned caller frame independent complete confirmation passes (2026-10-19)
+
+Revision `2a01c77` completes its separate complete-238 confirmation against
+corrected baseline `036aba3`. All 28 original settings, four balanced pairs
+per setting and 14 fresh KLU references remain. Relative to the initial
+campaign, cache domains and circuit order reverse and the initial arm phase
+flips. All 238 observations qualify. The actual controller exits zero and
+all 476 child edges/process groups close. The separate reviewer reconstructs
+the unique balanced grid, rechecks all paired waveforms and recomputes every
+ratio. Its actual exit is zero, its PID is absent and all 732 hashes revalidate.
+Evidence: `build/owned-caller-input-frame-v1-confirmation-spice-pair-20261019`
+and `build/owned-caller-input-frame-v1-confirmation-spice-pair-review-20261019`.
+
+The original incremental gate passes again: all 28 medians improve, 25 by at
+least 2%, and none regresses more than 2%. Candidate/baseline geometric means
+are 0.90647261 / 0.88627535 on LLC32 at threads 1 / 8 and 0.92458405 /
+0.92654478 on LLC96. The complete median range is 0.80207304 through
+0.99263945. These are gains against corrected KLS, not peer ratios.
+The fixed v5 decision exits zero with a truthful null session ID; its PID is
+absent and all five decision hashes revalidate. Its generic status string
+still says confirmation required; it does not request an endless sequence
+of confirmations. Evidence:
+`build/owned-caller-input-frame-v1-confirmation-spice-pair-decision-20261019`.
+
+A separate two-campaign decision verifies both original gates independently,
+all 476 application observations, the identical source/executable identities
+and complete 28-cell populations, and the changed full-grid ordering. It does
+not pool favorable subsets or introduce thresholds. Its actual exit is zero,
+PID absent and all 13 decision hashes revalidate. Evidence:
+`build/owned-caller-input-frame-v1-two-campaign-decision-20261019`.
+It permits a fresh peer diagnostic; broader generalization remains pending.
+
+Fresh source and executable pins are frozen for
+`build/owned-caller-input-frame-v1-peer-spice-20261019`, its separate reviewer
+and fixed full-grid decision. This retains all 28 settings, four arms/four
+balanced passes and 14 fresh KLU references: 462 observations covering all
+56 candidate peer cells, plus 28 corrected-baseline cells. Matched plain
+binaries use the independently qualified `343c527` SubtreeLU recovery object,
+the same KLS adapter/dependencies and default componentwise certification.
+The preparation exits zero; the peer controller remains unexecuted at this
+checkpoint. All failures/timeouts remain; no retries, circuit selectors,
+source combination, budget increase or production promotion follows.
+Broader 110-matrix generalization, all 56 qualified peer wins and a separate
+complete peer confirmation remain required for the fastest claim.
