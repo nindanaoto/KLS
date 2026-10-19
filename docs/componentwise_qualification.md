@@ -5574,3 +5574,45 @@ This startup correction supplies no numerical or performance result. The two
 other independent candidates remain in full-core qualification. All production
 accuracy, memory/cache/exploration limits and the full56-peer-win plus separate
 complete confirmation requirement remain unchanged.
+
+### Snapshot and typed-view full core closure (2026-10-19)
+
+Independent candidates `f72bcb1` (snapshot storage reuse) and `a782778`
+(once-per-call typed lean factor views) each complete all141 full core tests
+and18 initial guards. Both runtime controllers exit zero, are absent, and
+all60 combined child edges/process groups close before separate reviews.
+Each reviewer checks exact focused-change composition, all47 inherited test
+names in each profile, optimized sanitizer and full portable flags, archives,
+source/dependency pins and logs. Both reviewers exit zero and are absent;
+all2725 snapshot and2724 typed-view checked hashes are revalidated. Evidence:
+`build/original-frame-reuse-full-runtime-v2-20261019`,
+`build/original-frame-reuse-v2-full-runtime-review-20261019`,
+`build/typed-lean-factor-view-full-runtime-v3-20261019` and
+`build/typed-lean-factor-view-v3-full-runtime-review-20261019`.
+Fresh independent full28 Xyce/API campaigns now qualify their actual matched
+plain/profile links. They are correctness work overlapping the named SIMD
+core build; all instrumented/overlapped times remain excluded. Candidates are
+not combined or promoted. Work partitions retain their already closed core/API
+reviews and frozen, unexecuted isolated238 receipt.
+
+Read-only policy audit `build/small-repeated-ordering-policy-audit-20261019`
+identifies a further hypothesis from the papers. The overlapping ND analysis
+has a30000-row floor and repeated-pattern cache allowance; the generic ND
+promotion additionally requires substantial fill/work density or a high-work
+lifecycle alternative. NodeNDP separator construction itself is disabled below
+its30000-row default, and this EGraph executor separately requires size5000,
+250000 work units per requested thread, plus independence/storage checks.
+These are facts about those paths, not proof that every parallel route is
+absent or that changing the gates would improve any circuit.
+
+After the current cost decisions, a general small-graph lifecycle proposal may
+compare actual private-subtree parallelism and full recurring cost with the
+incumbent, charging preprocessing and the existing exploration/memory limits.
+It must retain full pivot freedom, certify ownership from realized factor
+structure and invalidate queues after repivoting; copying restricted-subdomain
+pivoting would lose generality. No threshold is lowered to fit a circuit.
+Earlier equal-degree packed-row and forward-L-run implementations remain
+rejected, and their old operation counts do not establish current exclusive
+cost. No ordering implementation, speed result, production promotion or
+fastest claim follows from this audit. All56 qualified peer wins and a separate
+complete confirmation remain required.
