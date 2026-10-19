@@ -6487,3 +6487,51 @@ archives remain uninstrumented. Production source and compiler flags are
 unchanged. It does not establish complete-program race freedom, real-circuit
 activation or a speedup. Standard API28, separate branch activation and
 complete application-cost comparisons remain required.
+
+
+### Static dependency scheduler passes standard API28 (2026-10-19)
+
+The exact qualified `e14c171` native core is linked into matched baseline,
+candidate and seven-wrapper diagnostic Xyce executables. Plain links differ
+only in corrected `036aba3` versus candidate core and fresh output paths;
+they share the committed adapter and immutable dependency archives. All
+28 original circuit/domain/thread settings pass unchanged step, completion,
+finite-output and waveform checks. All 288680 certificate calls use the
+current-operator verdict path, with zero legacy certificate calls, certificate
+errors or solver-stat errors. Default componentwise verification stays enabled.
+Runtime exits zero and all 62 link/run child edges/process groups close.
+Independent review rechecks every waveform and matched link, exits zero and
+revalidates 196 hashes. Evidence:
+`build/egraph-static-cluster-dependencies-v2-api-20261019` and
+`build/egraph-static-cluster-dependencies-v2-api-review-20261019`.
+Instrumented timing is excluded from performance decisions. A separate
+integer-only chosen-branch census is required before attributing this
+scheduler to real workloads; public EGraph path counts alone do not prove
+entry into the new dependency-publication branch. Complete plain-binary
+cost and broader generalization remain pending.
+
+
+### Separate census confirms actual static dependency dispatch (2026-10-19)
+
+A derived profiling root adds integer counters immediately after the actual
+scheduler predicate, leaving all qualified plain archives/executables unchanged.
+The only derived-source differences are the counter include, one recording
+call and its separate implementation. All 28 original settings pass the same
+waveform, step and current-operator verdict checks. Runtime exits zero, all
+60 compile/link/run child edges/process groups close, and independent review
+reconstructs every counter and exact derived source/link composition. Review
+exits zero and all 3053 hashes revalidate. Evidence:
+`build/egraph-static-cluster-dependencies-v2-activation-20261019` and
+`build/egraph-static-cluster-dependencies-v2-activation-review-20261019`.
+
+The branch is active in eight settings: eight-thread BJT, memory, DAC and RAM
+in each cache domain. The census records 14848 active dispatches in total.
+BJT has 1145 active dispatches and 45 cluster levels in each domain. The
+corresponding memory/DAC/RAM counts are 858/165/5435 in LLC32 and
+442/184/5474 in LLC96; these adaptive instrumented choices are observations,
+not fixed plain-binary choices or removable-time estimates. MOS, mux and
+NEURON have no worker dispatches in this census. All 28 settings, including
+zero-activation settings, remain in the upcoming plain-binary cost comparison.
+No caller/default, pivot-check, size, workload or CPU selector is changed.
+All instrumented timing remains excluded. Actual activation establishes
+neither an application speedup nor a solution to NEURON's separate gap.
