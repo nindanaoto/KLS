@@ -5616,3 +5616,26 @@ rejected, and their old operation counts do not establish current exclusive
 cost. No ordering implementation, speed result, production promotion or
 fastest claim follows from this audit. All56 qualified peer wins and a separate
 complete confirmation remain required.
+
+### Snapshot and typed-view API closure (2026-10-19)
+
+Snapshot reuse `f72bcb1` and typed factor views `a782778` each complete all28
+original Xyce/API settings, with288680 and288678 current-operator certificate
+calls respectively. Both runtime controllers exit zero and are absent; all62
+runtime/build child edges and process groups close for each campaign. Separate
+reviewers repeat all28 waveform checks, check completion and unchanged steps,
+verify the original seven profiling wrappers and matched plain links, and exit
+zero. Both reviewer PIDs are absent and all193 checked hashes per review are
+revalidated. Evidence: `build/original-frame-reuse-v2-api-20261019`,
+`build/original-frame-reuse-v2-api-review-20261019`,
+`build/typed-lean-factor-view-v3-api-20261019` and
+`build/typed-lean-factor-view-v3-api-review-20261019`.
+
+These instrumented campaigns overlap named correctness work, so their times
+supply no comparative performance evidence. Fresh complete238 paired-cost
+receipts are frozen for both candidates; neither timing controller has started.
+Work partitions retain their separately qualified, frozen cost receipt. The
+SIMD candidate remains in full144 core qualification. Keep all four independent
+until their separate whole-application cost decisions; certified accuracy,
+existing resource budgets and unrestricted pivot recovery remain unchanged.
+No production numerical promotion or fastest claim follows from these closures.
