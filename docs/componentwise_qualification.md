@@ -7146,3 +7146,47 @@ include trials/repairs and do not prove completed column work, plain-binary
 choices, removable time or speedup. The original broad controller remains
 coverage-only, and all overlapping timings remain excluded. No numerical
 algorithm change or performance qualification follows from this recovery.
+
+
+### Cached frontier closure and BTF shadow panels (2026-10-20)
+
+The clean cached-frontier R2 campaign at `e2b8da5` now passes all 150 full
+checks and 18 guards across native, ASan-UBSan and portable builds. Independent
+review closes 2770 hashes; source integrity also passes after every profile.
+The scoped ThreadSanitizer campaign passes the cache fixture, 576 owner
+configurations, the original 12 snapshot cases and KLU diagnostics, with clean
+and known-race controls. Its independent review closes 2597 hashes. Dependencies
+outside those instrumented roots remain native, so this is scoped race evidence.
+
+The same candidate completes all 28 original SPICE API settings against the
+ordered baseline. Independent review closes 198 hashes and rechecks waveforms,
+step/end conditions and all 288680 certificate calls with zero certificate
+errors and zero legacy certificate calls. The plain links share the adapter
+and dependencies and differ only in the core archive and output paths. These
+completed receipts supersede the earlier pending statuses above. They do not
+rehabilitate the failed-integrity first campaign.
+
+A separate activation diagnostic is now running all 28 original settings with
+the reversible integer census. All its timings are excluded. Cache selections
+include trials and repairs and cannot establish completed work, choices in the
+plain executable, removable time or speedup.
+
+Research commit `7726623` extends frontier eligibility to the unscaled plain
+BTF kernel while shadow panels exist. Source inspection establishes that this
+kernel reads native L slots; shadow-panel writes occupy disjoint column rows,
+and the final join remains before later panel consumers. Other unsupported
+kernels retain their existing synchronization. There is no floating-point
+kernel, ownership partition, numerical policy, threshold or production-default
+change.
+
+Its native fixture retains the original tests and adds 96 frontier epochs,
+96 barrier controls, 12 checked fallbacks, 108 allocation-failure cases and
+12 pre-dispatch expiry joins. Another 192 complete panel checks verify native
+slot correspondence, disjoint coverage, zero padding, and bit-equal factors
+and panels while the active-padding flag changes between epochs. Independent
+native review closes 2587 hashes. Full validation is prepared with all 51 tests
+and seven guards in each of three profiles (153 full checks and 21 guards);
+it has not run. Parent cache sanitizer/API evidence does not qualify this
+extension. Active-work or blocked-peer cancellation and complete comparative
+cost/confirmation remain open. No implementation here is promoted to the
+production path and no fastest claim is made.
