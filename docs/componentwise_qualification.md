@@ -7674,11 +7674,87 @@ coverage of optional large dense-panel arithmetic.
 
 The independent scalar candidates are rebased onto this foundation:
 `ee33384` for short producer updates and `3666adb` for one-RHS transpose solves.
-Both pass all 51 native tests, ten native/sanitizer priority guards and ten
-scoped vendor TSan jobs with independent audits. Remaining sanitizer/portable
-and full application checks are still pending. Original v1 evidence remains
+Both subsequently pass all 51 registered tests and ten priority guards in
+native, optimized ASan/UBSan and portable builds (153/30 executions each),
+ten scoped vendor TSan jobs, and all 28 application API settings. Runtime,
+review and process-session closure are complete. Original v1 evidence remains
 preserved as ancestor evidence; no timing or adoption result is inherited.
 Future matched application links retain identical numerical core objects,
 with only an audited build-identifier difference in the tuning module and
 the single intended KLU optimization object. Default componentwise checks,
 waveform tolerances and the full 28-setting performance gate remain unchanged.
+
+
+### KLU scalar whole-application performance decisions (2026-10-20)
+
+Both independent candidates complete the full original protocol: 28 settings,
+four balanced pairs per setting and 14 fresh KLU references, or 238 observations
+each. All 476 observations qualify numerically with the original waveform and
+step checks. Default componentwise verification, accuracy bounds and 1800-second
+child limits are unchanged. Each campaign closes its 476 child edges and process
+sessions before its independent waveform/pair audit and fixed acceptance decision.
+No compilation, correctness campaign or source edit overlaps these timings.
+
+The common numerical core is corrected `a67c32d`, with job-owned controls and
+KLU-aware tuning invalidation from foundation `fdd0967`. Matched plain links
+retain identical numerical core and other dependency objects. The candidate
+changes one intended KLU object; its tuning module differs only in its 64-byte
+build identifier. Both baseline executables are byte-identical to the qualified
+foundation control. This research baseline is distinct from main's numerical
+implementation; no main numerical integration is implied.
+
+The acceptance policy and decision/workflow sources are hashed before timing:
+all 238 observations must qualify, every setting's median candidate/control
+ratio must be at most 1.02, and at least one of the predefined eight KLU-dependent
+settings must reach 0.98. Those eight include MOS13 LLC96 at eight threads,
+which was not a losing setting in the earlier classification. Initial failure
+precludes confirmation, composition, peer evaluation and production promotion.
+
+| Candidate | Median linear-time changes across the eight KLU targets | Worst setting | Decision |
+| --- | --- | --- | --- |
+| Short producer, `ee33384` | -0.62% to +2.23% | MOS13 LLC96, 8 threads: +2.23% | Reject |
+| One-RHS transpose, `3666adb` | -1.14% to +0.97% | DAC LLC32, 8 threads: +3.77% | Reject |
+
+Negative percentages mean less linear-solution time. Neither candidate reaches
+a 2% improvement in a KLU-dependent setting; each also violates the 2%
+regression limit. These are four-pair medians, not a claim of universal slowdown
+or a causal explanation. Both source commits remain available on separate
+research branches. No confirmation retry, case exclusion, workload selector,
+composition or production promotion follows the rejected gates. No fastest
+claim is established.
+
+All 56 cost cells are joined to the separately qualified API path counters;
+26 have median ratios above one, and two exceed 1.02. Classifying those losing
+cells by their dominant observed public refactor path gives:
+
+| Dominant refactor path | Short producer losses | Transpose losses |
+| --- | --- | --- |
+| KLU | 7 | 1 |
+| MAPPED | 5 | 8 |
+| EGRAPH | 2 | 1 |
+| SNB | 1 | 1 |
+| Total | 15 | 11 |
+
+The gated losses are:
+
+* Short producer / MOS13 LLC96 at eight threads: both API arms observe 30479
+  KLU and eight MAPPED public refactors (99.97% KLU). This is KLU-dominated.
+* Transpose / DAC LLC32 at eight threads: the baseline API arm observes 175
+  EGRAPH and 339 MAPPED public refactors; the candidate observes 180 and 334.
+  Both record zero KLU refactor calls and 519 KLU transpose calls. This mixes
+  EGRAPH/MAPPED refactors with KLU solves, illustrating that a public refactor
+  label alone does not describe all KLU work.
+
+These counters include probes and describe separate diagnostic executions;
+they do not identify exact plain-run path choices or establish causation.
+Profile timings are excluded from acceptance. The full losing-cell table and
+both arms' path counters are preserved in
+`build/klu-kernel-cost-path-analysis-v1-20261020/{report.json,losing-cells.csv}`;
+post-terminal closure rechecks 18588 input hashes. Independently audited cost
+decisions are in `build/klu-short-producer-v2-spice-pair-decision-20261020`
+and `build/klu-single-rhs-transpose-v2-spice-pair-decision-20261020`.
+The scalar length/count census and removal of call boundaries are insufficient
+to produce a qualifying improvement in these experiments. A subsequent general
+kernel design needs a new frozen qualification and performance protocol;
+the current results do not justify case-specific exceptions or verification
+reductions.
