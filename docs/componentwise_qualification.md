@@ -7190,3 +7190,23 @@ it has not run. Parent cache sanitizer/API evidence does not qualify this
 extension. Active-work or blocked-peer cancellation and complete comparative
 cost/confirmation remain open. No implementation here is promoted to the
 production path and no fastest claim is made.
+
+
+The exact cache activation campaign subsequently completes all 28 settings.
+Actual controller, build and all 60 child edges/groups are closed, and the
+independent reviewer closes 3143 hashes. It reconstructs all counters and
+rechecks every waveform and certificate gate. Eight instrumented settings
+select the cache and twenty select it zero times. For example, the two
+8-thread BJT settings record 10 and 1138 selections respectively from 1145
+calls each, with 9 and 1137 positive hits. These adaptive decisions belong to
+the instrumented runs; they do not establish plain-executable decisions or
+performance and cannot justify a circuit or CPU selector. All observations,
+including zero activation, are retained.
+
+With this review closed, the separate BTF-shadow full campaign is now running
+all 153 full checks and 21 guards. Its prepared follow-on scoped TSan adds the
+active-panel fixture to the original numeric, owner and diagnostics roots;
+its API campaign retains all 28 settings against the corrected baseline.
+Both require actual closure and independent review of their exact source
+prerequisites. No comparative run or preparation begins while coverage or
+correctness controllers and their required reviews remain open.
