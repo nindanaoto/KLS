@@ -6794,3 +6794,27 @@ The independent API review, complete paired cost and different-order
 confirmation, peer comparison/confirmation and broader qualification remain
 pending. Neither numerical success nor instrumented durations establish a
 speedup or permit production promotion.
+
+### Reuse full circuit/API closure on the corrected baseline (2026-10-20)
+
+Value-storage reuse `44850b5` completes all 28 original Xyce settings. Every
+waveform, successful/failed step count and simulation-end gate qualifies;
+all certificate calls use the verdict path with zero legacy, certificate-error
+and stats-error counts. The actual runtime exits zero and all 62 link/run
+edges and process groups close. Independent review exits zero, rechecks all
+28 waveforms, the seven diagnostic wrappers, matched plain links, exact
+candidate archive and the common `a67c32d` baseline archive, and closes 197
+artifact hashes. Evidence:
+`build/owned-values-reuse-ordered-v3-api-20261020` and
+`build/owned-values-reuse-ordered-v3-api-review-20261020`.
+
+The explicit overlap with the identified short-L compiler/validation job is
+retained in the hashed policy, and every API/overlapping timing is excluded.
+These results complete reuse's full-core and circuit correctness gates;
+they do not demonstrate a speedup. Complete matched plain cost and independent
+different-order confirmation are prepared but unexecuted, and wait for every
+coverage/correctness controller and process group to close. Their original
+all-28-cell thresholds, budgets, waveform checks and failure retention remain
+unchanged. Peer superiority, broader qualification and production adoption
+remain unproven. Short-L has separately passed its 47 native and 47 sanitizer
+tests plus all 18 guards; its final 47 portable tests are still in progress.
