@@ -6847,3 +6847,39 @@ No public field, default, numerical/cache/exploration budget or workload
 selector changes. Neither full-core correctness nor future diagnostic
 activation substitutes for complete plain cost, confirmation, broader and
 peer evidence; no speedup, production promotion or fastest claim follows.
+
+### Short-L full circuit closure and exact-kernel census (2026-10-20)
+
+Candidate `2c16372` completes all 28 original circuit/API settings. Its actual
+runtime exits zero and all 62 link/run edges/groups close. Independent review
+rechecks every waveform/step/end gate, current-operator verdict accounting,
+matched plain archives and seven diagnostic wrappers; its actual reviewer
+exits zero and closes 196 hashes. Evidence:
+`build/mapped-short-l-scatter-ordered-v2-api-20261020` and its
+`-api-review-20261020` package.
+
+The separate derived-root exact-kernel census also completes all 28 settings
+with the original waveform and certificate checks. Its runtime exits zero,
+all 60 compile/link/run edges/groups close, and independent review closes
+10996 hashes, including byte-exact source restoration, exact links and all
+224 context rows. Evidence:
+`build/mapped-short-l-scatter-ordered-v2-activation-v2-20261020` and
+`build/mapped-short-l-scatter-ordered-v2-activation-v2-review-20261020`.
+
+Only the four NEURON settings call the modified kernel in these instrumented
+processes: 30871 completed calls and 123514871 length-one scatter updates;
+length-two/long update counts are zero. The other 24 settings record zero
+calls. This distinguishes the exact kernel from the broader mapped-path
+statistic. Trial/failure/repair calls may be included; instrumentation can
+change adaptive choices. No plain-binary choice, removable time or speedup
+is inferred. The standalone compact fixture still covers active lengths
+one, two and long without changing its strict residual/solution checks.
+
+Separate complete 238-observation cost and different-order confirmation
+sources are now prepared for both optimizations against the same ordered
+baseline. Every original 28-cell setting is retained, including all 24
+settings without observed kernel calls. The fixed qualification/regression
+and meaningful-gain gates remain unchanged. No comparative run starts while
+the original broad coverage controller or any correctness job/group remains
+live. Both optimizations are correctness-qualified research candidates;
+performance, broader qualification and peer leadership remain unproven.
