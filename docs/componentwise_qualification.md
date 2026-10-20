@@ -7376,3 +7376,47 @@ freescale2 singular setup failures. All 80 failed groups through triage batch18
 are closed and retained. These old arms do not qualify corrected `a67c32d` or
 the new candidate, and no speed aggregate is inferred from the unqualified
 corpus. No production promotion or fastest claim is made.
+
+
+### Final activation/coverage closure and first cost preparation (2026-10-20)
+
+The exact reader census completes all 28 original settings; runtime/controller,
+build and all 60 child edges/groups close. Independent review closes 3316
+hashes. Eight instrumented settings select the cache and twenty select it zero
+times. Selections total 2276 single-block plain, eight single-block padding-active
+and 7495 BTF-native modes. These include trials/repairs; a selected padding-active
+mode does not establish actual padded arithmetic or decisions in plain binaries.
+No setting is removed from the cost protocol.
+
+The original 110-matrix coverage controller also finishes all 1760 observations.
+Its final session check finds 16 orphan Squashfuse helpers from Hamrle3 timeouts,
+which had escaped the original launcher process groups. Their recorded sessions,
+UIDs, image FDs and process identities are checked before cleanup. All broad
+PID/PGID/SIDs then close. An earlier review startup with a missing closure
+receipt is preserved; the unchanged frozen reviewer subsequently passes and
+closes 3643 hashes. A separate coverage-only interpretation closes 3652 hashes:
+1680 observations meet the original residual gate, 80 failures remain across
+five families, with 40 shared failed pairs and no old-arm coverage asymmetry.
+Every timing, including passing rows, is excluded. This old experiment does
+not qualify corrected `a67c32d` or the new `9b8bcfc` source.
+
+Cleanup also closes 19 additional same-image orphan helpers tied to completed
+terminal records. Unmatched background helpers remain untouched. Commit
+`5528fd6` prevents this gap in new campaign sessions: after the numerical child
+is reaped, validate all remaining processes before signalling any; only same-UID
+Squashfuse helpers holding the requested image may receive SIGTERM through
+pidfds. Unknown processes, another image and unrelated sessions are protected.
+Five actual Linux process tests pass, including a helper with a different
+process group. Numerical deadlines and result statuses remain unchanged.
+
+Actual global guards now confirm no live known validation controller or
+numeric/compiler job. The new candidate's first plain full-cost protocol is
+prepared and its receipt freezes all qualified inputs and both executables:
+`build/frontier-single-padded-reader-v1-spice-pair-20261020`. It retains all 238
+observations, 28 settings, four balanced pairs and 14 fresh KLU references,
+with the original 1800-second numerical limit and waveform/step/end checks.
+All setup, calibration and componentwise verification remain in the reviewed
+public timing boundary. Each child session must close before the next run.
+The separate different-order confirmation remains gated on the complete initial
+review and the original fixed all-238/all-28 cost decision. No performance
+result, source promotion or fastest claim follows from preparation.
