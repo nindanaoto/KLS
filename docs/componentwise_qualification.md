@@ -7028,3 +7028,30 @@ and exact resource admission must be established before performance readiness.
 The original broad coverage and all overlapping correctness timings remain
 excluded. These results support numerical research qualification, not a speedup,
 production adoption or fastest claim.
+
+Original full-28 SPICE API correctness for `d50e879` now completes and passes
+independent review. Both matched plain links use the same adapter and shared
+dependencies, with ordered `a67c32d` as baseline and the compiled experimental
+core as candidate. All original waveform tolerances, 14 KLU references, step/end
+and certificate checks remain. Actual runtime/controller/all 62 child
+edges/groups close, followed by independent reviewer closure of 198 hashes:
+`build/egraph-worker-level-frontier-numeric-v5-api-20261020` and its reviewer.
+This supersedes the pending API status above; timings remain excluded.
+
+The `a4510a5` fault fixture now also passes portable execution and independent
+review, closing 2582 hashes. All three profiles retain the original 192
+frontier/192 barrier-control/24 checked settings plus 216 metadata allocation
+failures, 24 complete cleanup controls and 24 pre-dispatch expired joins per
+profile. Evidence is in
+`build/egraph-worker-level-frontier-numeric-v6-faults-portable-20261020` and its
+reviewer, supplementing the native and optimized ASan-UBSan fault packages.
+Cancellation during active arithmetic or a blocked peer wait remains unproved.
+
+Only the original broad coverage controller remains live. Dependency metadata
+reuse, exact frontier activation in application runs and complete comparative
+cost/confirmation remain outstanding. In particular, a one-level prefix still
+needs its final join, so removing intermediate level joins cannot help that
+structural case. Any future performance-ready admission must account for that
+without case/CPU identity rules. No cache has yet been implemented or admitted,
+no separately unproven gains are combined, and no production/fastest claim is
+made from these correctness results.
