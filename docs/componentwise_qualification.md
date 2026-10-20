@@ -7600,3 +7600,44 @@ in `build/klu-dependent-phase-measurement-r2-20261020`. The qualified narrow
 review is `build/klu-dependent-direct-phase-review-r3-20261020/review.json`;
 per-setting phase budgets, raw pair deltas and surrounding-time measurements
 are in `build/klu-dependent-direct-phase-analysis-r3-20261020/report.json`.
+
+
+### KLU kernel implementation and exact census (2026-10-20)
+
+The accepted plan retains KLU dispatch, storage, pivot recovery and default
+componentwise verification. Independent research candidates start from corrected
+`a67c32d`: `5d980b6` specializes real producer updates of lengths zero/one/two,
+and `7935213` specializes serial real one-RHS transpose solves. The original
+long-column loop, complex/multiple-RHS paths and OpenMP transpose path remain
+available. No new allocation, numeric cache, workload selector or budget is added.
+
+Tool `245ef68` creates reversible integer-only KLU census sources. Archive
+review verifies that only the refactor and transpose diagnostic objects change.
+All 28 original settings pass waveform/step/certificate checks; runtime and
+all 56 child edges/groups/sessions close. Independent review closes 1115 hashes
+in `build/klu-path-census-v1-review-20261020`. All diagnostic timings are excluded.
+In the LLC96 one-thread diagnostic, mux8 records 454536 length-one, 4747376
+length-two and 2802972 longer producer updates. MOS13 records 1523819 length-one
+and 12190507 length-two updates, with no longer producer. Both record only
+one-RHS transpose solves, with one nonsingleton block per solve and many
+singleton blocks. These counts include trials/failures and do not identify
+plain-run choices or removable time.
+
+Frozen-reference fixtures (`035bfaf`, corrected/extended in `787bcc8`) compare
+factor/solve bits, FP exception flags, statuses, scaling, singular updates,
+normal/transpose RHS counts zero through five, padding, dense-tail controls
+and concurrent owners. An initial truth failure also occurs in the unchanged
+reference: independently permuted rows/columns permit small preferred pivots.
+Fresh symmetric nonidentity permutations retain the strict `1e-12` truth
+criterion and all bit/FP assertions. Original failed attempts remain preserved.
+Both index widths now pass native, optimized ASan/UBSan and portable profiles:
+194 cases, 772 changing-value epochs and 9264 solves per context. A reviewer
+case-count arithmetic error is preserved; fresh review checks the declared
+194 contexts and closes 2628 hashes.
+
+Both independent candidates subsequently pass the same six focused contexts,
+with actual session closure and independent reviews of 2632 and 2633 hashes.
+Full A validation is running all 49 registered tests plus eight initial guards
+in each of three profiles (147/24). Full B and scoped TSan packages are prepared
+but remain gated. No API/cost/confirmation/peer result or production promotion
+is established by these focused tests. Main numerical defaults are unchanged.
