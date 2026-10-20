@@ -6883,3 +6883,39 @@ and meaningful-gain gates remain unchanged. No comparative run starts while
 the original broad coverage controller or any correctness job/group remains
 live. Both optimizations are correctness-qualified research candidates;
 performance, broader qualification and peer leadership remain unproven.
+
+### Worker-level frontier prerequisite model (2026-10-20)
+
+Separate research commit `7dc9eb7`, based directly on ordered baseline
+`a67c32d`, adds an allocation-free topology planner and two standalone tests.
+It reconstructs exact worker ownership from contiguous level partitions or
+the existing strided fallback, and compresses cross-worker dependencies into
+one maximum required producer level per peer/group. Same-worker dependencies
+must precede their consumer in its unchanged order; unsupported group edges
+are rejected. A counting pass supports exact storage admission before build.
+No numerical dispatcher includes or calls this component yet.
+
+Six signed/unsigned-index native, optimized ASan-UBSan and portable model
+contexts pass. Each checks 702 graph/partition contexts, 793932 completed
+schedules and 22 malformed/overflow/capacity rejections. The oracle reads
+actual partition ownership independently, rejects unfinished producer reads
+and deadlock, and compares with serial integer dependency recurrence.
+Exhaustive small-graph interleavings are supplemented by bounded schedules
+with four/eight-thread and idle-owner cases. All 47 original test registrations
+remain, with two model targets added; only those two targets/profile are
+built/run, and no KLS archive is built. The actual model controller exits zero,
+all 18 child edges/groups close, and independent review closes 2607 hashes:
+`build/egraph-worker-level-frontier-plan-v1-20261020` and its review package.
+
+This is a prerequisite proof, not numerical or performance qualification.
+Real producer/read-set binding, padded/shadow writes, BTF indices, deferred
+and dense-tail skips, cache invalidation/resource accounting, cancellation,
+release/acquire publication and phase joins remain integration obligations.
+Source audit also confirms that rejected `e14c171` uses existing per-column
+tokens and that its dependency-wait argument can change the BTF kernel route
+when padding is active; its regressions cannot be assigned solely to bitmap
+polling. A coarse frontier must preserve the actual numerical kernel/order
+and supply its own proven publication boundary. Source evidence is in
+`build/egraph-worker-level-frontier-dispatch-audit-v2-20261020`.
+No production mode, accuracy default, bound or numerical/cache/exploration
+budget changes, and no speedup or fastest claim follows from this model.
