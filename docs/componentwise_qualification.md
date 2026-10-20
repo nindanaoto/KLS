@@ -7520,3 +7520,83 @@ Reproducible joined records and checked inputs are retained in
 (4052 checked hashes). The first classification attempt's identity-field
 comparison error is retained in its original package; R2 matches identity
 keys separately and compares the complete counter dictionaries.
+
+
+### Matched measurement of the seven KLU-dominated losses (2026-10-20)
+
+Diagnostic wrapper commit `0cb7ff1` measures the real long-index KLU refactor,
+factor, solve and transpose-solve calls in each public API context. Both arms
+use the identical wrapper object, unchanged qualified numerical archives
+(`a67c32d` and `9b8bcfc`), the same adapter and shared dependencies. Compilation
+and relinking use the pinned Apptainer image. Thread-local context and atomic
+KLU totals distinguish owner-thread calls from worker calls without inherited
+context; unowned worker times are never subtracted from owner wall time.
+
+The scope is exactly the seven settings previously classified KLU-dominated:
+four mux8 settings and three invert50_mos1 settings. Four balanced pairs per
+setting produce 56 complete numerical runs, with no numerical reruns. Every
+run passes the original waveform tolerance (`1e-8`/`1e-10`), step counts,
+completion and componentwise-verification checks. Actual controller/all 112
+child edges and process groups/sessions close with unchanged inputs. mux8
+has order 170 and 906 input entries; invert50_mos1 has order 255 and 1359.
+These are seven settings of two circuits, not seven independent circuits.
+
+The first static relink fails because the wrapper follows the SuiteSparse
+archive. Its artifacts remain unqualified. Fresh R2 puts the identical wrapper
+before the archives; independent build review closes 755 hashes and confirms
+matched links and a real KLU call from the refactor wrapper.
+
+The original measurement controller's disjoint-phase assertion also fails:
+subtracting both the reported solve statistic and certificate time produces
+negative residuals. All original budget flags and its failed terminal receipt
+remain unchanged. This establishes that the reported statistic cannot be used
+as the assumed disjoint phase; it does not by itself identify the overlap's
+cause. The original prepared reviewer/analysis are held unexecuted.
+
+Fresh R3 independently rechecks all 56 waveforms, ordering, counts, sessions
+and direct timers, closing 1116 hashes. It reconstructs a narrower budget from
+immutable logs: combined public-call time minus direct owner-context KLU
+refactor/factor/solve/transpose-solve time and direct certificate time. KLU
+calls inside a certificate have a separate context and are not subtracted
+twice. The solve statistic remains informational and is excluded from budget
+arithmetic. Residual work includes native non-KLU solves, preparation,
+publication, recovery, uninstrumented trials and instrumentation overhead.
+The original failed accounting is not relabeled as successful.
+
+The table gives medians across the four observations per arm. KLU refactor
+milliseconds are direct measurements inside combined refactor-and-solve calls;
+linear milliseconds are Xyce's final total linear-solution time. The final
+column includes combined-call KLU refactor and solve time, divided by that
+reported linear time, calculated per observation before taking the median.
+
+| Circuit | Domain | Threads | Linear ms baseline / candidate | KLU refactor ms baseline / candidate | KLU refactor+solve % of linear, baseline / candidate |
+| --- | --- | ---: | ---: | ---: | ---: |
+| mux8 | llc96 | 1 | 98.50 / 101.15 | 38.88 / 40.33 | 55.4 / 55.7 |
+| invert50_mos1 | llc96 | 1 | 176.56 / 179.05 | 62.15 / 64.19 | 57.2 / 57.0 |
+| mux8 | llc96 | 8 | 99.36 / 99.67 | 38.75 / 39.51 | 54.5 / 54.9 |
+| mux8 | llc32 | 1 | 93.61 / 95.21 | 37.13 / 37.99 | 55.4 / 55.8 |
+| invert50_mos1 | llc32 | 1 | 170.09 / 170.10 | 60.67 / 60.63 | 57.0 / 57.3 |
+| mux8 | llc32 | 8 | 96.08 / 95.60 | 38.20 / 38.47 | 55.3 / 55.4 |
+| invert50_mos1 | llc32 | 8 | 169.97 / 171.07 | 59.12 / 59.55 | 56.3 / 56.3 |
+
+Across both arms and all settings, direct KLU refactorization occupies about
+39--44% of combined public refactor-and-solve time, KLU solves 17--24%, and
+componentwise certificates 24--25%; other work occupies roughly 12--16%.
+Combined-call KLU refactor plus solve occupies about 54--57% of reported total
+linear time; refactor alone occupies about 35--40%. Thus KLU is a substantial
+optimization target, alongside verification and surrounding work. These
+fractions describe the instrumented runs, including timer/atomic overhead.
+Per-phase medians need not sum exactly because medians are nonlinear.
+
+Both arms use the same KLU archive, and the diagnostic measurements do not
+establish that every original loss is caused by KLU. Some original small
+regressions do not reproduce at the same magnitude under instrumentation.
+Adaptive choices, placement, locality and run variability are not disentangled
+here. No significance claim, changed production defaults, accuracy relaxation,
+performance-gate retry, peer comparison or fastest claim follows.
+
+The source, original failures, child/session logs and all observations remain
+in `build/klu-dependent-phase-measurement-r2-20261020`. The qualified narrow
+review is `build/klu-dependent-direct-phase-review-r3-20261020/review.json`;
+per-setting phase budgets, raw pair deltas and surrounding-time measurements
+are in `build/klu-dependent-direct-phase-analysis-r3-20261020/report.json`.
