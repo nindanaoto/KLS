@@ -7299,3 +7299,43 @@ registration, tolerance and stage bound. Its exact-source scoped TSan, API28
 and reader-aware activation28 remain gated on preceding actual runtime,
 process-group, independent-review and hash closure. The original broad
 coverage run continues; every overlapping timing remains excluded.
+
+
+### Derived in-flight stop and recovery fixture (2026-10-20)
+
+Tool commit `984073c` generates a derived private fixture for the exact
+`9b8bcfc` source. The only scheduler observation is inserted inside an already
+unmet frontier peer wait; deleting it restores the entire original module
+byte for byte. No production source changes. Existing padded-read observation
+allows INVALID injection after producer progress has been published. A second
+mode holds a producer until a real cross-worker wait observes its unpublished
+next rank, then records INVALID and releases the producer.
+
+The first native executable exits zero, but its controller fails the dependency
+membership check because GCC spells includes as `tests/../src/...`. An audit
+confirms every resolved file was already a hashed canonical input before
+compilation and all bytes remain unchanged. The failed controller and all six
+child edges/groups close; its logs/receipt remain unqualified. A fresh R2
+package canonicalizes both declared inputs and observed dependencies with
+strict path resolution, retaining all sources, assertions and bounds.
+
+Fresh native R2 and independent review close successfully, including all six
+child edges/groups and 2639 hashes. Across the 12 crew/index/partition settings,
+it verifies 12 active padded-read stops and 12 actual unmet-peer stops. The
+stopped producer never publishes the interrupted group, all workers finish
+before the borrowed job is cleared, and the pool retains its cached plan.
+Another 24 checks clear dirty scratch through the existing preparation path,
+reuse that same pool/cache, and obtain bit-equal barrier-control factors and
+normal/transpose truth within `1e-12`. The original 96/96 epochs, 12 checked
+fallbacks, metadata/expiry fixtures and 53760 reads per arm remain intact.
+
+This covers native INVALID propagation in the derived single-block padded
+prefix. It does not establish generic cancellation, real in-flight deadline
+expiry, pivot rejection, sanitizer/portable behavior, API integration or speed.
+The pending exact-source scoped TSan campaign now retains all 17 earlier jobs
+and adds this derived root: 20 jobs and 40 child edges, with the same fresh
+clean/race controls and original bounds. It requires full `9b8bcfc` review and
+the native R2 stop review; its own generated Scotch header is hashed before
+compilation and its canonical dependency closure is checked independently.
+API and activation campaigns require the resulting scoped stop-check flag.
+All overlapping timings remain excluded.
