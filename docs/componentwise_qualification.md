@@ -7210,3 +7210,42 @@ its API campaign retains all 28 settings against the corrected baseline.
 Both require actual closure and independent review of their exact source
 prerequisites. No comparative run or preparation begins while coverage or
 correctness controllers and their required reviews remain open.
+
+
+### Exact single-block padded reader (2026-10-20)
+
+Research commit `9b8bcfc` extends the experimental frontier to single-block
+unscaled padded consumption. The consumer reads exactly the contiguous U
+producer rows selected by the existing padded-batch predicate. Union-row
+coordinates name destinations in its private workspace, rather than additional
+producer panels. Narrow U indices are checked elementwise copies of the wide
+indices. The planner now chooses the compressed single-block U length by
+kernel, independently of the plain-only dispatch flag.
+
+Admission retains the previous single-block capability conditions apart from
+active padding: supernode metadata exists, pair choice is negative, and no
+pair or stream trial is pending. Checked, private, scaled, dense and deferred
+surfaces retain their original synchronization. The arithmetic, worker
+partition, panel construction budgets and production defaults are unchanged.
+Only a compile-time private observation hook is added around padded reads;
+removing that hook restores the parent's numerical/worker source byte for byte.
+
+The new native fixture supplies valid empty strict-batch suffix metadata to
+force actual padded consumption before scalar fallback. It records 53760
+padded reads in each frontier and barrier arm, 96 changing-value epochs,
+12 checked fallbacks, 108 allocation failures, 12 pre-dispatch expiry joins
+and 192 complete panel checks. Factors and panels match the barrier controls
+bit for bit, and normal/transpose truth checks retain tolerance `1e-12`.
+The original numeric and BTF-shadow fixtures also pass unchanged. Actual
+controller and all 18 child edges/groups close; independent review closes
+2593 hashes in `build/frontier-single-padded-reader-v1-native-review-20261020`.
+
+This is native evidence only. Full validation is prepared with 52 tests and
+eight guards across native, ASan-UBSan and portable builds (156/24), followed
+by exact-source scoped TSan and all 28 API settings. It waits for the running
+BTF predecessor's full campaign and independent review to close. The
+predecessor's unexecuted scoped TSan/API packages are held while this broader
+candidate qualifies; no intermediate evidence is inferred. Active-work
+cancellation, exact application activation, complete comparative cost,
+independent confirmation and peer superiority remain unproved. All overlapping
+timings are excluded. No circuit or CPU selector is added.
