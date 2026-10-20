@@ -6765,3 +6765,32 @@ ratio, do not establish a regression specific to an optimization, and do not
 qualify the new ordered baseline on those matrices. No failure or trial is
 excluded and no limit or tolerance is changed. Broader qualification and
 serialized complete cost/peer evidence remain necessary for the full goal.
+
+### Reuse on the ordered baseline: full-core closure (2026-10-20)
+
+The separately rebased value-storage reuse candidate `44850b5` passes all 141
+full tests and all 18 guards across native, optimized ASan-UBSan and portable
+profiles. Its actual runtime exits zero; all 30 child edges and process groups
+close. Independent review checks archived sources/dependencies, the exact
+helper-only production change from `a67c32d`, all inherited test names and
+strict assertions, the 576 caller-frame configurations, original 12 ownership
+configurations and 216 raw-bit/rounding epochs in each owner profile. The
+reviewer exits zero and closes 10758 hashes. Evidence:
+`build/owned-values-reuse-ordered-v3-full-runtime-r2-20261020` and
+`build/owned-values-reuse-ordered-v3-full-runtime-r2-review-20261020`.
+The ancestor's root-plus-KLU-diagnostics TSan control retains its stated scope;
+this result does not claim whole-program race freedom.
+
+The full 28-setting reuse API/waveform check is now running, with the same
+ordered `a67c32d` baseline in the matched plain link. An explicit fresh untimed
+overlap decision allows only the original broad coverage controller and the
+identified frozen short-L full-core controller; the latter may share API CPU
+and cache resources. Every API/overlapping timing remains excluded. All
+original settings, verification/step/end gates, numerical budgets and time
+limits remain unchanged; failures must be retained and resource evidence
+inspected before attribution. Policy:
+`build/reuse-API-overlap-with-shortL-correctness-v3-20261020/decision.json`.
+The independent API review, complete paired cost and different-order
+confirmation, peer comparison/confirmation and broader qualification remain
+pending. Neither numerical success nor instrumented durations establish a
+speedup or permit production promotion.
