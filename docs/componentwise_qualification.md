@@ -6919,3 +6919,54 @@ and supply its own proven publication boundary. Source evidence is in
 `build/egraph-worker-level-frontier-dispatch-audit-v2-20261020`.
 No production mode, accuracy default, bound or numerical/cache/exploration
 budget changes, and no speedup or fastest claim follows from this model.
+
+### Transient numerical frontier experiment (2026-10-20)
+
+Research commits `8ca3568` and `82ca694` bind the planner to immutable U-row
+views and integrate an opt-in numerical dispatcher. The final fixture revision
+is `d50e879`; production sources are not promoted. The row reader follows the
+selected plain kernel's actual narrow/wide preference, compressed single-block
+lengths and BTF-local offsets. Worker-level acquire waits keep the original
+wait-zero column kernels and arithmetic order. Independent cache-line-separated
+release ranks publish complete groups; the existing final leader barrier joins
+workers before claimed multi-column work. Checked, active padded, private
+separator, dense-tail and deferred-terminal modes retain original execution.
+Neither barrier arrivals nor the possibly premarked column bitmap serves as
+frontier readiness. The caller frees each transient plan after pool completion.
+
+One native private-root diagnostic and its independent review close successfully:
+192 admitted frontier epochs, 192 original-barrier control epochs, 24 checked
+fallbacks and 2688 cross-worker requirements. Every L/U value and pivot matches
+its barrier control byte for byte. Changing coefficient epochs, crews 2/4/8,
+single/BTF factors, wide/narrow indices, contiguous/strided partitions, reused
+and recreated pools, and normal/transpose truth checks at `1e-12` pass. Review
+closes 2577 hashes. Evidence is in
+`build/egraph-worker-level-frontier-numeric-v5-diagnostic-20261020` and
+`build/egraph-worker-level-frontier-numeric-v5-native-review-r2-20261020`.
+
+Earlier failed fixtures and diagnostics remain immutable. The first did not
+supply the tiny fixture's strict-supernode metadata; another bypassed the public
+numeric wrapper's reciprocal-cache refresh. The latter produced byte-equal
+barrier/frontier factors but failed the strict solve check. The final fixture
+supplies verified four-column block metadata, refreshes solve reciprocals and
+retains the original truth tolerance. No failed run is counted as a pass.
+
+Full qualification is pending in
+`build/egraph-worker-level-frontier-numeric-v5-full-20261020`: enable the
+experimental macro throughout the library and private roots, run all 50 tests
+and six guards in native, optimized ASan-UBSan and portable builds, and then run
+its prepared independent reviewer after actual runtime/process-group closure.
+All 49 preceding registrations remain. This pending campaign is not full-suite
+or sanitizer evidence. All timings are excluded.
+
+The implementation is a correctness prototype: it allocates temporary topology
+storage and rebuilds requirements on every dispatch. Allocation/validation
+failure preserves the original path; setup is fully charged. Cancellation and
+allocation-failure injection, scoped race checks, API coverage, reusable-cache
+ownership/invalidation/resource admission, broader qualification and complete
+cost/peer confirmation remain outstanding. No numerical value or accepted
+certificate is cached by the planner. Default verification, bounds and existing
+numerical/cache/exploration constants remain unchanged. The original broad
+coverage campaign still runs; comparative launches remain gated on closure of
+every coverage/correctness job and its required review. No speedup, production
+adoption or fastest claim follows from this experiment.
