@@ -7055,3 +7055,50 @@ structural case. Any future performance-ready admission must account for that
 without case/CPU identity rules. No cache has yet been implemented or admitted,
 no separately unproven gains are combined, and no production/fastest claim is
 made from these correctness results.
+
+### Pool-owned frontier topology cache (2026-10-20)
+
+Separate research commit `e2b8da5`, based on fault-fixture revision `a4510a5`,
+now implements dependency-plan reuse. One cache belongs to the existing worker
+pool; each dispatched job borrows it until pool completion. A cache hit resets
+only per-worker completion ranks. The constructor drops inverse maps, peer
+scratch and all borrowed schedule/index/reader pointers before retention.
+Pool destruction joins workers before freeing the cached plan. No numerical
+value or accepted solve certificate is cached.
+
+A separate saturating layout epoch invalidates map, LU-pointer, schedule and
+solve-layout replacement paths. The key includes actual worker count, prefix
+levels, reader kernel, owner/topology identities and the epoch. Saturation
+prevents reuse. A failed optional construction declines that frame until its
+key changes, while original numerical execution remains available. One-level
+prefixes keep the original barriers because their final join cannot be removed.
+These are topology/resource rules, with no case or CPU identity selector.
+
+Retained requested storage, including its cache frame, may not exceed the
+existing schedule/partition and U-index topology footprint at construction.
+The builder accounts separately for inverse-map/scratch peak requests and
+rejects arithmetic overflow. Replacement frees the old cache before building
+the next one. All setup remains charged to the numeric dispatch. Existing
+numerical/cache/exploration constants are unchanged. This is requested-byte
+accounting, not a physical heap or process peak measurement.
+
+The native cache fixture passes and its independent review closes 2581 hashes:
+`build/egraph-worker-level-frontier-cache-v1-native-20261020` and
+`build/egraph-worker-level-frontier-cache-v1-native-review-r2-20261020`.
+It retains the 192 frontier/192 barrier-control/24 checked settings, 216 metadata
+failure cleanups, 24 complete cleanup controls and 24 pre-dispatch expiry joins.
+Another 24 settings check allocation-free hits, reset ranks, declined frames,
+invalidation rebuilds, every key dimension, mutation hooks, saturation and
+resource limits. Per-column numerical kernels and worker execution source are
+byte-identical to the qualified transient parent. No tolerance is weakened.
+
+The cache's own full campaign is running with all 50 tests and six guards in
+three builds. Native tests/guards have passed; optimized ASan-UBSan, portable
+and independent full review remain pending. Prepared scoped TSan additionally
+covers 576 metadata-owner configurations and the original 12 snapshot cases,
+plus the cache fixture and KLU diagnostics. Its API campaign preserves all 28
+settings against ordered baseline `a67c32d`. Both are gated on preceding actual
+runtime/review/hash closure. Parent transient/fault results do not qualify this
+new cache implementation. Cancellation during active work or a blocked peer
+wait, exact application activation, complete cost/confirmation and peer wins
+remain outstanding. No production promotion or fastest claim is made.
