@@ -6970,3 +6970,27 @@ numerical/cache/exploration constants remain unchanged. The original broad
 coverage campaign still runs; comparative launches remain gated on closure of
 every coverage/correctness job and its required review. No speedup, production
 adoption or fastest claim follows from this experiment.
+
+A separate fault-fixture extension, research commit `a4510a5`, now passes native
+execution and independent review. It fails each of the nine frontier metadata
+allocations independently in all 24 structural settings: 216 failures return
+no executable plan and leave zero tracked live allocations. Another 24 complete
+plan allocations/destructions also leave zero tracked allocations. For 24
+pre-dispatch expired deadlines, all actual workers join with every frontier
+rank still zero and all factor bytes unchanged. The original 192 frontier/192
+barrier-control epochs and 24 checked fallbacks remain and pass. Runtime,
+process groups and independent review close, including 2581 hashes:
+`build/egraph-worker-level-frontier-numeric-v6-faults-20261020` and its review
+package. The source change outside the fixture is solely a private observation
+hook after pool completion; removing that absent-by-default hook restores the
+parent numerical source byte for byte.
+
+These are native fault-fixture results, not cancellation during active arithmetic
+or a blocked peer wait, sanitized/portable fault checks, or full-suite/API/race
+qualification of the extension. The original `d50e879` full campaign remains
+frozen and running. Its prepared scoped TSan campaign includes fresh clean and
+known-race controls and original KLU diagnostics instrumentation, but cannot
+execute until full runtime and independent-review closure. All overlapping
+correctness timings remain excluded under the separate declared CPU-cohort
+policy `build/frontier-faults-full-correctness-overlap-v1-20261020/decision.json`.
+No production or performance qualification follows from the fault checks.
