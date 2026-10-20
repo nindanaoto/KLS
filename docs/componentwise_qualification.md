@@ -7453,3 +7453,70 @@ qualified by full141/18 and API28 reviews but still without complete cost or
 confirmation evidence. Its future campaign must retain all original settings
 and incorporate the validated session cleanup. KLS's fastest goal remains
 unachieved; the full peer and broader qualification requirements still apply.
+
+
+### Losing settings classified by observed paths (2026-10-20)
+
+Here a losing setting means a median candidate/baseline ratio above 1.0 in
+`9b8bcfc`'s completed initial comparison against corrected `a67c32d`.
+Twenty of 28 settings lose; five exceed the existing 2% regression limit.
+This is not a classification of losses to CKTSO or SubtreeLU.
+
+Join those plain-run results to the separately qualified instrumented28
+observations by exact circuit, CPU domain and thread count. Decode the public
+path enum from the hashed candidate header and check that each setting's path
+counts sum to its public-refactor count. All activation counters are also
+matched to independent review. The resulting groups are six MAPPED-only,
+three MAPPED-dominated with KLU, seven KLU-dominated and four EGRAPH/MAPPED
+settings. These labels describe after-call public path observations in the
+instrumented process; they are not exclusive internal-kernel measurements.
+
+| Losing circuit | Domain | Threads | Slowdown | Public refactor paths (calls) | BTF frontier selections |
+| --- | --- | ---: | ---: | --- | ---: |
+| ram2k | llc96 | 1 | 0.39% | MAPPED 5796 | 0 |
+| rallpack3 | llc96 | 1 | 0.12% | MAPPED 7716, KLU 24 | 0 |
+| dac | llc96 | 1 | 0.64% | MAPPED 514 | 0 |
+| mux8 | llc96 | 1 | 3.49% | MAPPED 1, KLU 25252 | 0 |
+| mem_plus | llc96 | 1 | 1.09% | MAPPED 1200 | 0 |
+| invert50_mos1 | llc96 | 1 | 1.98% | MAPPED 8, KLU 30479 | 0 |
+| ram2k | llc96 | 8 | 0.71% | EGRAPH 5464, MAPPED 332 | 5468 |
+| mux8 | llc96 | 8 | 3.06% | MAPPED 1, KLU 25252 | 0 |
+| mem_plus | llc96 | 8 | 1.39% | EGRAPH 889, MAPPED 311 | 893 |
+| ram2k | llc32 | 1 | 0.51% | MAPPED 5796 | 0 |
+| rallpack3 | llc32 | 1 | 0.12% | MAPPED 7720, KLU 20 | 0 |
+| mux8 | llc32 | 1 | 2.15% | MAPPED 1, KLU 25252 | 0 |
+| mem_plus | llc32 | 1 | 1.05% | MAPPED 1200 | 0 |
+| invert50_mos1 | llc32 | 1 | 1.92% | MAPPED 8, KLU 30479 | 0 |
+| ram2k | llc32 | 8 | 1.15% | MAPPED 5796 | 4 |
+| rallpack3 | llc32 | 8 | 0.22% | MAPPED 7720, KLU 20 | 0 |
+| dac | llc32 | 8 | 7.29% | EGRAPH 122, MAPPED 392 | 126 |
+| mux8 | llc32 | 8 | 1.90% | MAPPED 1, KLU 25252 | 0 |
+| mem_plus | llc32 | 8 | 16.17% | EGRAPH 845, MAPPED 355 | 849 |
+| invert50_mos1 | llc32 | 8 | 0.38% | MAPPED 8, KLU 30479 | 0 |
+
+The three mux8 settings beyond the regression limit are KLU-dominated:
+25252 KLU and one MAPPED public refactor, with zero frontier calls. The two
+other gate failures are dac and mem_plus on LLC32 at eight threads: mixed
+EGRAPH/MAPPED paths with 126 and 849 BTF-frontier selections. No losing
+setting records a single-block plain or padding-active frontier selection.
+
+Five losing settings record BTF-frontier selections, including LLC32 ram2k
+at eight threads. That last setting records four selections but returns
+MAPPED for all 5796 public refactors. This demonstrates why trial/repair
+selections cannot be treated as completed public EGRAPH work. The remaining
+15 losing settings record no frontier calls. Even mux8's persistent KLU path
+does not identify the slowdown's cause: code placement, shared wrapper work
+and run variability remain hypotheses requiring separate evidence.
+
+Adaptive choices in these diagnostic processes may differ from the plain
+benchmark processes. Thus this classification supports separate investigation
+of KLU-dominated losses, mapped paths, and BTF frontier overhead; it does not
+attribute the measured loss to a particular path, establish statistical
+significance, or justify a circuit/CPU selector. No numerical or timing run is
+repeated and no acceptance threshold changes.
+
+Reproducible joined records and checked inputs are retained in
+`build/frontier-losing-path-classification-r2-20261020/classification.json`
+(4052 checked hashes). The first classification attempt's identity-field
+comparison error is retained in its original package; R2 matches identity
+keys separately and compares the complete counter dictionaries.
