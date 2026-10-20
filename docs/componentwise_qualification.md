@@ -7339,3 +7339,40 @@ the native R2 stop review; its own generated Scotch header is hashed before
 compilation and its canonical dependency closure is checked independently.
 API and activation campaigns require the resulting scoped stop-check flag.
 All overlapping timings remain excluded.
+
+
+### Single-padded reader full, race and API closure (2026-10-20)
+
+The exact `9b8bcfc` candidate now passes all 156 full tests and 24 guards across
+native, ASan-UBSan and portable builds. Original registrations and per-profile
+input integrity checks remain intact. Actual controller/all 24 child edges and
+groups close, and independent full review closes 2803 hashes.
+
+The 20-job scoped TSan campaign also completes with all 40 child edges/groups
+closed. Fresh clean/race controls behave as expected. Original numeric,
+BTF-shadow, actual single-padded, owner-576/snapshot-12 and DLONG diagnostics
+roots pass, including the derived 24 stop/24 repair fixture. Independent review
+closes 2661 hashes. Uninstrumented dependency objects remain native; this does
+not establish full-program race freedom or generic cancellation behavior.
+
+All 28 original SPICE API settings subsequently pass against corrected baseline
+`a67c32d`, with the same adapter/dependencies and unchanged waveform/step/end
+checks. Independent review closes 198 hashes, including 288675 certificate
+calls with zero certificate errors and zero legacy calls. Actual controller,
+build and all 62 child edges/groups close. Its stdout retains the ancestor BTF
+family label; the checked candidate commit, native archive and exact-source
+full/TSan gates identify `9b8bcfc`, including the single-padded extension.
+
+The separate 38-field reader census is now running the same complete 28-setting
+application qualification. Its counters describe the instrumented process only;
+selected padding-active mode does not establish actual padded arithmetic or
+plain-executable decisions. No comparative preparation or launch occurs until
+this controller, the original broad coverage controller and all required reviews
+close. All overlapping timings remain excluded.
+
+The old broad corpus retains the additional second-domain FullChip solve
+failures, bips07/fpga residual rejections under the original `1e-8` bound, and
+freescale2 singular setup failures. All 80 failed groups through triage batch18
+are closed and retained. These old arms do not qualify corrected `a67c32d` or
+the new candidate, and no speed aggregate is inferred from the unqualified
+corpus. No production promotion or fastest claim is made.
