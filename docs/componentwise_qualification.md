@@ -7420,3 +7420,36 @@ public timing boundary. Each child session must close before the next run.
 The separate different-order confirmation remains gated on the complete initial
 review and the original fixed all-238/all-28 cost decision. No performance
 result, source promotion or fastest claim follows from preparation.
+
+### Single-padded frontier performance decision (2026-10-20)
+
+The complete initial cost campaign for `9b8bcfc` versus corrected baseline
+`a67c32d` is now closed. All 238 observations qualify under the unchanged
+waveform, step, completion and componentwise-verification checks. All 476
+child edges and their process groups/sessions close. The run retains all 28
+settings, four balanced pairs, 14 fresh KLU references and the original
+1800-second numerical limit, without overlapping builds or diagnostics.
+
+The original reviewer finishes, but its actual exec terminal result is lost
+during context handoff. Its files remain preserved and are not used as a
+qualified terminal record. A fresh package runs identical reviewer source,
+rechecks all 224 paired waveforms and closes 741 hashes after its observed
+zero exit. See `build/frontier-single-padded-reader-v1-spice-pair-review-r2-20261020`
+and its recovery audit. The frozen initial decision is recorded in
+`build/frontier-single-padded-reader-v1-spice-pair-decision-20261020/decision.json`.
+
+The candidate fails the existing all-cell regression gate. Median candidate
+over baseline time exceeds 1.02 in five settings: mux8 on LLC96 at one and
+eight threads (3.49% and 3.06% slower), mux8 on LLC32 at one thread (2.15%),
+and dac and mem_plus on LLC32 at eight threads (7.29% and 16.17%). The BJT
+LLC32 eight-thread setting improves 3.45%; that gain does not override the
+regressions. These results do not identify their underlying cost mechanism.
+
+The experimental frontier remains disabled by default. Its different-order
+confirmation and peer evaluation are held; no circuit or CPU selector,
+selective repeat, accuracy change or production promotion follows. The next
+independent planned candidate is owned-value buffer reuse `44850b5`, already
+qualified by full141/18 and API28 reviews but still without complete cost or
+confirmation evidence. Its future campaign must retain all original settings
+and incorporate the validated session cleanup. KLS's fastest goal remains
+unachieved; the full peer and broader qualification requirements still apply.
