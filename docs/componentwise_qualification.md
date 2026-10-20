@@ -6994,3 +6994,37 @@ execute until full runtime and independent-review closure. All overlapping
 correctness timings remain excluded under the separate declared CPU-cohort
 policy `build/frontier-faults-full-correctness-overlap-v1-20261020/decision.json`.
 No production or performance qualification follows from the fault checks.
+
+The frozen `d50e879` full campaign has since completed all 150 tests and 18
+guards successfully. The experimental frontier is compiled into the entire
+library and all private roots for native, optimized ASan-UBSan and portable
+builds. All 49 preceding test registrations remain. Actual runtime/controller
+and all 24 child edges/groups close; independent full review exits zero and
+closes 2769 hashes. This supersedes the pending full-suite status above.
+
+Its scoped TSan campaign also completes and independently closes 2591 hashes.
+The private numeric fixture root and original DLONG KLU diagnostics are
+instrumented; fresh clean IFUNC and known-race controls respectively exit zero
+and detect the expected race. The original 192 frontier/192 barrier-control
+and 24 checked-fallback settings pass with no reported race. The established
+GCC IFUNC function-stack-hook workaround retains memory instrumentation.
+Other dependency objects remain native, so this is not full-program race-free
+qualification. Evidence is in
+`build/egraph-worker-level-frontier-numeric-v5-tsan-20261020` and its reviewer.
+
+The separate `a4510a5` allocation/expiry fixture also passes optimized
+ASan-UBSan execution and independent review, closing 2581 hashes in
+`build/egraph-worker-level-frontier-numeric-v6-faults-sanitized-20261020` and
+its reviewer. This supplements its native result; portable fault checks and
+cancellation during active work or a blocked peer wait remain outstanding.
+
+Original full-28 SPICE API correctness is now running for `d50e879` against
+matched ordered baseline `a67c32d`, with the same immutable adapter and shared
+dependencies. Full review and scoped TSan closure gate that launch. Every
+waveform/step/end/certificate check remains; no API qualification follows
+until actual runtime/process closure and independent review. The transient
+planner is still rebuilt per dispatch. Reusable-cache lifetime, invalidation
+and exact resource admission must be established before performance readiness.
+The original broad coverage and all overlapping correctness timings remain
+excluded. These results support numerical research qualification, not a speedup,
+production adoption or fastest claim.
