@@ -6727,3 +6727,41 @@ The earlier failed reuse preparation preflight is preserved, with the fresh
 package at `build/owned-values-reuse-ordered-v3-full-runtime-r2-20261020`.
 No circuit/API success, performance gain, production promotion or fastest
 claim is inferred from full-core qualification alone.
+
+### Ordered baseline full circuit/API closure (2026-10-20)
+
+Baseline `a67c32d` completes all original 28 Xyce settings, spanning seven
+circuits, both LLC domains and one/eight threads. Every waveform independently
+matches the original KLU reference with unchanged tolerances, successful/failed
+step counts and simulation-end gates. All instrumented solves use the current
+operator verdict certificate; legacy certificate, certificate-error and
+stats-error counts are zero. Matched plain executables have no profiling
+wrappers; the diagnostic executable contains exactly the original seven.
+The same committed adapter and shared dependencies are retained.
+
+The actual API runtime exits zero, with all 62 link/run edges and process
+groups closed. Independent review exits zero, rechecks all 28 waveforms,
+certificate accounting, exact links and 196 artifact hashes. Evidence:
+`build/ordered-numeric-preparation-v1-api-20261019` and
+`build/ordered-numeric-preparation-v1-api-review-20261019`. All API timings
+remain excluded; these results establish circuit compatibility, not speed.
+
+Both separate optimizations now run full-core qualification against the
+ordered baseline: reuse `44850b5` on CPUs 0-3 and short-L `2c16372` on CPUs
+4-5. An immutable handoff checks actual baseline runtime/reviewer closure;
+the fresh launchers check source/proof hashes and admit only the original
+broad coverage controller and the explicitly identified disjoint correctness
+job. The original 47 tests, six guards per native/optimized ASan-UBSan/portable
+profile, CTest/stage limits and numerical budgets are retained. Compiler
+concurrency is four/two jobs respectively. All overlapping timings are excluded
+under `build/ordered-candidate-parallel-correctness-slots-v2-20261020`.
+
+The original broad campaign also retains shared residual rejections on
+`bips07_1998` and `fpga_dcop_01`, plus process exits on `FullChip` and
+`freescale2`, in addition to the Hamrle3 timeouts. Actual logs and failed
+process-group closure are recorded in the fresh retained-failure triage
+packages. These observations provide no verified successful result or speed
+ratio, do not establish a regression specific to an optimization, and do not
+qualify the new ordered baseline on those matrices. No failure or trial is
+excluded and no limit or tolerance is changed. Broader qualification and
+serialized complete cost/peer evidence remain necessary for the full goal.
