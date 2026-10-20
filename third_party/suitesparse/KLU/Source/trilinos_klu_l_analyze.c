@@ -178,8 +178,15 @@ static Int analyze_worker	/* returns TRILINOS_KLU_OK or < 0 if error */
 		    }
 		    kls_amd_control_ptr = kls_amd_control ;
 		}
-		result = TRILINOS_AMD_order (nk, Cp, Ci, Pblk,
-		    kls_amd_control_ptr, amd_Info) ;
+		#if defined(DLONG) || defined(ZLONG)
+                result = kls_trilinos_amd_l_order_alloc(nk, Cp, Ci, Pblk,
+                    kls_amd_control_ptr, amd_Info,
+                    Common->malloc_memory, Common->free_memory);
+#else
+                result = kls_trilinos_amd_order_alloc(nk, Cp, Ci, Pblk,
+                    kls_amd_control_ptr, amd_Info,
+                    Common->malloc_memory, Common->free_memory);
+#endif
 	    }
 	    ok = (result >= TRILINOS_AMD_OK) ;
 	    if (result == TRILINOS_AMD_OUT_OF_MEMORY)
@@ -339,11 +346,6 @@ static TRILINOS_KLU_symbolic *order_and_analyze	/* returns NULL if error, or a v
 	return (NULL) ;
     }
 
-    /* AMD memory management routines */
-    trilinos_amd_malloc  = Common->malloc_memory ;
-    trilinos_amd_free    = Common->free_memory ;
-    trilinos_amd_calloc  = Common->calloc_memory ;
-    trilinos_amd_realloc = Common->realloc_memory ;
 
     /* ---------------------------------------------------------------------- */
     /* allocate workspace for TRILINOS_BTF permutation */

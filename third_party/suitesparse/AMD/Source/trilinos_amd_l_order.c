@@ -22,14 +22,16 @@
 /* === TRILINOS_AMD_order =========================================================== */
 /* ========================================================================= */
 
-GLOBAL Int TRILINOS_AMD_order
+static Int kls_amd_order_alloc_impl
 (
     Int n,
     const Int Ap [ ],
     const Int Ai [ ],
     Int P [ ],
     double Control [ ],
-    double Info [ ]
+    double Info [ ],
+    void *(*allocate) (size_t),
+    void (*release) (void *)
 )
 {
     Int *Len, *S, nz, i, *Pinv, info, status, *Rp, *Ri, *Cp, *Ci, ok ;
@@ -93,15 +95,15 @@ GLOBAL Int TRILINOS_AMD_order
     }
 
     /* allocate two size-n integer workspaces */
-    Len = (Int*) trilinos_amd_malloc (n * sizeof (Int)) ;
-    Pinv = (Int*) trilinos_amd_malloc (n * sizeof (Int)) ;
+    Len = (Int*) allocate (n * sizeof (Int)) ;
+    Pinv = (Int*) allocate (n * sizeof (Int)) ;
     mem += n ;
     mem += n ;
     if (!Len || !Pinv)
     {
 	/* :: out of memory :: */
-	trilinos_amd_free (Len) ;
-	trilinos_amd_free (Pinv) ;
+	release (Len) ;
+	release (Pinv) ;
 	if (info) Info [TRILINOS_AMD_STATUS] = TRILINOS_AMD_OUT_OF_MEMORY ;
 	return (TRILINOS_AMD_OUT_OF_MEMORY) ;
     }
@@ -110,17 +112,17 @@ GLOBAL Int TRILINOS_AMD_order
     {
 	/* sort the input matrix and remove duplicate entries */
 	TRILINOS_AMD_DEBUG1 (("Matrix is jumbled\n")) ;
-	Rp = (Int*) trilinos_amd_malloc ((n+1) * sizeof (Int)) ;
-	Ri = (Int*) trilinos_amd_malloc (MAX (nz,1) * sizeof (Int)) ;
+	Rp = (Int*) allocate ((n+1) * sizeof (Int)) ;
+	Ri = (Int*) allocate (MAX (nz,1) * sizeof (Int)) ;
 	mem += (n+1) ;
 	mem += MAX (nz,1) ;
 	if (!Rp || !Ri)
 	{
 	    /* :: out of memory :: */
-	    trilinos_amd_free (Rp) ;
-	    trilinos_amd_free (Ri) ;
-	    trilinos_amd_free (Len) ;
-	    trilinos_amd_free (Pinv) ;
+	    release (Rp) ;
+	    release (Ri) ;
+	    release (Len) ;
+	    release (Pinv) ;
 	    if (info) Info [TRILINOS_AMD_STATUS] = TRILINOS_AMD_OUT_OF_MEMORY ;
 	    return (TRILINOS_AMD_OUT_OF_MEMORY) ;
 	}
@@ -164,16 +166,16 @@ GLOBAL Int TRILINOS_AMD_order
     ok = ok && (slen < Int_MAX) ;	/* S[i] for Int i must be OK */
     if (ok)
     {
-	S = (Int*) trilinos_amd_malloc (slen * sizeof (Int)) ;
+	S = (Int*) allocate (slen * sizeof (Int)) ;
     }
     TRILINOS_AMD_DEBUG1 (("slen %g\n", (double) slen)) ;
     if (!S)
     {
 	/* :: out of memory :: (or problem too large) */
-	trilinos_amd_free (Rp) ;
-	trilinos_amd_free (Ri) ;
-	trilinos_amd_free (Len) ;
-	trilinos_amd_free (Pinv) ;
+	release (Rp) ;
+	release (Ri) ;
+	release (Len) ;
+	release (Pinv) ;
 	if (info) Info [TRILINOS_AMD_STATUS] = TRILINOS_AMD_OUT_OF_MEMORY ;
 	return (TRILINOS_AMD_OUT_OF_MEMORY) ;
     }
@@ -193,11 +195,25 @@ GLOBAL Int TRILINOS_AMD_order
     /* free the workspace */
     /* --------------------------------------------------------------------- */
 
-    trilinos_amd_free (Rp) ;
-    trilinos_amd_free (Ri) ;
-    trilinos_amd_free (Len) ;
-    trilinos_amd_free (Pinv) ;
-    trilinos_amd_free (S) ;
+    release (Rp) ;
+    release (Ri) ;
+    release (Len) ;
+    release (Pinv) ;
+    release (S) ;
     if (info) Info [TRILINOS_AMD_STATUS] = status ;
     return (status) ;	    /* successful ordering */
+}
+
+/* KLU owns this allocator scope; concurrent Common objects never overwrite
+ * AMD's public process-wide allocator configuration. */
+GLOBAL Int kls_trilinos_amd_l_order_alloc (Int n, const Int Ap[], const Int Ai[],
+    Int P[], double Control[], double Info[],
+    void *(*allocate)(size_t), void (*release)(void *)) {
+    return kls_amd_order_alloc_impl(n, Ap, Ai, P, Control, Info, allocate, release);
+}
+
+GLOBAL Int TRILINOS_AMD_order (Int n, const Int Ap[], const Int Ai[],
+    Int P[], double Control[], double Info[]) {
+    return kls_amd_order_alloc_impl(n, Ap, Ai, P, Control, Info,
+                                  trilinos_amd_malloc, trilinos_amd_free);
 }

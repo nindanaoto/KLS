@@ -15,7 +15,11 @@ file(GLOB KLS_TUNING_FINGERPRINT_INPUTS CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_componentwise.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_*.inc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.c"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.h")
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/KLU/Source/*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/KLU/Include/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/AMD/Source/*.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/AMD/Include/*.h")
 list(APPEND KLS_TUNING_FINGERPRINT_INPUTS
   "${CMAKE_CURRENT_SOURCE_DIR}/bench/kls_snb_calibrate.c")
 string(TOUPPER "${CMAKE_BUILD_TYPE}" KLS_BUILD_TYPE_UPPER)
@@ -647,6 +651,10 @@ endif()
 
 if(KLS_BUILD_TESTS)
   enable_testing()
+  add_executable(kls_klu_allocator_ownership tests/klu_allocator_ownership.c)
+  target_compile_definitions(kls_klu_allocator_ownership PRIVATE DLONG)
+  target_link_libraries(kls_klu_allocator_ownership PRIVATE kls_suitesparse Threads::Threads)
+  add_test(NAME kls_klu_allocator_ownership COMMAND kls_klu_allocator_ownership)
   if(Python3_Interpreter_FOUND)
     add_test(NAME kls_componentwise_differential
       COMMAND "${CMAKE_COMMAND}" -E env "CC=${CMAKE_C_COMPILER}"

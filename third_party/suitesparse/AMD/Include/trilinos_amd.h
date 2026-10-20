@@ -315,6 +315,13 @@ UF_long trilinos_amd_l_valid
 #define EXTERN extern
 #endif
 
+/* Private KLU entry points: allocator ownership is per ordering call. */
+int kls_trilinos_amd_order_alloc(int, const int[], const int[], int[],
+    double[], double[], void *(*)(size_t), void (*)(void *));
+UF_long kls_trilinos_amd_l_order_alloc(UF_long, const UF_long[],
+    const UF_long[], UF_long[], double[], double[],
+    void *(*)(size_t), void (*)(void *));
+
 EXTERN void *(*trilinos_amd_malloc) (size_t) ;		    /* pointer to malloc */
 EXTERN void (*trilinos_amd_free) (void *) ;		    /* pointer to free */
 EXTERN void *(*trilinos_amd_realloc) (void *, size_t) ;	    /* pointer to realloc */
