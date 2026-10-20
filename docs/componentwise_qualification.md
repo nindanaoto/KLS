@@ -6703,3 +6703,27 @@ sanitized and portable qualification remains in progress. These focused
 results do not substitute for candidate full-core, circuit/API, comparative
 cost, peer or independent confirmation evidence. No production promotion or
 fastest claim follows.
+
+### Ordered baseline full-core closure (2026-10-20)
+
+Research baseline `a67c32d` passes all 141 full tests and all 18 guards across
+native, optimized ASan-UBSan and portable profiles. The actual runtime exits
+zero; all 30 child edges and process groups close. Independent review checks
+the archived root and four dependency sources, the exact changed files,
+inherited test names and strict assertions, compilation profiles, focused
+ownership proof and root-plus-KLU-diagnostics TSan evidence. Its actual reviewer
+exits zero and closes 7048 hashes. Evidence:
+`build/ordered-numeric-preparation-v1-full-runtime-20261019` and
+`build/ordered-numeric-preparation-v1-full-runtime-review-20261019`.
+
+The fresh full 28-setting Xyce API/waveform qualification is running in
+`build/ordered-numeric-preparation-v1-api-20261019`. Plain baseline/candidate
+and seven-wrapper diagnostic executables use the same adapter and shared
+dependencies; default caller-coordinate componentwise checks remain enabled.
+All API timings are excluded. Each separately rebased optimization now has a
+frozen full-core source package, prepared only after baseline review closure;
+neither numerical runtime is launched while the baseline API check is live.
+The earlier failed reuse preparation preflight is preserved, with the fresh
+package at `build/owned-values-reuse-ordered-v3-full-runtime-r2-20261020`.
+No circuit/API success, performance gain, production promotion or fastest
+claim is inferred from full-core qualification alone.
