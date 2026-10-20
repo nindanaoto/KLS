@@ -7282,3 +7282,20 @@ full 156/24, scoped TSan and standard API reviews plus the fresh syntax review.
 No settings, including zero activation, are filtered. All diagnostic timings
 remain excluded, and no comparative preparation starts while any coverage or
 correctness controller and required review remains open.
+
+
+The BTF-shadow predecessor `7726623` subsequently completes all 153 full tests
+and 21 guards across native, ASan-UBSan and portable builds, with unchanged
+inputs after every profile. Actual runtime/controller/all 24 child edges and
+groups close, followed by independent review and revalidation of 2788 hashes
+in `build/frontier-btf-shadow-panels-v1-full-review-20261020`. This supersedes
+its earlier pending full-validation statuses. It does not establish its scoped
+TSan, API, application activation or cost performance.
+
+With that closure complete, the broader `9b8bcfc` single-padded-reader full
+campaign is running at `build/frontier-single-padded-reader-v1-full-20261020`:
+52 tests and eight guards in each of three profiles, retaining every prior
+registration, tolerance and stage bound. Its exact-source scoped TSan, API28
+and reader-aware activation28 remain gated on preceding actual runtime,
+process-group, independent-review and hash closure. The original broad
+coverage run continues; every overlapping timing remains excluded.
