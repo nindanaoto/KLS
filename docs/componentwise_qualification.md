@@ -6680,3 +6680,26 @@ No speedup or production adoption follows from these correctness checks. The
 last qualified peer result remains 33 wins / 23 losses / zero unqualified
 cells. The original broad run continues as coverage only with all timings
 excluded; comparative cost and peer runs wait for controller/group closure.
+
+### Corrected-baseline optimization fixtures (2026-10-20)
+
+Fresh focused qualification of `44850b5` passes all six native/optimized
+ASan-UBSan/portable contexts. Independent review closes all 24 runtime edges
+and 5130 hashes: each owner profile retains 576 caller-frame configurations,
+the original 12 ownership configurations and 216 value-reuse raw-bit/rounding
+epochs. Legacy cache and rebuild-allocation checks are unchanged. Fresh
+`2c16372` qualification passes three compact-kernel profiles, retaining all
+142 cases and active length-one, length-two and long dependency shapes;
+independent review closes 12 runtime edges and 5127 hashes. Packages are
+`build/owned-values-reuse-ordered-v3-focused-review-20261019` and
+`build/mapped-short-l-scatter-ordered-v2-focused-review-20261019`.
+
+A separate source composition check confirms the reuse helper and its added
+representation fixture match `b5ba1df` exactly; the short-L production and
+fixture files match `ac977e3` exactly. Each rebased candidate changes only its
+original two files relative to `a67c32d`. The baseline has passed all 47 native
+tests and its six native plus six optimized ASan-UBSan guards. Its complete
+sanitized and portable qualification remains in progress. These focused
+results do not substitute for candidate full-core, circuit/API, comparative
+cost, peer or independent confirmation evidence. No production promotion or
+fastest claim follows.
