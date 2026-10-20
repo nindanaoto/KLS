@@ -7249,3 +7249,36 @@ candidate qualifies; no intermediate evidence is inferred. Active-work
 cancellation, exact application activation, complete comparative cost,
 independent confirmation and peer superiority remain unproved. All overlapping
 timings are excluded. No circuit or CPU selector is added.
+
+
+### Reader-aware activation census (2026-10-20)
+
+Separate tool commit `83c9eaa` adds a census pinned to the complete `9b8bcfc`
+frontier module. Its 38 counters partition calls by kernel and selections by
+single-block plain, single-block padding-active and BTF native modes. It uses
+the actual single-reader capability predicate for unsupported-reader counts.
+An active-padding marker on an ineligible call is labeled as state rather
+than as an independent rejection reason. A padding-active selection does not
+prove actual padded arithmetic: strict batches or scalar fallback may consume
+all columns. The tool never establishes plain-executable decisions or speed.
+
+Seven valid parser contexts and 23 malformed/revision contexts pass, including
+rejection of unrelated source and altered restored source. Generated integer
+telemetry under the pinned Apptainer SIF accepts zero/plain/padding-active/BTF
+contexts and rejects real unsigned overflow. Runtime controller/all 12 child
+edges/groups and independent review close, with 18 hashes revalidated.
+
+The first whole-root syntax-only attempt compiles successfully, but independent
+review fails because a generated Scotch header lacks an earlier hash anchor.
+That attempt remains unqualified, with its failure audit and actual receipts
+preserved. A fresh preflight hashes every discovered dependency before compile,
+including the generated header, and verifies the identical dependency set and
+bytes afterward. Its runtime/all two edges/groups close; independent review
+closes 2634 hashes. This is source/tool syntax evidence, not numerical execution.
+
+The exact-source 28-setting application census and reviewer are prepared with
+the original waveform/steps/certificate/wrapper gates. They require `9b8bcfc`
+full 156/24, scoped TSan and standard API reviews plus the fresh syntax review.
+No settings, including zero activation, are filtered. All diagnostic timings
+remain excluded, and no comparative preparation starts while any coverage or
+correctness controller and required review remains open.
