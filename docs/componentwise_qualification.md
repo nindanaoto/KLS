@@ -7641,3 +7641,44 @@ Full A validation is running all 49 registered tests plus eight initial guards
 in each of three profiles (147/24). Full B and scoped TSan packages are prepared
 but remain gated. No API/cost/confirmation/peer result or production promotion
 is established by these focused tests. Main numerical defaults are unchanged.
+
+
+### KLU pipeline ownership foundation (2026-10-20)
+
+Full vendor ThreadSanitizer instrumentation exposed a pre-existing race on
+`kls_pipe_dense_panels` in the original scalar candidate. A fresh unchanged
+`a67c32d` control reproduces it at both index widths, with working clean and
+known-race controls. Independent audit in
+`build/klu-global-controls-baseline-tsan-v1-review-20261020` confirms the defect;
+this expected-failure experiment is not clean numerical qualification. The
+adjacent `kls_pipe_apply_kahan` control has the same process-global ownership.
+Earlier uninstrumented vendor runs could not rule out either race.
+
+Commit `2924d53` captures both controls in each private pipeline job before
+workers start. Workers read that immutable job policy, including the caller's
+deterministic-mode setting. Dispatch, admission thresholds, arithmetic and
+verification remain unchanged. Commit `fdd0967` adds KLU sources and headers
+to the tuning fingerprint so saved profiles from an older kernel are rejected.
+Both changes are committed on the corrected research foundation, rather than
+promoted onto main's different numerical core.
+
+The foundation passes 153 full test executions and 30 priority guards across
+native, optimized ASan/UBSan and portable builds. Independent review closes
+2643 hashes in `build/klu-pipe-control-ownership-v1-full-review-20261020`.
+All 15 child stage wait statuses are zero and all sessions are closed; the
+unavailable outer tool exit status is explicitly recorded in the runtime
+receipt instead of inferred. Fresh scoped vendor TSan passes ten jobs,
+including both-width numerical and ownership fixtures and a known-race
+positive control. This does not establish full Xyce race freedom or exhaustive
+coverage of optional large dense-panel arithmetic.
+
+The independent scalar candidates are rebased onto this foundation:
+`ee33384` for short producer updates and `3666adb` for one-RHS transpose solves.
+Both pass all 51 native tests, ten native/sanitizer priority guards and ten
+scoped vendor TSan jobs with independent audits. Remaining sanitizer/portable
+and full application checks are still pending. Original v1 evidence remains
+preserved as ancestor evidence; no timing or adoption result is inherited.
+Future matched application links retain identical numerical core objects,
+with only an audited build-identifier difference in the tuning module and
+the single intended KLU optimization object. Default componentwise checks,
+waveform tolerances and the full 28-setting performance gate remain unchanged.
