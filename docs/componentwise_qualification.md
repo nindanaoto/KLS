@@ -6818,3 +6818,32 @@ all-28-cell thresholds, budgets, waveform checks and failure retention remain
 unchanged. Peer superiority, broader qualification and production adoption
 remain unproven. Short-L has separately passed its 47 native and 47 sanitizer
 tests plus all 18 guards; its final 47 portable tests are still in progress.
+
+### Short-L on the ordered baseline: full-core closure (2026-10-20)
+
+The separately rebased short-L scalar scatter candidate `2c16372` passes all
+141 full tests and all 18 guards across native, optimized ASan-UBSan and
+portable profiles. The actual runtime exits zero and all 30 child edges and
+process groups close. Independent review checks the exact two-file change
+from `a67c32d`, the preserved update order/long-column loop, all 142 compact
+fixture cases per profile, active length-one/two/long dependency shapes,
+strict inherited assertions and the full archived source/dependency set.
+Its actual reviewer exits zero and closes 10757 hashes. Evidence:
+`build/mapped-short-l-scatter-ordered-v2-full-runtime-20261019` and
+`build/mapped-short-l-scatter-ordered-v2-full-runtime-review-20261019`.
+
+The original full 28-setting circuit/API qualification is running against the
+same ordered baseline, with all timings excluded. After its independent
+closure, a separate derived-root census is prepared for the exact modified
+kernel: integer counters record completed calls/return categories and actual
+nonzero-U scatter lengths zero/one/two/long in eight entry-flag contexts.
+Removing the instrumentation restores every original source byte, including
+all floating-point updates. This diagnostic has not run; its counts may include
+trial, failure and repair calls, and will not establish plain-binary choices
+or removable time. The earlier read-only global-marker preflight failure is
+preserved; the fresh scoped patcher is in
+`build/mapped-short-l-scatter-ordered-v2-activation-v2-20261020`.
+No public field, default, numerical/cache/exploration budget or workload
+selector changes. Neither full-core correctness nor future diagnostic
+activation substitutes for complete plain cost, confirmation, broader and
+peer evidence; no speedup, production promotion or fastest claim follows.
