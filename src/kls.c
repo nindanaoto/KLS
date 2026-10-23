@@ -9210,6 +9210,20 @@ static int private_factor_body(kls_solver *solver, const double *values) {
       }
       goto factor_preps_deferred_exit;
     }
+    /* Small factors reach serial preparation while the optional compact
+       builders are still live. Finish those readers before panel preparation
+       can reorder the numeric, or the caller can build the same solve cache
+       concurrently and lose the worker's allocations. */
+    if (compact_pattern_active) {
+      pthread_join(compact_pattern_thread, NULL);
+      compact_pattern_active = 0;
+      if (compact_solve_active) {
+        pthread_join(compact_solve_thread, NULL);
+        compact_solve_active = 0;
+      }
+      elapsed = compact_pattern_elapsed_before_overlap +
+        (kls_now_seconds() - compact_pattern_overlap_start);
+    }
     if (value_alternative_used && solver->common.status >= TRILINOS_KLU_OK) {
       const double start = kls_now_seconds();
       (void)kls_prepare_auto_row_refactor_from_numeric(solver);

@@ -58,7 +58,13 @@ int main(void) {
     s->private_solve_depth=0;
     assert(s->private_original==saved && saved->values==saved_values);
     assert(entry(s,0,0)==3 && entry(s,1,1)==6);
-    assert(kls_factor(s,a)==KLS_OK);
+    /* Repeated small-factor preparation must publish one solve cache per
+     * numeric. ASan/TSan cover leaked allocations and overlapping builders. */
+    for(int epoch=0;epoch<8;++epoch) {
+      assert(kls_factor(s,a)==KLS_OK);
+      assert(kls_solve(s,1,b,0,x,0)==KLS_OK);
+      assert(fabs(x[0]-2.0/3.0)<1e-14 && fabs(x[1]-2.0/3.0)<1e-14);
+    }
     saved=s->private_original;saved_values=saved->values;
     /* A cache hit allocates only fresh values. Failure still invalidates the
      * numeric epoch without changing the previously published snapshot. */
