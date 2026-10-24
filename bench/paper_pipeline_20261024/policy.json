@@ -1,0 +1,49 @@
+{
+  "baseline": "7d2c909c6ab77a7201bad8559b024f4e97625840",
+  "scope": "Isolated research branches; no main merge or push in this cycle",
+  "constraints": [
+    "Keep DEFAULT componentwise verification and original tolerance",
+    "No matrix-name selectors, benchmark-specific thresholds, production forced ND, or lowering 30000-row floor",
+    "Keep original first-factor 2B heap cap, private/pipeline barrier, BTF semantics and atomic caller publication",
+    "Use Apptainer; no dependency changes"
+  ],
+  "subtree": {
+    "steps": [
+      "Import bounded first-factor prerequisites only",
+      "Compact private worker maps and phase scratch",
+      "Test matching before explicit ND",
+      "Admit block-local BTF-preserving AUTO only after explicit ND fits and validates",
+      "Scheduler only after active native target exposes at least 10% avoidable waiting"
+    ],
+    "auto_gate": {
+      "min_rows": 30000,
+      "min_expected_updates": 16,
+      "max_speculative_fraction": 0.02
+    },
+    "stop": "Explicit-ND matched target exceeds unchanged cap: stop before AUTO admission and scheduler work"
+  },
+  "recovery": {
+    "steps": [
+      "Retain isolated scaled symbolic/pivot proposal on numeric epoch transitions",
+      "Require exact canonical CSC compatibility",
+      "Try incumbent and verify current RHS before updating retained proposal",
+      "One checked refactor; independent current-operator certification of every RHS",
+      "Reject to existing fresh MAX then SUM search; OOM propagates; reanalysis destroys cache"
+    ],
+    "target": "All three captured operators under deterministic row powers-of-two numeric changes; eight updates",
+    "secondary": [
+      "column powers-of-two",
+      "entrywise deterministic 1e-4 perturbation with analytic RHS"
+    ],
+    "timing": "Initial ABBA and opposite-order BAAB; two blocks for epoch targets, four for healthy paths; all observations retained",
+    "acceptance": "At least 2% improvement on each primary operator in both campaigns, valid baseline/candidate answers, actual accepted reuse; every qualified healthy setting <=1.02; each other setting with valid paired answers must also be <=1.02"
+  },
+  "qualification": [
+    "Full native and portable suites",
+    "ASan/UBSan/leaks",
+    "Scoped TSan with clean and race-positive controls; no suppressions",
+    "Allocation and partial thread-creation failure rollback",
+    "69 frozen matrices at 1 and 8 threads",
+    "28 fresh AUTO Xyce settings on both LLC domains, with KLU waveforms and step-count comparison"
+  ]
+}

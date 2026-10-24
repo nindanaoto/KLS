@@ -1,0 +1,1355 @@
+{
+  "baseline": "7d2c909c6ab77a7201bad8559b024f4e97625840",
+  "main_unchanged": true,
+  "sources": {
+    "recovery": {
+      "tested_source_commit": "15b5d577a3ca5a3f07b26f651f8d0575616335c0",
+      "worktree": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS-paper-recovery",
+      "branch": "research/paper-recovery-reuse-20261024",
+      "snapshot_files": 759,
+      "all_snapshot_inputs_match": true,
+      "snapshot_manifest_sha256": "1fedd9d99de1ae5bfb5cf739376cd2a61714727d8f59582b0bdc4b62d251922f",
+      "commits": [
+        "15b5d57 Keep KLU AMD allocator ownership local to each ordering call",
+        "0954a9b fix: join small-factor cache builders before serial preparation",
+        "14d5d11 Test retained-update rejection and allocation failure before fresh recovery",
+        "aed5cfe Retain scaled symbolic proposals for checked updates across numeric epochs"
+      ]
+    },
+    "subtree": {
+      "tested_source_commit": "87244945779d6de18145982f0fa36bd0b4ca5864",
+      "worktree": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS-paper-subtree",
+      "branch": "research/paper-subtree-v2-20261024",
+      "snapshot_files": 763,
+      "all_snapshot_inputs_match": true,
+      "snapshot_manifest_sha256": "3125da59f41aac025722914b07b495e47a07be1cecc1296499085d4207048098",
+      "commits": [
+        "8724494 Keep KLU AMD allocator ownership local to each ordering call",
+        "b948fb1 Exercise rollback after partial subtree worker creation",
+        "71cedc6 Compact private subtree scratch and release phase storage within the fixed budget",
+        "bf27d53 test: require checked fallback when separator repair exceeds its heap cap",
+        "e87fa37 numeric: share collapsed pivot domains and construct fresh subtree factors",
+        "bf9bc37 numeric: bound speculative first-factor and repair heap allocations",
+        "95600aa api: reserve a truthful factor path for subtree first factorization",
+        "e2709fd fix: join small-factor cache builders before serial preparation"
+      ]
+    }
+  },
+  "policy": {
+    "baseline": "7d2c909c6ab77a7201bad8559b024f4e97625840",
+    "scope": "Isolated research branches; no main merge or push in this cycle",
+    "constraints": [
+      "Keep DEFAULT componentwise verification and original tolerance",
+      "No matrix-name selectors, benchmark-specific thresholds, production forced ND, or lowering 30000-row floor",
+      "Keep original first-factor 2B heap cap, private/pipeline barrier, BTF semantics and atomic caller publication",
+      "Use Apptainer; no dependency changes"
+    ],
+    "subtree": {
+      "steps": [
+        "Import bounded first-factor prerequisites only",
+        "Compact private worker maps and phase scratch",
+        "Test matching before explicit ND",
+        "Admit block-local BTF-preserving AUTO only after explicit ND fits and validates",
+        "Scheduler only after active native target exposes at least 10% avoidable waiting"
+      ],
+      "auto_gate": {
+        "min_rows": 30000,
+        "min_expected_updates": 16,
+        "max_speculative_fraction": 0.02
+      },
+      "stop": "Explicit-ND matched target exceeds unchanged cap: stop before AUTO admission and scheduler work"
+    },
+    "recovery": {
+      "steps": [
+        "Retain isolated scaled symbolic/pivot proposal on numeric epoch transitions",
+        "Require exact canonical CSC compatibility",
+        "Try incumbent and verify current RHS before updating retained proposal",
+        "One checked refactor; independent current-operator certification of every RHS",
+        "Reject to existing fresh MAX then SUM search; OOM propagates; reanalysis destroys cache"
+      ],
+      "target": "All three captured operators under deterministic row powers-of-two numeric changes; eight updates",
+      "secondary": [
+        "column powers-of-two",
+        "entrywise deterministic 1e-4 perturbation with analytic RHS"
+      ],
+      "timing": "Initial ABBA and opposite-order BAAB; two blocks for epoch targets, four for healthy paths; all observations retained",
+      "acceptance": "At least 2% improvement on each primary operator in both campaigns, valid baseline/candidate answers, actual accepted reuse; every qualified healthy setting <=1.02; each other setting with valid paired answers must also be <=1.02"
+    },
+    "qualification": [
+      "Full native and portable suites",
+      "ASan/UBSan/leaks",
+      "Scoped TSan with clean and race-positive controls; no suppressions",
+      "Allocation and partial thread-creation failure rollback",
+      "69 frozen matrices at 1 and 8 threads",
+      "28 fresh AUTO Xyce settings on both LLC domains, with KLU waveforms and step-count comparison"
+    ]
+  },
+  "qualification": {
+    "recovery": {
+      "native": {
+        "passed": true,
+        "tests": 45,
+        "receipt": "recovery-v6-native-full-completed.json",
+        "sha256": "6abb2245800e0812ffe5ae5c3ee63e11f70cbc930403edbba5b8a54eaee08e47"
+      },
+      "portable": {
+        "passed": true,
+        "tests": 45,
+        "receipt": "recovery-v6-portable-full-completed.json",
+        "sha256": "3418c2e2efbf7d5263b4468d88401bb74e65d664f58206aa6e6e975e50e18564"
+      },
+      "asan": {
+        "passed": true,
+        "tests": 3,
+        "receipt": "recovery-v6-asan-completed.json",
+        "sha256": "0dd27dbf75c473893171f0f53341bfdbe158bea226390bd5c3f7a8e1a34e62b1"
+      },
+      "tsan": {
+        "passed": true,
+        "tests": 5,
+        "receipt": "recovery-v6-tsan-completed.json",
+        "sha256": "81ec514c71e7af7538ab4f4922eb4dc1080754e438f7995cd0ef0a89febce9ae"
+      },
+      "allocator_asan": {
+        "passed": true,
+        "tests": 1,
+        "receipt": "recovery-v6-asan-allocator-completed.json",
+        "sha256": "fd787292261a644e7d6bd9e8ecaef31dac192c08318153513698dd0f93484f33"
+      }
+    },
+    "subtree": {
+      "native": {
+        "passed": true,
+        "tests": 47,
+        "receipt": "subtree-compact-v11-native-full-completed.json",
+        "sha256": "e82db4e12db127db82214eaf6b75ece10a81757bc0cf86a23e153e95f597a7a8"
+      },
+      "portable": {
+        "passed": true,
+        "tests": 47,
+        "receipt": "subtree-compact-v11-portable-full-completed.json",
+        "sha256": "37fdb5d1e6e8ced7a00a44b0ef646e06cbc250c79180182b6bc3c6fc23cf0138"
+      },
+      "asan": {
+        "passed": true,
+        "tests": 3,
+        "receipt": "subtree-compact-v11-asan-completed.json",
+        "sha256": "61fb7e9abf300c66201e13c14d184f7b2f05189e6542653fc98fb3220ce9d4d9"
+      },
+      "tsan": {
+        "passed": true,
+        "tests": 5,
+        "receipt": "subtree-compact-v11-tsan-completed.json",
+        "sha256": "6649a5d06727856c15e7c3416cfdfcf100358796f05b71b80c124735b6f462c6"
+      },
+      "allocator_asan": {
+        "passed": true,
+        "tests": 1,
+        "receipt": "subtree-compact-v11-asan-allocator-completed.json",
+        "sha256": "021ce0e2605a57a12eb86963d261a3040f035bba7acc376c82b7d488875aa8e7"
+      }
+    }
+  },
+  "recovery": {
+    "timing_scope": "Captured METIS operators at one thread with deterministic numeric changes; not an end-to-end AUTO Xyce speed claim.",
+    "frames": [
+      {
+        "case": "invert50",
+        "path": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/build/subtree-investigation-20261024/followup/invert50_mos1/failed-frame.bin",
+        "sha256": "b2c17a41a29e881d446815e3a797b77cbb1446524fa7dfc740c22e42a82cedb3",
+        "n": 255,
+        "nnz": 1359,
+        "options": {
+          "struct_size": 96,
+          "threads": 1,
+          "ordering": 4,
+          "orientation": 0,
+          "use_btf": 0,
+          "scale": -2,
+          "abi_version": 1263293187,
+          "pivot_tolerance": 0.001,
+          "memory_growth": 1.5,
+          "halt_if_singular": 1,
+          "fast_factor": 1,
+          "static_pivoting": 1,
+          "backend": 0,
+          "expected_refactorizations": 0,
+          "expected_solves": 0,
+          "record_tiny_solve_timing": 0,
+          "tuning_profile_path": 0
+        }
+      },
+      {
+        "case": "invertbjt",
+        "path": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/build/subtree-investigation-20261024/nd/invertbjt/failed-frame.bin",
+        "sha256": "deef075a5108af1dd749b2f6bff8e12578a8da3efbcfaccb921cf0ed94d6de95",
+        "n": 8903,
+        "nnz": 84617,
+        "options": {
+          "struct_size": 96,
+          "threads": 1,
+          "ordering": 4,
+          "orientation": 0,
+          "use_btf": 0,
+          "scale": -2,
+          "abi_version": 1263293187,
+          "pivot_tolerance": 0.001,
+          "memory_growth": 1.5,
+          "halt_if_singular": 1,
+          "fast_factor": 1,
+          "static_pivoting": 1,
+          "backend": 0,
+          "expected_refactorizations": 0,
+          "expected_solves": 0,
+          "record_tiny_solve_timing": 0,
+          "tuning_profile_path": 0
+        }
+      },
+      {
+        "case": "invertbjt-later",
+        "path": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/build/scaled-recovery-20261024/remaining/failed-frame.bin",
+        "sha256": "21e2f6c9b7e27099fa7d327e2078506b06b288db4dcf617d5cedf4b111236c5e",
+        "n": 8903,
+        "nnz": 84617,
+        "options": {
+          "struct_size": 96,
+          "threads": 1,
+          "ordering": 4,
+          "orientation": 0,
+          "use_btf": 0,
+          "scale": -2,
+          "abi_version": 1263293187,
+          "pivot_tolerance": 0.001,
+          "memory_growth": 1.5,
+          "halt_if_singular": 1,
+          "fast_factor": 1,
+          "static_pivoting": 1,
+          "backend": 0,
+          "expected_refactorizations": 0,
+          "expected_solves": 0,
+          "record_tiny_solve_timing": 0,
+          "tuning_profile_path": 0
+        }
+      }
+    ],
+    "corpus": {
+      "1": {
+        "count_per_side": 69,
+        "passes": {
+          "control": 68,
+          "candidate": 68
+        },
+        "new_regressions": [],
+        "failures": [
+          {
+            "matrix": "data/suitesparse/Rommes/bips07_1998.mtx",
+            "side": "candidate",
+            "status": null
+          },
+          {
+            "matrix": "data/suitesparse/Rommes/bips07_1998.mtx",
+            "side": "control",
+            "status": null
+          }
+        ],
+        "receipt_sha256": "29e2db26f42387f24e6d6f8349a520c435d2143b3fefb7ab7c31af1248821851"
+      },
+      "8": {
+        "count_per_side": 69,
+        "passes": {
+          "control": 68,
+          "candidate": 68
+        },
+        "new_regressions": [],
+        "failures": [
+          {
+            "matrix": "data/suitesparse/Rommes/bips07_1998.mtx",
+            "side": "candidate",
+            "status": null
+          },
+          {
+            "matrix": "data/suitesparse/Rommes/bips07_1998.mtx",
+            "side": "control",
+            "status": null
+          }
+        ],
+        "receipt_sha256": "9f794f6956f58bccd56d740b0be4d4b16cb25ce392c957d4fa767930eaa74564"
+      }
+    },
+    "xyce": {
+      "settings": 28,
+      "passes": 28,
+      "all_qualified": true,
+      "binary_sha256": "bae39720a4560f5937c82f670c39057b04e9e1af533d303f4cce2b44b7d90df8",
+      "archive_sha256": "410795c2a3f96a260fcd49a66ab691bf4605e5fe2bce0445b55fff68f076ec0d",
+      "domains": [
+        "llc32",
+        "llc96"
+      ],
+      "acceptance_timing": false,
+      "harness_interruption": "After 14 valid settings, a metadata lookup used nonexistent label llc97. Corrected to stored llc32; resumed the 14 missing settings without repeating completed settings."
+    },
+    "epoch_timing": {
+      "initial": [
+        {
+          "case": "invert50",
+          "family": 0,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.0003922038886230439,
+            "candidate": 0.0001579363743076101
+          },
+          "ratio": 0.40268946557897684,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.40268946557897684,
+          "median_peak_rss_kb": {
+            "control": 22524.0,
+            "candidate": 22396.0
+          }
+        },
+        {
+          "case": "invert50",
+          "family": 1,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.0003787483728956431,
+            "candidate": 0.00015787556185387075
+          },
+          "ratio": 0.41683495732764597,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.41683495732764597,
+          "median_peak_rss_kb": {
+            "control": 22524.0,
+            "candidate": 22396.0
+          }
+        },
+        {
+          "case": "invert50",
+          "family": 2,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.00027076560945715755,
+            "candidate": 0.0001302191085414961
+          },
+          "ratio": 0.4809292760722638,
+          "minimum_reuse_accepts": 5,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.4809292760722638,
+          "median_peak_rss_kb": {
+            "control": 22268.0,
+            "candidate": 22268.0
+          }
+        },
+        {
+          "case": "invertbjt",
+          "family": 0,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.09721234721655492,
+            "candidate": 0.03872226747625973
+          },
+          "ratio": 0.39832663838473253,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.39832663838473253,
+          "median_peak_rss_kb": {
+            "control": 87276.0,
+            "candidate": 125742.0
+          }
+        },
+        {
+          "case": "invertbjt",
+          "family": 1,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.09690998500445858,
+            "candidate": 0.03852979598741513
+          },
+          "ratio": 0.3975833448497848,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.3975833448497848,
+          "median_peak_rss_kb": {
+            "control": 87148.0,
+            "candidate": 125888.0
+          }
+        },
+        {
+          "case": "invertbjt",
+          "family": 2,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.013135582907125354,
+            "candidate": 0.013318169047124684
+          },
+          "ratio": 1.0139001170553525,
+          "minimum_reuse_accepts": 0,
+          "speed_reference_valid": true,
+          "qualified_ratio": 1.0139001170553525,
+          "median_peak_rss_kb": {
+            "control": 67788.0,
+            "candidate": 85890.0
+          }
+        },
+        {
+          "case": "invertbjt-later",
+          "family": 0,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.19594975144718774,
+            "candidate": 0.05718499481736217
+          },
+          "ratio": 0.29183499542623625,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.29183499542623625,
+          "median_peak_rss_kb": {
+            "control": 103090.0,
+            "candidate": 142532.0
+          }
+        },
+        {
+          "case": "invertbjt-later",
+          "family": 1,
+          "valid": {
+            "control": false,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.1678983517776942,
+            "candidate": 0.057174335583113134
+          },
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": false,
+          "qualified_ratio": null,
+          "unqualified_elapsed_ratio": 0.34052946308141735,
+          "median_peak_rss_kb": {
+            "control": 103236.0,
+            "candidate": 142900.0
+          }
+        },
+        {
+          "case": "invertbjt-later",
+          "family": 2,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.03496749475016259,
+            "candidate": 0.03519728015817236
+          },
+          "ratio": 1.0065714003720185,
+          "minimum_reuse_accepts": 0,
+          "speed_reference_valid": true,
+          "qualified_ratio": 1.0065714003720185,
+          "median_peak_rss_kb": {
+            "control": 84008.0,
+            "candidate": 103190.0
+          }
+        }
+      ],
+      "confirmation": [
+        {
+          "case": "invert50",
+          "family": 0,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.0003800684353336692,
+            "candidate": 0.00015670985158067197
+          },
+          "ratio": 0.41232009030977135,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.41232009030977135,
+          "median_peak_rss_kb": {
+            "control": 22268.0,
+            "candidate": 22268.0
+          }
+        },
+        {
+          "case": "invert50",
+          "family": 1,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.0004110081645194441,
+            "candidate": 0.00015748440637253225
+          },
+          "ratio": 0.3831661265334351,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.3831661265334351,
+          "median_peak_rss_kb": {
+            "control": 22268.0,
+            "candidate": 22652.0
+          }
+        },
+        {
+          "case": "invert50",
+          "family": 2,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.0002722361241467297,
+            "candidate": 0.00013109706924296916
+          },
+          "ratio": 0.48155647842058796,
+          "minimum_reuse_accepts": 5,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.48155647842058796,
+          "median_peak_rss_kb": {
+            "control": 22268.0,
+            "candidate": 22524.0
+          }
+        },
+        {
+          "case": "invertbjt",
+          "family": 0,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.09672368428437039,
+            "candidate": 0.0385030007455498
+          },
+          "ratio": 0.39807210643827295,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.39807210643827295,
+          "median_peak_rss_kb": {
+            "control": 87202.0,
+            "candidate": 125398.0
+          }
+        },
+        {
+          "case": "invertbjt",
+          "family": 1,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.09671479936514515,
+            "candidate": 0.03845908555376809
+          },
+          "ratio": 0.3976546072185544,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.3976546072185544,
+          "median_peak_rss_kb": {
+            "control": 87258.0,
+            "candidate": 125656.0
+          }
+        },
+        {
+          "case": "invertbjt",
+          "family": 2,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.013152828076272272,
+            "candidate": 0.013285381006426178
+          },
+          "ratio": 1.0100779033516778,
+          "minimum_reuse_accepts": 0,
+          "speed_reference_valid": true,
+          "qualified_ratio": 1.0100779033516778,
+          "median_peak_rss_kb": {
+            "control": 67808.0,
+            "candidate": 85850.0
+          }
+        },
+        {
+          "case": "invertbjt-later",
+          "family": 0,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.19552458501129877,
+            "candidate": 0.05675852615968324
+          },
+          "ratio": 0.2902884369063018,
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": true,
+          "qualified_ratio": 0.2902884369063018,
+          "median_peak_rss_kb": {
+            "control": 103352.0,
+            "candidate": 142656.0
+          }
+        },
+        {
+          "case": "invertbjt-later",
+          "family": 1,
+          "valid": {
+            "control": false,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.16785434370103758,
+            "candidate": 0.05723586781823542
+          },
+          "minimum_reuse_accepts": 8,
+          "speed_reference_valid": false,
+          "qualified_ratio": null,
+          "unqualified_elapsed_ratio": 0.3409853242772032,
+          "median_peak_rss_kb": {
+            "control": 103592.0,
+            "candidate": 142978.0
+          }
+        },
+        {
+          "case": "invertbjt-later",
+          "family": 2,
+          "valid": {
+            "control": true,
+            "candidate": true
+          },
+          "median_update_seconds": {
+            "control": 0.03496948626707308,
+            "candidate": 0.03508397420227993
+          },
+          "ratio": 1.0032739381508917,
+          "minimum_reuse_accepts": 0,
+          "speed_reference_valid": true,
+          "qualified_ratio": 1.0032739381508917,
+          "median_peak_rss_kb": {
+            "control": 83966.0,
+            "candidate": 103180.0
+          }
+        }
+      ]
+    },
+    "healthy_timing": {
+      "initial": {
+        "passed": true,
+        "summary": [
+          {
+            "n": 128,
+            "threads": 1,
+            "valid": true,
+            "median": {
+              "control": 2.6104215749001014e-06,
+              "candidate": 2.6149958785026683e-06
+            },
+            "ratio": 1.0017523237037842
+          },
+          {
+            "n": 128,
+            "threads": 8,
+            "valid": true,
+            "median": {
+              "control": 2.664846306288382e-06,
+              "candidate": 2.665020247150096e-06
+            },
+            "ratio": 1.0000652723803634
+          },
+          {
+            "n": 4096,
+            "threads": 1,
+            "valid": true,
+            "median": {
+              "control": 7.829343621779117e-05,
+              "candidate": 7.81431208451977e-05
+            },
+            "ratio": 0.9980801024983074
+          },
+          {
+            "n": 4096,
+            "threads": 8,
+            "valid": true,
+            "median": {
+              "control": 4.588677120409557e-05,
+              "candidate": 4.574806462187553e-05
+            },
+            "ratio": 0.9969771989054732
+          },
+          {
+            "n": 32768,
+            "threads": 1,
+            "valid": true,
+            "median": {
+              "control": 0.0006298322405200452,
+              "candidate": 0.0006314854235824896
+            },
+            "ratio": 1.0026247990434396
+          },
+          {
+            "n": 32768,
+            "threads": 8,
+            "valid": true,
+            "median": {
+              "control": 0.00036987336170568597,
+              "candidate": 0.00037066705772303976
+            },
+            "ratio": 1.002145858825014
+          }
+        ]
+      },
+      "confirmation": {
+        "passed": true,
+        "summary": [
+          {
+            "n": 128,
+            "threads": 1,
+            "valid": true,
+            "median": {
+              "control": 2.6121330165551626e-06,
+              "candidate": 2.6131723416256136e-06
+            },
+            "ratio": 1.0003978836697305
+          },
+          {
+            "n": 128,
+            "threads": 8,
+            "valid": true,
+            "median": {
+              "control": 2.6682986344894744e-06,
+              "candidate": 2.6657955913833575e-06
+            },
+            "ratio": 0.9990619329209395
+          },
+          {
+            "n": 4096,
+            "threads": 1,
+            "valid": true,
+            "median": {
+              "control": 7.810369424987584e-05,
+              "candidate": 7.818741869414225e-05
+            },
+            "ratio": 1.0010719652261075
+          },
+          {
+            "n": 4096,
+            "threads": 8,
+            "valid": true,
+            "median": {
+              "control": 4.551496431304258e-05,
+              "candidate": 4.5849517391616246e-05
+            },
+            "ratio": 1.0073503974708773
+          },
+          {
+            "n": 32768,
+            "threads": 1,
+            "valid": true,
+            "median": {
+              "control": 0.0006284815644903574,
+              "candidate": 0.000629864662187174
+            },
+            "ratio": 1.0022006973234578
+          },
+          {
+            "n": 32768,
+            "threads": 8,
+            "valid": true,
+            "median": {
+              "control": 0.00036907297726429533,
+              "candidate": 0.0003717406125360867
+            },
+            "ratio": 1.0072279344089747
+          }
+        ]
+      }
+    },
+    "gates": {
+      "correctness": true,
+      "primary_2_percent_both_orders": true,
+      "every_valid_paired_epoch_within_2_percent": true,
+      "healthy_within_2_percent_both_orders": true
+    },
+    "promotion_recommended": true
+  },
+  "subtree": {
+    "probes": [
+      {
+        "fields": {
+          "threads": "2",
+          "matched": "0",
+          "orientation": "transpose",
+          "status": "0",
+          "certificate": "1",
+          "bound": "7.74952691751924605395e-15",
+          "path": "klu_fallback",
+          "peak": "16789776",
+          "limit": "21850128",
+          "reason": "7",
+          "row": "22412",
+          "match_rows": "0"
+        },
+        "log": "subtree-probe-compact-v11-original-t2.log",
+        "sha256": "7e79d35e3f6b79bdc3cb3cd8bb4019c015afb02fd27f7ce5a36e3eb4287d42aa"
+      },
+      {
+        "fields": {
+          "threads": "8",
+          "matched": "0",
+          "orientation": "transpose",
+          "status": "0",
+          "certificate": "1",
+          "bound": "7.74952691751924605395e-15",
+          "path": "klu_fallback",
+          "peak": "16822192",
+          "limit": "21850128",
+          "reason": "7",
+          "row": "22412",
+          "match_rows": "0"
+        },
+        "log": "subtree-probe-compact-v11-original-t8.log",
+        "sha256": "c81bc686f50f3d02ff16eb2a18acfd282eadf76bed46738dfdf5a3adb36f2963"
+      },
+      {
+        "fields": {
+          "threads": "2",
+          "matched": "1",
+          "orientation": "transpose",
+          "status": "0",
+          "certificate": "1",
+          "bound": "7.88809513865358139031e-15",
+          "path": "klu_fallback",
+          "peak": "21736456",
+          "limit": "21850128",
+          "reason": "0",
+          "row": "0",
+          "match_rows": "32632"
+        },
+        "log": "subtree-probe-compact-v11-matched-t2.log",
+        "sha256": "48dd0c6c2b39fdaa2c52746cf2e3c1fc98afc2591718fbf2e3e74dea3a52a318"
+      },
+      {
+        "fields": {
+          "threads": "8",
+          "matched": "1",
+          "orientation": "transpose",
+          "status": "0",
+          "certificate": "1",
+          "bound": "7.88809513865358139031e-15",
+          "path": "klu_fallback",
+          "peak": "21847189",
+          "limit": "21850128",
+          "reason": "0",
+          "row": "0",
+          "match_rows": "32632"
+        },
+        "log": "subtree-probe-compact-v11-matched-t8.log",
+        "sha256": "d4965777f01e379b87f255d4dfc4f37e1d9b0df2acb61387b230589acbf7e94f"
+      }
+    ],
+    "unchanged_heap_limit_bytes": 21850128,
+    "matching": "Owned diagnostic SPRAL weighted-matching row permutation before ND, outside the numeric ledger; no claim that full matching+factor proposal meets the cap.",
+    "decision": "Stop before BTF-preserving AUTO admission: matched pipeline workspace cannot fit the unchanged numeric cap. Scheduler work gated off.",
+    "auto_admission_implemented": false,
+    "scheduler_implemented": false,
+    "production_promotion_recommended": false
+  },
+  "sanitizer_development_failures_preserved": [
+    "recovery-v4-tsan: cache preparation race; fixed by joining builders",
+    "subtree-compact-v9-tsan: independent KLU analysis writes global AMD allocator hooks; fixed by call-owned allocators"
+  ],
+  "papers": [
+    {
+      "path": "refs/1824801.1824814.pdf",
+      "sha256": "2db79e2135c4ab93760740a3046ccaf06b6da027c1af265a778c1f999e2e4c26"
+    },
+    {
+      "path": "refs/2509.07690.pdf",
+      "sha256": "33a68e505d779a8dfadacf536a2b6246112c4d7b5bbcaea655e25980ba688272"
+    },
+    {
+      "path": "refs/Advancing_General_Sparse_Linear-Equation_Solvers_via_Nested-Dissection-Based_Parallel_Scheduling_and_Randomized_Linear_Algebra.pdf",
+      "sha256": "561e4ac9fd220373e416cbc4bd4f5d11c1ba5de7effff9a132dad3de1dd9aa16"
+    },
+    {
+      "path": "refs/An_EScheduler-Based_Data_Dependence_Analysis_and_Task_Scheduling_for_Parallel_Circuit_Simulation.pdf",
+      "sha256": "d6a035fe1f8ebefc5aa0a7ec1942bd796a12d7860306d81e55173fe21f1edc5f"
+    },
+    {
+      "path": "refs/CKTSO_High-Performance_Parallel_Sparse_Linear_Solver_for_General_Circuit_Simulations.pdf",
+      "sha256": "0fed8d77eca126a7da5e3d60616d84d5a74ad63927b2d2cdfde8ff28a6651b91"
+    },
+    {
+      "path": "refs/NICSLU_An_Adaptive_Sparse_Matrix_Solver_for_Parallel_Circuit_Simulation.pdf",
+      "sha256": "c939b6342f8f07fd66ff4d4ef329c1b55293b4c0dd52a544f4bcd785bcb29d47"
+    },
+    {
+      "path": "refs/SubtreeLU_High-Performance_Parallel_Sparse_LU_Factorization_for_Circuit_Simulation.pdf",
+      "sha256": "5c5f85b925634a804620dd1f1d661f92d4227a18e82593b1a3b0f39aa94af778"
+    }
+  ],
+  "paper_mapping": {
+    "SubtreeLU": "Matching before ND, private scratch ownership, mandatory private/pipeline first-factor barrier; fixed-pattern refactor scheduling deferred until active target.",
+    "CKTSO": "Checked retained-pivot refactors motivate retained scaled proposal; every new operator/RHS is certified independently.",
+    "EScheduler": "Dependency-aware scheduling remains gated by native activation and measured avoidable waits.",
+    "HYLU_and_Advancing": "Kernel/scheduling and randomized outer-solve ideas remain deferred; no relaxed correctness policy."
+  },
+  "process_audit": [
+    {
+      "file": "healthy-v6-confirmation-processes.json",
+      "sha256": "ed0c61fbb2f1c97b65e37bfc6208b857039d41efe85f635fcfcac1f70289a889",
+      "stages": 100,
+      "nonzero_stages": []
+    },
+    {
+      "file": "healthy-v6-initial-processes.json",
+      "sha256": "2d8abde24a44e87a43a473d48cb4d51ed7b55e386818a4a077b76a994fda650f",
+      "stages": 100,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-epochs-v6-confirmation-processes.json",
+      "sha256": "16afa20abccf49c5af1ae522d3f7b1c8d9987505cc780f3c713ea6f40cd055f5",
+      "stages": 76,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-epochs-v6-initial-processes.json",
+      "sha256": "462740affe50be7b21c2414c3a3fed2c6f858546d9af2af0c99220825fa62985",
+      "stages": 76,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v1-native-processes.json",
+      "sha256": "59b3ae676268b3e2fc6e851ddf7c8144fcb771098f7f1ca725191e9d9932453c",
+      "stages": 3,
+      "nonzero_stages": [
+        {
+          "stage": "tests",
+          "exit_code": 8,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "recovery-v2-native-processes.json",
+      "sha256": "96af56d1e6093428b04120866596f20cfd37abc71e2f27ab4459cbaf9fe5e28e",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v3-native-processes.json",
+      "sha256": "779e4856245d8d27450d923a4fe8e26cd1bf9f9d3259e356770ef246f22b84ed",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v4-asan-processes.json",
+      "sha256": "2933075ae0c7134d8c0d7625514911c44de294499bc2af92fa9b4441ac5380e9",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v4-corpus-t1-processes.json",
+      "sha256": "0515db8976a9a3e1b482fa53c058116a6df3fbc8b2a327cee2779490937ad1cf",
+      "stages": 138,
+      "nonzero_stages": [
+        {
+          "stage": "41-candidate",
+          "exit_code": 1,
+          "timed_out": false
+        },
+        {
+          "stage": "41-control",
+          "exit_code": 1,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "recovery-v4-corpus-t8-processes.json",
+      "sha256": "6968b3c1b579530cd9b4be50ca2808338e7318e115affabe9bb7245db7c2bb72",
+      "stages": 138,
+      "nonzero_stages": [
+        {
+          "stage": "41-candidate",
+          "exit_code": 1,
+          "timed_out": false
+        },
+        {
+          "stage": "41-control",
+          "exit_code": 1,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "recovery-v4-native-full-processes.json",
+      "sha256": "52ec9d57f984f8fd86d160fb2e46da8db2eed733bc3e58587133fe53af9941be",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v4-native-processes.json",
+      "sha256": "9b033cc5b0986556f450db3de6e27d425bc07e2d6c514880904011057d2f0d05",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v4-portable-full-processes.json",
+      "sha256": "52e0951013623f36f4f8d6dab62eff364f2e86f32f54bd92d166d96a889c5b90",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v4-tsan-processes.json",
+      "sha256": "94c7c249c762eb9ef43914738a7ccaf8c9f0bac9977f4aeb2889298875c564c6",
+      "stages": 8,
+      "nonzero_stages": [
+        {
+          "stage": "race-run",
+          "exit_code": 66,
+          "timed_out": false
+        },
+        {
+          "stage": "kls_accuracy_owner",
+          "exit_code": 66,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "recovery-v5-asan-processes.json",
+      "sha256": "e2467d82dc254bfd0bc2f6ac5e72a61e4233102442338370094efa70d9cab486",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v5-native-full-processes.json",
+      "sha256": "a6667dfa679158e0b31e80bf07b4fac8dcd68883a992321a3bd5ba6472feeed1",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v5-portable-full-processes.json",
+      "sha256": "119e26f339f2be252c286dfaaa0f4c327424725b6fe0e0318f42311b72b7c2a8",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v6-asan-allocator-processes.json",
+      "sha256": "e3d9391189781fb058ea3a972cf45912d7c4aa1abebf40434e761d7bfa6cb04f",
+      "stages": 2,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v6-asan-processes.json",
+      "sha256": "c210d3cad2cd61f6e7908cbda05cbe4d5b5bc8ca91aef13c4f7e2fb4a864db5b",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v6-corpus-t1-processes.json",
+      "sha256": "5063b8c292c68720b1e02ab045f4b3d1c203efe31273c62c07706ba92eab709b",
+      "stages": 138,
+      "nonzero_stages": [
+        {
+          "stage": "41-candidate",
+          "exit_code": 1,
+          "timed_out": false
+        },
+        {
+          "stage": "41-control",
+          "exit_code": 1,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "recovery-v6-corpus-t8-processes.json",
+      "sha256": "fa46c6f3893fd03467f54ad25a525d2f96faea5e8c9909affb8bd860031fbadf",
+      "stages": 138,
+      "nonzero_stages": [
+        {
+          "stage": "41-candidate",
+          "exit_code": 1,
+          "timed_out": false
+        },
+        {
+          "stage": "41-control",
+          "exit_code": 1,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "recovery-v6-native-full-processes.json",
+      "sha256": "c988591b8be7319bac224bea6a5b919e20478c48666cec92ec7d6677bbdac931",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v6-portable-full-processes.json",
+      "sha256": "62ea489959207fe83d73113eca61ed76f205ae0e5957b5a81f281ef0e4b73a0a",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "recovery-v6-tsan-processes.json",
+      "sha256": "d41af8decb6616092d8af52c54e618e0ace5c9786bb1f9144f260debbd1898f3",
+      "stages": 11,
+      "nonzero_stages": [
+        {
+          "stage": "race-run",
+          "exit_code": 66,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "recovery-v6-xyce-processes.json",
+      "sha256": "55ef34189622ba28ef6b2d0c284486831b0c74dc951a994699acf0ef305f0fff",
+      "stages": 29,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v1-native-processes.json",
+      "sha256": "fded503e20a626ede301baca257206e2e966d738800f703d7c5cc44a932f8b2b",
+      "stages": 3,
+      "nonzero_stages": [
+        {
+          "stage": "tests",
+          "exit_code": 8,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "subtree-compact-v10-native-processes.json",
+      "sha256": "f18d79c2b0f137f090534432337397cb171cdd3f9223c964ca5486d0e9cc7f58",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v11-asan-allocator-processes.json",
+      "sha256": "767eee58ace92804a266055717e08ff249ad1eaf2d9597e9b0f72d2eefbb8212",
+      "stages": 2,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v11-asan-processes.json",
+      "sha256": "1a5a670193e827cbe9fe1870c40095573c13044ee709b3e5a72699e55917a898",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v11-native-full-processes.json",
+      "sha256": "dd5ece550fbf0040bb33e30fe223ce9a571b80a462072b37de8ebdc6841b267c",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v11-portable-full-processes.json",
+      "sha256": "78d6674c5df4db6c6b1d9c0a6d92707310ca2f6a36510c95f2e3c39a9f520c2b",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v11-tsan-processes.json",
+      "sha256": "27b1629522592813300528c4cb3bb3bf8ec9e2885c3855968d6a36735bda8e79",
+      "stages": 11,
+      "nonzero_stages": [
+        {
+          "stage": "race-run",
+          "exit_code": 66,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "subtree-compact-v2-native-processes.json",
+      "sha256": "e5b73b9571577eeafafc77594bb029f59a4ace22f9f77adc53d5cac0d10a1516",
+      "stages": 3,
+      "nonzero_stages": [
+        {
+          "stage": "tests",
+          "exit_code": 8,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "subtree-compact-v3-asan-processes.json",
+      "sha256": "22376e6cb97b3c703b8690ce0747eb7e909a1c2109bcacf641ad89229c6edc0d",
+      "stages": 3,
+      "nonzero_stages": [
+        {
+          "stage": "tests",
+          "exit_code": 8,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "subtree-compact-v3-native-processes.json",
+      "sha256": "79d7cf507478d966539ab7a1401003d71aa83e89074d62c1328edf5b89a7f48e",
+      "stages": 3,
+      "nonzero_stages": [
+        {
+          "stage": "tests",
+          "exit_code": 8,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "subtree-compact-v4-native-processes.json",
+      "sha256": "579ecfa1a13428d128ea8de5131749d2d1639e1f7fd061ce52b3e93c1b1922ff",
+      "stages": 3,
+      "nonzero_stages": [
+        {
+          "stage": "tests",
+          "exit_code": 8,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "subtree-compact-v9-asan-processes.json",
+      "sha256": "8dd51e7dfe2674150b0983bdda568602dc88b360dcbc8d4678a13ad46a8a74af",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v9-native-full-processes.json",
+      "sha256": "77e60d89ea67f77dcfe251b6fdc0750776ff9281c11138bf74381ffcc727f471",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v9-native-processes.json",
+      "sha256": "fa66ca160b97f300553f1c32ea2924b4dc322afdb426cb9d2440b9a7f5b532ea",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v9-portable-full-processes.json",
+      "sha256": "d144aecd94dcfc4e025c8eb1a8d8d04d69c872ad3aa23c062dac5c59e42cb487",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-compact-v9-tsan-processes.json",
+      "sha256": "5084e1a8d6f3deeabaa95e0005f04375ab66cccb2dd0c0323d97cba9d1bf6c10",
+      "stages": 10,
+      "nonzero_stages": [
+        {
+          "stage": "race-run",
+          "exit_code": 66,
+          "timed_out": false
+        },
+        {
+          "stage": "kls_certificate_pool",
+          "exit_code": 66,
+          "timed_out": false
+        }
+      ]
+    },
+    {
+      "file": "subtree-probe-compact-v11-processes.json",
+      "sha256": "351f37648b0786954b4948b628728e2b9e963f5a01ce3f8260fa6ed1de5db161",
+      "stages": 6,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-probe-compact-v5-processes.json",
+      "sha256": "b0a33cb721d114daba405c855cfa267e6a507e23be27ff022d63f0f8c5351670",
+      "stages": 6,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-probe-compact-v6-processes.json",
+      "sha256": "4708e1ddf0fe899d5c0f1d6deb6ce6c06561eee3142d9c1f1126d6d6f976a90e",
+      "stages": 6,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-probe-compact-v7-processes.json",
+      "sha256": "c5d3a86832a809bd90296e5f9158b37cffe20bf4dad3fb02877320a0dc22f905",
+      "stages": 6,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-probe-compact-v8-processes.json",
+      "sha256": "0c38aff79bd84451f2ba72b45448b8783b4cb46b43a991e6146d3be7b4cabbdb",
+      "stages": 6,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-probe-compact-v9-processes.json",
+      "sha256": "0584cb56af34ca14d55d53ceafb6d31fb692545cc7f56383ff088fff0c06c378",
+      "stages": 6,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-scaffold-native-processes.json",
+      "sha256": "d6da11a803703c1c41ffc51d22d37c3c40eef3fe55a2c021455c5e7f2764b90c",
+      "stages": 3,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-stage-decode-processes.json",
+      "sha256": "bbde1d17bdcd1cdae2c7b14a72488997ec99e3fc3dd305f79b4b3e0daa901257",
+      "stages": 1,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-stage-decode-v7-processes.json",
+      "sha256": "408886e31134a3331e85d4859d13eabd4eccab652a16d5cf11fbb4f03e3bc854",
+      "stages": 1,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-stage-decode-v8-t2-processes.json",
+      "sha256": "20fe5b00731722e1ebf582c79f3135a9ab66ef0b1f4e32b290ff007701557ed1",
+      "stages": 1,
+      "nonzero_stages": []
+    },
+    {
+      "file": "subtree-stage-decode-v8-t8-processes.json",
+      "sha256": "1cfdad44101cc0c350d809b7fa34b54b548020059c30a1de6649a4c5240d2191",
+      "stages": 1,
+      "nonzero_stages": []
+    }
+  ],
+  "raw_artifact_root": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/build/paper-pipeline-20261024",
+  "image": {
+    "path": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/build/kls-xyce-private.sif",
+    "sha256": "23503f55a69b0ec342abd7f82a65e4b22ff5482e0eac0090bafd6fa0175ebd2c"
+  },
+  "no_main_merge_or_push": true,
+  "artifact_manifest_sha256": "f6fef42005d343ed0366327d6e672da81847603ebd3c15a5a553e1d615470687"
+}
