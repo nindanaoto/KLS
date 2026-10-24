@@ -27,7 +27,7 @@ extern int kls_componentwise_certify_correction(kls_componentwise_plan**,int,siz
     const int64_t*,const int64_t*,const double*,const double*,const double*,int,
     long double*,kls_componentwise_executor,void*,double**);
 extern int kls_accuracy_certify(size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,double*);
-static int calls,residual_calls,strict_calls,reject_all,oom_call;
+static int calls,residual_calls,strict_calls,reject_all,oom_call,fail_cold_create;
 /* Trap both external cold-search entrances, including recovery after forced
  * exhaustion. No production instrumentation or acceptance shortcut is added. */
 int caller_forbidden_lattice(int n,const int64_t *p,const int64_t *r,const double *a,
@@ -46,10 +46,14 @@ int caller_correction_certificate(kls_componentwise_plan **plan,int threads,size
     kls_componentwise_executor executor,void *context,double **work) {
   ++calls;
   if(calls==oom_call) return -1;
-  if(reject_all) {
+  if(reject_all && (reject_all==1 ||
+       calls<=2*(1+KLS_COMPONENTWISE_MAX_CORRECTIONS))) {
     *upper=1;
     if(!*work) {*work=malloc(2*n*sizeof(**work));if(!*work) return -1;}
     memset(*work,0,n*sizeof(**work));++residual_calls;
+    if(fail_cold_create && calls==1+KLS_COMPONENTWISE_MAX_CORRECTIONS) {
+      fail_calloc=1;fail_cold_create=0;
+    }
     return 0;
   }
   return kls_componentwise_certify_correction(plan,threads,n,p,r,a,b,x,
@@ -80,13 +84,44 @@ int main(void) {
       if(fault<4) assert(status==KLS_ERR_OUT_OF_MEMORY);
       else if(fault==4) {
         assert(status==KLS_ERR_SOLVE_FAILED);
-        assert(residual_calls==1+KLS_COMPONENTWISE_MAX_CORRECTIONS);
-        assert(calls==1+KLS_COMPONENTWISE_MAX_CORRECTIONS);
+        /* Both independent scaled proposals are also rejected. */
+        assert(residual_calls==3*(1+KLS_COMPONENTWISE_MAX_CORRECTIONS));
+        assert(calls==3*(1+KLS_COMPONENTWISE_MAX_CORRECTIONS));
+        assert(!s->private_scaled_recovery);
       } else {
         assert(status==KLS_OK && calls==2 && residual_calls==0);
         assert(x[0]==1 && x[1]==1 && x[2]==77 && x[3]==2 && x[4]==2 && x[5]==88);
       }
       if(fault<5) assert(!memcmp(x,before,sizeof x));
+    }
+    /* Failure allocating the isolated proposal preserves the incumbent and
+     * every caller byte, including aliased, strided multi-RHS calls. */
+    {
+      double x[]={2,4,77,4,8,88},before[6];memcpy(before,x,sizeof x);
+      trilinos_klu_l_numeric *incumbent=s->numeric;
+      calls=residual_calls=strict_calls=0;reject_all=1;fail_cold_create=1;
+      int status=api==2?kls_refactor_solve(s,a,2,x,3,x,3):
+          api?kls_solve_transpose(s,2,x,3,x,3):kls_solve(s,2,x,3,x,3);
+      assert(status==KLS_ERR_OUT_OF_MEMORY && !memcmp(x,before,sizeof x));
+      assert(calls==1+KLS_COMPONENTWISE_MAX_CORRECTIONS);
+      assert(!s->private_scaled_recovery && s->numeric==incumbent);
+      assert(!fail_calloc && !fail_cold_create);reject_all=0;
+    }
+    /* Reject the incumbent and MAX proposal, then independently certify
+     * the SUM proposal and keep it only after all RHSs have passed. */
+    {
+      double b[]={2,4,77,4,8,88},x[]={91,91,91,91,91,91};
+      calls=residual_calls=strict_calls=0;reject_all=2;
+      int status=api==2?kls_refactor_solve(s,a,2,b,3,x,3):
+          api?kls_solve_transpose(s,2,b,3,x,3):kls_solve(s,2,b,3,x,3);
+      assert(status==KLS_OK && s->private_scaled_recovery);
+      assert(s->private_scaled_recovery->common.scale==1);
+      assert(x[0]==1 && x[1]==1 && x[2]==91 && x[3]==2 && x[4]==2 && x[5]==91);
+      reject_all=0;calls=0;
+      /* A cached recovery must not displace a now-certifiable incumbent. */
+      assert(kls_solve(s,2,b,3,x,3)==KLS_OK && calls==2);
+      assert(s->private_scaled_recovery->common.scale==1);
+      assert(kls_factor(s,a)==KLS_OK && !s->private_scaled_recovery);
     }
     calls=0;double b[]={2,4},x[]={1,1};
     assert(private_componentwise_finish(s,0,1,b,x,0,KLS_ERR_SOLVE_FAILED)==KLS_ERR_SOLVE_FAILED);

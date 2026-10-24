@@ -1282,6 +1282,8 @@ struct kls_solver {
   void *componentwise_work_context;
   struct kls_componentwise_team *componentwise_team;
   int componentwise_team_declined;
+  /* Recovery ownership is cold; preserve every established hot-field offset. */
+  kls_solver *private_scaled_recovery;
 };
 
 struct kls_generic_nd_trial;
@@ -7253,6 +7255,8 @@ static void clear_matrix(kls_solver *solver) {
   private_original_operator_free(solver->private_original);
   KLS_FREE_AND_NULL(solver->private_original);
   solver->private_original_valid = 0;
+  kls_destroy(solver->private_scaled_recovery);
+  solver->private_scaled_recovery = NULL;
   kls_metis_race_abandon(solver);
   destroy_refactor_pool(solver);
   free_numeric(solver);
@@ -7971,7 +7975,11 @@ int kls_factor(kls_solver *solver, const double *values) {
   const int public_epoch = solver && !solver->private_numeric_depth &&
     !solver->private_solve_depth;
   if (solver) {
-    if (public_epoch) solver->private_original_valid = 0;
+    if (public_epoch) {
+      solver->private_original_valid = 0;
+      kls_destroy(solver->private_scaled_recovery);
+      solver->private_scaled_recovery = NULL;
+    }
     ++solver->private_numeric_depth;
   }
   int status=private_factor_body(solver,values);
@@ -9490,7 +9498,11 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const int public_epoch = solver && !solver->private_numeric_depth &&
     !solver->private_solve_depth;
   if (solver) {
-    if (public_epoch) solver->private_original_valid = 0;
+    if (public_epoch) {
+      solver->private_original_valid = 0;
+      kls_destroy(solver->private_scaled_recovery);
+      solver->private_scaled_recovery = NULL;
+    }
     ++solver->private_numeric_depth;
   }
   int status=private_refactor_body(solver,values);
@@ -12873,6 +12885,8 @@ done:
   free(work);return status;
 }
 
+#include "kls_componentwise_recovery.inc"
+
 static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
     double *saved, double *x, int64_t ldx, int status) {
   if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) {
@@ -12893,7 +12907,10 @@ static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
   }
   if(s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR) {
     const double start=kls_now_seconds(),prior=s->stats.solve_seconds;
+    const int kernel_status=status;
     status=private_componentwise_finish(s,transpose,nrhs,saved,x,ldx,status);
+    if(kernel_status==KLS_OK && status==KLS_ERR_SOLVE_FAILED)
+      status=private_componentwise_scaled_recover(s,transpose,nrhs,saved,x,ldx);
     s->stats.solve_seconds=prior+kls_now_seconds()-start;
     free(saved);return status;
   }
