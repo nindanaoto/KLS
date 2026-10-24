@@ -1284,6 +1284,9 @@ struct kls_solver {
   int componentwise_team_declined;
   /* Recovery ownership is cold; preserve every established hot-field offset. */
   kls_solver *private_scaled_recovery;
+  int private_scaled_recovery_pending;
+  uint64_t private_scaled_recovery_updates, private_scaled_recovery_accepts;
+  uint64_t private_scaled_recovery_builds;
 };
 
 struct kls_generic_nd_trial;
@@ -7257,6 +7260,10 @@ static void clear_matrix(kls_solver *solver) {
   solver->private_original_valid = 0;
   kls_destroy(solver->private_scaled_recovery);
   solver->private_scaled_recovery = NULL;
+  solver->private_scaled_recovery_pending = 0;
+  solver->private_scaled_recovery_updates=0;
+  solver->private_scaled_recovery_accepts=0;
+  solver->private_scaled_recovery_builds=0;
   kls_metis_race_abandon(solver);
   destroy_refactor_pool(solver);
   free_numeric(solver);
@@ -7977,8 +7984,10 @@ int kls_factor(kls_solver *solver, const double *values) {
   if (solver) {
     if (public_epoch) {
       solver->private_original_valid = 0;
-      kls_destroy(solver->private_scaled_recovery);
-      solver->private_scaled_recovery = NULL;
+      /* Numeric validity ends here; compatible symbolic analysis and the
+       * preceding pivots may be proposed again after a measured failure. */
+      solver->private_scaled_recovery_pending =
+        solver->private_scaled_recovery != NULL;
     }
     ++solver->private_numeric_depth;
   }
@@ -9500,8 +9509,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
   if (solver) {
     if (public_epoch) {
       solver->private_original_valid = 0;
-      kls_destroy(solver->private_scaled_recovery);
-      solver->private_scaled_recovery = NULL;
+      /* Numeric validity ends here; compatible symbolic analysis and the
+       * preceding pivots may be proposed again after a measured failure. */
+      solver->private_scaled_recovery_pending =
+        solver->private_scaled_recovery != NULL;
     }
     ++solver->private_numeric_depth;
   }

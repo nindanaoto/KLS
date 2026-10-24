@@ -121,7 +121,8 @@ int main(void) {
       /* A cached recovery must not displace a now-certifiable incumbent. */
       assert(kls_solve(s,2,b,3,x,3)==KLS_OK && calls==2);
       assert(s->private_scaled_recovery->common.scale==1);
-      assert(kls_factor(s,a)==KLS_OK && !s->private_scaled_recovery);
+      assert(kls_factor(s,a)==KLS_OK && s->private_scaled_recovery);
+      assert(s->private_scaled_recovery_pending);
     }
     calls=0;double b[]={2,4},x[]={1,1};
     assert(private_componentwise_finish(s,0,1,b,x,0,KLS_ERR_SOLVE_FAILED)==KLS_ERR_SOLVE_FAILED);

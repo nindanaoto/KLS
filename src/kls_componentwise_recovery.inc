@@ -11,15 +11,40 @@ static int private_componentwise_scaled_recover(kls_solver *s,int transpose,
    * certificate for a previous RHS must never displace a usable incumbent.
    * The cached factor's public solve performs its own bounded correction. */
   if(s->private_scaled_recovery) {
-    int status=transpose
-      ?kls_solve_transpose(s->private_scaled_recovery,nrhs,b,0,x,ldx)
-      :kls_solve(s->private_scaled_recovery,nrhs,b,0,x,ldx);
+    kls_solver *retained=s->private_scaled_recovery;
+    int status=KLS_OK;
+    const int updating=s->private_scaled_recovery_pending;
+    if(updating) {
+      const private_original_operator *old=retained->private_original;
+      /* A hash alone cannot establish index or value-order compatibility.
+       * No previous numeric or RHS certificate is usable in this epoch. */
+      if(!old || old->n!=a->n || old->nnz!=a->nnz || !old->p ||
+         !old->rows || memcmp(old->p,a->p,(a->n+1)*sizeof(*a->p)) ||
+         memcmp(old->rows,a->rows,a->nnz*sizeof(*a->rows)))
+        status=KLS_ERR_SOLVE_FAILED;
+      else {
+        ++s->private_scaled_recovery_updates;
+        status=kls_refactor(retained,a->values);
+      }
+    }
+    if(status==KLS_OK)
+      status=transpose?kls_solve_transpose(retained,nrhs,b,0,x,ldx)
+                      :kls_solve(retained,nrhs,b,0,x,ldx);
     if(status==KLS_OK)
       status=private_componentwise_finish(s,transpose,nrhs,b,x,ldx,status);
-    return status;
+    if(status==KLS_OK) {s->private_scaled_recovery_pending=0;
+      if(updating) ++s->private_scaled_recovery_accepts;
+      return status;}
+    if(!updating) return status; /* A bad RHS cannot invalidate a certified factor. */
+    /* Failed fixed-pivot updates do not narrow the existing fresh search.
+     * Destroy the rejected proposal before constructing either fresh factor. */
+    kls_destroy(retained);s->private_scaled_recovery=NULL;
+    s->private_scaled_recovery_pending=0;
+    if(status==KLS_ERR_OUT_OF_MEMORY) return status;
   }
   const int scales[]={2,1};
   for(size_t attempt=0;attempt<sizeof(scales)/sizeof(scales[0]);++attempt) {
+    ++s->private_scaled_recovery_builds;
     kls_solver *trial=NULL;
     int status=kls_create(&trial);
     if(status!=KLS_OK) return status;
@@ -43,7 +68,8 @@ static int private_componentwise_scaled_recover(kls_solver *s,int transpose,
      * operator before retaining the factor, including CSR/permuted inputs. */
     if(status==KLS_OK)
       status=private_componentwise_finish(s,transpose,nrhs,b,x,ldx,status);
-    if(status==KLS_OK) {s->private_scaled_recovery=trial;return KLS_OK;}
+    if(status==KLS_OK) {s->private_scaled_recovery=trial;
+      s->private_scaled_recovery_pending=0;return KLS_OK;}
     kls_destroy(trial);
     if(status==KLS_ERR_OUT_OF_MEMORY) return status;
   }

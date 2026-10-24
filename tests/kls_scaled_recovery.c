@@ -39,6 +39,7 @@ static void witness(size_t n,size_t nz,const int64_t *p,const int64_t *j,
     }
     if(mode==1) {assert(!s->private_scaled_recovery);kls_destroy(s);continue;}
     kls_solver *retained=s->private_scaled_recovery;
+    assert(s->private_scaled_recovery_builds==1);
     assert(retained && retained->common.scale==2 && retained->private_cold_trial);
     assert(retained->tuning.snode_min_batch==s->tuning.snode_min_batch);
     assert(!retained->private_scaled_recovery && s->options.scale==-2);
@@ -62,13 +63,18 @@ static void witness(size_t n,size_t nz,const int64_t *p,const int64_t *j,
     assert(kls_solve(s,2,rhs,n+1,x,n+1)!=KLS_OK);
     for(size_t i=0;i<2*(n+1);++i) assert(x[i]==91);
     assert(s->private_scaled_recovery==retained);
-    /* Public updates discard the proposal before processing new values. */
+    /* Public updates invalidate numeric validity but retain compatible analysis. */
     for(size_t i=0;i<nz;++i) updated[i]=2*a[i];
-    assert(kls_refactor(s,updated)==KLS_OK && !s->private_scaled_recovery);
+    assert(kls_refactor(s,updated)==KLS_OK && s->private_scaled_recovery==retained);
+    assert(s->private_scaled_recovery_pending);
     for(size_t i=0;i<n;++i) rhs[i]=2*b[i];
     assert(kls_solve(s,1,rhs,0,x,0)==KLS_OK);
     assert(kls_componentwise_certify(n,p,j,updated,rhs,x,1,NULL,&bound)==1);
-    assert(kls_factor(s,a)==KLS_OK && !s->private_scaled_recovery);
+    assert(s->private_scaled_recovery==retained && !s->private_scaled_recovery_pending);
+    assert(s->private_scaled_recovery_updates==1 && s->private_scaled_recovery_accepts==1);
+    assert(s->private_scaled_recovery_builds==1);
+    assert(kls_factor(s,a)==KLS_OK && s->private_scaled_recovery==retained);
+    assert(s->private_scaled_recovery_pending);
     assert(kls_solve(s,1,b,0,x,0)==KLS_OK && s->private_scaled_recovery);
     assert(kls_analyze_csr(s,KLS_INDEX_INT64,n,p,j,0,&o)==KLS_OK);
     assert(!s->private_scaled_recovery);
