@@ -1,0 +1,958 @@
+{
+  "selection": "All locally available real square MatrixMarket matrices with n<=100000 and stored nnz<=1000000, frozen before observations; no outcome-based selection.",
+  "timeout_seconds": 60,
+  "address_space_gb": 8,
+  "systems": 3,
+  "threads": [
+    1,
+    8
+  ],
+  "rows": [
+    {
+      "path": "data/suitesparse/ATandT/onetone1.mtx",
+      "n": 36057,
+      "columns": 36057,
+      "stored_nnz": 341088,
+      "sha256": "ded46803001cfb890ddc5752ac166396c0f24c9948728586f65386c99dc588da"
+    },
+    {
+      "path": "data/suitesparse/ATandT/onetone2.mtx",
+      "n": 36057,
+      "columns": 36057,
+      "stored_nnz": 227628,
+      "sha256": "214282a5be03ee042c163d55c741f30e4a156911b62a53618cd36167f70dda79"
+    },
+    {
+      "path": "data/suitesparse/Bai/qh1484.mtx",
+      "n": 1484,
+      "columns": 1484,
+      "stored_nnz": 6110,
+      "sha256": "e2ec8f22ab9098cf03d2f2eae71d6c6a90f5a4e5f245986af3c3f1f08ae76bab"
+    },
+    {
+      "path": "data/suitesparse/Bomhof/circuit_1.mtx",
+      "n": 2624,
+      "columns": 2624,
+      "stored_nnz": 35823,
+      "sha256": "d30841bff2db8e81564a5d43cc7ca0be857a498856b1ad97e2be3faf28205e8e"
+    },
+    {
+      "path": "data/suitesparse/Bomhof/circuit_2.mtx",
+      "n": 4510,
+      "columns": 4510,
+      "stored_nnz": 21199,
+      "sha256": "625442cbac59550a21c0a94800a7cc8024bbeec37ff3bcf9247e9dd2085869b8"
+    },
+    {
+      "path": "data/suitesparse/Bomhof/circuit_3.mtx",
+      "n": 12127,
+      "columns": 12127,
+      "stored_nnz": 48137,
+      "sha256": "3f8a1b2640122564ecd4aed1ad5ca5b7653f21618067cb9f3e53ee4fff5cde3a"
+    },
+    {
+      "path": "data/suitesparse/Bomhof/circuit_4.mtx",
+      "n": 80209,
+      "columns": 80209,
+      "stored_nnz": 307604,
+      "sha256": "fe96401f10d7924cb83cde22b52ce05ed5dabdba6e87603f6c32634fac67dd1b"
+    },
+    {
+      "path": "data/suitesparse/Grund/meg1.mtx",
+      "n": 2904,
+      "columns": 2904,
+      "stored_nnz": 58142,
+      "sha256": "1222353864553e7f1fe369f478a3580c071e2ad1fcb21ad80b61b41f620c9bdf"
+    },
+    {
+      "path": "data/suitesparse/HB/1138_bus.mtx",
+      "n": 1138,
+      "columns": 1138,
+      "stored_nnz": 2596,
+      "sha256": "91af071985d646ea6f0b478db765444a232a7dd79cab55b1c264b292137207ae"
+    },
+    {
+      "path": "data/suitesparse/HB/gemat11.mtx",
+      "n": 4929,
+      "columns": 4929,
+      "stored_nnz": 33185,
+      "sha256": "b5f826b248b398085b2644b9caa964c224be51a947a823066e13e7edfa6cc279"
+    },
+    {
+      "path": "data/suitesparse/HB/gemat12.mtx",
+      "n": 4929,
+      "columns": 4929,
+      "stored_nnz": 33111,
+      "sha256": "49eb475fbf292d1e2a5773b8c32437d077518f2d23d14b1f0492e2fc3fc7c2a9"
+    },
+    {
+      "path": "data/suitesparse/HVDC/hvdc1.mtx",
+      "n": 24842,
+      "columns": 24842,
+      "stored_nnz": 159981,
+      "sha256": "b79efc26770450d0d611f7d9aaeef8bb05cfac5704e521f754e3e96b686cb666"
+    },
+    {
+      "path": "data/suitesparse/Hamm/add20.mtx",
+      "n": 2395,
+      "columns": 2395,
+      "stored_nnz": 17319,
+      "sha256": "69900d7a31168b699d7d34cabb540cae3b11eb740b2e11a368657e7b44ef5cf5"
+    },
+    {
+      "path": "data/suitesparse/Hamm/add32.mtx",
+      "n": 4960,
+      "columns": 4960,
+      "stored_nnz": 23884,
+      "sha256": "ee58157e7116b6e7d1f5fa2f0fd7f595fca621873cf5e3a91e459095621fca48"
+    },
+    {
+      "path": "data/suitesparse/Hamm/bcircuit.mtx",
+      "n": 68902,
+      "columns": 68902,
+      "stored_nnz": 375558,
+      "sha256": "0c2c3460a4529ca0d44599c2722793110ea5bfc7178c240bcf5d53e19a81720f"
+    },
+    {
+      "path": "data/suitesparse/Hamm/memplus.mtx",
+      "n": 17758,
+      "columns": 17758,
+      "stored_nnz": 126150,
+      "sha256": "7557ed285697c72b4692b41804725194798f9285ef39c0fe3823024214072aa1"
+    },
+    {
+      "path": "data/suitesparse/Hamrle/Hamrle2.mtx",
+      "n": 5952,
+      "columns": 5952,
+      "stored_nnz": 22162,
+      "sha256": "f45220c7ced841dbd15d97156f0ed433cd142698fc09b68141ba57916c9717f4"
+    },
+    {
+      "path": "data/suitesparse/IBM_Austin/coupled.mtx",
+      "n": 11341,
+      "columns": 11341,
+      "stored_nnz": 98523,
+      "sha256": "de32de1a9c42ebb31f49d7a1d5530913c47fc2458cad77413e6219017290b275"
+    },
+    {
+      "path": "data/suitesparse/IBM_EDA/ckt11752_dc_1.mtx",
+      "n": 49702,
+      "columns": 49702,
+      "stored_nnz": 333029,
+      "sha256": "af8ab2c319a8a312aa67a1b4ca7ef6f37d81a2eb08117f0703420dccb31161d9"
+    },
+    {
+      "path": "data/suitesparse/IBM_EDA/ckt11752_tr_0.mtx",
+      "n": 49702,
+      "columns": 49702,
+      "stored_nnz": 333029,
+      "sha256": "3c1307182835fad7ddc1679f632a96cdb0e540d2b99b91faef318f54b0cc0443"
+    },
+    {
+      "path": "data/suitesparse/IPSO/OPF_10000.mtx",
+      "n": 43887,
+      "columns": 43887,
+      "stored_nnz": 255799,
+      "sha256": "504c4b4cf001c2aa4c599bd2ce9a71ea187a1114ea3a1e5ab0bf3cdb502e8856"
+    },
+    {
+      "path": "data/suitesparse/IPSO/OPF_3754.mtx",
+      "n": 15435,
+      "columns": 15435,
+      "stored_nnz": 86854,
+      "sha256": "c94d28c71cb314e075b0285875f0872bb8cc9097f88af7099d7fe71d1b41b000"
+    },
+    {
+      "path": "data/suitesparse/LeGresley/LeGresley_2508.mtx",
+      "n": 2508,
+      "columns": 2508,
+      "stored_nnz": 16727,
+      "sha256": "532eda18050043d09a5f8a08c6b81c3ee5d3e6779f7c12ef41c92af1fd43b567"
+    },
+    {
+      "path": "data/suitesparse/LeGresley/LeGresley_4908.mtx",
+      "n": 4908,
+      "columns": 4908,
+      "stored_nnz": 30482,
+      "sha256": "d946e8c4231ea540f4cf3dfa78f7e364ce56c4fe2f046ae47fe37e61670f126d"
+    },
+    {
+      "path": "data/suitesparse/LeGresley/LeGresley_87936.mtx",
+      "n": 87936,
+      "columns": 87936,
+      "stored_nnz": 593276,
+      "sha256": "dd3faf56a54834ec18148dbe9c234f3c849b0772090e780c2b0b3adb84ce47e3"
+    },
+    {
+      "path": "data/suitesparse/LiuWenzhuo/powersim.mtx",
+      "n": 15838,
+      "columns": 15838,
+      "stored_nnz": 67562,
+      "sha256": "613a5925ba3a4d852752723aa2f83a0e6fe918516fec441d69e49453aab21b31"
+    },
+    {
+      "path": "data/suitesparse/QY/case9.mtx",
+      "n": 14454,
+      "columns": 14454,
+      "stored_nnz": 75801,
+      "sha256": "20a112f29cca08143ed962b467dfe64c80cb8711e65895146b57102230e859b7"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat03.mtx",
+      "n": 7602,
+      "columns": 7602,
+      "stored_nnz": 32653,
+      "sha256": "7f9dfd4115c81714b72d099f82dc0a24f47f653a45af73d0993ed9f598f1f74a"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat12.mtx",
+      "n": 1879,
+      "columns": 1879,
+      "stored_nnz": 12926,
+      "sha256": "7e9a2f42f7a36e33788af4a55d15c6ff8aa86f0e9c8eef1d799786480ebd9e44"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat13.mtx",
+      "n": 7598,
+      "columns": 7598,
+      "stored_nnz": 48922,
+      "sha256": "eb1f7337ed3e456797d2655b18457c4f70f38c08057e65532041e2c4f1d31d7c"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat15.mtx",
+      "n": 37261,
+      "columns": 37261,
+      "stored_nnz": 443573,
+      "sha256": "fb1850e6a9850b70fcb8787fa7b9a6bbccdcf1bafec9200d9463480a8a709227"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat16.mtx",
+      "n": 94294,
+      "columns": 94294,
+      "stored_nnz": 641159,
+      "sha256": "60edccbdf38a2bf08986d3cb5f86b212bf6f5492983645deb1032f2ef07fedc1"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat17.mtx",
+      "n": 94294,
+      "columns": 94294,
+      "stored_nnz": 641159,
+      "sha256": "08fd9d65f43406d5ef460d7684d7d8f535e8af4b1804a2b170a22dd553c1a9e8"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat18.mtx",
+      "n": 94294,
+      "columns": 94294,
+      "stored_nnz": 485143,
+      "sha256": "9dd72f9d6f887a987dc86389aea0d76945bc394171650081d61ed4f8c8082adf"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat20.mtx",
+      "n": 86916,
+      "columns": 86916,
+      "stored_nnz": 605045,
+      "sha256": "2b7eafb39ed6dddbe0d099293591d3feae9d916ca4f7cb71390c0880d517c9b3"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat22.mtx",
+      "n": 39899,
+      "columns": 39899,
+      "stored_nnz": 197264,
+      "sha256": "efc40cac10add663df33c3e74b26eb86f7c44223a2c356d63e20d13e19c258c7"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat25.mtx",
+      "n": 87190,
+      "columns": 87190,
+      "stored_nnz": 607235,
+      "sha256": "a75c7696701e4b44f3cec65b18d97790f63773941087780d3ae083b36e7618d8"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat26.mtx",
+      "n": 51032,
+      "columns": 51032,
+      "stored_nnz": 249302,
+      "sha256": "41176d4e3df795e4abe48652592d156e6ffc1749e8c73dc56aefb832923933bf"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat27.mtx",
+      "n": 20640,
+      "columns": 20640,
+      "stored_nnz": 99777,
+      "sha256": "73addff0ddeb456a18840bd5398707e9070a2c7356c25abcbbb266ec86c3ff4e"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat28.mtx",
+      "n": 87190,
+      "columns": 87190,
+      "stored_nnz": 607235,
+      "sha256": "174fd52b607ec9ae43c1282f28fda32e9690741dbf9d37ce326827325d94ed97"
+    },
+    {
+      "path": "data/suitesparse/Rommes/bips07_1693.mtx",
+      "n": 13275,
+      "columns": 13275,
+      "stored_nnz": 49044,
+      "sha256": "35ed53dc57afd71e2417a43c811c5da83a0d52df39dd2040f68054f16686b391"
+    },
+    {
+      "path": "data/suitesparse/Rommes/bips07_1998.mtx",
+      "n": 15066,
+      "columns": 15066,
+      "stored_nnz": 62198,
+      "sha256": "6022c18ac7a890c404339cad978fa63504a7b63565a8cdf5795ef33136ef2764"
+    },
+    {
+      "path": "data/suitesparse/Rommes/bips98_1142.mtx",
+      "n": 9735,
+      "columns": 9735,
+      "stored_nnz": 40983,
+      "sha256": "5a405b45bad475d6e20e911cef730757f099192a64211d3ac844589072f0a863"
+    },
+    {
+      "path": "data/suitesparse/Rommes/bips98_1450.mtx",
+      "n": 11305,
+      "columns": 11305,
+      "stored_nnz": 44678,
+      "sha256": "c4ef880a51abc8514636a524eea1e98b408631122fbfd9e6d97f06e460cc5bc0"
+    },
+    {
+      "path": "data/suitesparse/Rommes/bips98_606.mtx",
+      "n": 7135,
+      "columns": 7135,
+      "stored_nnz": 34738,
+      "sha256": "f4fe62c3c6f51ca9a146afcaa9302ecfc32c5f635bf94750a856e227c3845632"
+    },
+    {
+      "path": "data/suitesparse/Rommes/mimo28x28_system.mtx",
+      "n": 13251,
+      "columns": 13251,
+      "stored_nnz": 48737,
+      "sha256": "8481ac1d351c293a0a277db69b99d0a9d1ecaf7d1a7012119429eeb3f0db8b02"
+    },
+    {
+      "path": "data/suitesparse/Rommes/mimo46x46_system.mtx",
+      "n": 13250,
+      "columns": 13250,
+      "stored_nnz": 48735,
+      "sha256": "7b737cac074c843df8efb33a20f6ff472f781828ccf89698cfa0f3618a785818"
+    },
+    {
+      "path": "data/suitesparse/Rommes/mimo8x8_system.mtx",
+      "n": 13309,
+      "columns": 13309,
+      "stored_nnz": 48872,
+      "sha256": "678d7e684913463c80a38ce8ae7a56659ec40fb6b4867cd74532e58626028927"
+    },
+    {
+      "path": "data/suitesparse/Rommes/nopss_11k.mtx",
+      "n": 11685,
+      "columns": 11685,
+      "stored_nnz": 44941,
+      "sha256": "664e275d991d490f502b6365999e651672cd539bb0a607377f9d1faaf35e4f2d"
+    },
+    {
+      "path": "data/suitesparse/Rommes/ww_vref_6405.mtx",
+      "n": 13251,
+      "columns": 13251,
+      "stored_nnz": 48737,
+      "sha256": "c666e0bede9dcddad0e6c509affc7ceebcbdb1bf3cf3d74a51c465220efff867"
+    },
+    {
+      "path": "data/suitesparse/Rommes/xingo_afonso_itaipu.mtx",
+      "n": 13250,
+      "columns": 13250,
+      "stored_nnz": 48735,
+      "sha256": "26e0cb5d9c5f2bf4079c2300b2587d18ba40429752662c1e764f40048b7e5154"
+    },
+    {
+      "path": "data/suitesparse/Rommes/zeros_nopss_13k.mtx",
+      "n": 13296,
+      "columns": 13296,
+      "stored_nnz": 48827,
+      "sha256": "400f8740697a6feaf79f754b843a7731e6bcf71e4e43af7f01bf5b3600fb0f07"
+    },
+    {
+      "path": "data/suitesparse/Sandia/ASIC_100k.mtx",
+      "n": 99340,
+      "columns": 99340,
+      "stored_nnz": 954163,
+      "sha256": "19bf67d60d6b794934985ea1d5aa143f6a813592294d362c548f5cb6b4dbb725"
+    },
+    {
+      "path": "data/suitesparse/Sandia/ASIC_100ks.mtx",
+      "n": 99190,
+      "columns": 99190,
+      "stored_nnz": 578890,
+      "sha256": "3f9fe74bddc736aa790e00d235cbf2681ee02958f5e63d4a52181ec5c0bd5cd5"
+    },
+    {
+      "path": "data/suitesparse/Sandia/adder_dcop_01.mtx",
+      "n": 1813,
+      "columns": 1813,
+      "stored_nnz": 11156,
+      "sha256": "ea3ffaae3876647f7c341faca0edd8d6918a0568e8240edf047a2fa211831fcd"
+    },
+    {
+      "path": "data/suitesparse/Sandia/adder_trans_01.mtx",
+      "n": 1814,
+      "columns": 1814,
+      "stored_nnz": 14579,
+      "sha256": "c063d153517b87afe889864081adaed789b3a74035aef0abaff4dbc37f7036ae"
+    },
+    {
+      "path": "data/suitesparse/Sandia/fpga_dcop_01.mtx",
+      "n": 1220,
+      "columns": 1220,
+      "stored_nnz": 5892,
+      "sha256": "3e1d0cf250d95a978f25427dc04bb6f35db486ef19ab7a2069a1a15709b7f436"
+    },
+    {
+      "path": "data/suitesparse/Sandia/fpga_trans_01.mtx",
+      "n": 1220,
+      "columns": 1220,
+      "stored_nnz": 7382,
+      "sha256": "c243b83b5519f9770c0ed3ccff189a1b7d229ace8669c09cf5a2e6301fcde0ba"
+    },
+    {
+      "path": "data/suitesparse/Sandia/mult_dcop_01.mtx",
+      "n": 25187,
+      "columns": 25187,
+      "stored_nnz": 193276,
+      "sha256": "86f433e1e69c4d800bdb6c348c7ddccc7b8ed53d10287cc600b69db8f0934619"
+    },
+    {
+      "path": "data/suitesparse/Sandia/mult_dcop_02.mtx",
+      "n": 25187,
+      "columns": 25187,
+      "stored_nnz": 193276,
+      "sha256": "4daf1e61d2a2a592e3778b0245fe729e504d5b26b23da1639785aae5a5c4aab4"
+    },
+    {
+      "path": "data/suitesparse/Sandia/mult_dcop_03.mtx",
+      "n": 25187,
+      "columns": 25187,
+      "stored_nnz": 193216,
+      "sha256": "e937c66c389bd0c2557923fdca58631deabe0ace849e143dce14608398a10ae6"
+    },
+    {
+      "path": "data/suitesparse/TAMU_SmartGridCenter/ACTIVSg10K.mtx",
+      "n": 20000,
+      "columns": 20000,
+      "stored_nnz": 137736,
+      "sha256": "f8a6265a68a27f5692c6296f80293a0e1054d52021f9b3f18fc312f1f186796b"
+    },
+    {
+      "path": "data/suitesparse/TAMU_SmartGridCenter/ACTIVSg2000.mtx",
+      "n": 4000,
+      "columns": 4000,
+      "stored_nnz": 29336,
+      "sha256": "7404e01b55991e9b4b1fc4bd75c164eefce910bdbc151b2edb500a787672412c"
+    },
+    {
+      "path": "data/suitesparse/TAMU_SmartGridCenter/ACTIVSg70K.mtx",
+      "n": 69999,
+      "columns": 69999,
+      "stored_nnz": 154313,
+      "sha256": "8430210f15b8cfa61df463d261ae36639ba693d57423bd9c76dbd151ea453058"
+    },
+    {
+      "path": "data/suitesparse/TSOPF/TSOPF_FS_b39_c19.mtx",
+      "n": 76216,
+      "columns": 76216,
+      "stored_nnz": 998359,
+      "sha256": "ff7c6155df777227c6444c945e06ae669774d2649fc9c87eb5d27fa27d556234"
+    },
+    {
+      "path": "data/suitesparse/TSOPF/TSOPF_FS_b9_c1.mtx",
+      "n": 2454,
+      "columns": 2454,
+      "stored_nnz": 12831,
+      "sha256": "d5269cfd69f994a7aa24a79c4360b91ac23c3dea1f07224dea9608a4bdceef3c"
+    },
+    {
+      "path": "data/suitesparse/TSOPF/TSOPF_FS_b9_c6.mtx",
+      "n": 14454,
+      "columns": 14454,
+      "stored_nnz": 75801,
+      "sha256": "f7aa8ee04ff7c7b2f738b2694b674288ddc8453bac821f8494ff546e8bad7118"
+    },
+    {
+      "path": "data/suitesparse/TSOPF/TSOPF_RS_b9_c6.mtx",
+      "n": 7224,
+      "columns": 7224,
+      "stored_nnz": 54082,
+      "sha256": "4b2061b1b13f89d676496518e4aad82863e7ec93f26796f87d9a6d099c2cf111"
+    },
+    {
+      "path": "data/suitesparse/YZhou/circuit204.mtx",
+      "n": 1020,
+      "columns": 1020,
+      "stored_nnz": 5883,
+      "sha256": "086ea08c0036aac605c99e4cbfd25569771ef0bf84f3c423294634f97c2f4cec"
+    }
+  ],
+  "resource_exclusions": [
+    {
+      "path": "data/suitesparse/AMD/G2_circuit.mtx",
+      "n": 150102,
+      "columns": 150102,
+      "stored_nnz": 438388,
+      "sha256": "cddcb9e6e489878da31359a0032cf9e98211a0b974b10daf1b17fe4bf26fa941"
+    },
+    {
+      "path": "data/suitesparse/AMD/G3_circuit.mtx",
+      "n": 1585478,
+      "columns": 1585478,
+      "stored_nnz": 4623152,
+      "sha256": "ccaf9972ebe3f24731cec7295f281bdca59f31cb084663ef1011f0194a26a101"
+    },
+    {
+      "path": "data/suitesparse/ATandT/pre2.mtx",
+      "n": 659033,
+      "columns": 659033,
+      "stored_nnz": 5959282,
+      "sha256": "694f7798434609d2cbbe7b1219a31280da449afb2b2f94b2f711f4855b947e50"
+    },
+    {
+      "path": "data/suitesparse/ATandT/twotone.mtx",
+      "n": 120750,
+      "columns": 120750,
+      "stored_nnz": 1224224,
+      "sha256": "9d5ffb1f79a8f3dbee39b86282bb4ba82e04e879b4a5484cc5fb49e7c7d34260"
+    },
+    {
+      "path": "data/suitesparse/Freescale/Freescale1.mtx",
+      "n": 3428755,
+      "columns": 3428755,
+      "stored_nnz": 18920347,
+      "sha256": "243ae66ded633dd6e303cf7e7b2f6323edd439f71a6321105324962fe3e90804"
+    },
+    {
+      "path": "data/suitesparse/Freescale/Freescale2.mtx",
+      "n": 2999349,
+      "columns": 2999349,
+      "stored_nnz": 23042677,
+      "sha256": "2b132b552e46cc19a72165322822178d7a48bc017928ec72c86cf04efe74338e"
+    },
+    {
+      "path": "data/suitesparse/Freescale/FullChip.mtx",
+      "n": 2987012,
+      "columns": 2987012,
+      "stored_nnz": 26621990,
+      "sha256": "0c83ca1c69a42fb4d2917911d1c642e380dd58d7b6b860e44168a8ea9e3b19fc"
+    },
+    {
+      "path": "data/suitesparse/Freescale/circuit5M.mtx",
+      "n": 5558326,
+      "columns": 5558326,
+      "stored_nnz": 59524291,
+      "sha256": "2eff49ef611e86a0f32b4af52b93aadb70b4c4ef76b0e4a1747981f3025bd2c3"
+    },
+    {
+      "path": "data/suitesparse/Freescale/circuit5M_dc.mtx",
+      "n": 3523317,
+      "columns": 3523317,
+      "stored_nnz": 19194193,
+      "sha256": "435d665495cdc1e7e6afb8e4d61cab905c479d6b0820d2a7f52d5bfb7b65d42e"
+    },
+    {
+      "path": "data/suitesparse/Freescale/memchip.mtx",
+      "n": 2707524,
+      "columns": 2707524,
+      "stored_nnz": 14810202,
+      "sha256": "fac6311b28f5baaf94540f4a4e5dd6d0dc01760e03e186d37a17e8c07968e19f"
+    },
+    {
+      "path": "data/suitesparse/Freescale/nxp1.mtx",
+      "n": 414604,
+      "columns": 414604,
+      "stored_nnz": 2656177,
+      "sha256": "b66247322b03b03f6502cb82683c39b93b49bf3860b5e7014bb5dd4bd745a517"
+    },
+    {
+      "path": "data/suitesparse/Freescale/transient.mtx",
+      "n": 178866,
+      "columns": 178866,
+      "stored_nnz": 961790,
+      "sha256": "1040e734fbe1eabaca99d254f32962471ef9666f2a12508c9ad73d18b4c8f33a"
+    },
+    {
+      "path": "data/suitesparse/HVDC/hvdc2.mtx",
+      "n": 189860,
+      "columns": 189860,
+      "stored_nnz": 1347273,
+      "sha256": "b07262798ef0a4e16e71bcfc867ca8feacb1465bbfe96e4e68f619086c325be5"
+    },
+    {
+      "path": "data/suitesparse/Hamm/hcircuit.mtx",
+      "n": 105676,
+      "columns": 105676,
+      "stored_nnz": 513072,
+      "sha256": "4e26756b7187ffdc5726548925312fc29a691b40179f8d2091790efd8ec37994"
+    },
+    {
+      "path": "data/suitesparse/Hamm/scircuit.mtx",
+      "n": 170998,
+      "columns": 170998,
+      "stored_nnz": 958936,
+      "sha256": "7224052d8c289a07e0b9295d4c884a963322a7e745a86f853cd1893a8110ed34"
+    },
+    {
+      "path": "data/suitesparse/Hamrle/Hamrle3.mtx",
+      "n": 1447360,
+      "columns": 1447360,
+      "stored_nnz": 5514242,
+      "sha256": "ca8698a6c1444fd7a27f285c9dd81acc507c54fae443f1d671d28433d245c9c5"
+    },
+    {
+      "path": "data/suitesparse/IBM_EDA/dc1.mtx",
+      "n": 116835,
+      "columns": 116835,
+      "stored_nnz": 766396,
+      "sha256": "18c203271ac0286d29489e04b1bcc5f45acf9e397dce7f559628272bb53b930f"
+    },
+    {
+      "path": "data/suitesparse/IBM_EDA/dc2.mtx",
+      "n": 116835,
+      "columns": 116835,
+      "stored_nnz": 766396,
+      "sha256": "59fa428ac54ee63f8fa0586e75f257c4d5bfebd0e17ce0a7b7c291750dc858c6"
+    },
+    {
+      "path": "data/suitesparse/IBM_EDA/dc3.mtx",
+      "n": 116835,
+      "columns": 116835,
+      "stored_nnz": 766396,
+      "sha256": "3e8a700e99b599f295c65de976ac2abe21d8c22c9ed29a95ff9af710ba605e6a"
+    },
+    {
+      "path": "data/suitesparse/IBM_EDA/trans4.mtx",
+      "n": 116835,
+      "columns": 116835,
+      "stored_nnz": 766396,
+      "sha256": "483c4cfd42e940a97b1c263d695d0d11245cd74962a04601a592cec172c227ff"
+    },
+    {
+      "path": "data/suitesparse/IBM_EDA/trans5.mtx",
+      "n": 116835,
+      "columns": 116835,
+      "stored_nnz": 766396,
+      "sha256": "a5aa689c023ba50a7c5e7107384e18386ed7cd2dac0194133ffca4532c22cf84"
+    },
+    {
+      "path": "data/suitesparse/IPSO/HTC_336_4438.mtx",
+      "n": 226340,
+      "columns": 226340,
+      "stored_nnz": 565431,
+      "sha256": "70dd1c20e5992ea88a8601845e6893087d51c53c1fa1fd3845f2ffe4d4c9fee2"
+    },
+    {
+      "path": "data/suitesparse/IPSO/HTC_336_9129.mtx",
+      "n": 226340,
+      "columns": 226340,
+      "stored_nnz": 554881,
+      "sha256": "ed0694acdbd5de401ecabca6894ddcf2641383daef931ec89079cb7359658515"
+    },
+    {
+      "path": "data/suitesparse/PowerSystem/power197k.mtx",
+      "n": 197156,
+      "columns": 197156,
+      "stored_nnz": 3698357,
+      "sha256": "d19a36065e025fd5c13f9525ff8d233c401acbb134650c571f5cb0d23867f8cf"
+    },
+    {
+      "path": "data/suitesparse/Rajat/Raj1.mtx",
+      "n": 263743,
+      "columns": 263743,
+      "stored_nnz": 1302464,
+      "sha256": "90eb0ab6eb82b4947cee74e79f0b25582f1751b5d790f8304ea4b4021afb5a2a"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat21.mtx",
+      "n": 411676,
+      "columns": 411676,
+      "stored_nnz": 1893370,
+      "sha256": "ea416e8acb80c26d0ec49e2e8a3225d4405d9f4f7654545e59e322888a97e93f"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat23.mtx",
+      "n": 110355,
+      "columns": 110355,
+      "stored_nnz": 556938,
+      "sha256": "9db99e600f8f933e787a4ef14f3b77d2a622d473e698650daa4879c53b44ab74"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat24.mtx",
+      "n": 358172,
+      "columns": 358172,
+      "stored_nnz": 1948235,
+      "sha256": "8bbb3bdb37f278dce15d3c0b041de1c522aa248a5d9b4c12d8c2929ed70a67f4"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat29.mtx",
+      "n": 643994,
+      "columns": 643994,
+      "stored_nnz": 4866270,
+      "sha256": "856e789f86e7b03b3a1c9d6f614c06bcceea9ff308d38ca47a935fcf0055d3c5"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat30.mtx",
+      "n": 643994,
+      "columns": 643994,
+      "stored_nnz": 6175377,
+      "sha256": "7d1c7014c0bca863336d598eaac600d4f6c26a86816d1e45d625f210cf84cb13"
+    },
+    {
+      "path": "data/suitesparse/Rajat/rajat31.mtx",
+      "n": 4690002,
+      "columns": 4690002,
+      "stored_nnz": 20316253,
+      "sha256": "75f9a135e5d58c87be6a679536e48c31c661360f48d07a419bbdce0dc2d5dfa5"
+    },
+    {
+      "path": "data/suitesparse/Sandia/ASIC_320k.mtx",
+      "n": 321821,
+      "columns": 321821,
+      "stored_nnz": 2635364,
+      "sha256": "5c03d1a655a4cd3293baf2559f4871df3b0aeabf907cb682bc741d1d0c55af81"
+    },
+    {
+      "path": "data/suitesparse/Sandia/ASIC_320ks.mtx",
+      "n": 321671,
+      "columns": 321671,
+      "stored_nnz": 1827807,
+      "sha256": "fea68c8bf85aa4d6baba93229c9384b1de520ec8b48ea1e68a2bbe89ff13a334"
+    },
+    {
+      "path": "data/suitesparse/Sandia/ASIC_680k.mtx",
+      "n": 682862,
+      "columns": 682862,
+      "stored_nnz": 3871773,
+      "sha256": "f289e24fb1a251d8d6eb2531d0c383e5b36c3b7adecfe4c591ef5e7e62ae7c25"
+    },
+    {
+      "path": "data/suitesparse/Sandia/ASIC_680ks.mtx",
+      "n": 682712,
+      "columns": 682712,
+      "stored_nnz": 2329176,
+      "sha256": "b02ea7572a482d99169335146145f57adb02a9e0ac7b6cd859974fef4d24eb53"
+    },
+    {
+      "path": "data/suitesparse/TSOPF/TSOPF_FS_b39_c30.mtx",
+      "n": 120216,
+      "columns": 120216,
+      "stored_nnz": 1575639,
+      "sha256": "05282c8aeaa0b5846a0c863e6e1f7addca0e4c9aa20413b197f6955202581989"
+    },
+    {
+      "path": "data/suitesparse/TSOPF/TSOPF_RS_b2383.mtx",
+      "n": 38120,
+      "columns": 38120,
+      "stored_nnz": 16171169,
+      "sha256": "5eee71c510f977bf3b867b4e83aa648e3b25544240f8ac0b6bce0869ff57adde"
+    },
+    {
+      "path": "data/suitesparse/TSOPF/TSOPF_RS_b2383_c1.mtx",
+      "n": 38120,
+      "columns": 38120,
+      "stored_nnz": 16171169,
+      "sha256": "7c5f207eaf1c9c0550853176bfd583686a930749adb6a9ce84f561a4e040489b"
+    },
+    {
+      "path": "data/suitesparse/VLSI/ss1.mtx",
+      "n": 205282,
+      "columns": 205282,
+      "stored_nnz": 845089,
+      "sha256": "d7709c38b02140eddbe187ce6a0f48a98fda77489ec544ce2e07afb8f26eb9b6"
+    },
+    {
+      "path": "data/suitesparse/Williams/mac_econ_fwd500.mtx",
+      "n": 206500,
+      "columns": 206500,
+      "stored_nnz": 1273389,
+      "sha256": "af42fcc1e72ef6c470ed247358cd7dd19dcf4d3e05acd354087717b66abc1684"
+    },
+    {
+      "path": "data/suitesparse/Williams/mc2depi.mtx",
+      "n": 525825,
+      "columns": 525825,
+      "stored_nnz": 2100225,
+      "sha256": "23c3d7b3336b2344adf09e25511666194bfa4866e335602b2d864ed18968193b"
+    }
+  ],
+  "unavailable_generalization_downloads": {
+    "manifest": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/bench/suitesparse_generalization_dev_manifest.txt",
+    "manifest_sha256": "03d0d5e2c0394841dd66bcd79d31751aa772240e1680a63049e6100cdf271ece",
+    "rows": [
+      {
+        "name": "uni_chimera_i4",
+        "group": "FlowIPM22",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/FlowIPM22/uni_chimera_i4.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "shar_te2-b3",
+        "group": "JGD_Homology",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/JGD_Homology/shar_te2-b3.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "vibrobox",
+        "group": "Cote",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Cote/vibrobox.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "Zd_Jac3_db",
+        "group": "VanVelzen",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/VanVelzen/Zd_Jac3_db.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "windtunnel_evap3d",
+        "group": "Grueninger",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Grueninger/windtunnel_evap3d.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "sx-mathoverflow",
+        "group": "SNAP",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/SNAP/sx-mathoverflow.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "t3dl_e",
+        "group": "Oberwolfach",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Oberwolfach/t3dl_e.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "enron",
+        "group": "LAW",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/LAW/enron.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "struct4",
+        "group": "Rothberg",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Rothberg/struct4.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "GT01R",
+        "group": "Fluorem",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Fluorem/GT01R.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "c-18",
+        "group": "Schenk_IBMNA",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Schenk_IBMNA/c-18.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "cz5108",
+        "group": "CPM",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/CPM/cz5108.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "bibd_81_2",
+        "group": "JGD_BIBD",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/JGD_BIBD/bibd_81_2.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "extr1b",
+        "group": "Zitney",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Zitney/extr1b.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "pkustk02",
+        "group": "Chen",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Chen/pkustk02.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "lhr11",
+        "group": "Mallya",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Mallya/lhr11.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "TEM27623",
+        "group": "Guettel",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Guettel/TEM27623.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "epb3",
+        "group": "Averous",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Averous/epb3.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "onera_dual",
+        "group": "Pothen",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Pothen/onera_dual.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "MISKnowledgeMap",
+        "group": "Moqri",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Moqri/MISKnowledgeMap.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "coater2",
+        "group": "Brethour",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Brethour/coater2.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "sts4098",
+        "group": "Cannizzo",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Cannizzo/sts4098.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "Sieber",
+        "group": "MathWorks",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/MathWorks/Sieber.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      },
+      {
+        "name": "Chem97ZtZ",
+        "group": "Bates",
+        "url": "https://suitesparse-collection-website.herokuapp.com/MM/Bates/Chem97ZtZ.tar.gz",
+        "status": "unavailable",
+        "error": "HTTP Error 403: Forbidden"
+      }
+    ]
+  }
+}
