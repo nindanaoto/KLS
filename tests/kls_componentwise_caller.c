@@ -27,7 +27,7 @@ extern int kls_componentwise_certify_correction(kls_componentwise_plan**,int,siz
     const int64_t*,const int64_t*,const double*,const double*,const double*,int,
     long double*,kls_componentwise_executor,void*,double**);
 extern int kls_accuracy_certify(size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,double*);
-static int calls,residual_calls,strict_calls,reject_all,oom_call,fail_cold_create;
+static int calls,residual_calls,strict_calls,reject_all,oom_call,fail_cold_create,reject_remaining;
 /* Trap both external cold-search entrances, including recovery after forced
  * exhaustion. No production instrumentation or acceptance shortcut is added. */
 int caller_forbidden_lattice(int n,const int64_t *p,const int64_t *r,const double *a,
@@ -46,8 +46,9 @@ int caller_correction_certificate(kls_componentwise_plan **plan,int threads,size
     kls_componentwise_executor executor,void *context,double **work) {
   ++calls;
   if(calls==oom_call) return -1;
-  if(reject_all && (reject_all==1 ||
-       calls<=2*(1+KLS_COMPONENTWISE_MAX_CORRECTIONS))) {
+  if(reject_remaining>0 || (reject_all && (reject_all==1 ||
+       calls<=2*(1+KLS_COMPONENTWISE_MAX_CORRECTIONS)))) {
+    if(reject_remaining>0)--reject_remaining;
     *upper=1;
     if(!*work) {*work=malloc(2*n*sizeof(**work));if(!*work) return -1;}
     memset(*work,0,n*sizeof(**work));++residual_calls;
@@ -123,6 +124,22 @@ int main(void) {
       assert(s->private_scaled_recovery->common.scale==1);
       assert(kls_factor(s,a)==KLS_OK && s->private_scaled_recovery);
       assert(s->private_scaled_recovery_pending);
+      /* A rejected retained update must reach the original fresh MAX/SUM
+       * search, without publishing a rejected intermediate answer. */
+      uint64_t builds=s->private_scaled_recovery_builds;
+      uint64_t accepts=s->private_scaled_recovery_accepts;
+      reject_remaining=1+KLS_COMPONENTWISE_MAX_CORRECTIONS;
+      assert(private_componentwise_scaled_recover(s,0,2,b,x,3)==KLS_OK);
+      assert(reject_remaining==0 && s->private_scaled_recovery_builds==builds+1);
+      assert(s->private_scaled_recovery_accepts==accepts);
+      assert(!s->private_scaled_recovery_pending);
+      assert(kls_factor(s,a)==KLS_OK && s->private_scaled_recovery_pending);
+      memcpy(x,b,sizeof(x));double before[6];memcpy(before,x,sizeof(x));
+      trilinos_klu_l_numeric *incumbent=s->numeric;
+      fail_malloc=1;
+      assert(private_componentwise_scaled_recover(s,0,2,b,x,3)==KLS_ERR_OUT_OF_MEMORY);
+      assert(!fail_malloc && !memcmp(x,before,sizeof(x)) && s->numeric==incumbent);
+      assert(!s->private_scaled_recovery && !s->private_scaled_recovery_pending);
     }
     calls=0;double b[]={2,4},x[]={1,1};
     assert(private_componentwise_finish(s,0,1,b,x,0,KLS_ERR_SOLVE_FAILED)==KLS_ERR_SOLVE_FAILED);
