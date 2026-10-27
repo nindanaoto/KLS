@@ -656,6 +656,9 @@ if(KLS_BUILD_TESTS)
   target_link_libraries(kls_klu_allocator_ownership PRIVATE kls_suitesparse Threads::Threads)
   add_test(NAME kls_klu_allocator_ownership COMMAND kls_klu_allocator_ownership)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME kls_spice_campaign_integrity
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spice_campaign.py")
     add_test(NAME kls_componentwise_differential
       COMMAND "${CMAKE_COMMAND}" -E env "CC=${CMAKE_C_COMPILER}"
               "${Python3_EXECUTABLE}"
