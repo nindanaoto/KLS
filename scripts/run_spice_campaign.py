@@ -15,6 +15,7 @@ import shutil
 import signal
 import statistics
 import subprocess
+import threading
 import time
 
 CASES = (
@@ -36,6 +37,26 @@ def sha(path):
 
 def write_json(path, data):
     Path(path).write_text(json.dumps(data, indent=2, allow_nan=False) + '\n')
+
+
+def wait_child(child, seconds):
+    """Bound runtime without Popen.wait(timeout)'s 50 ms polling quantization."""
+    timed_out = threading.Event()
+    def expire():
+        if child.poll() is None:
+            timed_out.set()
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    timer = threading.Timer(seconds, expire)
+    timer.daemon = True
+    timer.start()
+    try:
+        return child.wait(), timed_out.is_set()
+    finally:
+        timer.cancel()
+        timer.join()
 
 
 def stage(source, destination, solver, threads, license_file):
@@ -236,13 +257,8 @@ def run(args):
         start = time.monotonic()
         with (dest / 'stdout.log').open('x') as stream:
             child = subprocess.Popen(cmd, stdout=stream, stderr=subprocess.STDOUT, env=env, start_new_session=True)
-            timeout = False
             try:
-                code = child.wait(timeout=1800)
-            except subprocess.TimeoutExpired:
-                timeout = True
-                os.killpg(child.pid, signal.SIGKILL)
-                code = child.wait()
+                code, timeout = wait_child(child, 1800)
             except BaseException:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait()

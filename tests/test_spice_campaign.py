@@ -3,6 +3,8 @@ import copy
 import importlib.util
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 
 spec = importlib.util.spec_from_file_location('campaign', Path(__file__).resolve().parents[1] / 'scripts/run_spice_campaign.py')
@@ -11,6 +13,15 @@ spec.loader.exec_module(c)
 
 
 class CampaignTests(unittest.TestCase):
+    def test_child_timeout_and_normal_exit(self):
+        child = subprocess.Popen([sys.executable, '-c', 'pass'], start_new_session=True)
+        self.assertEqual(c.wait_child(child, 10), (0, False))
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)'], start_new_session=True)
+        code, timeout = c.wait_child(child, .05)
+        self.assertTrue(timeout)
+        self.assertNotEqual(code, 0)
+        self.assertIsNotNone(child.returncode)
+
     def fixture(self):
         metadata = dict(cases=list(c.CASES), domains=list(c.DOMAINS), threads=[1, 8],
                         passes=4, sides=['baseline', 'candidate', 'ck', 'st'], complete_grid=True)
