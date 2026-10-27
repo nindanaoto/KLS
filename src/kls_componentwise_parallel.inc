@@ -354,15 +354,19 @@ static int componentwise_plan_select(kls_componentwise_plan *plan,int threads,
   const unsigned timing_csr=_mm_getcsr();
   for(int trial=0;trial<2;++trial) {
     const int side=(sample+trial)%2;
-    const double start=omp_get_wtime();
+    double start=0;
     /* The private witness is cheap enough that an idle team's wakeup can
      * dominate a single probe and permanently select slower serial rows.
-     * Compare bounded batches of complete current-input proofs on both sides.
+     * Warm both sides with bounded batches of complete current-input proofs,
+     * then compare their final runs. Timing the entire batch still biases
+     * the choice toward serial execution after an idle team. The intended
+     * comparison is steady throughput, not optional worker construction.
      * Every run must agree; rejected or unsupported runs are never repeated
      * for timing. Detailed-bound interfaces retain their single-run probes.
      * All calibration work remains in the public solve's cost. */
     const int runs=plan->verdict_only?KLS_CERTIFICATE_VERDICT_PROBE_RUNS:1;
     for(int run=0;run<runs;++run) {
+      if(run==0 || run==runs-1) start=omp_get_wtime();
       long double bound;
       const int status=componentwise_plan_run(plan,side?threads:1,p,rows,a,b,x,transpose,&bound);
       if(run==0) {result[side]=status;bounds[side]=bound;}
