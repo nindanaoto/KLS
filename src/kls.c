@@ -7249,6 +7249,77 @@ static void kls_metis_race_abandon(kls_solver *solver);
 
 #include "kls_original_operator.inc"
 
+/* Capture structural input ownership while the public caller's arrays are
+ * available. CSC stores A; CSR stores CSC(A^T). No working-map identity or
+ * generation is used as evidence that the original pattern is unchanged.
+ * Optional preparation failure keeps the existing exact-map fallback. */
+static private_original_operator *private_original_input_pattern(
+    kls_index_type type, int64_t n, const void *p, const void *rows,
+    int base, int csr) {
+  if (n <= 0 || !p || !rows || (base != 0 && base != 1) ||
+      (type != KLS_INDEX_INT32 && type != KLS_INDEX_INT64) ||
+      (uintmax_t)n > SIZE_MAX / sizeof(int64_t) - 1u)
+    return NULL;
+  const int64_t last = read_index(type, p, n);
+  if (last < base) return NULL;
+  const int64_t count = last - base;
+  if ((uintmax_t)count > SIZE_MAX / sizeof(int64_t) ||
+      (uintmax_t)count > SIZE_MAX / sizeof(double)) return NULL;
+  private_original_operator *a = calloc(1, sizeof(*a));
+  if (!a) return NULL;
+  a->n = (size_t)n;
+  a->nnz = (size_t)count;
+  a->p = malloc((a->n + 1u) * sizeof(*a->p));
+  a->rows = malloc((a->nnz ? a->nnz : 1u) * sizeof(*a->rows));
+  if (!a->p || !a->rows) goto declined;
+  int64_t previous = 0;
+  for (int64_t j = 0; j <= n; ++j) {
+    const int64_t raw = read_index(type, p, j);
+    if (raw < base || raw > last) goto declined;
+    const int64_t position = raw - base;
+    if ((!j && position != 0) || position < previous) goto declined;
+    a->p[j] = position;
+    previous = position;
+  }
+  for (int64_t k = 0; k < count; ++k) {
+    const int64_t raw = read_index(type, rows, k);
+    if (raw < base || raw - base >= n) goto declined;
+    a->rows[k] = raw - base;
+  }
+  a->map_flags = PRIVATE_ORIGINAL_INPUT_ORDER;
+  a->orientation = csr ? KLS_ORIENTATION_TRANSPOSE : KLS_ORIENTATION_NORMAL;
+  return a;
+declined:
+  private_original_operator_free(a);
+  free(a);
+  return NULL;
+}
+
+/* The caller still supplies values in its original compressed-input order.
+ * Fresh storage also permits aliasing with the preceding snapshot and leaves
+ * its bytes untouched if allocation or finite-input validation fails. */
+static int private_original_input_values(const kls_solver *s,
+    const double *values, private_original_operator *a) {
+  if (!s || !values || !private_original_operator_input_order(a) ||
+      !a->p || !a->rows || !a->n || a->n != (size_t)s->n ||
+      a->nnz > SIZE_MAX / sizeof(double)) return KLS_ERR_INVALID_ARGUMENT;
+  double *fresh = malloc((a->nnz ? a->nnz : 1u) * sizeof(*fresh));
+  if (!fresh) return KLS_ERR_OUT_OF_MEMORY;
+  if (s->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED) {
+    for (size_t k = 0; k < a->nnz; ++k) {
+      if (!isfinite(values[k])) {
+        free(fresh);
+        return KLS_ERR_INVALID_ARGUMENT;
+      }
+    }
+  }
+  /* Copy representations, including signaling NaNs, without FP arithmetic. */
+  if (a->nnz) memcpy(fresh, values, a->nnz * sizeof(*fresh));
+  free(a->values);
+  a->values = fresh;
+  return KLS_OK;
+}
+
 static void clear_matrix(kls_solver *solver) {
   kls_componentwise_team_destroy(solver->componentwise_team);
   solver->componentwise_team=NULL;
@@ -7860,7 +7931,10 @@ int kls_analyze_csc(kls_solver *solver,
   }
   adopt_candidate(solver, chosen);
   solver->accuracy_policy_locked=1;
-  fill_symbolic_stats(solver, elapsed);
+  const double input_pattern_start = kls_now_seconds();
+  solver->private_original = private_original_input_pattern(
+      index_type, n, col_ptr, row_idx, index_base, 0);
+  fill_symbolic_stats(solver, elapsed + (kls_now_seconds() - input_pattern_start));
   kls_maybe_start_metis_race(solver);
   free_candidate(&transpose);
   free_candidate(&normal);
@@ -7950,7 +8024,10 @@ int kls_analyze_csr(kls_solver *solver,
   }
   adopt_candidate(solver, chosen);
   solver->accuracy_policy_locked=1;
-  fill_symbolic_stats(solver, elapsed);
+  const double input_pattern_start = kls_now_seconds();
+  solver->private_original = private_original_input_pattern(
+      index_type, n, row_ptr, col_idx, index_base, 1);
+  fill_symbolic_stats(solver, elapsed + (kls_now_seconds() - input_pattern_start));
   kls_maybe_start_metis_race(solver);
   free_candidate(&normal);
   free_candidate(&transpose);
@@ -7974,7 +8051,9 @@ static int private_numeric_snapshot_finish(kls_solver *solver,
     solver->private_original = calloc(1, sizeof(*solver->private_original));
     if (!solver->private_original) return KLS_ERR_OUT_OF_MEMORY;
   }
-  status = private_original_operator_build(solver, values, solver->private_original);
+  status = private_original_operator_input_order(solver->private_original)
+    ? private_original_input_values(solver, values, solver->private_original)
+    : private_original_operator_build(solver, values, solver->private_original);
   solver->private_original_valid = status == KLS_OK;
   return status;
 }
@@ -12862,6 +12941,7 @@ static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs
   const private_original_operator *a=s->private_original;
   if(!s->private_original_valid || !a || a->n!=(size_t)s->n)
     return KLS_ERR_SOLVE_FAILED;
+  const int certificate_transpose = private_original_operator_operation(a, transpose);
   if(!ldx) ldx=(int64_t)a->n;
   double *work=NULL;
   for(int64_t rhs=0;rhs<nrhs;++rhs) {
@@ -12887,7 +12967,7 @@ static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs
       int certified=kls_componentwise_certify_correction(
           &s->componentwise_plan,
           owned_threads>1?owned_threads:certificate_threads,
-          a->n,a->p,a->rows,a->values,br,xr,transpose,&upper,
+          a->n,a->p,a->rows,a->values,br,xr,certificate_transpose,&upper,
           executor,executor?s:NULL,&work);
       if(certified==1) break;
       if(certified<0) {status=KLS_ERR_OUT_OF_MEMORY;goto done;}
@@ -12945,6 +13025,7 @@ static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
       status = KLS_ERR_SOLVE_FAILED;
     else {
       status = KLS_OK;
+      const int certificate_transpose = private_original_operator_operation(a, transpose);
       /* Standalone fixture calls have no public-call lifetime. Real APIs
        * retain one lazily started deadline through all nested solves/RHSs. */
       if (!s->private_caller_depth) s->private_cold_deadline = 0;
@@ -12953,12 +13034,12 @@ static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
         double bound;
         if (!kls_accuracy_certify(a->n, a->p, a->rows, a->values,
               saved + (size_t)k * a->n, x + (size_t)k * ldx,
-              transpose, &bound) &&
+              certificate_transpose, &bound) &&
             (!private_caller_recover(s,a,saved+(size_t)k*a->n,
-                                     x+(size_t)k*ldx,transpose,
+                                     x+(size_t)k*ldx,certificate_transpose,
                                      private_recovery_deadline(s)) ||
              !kls_accuracy_certify(a->n,a->p,a->rows,a->values,saved+(size_t)k*a->n,
-                           x+(size_t)k*ldx,transpose,&bound))) {
+                           x+(size_t)k*ldx,certificate_transpose,&bound))) {
           status = KLS_ERR_SOLVE_FAILED;
           break;
         }

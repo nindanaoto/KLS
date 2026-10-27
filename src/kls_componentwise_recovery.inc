@@ -7,6 +7,7 @@ static int private_componentwise_scaled_recover(kls_solver *s,int transpose,
   if(s->private_cold_trial || s->options.scale!=-2 || s->common.scale>0 ||
      !s->private_original_valid || !a || a->n!=(size_t)s->n)
     return KLS_ERR_SOLVE_FAILED;
+  const int recovery_transpose = private_original_operator_operation(a, transpose);
   /* Reuse a factor only after the incumbent fails on this actual RHS. A
    * certificate for a previous RHS must never displace a usable incumbent.
    * The cached factor's public solve performs its own bounded correction. */
@@ -28,7 +29,7 @@ static int private_componentwise_scaled_recover(kls_solver *s,int transpose,
       }
     }
     if(status==KLS_OK)
-      status=transpose?kls_solve_transpose(retained,nrhs,b,0,x,ldx)
+      status=recovery_transpose?kls_solve_transpose(retained,nrhs,b,0,x,ldx)
                       :kls_solve(retained,nrhs,b,0,x,ldx);
     if(status==KLS_OK)
       status=private_componentwise_finish(s,transpose,nrhs,b,x,ldx,status);
@@ -62,7 +63,7 @@ static int private_componentwise_scaled_recover(kls_solver *s,int transpose,
       status=kls_factor(trial,a->values);
     }
     if(status==KLS_OK)
-      status=transpose?kls_solve_transpose(trial,nrhs,b,0,x,ldx)
+      status=recovery_transpose?kls_solve_transpose(trial,nrhs,b,0,x,ldx)
                       :kls_solve(trial,nrhs,b,0,x,ldx);
     /* Independently check every RHS against the parent's current original
      * operator before retaining the factor, including CSR/permuted inputs. */

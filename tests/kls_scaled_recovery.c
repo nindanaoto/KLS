@@ -46,15 +46,15 @@ static void witness(size_t n,size_t nz,const int64_t *p,const int64_t *j,
     /* Reuse only a factor, never a previous answer or RHS certificate. */
     assert(kls_solve(s,2,rhs,n+1,rhs,n+1)==KLS_OK);
     assert(s->private_scaled_recovery==retained && rhs[n]==77);
-    const private_original_operator *original=s->private_original;
     memset(rhs,0,n*sizeof(double));
-    for(size_t c=0;c<n;++c)
-      for(int64_t k=original->p[c];k<original->p[c+1];++k)
-        rhs[c]+=original->values[k]; /* A^T * ones */
+    /* Build A^T * ones from the public CSR input, independently of the
+     * certificate snapshot's storage orientation. */
+    for(size_t row=0;row<n;++row)
+      for(int64_t k=p[row];k<p[row+1];++k)
+        rhs[j[k]]+=a[k];
     assert(kls_solve_transpose(s,1,rhs,0,x,0)==KLS_OK);
     long double bound;
-    assert(kls_componentwise_certify(n,original->p,original->rows,
-        original->values,rhs,x,1,NULL,&bound)==1);
+    assert(kls_componentwise_certify(n,p,j,a,rhs,x,0,NULL,&bound)==1);
     /* Failure in a later RHS cannot publish the earlier RHS or replace the
      * retained factor. Nonfinite input remains a failure under DEFAULT. */
     memcpy(rhs,b,n*sizeof(double));memcpy(rhs+n+1,b,n*sizeof(double));

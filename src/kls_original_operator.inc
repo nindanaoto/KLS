@@ -1,6 +1,6 @@
-/* Private integration preparation: caller-frame CSC from the retained maps
- * and CURRENT caller-order values. Never undo rounded scaling to recover A.
- * Public numeric updates publish this snapshot transactionally. */
+/* Private caller-frame snapshot. Public analysis can retain the caller's
+ * compressed input pattern; otherwise reconstruct CSC from the working maps.
+ * Values are always CURRENT and publication is transactional. */
 typedef struct private_original_operator {
   size_t n, nnz;
   int64_t *p, *rows;
@@ -12,6 +12,23 @@ typedef struct private_original_operator {
   unsigned map_flags;
   int orientation;
 } private_original_operator;
+
+/* Legacy map flags occupy bits 0..2. Only public analysis constructs this
+ * capability: its pattern is an owned copy of the original input, independent
+ * of subsequent working permutations, scaling and pivot recovery. */
+enum { PRIVATE_ORIGINAL_INPUT_ORDER = 0x100u };
+
+static inline int private_original_operator_input_order(
+    const private_original_operator *a) {
+  return a && (a->map_flags & PRIVATE_ORIGINAL_INPUT_ORDER) != 0u;
+}
+
+static inline int private_original_operator_operation(
+    const private_original_operator *a, int transpose) {
+  return (transpose != 0) ^
+    (private_original_operator_input_order(a) &&
+     a->orientation == KLS_ORIENTATION_TRANSPOSE);
+}
 
 static void private_original_operator_free(private_original_operator *a) {
   if (!a) return;
