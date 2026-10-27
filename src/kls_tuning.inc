@@ -27,6 +27,7 @@
 
 /* Bounded serial/parallel certificate timing trials; never an accuracy limit. */
 #define KLS_CERTIFICATE_PROBE_PAIRS 3
+#define KLS_CERTIFICATE_VERDICT_PROBE_RUNS 3
 
 /* Workload lifecycle and repeated-factorization admission. */
 #define KLS_LEAN_LIFECYCLE_REAUDIT_SAMPLES 4

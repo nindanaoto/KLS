@@ -355,7 +355,22 @@ static int componentwise_plan_select(kls_componentwise_plan *plan,int threads,
   for(int trial=0;trial<2;++trial) {
     const int side=(sample+trial)%2;
     const double start=omp_get_wtime();
-    result[side]=componentwise_plan_run(plan,side?threads:1,p,rows,a,b,x,transpose,bounds+side);
+    /* The private witness is cheap enough that an idle team's wakeup can
+     * dominate a single probe and permanently select slower serial rows.
+     * Compare bounded batches of complete current-input proofs on both sides.
+     * Every run must agree; rejected or unsupported runs are never repeated
+     * for timing. Detailed-bound interfaces retain their single-run probes.
+     * All calibration work remains in the public solve's cost. */
+    const int runs=plan->verdict_only?KLS_CERTIFICATE_VERDICT_PROBE_RUNS:1;
+    for(int run=0;run<runs;++run) {
+      long double bound;
+      const int status=componentwise_plan_run(plan,side?threads:1,p,rows,a,b,x,transpose,&bound);
+      if(run==0) {result[side]=status;bounds[side]=bound;}
+      else if(status!=result[side] || (status==1 && bound!=bounds[side])) {
+        plan->eligible=-1;_mm_setcsr(timing_csr);return 0;
+      }
+      if(status!=1) break;
+    }
     seconds[side]=omp_get_wtime()-start;
     /* A rejected first trial already requires the full certificate. Avoid a
      * second incomplete proof and calibrate only on accepted full traversals. */

@@ -40,6 +40,7 @@ typedef struct {int calls,mode;} executor_context;
 static int test_executor(void *opaque,void (*work)(void *,int),void *job,int threads) {
   executor_context *c=opaque;++c->calls;
   if(c->mode==1) return 0;
+  if(c->mode==3 && c->calls==2) return 0;
   for(int tid=threads-1;tid>=0;--tid) {
     if(c->mode==2 && tid==1) fesetround(FE_UPWARD);
     work(job,tid);
@@ -125,6 +126,38 @@ int main(void) {
     kls_componentwise_plan_reset(external);
   }
   kls_componentwise_plan_destroy(external);CHECK(live==0);
+  /* Private scheduling uses bounded complete batches, then stops probing.
+   * Detailed bounds still use one complete run per side and sample. */
+  {
+    kls_componentwise_plan *batched=NULL;executor_context team={0};double *work=NULL;
+    for(int i=0;i<KLS_CERTIFICATE_PROBE_PAIRS;++i)
+      CHECK(kls_componentwise_certify_verdict_correction(&batched,4,2,p,r,a,b,x,0,
+                &upper,test_executor,&team,&work)==1);
+    CHECK(team.calls==KLS_CERTIFICATE_PROBE_PAIRS*KLS_CERTIFICATE_VERDICT_PROBE_RUNS);
+    CHECK(!work && batched->direction[0].choice);
+    const int before=team.calls;batched->direction[0].choice=-1;
+    for(int i=0;i<20;++i)
+      CHECK(kls_componentwise_certify_verdict_correction(&batched,4,2,p,r,a,b,x,0,
+                &upper,test_executor,&team,&work)==1);
+    CHECK(team.calls==before);
+    double changed_rhs[]={4.1,11};
+    CHECK(kls_componentwise_certify_verdict_correction(&batched,4,2,p,r,a,changed_rhs,x,0,
+              &upper,test_executor,&team,&work)==0);
+    CHECK(work!=NULL);fault_free(work);work=NULL;
+    for(int i=0;i<KLS_CERTIFICATE_PROBE_PAIRS;++i)
+      CHECK(kls_componentwise_certify_executor(&batched,4,2,p,r,a,b,x,0,
+                &upper,test_executor,&team)==1);
+    CHECK(team.calls==before+KLS_CERTIFICATE_PROBE_PAIRS);
+    kls_componentwise_plan_destroy(batched);CHECK(live==0);
+    /* A worker failure partway through a batch invalidates the plan and
+     * retains the unchanged stateless certificate, rather than using the
+     * first accepted run as authorization for the incomplete batch. */
+    batched=NULL;team.calls=0;team.mode=3;
+    CHECK(kls_componentwise_certify_verdict_correction(&batched,4,2,p,r,a,b,x,0,
+              &upper,test_executor,&team,&work)==1);
+    CHECK(team.calls==2 && batched->eligible<0 && !work);
+    kls_componentwise_plan_destroy(batched);CHECK(live==0);
+  }
   /* Serial row requests must not launch even trial workers. The injected
    * unsupported worker would disable a plan if any parallel trial ran. */
   kls_componentwise_plan *serial_only=NULL;
