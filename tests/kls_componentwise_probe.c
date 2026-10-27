@@ -255,3 +255,28 @@ int kls_test_range_equivalence(size_t n,const int64_t *p,const int64_t *rows,
   (void)transpose;(void)threads;(void)mode;return -2;
 #endif
 }
+
+/* Exercise the actual private public-call boundary, including interval
+ * correction fallback, with a new plan for each exact-oracle case. */
+int kls_test_verdict(size_t n,const int64_t *p,const int64_t *rows,
+    const double *a,const double *b,const double *x,int transpose,
+    double *residual,long double *upper) {
+  (void)residual;
+  kls_componentwise_plan *plan=NULL;
+  double *work=NULL;
+  int result=kls_componentwise_certify_verdict_correction(&plan,1,n,p,rows,
+      a,b,x,transpose,upper,NULL,NULL,&work);
+  free(work);kls_componentwise_plan_destroy(plan);return result;
+}
+int kls_test_verdict_activation(void) {
+#if KLS_COMPONENTWISE_HAS_ACCUMULATED && defined(_OPENMP)
+  int64_t p[]={0,1},rows[]={0};double a[]={1},b[]={1},x[]={1};
+  long double upper; kls_componentwise_plan *plan=NULL;double *work=NULL;
+  int result=kls_componentwise_certify_verdict_correction(&plan,1,1,p,rows,
+      a,b,x,0,&upper,NULL,NULL,&work);
+  int active=result==1 && plan && plan->verdict_only && upper>1e-9L;
+  free(work);kls_componentwise_plan_destroy(plan);return active;
+#else
+  return -1;
+#endif
+}

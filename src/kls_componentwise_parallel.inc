@@ -12,6 +12,7 @@ struct kls_componentwise_plan {
   size_t *rowptr;
   int64_t *positions,*columns;
   int eligible,threads;
+  int verdict_only; /* Output contract, never a cached answer. */
   kls_componentwise_executor executor;
   void *executor_context;
   struct {
@@ -208,7 +209,7 @@ static int componentwise_plan_row(const kls_componentwise_plan *plan,size_t row,
 /* Taking the maximum commutes with exact binary64-to-extended conversion.
  * Keep binary64 bounds in their native format through a complete row range;
  * retain the extended maximum for any row requiring that proof. */
-static int componentwise_plan_range(const kls_componentwise_plan *plan,
+static int componentwise_plan_range_original(const kls_componentwise_plan *plan,
     size_t first,size_t last,const int64_t *p,const int64_t *rows,
     const double *a,const double *b,const double *x,int transpose,
     int binary64_permitted,long double tolerance,long double *upper) {
@@ -228,6 +229,22 @@ static int componentwise_plan_range(const kls_componentwise_plan *plan,
   const long double binary64_extended=(long double)binary64_maximum;
   *upper=extended_maximum>binary64_extended?extended_maximum:binary64_extended;
   return 1;
+}
+
+typedef struct { double value; int ready; } componentwise_tolerance64_cache;
+#include "kls_componentwise_verdict_witness.inc"
+
+static int componentwise_plan_range(const kls_componentwise_plan *plan,
+    size_t first,size_t last,const int64_t *p,const int64_t *rows,
+    const double *a,const double *b,const double *x,int transpose,
+    int binary64_permitted,long double tolerance,long double *upper) {
+  /* Degree+1 must fit the exact signed conversion in the witness. The plan
+   * has already validated every coordinate and rejected duplicates. */
+  if(plan->verdict_only && (uintmax_t)plan->nnz<=UINT64_C(0x0000ffffffffffff))
+    return componentwise_plan_range_verdict_exact_domain(plan,first,last,p,rows,
+        a,b,x,transpose,binary64_permitted,tolerance,upper);
+  return componentwise_plan_range_original(plan,first,last,p,rows,a,b,x,
+      transpose,binary64_permitted,tolerance,upper);
 }
 
 typedef struct {
@@ -374,7 +391,7 @@ static int componentwise_plan_select(kls_componentwise_plan *plan,int threads,
 static int componentwise_certify_executor_body(kls_componentwise_plan **owner,int threads,
     size_t n,const int64_t *p,const int64_t *rows,const double *a,
     const double *b,const double *x,int transpose,long double *upper,
-    kls_componentwise_executor executor,void *context,double **correction) {
+    kls_componentwise_executor executor,void *context,double **correction,int verdict_only) {
   if(upper) *upper=INFINITY;
   int accumulated_rejected=0;
 #if KLS_COMPONENTWISE_HAS_ACCUMULATED && defined(_OPENMP)
@@ -388,6 +405,10 @@ static int componentwise_certify_executor_body(kls_componentwise_plan **owner,in
       if(plan->eligible && (plan->n!=n || plan->nnz!=p[n])) kls_componentwise_plan_reset(plan);
       if(!plan->eligible) componentwise_plan_build(plan,n,p,rows);
       if(plan->eligible>0) {
+        if(plan->verdict_only!=verdict_only) {
+          plan->verdict_only=verdict_only;
+          plan->threads=0; /* Re-measure after changing the output contract. */
+        }
         if(plan->executor!=executor || plan->executor_context!=context) {
           plan->executor=executor;plan->executor_context=context;
           plan->threads=0; /* Reset both timing choices on executor changes. */
@@ -417,7 +438,7 @@ static int componentwise_certify_executor_body(kls_componentwise_plan **owner,in
     }
   }
 #else
-  (void)owner;(void)threads;(void)executor;(void)context;
+  (void)owner;(void)threads;(void)executor;(void)context;(void)verdict_only;
 #endif
   return componentwise_certify_body(n,p,rows,a,b,x,transpose,NULL,upper,correction,
                                    accumulated_rejected);
@@ -428,7 +449,7 @@ int kls_componentwise_certify_executor(kls_componentwise_plan **owner,int thread
     const double *b,const double *x,int transpose,long double *upper,
     kls_componentwise_executor executor,void *context) {
   return componentwise_certify_executor_body(owner,threads,n,p,rows,a,b,x,
-      transpose,upper,executor,context,NULL);
+      transpose,upper,executor,context,NULL,0);
 }
 
 int kls_componentwise_certify_correction(kls_componentwise_plan **owner,int threads,
@@ -436,7 +457,17 @@ int kls_componentwise_certify_correction(kls_componentwise_plan **owner,int thre
     const double *b,const double *x,int transpose,long double *upper,
     kls_componentwise_executor executor,void *context,double **correction) {
   return componentwise_certify_executor_body(owner,threads,n,p,rows,a,b,x,
-      transpose,upper,executor,context,correction);
+      transpose,upper,executor,context,correction,0);
+}
+
+/* On acceptance only the verdict is consumed. On rejection the existing
+ * interval path still supplies the bound and correction RHS, unchanged. */
+int kls_componentwise_certify_verdict_correction(kls_componentwise_plan **owner,int threads,
+    size_t n,const int64_t *p,const int64_t *rows,const double *a,
+    const double *b,const double *x,int transpose,long double *failure_upper,
+    kls_componentwise_executor executor,void *context,double **correction) {
+  return componentwise_certify_executor_body(owner,threads,n,p,rows,a,b,x,
+      transpose,failure_upper,executor,context,correction,1);
 }
 
 int kls_componentwise_certify_planned(kls_componentwise_plan **owner,int threads,

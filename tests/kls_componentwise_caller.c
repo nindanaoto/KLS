@@ -10,20 +10,20 @@ static void *caller_calloc(size_t n,size_t size) {
 }
 #define malloc caller_malloc
 #define calloc caller_calloc
-#define kls_componentwise_certify_correction caller_correction_certificate
+#define kls_componentwise_certify_verdict_correction caller_correction_certificate
 #define kls_accuracy_certify caller_strict_certificate
 #define kls_accuracy_lattice_recover caller_forbidden_lattice
 #define kls_accuracy_lattice_schedule caller_forbidden_schedule
 #include "../src/kls.c"
 #undef malloc
 #undef calloc
-#undef kls_componentwise_certify_correction
+#undef kls_componentwise_certify_verdict_correction
 #undef kls_accuracy_certify
 #undef kls_accuracy_lattice_recover
 #undef kls_accuracy_lattice_schedule
 #undef NDEBUG
 #include <assert.h>
-extern int kls_componentwise_certify_correction(kls_componentwise_plan**,int,size_t,
+extern int kls_componentwise_certify_verdict_correction(kls_componentwise_plan**,int,size_t,
     const int64_t*,const int64_t*,const double*,const double*,const double*,int,
     long double*,kls_componentwise_executor,void*,double**);
 extern int kls_accuracy_certify(size_t,const int64_t*,const int64_t*,const double*,const double*,const double*,int,double*);
@@ -57,7 +57,7 @@ int caller_correction_certificate(kls_componentwise_plan **plan,int threads,size
     }
     return 0;
   }
-  return kls_componentwise_certify_correction(plan,threads,n,p,r,a,b,x,
+  return kls_componentwise_certify_verdict_correction(plan,threads,n,p,r,a,b,x,
       transpose,upper,executor,context,work);
 }
 int caller_strict_certificate(size_t n,const int64_t *p,const int64_t *r,const double *a,

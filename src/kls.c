@@ -12964,7 +12964,7 @@ static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs
       kls_componentwise_executor executor=owned_threads>1
         ?private_componentwise_execute
         :certificate_threads>1?private_componentwise_execute_dedicated:NULL;
-      int certified=kls_componentwise_certify_correction(
+      int certified=kls_componentwise_certify_verdict_correction(
           &s->componentwise_plan,
           owned_threads>1?owned_threads:certificate_threads,
           a->n,a->p,a->rows,a->values,br,xr,certificate_transpose,&upper,

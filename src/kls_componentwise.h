@@ -36,4 +36,13 @@ int kls_componentwise_certify_correction(kls_componentwise_plan **plan,int threa
 int kls_componentwise_certify(size_t n, const int64_t *p,
     const int64_t *rows, const double *a, const double *b, const double *x,
     int transpose, double *residual, long double *upper);
+/* Private verdict/correction interface. All current rows must satisfy the
+ * same componentwise tolerance. The successful bound is not part of this
+ * interface's output contract. On rejection, failure_upper and correction
+ * have exactly the existing correction-interface semantics. Legacy detailed
+ * interfaces above retain their accepted-bound contract. */
+int kls_componentwise_certify_verdict_correction(kls_componentwise_plan **plan,int threads,
+    size_t n,const int64_t *p,const int64_t *rows,const double *a,
+    const double *b,const double *x,int transpose,long double *failure_upper,
+    kls_componentwise_executor executor,void *context,double **correction);
 #endif

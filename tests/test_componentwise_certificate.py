@@ -25,6 +25,9 @@ class CertificateTests(unittest.TestCase):
             C.POINTER(C.c_double),C.POINTER(C.c_double),C.POINTER(C.c_double),
             C.c_int,C.POINTER(C.c_double),C.POINTER(C.c_longdouble)]
         cls.check.restype = C.c_int
+        cls.verdict = cls.lib.kls_test_verdict
+        cls.verdict.argtypes = cls.check.argtypes
+        cls.verdict.restype = C.c_int
         cls.fast = cls.lib.kls_test_fast
         cls.fast.argtypes = cls.check.argtypes
         cls.fast.restype = C.c_int
@@ -83,6 +86,9 @@ class CertificateTests(unittest.TestCase):
             actual=max((abs(r)/d if d else F(0) for r,d in zip(residual,den)),default=F(0))
             self.assertGreaterEqual(reported,actual)
         verify(got,bound)
+        verdict_bound=C.c_longdouble()
+        verdict=self.verdict(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(verdict_bound))
+        verify(verdict,verdict_bound)
         fast_bound=C.c_longdouble()
         fast=self.fast(n,pp,rr,aa,bb,xx,int(transpose),None,C.byref(fast_bound))
         verify(fast,fast_bound)
@@ -278,6 +284,13 @@ class CertificateTests(unittest.TestCase):
                 if rng.randrange(2) and b:
                     i=rng.randrange(n);b[i]*=1.+rng.choice((-2e-8,2e-8))
                 self.compare(n,p,rows,a,b,x,trans)
+
+    def test_verdict_activation(self):
+        active=self.lib.kls_test_verdict_activation()
+        if '-fopenmp' in os.environ.get('CFLAGS',''):
+            self.assertEqual(active,1)
+        else:
+            self.assertEqual(active,-1)
 
     def test_accumulation_boundaries(self):
         # No duplicate coordinates: the fast gate must bound accumulation,
