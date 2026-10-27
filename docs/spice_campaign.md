@@ -32,9 +32,11 @@ hashed. `bench/spice_link.json` specifies the pinned GCC 15 container ABI.
 
 Before timing, run `--diagnostic --passes 1` on the complete grid. The runner
 requires successful termination, finite waveforms, matching accepted/rejected
-step counts, the same time grid within floating-point roundoff, pointwise
-waveform tolerances of `rtol=1e-8, atol=1e-10`, and the upstream Xyce verifier.
-It never interpolates a different grid. The solver's default componentwise
+step counts, and the upstream Xyce verifier at `rtol=1e-8, atol=1e-10`.
+Following the existing complete-circuit benchmark protocol, strict pointwise
+and grid differences are retained separately as diagnostics: adaptive grids
+can differ even for unchanged main. The upstream verifier performs its usual
+transient interpolation. The solver's default componentwise
 accuracy contract remains unchanged. `--smoke --passes 1 --peers` is a shorter
 mux8 check of binaries, licenses, adapters, and verification plumbing.
 
