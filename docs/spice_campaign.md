@@ -73,3 +73,16 @@ Confirmation requires matching binaries and pinned inputs and opposite orders.
 `all56_peer_wins` in a single `summary.json` is provisional; only the combined
 `confirmation.json` establishes the replicated gate. This mechanical review
 does not substitute for human review of numerical changes.
+
+For a separately implemented reconstruction, run the auditor between campaigns:
+
+```sh
+python3 scripts/audit_spice_campaign.py --campaign /absolute/campaign --output /absolute/new-audit
+```
+
+It imports none of the launcher's parsing or reduction code, ignores its
+qualified flags, checks solver/thread/CPU/executable selection, reparses final
+linear times and step counts, and reruns the upstream verifier from newly
+generated verification inputs. Original verifier failures remain failures.
+Its `audit.json` contains independently calculated cells and gates. Running the
+auditor during a timing campaign would introduce competing work and is excluded.
