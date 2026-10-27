@@ -57,7 +57,7 @@ def main():
     env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',
                ASAN_OPTIONS='detect_leaks=1:halt_on_error=1',UBSAN_OPTIONS='halt_on_error=1:print_stacktrace=1',
                TSAN_OPTIONS='halt_on_error=1')
-    def run(stage,cmd):
+    def run(stage,cmd,expected=0):
         full=['apptainer','exec','--bind',f'{args.workspace}:/work','--bind',f'{args.workspace}:{args.workspace}',
               '--bind','/tmp:/tmp',str(args.image),*map(str,cmd)]
         with (args.output/(stage+'.log')).open('x') as f:
@@ -72,7 +72,7 @@ def main():
             closure=cleanup.drain_exited_apptainer_session(child.pid,args.image)))
         write_json(args.output/'commands.json',commands)
         print(stage,code,flush=True)
-        if code:
+        if code != expected:
             raise RuntimeError(f'{stage} failed; retained at {args.output}')
     for profile in args.profiles:
         build=args.output/profile
@@ -83,8 +83,26 @@ def main():
             sanitize='address,undefined' if profile=='asan' else 'thread'
             flags=[f'-DCMAKE_C_FLAGS=-fsanitize={sanitize} -fno-omit-frame-pointer -fno-pie',
                    f'-DCMAKE_EXE_LINKER_FLAGS=-fsanitize={sanitize} -no-pie','-DCMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG']
+        if profile=='tsan':
+            # GCC's target_clones resolver runs before TSan's stack-hook
+            # initialization. Keep memory instrumentation, disable only the
+            # function entry/exit hooks, and prove race detection still works.
+            flags[0] += ' --param=tsan-instrument-func-entry-exit=0'
+            control=root/'tests/spice_tsan_control.c'
+            for label,race in [('clean',False),('race',True)]:
+                binary=args.output/('tsan-'+label)
+                run('tsan-'+label+'-compile',['gcc','-O2','-g','-fsanitize=thread',
+                    '--param=tsan-instrument-func-entry-exit=0','-fno-pie','-no-pie',
+                    *(['-DRACE'] if race else []),control,'-pthread','-o',binary])
+                run('tsan-'+label+'-run',[binary],66 if race else 0)
+                log=(args.output/('tsan-'+label+'-run.log')).read_text()
+                if 'CONTROL_MAIN_ENTERED' not in log or (race and 'WARNING: ThreadSanitizer: data race' not in log):
+                    raise RuntimeError('TSan runtime control did not execute correctly')
         run(profile+'-configure',['cmake','-S',source,'-B',build,'-DCMAKE_BUILD_TYPE=Release',*flags])
-        targets=['kls_accuracy_owner','kls_componentwise_parallel','kls_klu_allocator_ownership'] if profile=='tsan' else []
+        # Direct OpenMP reduction testing with uninstrumented libgomp reports
+        # races even on the unchanged baseline. This scope tests the owned
+        # pthread team and public solver ownership, without suppressing races.
+        targets=['kls_accuracy_owner','kls_componentwise_team','kls_klu_allocator_ownership'] if profile=='tsan' else []
         run(profile+'-build',['cmake','--build',build,'-j'+str(args.jobs),*(['--target',*targets] if targets else [])])
         run(profile+'-test',['ctest','--test-dir',build,'--output-on-failure','-j1',*(['-R','^('+'|'.join(targets)+')$'] if targets else [])])
     if any(sha(path)!=h for path,h in files.items()):

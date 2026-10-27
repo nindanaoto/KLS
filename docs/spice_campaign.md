@@ -11,8 +11,14 @@ and smoke tests cannot pass the performance gates.
 Use `scripts/qualify_spice_variant.py --help` to freeze each candidate's actual
 source bytes and build native, portable, ASan/UBSan, and scoped TSan variants.
 It verifies the four external dependency gitlinks against clean local sources,
-records commands and exit codes, and retains failed logs. TSan covers ownership,
-parallel certificates, and the KLU allocator boundary. A failed sanitizer run
+records commands and exit codes, and retains failed logs. Scoped TSan covers
+public solver ownership, the pthread certificate team, and the KLU allocator
+boundary. Its clean/known-race controls must both behave as expected. GCC
+function entry/exit hooks are disabled for the target-clone resolver startup
+issue; memory instrumentation remains enabled. Direct OpenMP reductions are
+outside this scope: the pinned uninstrumented libgomp reports a reduction race
+on unchanged main as well as candidates. This is not full Xyce race coverage.
+A failed sanitizer run
 requires investigation; it is not a performance qualification.
 
 `scripts/build_spice_links.py` rebuilds the KLS and third-party Xyce adapters
