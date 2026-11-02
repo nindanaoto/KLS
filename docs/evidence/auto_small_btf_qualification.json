@@ -1,0 +1,543 @@
+{
+  "merge_ready": false,
+  "full_qualification_complete": false,
+  "scientific_commit": "98a3893e4362feaaf06a5faca37b0e5efa3f2ac7",
+  "main_base": "f3e6c41590e92b28187fdb3bc77c441d041607ad",
+  "core": {
+    "root": "/tmp/kls-main-btf-v207-qualification",
+    "profiles": [
+      "native",
+      "portable",
+      "asan",
+      "tsan"
+    ],
+    "passed": {
+      "native": 49,
+      "portable": 49,
+      "asan_ubsan": 49,
+      "scoped_tsan": 4
+    },
+    "libraries": {
+      "native": "8500cff920ee1ce64ad6c3514ce5104c5d06375daf09b82397e33c2ab25826be",
+      "portable": "b99885b206dc3b53e00815cb77e1b1dcc415ea139bfc8cd19e3cd72d4358964c",
+      "asan": "caa2d57af2feeb68c6acedea59495a71bfcd83944f5541fd8b0269aba6cf218c",
+      "tsan": "6ae165775066c02237c449b279cdc7cd7240e027074711f8096b94e0570b21b8"
+    }
+  },
+  "api": {
+    "root": "/tmp/kls-main-btf-v208-activation",
+    "observations": 70,
+    "retained_execution_observations": 70,
+    "all_qualified": true,
+    "independent_exact_agreement": true,
+    "retained_execution_all_four_inverter_cells": true,
+    "negative_mux_has_no_retained_proposal": true
+  },
+  "spice": {
+    "orders": [
+      {
+        "root": "/tmp/kls-main-btf-v209-initial",
+        "observations": 462,
+        "all_qualified": true,
+        "acceptance_gate": true,
+        "hybrid": {
+          "passed": true,
+          "complete": true,
+          "targets": [
+            {
+              "domain": "llc96",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.9079483391472913,
+              "wall_median": 0.977154069091402
+            },
+            {
+              "domain": "llc32",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.8991988317221986,
+              "wall_median": 0.9725089007619545
+            }
+          ],
+          "regressions": []
+        },
+        "independent_audit": "/tmp/kls-main-btf-v209-initial-independent/audit.json",
+        "independent_exact_agreement": true,
+        "inverter_cells": [
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.8969742108614573,
+              0.8712572881504537,
+              0.9242366790231756,
+              0.9189224674331252
+            ],
+            "median": 0.9079483391472913,
+            "wall_median": 0.977154069091402
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              1.019601380433518,
+              1.0564174800502315,
+              1.0834544115598193,
+              1.0668226281048698
+            ],
+            "median": 1.0616200540775507,
+            "wall_median": 1.0039347724125505
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.723954222573007,
+              0.7336988121937038,
+              0.7524327312937708,
+              0.7412600615203258
+            ],
+            "median": 0.7374794368570148,
+            "wall_median": 0.9520264236940152
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.9007820219643714,
+              0.9034784702121346,
+              0.9073054176340004,
+              0.9258135434080657
+            ],
+            "median": 0.9053919439230675,
+            "wall_median": 0.986650147721803
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              0.16542614084133161,
+              0.17547581584352853,
+              0.1660491542630065,
+              0.15692534619452883
+            ],
+            "median": 0.16573764755216908,
+            "wall_median": 0.539282896050064
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.8625643410182101,
+              0.92227372223143,
+              0.8205181908274503,
+              0.9777259150876089
+            ],
+            "median": 0.8924190316248201,
+            "wall_median": 0.9865656866700273
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.9023875416295324,
+              0.9033809591172727,
+              0.883971243123672,
+              0.896010121814865
+            ],
+            "median": 0.8991988317221986,
+            "wall_median": 0.9725089007619545
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              1.0603100241129866,
+              1.0102032745392708,
+              1.0239029587075545,
+              1.0612527967324408
+            ],
+            "median": 1.0421064914102707,
+            "wall_median": 0.9893856551565435
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.7349761222540593,
+              0.7265315022777586,
+              0.7338517151058832,
+              0.6761627313139208
+            ],
+            "median": 0.730191608691821,
+            "wall_median": 0.9443713442596062
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.9007641227305909,
+              0.8752008446954047,
+              0.8895253254637242,
+              0.9180289889509328
+            ],
+            "median": 0.8951447240971575,
+            "wall_median": 0.9684822806197321
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              0.16526275428923223,
+              0.1446375904482821,
+              0.16701460922451347,
+              0.16461073232874643
+            ],
+            "median": 0.16493674330898933,
+            "wall_median": 0.5300678349891343
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.980048166224716,
+              0.8513597999374806,
+              0.935587545214586,
+              0.858680372273927
+            ],
+            "median": 0.8971339587442565,
+            "wall_median": 0.9718858934679813
+          }
+        ]
+      },
+      {
+        "root": "/tmp/kls-main-btf-v210-confirmation",
+        "observations": 462,
+        "all_qualified": true,
+        "acceptance_gate": true,
+        "hybrid": {
+          "passed": true,
+          "complete": true,
+          "targets": [
+            {
+              "domain": "llc96",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.8895213607403489,
+              "wall_median": 0.959456036070016
+            },
+            {
+              "domain": "llc32",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.8888552988409408,
+              "wall_median": 0.9666451883324604
+            }
+          ],
+          "regressions": []
+        },
+        "independent_audit": "/tmp/kls-main-btf-v210-confirmation-independent/audit.json",
+        "independent_exact_agreement": true,
+        "inverter_cells": [
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.8796722900571682,
+              0.905206166096065,
+              0.8777884308085651,
+              0.8980383076247136
+            ],
+            "median": 0.8888552988409408,
+            "wall_median": 0.9666451883324604
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              1.0512348134346585,
+              1.0456135247633098,
+              1.044255189719413,
+              1.041443463651762
+            ],
+            "median": 1.0449343572413614,
+            "wall_median": 0.996026940930167
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.7091051162440396,
+              0.7063824411515625,
+              0.7152638033324021,
+              0.7265212212039118
+            ],
+            "median": 0.7121844597882209,
+            "wall_median": 0.9275633353843775
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.8998681704994873,
+              0.8922597372330818,
+              0.8938851655613648,
+              0.8968130860889798
+            ],
+            "median": 0.8953491258251722,
+            "wall_median": 0.9546243550719726
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              0.16065141305462052,
+              0.13720769795903742,
+              0.18241936080601603,
+              0.15769376204910765
+            ],
+            "median": 0.1591725875518641,
+            "wall_median": 0.5224747110178222
+          },
+          {
+            "domain": "llc32",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.8830022709632909,
+              0.9415782839927449,
+              0.9490602472478005,
+              0.8715120163072337
+            ],
+            "median": 0.9122902774780179,
+            "wall_median": 0.9688836566451262
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.8920683381306717,
+              0.8680900912848396,
+              0.8975614779892207,
+              0.8869743833500263
+            ],
+            "median": 0.8895213607403489,
+            "wall_median": 0.959456036070016
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              1.0398833834556844,
+              1.0196663854092294,
+              1.03508251021068,
+              1.0441168633929285
+            ],
+            "median": 1.0374829468331823,
+            "wall_median": 0.994326109157682
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 1,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.7209884636746885,
+              0.7037048650149833,
+              0.7110951955722569,
+              0.7158377859980819
+            ],
+            "median": 0.7134664907851693,
+            "wall_median": 0.9332155333447519
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "baseline",
+            "complete": true,
+            "ratios": [
+              0.8993891161800146,
+              0.8893684458981017,
+              0.8682269887477836,
+              0.8962758730014946
+            ],
+            "median": 0.8928221594497981,
+            "wall_median": 0.9591904157835894
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "ck",
+            "complete": true,
+            "ratios": [
+              0.15346172971732397,
+              0.17145605907615502,
+              0.1611032130238832,
+              0.16735255657402487
+            ],
+            "median": 0.16422788479895403,
+            "wall_median": 0.5315832491196031
+          },
+          {
+            "domain": "llc96",
+            "case": "MOS13_IC/invert50_mos1.cir",
+            "threads": 8,
+            "peer": "st",
+            "complete": true,
+            "ratios": [
+              0.8542789004109619,
+              0.9581923093224187,
+              0.8508463749600766,
+              0.9333659566188912
+            ],
+            "median": 0.8938224285149265,
+            "wall_median": 0.9728633300535237
+          }
+        ]
+      }
+    ],
+    "confirmation": {
+      "acceptance_policy": "auto-btf",
+      "acceptance_gate": true,
+      "hybrid_gate": true,
+      "campaigns": [
+        "/tmp/kls-main-btf-v209-initial",
+        "/tmp/kls-main-btf-v210-confirmation"
+      ],
+      "matching_inputs": true,
+      "incremental_gate": true,
+      "all56_peer_wins": false
+    },
+    "all56_peer_win_claim": false
+  },
+  "broad": {
+    "root": "/tmp/kls-main-btf-v211-broad",
+    "expected_observations": 1760,
+    "status": "interrupted_teardown_and_prefix_gate_failed",
+    "independent_audit_complete": false,
+    "acceptance_gate": false,
+    "observations": 464,
+    "independent_prefix_audit": "/tmp/kls-main-btf-v211-prefix-independent/audit.json",
+    "independent_prefix_audit_complete": true,
+    "coverage_regressions": [],
+    "lifecycle_regressions": [
+      {
+        "config": "headline_llc32_t8",
+        "matrix": "circuit_1",
+        "valid_pairs": 4,
+        "ratios": [
+          3.0734357097647957,
+          1.0220285912973257,
+          0.9773194022551344,
+          1.0298451734504592
+        ],
+        "median": 1.0259368823738924
+      }
+    ],
+    "continuation_not_launched": true
+  },
+  "historical_development_record": "auto_small_btf_development.json",
+  "preserved_exact_oracle_failure": "/tmp/kls-main-btf-v205-qualification/asan-test.log",
+  "unmodified_main_vendor_oracle": "/tmp/kls-main-btf-v207-main-vendor-oracle/receipt.json",
+  "receipt_sha256": {
+    "/tmp/kls-main-btf-v207-qualification/completed.json": "120f73975d48799eb6ad6762ce8a11d2fbd9c8b01359d686f37d4133869fbfdc",
+    "/tmp/kls-main-btf-v207-qualification/source.json": "e4b609375f19de61dae2ab5f96a76ec279843fb1d25cb027271628db3b61353e",
+    "/tmp/kls-main-btf-v207-qualification/commands.json": "c77ea7461244ec7508ec60ae89b2895c1dddf0f939c71c7f66cd7ac0fae70bfd",
+    "/tmp/kls-main-btf-v205-baseline/completed.json": "eea5b7c5d6d82d36e771ac5a07865f45108891f108e25574bbb7c9efe9209d74",
+    "/tmp/kls-main-btf-v205-baseline/source.json": "8e8d3602bf113d52c706af2c9152b8f2544e9202be8c1a9807b2e91cdbd222ac",
+    "/tmp/kls-main-btf-v205-baseline/commands.json": "3a519d24d14ac4555d940519972307a4e1f020381fc0dbded781482adf86a852",
+    "/tmp/kls-main-btf-v208-activation/completed.json": "a7de06e7288da68040bf50c67c934a655de3ea79859094f1f8b72d768802c528",
+    "/tmp/kls-main-btf-v208-activation/inputs.json": "dc8faa53470a2eb333696f3a7beb7d4ebeed3828bda726d2e3b3522b321bc79e",
+    "/tmp/kls-main-btf-v208-activation/commands.json": "71de90f7adb87aeb6c32dc45915c3629aea23509e8a7edb7affb2e7efe953a28",
+    "/tmp/kls-main-btf-v208-activation/activation-events.json": "9f7b65b3a59b48310367ffdf520ea87e9be8c9bddb989e13f4dd8d07598a8218",
+    "/tmp/kls-main-btf-v207-main-vendor-oracle/receipt.json": "bad0bc9a4fe03927feca553b2d1e0f42b8def0f10a356878976e7f123d126c1f",
+    "/tmp/kls-main-btf-v209-initial/metadata.json": "9be27d477b2d35e445ed3e92354c6f9b5ac64afdababa327c37b1cccb751b7d6",
+    "/tmp/kls-main-btf-v209-initial/observations.jsonl": "498759e5d9436a8939dfaaea6e6ae5c8a7534582a8f34d990e3ca0dd4f261444",
+    "/tmp/kls-main-btf-v209-initial/review.json": "211ca7995dc4999c14fb91f2ab6c6641a54e54e2b889cebff1bc391681bddd62",
+    "/tmp/kls-main-btf-v209-initial-independent/audit.json": "bc270035e47c4f09990cac273f0e75f929d93f786f420d576f4058c604884395",
+    "/tmp/kls-main-btf-v210-confirmation/metadata.json": "2d0a3852280f6c35c65c9fc8c70de4c766b67e7cc0a1aa86501690f1c774ec36",
+    "/tmp/kls-main-btf-v210-confirmation/observations.jsonl": "9a6c3ca0f79d1c2f78624a15413f7417b1ff3b26af145ba3a8227d0dfbad2b50",
+    "/tmp/kls-main-btf-v210-confirmation/review.json": "6e0ddfe614be28704e8da0c354444e6d5eb367ed3f2deb703d036ee5070783fb",
+    "/tmp/kls-main-btf-v210-confirmation-independent/audit.json": "98915018d93409d2d800fd3688bae2dc2d7f36ca91e408f24113a8e3cf8bea02",
+    "/tmp/kls-main-btf-v210-confirmation/confirmation.json": "be3d3b77fdb0bad3c528dc22c02b6da8183fff01a27d2f69e6be0618f348b5c0",
+    "/tmp/kls-main-btf-v211-prefix-independent/audit.json": "2e111c9aab195ecfe5e0196a7f62d050f9839fc8f62132151dd7f9913ebf7a03",
+    "/tmp/kls-main-btf-v211-failure/receipt.json": "e6d55f44ad9f47e279186578a55985f873b6a5c19e68651ee0e2243df218851d",
+    "/tmp/kls-main-btf-v212-harness-ctest.log": "3f3360f23a86214a2c119d249288360ff67af9c38d83812d8c2961b444d6d28b"
+  },
+  "harness_repair": {
+    "reason": "Transient post-exit process rejected by strict mount-helper validation",
+    "failure_receipt": "/tmp/kls-main-btf-v211-failure/receipt.json",
+    "strict_remaining_helper_cleanup_passed": true,
+    "unknown_processes_never_signalled": true,
+    "tests": {
+      "real_session_cases": 3,
+      "prefix_preservation_cases": 5,
+      "container_ctest_passed": 2
+    },
+    "container_test_log": "/tmp/kls-main-btf-v212-harness-ctest.log",
+    "first_fixture_test_failure": "Inherited stderr pipe kept communicate() open; fixed fixture and removed only verified test-owned descendants",
+    "numerical_binaries_unchanged": true
+  }
+}

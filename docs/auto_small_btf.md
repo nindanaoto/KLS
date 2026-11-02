@@ -39,16 +39,62 @@ round the multiply before subtraction, matching their existing native release
 code generation and the compact executor. A register barrier prevents the
 sanitizer build from silently contracting those operations; complex and
 multiple-RHS walks retain their existing arithmetic.
- A captured caller-order inverter fixture exercises positive
+
+A captured caller-order inverter fixture exercises positive
 selection through the public API, unlike the grid rejection fixtures. Tests
 cover changed A/RHS, aliasing, both solve directions, numeric allocation failure,
 singular updates, snapshot allocation failure, lease revocation and reanalysis.
 The adjacent fixture provenance records source and capture hashes.
 
-Native development tests and the initial ten-observation unhinted capture
-screen passed. These are development evidence, not complete qualification or
-a performance result against main. Full native/portable/ASan/scoped-TSan,
-API, retained-execution and broad-corpus qualification remain required.
+The frozen main-based candidate at 98a3893e passes native, portable and
+ASan/UBSan suites (49 tests each), plus all four scoped TSan ownership tests.
+The unchanged exact oracle also passes against fresh main's unmodified native
+vendor archive. Both the ordinary API and retained-execution campaigns pass
+70 observations, with exact independent agreement. All four inverter cells
+retain AUTO-selected METIS and execute compact factor and solve operations on
+successful public calls; mux8 retains no proposal.
+
+Both opposite-order timing campaigns pass: 924 qualified observations with
+exact independent agreement on every comparison cell. The serial inverter
+linear-time ratios versus fresh main are:
+
+| Campaign | LLC 96 MiB | LLC 32 MiB |
+| --- | ---: | ---: |
+| Initial | 0.90795 | 0.89920 |
+| Confirmation | 0.88952 | 0.88886 |
+
+Serial inverter linear time is 26.3–28.8% lower than SubtreeLU's and
+3.7–6.2% higher than CKTSO's in these campaigns. The existing CKTSO gap remains;
+this focused change does not complete the broader peer-win objective.
+
+All other SPICE cells remain within the 2% linear/wall non-regression tolerance
+in both orders. No peer exception is needed for those campaigns.
+
+The broad experiment stopped during FullChip teardown after 464 recorded
+observations. Its strict cleanup rejected a transient process in the completed
+session; a later strict identity check removed only the remaining mount helper.
+The original campaign and its unrecorded attempted stage are retained. The
+independently audited complete prefix contains no candidate-only correctness
+loss, but circuit_1 has a 1.02594 median lifecycle ratio, exceeding the 1.02
+broad gate. This candidate is therefore **not merge ready**. A production fix
+and fresh qualification are required; the failing measurements are not filtered
+or accepted through additional repetitions.
+
+A separate bounded post-exit wait preserves the strict cleanup's PID, session,
+owner and image checks. It never signals an unknown process and never extends
+the numerical acceptance deadline. Three real-session tests and five prefix
+preservation tests pass, including both container CTest registrations. The new
+broad harness persists numeric exit status before teardown. Continuation can
+retain an entire immutable complete-matrix prefix only with identical frozen
+binaries and inputs, including every failed row. It was not launched for this
+candidate because the audited prefix already fails the lifecycle gate.
+
+The broad ledger includes shared 900-second Hamrle3 timeouts. Those pairs supply
+no performance ratio; no complete-corpus aggregate is claimed. The
+[qualification receipt](evidence/auto_small_btf_qualification.json) records frozen
+sources, libraries, receipts, the failed broad gate and remaining work. The
+[development record](evidence/auto_small_btf_development.json) preserves the
+initial ASan exact-word failure and earlier excluded preparations.
 
 The `auto-btf` campaign policy uses two fresh opposite-order full campaigns.
 Both one-thread inverter cells must improve linear time by at least 2% versus

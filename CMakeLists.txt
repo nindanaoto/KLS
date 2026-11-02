@@ -815,6 +815,11 @@ if(KLS_BUILD_TESTS)
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_btf_merge_gate.py")
     add_test(NAME kls_spice_campaign_contract
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spice_campaign.py")
+    add_test(NAME kls_session_settle
+      COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/spice_session_settle.py")
+    add_test(NAME kls_broad_continuation
+      COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/auto_broad_continuation.py")
+    set_tests_properties(kls_session_settle kls_broad_continuation PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
   endif()
 
   add_executable(kls_singleton_metadata tests/kls_singleton_metadata.c)
