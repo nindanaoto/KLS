@@ -524,7 +524,10 @@
     "/tmp/kls-main-btf-v210-confirmation/confirmation.json": "be3d3b77fdb0bad3c528dc22c02b6da8183fff01a27d2f69e6be0618f348b5c0",
     "/tmp/kls-main-btf-v211-prefix-independent/audit.json": "2e111c9aab195ecfe5e0196a7f62d050f9839fc8f62132151dd7f9913ebf7a03",
     "/tmp/kls-main-btf-v211-failure/receipt.json": "e6d55f44ad9f47e279186578a55985f873b6a5c19e68651ee0e2243df218851d",
-    "/tmp/kls-main-btf-v212-harness-ctest.log": "3f3360f23a86214a2c119d249288360ff67af9c38d83812d8c2961b444d6d28b"
+    "/tmp/kls-main-btf-v212-harness-ctest.log": "3f3360f23a86214a2c119d249288360ff67af9c38d83812d8c2961b444d6d28b",
+    "/tmp/kls-main-btf-v213-development-tests.log": "addadd094f1b717b1e201b98c6d130456df84dd94e1c75f863a32960d19177f6",
+    "/tmp/kls-main-btf-v213-normal-screen/summary.json": "acbf5a57b09cdf00621f9c5806908dd1e2811fbe623c4ad0441f2eb0a4639ed3",
+    "/tmp/kls-main-btf-v213-normal-screen/inputs.json": "767586a4a090f20ad929451fcdbc56bd9b85b88e9ebc4a4fabc9baed876ae376"
   },
   "harness_repair": {
     "reason": "Transient post-exit process rejected by strict mount-helper validation",
@@ -539,5 +542,27 @@
     "container_test_log": "/tmp/kls-main-btf-v212-harness-ctest.log",
     "first_fixture_test_failure": "Inherited stderr pipe kept communicate() open; fixed fixture and removed only verified test-owned descendants",
     "numerical_binaries_unchanged": true
+  },
+  "development_guard": {
+    "scope": "Reject normal-orientation frames before small-BTF admission and ownership checks; retain every positive admission gate",
+    "production_files": [
+      "src/kls.c",
+      "src/kls_small_btf.inc",
+      "src/kls_compact_solve.inc",
+      "src/kls_egraph_refactor.inc"
+    ],
+    "focused_native_ctest_passed": 5,
+    "diagnostic_root": "/tmp/kls-main-btf-v213-normal-screen",
+    "diagnostic_observations": 72,
+    "diagnostic_all_valid": true,
+    "diagnostic_not_acceptance_evidence": true,
+    "original_failed_gate_retained": true,
+    "full_requalification_required": true,
+    "source_sha256": {
+      "src/kls.c": "ad7668a26ee0a6fefb1aed3166a91b06fcb90196a7e1f5291c9dfa4a3379673b",
+      "src/kls_small_btf.inc": "52aa965d4c7896c1f06f96870ba4e59c8d17aea2545d42b8cbed75dc04956eab",
+      "src/kls_compact_solve.inc": "e6da813656e7256517988a1b52ae662434d372565500423b919b543e4edef986",
+      "src/kls_egraph_refactor.inc": "1037a86e09e8a80516ada547f9a4e83234036ba015cde27d2c8eedad1daa7789"
+    }
   }
 }

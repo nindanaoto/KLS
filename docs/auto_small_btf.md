@@ -78,7 +78,13 @@ independently audited complete prefix contains no candidate-only correctness
 loss, but circuit_1 has a 1.02594 median lifecycle ratio, exceeding the 1.02
 broad gate. This candidate is therefore **not merge ready**. A production fix
 and fresh qualification are required; the failing measurements are not filtered
-or accepted through additional repetitions.
+or accepted through additional repetitions. A subsequent implementation moves
+normal-orientation rejection ahead of the added small-BTF admission checks.
+The focused native checks pass. A separate 72-observation diagnostic using an
+identical benchmark object places both the previous candidate and the new guard
+close to main, indicating startup sensitivity rather than proving a systematic
+2.6% cost. That screen does not replace the failed acceptance measurements;
+the new implementation requires complete fresh qualification.
 
 A separate bounded post-exit wait preserves the strict cleanup's PID, session,
 owner and image checks. It never signals an unknown process and never extends

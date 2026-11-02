@@ -24,10 +24,13 @@ static int kls_small_btf_cache_ready(const kls_solver *s) {
 }
 
 static int kls_small_btf_cache_capable(kls_solver *s) {
-  if(!s || !s->symbolic || !s->numeric ||
+  /* An ineligible symbolic frame must not traverse numerical ownership state
+     on every ordinary solve/refactor. This is rejection only; positive frames
+     still pass the complete ownership, factor-count, budget and FP gates. */
+  if(!s || s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
+  if(!s->symbolic || !s->numeric ||
      s->options.backend!=KLS_BACKEND_AUTO || s->stats.tuning_profile_active ||
      s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
-     s->orientation!=KLS_ORIENTATION_TRANSPOSE ||
      s->common.scale>0 || s->numeric->Rs || !s->numeric->Offp ||
      !s->numeric->Udiag || !s->numeric->Xwork || !s->numeric->LUbx ||
      s->snb || s->snb_group ||
@@ -131,6 +134,7 @@ static UF_long kls_compact_btf_transpose_prechecked(kls_solver *s,double *out) {
 /* Preserve the complete admission and optional cache preparation for every
    raw/ordinary caller. No solve or answer is cached by either entry. */
 static UF_long kls_compact_btf_transpose_solve(kls_solver *s,double *out) {
+  if(!s || s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
   if(!kls_small_btf_environment() || !kls_small_btf_cache_capable(s) ||
      !kls_i32_solve_ready(s) || !kls_small_btf_cache_ready(s))return 0;
   return kls_compact_btf_transpose_prechecked(s,out);
