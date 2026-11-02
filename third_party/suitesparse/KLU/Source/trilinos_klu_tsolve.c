@@ -207,7 +207,7 @@ Int TRILINOS_KLU_tsolve
 				else
 #endif
 				{
-				    MULT_SUB (X [k], Offx [p], X [Offi [p]]) ;
+				    KLS_TRANSPOSE_MULT_SUB (X [k], Offx [p], X [Offi [p]]) ;
 				}
 			    }
 			}

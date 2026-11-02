@@ -34,7 +34,12 @@ saved symbolic/pattern are included in the LLC/32 budget.
 ## Validation and merge decision
 
 The dedicated private test retains exact native-factor and vendor-solve word
-and FP-flag oracles. A captured caller-order inverter fixture exercises positive
+and FP-flag oracles. The real one-RHS vendor transpose loops explicitly
+round the multiply before subtraction, matching their existing native release
+code generation and the compact executor. A register barrier prevents the
+sanitizer build from silently contracting those operations; complex and
+multiple-RHS walks retain their existing arithmetic.
+ A captured caller-order inverter fixture exercises positive
 selection through the public API, unlike the grid rejection fixtures. Tests
 cover changed A/RHS, aliasing, both solve directions, numeric allocation failure,
 singular updates, snapshot allocation failure, lease revocation and reanalysis.

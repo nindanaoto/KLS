@@ -481,7 +481,7 @@ void TRILINOS_KLU_ltsolve
 #endif
 		    {
 			/*x [0] -= Lx [p] * X [Li [p]] ;*/
-			MULT_SUB (x [0], Lx [p], X [Li [p]]) ;
+			KLS_TRANSPOSE_MULT_SUB (x [0], Lx [p], X [Li [p]]) ;
 		    }
 		}
 		X [k] = x [0] ;
@@ -635,7 +635,7 @@ void TRILINOS_KLU_utsolve
 #endif
 		    {
 			/* x [0] -= Ux [p] * X [Ui [p]] ; */
-			MULT_SUB (x [0], Ux [p], X [Ui [p]]) ;
+			KLS_TRANSPOSE_MULT_SUB (x [0], Ux [p], X [Ui [p]]) ;
 		    }
 		}
 #ifdef COMPLEX

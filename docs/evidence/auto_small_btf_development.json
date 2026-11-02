@@ -62,5 +62,19 @@
       "log": "/tmp/kls-main-btf-dev-native-build.log",
       "reason": "New private test initially lacked private include directories; corrected to inherit the existing private-test properties."
     }
-  ]
+  ],
+  "transpose_contraction_fix": {
+    "initial_failure": "/tmp/kls-main-btf-v205-qualification/asan-test.log",
+    "initial_result": "48/49; exact word mismatch, matching FP flags; no memory diagnostic",
+    "cause": "ASan O2 contracted vendor scalar transpose multiply/subtract; native release did not",
+    "fix": "Explicit separate real one-RHS transpose multiply/subtract; strict oracle unchanged",
+    "focused_rerun": "/tmp/kls-main-btf-v206-asan/asan-test.log",
+    "focused_result": "ASan/UBSan 49/49 passed",
+    "sha256": {
+      "/tmp/kls-main-btf-v205-qualification/asan-test.log": "18703fbcd3fcafc970961564da7cd7b64be084f0c376fb0f50dea423ee1bfa3c",
+      "/tmp/kls-main-btf-v206-asan/asan-test.log": "a8ecf1216afe195e9348a8d9c40f16a88d0f078cee53121a52ff49a82232e6b7",
+      "/tmp/kls-main-btf-v206-asan/completed.json": "c3b7848198380be67a559e40a3c7f9d1810d7b42f2061c2a958f76df07ce3267"
+    },
+    "full_qualification_required": true
+  }
 }
