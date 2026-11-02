@@ -14164,6 +14164,7 @@ static void free_candidate(kls_pattern_candidate *candidate) {
   if (candidate == NULL) {
     return;
   }
+  kls_small_btf_fallback_clear(&candidate->small_btf_fallback);
   if (candidate->symbolic != NULL) {
     trilinos_klu_l_free_symbolic(&candidate->symbolic, &candidate->common);
   }
@@ -14758,7 +14759,12 @@ static int select_candidate(kls_pattern_candidate *normal,
   return status;
 }
 
+#include "kls_small_btf_ordering.inc"
+
 static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate) {
+  kls_small_btf_fallback_clear(&solver->small_btf_fallback);
+  solver->small_btf_fallback=candidate->small_btf_fallback;
+  memset(&candidate->small_btf_fallback,0,sizeof(candidate->small_btf_fallback));
   solver->n = candidate->n;
   solver->nnz = candidate->nnz;
   solver->col_ptr = candidate->col_ptr;

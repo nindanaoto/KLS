@@ -732,7 +732,7 @@ if(KLS_BUILD_TESTS)
   add_executable(kls_snb_profile tests/kls_snb_profile.c)
   target_link_libraries(kls_snb_profile PRIVATE kls)
   add_test(NAME kls_snb_profile COMMAND kls_snb_profile)
-  set(KLS_PRIVATE_TESTS kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan kls_egraph_numeric_startup)
+  set(KLS_PRIVATE_TESTS kls_small_btf kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan kls_egraph_numeric_startup)
   set(KLS_ACCURACY_TESTS
     kls_accuracy_owner kls_accuracy_best kls_accuracy_gate kls_accuracy_recovery kls_scaled_recovery kls_componentwise_caller kls_application_managed kls_certificate_pool
     kls_accuracy_epochs kls_accuracy_frames kls_accuracy_rhs
@@ -807,6 +807,15 @@ if(KLS_BUILD_TESTS)
   add_test(NAME kls_accuracy_certificate COMMAND kls_accuracy_certificate)
   set_tests_properties(kls_accuracy_certificate PROPERTIES
     RUN_SERIAL TRUE TIMEOUT 120 LABELS "accuracy")
+
+  set_tests_properties(kls_small_btf PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME kls_small_btf_merge_gate
+      COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_btf_merge_gate.py")
+    add_test(NAME kls_spice_campaign_contract
+      COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spice_campaign.py")
+  endif()
 
   add_executable(kls_singleton_metadata tests/kls_singleton_metadata.c)
   target_link_libraries(kls_singleton_metadata PRIVATE kls_suitesparse)

@@ -63,6 +63,40 @@ class CampaignTests(unittest.TestCase):
                 row['wall_seconds'] = 1.03
         self.assertFalse(c.reduce_results(m, rows)['all56_peer_wins'])
 
+    def test_hybrid_main_regression_requires_both_peers(self):
+        m, rows = self.fixture()
+        m['acceptance_policy'] = 'auto-btf'
+        for r in rows:
+            if not r['case'].endswith('/dac.cir') or r['trial']<0:
+                continue
+            if r['side']=='candidate':
+                r['linear_seconds']=[1.1];r['wall_seconds']=1.1
+            elif r['side'] in ('ck','st'):
+                r['linear_seconds']=[1.2]
+        result=c.reduce_results(m,rows)
+        self.assertTrue(result['hybrid_gate'])
+        self.assertTrue(result['acceptance_gate'])
+        self.assertFalse(result['incremental_gate'])
+        spec=importlib.util.spec_from_file_location('audit',Path(c.__file__).with_name('audit_spice_campaign.py'))
+        audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
+        self.assertEqual(result['hybrid'],audit.hybrid_acceptance(result['cells'],True))
+        for r in rows:
+            if r['side']=='st' and r['case'].endswith('/dac.cir') and r['trial']>=0:
+                r['linear_seconds']=[1.0]
+        result=c.reduce_results(m,rows)
+        self.assertFalse(result['acceptance_gate'])
+        self.assertEqual(result['hybrid'],audit.hybrid_acceptance(result['cells'],True))
+
+    def test_hybrid_rejects_diagnostic_or_short_campaign(self):
+        m,rows=self.fixture();m['acceptance_policy']='auto-btf'
+        self.assertTrue(c.reduce_results(m,rows)['acceptance_gate'])
+        m['diagnostic_only']=True
+        self.assertFalse(c.reduce_results(m,rows)['acceptance_gate'])
+        m['diagnostic_only']=False;m['passes']=2
+        shorter=[r for r in rows if r['trial']<2]
+        self.assertTrue(c.reduce_results(m,shorter)['all_qualified'])
+        self.assertFalse(c.reduce_results(m,shorter)['acceptance_gate'])
+
     def test_balanced_positions(self):
         for sides in (['baseline', 'candidate'], ['baseline', 'candidate', 'ck', 'st']):
             for confirmation in (True, False):

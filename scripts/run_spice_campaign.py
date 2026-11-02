@@ -176,12 +176,20 @@ def reduce_results(metadata, rows):
     all_qualified = set(indexed) == expected_keys and not duplicates and all(r['qualified'] for r in rows)
     baseline = [c for c in cells if c['peer'] == 'baseline']
     peers = [c for c in cells if c['peer'] in ('ck', 'st')]
-    official = (metadata['complete_grid'] and all_qualified and set(metadata['cases']) == set(CASES)
+    official = (metadata['complete_grid'] and not metadata.get('diagnostic_only',False) and all_qualified and set(metadata['cases']) == set(CASES)
                 and set(map(tuple, metadata['domains'])) == set(DOMAINS) and metadata['threads'] == [1, 8]
                 and metadata['passes'] >= 4 and metadata['passes'] % 4 == 0)
     nonregression = official and len(baseline) == 28 and all(c['complete'] and c['median'] <= 1.02 and c['wall_median'] <= 1.02 for c in baseline)
     incremental = nonregression and any(c['median'] <= .98 for c in baseline)
-    return dict(expected=expected, observations=len(rows), all_qualified=all_qualified,
+    gate_spec = importlib.util.spec_from_file_location('auto_btf_gate', Path(__file__).with_name('auto_btf_merge_gate.py'))
+    gate_module = importlib.util.module_from_spec(gate_spec)
+    gate_spec.loader.exec_module(gate_module)
+    hybrid = gate_module.evaluate(cells, all_qualified=official)
+    policy = metadata.get('acceptance_policy', 'incremental')
+    acceptance = hybrid['passed'] if policy == 'auto-btf' else incremental
+    return dict(acceptance_policy=policy, acceptance_gate=acceptance,
+                hybrid_gate=hybrid['passed'], hybrid=hybrid,
+                expected=expected, observations=len(rows), all_qualified=all_qualified,
                 duplicates=duplicates, cells=cells, incremental_gate=incremental,
                 all56_peer_wins=nonregression and len(peers) == 56 and all(c['complete'] and c['median'] <= .98 for c in peers),
                 independent_confirmation_required=True,
@@ -227,13 +235,13 @@ def run(args):
         shutil.copy2(original, frozen / name)
         binaries[name] = frozen / name
         hashes[str(binaries[name])] = sha(binaries[name])
-    inputs = [Path(__file__), root / 'bench/process_session_cleanup.py', args.image,
+    inputs = [Path(__file__), Path(__file__).with_name('auto_btf_merge_gate.py'), root / 'bench/process_session_cleanup.py', args.image,
               args.license, args.regression / 'TestScripts/xyce_verify.pl',
               *[args.regression / 'Netlists' / c for c in cases], *args.peer_library]
     if args.provenance:
         inputs.append(args.provenance)
     hashes.update({str(p.resolve()): sha(p) for p in inputs})
-    metadata = dict(cases=cases, domains=domains, threads=threads, passes=args.passes,
+    metadata = dict(acceptance_policy=args.acceptance_policy,cases=cases, domains=domains, threads=threads, passes=args.passes,
                     sides=sides, order=args.order, complete_grid=not args.smoke and not args.diagnostic and args.passes >= 4 and args.passes % 4 == 0,
                     diagnostic_only=args.diagnostic or args.smoke,
                     timeout=1800, input_sha256=hashes, cpu_topology=subprocess.check_output(['lscpu'], text=True),
@@ -320,6 +328,8 @@ def run(args):
     summary['changed_inputs'] = changed
     if changed:
         summary['all_qualified'] = summary['incremental_gate'] = summary['all56_peer_wins'] = False
+        summary['acceptance_gate'] = summary['hybrid_gate'] = False
+        summary['hybrid']['passed'] = summary['hybrid']['complete'] = False
     write_json(output / 'summary.json', summary)
     return 0 if summary['all_qualified'] else 1
 
@@ -363,6 +373,8 @@ def review(output):
     summary['changed_inputs'] = changed
     if changed or not summary['launch_order_verified']:
         summary['all_qualified'] = summary['incremental_gate'] = summary['all56_peer_wins'] = False
+        summary['acceptance_gate'] = summary['hybrid_gate'] = False
+        summary['hybrid']['passed'] = summary['hybrid']['complete'] = False
     write_json(output/'review.json', summary)
     return 0 if summary['all_qualified'] else 1
 
@@ -382,16 +394,23 @@ def main():
         def common_inputs(m, output):
             return {p:h for p,h in m['input_sha256'].items()
                     if not Path(p).is_relative_to(output/'binaries')}
-        matching = (outputs[0] != outputs[1] and same_binaries and
+        matching = (metadata[0].get('acceptance_policy','incremental') == metadata[1].get('acceptance_policy','incremental') and
+                    metadata[0]['sides'] == metadata[1]['sides'] and
+                    outputs[0] != outputs[1] and same_binaries and
                     [m['order'] for m in metadata] == ['initial', 'confirmation'] and
                     common_inputs(metadata[0], outputs[0]) == common_inputs(metadata[1], outputs[1]))
-        result = dict(campaigns=list(map(str, outputs)), matching_inputs=matching,
+        policy=metadata[0].get('acceptance_policy','incremental')
+        accepted=matching and all(s.get('acceptance_gate',s['incremental_gate']) for s in summaries)
+        result = dict(acceptance_policy=policy,acceptance_gate=accepted,
+                      hybrid_gate=matching and all(s.get('hybrid_gate',False) for s in summaries),
+                      campaigns=list(map(str, outputs)), matching_inputs=matching,
                       incremental_gate=matching and all(s['incremental_gate'] for s in summaries),
                       all56_peer_wins=matching and all(s['all56_peer_wins'] for s in summaries))
         write_json(outputs[1]/'confirmation.json', result)
         print(json.dumps(result, indent=2))
-        return 0 if result['incremental_gate'] else 1
+        return 0 if result['acceptance_gate'] else 1
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--acceptance-policy', choices=['incremental','auto-btf'], default='incremental')
     p.add_argument('--workspace', type=Path, required=True)
     p.add_argument('--regression', type=Path, required=True)
     p.add_argument('--image', type=Path, required=True)

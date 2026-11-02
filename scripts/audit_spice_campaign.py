@@ -50,6 +50,27 @@ def output_shape(path):
     return count, header
 
 
+def hybrid_acceptance(cells, official):
+    # Independent implementation: never import the campaign reducer or gate.
+    required={(domain,case,threads,peer) for domain in ('llc96','llc32')
+              for case in CASES for threads in (1,8) for peer in ('baseline','ck','st')}
+    by_key={(c['domain'],c['case'],c['threads'],c['peer']):c for c in cells}
+    valid=official is True and len(cells)==len(by_key)==84 and set(by_key)==required
+    valid=valid and all(type(c.get(k)) in (int,float) and math.isfinite(c[k]) and c[k]>0
+                        for c in cells for k in ('median','wall_median'))
+    if not valid:return dict(passed=False,complete=False,targets=[],regressions=[])
+    targets=[by_key[d,'MOS13_IC/invert50_mos1.cir',1,'baseline'] for d in ('llc96','llc32')]
+    regressions=[]
+    for d,case,threads,peer in sorted(required):
+        if peer!='baseline':continue
+        row=by_key[d,case,threads,peer]
+        if row['median']>1.02 or row['wall_median']>1.02:
+            exception=by_key[d,case,threads,'ck']['median']<=.98 and by_key[d,case,threads,'st']['median']<=.98
+            regressions.append(dict(domain=d,case=case,threads=threads,peer_exception=exception))
+    return dict(passed=all(c['median']<=.98 for c in targets) and all(r['peer_exception'] for r in regressions),
+                complete=True,targets=[{k:c[k] for k in ('domain','case','threads','median','wall_median')} for c in targets],regressions=regressions)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--campaign', required=True, type=Path)
@@ -168,7 +189,13 @@ def main():
     baseline = [c for c in cells if c['peer'] == 'baseline']
     peers = [c for c in cells if c['peer'] in ('ck', 'st')]
     stable = official and len(baseline) == 28 and all(c['median'] <= 1.02 and c['wall_median'] <= 1.02 for c in baseline)
-    result = dict(all_qualified=not errors, observations=len(ledger), errors=errors, cells=cells,
+    hybrid=hybrid_acceptance(cells,official)
+    policy=metadata.get('acceptance_policy','incremental')
+    incremental=stable and any(c['median']<=.98 for c in baseline)
+    result = dict(acceptance_policy=policy,
+                  acceptance_gate=hybrid['passed'] if policy=='auto-btf' else incremental,
+                  hybrid_gate=hybrid['passed'],hybrid=hybrid,
+                  all_qualified=not errors, observations=len(ledger), errors=errors, cells=cells,
                   incremental_gate=stable and any(c['median'] <= .98 for c in baseline),
                   all56_peer_wins=stable and len(peers) == 56 and all(c['median'] <= .98 for c in peers),
                   input_sha256=pins, separate_confirmation_required=True)

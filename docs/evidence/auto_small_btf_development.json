@@ -1,0 +1,66 @@
+{
+  "development_only": true,
+  "merge_ready": false,
+  "full_qualification_complete": false,
+  "main_base": "f3e6c41590e92b28187fdb3bc77c441d041607ad",
+  "native_checks": {
+    "log": "/tmp/kls-main-btf-dev-native-checks3.log",
+    "sha256": "3f0196d83a4485cd59cf1254ca51b81c786c8d167529d0ee11b42cf793de2f2f",
+    "passed": 3
+  },
+  "library_sha256": "5aa3ab097a90d0c376e0b7d311c3ff9928b0b1c438f1834ae6470fd65be15688",
+  "scientific_sha256": {
+    "src/kls_componentwise_pool.inc": "628bc5262c931c91acabad675577f82c731179bb049190f02989f2fb959cf860",
+    "src/kls_componentwise_parallel.inc": "5b680fa890399b542ec528aa7e09423132a69944ab413d302dc3b29fb61193a3",
+    "src/kls_numeric_engines.inc": "fddbfe891ba847a653f3c4733758d701e5514e5ba8f1aa59173540403080461e",
+    "src/kls_pts.inc": "b975873c56e15d1efa6bf9ce4b06ec229663c20a4ae140b2fde8b58288d229ed",
+    "src/kls_componentwise_team.inc": "68e18ed8d3aa0e4cca9ca3c554358d5eb5110f552b41405d7db6f9016b55a460",
+    "src/kls_original_operator.inc": "9e641f025fe8bb5d396d33482d5df0a4ac7e9f5e5c337fc9af338788d9de9d5b",
+    "src/kls_accuracy_certificate.c": "cb7d12ee63bba3f8e8f5dad1060e26a8398bfa16e9dd4fcdf8ab8742b3076c0a",
+    "src/kls_lattice_recovery.inc": "6d6f7849124b425a0ac3f2c67231c95d9592094f27b369ef784b9f1b6b2faada",
+    "src/kls_first_factor.inc": "b7d866593018bf0da62f679713962dda13315004e91d9ef067ca913554c24369",
+    "src/kls_numeric_prepare_repair.inc": "d49952eb9951dd1f8a18f72adf5987485f895b67def0d9558a097e39b4c23dc8",
+    "src/kls_componentwise_interval_rows.inc": "26eb7259a24e317c7a9a827c10fc63fa7b836267fa10f470184ff515bacbf6ce",
+    "src/kls_egraph_refactor.inc": "5d22e56293386cd7437485fd232c11223fbbc1491f164dafddd23169fec8436e",
+    "src/kls_accuracy_lattice.c": "c82a4fc6a17fa0e539c3ce6bf0af9f83ca2d902517b741d85ba99c007d1b9637",
+    "src/kls_snb_grouping.inc": "3f94efc6cba3e6209e95e1f521c640f096ec66807300aa4ec990abcd65906990",
+    "src/kls_componentwise.h": "a2df05b273f9767b761e582d14a37b72e5e6f9ad4dee726a26352d4d2a4c0f1d",
+    "src/kls.c": "ffc8c14611fe8ceec06013c91fa9ad8ff00679bed182c10872371c22188c4739",
+    "src/kls_tuning_profile.h": "c00db3749154e23c838cf064133274d8a5751402eaa95cd013640f88a46e4f1c",
+    "src/kls_row_refactor.inc": "2251bf8b288b626a36fad3ecc20dd50af3d3af5a54bccb0d1a4d987b3fd11c46",
+    "src/kls_accuracy_recovery.c": "e143e6ea2c43418fb85f0f36875e04ea6cfde14d77247bb860c2a8ab6bf36c6d",
+    "src/kls_componentwise_verdict_witness.inc": "7e024457f56e93096f40f650c45a18af2bb751e1a4c9f07ad6162bf9923c1dd6",
+    "src/kls_small_btf_ordering.inc": "2b89bbba16b9680052998684ce18e4b35369ab58c74a8c78abe7d6e36c1a31e9",
+    "src/kls_small_btf.inc": "151f62670e1141a1f83b28a72bb0102629e0b87c0bdca01aa71a236c2ee8d24f",
+    "src/kls_tuning.inc": "7de5d96b2dd0ad20834b2188684f2711d99bba3d72a64ecc43f37b7e1435a392",
+    "src/kls_snb_cycle.inc": "fb7c2616ef0879517126248c8f317b175e6a9b22bbd65fa858b756b3e37193f9",
+    "src/kls_caller_recovery.inc": "59d933932e956e32fee36058ecf7815992f4f02d0deee71dca0b4f61ecf6c167",
+    "src/kls_compact_solve.inc": "d83972a48672ac27d0aa146f8150ec826de04fabc84acc7c159d0f0a86382d62",
+    "src/kls_tuning_profile.c": "4ab0016567243a804855f3a2da04c253179ec30040cedd6b2693c47329d5c64c",
+    "src/kls_componentwise.c": "3bd8595cc5bec6036fd88c144ca9eeba6ce371f769f6e23869918083755fa00c",
+    "src/kls_gamma_certificate.inc": "8376102646fe518d999a1d1a60b7ac9fe0c4c210b13389c04e99bf35c10e38c5",
+    "src/kls_accuracy_schedule.c": "4ecb4448a73c4f66e9e1e60eb4859d51b41a5fda90495dd0e38ca4e0ac99a6ec",
+    "src/kls_numeric_schedule.inc": "bf80418b16b10dc10de3cfcb8cef823648bd3336e140f1961c019c637ec46055",
+    "src/kls_componentwise_recovery.inc": "1c3caa29d20b2109fff64fcc61454e9e9b1da9c95c2d0d2c5f3b5d399a4760a2",
+    "src/kls_strict_interval.inc": "3b80a37ae80ba6ced125fd6cccde69cc29b6044eaf64aadd522bc04a9725be85",
+    "src/kls_ordering_policy.inc": "8ad3d8eb56c5dcd251ab7060073811cad17451d5e1fdf19290fe0cff0a586989",
+    "include/kls/kls.h": "be2fc37020e541a07afa23a81926277bf7de1e1c467540cfda979998e16c0eee"
+  },
+  "capture_campaign": {
+    "root": "/tmp/kls-main-small-btf-v204-capture",
+    "observations": 10,
+    "qualified": 10,
+    "observations_sha256": "0903cac0948c4e720e134a66296d0ab0c09aebe8382abcf8ecb82680933501e6",
+    "purpose": "Caller-order fixture capture and unhinted development execution; not performance evidence against main."
+  },
+  "retained_failed_preparations": [
+    {
+      "root": "/tmp/kls-main-small-btf-v202",
+      "reason": "Compile failed on unavailable early SNB group definition. Legacy hand-written receipt did not establish an inverse proof; excluded from qualification."
+    },
+    {
+      "log": "/tmp/kls-main-btf-dev-native-build.log",
+      "reason": "New private test initially lacked private include directories; corrected to inherit the existing private-test properties."
+    }
+  ]
+}

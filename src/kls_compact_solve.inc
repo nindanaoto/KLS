@@ -468,7 +468,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   if (solver->i32solve_state != 0) {
     return solver->i32solve_state > 0;
   }
-  if (kls_low_work_btf_prefers_native_solve(solver)) {
+  if (kls_low_work_btf_prefers_native_solve(solver) && !kls_small_btf_cache_capable(solver)) {
     /* Building a second solve-index representation does not repay while the
        complete low-work factor and RHS remain in this cache-sized regime. */
     solver->i32solve_state = -1;
