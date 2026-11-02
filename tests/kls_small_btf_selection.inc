@@ -51,6 +51,10 @@ static int small_btf_selection_checks(void) {
       small_btf_fail_numeric_calls=0;s->common.malloc_memory=small_btf_fail_numeric;
       SELECT_REQUIRE(kls_factor(s,a)==KLS_OK);
       SELECT_REQUIRE(small_btf_fail_numeric_calls>0 && s->symbolic==ordinary && !s->small_btf_fallback.symbolic);
+      SELECT_REQUIRE(s->stats.selected_ordering==KLS_ORDERING_AMD &&
+        s->stats.nblocks==ordinary->nblocks && s->stats.max_block==ordinary->maxblock &&
+        s->stats.structural_rank==ordinary->structural_rank &&
+        s->stats.estimated_flops==ordinary->est_flops);
     } else {
       if(scenario==3) {
         const UF_long old=s->row_idx[0];s->row_idx[0]=(old+1)%N;
@@ -78,6 +82,10 @@ static int small_btf_selection_checks(void) {
       memset(a,0,sizeof a);for(int k=0;k<N;++k)x[k]=123.;
       SELECT_REQUIRE(kls_refactor_solve(s,a,1,b,0,x,0)!=KLS_OK);
       SELECT_REQUIRE(s->symbolic==ordinary && !s->small_btf_fallback.symbolic);
+      SELECT_REQUIRE(s->stats.selected_ordering==KLS_ORDERING_AMD &&
+        s->stats.nblocks==ordinary->nblocks && s->stats.max_block==ordinary->maxblock &&
+        s->stats.structural_rank==ordinary->structural_rank &&
+        s->stats.estimated_flops==ordinary->est_flops);
       for(int k=0;k<N;++k)SELECT_REQUIRE(x[k]==123.);
     }
     o.ordering=KLS_ORDERING_AMD;

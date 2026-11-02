@@ -97,6 +97,10 @@ static int kls_small_btf_restore(kls_solver *s) {
   s->symbolic=saved.symbolic;s->common=saved.common;
   kls_separator_analysis_move(&s->separator,&saved.separator);
   s->stats.selected_ordering=saved.ordering;
+  s->stats.nblocks=(int64_t)s->symbolic->nblocks;
+  s->stats.max_block=(int64_t)s->symbolic->maxblock;
+  s->stats.structural_rank=(int64_t)s->symbolic->structural_rank;
+  s->stats.estimated_flops=s->symbolic->est_flops;
   s->generic_nd_portfolio_selected=0;s->generic_amf3_span_variant_selected=0;
   kls_invalidate_factor_etree_stats(s);free(saved.pattern);
 #ifdef KLS_SMALL_BTF_RESTORE_TEST_EVENT

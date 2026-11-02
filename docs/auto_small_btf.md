@@ -23,6 +23,9 @@ and refactor current A using AMD. Invalid arguments never trigger a retry.
 Changing the symbolic, input frame, or analysis revokes the lease. Numeric
 caches are discarded before rollback. Proposal time and correctness recovery
 are charged to their initiating operation; no tuning solve is replayed.
+Rollback also restores public symbolic block, rank, and estimated-work
+statistics from AMD. Allocation-failure and singular-retry tests check these
+statistics alongside the restored symbolic ownership.
 
 The compact factor/transpose solve uses current values and RHS on every call.
 Native factors remain authoritative. Only immutable capability is cached;
