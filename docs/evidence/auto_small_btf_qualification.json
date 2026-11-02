@@ -564,5 +564,38 @@
       "src/kls_compact_solve.inc": "e6da813656e7256517988a1b52ae662434d372565500423b919b543e4edef986",
       "src/kls_egraph_refactor.inc": "1037a86e09e8a80516ada547f9a4e83234036ba015cde27d2c8eedad1daa7789"
     }
+  },
+  "current_validation": {
+    "scientific_commit": "74365dfc97fabbb6001d9c51366ee6039251547f",
+    "core": {
+      "root": "/tmp/kls-main-btf-v215-qualification",
+      "passed": true,
+      "profiles": [
+        "native",
+        "portable",
+        "asan",
+        "tsan"
+      ],
+      "tests": {
+        "native": 51,
+        "portable": 51,
+        "asan_ubsan": 51,
+        "scoped_tsan": 4
+      },
+      "libraries": {
+        "native": "1ec6b93201112466d40771ac39335092646b942c6579024191b3d72321006ee8",
+        "portable": "4362dd691ad18170e9482f303ea0b2aa68fbf369e4e054e186bbc55709c43911",
+        "asan": "f4b3daf129310b33351bf702e512bbfe86c209051ef1fadea91bf3dc2353d6bb",
+        "tsan": "f1b7a4714062ab91e7dcff19d73cd25ab0957e433f2e3f1388fb8a4d51904f85"
+      },
+      "source_sha256": "436b7f27e387effbd5ce1317c204fb9ecfb58bb535380783521ebf6248c16dca",
+      "commands_sha256": "62444d16fc5053fdf4b261d78a3884cba855c16c93961eced3f5c226ed94c015",
+      "completion_sha256": "856f017d8abe776777aa4f6c1ce6dfd1c413f2303a80ea0181ae7654c2cacb94"
+    },
+    "api_activation_root": "/tmp/kls-main-btf-v216-activation",
+    "api_activation_status": "running",
+    "performance_status": "pending",
+    "full_broad_status": "pending",
+    "prior_failures_retained": true
   }
 }

@@ -36,6 +36,13 @@ saved symbolic/pattern are included in the LLC/32 budget.
 
 ## Validation and merge decision
 
+The current scientific commit, 74365dfc, passes all 51 native, portable, and
+ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and
+library receipts are recorded under `current_validation` in the qualification
+receipt. Fresh API/activation, opposite-order SPICE, and full broad comparison
+remain pending. The measurements below describe the earlier 98a3893e snapshot
+and do not establish merge readiness for the current commit.
+
 The dedicated private test retains exact native-factor and vendor-solve word
 and FP-flag oracles. The real one-RHS vendor transpose loops explicitly
 round the multiply before subtraction, matching their existing native release
