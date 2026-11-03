@@ -36,6 +36,21 @@ saved symbolic/pattern are included in the LLC/32 budget.
 
 ## Validation and merge decision
 
+The user-approved revised gate (`auto-btf-v2`) supersedes the historical
+`auto-btf` decision policy below. Both serial inverter cells must improve
+linear time by at least 2% versus main. A cell where main already wins against
+either peer must preserve each such win and stay within 2% of main in linear
+and wall time. A cell where main loses to both peers may regress by at most
+5% in linear and wall time. The geometric mean of the 28 candidate/main
+linear-time cell medians must not exceed 1.0. Existing peer ties are protected
+as wins. Classification uses medians of paired main/peer observations, never
+a quotient of candidate/peer and candidate/main medians. Correctness and full
+grid requirements are unchanged. The original scripts and failed receipts
+remain intact; versioned launch/review and independent audit scripts implement
+the revised policy. Seven focused tests check both implementations and raw
+paired classification. The broad matrix comparison retains its original
+correctness coverage and 2% lifecycle gate.
+
 The current scientific commit, 74365dfc, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and
 library receipts are recorded under `current_validation` in the qualification

@@ -813,6 +813,8 @@ if(KLS_BUILD_TESTS)
   if(Python3_Interpreter_FOUND)
     add_test(NAME kls_small_btf_merge_gate
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_btf_merge_gate.py")
+    add_test(NAME kls_auto_btf_merge_gate_v2
+      COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_btf_gate_v2.py")
     add_test(NAME kls_spice_campaign_contract
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spice_campaign.py")
     add_test(NAME kls_session_settle

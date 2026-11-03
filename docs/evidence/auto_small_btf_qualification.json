@@ -660,5 +660,46 @@
     },
     "failed_acceptance_not_overridden": true,
     "full_fresh_qualification_required": true
+  },
+  "approved_policy_v2": {
+    "user_approved": true,
+    "target_linear_ratio_max": 0.98,
+    "existing_win_main_linear_and_wall_ratio_max": 1.02,
+    "existing_loss_main_linear_and_wall_ratio_max": 1.05,
+    "preserve_each_existing_peer_win": true,
+    "peer_ties_protected": true,
+    "overall_main_linear_geometric_mean_max": 1.0,
+    "original_scripts_and_failed_receipts_retained": true,
+    "broad_lifecycle_gate_unchanged": 1.02,
+    "host_unit_tests": 7,
+    "container_unit_tests": 7,
+    "container_log": "/tmp/kls-main-btf-v228-gate-v2-tests.log",
+    "historical_reassessment_receipt": "/tmp/kls-main-btf-v228-reassessment.json",
+    "historical_reassessment": {
+      "passed": true,
+      "complete": true,
+      "targets": [
+        {
+          "domain": "llc96",
+          "case": "MOS13_IC/invert50_mos1.cir",
+          "threads": 1,
+          "median": 0.8759366859207928,
+          "wall_median": 0.9669002915378355
+        },
+        {
+          "domain": "llc32",
+          "case": "MOS13_IC/invert50_mos1.cir",
+          "threads": 1,
+          "median": 0.8803295463548095,
+          "wall_median": 0.9676367492853208
+        }
+      ],
+      "regressions": [],
+      "geometric_mean": 0.9832380988834569
+    },
+    "historical_reassessment_is_not_fresh_acceptance": true,
+    "latest_scientific_commit": "9d8f9350",
+    "latest_qualification_root": "/tmp/kls-main-btf-v223-qualification",
+    "latest_qualification_status": "native_51_portable_51_passed_asan_running"
   }
 }
