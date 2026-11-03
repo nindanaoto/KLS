@@ -742,7 +742,7 @@
     "spice_confirmation_root": "/tmp/kls-main-btf-v231-confirmation",
     "spice_status": "initial_passed_confirmation_wall_limit_failed",
     "broad_root": "/tmp/kls-main-btf-v232-broad",
-    "broad_status": "not_started",
+    "broad_status": "running",
     "merge_ready": false,
     "api_activation": {
       "api_observations": 70,
@@ -822,6 +822,21 @@
         "audit_sha256": "862c90503742839c8b6d8ee8df9a52deaf0779c2a4fa69863a815626a582dcec"
       }
     ],
-    "wall_time_policy_clarification_pending": true
+    "wall_time_policy_clarification_pending": true,
+    "broad_progress_checkpoint": {
+      "completed_observations": 150,
+      "all_recorded_observations_valid_so_far": true,
+      "full_corpus_acceptance_unproven": true,
+      "metadata_sha256": "3b8e5b3a0d3d752853d2e4d07460abaa6ef64b33564932407fd8f8fb403083b9",
+      "shared_failures_will_be_retained": true
+    },
+    "wall_time_policy_clarification": {
+      "pending": true,
+      "question": "Should wall-time regressions remain blocking, or be reported separately while linear time determines acceptance?",
+      "confirmation_cell": "llc32/ram2k/threads1",
+      "linear_ratio": 1.002630148482241,
+      "wall_ratio": 1.0306235912543151,
+      "lost_peer_wins": []
+    }
   }
 }

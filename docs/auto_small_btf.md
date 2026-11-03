@@ -53,9 +53,21 @@ correctness coverage and 2% lifecycle gate.
 
 The latest scientific commit, 9d8f9350, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. The revised gate's
-seven focused Python tests pass on the host and in the container. Its new API,
-activation, opposite-order timing campaigns, and broad comparison remain
-pending. The `latest_validation` receipt identifies this exact frozen source.
+seven focused Python tests pass on the host and in the container. Its ordinary
+API and retained-execution campaigns each pass 70 observations, including
+independent agreement and retained execution in all four inverter cells.
+The `latest_validation` receipt identifies this exact frozen source.
+
+Both fresh opposite-order timing campaigns pass correctness on all 462
+observations each, with exact independent agreement. Initial serial inverter
+ratios versus main are 0.89252 and 0.89364; confirmation ratios are 0.90360 and
+0.89953. Their overall linear-time geometric means are 0.98365 and 0.98355.
+The initial campaign passes `auto-btf-v2`. Confirmation fails only the wall-time
+limit for LLC32 serial `ram2k`: its linear ratio is 1.00263 and wall ratio is
+1.03062, with no lost peer win. That failure is retained. Whether elapsed time
+should remain blocking is awaiting explicit user clarification; no gate has
+been relaxed. The full 1760-observation broad comparison is running, with 150
+valid observations at the recorded checkpoint. Merge readiness remains unproven.
 
 The previous scientific commit, 74365dfc, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and
