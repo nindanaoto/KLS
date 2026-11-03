@@ -737,12 +737,91 @@
       "container_log": "/tmp/kls-main-btf-v228-gate-v2-tests.log"
     },
     "api_activation_root": "/tmp/kls-main-btf-v229-activation",
-    "api_activation_status": "running",
+    "api_activation_status": "passed",
     "spice_initial_root": "/tmp/kls-main-btf-v230-initial",
     "spice_confirmation_root": "/tmp/kls-main-btf-v231-confirmation",
-    "spice_status": "pending",
+    "spice_status": "initial_passed_confirmation_wall_limit_failed",
     "broad_root": "/tmp/kls-main-btf-v232-broad",
-    "broad_status": "pending",
-    "merge_ready": false
+    "broad_status": "not_started",
+    "merge_ready": false,
+    "api_activation": {
+      "api_observations": 70,
+      "activation_observations": 70,
+      "independent_exact_agreement": true,
+      "retained_all_four_inverter_cells": true
+    },
+    "spice_reports": [
+      {
+        "root": "/tmp/kls-main-btf-v230-initial",
+        "observations": 462,
+        "all_qualified": true,
+        "independent_exact_agreement": true,
+        "gate": {
+          "passed": true,
+          "complete": true,
+          "targets": [
+            {
+              "domain": "llc96",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.8925210082603792,
+              "wall_median": 0.9656434630667792
+            },
+            {
+              "domain": "llc32",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.893643849645544,
+              "wall_median": 0.9716678619600649
+            }
+          ],
+          "regressions": [],
+          "geometric_mean": 0.9836505184572003
+        },
+        "review_sha256": "866b022f12ca78decfff703f44b2b66be62f4efd587aeb904aaf87b90006763e",
+        "audit_sha256": "4c7253119727c1e261b9069aeccacb4d60be8624392320c8bd4fd05528a31973"
+      },
+      {
+        "root": "/tmp/kls-main-btf-v231-confirmation",
+        "observations": 462,
+        "all_qualified": true,
+        "independent_exact_agreement": true,
+        "gate": {
+          "passed": false,
+          "complete": true,
+          "targets": [
+            {
+              "domain": "llc96",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.9036017269717525,
+              "wall_median": 0.9700538082136003
+            },
+            {
+              "domain": "llc32",
+              "case": "MOS13_IC/invert50_mos1.cir",
+              "threads": 1,
+              "median": 0.8995307785172676,
+              "wall_median": 0.9718467349937304
+            }
+          ],
+          "regressions": [
+            {
+              "domain": "llc32",
+              "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+              "threads": 1,
+              "limit": 1.02,
+              "lost_peer_wins": [],
+              "median": 1.002630148482241,
+              "wall_median": 1.0306235912543151
+            }
+          ],
+          "geometric_mean": 0.9835521427906988
+        },
+        "review_sha256": "47b77efc375b4a35be7f9d7501d56733305609645b0d77928280ccbcbfb74271",
+        "audit_sha256": "862c90503742839c8b6d8ee8df9a52deaf0779c2a4fa69863a815626a582dcec"
+      }
+    ],
+    "wall_time_policy_clarification_pending": true
   }
 }
