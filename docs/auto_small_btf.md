@@ -51,7 +51,13 @@ the revised policy. Seven focused tests check both implementations and raw
 paired classification. The broad matrix comparison retains its original
 correctness coverage and 2% lifecycle gate.
 
-The current scientific commit, 74365dfc, passes all 51 native, portable, and
+The latest scientific commit, 9d8f9350, passes all 51 native, portable, and
+ASan/UBSan tests, plus four scoped TSan ownership tests. The revised gate's
+seven focused Python tests pass on the host and in the container. Its new API,
+activation, opposite-order timing campaigns, and broad comparison remain
+pending. The `latest_validation` receipt identifies this exact frozen source.
+
+The previous scientific commit, 74365dfc, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and
 library receipts are recorded under `current_validation` in the qualification
 receipt. Its ordinary API and retained AUTO execution campaigns both pass 70
