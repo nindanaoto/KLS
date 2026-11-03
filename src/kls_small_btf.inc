@@ -27,7 +27,8 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
   /* An ineligible symbolic frame must not traverse numerical ownership state
      on every ordinary solve/refactor. This is rejection only; positive frames
      still pass the complete ownership, factor-count, budget and FP gates. */
-  if(!s || s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
+  if(!s || s->n<=1 || s->n>4096 || s->nnz<=0 || s->nnz>UINT16_MAX ||
+     s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
   if(!s->symbolic || !s->numeric ||
      s->options.backend!=KLS_BACKEND_AUTO || s->stats.tuning_profile_active ||
      s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
@@ -44,8 +45,7 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
      above and the executor's current floating environment are never cached. */
   const int policy=atomic_load_explicit(&s->compact_btf_policy,memory_order_relaxed);
   if(policy)return policy>0;
-  if(s->n<=1 || s->n>4096 || s->nnz<=0 || s->nnz>UINT16_MAX ||
-     s->symbolic->nblocks<=1 || s->symbolic->maxblock<=1 ||
+  if(s->symbolic->nblocks<=1 || s->symbolic->maxblock<=1 ||
      s->numeric->lnz<0 || s->numeric->unz<0 ||
      s->numeric->lnz>UINT16_MAX || s->numeric->unz>UINT16_MAX ||
      s->numeric->Offp[s->n]<0 || s->numeric->Offp[s->n]>UINT16_MAX) {
@@ -134,7 +134,8 @@ static UF_long kls_compact_btf_transpose_prechecked(kls_solver *s,double *out) {
 /* Preserve the complete admission and optional cache preparation for every
    raw/ordinary caller. No solve or answer is cached by either entry. */
 static UF_long kls_compact_btf_transpose_solve(kls_solver *s,double *out) {
-  if(!s || s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
+  if(!s || s->n<=1 || s->n>4096 || s->nnz<=0 || s->nnz>UINT16_MAX ||
+     s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
   if(!kls_small_btf_environment() || !kls_small_btf_cache_capable(s) ||
      !kls_i32_solve_ready(s) || !kls_small_btf_cache_ready(s))return 0;
   return kls_compact_btf_transpose_prechecked(s,out);

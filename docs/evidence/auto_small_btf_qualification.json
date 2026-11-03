@@ -593,9 +593,72 @@
       "completion_sha256": "856f017d8abe776777aa4f6c1ce6dfd1c413f2303a80ea0181ae7654c2cacb94"
     },
     "api_activation_root": "/tmp/kls-main-btf-v216-activation",
-    "api_activation_status": "running",
-    "performance_status": "pending",
+    "api_activation_status": "passed",
+    "performance_status": "initial_gate_failed",
     "full_broad_status": "pending",
-    "prior_failures_retained": true
+    "prior_failures_retained": true,
+    "api_activation": {
+      "root": "/tmp/kls-main-btf-v216-activation",
+      "api_observations": 70,
+      "activation_observations": 70,
+      "independent_exact_agreement": true,
+      "retained_all_four_inverter_cells": true
+    },
+    "performance": {
+      "root": "/tmp/kls-main-btf-v217-initial",
+      "independent_audit": "/tmp/kls-main-btf-v217-initial-independent/audit.json",
+      "observations": 462,
+      "all_qualified": true,
+      "independent_exact_agreement": true,
+      "acceptance_gate": false,
+      "failed_cell": {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 8,
+        "candidate_over_main_linear_median": 1.0256756695927516,
+        "candidate_over_main_wall_median": 1.0030853159479016,
+        "peer_exception": false
+      },
+      "inverter_serial_main_ratios": [
+        0.8759366859207928,
+        0.8803295463548095
+      ],
+      "confirmation_not_launched": true,
+      "broad_not_launched": true
+    },
+    "orchestration_failure": {
+      "script": "/tmp/kls-main-btf-v216-pipeline.py",
+      "stage": "after_successful_independent_audit",
+      "reason": "missing primary review invocation; primary review subsequently generated without changing any timing observations",
+      "numeric_failure": false
+    }
+  },
+  "size_first_development": {
+    "diagnostic_only": true,
+    "reason": "matrices outside existing bounds still reached ownership and FP admission checks",
+    "source_sha256": {
+      "kls.c": "6608cd4e60a5f6ee1ebe700024764884119b915a39dbcb34b6dab6e06c5cb315",
+      "kls_small_btf.inc": "9d90c72ccefbe5a535a2eb9fa3ee4687be554a82a4492def9ff29567c91b8b52",
+      "kls_egraph_refactor.inc": "5698a1b7338172fa6ee434ff9b8ac38cb5a0f99ee59d6bf053673cf34dd4859c",
+      "kls_compact_solve.inc": "994d770331da5c6f422259faaca0dfe956a327f6bd0c7a05c953ffdcde0cc99d"
+    },
+    "focused_native_test_passed": true,
+    "previous_vs_main_screen": {
+      "root": "/tmp/kls-main-btf-v220-dac-screen",
+      "observations": 49,
+      "all_qualified": true,
+      "median_threads_1": 1.0109582931780186,
+      "median_threads_8": 1.0143448421126444
+    },
+    "size_first_vs_previous_screen": {
+      "root": "/tmp/kls-main-btf-v222-size-screen",
+      "link_receipt": "/tmp/kls-main-btf-v222-size-link/receipt.json",
+      "observations": 49,
+      "all_qualified": true,
+      "median_threads_1": 0.9918720205084515,
+      "median_threads_8": 0.9893456224615853
+    },
+    "failed_acceptance_not_overridden": true,
+    "full_fresh_qualification_required": true
   }
 }

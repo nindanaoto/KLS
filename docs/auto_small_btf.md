@@ -39,9 +39,23 @@ saved symbolic/pattern are included in the LLC/32 budget.
 The current scientific commit, 74365dfc, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and
 library receipts are recorded under `current_validation` in the qualification
-receipt. Fresh API/activation, opposite-order SPICE, and full broad comparison
-remain pending. The measurements below describe the earlier 98a3893e snapshot
-and do not establish merge readiness for the current commit.
+receipt. Its ordinary API and retained AUTO execution campaigns both pass 70
+observations with exact independent agreement. Its first full timing campaign
+passes correctness on all 462 observations, but fails the accepted performance
+gate: LLC96 eight-thread `dac` has a 1.02568 linear-time ratio versus main and
+does not qualify for a peer exception. The serial inverter ratios are 0.87594
+and 0.88033. Confirmation and broad comparison were not launched for that
+snapshot. The failed campaign is retained without filtering.
+
+`dac` has 6366 unknowns and never enters compact execution. The next revision
+moves existing size limits ahead of ownership and FP-environment admission,
+including ordinary refactor/solve entries. A 12-pair diagnostic per thread count
+measures size-first/previous median ratios of 0.99187 (one thread) and 0.98935
+(eight threads), with all 49 observations qualified. These diagnostics support
+the rejection-cost change; they do not override the failed gate. Complete fresh
+qualification is required for the revised source. The measurements below
+describe the earlier 98a3893e snapshot and do not establish current merge
+readiness.
 
 The dedicated private test retains exact native-factor and vendor-solve word
 and FP-flag oracles. The real one-RHS vendor transpose loops explicitly

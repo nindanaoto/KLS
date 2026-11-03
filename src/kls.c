@@ -5941,7 +5941,7 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
 }
 
 static int kls_lean_btf_map32_refactor(kls_solver *s,double *values) {
-  if(s && s->orientation==KLS_ORIENTATION_TRANSPOSE &&
+  if(s && s->n<=4096 && s->orientation==KLS_ORIENTATION_TRANSPOSE &&
      kls_small_btf_cache_capable(s) && kls_small_btf_cache_ready(s))
     return kls_compact_btf_map32_refactor(s,values);
   return kls_native_btf_map32_refactor(s,values);
@@ -10092,7 +10092,7 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
         solver->fused_refactor_solve_computed = 0;
       }
     }
-    if(!compact_used && direct_low_work_public_btf &&
+    if(!compact_used && solver->n<=4096 && direct_low_work_public_btf &&
        kls_small_btf_cache_capable(solver) && kls_small_btf_environment() &&
        kls_build_refactor_map(solver) && solver->refactor_row_idx32 &&
        solver->refactor_input_pos32) {
@@ -13499,9 +13499,9 @@ static int private_solve_body(kls_solver *solver,
      wrapper still owns its original-operator certificate and correction.
      Only the default componentwise policy can enter here: no L2 refinement
      contract or transformed/packed/observed owner is bypassed. */
-  if(solver->orientation==KLS_ORIENTATION_TRANSPOSE &&
+  if(solver->n<=4096 && solver->orientation==KLS_ORIENTATION_TRANSPOSE &&
      !solver->in_solve_refinement && !solver->certified_unscaled_l2_contract &&
-     !transpose && nrhs==1 && solver->n<=4096 && solver->symbolic->nblocks>1 && ldb==(int64_t)solver->n && ldx==(int64_t)solver->n &&
+     !transpose && nrhs==1 && solver->symbolic->nblocks>1 && ldb==(int64_t)solver->n && ldx==(int64_t)solver->n &&
      kls_small_btf_cache_capable(solver) && kls_small_btf_cache_ready(solver)) {
     if(b!=x)memmove(x,b,(size_t)solver->n*sizeof(*x));
     if(kls_compact_btf_transpose_prechecked(solver,x)) {
