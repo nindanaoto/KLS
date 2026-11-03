@@ -2,6 +2,7 @@
 #include "bench_value_sequence.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +11,17 @@
 #include <limits>
 #include <string>
 #include <vector>
+
+// Match KLS lifecycle timing: sum elapsed public calls, excluding input
+// generation and residual verification. Preserve library timers for diagnostics.
+template <class Call>
+static int bench_public_call(double &elapsed, Call call) {
+  const auto start = std::chrono::steady_clock::now();
+  const int status = static_cast<int>(call());
+  elapsed += std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - start).count();
+  return status;
+}
 
 struct Entry {
   int row;
@@ -230,6 +242,7 @@ int main(int argc, char **argv) {
   std::vector<double> x(static_cast<size_t>(a.n), 0.0);
   matvec(a, x_true, b);
 
+  double public_lifecycle_seconds = 0.0;
   ICktSo inst = nullptr;
   int *iparm = nullptr;
   const long long *oparm = nullptr;
@@ -242,8 +255,8 @@ int main(int argc, char **argv) {
   if (const char *ordering = std::getenv("CKTSO_ORDERING_METHOD")) {
     iparm[2] = std::atoi(ordering);
   }
-  ret = CKTSO_Analyze(inst, false, a.n, a.col_ptr.data(), a.row_idx.data(),
-                      a.values.data(), threads);
+  ret = bench_public_call(public_lifecycle_seconds, [&]() { return CKTSO_Analyze(inst, false, a.n, a.col_ptr.data(), a.row_idx.data(),
+                      a.values.data(), threads); });
   if (ret < 0) {
     std::fprintf(stderr, "CKTSO_Analyze failed: %d\n", ret);
     CKTSO_DestroySolver(inst);
@@ -251,7 +264,7 @@ int main(int argc, char **argv) {
   }
   const long long analysis_us = oparm[0];
 
-  ret = CKTSO_Factorize(inst, a.values.data(), true);
+  ret = bench_public_call(public_lifecycle_seconds, [&]() { return CKTSO_Factorize(inst, a.values.data(), true); });
   if (ret < 0) {
     std::fprintf(stderr, "CKTSO initial Factorize failed: %d\n", ret);
     CKTSO_DestroySolver(inst);
@@ -276,12 +289,12 @@ int main(int argc, char **argv) {
     std::getenv("KLS_BENCH_VERIFY_EACH_REFACTOR") != nullptr;
   double refactor_max_relative_residual = 0.0;
   for (int i = 0; i < factor_repeat; ++i) {
-    ret = CKTSO_Factorize(inst, a.values.data(), true);
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return CKTSO_Factorize(inst, a.values.data(), true); });
     if (ret < 0) break;
     factor_total += oparm[1];
   }
   if (lifecycle_systems > 0 && ret >= 0) {
-    ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return CKTSO_Solve(inst, b.data(), x.data(), false, true); });
     if (ret >= 0) {
       solve_total = oparm[2];
       if (verify_each_refactor) {
@@ -296,7 +309,7 @@ int main(int argc, char **argv) {
                            refactor_value_amplitude);
       matvec(a, x_true, b);
     }
-    ret = CKTSO_Refactorize(inst, a.values.data());
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return CKTSO_Refactorize(inst, a.values.data()); });
     if (ret < 0) break;
     refactor_total += oparm[1];
     if (i == 0) refactor_first = oparm[1];
@@ -304,7 +317,7 @@ int main(int argc, char **argv) {
        opportunity after every sampled refactor as KLS.  Retain these
        timings separately so the projected cycle charges the solve paired
        with each changed numeric. */
-    ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return CKTSO_Solve(inst, b.data(), x.data(), false, true); });
     if (ret >= 0) {
       refactor_solve_total += oparm[2];
       if (i == 0) refactor_solve_first = oparm[2];
@@ -322,7 +335,7 @@ int main(int argc, char **argv) {
   }
   const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
   for (int i = 0; i < standalone_solve_repeats && ret >= 0; ++i) {
-    ret = CKTSO_Solve(inst, b.data(), x.data(), false, true);
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return CKTSO_Solve(inst, b.data(), x.data(), false, true); });
     if (ret < 0) break;
     solve_total += oparm[2];
   }
@@ -360,10 +373,7 @@ int main(int argc, char **argv) {
               98.0 * (refactor_steady_us_avg +
                       refactor_solve_steady_us_avg));
   const double measured_lifecycle_seconds = lifecycle_systems > 0
-    ? 1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
-                static_cast<double>(solve_total + refactor_total +
-                                    refactor_solve_total))
-    : -1.0;
+    ? public_lifecycle_seconds : -1.0;
   double relative_residual = 0.0;
   const double residual_l2 = residual(a, x, b, &relative_residual);
 
@@ -372,6 +382,7 @@ int main(int argc, char **argv) {
               "\"refactor_repeat\":%d,"
               "\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d,"
               "\"measured_lifecycle_seconds\":%.9g,"
+              "\"lifecycle_timing_schema\":2,"
               "\"refactor_value_mode\":\"%s\","
               "\"refactor_value_amplitude\":%.9g,"
               "\"analysis_us\":%lld,\"initial_factor_us\":%lld,"

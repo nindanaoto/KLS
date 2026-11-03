@@ -84,6 +84,30 @@ unchanged 1.02 lifecycle ratio limit; the largest is LLC32 `1138_bus` at
 1.09224. This broad gate fails, so the candidate is not merge ready. No
 complete-corpus geometric mean is claimed from the incomplete correctness coverage.
 
+Follow-up diagnostics preserve every original result. A 216-observation,
+12-pair screen found two cells still above 2%; a 324-observation, balanced
+three-arm experiment found no consistent benefit from keeping native and
+compact refactor routines out of line. Those experimental annotations were
+not promoted to production.
+
+The peer benchmark tools now use timing schema 2: summed elapsed public API
+calls, matching the KLS driver. Internal library timers remain diagnostic
+fields. The previous peer tools summed internal timers and cannot establish
+this public-call comparison. Fresh frozen peer tools completed 432 balanced
+observations across all nine original over-limit groups; all raw logs,
+residuals, timing schemas, and paired ratios were revalidated. Five groups
+beat both peers: LLC32 rajat21, adder_dcop_01, case9, powersim, and LLC96
+adder_dcop_01. The four others lose to CKTSO.
+
+Pooling all 40 recorded main/candidate pairs per investigated group retains
+the original failed campaign and every diagnostic pair. The four groups
+without both peer wins then have ratios 1.00642 (LLC32 1138_bus), 1.00849
+(LLC96 circuit_3), 1.00989 (LLC96 hcircuit), and 1.00508 (LLC96
+legresley_2508). Only case9 remains over 2%, at 1.02121, and beats both
+peers. Using this pooled evidence instead of the frozen four-pair broad gate
+requires a user decision, which is pending. The original broad gate remains
+failed; no merge is authorized by these diagnostics alone.
+
 The previous scientific commit, 74365dfc, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and
 library receipts are recorded under `current_validation` in the qualification
