@@ -36,6 +36,15 @@ saved symbolic/pattern are included in the LLC/32 budget.
 
 ## Validation and merge decision
 
+The latest user-approved gate, `auto-btf-v3`, allows a cell to regress against
+main in linear and wall time when its paired linear-time medians strictly beat
+both CKTSO and SubtreeLU. Otherwise the v2 limits below apply. The inverter
+target, overall geometric mean, correctness, and broad gate remain unchanged.
+The versioned v3 gate and independent auditor agree on both retained SPICE
+campaigns, which pass. All ten gate tests pass on host and container. The
+user authorizes merging after the required checks pass; the broad lifecycle
+gate below currently prevents merging.
+
 The user-approved revised gate (`auto-btf-v2`) supersedes the historical
 `auto-btf` decision policy below. Both serial inverter cells must improve
 linear time by at least 2% versus main. A cell where main already wins against
@@ -64,10 +73,16 @@ ratios versus main are 0.89252 and 0.89364; confirmation ratios are 0.90360 and
 0.89953. Their overall linear-time geometric means are 0.98365 and 0.98355.
 The initial campaign passes `auto-btf-v2`. Confirmation fails only the wall-time
 limit for LLC32 serial `ram2k`: its linear ratio is 1.00263 and wall ratio is
-1.03062, with no lost peer win. That failure is retained. Whether elapsed time
-should remain blocking is awaiting explicit user clarification; no gate has
-been relaxed. The full 1760-observation broad comparison is running, with 150
-valid observations at the recorded checkpoint. Merge readiness remains unproven.
+1.03062, with no lost peer win. That v2 failure is retained. The user subsequently approved the v3 peer-win
+exception: ram2k confirmation ratios are 0.90259 against CKTSO and 0.44521
+against SubtreeLU. Both v3 reassessments pass, and the combined receipt verifies matching inputs,
+binaries, and opposite campaign orders. The full
+1760-observation broad comparison has completed and its independent audit
+agrees exactly. It has no candidate-only correctness failure, with 80 shared
+invalid observations retained. Nine qualified matrix/cache groups exceed the
+unchanged 1.02 lifecycle ratio limit; the largest is LLC32 `1138_bus` at
+1.09224. This broad gate fails, so the candidate is not merge ready. No
+complete-corpus geometric mean is claimed from the incomplete correctness coverage.
 
 The previous scientific commit, 74365dfc, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and

@@ -822,7 +822,7 @@
         "audit_sha256": "862c90503742839c8b6d8ee8df9a52deaf0779c2a4fa69863a815626a582dcec"
       }
     ],
-    "wall_time_policy_clarification_pending": true,
+    "wall_time_policy_clarification_pending": false,
     "broad_progress_checkpoint": {
       "completed_observations": 150,
       "all_recorded_observations_valid_so_far": true,
@@ -831,12 +831,243 @@
       "shared_failures_will_be_retained": true
     },
     "wall_time_policy_clarification": {
-      "pending": true,
+      "pending": false,
       "question": "Should wall-time regressions remain blocking, or be reported separately while linear time determines acceptance?",
       "confirmation_cell": "llc32/ram2k/threads1",
       "linear_ratio": 1.002630148482241,
       "wall_ratio": 1.0306235912543151,
-      "lost_peer_wins": []
+      "lost_peer_wins": [],
+      "resolution": "User authorizes main regressions for any case whose candidate paired linear-time medians strictly beat both CKTSO and SubtreeLU."
     }
+  },
+  "approved_policy_v3": {
+    "policy": "auto-btf-v3",
+    "status": "validated_spice_pass_broad_failed",
+    "supersedes": "auto-btf-v2",
+    "peer_exception": "If both candidate/CKTSO and candidate/SubtreeLU paired linear-time medians are strictly below 1, exempt that cell from main linear and wall regression limits.",
+    "otherwise": "Retain v2 limits and preservation of existing peer wins.",
+    "unchanged": [
+      "correctness and complete grid",
+      "serial inverter main ratio <= 0.98 in each domain",
+      "overall linear geometric mean <= 1",
+      "broad comparison correctness and lifecycle gate"
+    ],
+    "merge_authorized_when_all_checks_pass": true,
+    "ram2k_confirmation_llc32_threads1": {
+      "candidate_cktso_ratio": 0.9025904659866606,
+      "candidate_subtreelu_ratio": 0.44520751300586575
+    },
+    "original_reports_preserved": true,
+    "validation_sha256": {
+      "/tmp/kls-main-btf-v233-gate-v3-tests.log": "9d5cbf50af2b5d43b53292e22efa8ffa4ca03168aabba92fa0d3e90b2ff6a317",
+      "/tmp/kls-main-btf-v233-gate-v3-container-tests.log": "9d5cbf50af2b5d43b53292e22efa8ffa4ca03168aabba92fa0d3e90b2ff6a317",
+      "/tmp/kls-main-btf-v233-initial-v3-independent/audit.json": "86258a28609cb4e02e1e032eef62b3c437fb30732025e0954764bf6b4830ea56",
+      "/tmp/kls-main-btf-v234-confirmation-v3-independent/audit.json": "2a874db316faec9f2ca2651d1b473b44ab15dfccfb5288e00fc9ee0258bbd2ae",
+      "/tmp/kls-main-btf-v235-policy-v3/confirmation.json": "9fd670e3ff6366e385ead5bbdeab2eb30c6706e89ee09d3d5d15d3f04f7e9077"
+    },
+    "host_and_container_tests_passed": 10,
+    "combined_spice_reassessment": {
+      "acceptance_policy": "auto-btf-v3",
+      "policy_reassessment": true,
+      "acceptance_gate": true,
+      "matching_inputs": true,
+      "campaigns": [
+        {
+          "campaign": "/tmp/kls-main-btf-v230-initial",
+          "acceptance_policy": "auto-btf-v3",
+          "recorded_acceptance_policy": "auto-btf-v2",
+          "policy_reassessment": true,
+          "decision": {
+            "passed": true,
+            "complete": true,
+            "targets": [
+              {
+                "domain": "llc96",
+                "case": "MOS13_IC/invert50_mos1.cir",
+                "threads": 1,
+                "median": 0.8925210082603792,
+                "wall_median": 0.9656434630667792
+              },
+              {
+                "domain": "llc32",
+                "case": "MOS13_IC/invert50_mos1.cir",
+                "threads": 1,
+                "median": 0.893643849645544,
+                "wall_median": 0.9716678619600649
+              }
+            ],
+            "regressions": [],
+            "geometric_mean": 0.9836505184572003
+          },
+          "metadata_sha256": "459f76a6ee214b10dcb54a5ca4817b7ce174821715f85f0986f77c8f9784ad79",
+          "ledger_sha256": "4f3d1a3fbe36d6f1bd1362c5e0a6d60039eaeb170c1b2f8b2403851067fcd75a",
+          "independent_audit": "/tmp/kls-main-btf-v233-initial-v3-independent/audit.json",
+          "audit_sha256": "86258a28609cb4e02e1e032eef62b3c437fb30732025e0954764bf6b4830ea56"
+        },
+        {
+          "campaign": "/tmp/kls-main-btf-v231-confirmation",
+          "acceptance_policy": "auto-btf-v3",
+          "recorded_acceptance_policy": "auto-btf-v2",
+          "policy_reassessment": true,
+          "decision": {
+            "passed": true,
+            "complete": true,
+            "targets": [
+              {
+                "domain": "llc96",
+                "case": "MOS13_IC/invert50_mos1.cir",
+                "threads": 1,
+                "median": 0.9036017269717525,
+                "wall_median": 0.9700538082136003
+              },
+              {
+                "domain": "llc32",
+                "case": "MOS13_IC/invert50_mos1.cir",
+                "threads": 1,
+                "median": 0.8995307785172676,
+                "wall_median": 0.9718467349937304
+              }
+            ],
+            "regressions": [],
+            "geometric_mean": 0.9835521427906988
+          },
+          "metadata_sha256": "4fe0554ff0b759085ab26044535104afda1cb763c2f1c42aac7b5729f76e4ec5",
+          "ledger_sha256": "5479449d82a99be58efd3a6a39033de0fe7094efab4076f338c8993e785e0b33",
+          "independent_audit": "/tmp/kls-main-btf-v234-confirmation-v3-independent/audit.json",
+          "audit_sha256": "2a874db316faec9f2ca2651d1b473b44ab15dfccfb5288e00fc9ee0258bbd2ae"
+        }
+      ],
+      "tool_sha256": {
+        "reassess_auto_btf_v3.py": "b38d0b8eb7f863e2cf3cd0663f702e5972f3ddc8953a6460507a7c3d94c13bff",
+        "auto_btf_merge_gate_v3.py": "be7a333ef5cda9efe68a0d7d9357dc82aaa4e3fdd5445f2d0d002bc4bdbde8b6",
+        "run_auto_btf_campaign_v2.py": "b4b483c6ab171240631463fd9ffd6d207a74fc4472d5bbe04894ef86ba936c0b"
+      }
+    },
+    "merge_ready": false
+  },
+  "current_broad_v232_final": {
+    "status": "failed_lifecycle_gate",
+    "campaign": "/tmp/kls-main-btf-v232-broad",
+    "observations": 1760,
+    "independent_exact_agreement": true,
+    "candidate_only_correctness_failures": [],
+    "invalid_observations_retained": 80,
+    "complete_corpus_geomean": null,
+    "qualified_group_limit": 1.02,
+    "over_limit_groups": [
+      {
+        "config": "headline_llc32_t8",
+        "matrix": "rajat21",
+        "valid_pairs": 4,
+        "ratios": [
+          1.005680008856934,
+          1.0411737153417209,
+          1.0365134108073426,
+          0.9702477245945794
+        ],
+        "median": 1.0210967098321384
+      },
+      {
+        "config": "headline_llc32_t8",
+        "matrix": "1138_bus",
+        "valid_pairs": 4,
+        "ratios": [
+          1.3205432362810563,
+          1.127479680546781,
+          1.0196466665624233,
+          1.0570079799168313
+        ],
+        "median": 1.0922438302318063
+      },
+      {
+        "config": "headline_llc32_t8",
+        "matrix": "adder_dcop_01",
+        "valid_pairs": 4,
+        "ratios": [
+          0.9089875752429459,
+          1.067628321249928,
+          1.0474155503434404,
+          1.0313263361366976
+        ],
+        "median": 1.039370943240069
+      },
+      {
+        "config": "headline_llc32_t8",
+        "matrix": "case9",
+        "valid_pairs": 4,
+        "ratios": [
+          1.025148025663513,
+          1.0351064076378904,
+          1.0320385112305233,
+          1.0102441550947037
+        ],
+        "median": 1.0285932684470183
+      },
+      {
+        "config": "headline_llc32_t8",
+        "matrix": "powersim",
+        "valid_pairs": 4,
+        "ratios": [
+          1.0335305681364202,
+          0.9657265472493115,
+          1.0065758613921785,
+          1.0512738462208824
+        ],
+        "median": 1.0200532147642993
+      },
+      {
+        "config": "headline_llc96_t8",
+        "matrix": "circuit_3",
+        "valid_pairs": 4,
+        "ratios": [
+          1.041910261743342,
+          0.9849047803725693,
+          1.083904832922462,
+          1.0236467755656922
+        ],
+        "median": 1.032778518654517
+      },
+      {
+        "config": "headline_llc96_t8",
+        "matrix": "hcircuit",
+        "valid_pairs": 4,
+        "ratios": [
+          1.0528751126897025,
+          1.037125782566406,
+          1.0295338505180842,
+          0.9961357401964339
+        ],
+        "median": 1.033329816542245
+      },
+      {
+        "config": "headline_llc96_t8",
+        "matrix": "adder_dcop_01",
+        "valid_pairs": 4,
+        "ratios": [
+          1.0594651925893994,
+          1.1153780727191709,
+          1.012762890528951,
+          1.0229267530035993
+        ],
+        "median": 1.0411959727964994
+      },
+      {
+        "config": "headline_llc96_t8",
+        "matrix": "legresley_2508",
+        "valid_pairs": 4,
+        "ratios": [
+          1.1084578538184833,
+          1.0108549167174847,
+          1.032666217418201,
+          0.9551651105875479
+        ],
+        "median": 1.021760567067843
+      }
+    ],
+    "independent_audit": "/tmp/kls-main-btf-v232-broad-independent/audit.json",
+    "audit_sha256": "1f70ec0e6f4850aecadd6765ddafba616a652d794fdd1bfb7aab09061c6782b6",
+    "merge_ready": false,
+    "over_limit_groups_all_selected_normal_orientation": true,
+    "diagnosis": "All four candidate trials in all nine over-limit groups selected normal orientation, outside the new transpose executor. Causality remains unproven; investigate normal-path overhead with balanced diagnostic measurements before changing production."
   }
 }
