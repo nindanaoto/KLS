@@ -39,11 +39,12 @@ saved symbolic/pattern are included in the LLC/32 budget.
 The latest user-approved gate, `auto-btf-v3`, allows a cell to regress against
 main in linear and wall time when its paired linear-time medians strictly beat
 both CKTSO and SubtreeLU. Otherwise the v2 limits below apply. The inverter
-target, overall geometric mean, correctness, and broad gate remain unchanged.
+target, overall geometric mean, and correctness remain unchanged. The broad
+gate uses the separately approved all-recorded-pairs reassessment below.
 The versioned v3 gate and independent auditor agree on both retained SPICE
 campaigns, which pass. All ten gate tests pass on host and container. The
-user authorizes merging after the required checks pass; the broad lifecycle
-gate below currently prevents merging.
+user authorizes merging after the required checks pass. All current gates
+pass, including the approved broad reassessment described below.
 
 The user-approved revised gate (`auto-btf-v2`) supersedes the historical
 `auto-btf` decision policy below. Both serial inverter cells must improve
@@ -58,7 +59,9 @@ grid requirements are unchanged. The original scripts and failed receipts
 remain intact; versioned launch/review and independent audit scripts implement
 the revised policy. Seven focused tests check both implementations and raw
 paired classification. The broad matrix comparison retains its original
-correctness coverage and 2% lifecycle gate.
+correctness coverage and 2% lifecycle threshold; on 2026-11-04 the user
+approved using all recorded pairs for the nine investigated cells, with
+the existing both-peer-win exception.
 
 The latest scientific commit, 9d8f9350, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. The revised gate's
@@ -81,7 +84,8 @@ binaries, and opposite campaign orders. The full
 agrees exactly. It has no candidate-only correctness failure, with 80 shared
 invalid observations retained. Nine qualified matrix/cache groups exceed the
 unchanged 1.02 lifecycle ratio limit; the largest is LLC32 `1138_bus` at
-1.09224. This broad gate fails, so the candidate is not merge ready. No
+1.09224. The original four-pair broad gate fails and is retained as a historical
+decision. The approved reassessment below passes. No
 complete-corpus geometric mean is claimed from the incomplete correctness coverage.
 
 Follow-up diagnostics preserve every original result. A 216-observation,
@@ -104,9 +108,15 @@ the original failed campaign and every diagnostic pair. The four groups
 without both peer wins then have ratios 1.00642 (LLC32 1138_bus), 1.00849
 (LLC96 circuit_3), 1.00989 (LLC96 hcircuit), and 1.00508 (LLC96
 legresley_2508). Only case9 remains over 2%, at 1.02121, and beats both
-peers. Using this pooled evidence instead of the frozen four-pair broad gate
-requires a user decision, which is pending. The original broad gate remains
-failed; no merge is authorized by these diagnostics alone.
+peers. On 2026-11-04 the user approved using all 40 recorded pairs instead
+of the frozen four-pair gate. `reassess_auto_broad_pooled.py` validates the
+original full-grid audit, exact binary identities, all raw logs and numerical
+checks, all launch orders, and all 40 pairs in every original over-limit cell.
+It preserves the original failure and passes the approved gate. An independent
+reduction agrees exactly. Seven gate tests pass on host and container. The
+original 1,760 observations, including 80 shared failures, remain intact.
+No complete-corpus aggregate is claimed. The unmodified production sources
+match the build qualified in all four profiles; public headers are unchanged.
 
 The previous scientific commit, 74365dfc, passes all 51 native, portable, and
 ASan/UBSan tests, plus four scoped TSan ownership tests. Its frozen source and

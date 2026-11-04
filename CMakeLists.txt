@@ -817,6 +817,8 @@ if(KLS_BUILD_TESTS)
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_btf_gate_v2.py")
     add_test(NAME kls_auto_btf_merge_gate_v3
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_btf_gate_v3.py")
+    add_test(NAME kls_auto_broad_pooled_gate
+      COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_broad_pooled.py")
     add_test(NAME kls_spice_campaign_contract
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spice_campaign.py")
     add_test(NAME kls_session_settle
