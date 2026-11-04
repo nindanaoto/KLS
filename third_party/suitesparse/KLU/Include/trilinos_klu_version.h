@@ -272,6 +272,20 @@ typedef double Unit ;
 #define MULT_CONJ(c,a,b)	    { (c) = (a) * (b) ; }
 #define MULT_SUB(c,a,b)		    { (c) -= (a) * (b) ; }
 #define MULT_SUB_CONJ(c,a,b)	    { (c) -= (a) * (b) ; }
+/* KLS one-RHS transpose walks preserve the release scalar operation order.
+ * A register barrier prevents build-dependent FMA contraction without a store
+ * on x86. Other targets use an explicitly rounded temporary. */
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
+#define KLS_TRANSPOSE_MULT_SUB(c,a,b) { \
+    double kls_transpose_product = (a) * (b) ; \
+    __asm__ ("" : "+x" (kls_transpose_product)) ; \
+    (c) -= kls_transpose_product ; }
+#else
+#define KLS_TRANSPOSE_MULT_SUB(c,a,b) { \
+    volatile double kls_transpose_product = (a) * (b) ; \
+    (c) -= kls_transpose_product ; }
+#endif
+
 #define DIV(c,a,b)		    { (c) = (a) / (b) ; }
 #define RECIPROCAL(c)		    { (c) = 1.0 / (c) ; }
 #define DIV_CONJ(c,a,b)		    { (c) = (a) / (b) ; }
@@ -690,5 +704,9 @@ typedef Double_Complex Unit ;
 /* -------------------------------------------------------------------------- */
 
 #endif	/* #ifndef COMPLEX */
+
+#ifdef COMPLEX
+#define KLS_TRANSPOSE_MULT_SUB(c,a,b) MULT_SUB(c,a,b)
+#endif
 
 #endif

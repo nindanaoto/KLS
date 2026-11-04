@@ -7581,6 +7581,12 @@ static int kls_mapped_refactor(kls_solver *solver,
   if (!kls_build_refactor_map(solver)) {
     return -1;
   }
+  if(solver->n<=4096 && solver->orientation==KLS_ORIENTATION_TRANSPOSE &&
+     !scaled && !check_pivots && kls_small_btf_cache_capable(solver) &&
+     kls_small_btf_environment() && solver->refactor_row_idx32 && solver->refactor_input_pos32) {
+    const int result=kls_lean_btf_map32_refactor(solver,numeric_values);
+    if(result>=0)return result;
+  }
   const int moderate_btf_trial = !check_pivots && !scaled &&
     kls_moderate_btf_map32_trial_capable(solver);
   if (kls_pts_refactor_ready(solver) ||

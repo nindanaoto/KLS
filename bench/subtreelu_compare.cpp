@@ -12,6 +12,17 @@
 #include <string>
 #include <vector>
 
+// Match KLS lifecycle timing: sum elapsed public calls, excluding input
+// generation and residual verification. Preserve library timers for diagnostics.
+template <class Call>
+static int bench_public_call(double &elapsed, Call call) {
+  const auto start = std::chrono::steady_clock::now();
+  const int status = static_cast<int>(call());
+  elapsed += std::chrono::duration<double>(
+      std::chrono::steady_clock::now() - start).count();
+  return status;
+}
+
 struct Entry {
   int row;
   int col;
@@ -265,17 +276,18 @@ int main(int argc, char **argv) {
   std::vector<double> x(static_cast<size_t>(a.n), 0.0);
   matvec(a, x_true, b);
 
+  double public_lifecycle_seconds = 0.0;
   subtree_lu::SubtreeLU<int, double> solver;
   long long *parm = solver.parm;
-  int ret = solver.analyze(a.n, a.row_ptr.data(), a.col_idx.data(),
-                           a.row_values.data(), threads, nullptr, nullptr);
+  int ret = bench_public_call(public_lifecycle_seconds, [&]() { return solver.analyze(a.n, a.row_ptr.data(), a.col_idx.data(),
+                           a.row_values.data(), threads, nullptr, nullptr); });
   if (ret != subtree_lu::E_OK) {
     std::fprintf(stderr, "SubtreeLU analyze failed: %d\n", ret);
     return EXIT_FAILURE;
   }
   const long long analysis_us = parm[subtree_lu::O_ANALYZE_TIME];
 
-  ret = solver.factorize(a.row_values.data());
+  ret = bench_public_call(public_lifecycle_seconds, [&]() { return solver.factorize(a.row_values.data()); });
   if (ret != subtree_lu::E_OK) {
     std::fprintf(stderr, "SubtreeLU initial factorize failed: %d\n", ret);
     return EXIT_FAILURE;
@@ -295,13 +307,13 @@ int main(int argc, char **argv) {
     std::getenv("KLS_BENCH_VERIFY_EACH_REFACTOR") != nullptr;
   double refactor_max_relative_residual = 0.0;
   for (int i = 0; i < factor_repeat; ++i) {
-    ret = solver.factorize(a.row_values.data());
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return solver.factorize(a.row_values.data()); });
     if (ret != subtree_lu::E_OK) break;
     factor_total += parm[subtree_lu::O_FACTORIZE_TIME];
   }
   if (lifecycle_systems > 0 && ret == subtree_lu::E_OK) {
     const auto w0 = std::chrono::steady_clock::now();
-    ret = solver.solve(b.data(), x.data());
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return solver.solve(b.data(), x.data()); });
     const auto w1 = std::chrono::steady_clock::now();
     if (ret == subtree_lu::E_OK) {
       solve_total = parm[subtree_lu::O_SOLVE_TIME];
@@ -320,7 +332,7 @@ int main(int argc, char **argv) {
       matvec(a, x_true, b);
     }
     const auto w0 = std::chrono::steady_clock::now();
-    ret = solver.refactorize(a.row_values.data());
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return solver.refactorize(a.row_values.data()); });
     const auto w1 = std::chrono::steady_clock::now();
     if (ret != subtree_lu::E_OK) break;
     refactor_total += parm[subtree_lu::O_FACTORIZE_TIME];
@@ -330,7 +342,7 @@ int main(int argc, char **argv) {
     /* Mirror the refactor/solve cadence used by the other adaptive
        harnesses.  These samples remain separate from the final-state solve
        loop so the projection charges the solve paired with each numeric. */
-    ret = solver.solve(b.data(), x.data());
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return solver.solve(b.data(), x.data()); });
     if (ret == subtree_lu::E_OK) {
       refactor_solve_total += parm[subtree_lu::O_SOLVE_TIME];
       if (i == 0) refactor_solve_first = parm[subtree_lu::O_SOLVE_TIME];
@@ -349,7 +361,7 @@ int main(int argc, char **argv) {
   const int standalone_solve_repeats = lifecycle_systems > 0 ? 0 : repeat;
   for (int i = 0; i < standalone_solve_repeats && ret == subtree_lu::E_OK; ++i) {
     const auto w0 = std::chrono::steady_clock::now();
-    ret = solver.solve(b.data(), x.data());
+    ret = bench_public_call(public_lifecycle_seconds, [&]() { return solver.solve(b.data(), x.data()); });
     const auto w1 = std::chrono::steady_clock::now();
     if (ret != subtree_lu::E_OK) break;
     solve_total += parm[subtree_lu::O_SOLVE_TIME];
@@ -389,10 +401,7 @@ int main(int argc, char **argv) {
               98.0 * (refactor_steady_us_avg +
                       refactor_solve_steady_us_avg));
   const double measured_lifecycle_seconds = lifecycle_systems > 0
-    ? 1.0e-6 * (static_cast<double>(analysis_us + initial_factor_us) +
-                static_cast<double>(solve_total + refactor_total +
-                                    refactor_solve_total))
-    : -1.0;
+    ? public_lifecycle_seconds : -1.0;
   {
     const char *dump = std::getenv("ST_DUMP_PERM");
     if (dump != nullptr) {
@@ -451,6 +460,7 @@ int main(int argc, char **argv) {
               "\"refactor_repeat\":%d,"
               "\"lifecycle_mode\":\"%s\",\"lifecycle_systems\":%d,"
               "\"measured_lifecycle_seconds\":%.9g,"
+              "\"lifecycle_timing_schema\":2,"
               "\"refactor_value_mode\":\"%s\","
               "\"refactor_value_amplitude\":%.9g,"
               "\"analysis_us\":%lld,\"initial_factor_us\":%lld,"

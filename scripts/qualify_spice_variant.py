@@ -103,6 +103,8 @@ def main():
         # races even on the unchanged baseline. This scope tests the owned
         # pthread team and public solver ownership, without suppressing races.
         targets=['kls_accuracy_owner','kls_componentwise_team','kls_klu_allocator_ownership'] if profile=='tsan' else []
+        if profile=='tsan' and (source/'tests/kls_small_btf.c').exists():
+            targets.append('kls_small_btf')
         run(profile+'-build',['cmake','--build',build,'-j'+str(args.jobs),*(['--target',*targets] if targets else [])])
         run(profile+'-test',['ctest','--test-dir',build,'--output-on-failure','-j1',*(['-R','^('+'|'.join(targets)+')$'] if targets else [])])
     if any(sha(path)!=h for path,h in files.items()):

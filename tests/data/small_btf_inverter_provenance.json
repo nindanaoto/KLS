@@ -1,0 +1,15 @@
+{
+  "source_case": "MOS13_IC/invert50_mos1.cir",
+  "source_netlist_sha256": "0fcf0679468068146ae72ef6ace3547a8b9cec513913c0323f36d02afc2fb479",
+  "capture_campaign": "/tmp/kls-main-small-btf-v204-capture",
+  "capture_stdout_sha256": "d9b8ed0e4175cda3adf3f35ddfd29f2abdc4c32db4de1d70b50821cf40a7017c",
+  "snapshot_receipt_sha256": "eed14aa0336e9177b5c2af82d50c0e15ef754e5c9a0eece2993e8a40b879a30b",
+  "fixture_sha256": "9991634c1848e4a4d6a4f67d7b135d47589bca3f3421405be037123743a5a276",
+  "n": 255,
+  "nnz": 1359,
+  "storage": "CSR",
+  "unhinted_ordering": 4,
+  "owned_fallback": true,
+  "complete_capture_campaign_observations": 10,
+  "qualified_observations": 10
+}
