@@ -1,0 +1,29 @@
+{
+  "criterion": "More peer wins than main, or smaller worst peer ratio with equal wins; user-authorized checkpoint, distinct from final acceptance gates",
+  "baseline_commit": "fb3d7c6968f84f39164271864e185fc43b1ed59d",
+  "candidate": "v51",
+  "win_ratio_max": 0.98,
+  "comparisons": 56,
+  "main_wins": 29,
+  "candidate_wins": 39,
+  "main_worst_ratio": 1.5384949305478133,
+  "candidate_worst_ratio": 1.4424397315353306,
+  "pending": [
+    "All 56 peer wins",
+    "Independent opposite-order confirmation",
+    "Broad 110-matrix campaign"
+  ],
+  "evidence_sha256": {
+    "summary.json": "e49cd703fc23accd3c589fa1f7075a1424b65b70b6a12f7420b65f815a597f6a",
+    "audit.json": "d9cfeb09f20d8fa04aea49a68e69922f4636832b7675dc5bc7399672a97002a2",
+    "qualification.json": "c8b7397123794ec60ef1c85d66e09fad46a6fcb5c697a5a48c6c2bf37051f2e1",
+    "qualified-source.json": "4f365d950801c505df8f58d5b5423d253f3f257a4f2db109a6267f4be98154dc",
+    "abi.json": "79af478e0c37b260680184ea50827fd50865ec883cfbf2e95a6aa83d194f4576"
+  },
+  "integration_verification": {
+    "runtime_inputs": "132 files byte-identical to qualified frozen source",
+    "dependency_gitlinks": "all four match qualified revisions",
+    "harness_unit_tests": 21,
+    "diff_check": "One existing qualified-source blank line at EOF retained in src/kls_egraph_refactor.inc to preserve exact source identity"
+  }
+}

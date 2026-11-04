@@ -6531,6 +6531,11 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
       solver->refactor_level_max_width < (UF_long)(4 * solver->options.threads)) {
     return 0;
   }
+  /* A retained timed-out plan is preparation, not a free parallel verdict.
+     Only a funded probe or a retained win may dispatch it automatically.
+     Explicit engine controls retain their ordinary eligibility policy. */
+  if(solver->observed_parallel.retry_pending && !kls_observed_parallel_enabled(solver) &&
+     !getenv("KLS_EGRAPH_REFACTOR_FLOOR") && !getenv("KLS_DISABLE_OBSERVED_PARALLEL"))return 0;
   if (solver->dense_tail_cols > 0) {
     /* pipe-emitted dense-tail numerics (see the schedule gate): the
        tail no-ops in the dispatch, the BLAS3 refresh rebuilds it */
@@ -6559,7 +6564,8 @@ static int kls_egraph_refactor_is_eligible(const kls_solver *solver) {
        the work checks decide whether schedule construction can amortize. */
     if (solver->n < (UF_long)solver->tuning.egraph_min_size ||
         solver->refactor_level_cols == NULL ||
-        solver->refactor_dependency_work < min_dependency_work ||
+        (!kls_observed_parallel_enabled(solver) &&
+         solver->refactor_dependency_work < min_dependency_work) ||
         (solver->refactor_dependency_max_column_work > 0.0 &&
          solver->refactor_dependency_work <
            independence_workers *
@@ -7297,6 +7303,9 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->row_pipeline_private_group_mask = NULL;
   shared->row_pipeline_private_count = 0;
   shared->row_pipeline_ordered_private = 0;
+  shared->trial_deadline_seconds = solver->observed_parallel.active==1
+    ? solver->observed_parallel.deadline : 0;
+  atomic_store_explicit(&shared->trial_deadline_hit,0,memory_order_relaxed);
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;
   shared->pivot_rejected = 0;
@@ -7465,7 +7474,25 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
 
   shared->btf_scalar_run_exec = 0;
 
+  const int observed_timeout=atomic_load_explicit(&shared->trial_deadline_hit,
+                                                memory_order_acquire);
+  shared->trial_deadline_seconds=0;
+  if(observed_timeout) shared->invalid=1;
+
   pthread_mutex_unlock(&shared->lock);
+
+  if(observed_timeout) {
+    /* All workers have joined. A stopped partial numeric must never be
+       published as successful; the router refactors the current input using
+       its ordinary fallback before any answer can escape. */
+    solver->egraph_worker_scratch_dirty=1;
+    kls_sync_authoritative_packed_l_values(solver);
+    kls_sync_authoritative_packed_u_values(solver);
+    solver->refactor_l_packed_valid=0;
+    solver->refactor_u_packed_valid=0;
+    common->status=TRILINOS_KLU_OK;
+    return -1;
+  }
 
   if (shared->invalid || shared->pivot_rejected ||
       (shared->singular && common->halt_if_singular)) {
@@ -7791,7 +7818,7 @@ static int kls_mapped_refactor(kls_solver *solver,
     worker.rejected_multiplier_abs = -1.0;
     worker.rejected_pivot_abs = -1.0;
     worker.rejected_candidate_abs = -1.0;
-    kls_parallel_refactor_block(&worker, block);
+    kls_refactor_block_dispatch(&worker, block);
     if (worker.invalid || worker.pivot_rejected ||
         (worker.singular && common->halt_if_singular)) {
       memset(worker.x, 0, (size_t)solver->symbolic->maxblock * sizeof(*worker.x));
@@ -7898,7 +7925,7 @@ static int kls_serial_refactor_tail_from_block(kls_solver *solver,
   common->nrealloc = 0;
 
   for (UF_long block = start_block; block < solver->symbolic->nblocks; ++block) {
-    kls_parallel_refactor_block(&worker, block);
+    kls_refactor_block_dispatch(&worker, block);
     if (worker.invalid || worker.pivot_rejected ||
         (worker.singular && common->halt_if_singular)) {
       memset(worker.x, 0, (size_t)solver->symbolic->maxblock * sizeof(*worker.x));
@@ -8113,7 +8140,7 @@ static int kls_serial_checked_scaled_refactor_from_block(
   memset(worker.x, 0, (size_t)solver->symbolic->maxblock * sizeof(*worker.x));
 
   for (UF_long block = start_block; block < solver->symbolic->nblocks; ++block) {
-    kls_parallel_refactor_block(&worker, block);
+    kls_refactor_block_dispatch(&worker, block);
     if (worker.invalid || worker.pivot_rejected ||
         (worker.singular && common->halt_if_singular)) {
       memset(worker.x, 0, (size_t)solver->symbolic->maxblock * sizeof(*worker.x));
@@ -8240,7 +8267,14 @@ typedef struct kls_snb_state {
   uint64_t coop_min_doubles;
   size_t allocation_bytes; /* Requested retained bytes, including scratch. */
   double preparation_seconds;
+  uint64_t stream_jobs;
+  int16_t *private_owner;
+  int32_t *private_nodes,*private_pipeline;
+  int64_t private_ptr[65],private_pipeline_count;
+  int private_threads;
+
 } kls_snb_state;
 
 /* Work threshold above which a lone task on a level is executed by the
  * whole crew (column-sliced edges, row-sliced GEMM/scatter and getrf). */
+

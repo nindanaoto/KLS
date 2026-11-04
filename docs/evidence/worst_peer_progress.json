@@ -1,0 +1,4384 @@
+{
+  "goal": "Confirmed 2% win over CKTSO and SubtreeLU in all 28 SPICE settings; peer-aware standalone guard",
+  "complete": false,
+  "branch": "work/worst-peer-20261104",
+  "baseline": "fb3d7c69",
+  "baseline_qualification": "/tmp/kls-worst-peer-v1-baseline-core",
+  "candidate_qualification": "/tmp/kls-worst-peer-v7-snb-kernels-core",
+  "candidate_features": [
+    "Observed parallel consultation port from 8bda879a with a3bd1683 alignment fix; current small-BTF state retained",
+    "Outlined observed consultation (public wrapper 516 bytes versus baseline 490; inline first draft 18,586)",
+    "Selective forest ports cbd3c790/f7a39f75/0d4cbbac/6fa5a3e3; current small-BTF retained; independent combined-call scope",
+    "SNB eight-accumulator dense products (b74e0873), four-column narrow updates (fa0bf949), register TRSM (0c307460) adapted to ordinary SNB with local masked-nearest guard"
+  ],
+  "harness": [
+    "worst_peer_gate.py",
+    "run_worst_peer_campaign.py",
+    "audit_worst_peer_campaign.py",
+    "confirm_worst_peer.py"
+  ],
+  "tests": {
+    "worst_peer_gate": 6,
+    "historical_auto_btf_gate_tests": 17,
+    "register_edge_oracle_cases": 67200,
+    "worst_peer_broad_gate": 6
+  },
+  "pending": [
+    "Monitor composed v51 controller session97030: full qualification, link/ABI check, complete initial peer campaign and independent audit are queued sequentially under quiet timing protocol.",
+    "Implement and qualify a candidate that closes residual BJT, DAC, memory and serial peer losses while preserving default certification and public options",
+    "Run two fresh complete opposite-order 56-peer-comparison campaigns, independent audits, and matching binary/input pin confirmation",
+    "Run full original 110-matrix broad candidate/baseline comparison plus fresh peer evidence for every >2% regression, with independent audit",
+    "Selectively compose proven changes into main worktree, qualify composed source, verify ABI and all gates, then commit"
+  ],
+  "baseline_native_tests": 55,
+  "baseline_src_files_match_main": 34,
+  "baseline_link": "/tmp/kls-worst-peer-v1-baseline-link",
+  "qualification_runs": {
+    "v2": {
+      "path": "/tmp/kls-worst-peer-v2-observed-core",
+      "native": "pass 57/57",
+      "portable": "pass 57/57",
+      "status": "complete: native/portable/ASan/UBSan 57/57 each; scoped TSan 4/4 and runtime controls"
+    },
+    "v3": {
+      "path": "/tmp/kls-worst-peer-v3-outlined-core",
+      "native": "pass 57/57",
+      "portable": "pass 57/57",
+      "status": "complete: native/portable/ASan/UBSan 57/57 each, scoped TSan 5/5, runtime controls"
+    },
+    "v4": {
+      "path": "/tmp/kls-worst-peer-v4-forest-core",
+      "status": "failed build: extraneous native_i16 invalidation dependency; corrected in worktree"
+    },
+    "v5": {
+      "path": "/tmp/kls-worst-peer-v5-forest-core",
+      "status": "failed build: forest transition call inserted at factor rather than refactor; corrected and syntax-checked"
+    },
+    "v6": {
+      "path": "/tmp/kls-worst-peer-v6-forest-core",
+      "status": "complete: native/portable/ASan/UBSan 60/60 each; scoped TSan 8/8 and runtime controls",
+      "native": "pass 60/60",
+      "portable": "pass 60/60"
+    },
+    "v7": {
+      "path": "/tmp/kls-worst-peer-v7-snb-kernels-core",
+      "status": "complete: native/portable/ASan/UBSan 62/62 each; scoped TSan 8/8 and runtime controls",
+      "native": "pass 62/62",
+      "portable": "pass 62/62"
+    },
+    "v9": {
+      "path": "/tmp/kls-worst-peer-v9-ordering-native",
+      "status": "native passed; portable/sanitizers not yet run"
+    },
+    "v10": {
+      "path": "/tmp/kls-worst-peer-v10-stream-native",
+      "status": "native passed; source predates independent-SNB ownership guard"
+    },
+    "v11": {
+      "path": "/tmp/kls-worst-peer-v11-stream-native",
+      "status": "native passed; predates consultation isolation guards"
+    },
+    "v12": {
+      "path": "/tmp/kls-worst-peer-v12-stream-native",
+      "status": "native69/69 passed; BJT stream ineligible due to transpose-only guard"
+    },
+    "v13": {
+      "path": "/tmp/kls-worst-peer-v13-stream-native",
+      "status": "native passed; NORMAL/TRANSPOSE admission fixtures included"
+    },
+    "v14": {
+      "path": "/tmp/kls-worst-peer-v14-private16-native",
+      "status": "native passed; private queues and 16-column candidate panels"
+    },
+    "v16": {
+      "path": "/tmp/kls-worst-peer-v16-normal-core",
+      "status": "native/portable/asan/tsan running"
+    }
+  },
+  "diagnostic_campaign": {
+    "path": "/tmp/kls-worst-peer-v3-diagnostic",
+    "performance_eligible": false,
+    "status": "superseded; interrupted with SIGINT; child teardown complete",
+    "completed_observations": 14,
+    "completed_failures": 0,
+    "receipt": "/tmp/kls-worst-peer-v3-diagnostic/interruption.json"
+  },
+  "activation_qualifier": "scripts/qualify_worst_peer_activation.py; completed successfully",
+  "candidate_link": "/tmp/kls-worst-peer-v7-snb-kernels-link",
+  "activation_queue": {
+    "script": "/tmp/kls-worst-peer-v7-next.py",
+    "session": 8220,
+    "status": "complete; API70 and activation70 passed with independent exact audit agreement",
+    "output": "/tmp/kls-worst-peer-v7-activation"
+  },
+  "abi_receipt": "/tmp/kls-worst-peer-v7-abi.json",
+  "peer_campaign_queue": {
+    "script": "/tmp/kls-worst-peer-v7-peers-next.py",
+    "session": 49065,
+    "status": "complete; performance rejected; no confirmation run",
+    "initial": "/tmp/kls-worst-peer-v7-initial"
+  },
+  "standalone_gate": "scripts/worst_peer_broad_gate.py; policy tested, full-corpus/peer evidence collection and audit integration still pending",
+  "isolated_frame_experiment": {
+    "source": "/tmp/kls-worst-peer-frame-worktree",
+    "branch": "work/worst-peer-frame-20261104",
+    "status": "native qualification running session41289",
+    "additional_changes": "outline acquisition helper, decline larger retention outside Linux",
+    "qualification": "/tmp/kls-worst-peer-v15-frame-native"
+  },
+  "source_agreement": "/tmp/kls-worst-peer-v7-source-agreement.json",
+  "isolated_ordering_experiment": {
+    "source": "/tmp/kls-worst-peer-ordering-worktree",
+    "branch": "work/worst-peer-ordering-20261104",
+    "status": "native qualification and focused BJT screen/review passed correctness; parallel peer targets still fail",
+    "scope": "ordinary SNB only; owned streaming not ported; explicit non-AUTO backends excluded; current small-BTF preserved",
+    "pending_test": "Explicit SERIAL/KLS backend exclusion fixture added after syntax check; runtime and renewed syntax validation deferred until timing finishes",
+    "qualification": "/tmp/kls-worst-peer-v9-ordering-native",
+    "failed_run": "/tmp/kls-worst-peer-v8-ordering-native/development-only.json",
+    "link": "/tmp/kls-worst-peer-v9-ordering-link",
+    "screen": "/tmp/kls-worst-peer-v9-bjt-screen",
+    "partial_screen": {
+      "scope": "llc96 one thread, four paired trials",
+      "all_qualified": true,
+      "ratios": {
+        "baseline": 0.8466435510956589,
+        "ck": 0.8764638093066592,
+        "st": 0.5553410888023469
+      },
+      "acceptance_evidence": false
+    },
+    "parallel_partial_screen": {
+      "scope": "llc96 eight threads, four paired trials",
+      "ratios": {
+        "baseline": 0.899134924701749,
+        "ck": 1.0608120738401303,
+        "st": 1.2132711173789477
+      },
+      "acceptance_evidence": false
+    },
+    "screen_cells": [
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8491484493884539,
+          0.8459411827873219,
+          0.8458929367684074,
+          0.847345919403996
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.8466435510956589,
+        "wall_median": 0.9076924203780194
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.8774982175116901,
+          0.8796565117816809,
+          0.8737641971347055,
+          0.8754294011016285
+        ],
+        "baseline_peer_median": 1.0332644962676203,
+        "median": 0.8764638093066592,
+        "wall_median": 0.9301887451803244
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.5555863279913923,
+          0.555951163553387,
+          0.5549295306014369,
+          0.5550958496133016
+        ],
+        "baseline_peer_median": 0.6555637740159705,
+        "median": 0.5553410888023469,
+        "wall_median": 0.6842423584477971
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8746059813946336,
+          0.9042852937465831,
+          0.9073287504369287,
+          0.8939845556569149
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.899134924701749,
+        "wall_median": 0.9686716548388364
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          1.1722034457175832,
+          0.6825130433057589,
+          1.0713861355179637,
+          1.050238012162297
+        ],
+        "baseline_peer_median": 1.177798390123041,
+        "median": 1.0608120738401303,
+        "wall_median": 1.0230833191217155
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          1.2139234112784467,
+          1.2209895733520715,
+          1.2126188234794488,
+          1.1909098616625922
+        ],
+        "baseline_peer_median": 1.3433486761039357,
+        "median": 1.2132711173789477,
+        "wall_median": 1.0823809080691158
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8423184432671943,
+          0.8495109074529434,
+          0.847753845414247,
+          0.8451356243018678
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.8464447348580575,
+        "wall_median": 0.9062845829805486
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.9637328494673902,
+          0.9705558154660704,
+          0.9657423591746949,
+          0.9688231830071625
+        ],
+        "baseline_peer_median": 1.1433154396760088,
+        "median": 0.9672827710909286,
+        "wall_median": 0.9958622338275649
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.6138004526785416,
+          0.6183056613648921,
+          0.6142669290790023,
+          0.616736023527087
+        ],
+        "baseline_peer_median": 0.7282703950490534,
+        "median": 0.6155014763030446,
+        "wall_median": 0.7355144495178879
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.9129543871152821,
+          0.9248245196446839,
+          0.9083273232167126,
+          0.9189638867395911
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.9159591369274366,
+        "wall_median": 0.9657271599704222
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          1.2099831622399653,
+          1.1379662749105774,
+          1.019926069160042,
+          1.0161667337717533
+        ],
+        "baseline_peer_median": 1.1766645292200333,
+        "median": 1.0789461720353097,
+        "wall_median": 1.0455064597594266
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          1.269182013701947,
+          1.3236927180736167,
+          1.342961598166229,
+          1.3177302393038435
+        ],
+        "baseline_peer_median": 1.4326105335040067,
+        "median": 1.3207114786887302,
+        "wall_median": 1.1099047474724453
+      }
+    ]
+  },
+  "api_qualification": {
+    "path": "/tmp/kls-worst-peer-v7-activation/api",
+    "agreement": "/tmp/kls-worst-peer-v7-activation/api-agreement.json",
+    "observations": 70,
+    "passed": true,
+    "independent_exact_agreement": true
+  },
+  "partial_activation": {
+    "complete": true,
+    "observations": 70,
+    "failures": 0,
+    "events": [
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 5595,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 7652,
+            "plan": 7652,
+            "stage": 7652,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 7649,
+            "plan": 7649,
+            "stage": 7649,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 997,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "MOS13_IC/invert50_mos1.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "MOS13_IC/invert50_mos1.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 1145
+          }
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 5598,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 7645,
+            "plan": 7645,
+            "stage": 7645,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 7642,
+            "plan": 7642,
+            "stage": 7642,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 1004,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "MOS13_IC/invert50_mos1.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "MOS13_IC/invert50_mos1.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "owners": [
+          {
+            "threads": 1,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 1145
+          }
+        ]
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "owners": [
+          {
+            "threads": 8,
+            "observed": 0,
+            "forest": 0,
+            "plan": 0,
+            "stage": 0,
+            "registers": 0
+          }
+        ]
+      }
+    ]
+  },
+  "activation_qualification": {
+    "receipt": "/tmp/kls-worst-peer-v7-activation/completed.json",
+    "passed": true,
+    "api70_qualified": true,
+    "activation70_qualified": true,
+    "retained_forest_all_four_neuron_cells": true,
+    "observed_parallel_execution_seen": true,
+    "independent_exact_agreement": true,
+    "performance_qualified": false,
+    "source_pins_unchanged": true,
+    "ordinary_candidate": "/tmp/kls-worst-peer-v7-activation/candidate-link/Xyce",
+    "ordinary_baseline": "/tmp/kls-worst-peer-v7-activation/baseline-link/Xyce",
+    "input_manifest_sha256": "731754c0a0835d91cf783a1030f77f4b943baeb44f27f1b1ac367f0399c96091",
+    "commands_sha256": "d317f861e27c7408aa535cb1e6afdf9009b5913cff5de82c1cfb9f22f9ad3977"
+  },
+  "partial_peer_campaign": {
+    "observations": 316,
+    "failures": 0,
+    "ledger_prefix_sha256": "841deeb9310073e1d7c59a0e7f99cf910c9002e6b47e5bde53e9642056bdea3b",
+    "independently_audited": false,
+    "acceptance_decision": false,
+    "complete_settings": [
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 1.0013902979493297,
+          "ck": 0.9618696827941726,
+          "st": 0.5759683157475379
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.666023832517146,
+          "ck": 0.9344645140222649,
+          "st": 0.7604657706055085
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.7044132338189186,
+          "ck": 0.9655209862221167,
+          "st": 0.5161765503793554
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.6645101898559864,
+          "ck": 0.15612406172501428,
+          "st": 0.913304351380362
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.9961349655708074,
+          "ck": 1.0361103882835758,
+          "st": 0.5508464319360808
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.8340870227717975,
+          "ck": 1.2329632901687262,
+          "st": 1.0356369543704296
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 1.0058478595568152,
+          "ck": 1.1761813691049057,
+          "st": 0.7445663427362561
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 1.0087719347635598,
+          "ck": 0.23191084001821133,
+          "st": 0.47954000185804285
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 1.0006566592579007,
+          "ck": 1.0808000425474305,
+          "st": 0.6507286931453222
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.6735112847561463,
+          "ck": 0.9143348362937563,
+          "st": 1.007303864856147
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "MOS13_IC/invert50_mos1.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.9982392672123352,
+          "ck": 1.0624988468244294,
+          "st": 0.7303208636955599
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "MOS13_IC/invert50_mos1.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 1.0065188778681813,
+          "ck": 0.15686970307681353,
+          "st": 0.9857176911289562
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 1.0217490967968352,
+          "ck": 1.0559638461116543,
+          "st": 0.6719472014231719
+        }
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 1.0026418553241032,
+          "ck": 1.2282926949279558,
+          "st": 1.3190178998133315
+        }
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.9962348944718874,
+          "ck": 0.9205170391220099,
+          "st": 0.44784276783709864
+        }
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.8706275251986231,
+          "ck": 0.8428862751306913,
+          "st": 0.804102849721144
+        }
+      },
+      {
+        "domain": "llc32",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.7043917419563348,
+          "ck": 0.941502238670572,
+          "st": 0.5069744535109532
+        }
+      },
+      {
+        "domain": "llc32",
+        "case": "NEURON/rallpack3.cir",
+        "threads": 8,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.6671750820153615,
+          "ck": 0.15541967761124978,
+          "st": 0.921277505897496
+        }
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 1,
+        "qualified": true,
+        "ratios": {
+          "baseline": 0.9922674476822009,
+          "ck": 1.0655185816326092,
+          "st": 0.5476961426244766
+        }
+      }
+    ]
+  },
+  "measured_next_targets": [
+    "BJT8 llc96: /baseline 1.00264186, /CKTSO 1.22829269, /SubtreeLU 1.31901790; prioritize isolated exact-AMF ordering qualification, then owned streaming if needed.",
+    "BJT1 llc96: /baseline 1.02174910 violates intermediate 1.02 guard while /CKTSO 1.05596385 still loses; /SubtreeLU .67194720. Qualify ordering experiment and isolate register-kernel effect before accepting candidate.",
+    "DAC8: candidate/CKTSO 1.23296 and /SubtreeLU 1.03564 in llc96; inspect scheduling/refactor/solve costs",
+    "mux1: candidate/CKTSO 1.17618 in llc96; qualify isolated caller-frame experiment after timing",
+    "DAC1: candidate/CKTSO 1.03611 in llc96; serial overhead remains",
+    "mem_plus1 llc96: /CKTSO 1.08080004; serial overhead target",
+    "mem_plus8 llc96: /baseline .67351128, /CKTSO .91433484, /SubtreeLU 1.00730386; remaining solve/schedule gap despite observed parallel gain"
+  ],
+  "ram_four_setting_screen": {
+    "independently_audited": false,
+    "confirmation_complete": false,
+    "all_peer_margins_met": true,
+    "llc32_t1": {
+      "baseline": 0.9962348944718874,
+      "ck": 0.9205170391220099,
+      "st": 0.44784276783709864
+    },
+    "llc32_t8": {
+      "baseline": 0.8706275251986231,
+      "ck": 0.8428862751306913,
+      "st": 0.804102849721144
+    },
+    "source": "/tmp/kls-worst-peer-v7-initial/observations.jsonl"
+  },
+  "initial_campaign": {
+    "path": "/tmp/kls-worst-peer-v7-initial",
+    "observations": 462,
+    "all_qualified": true,
+    "peer_wins": 36,
+    "worst_ratio": 1.451779873234811,
+    "candidate_gate": false,
+    "acceptance_gate": false,
+    "audit_status": "complete; independent audit agrees; all462 qualified; performance gates fail",
+    "audit": "/tmp/kls-worst-peer-v7-initial-audit/audit.json"
+  },
+  "focused_screen": {
+    "script": "scripts/screen_worst_peer.py",
+    "metadata_guard_checked": true,
+    "complete_grid": false,
+    "acceptance_evidence": false,
+    "session": 89143
+  },
+  "streaming_followup": "Owned SNB AUTO relies on NativeI16 ownership, environment guard, bounded build clock/memory and numeric-schedule streaming worker. Selective complete ownership/recovery port required; a kernel-only port is insufficient.",
+  "isolated_streaming_experiment": {
+    "source": "/tmp/kls-worst-peer-streaming-worktree",
+    "branch": "work/worst-peer-streaming-20261104",
+    "status": "NORMAL/TRANSPOSE public admission fixture passed; v13 native qualification running session52511",
+    "next": "adapt cold ownership state, dependency invalidation and numeric scheduling; exclude experimental controls",
+    "development_oracle": "/tmp/kls-worst-peer-streaming-dev/native-i16",
+    "admission_oracle": "/tmp/kls-worst-peer-streaming-dev/native-i16-admission",
+    "qualification": "/tmp/kls-worst-peer-v13-stream-native",
+    "post_freeze_fix": "AUTO eligibility now retires candidate if an independent ordinary SNB schedule appears; v10 frozen source predates this guard; new qualification required before acceptance",
+    "activation_blocker": "Real BJT has orientation NORMAL (1), excluded by inherited transpose-only guards; eligibility corrected for native-factor scheduler"
+  },
+  "streaming_screen_queue": {
+    "script": "/tmp/kls-worst-peer-v14-next.py",
+    "session": 35011,
+    "output": "/tmp/kls-worst-peer-v14-bjt-screen",
+    "status": "complete; review correctness passed; performance gaps remain"
+  },
+  "v12_bjt_screen": {
+    "path": "/tmp/kls-worst-peer-v12-bjt-screen",
+    "all_qualified": true,
+    "acceptance_evidence": false,
+    "cells": [
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.815427885223107,
+          0.8138393356241391,
+          0.810338070193183,
+          0.8138812446185274
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.8138602901213332,
+        "wall_median": 0.8828713601469482
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.8442802641136552,
+          0.8418085259579594,
+          0.8402511793148503,
+          0.8410208545502522
+        ],
+        "baseline_peer_median": 1.0348750416119894,
+        "median": 0.8414146902541058,
+        "wall_median": 0.901975469621914
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.5354298575556905,
+          0.5343290072667393,
+          0.5331397081759263,
+          0.53508412892878
+        ],
+        "baseline_peer_median": 0.6570359199053699,
+        "median": 0.5347065680977596,
+        "wall_median": 0.6654541884192509
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8992383993300008,
+          0.904577957202037,
+          0.9102272309155992,
+          0.9140614312922879
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.9074025940588182,
+        "wall_median": 0.9633887275813908
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          1.0773142864309635,
+          1.111000926844128,
+          1.1753909643788012,
+          1.170180377999003
+        ],
+        "baseline_peer_median": 1.2541984658760572,
+        "median": 1.1405906524215657,
+        "wall_median": 1.0414923901472388
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          1.2145538611635456,
+          1.2140332736042156,
+          1.2229983120634496,
+          1.230431456981784
+        ],
+        "baseline_peer_median": 1.3448666512626397,
+        "median": 1.2187760866134976,
+        "wall_median": 1.069465030415682
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8185196396281573,
+          0.8208359901236922,
+          0.8147075484493805,
+          0.8135179444734046
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.8166135940387689,
+        "wall_median": 0.87954871964401
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.9333596751778074,
+          0.9426900237936092,
+          0.9232556667661234,
+          0.92810399656795
+        ],
+        "baseline_peer_median": 1.1405773165765418,
+        "median": 0.9307318358728787,
+        "wall_median": 0.9663789120755415
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.5976418173913423,
+          0.5996615910156188,
+          0.5943730918890917,
+          0.5941885980846643
+        ],
+        "baseline_peer_median": 0.7302718014079566,
+        "median": 0.596007454640217,
+        "wall_median": 0.7174159637382407
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.93368062411089,
+          0.959337264525516,
+          0.8814714429691093,
+          0.9222011192990452
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.9279408717049676,
+        "wall_median": 0.9716301756412509
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.7682396997504863,
+          1.0264936602693768,
+          1.1124962951985773,
+          0.8808498698685139
+        ],
+        "baseline_peer_median": 1.012581587555963,
+        "median": 0.9536717650689454,
+        "wall_median": 0.9889177805919951
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          1.289929778424351,
+          1.357897026831037,
+          1.2982583820318634,
+          1.3106357249798457
+        ],
+        "baseline_peer_median": 1.4183285079945418,
+        "median": 1.3044470535058545,
+        "wall_median": 1.0984229075496224
+      }
+    ]
+  },
+  "stream_diagnostic_queue": {
+    "script": "/tmp/kls-v13-diagnose-next.py",
+    "session": 97198,
+    "output": "/tmp/kls-worst-peer-v13-stream-diagnostic",
+    "status": "waiting for screen summary before compiling and running diagnostic-only Xyce"
+  },
+  "stream_activation_diagnosis": {
+    "source": "/tmp/kls-worst-peer-v13-stream-diagnostic/run/stdout.log",
+    "factor_eligible": true,
+    "completed_samples": 8,
+    "retained": false,
+    "spent": 0.0115491636,
+    "limit": 0.0365530606,
+    "capable_at_retirement": true,
+    "next": "measure candidate/incumbent medians; optimize executor cost rather than widening guards"
+  },
+  "stream_chunk4_experiment": {
+    "source": "/tmp/kls-worst-peer-v13-chunk4-diagnostic/run/stdout.log",
+    "oracle": "passed exact serial coefficients, current RHS and injected worker failure",
+    "diagnostic_session": 43554,
+    "diagnostic_path": "/tmp/kls-worst-peer-v13-chunk4-diagnostic",
+    "status": "rejected; single-node claims restored",
+    "incumbent": 0.00145453564,
+    "candidate": 0.00202165172
+  },
+  "private_queue_experiment": {
+    "source": "/tmp/kls-worst-peer-streaming-worktree",
+    "oracle": "passed exact factors/current RHS, injected worker failure and synthetic independent-root/cross-owner merge fixture",
+    "diagnostic": "/tmp/kls-worst-peer-v13-private-diagnostic/run/stdout.log",
+    "private_nodes": 2424,
+    "shared_nodes": 646,
+    "incumbent": 0.00141041027,
+    "candidate": 0.00138707203,
+    "performance_qualified": false,
+    "next": "column-sliced shared tail updates with synchronized scalar finalization"
+  },
+  "cooperative_tail_experiment": {
+    "source": "/tmp/kls-worst-peer-streaming-worktree",
+    "oracle": "passed exact serial factors, current RHS, private/shared alternation and worker failure recovery",
+    "diagnostic_session": 79689,
+    "diagnostic_path": "/tmp/kls-worst-peer-v13-tail-diagnostic",
+    "status": "rejected in diagnostic; private-only routing restored",
+    "incumbent": 0.00136765442,
+    "candidate": 0.00144015159
+  },
+  "panel16_experiment": {
+    "status": "oracle passed; diagnostic retained; native qualification running session47171",
+    "source": "/tmp/kls-worst-peer-streaming-worktree",
+    "private_nodes": 2424,
+    "shared_nodes": 709,
+    "incumbent": 0.00153024122,
+    "candidate": 0.00126104918,
+    "retained": true,
+    "diagnostic": "/tmp/kls-worst-peer-v13-panel16-diagnostic/run/stdout.log",
+    "qualification": "/tmp/kls-worst-peer-v14-private16-native",
+    "uninstrumented_activation": {
+      "source": "/tmp/kls-worst-peer-v14-bjt-screen/llc96/invertbjt/t8-p0-candidate/stdout.log",
+      "retained": true,
+      "incumbent": 0.001479103,
+      "candidate": 0.00127339433,
+      "run_qualified": true,
+      "paired_performance_pending": true
+    },
+    "partial_balanced_screen": {
+      "domain": "llc96",
+      "all_qualified": true,
+      "independent_full_audit": false,
+      "serial": {
+        "baseline": 0.8118285107692638,
+        "ck": 0.8392242040495719,
+        "st": 0.5318217259654509
+      },
+      "parallel": {
+        "baseline": 0.8217990420189516,
+        "ck": 1.041986854987821,
+        "st": 1.0967034875472932
+      },
+      "target_met": false
+    }
+  },
+  "stream_sanitizer_scope": "qualify_spice_variant.py now includes stream, AUTO stream, native_i16 and native_i16_admission when present; execution pending",
+  "v14_bjt_screen": {
+    "path": "/tmp/kls-worst-peer-v14-bjt-screen",
+    "all_qualified": true,
+    "acceptance_evidence": false,
+    "cells": [
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8127984495960021,
+          0.810752410814148,
+          0.8118805592196501,
+          0.8117764623188773
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.8118285107692638,
+        "wall_median": 0.8815986281373552
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.8412272980086626,
+          0.840001401959238,
+          0.8384470061399059,
+          0.8371625885080861
+        ],
+        "baseline_peer_median": 1.033849308320125,
+        "median": 0.8392242040495719,
+        "wall_median": 0.9026363065865232
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.5327939332748999,
+          0.5310334035443403,
+          0.5311992197943926,
+          0.5324442321365092
+        ],
+        "baseline_peer_median": 0.655246985869758,
+        "median": 0.5318217259654509,
+        "wall_median": 0.665746501984505
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8100056915790738,
+          0.8278476574483937,
+          0.8157504265895096,
+          0.8839853224052857
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.8217990420189516,
+        "wall_median": 0.9251427307057156
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.922544885785821,
+          1.0456058289106773,
+          1.0383678810649648,
+          1.1220458858030016
+        ],
+        "baseline_peer_median": 1.26617255429429,
+        "median": 1.041986854987821,
+        "wall_median": 1.0153280771181465
+      },
+      {
+        "domain": "llc96",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          1.0992729385753566,
+          1.0679746137645412,
+          1.0941340365192298,
+          1.1982216239195127
+        ],
+        "baseline_peer_median": 1.3483687953782808,
+        "median": 1.0967034875472932,
+        "wall_median": 1.030435098122078
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.8237484642198236,
+          0.8111245451134312,
+          0.8173670555640078,
+          0.8028428116825381
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.8142458003387195,
+        "wall_median": 0.8812128120882484
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.9389740431549656,
+          0.9291643545261856,
+          0.9322962333771736,
+          0.9223143052784596
+        ],
+        "baseline_peer_median": 1.143067569197055,
+        "median": 0.9307302939516796,
+        "wall_median": 0.9685847255467249
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.5959957609328264,
+          0.5950460527465613,
+          0.5949498599692835,
+          0.588935969936564
+        ],
+        "baseline_peer_median": 0.7307245093244068,
+        "median": 0.5949979563579224,
+        "wall_median": 0.7157205736473403
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.9299020262976633,
+          0.8393736854405236,
+          0.9154775684521435,
+          1.157814600562187
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.9226897973749033,
+        "wall_median": 0.970065869877029
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.9865626141823318,
+          1.0181364628511496,
+          1.192708197914771,
+          1.2493516056003693
+        ],
+        "baseline_peer_median": 1.1460158911919267,
+        "median": 1.1054223303829602,
+        "wall_median": 1.0442860213296674
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          1.2839976719756978,
+          1.2981068792783157,
+          1.331816367265469,
+          1.6465131436019986
+        ],
+        "baseline_peer_median": 1.4384323809868462,
+        "median": 1.3149616232718924,
+        "wall_median": 1.1082450012537408
+      }
+    ]
+  },
+  "direct_product_experiment": {
+    "oracle": "3564 finite product cases plus full factor/current-RHS/failure recovery passed",
+    "diagnostic": "/tmp/kls-worst-peer-v14-direct32-diagnostic/run/stdout.log",
+    "incumbent": 0.00154114841,
+    "candidate": 0.00164176757,
+    "status": "rejected; direct execution path removed"
+  },
+  "selective_publication_experiment": {
+    "status": "rejected; publication flags/routing removed",
+    "path": "/tmp/kls-worst-peer-v14-publish32-diagnostic",
+    "private_nodes": 2424,
+    "published_nodes": 2402,
+    "incumbent": 0.00154882181,
+    "candidate": 0.00155246281
+  },
+  "frame_mux_screen": {
+    "path": "/tmp/kls-worst-peer-v15-mux-screen",
+    "all_qualified": true,
+    "cells": [
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.9833292299275065,
+          0.9995750739001913,
+          0.9906538236508811,
+          0.9813573100404279
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.9869915267891938,
+        "wall_median": 0.982897474476816
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          1.1125251935009435,
+          1.1582942100968174,
+          1.1608061479366152,
+          1.1316675915195396
+        ],
+        "baseline_peer_median": 1.1559761554741175,
+        "median": 1.1449809008081786,
+        "wall_median": 1.009840700939804
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.7140167014945533,
+          0.7429534972011083,
+          0.7436818266226375,
+          0.7257292717369377
+        ],
+        "baseline_peer_median": 0.7413925839652982,
+        "median": 0.734341384469023,
+        "wall_median": 0.9678114372744557
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          1.0006449265063717,
+          0.9939570196994808,
+          1.0088030836222606,
+          0.9983315241211032
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.9994882253137374,
+        "wall_median": 0.9951328182972333
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.24910731277155193,
+          0.28431810613628794,
+          0.2792099698699556,
+          0.2192282078977031
+        ],
+        "baseline_peer_median": 0.26286013496415195,
+        "median": 0.2641586413207538,
+        "wall_median": 0.7871913604368078
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.4142890256894884,
+          0.4796988564102826,
+          0.4745954008827617,
+          0.4662696128725507
+        ],
+        "baseline_peer_median": 0.4687514140120114,
+        "median": 0.4704325068776562,
+        "wall_median": 0.8985088195960957
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          1.0092594693188626,
+          0.9982661513845489,
+          1.0040613952857997,
+          1.0077468578521556
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 1.0059041265689777,
+        "wall_median": 0.9999507730281143
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          1.171226754739881,
+          1.1529148529457598,
+          1.1833879542834627,
+          1.1803148053387915
+        ],
+        "baseline_peer_median": 1.1658613392975332,
+        "median": 1.1757707800393362,
+        "wall_median": 1.0189660060535393
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.7420556616598417,
+          0.7505994250929997,
+          0.7474721486526253,
+          0.7557301798573428
+        ],
+        "baseline_peer_median": 0.7471846497968608,
+        "median": 0.7490357868728126,
+        "wall_median": 0.9587260562793027
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "peer": "baseline",
+        "complete": true,
+        "ratios": [
+          0.9998816486678712,
+          0.9814820587960222,
+          1.0148316874959165,
+          0.9898909878044699
+        ],
+        "baseline_peer_median": 1.0,
+        "median": 0.9948863182361706,
+        "wall_median": 1.001033103033421
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "peer": "ck",
+        "complete": true,
+        "ratios": [
+          0.19631485301017113,
+          0.2819775959465425,
+          0.23475913253313457,
+          0.2598844072870865
+        ],
+        "baseline_peer_median": 0.24693327852735986,
+        "median": 0.24732176991011054,
+        "wall_median": 0.7694256745332538
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 8,
+        "peer": "st",
+        "complete": true,
+        "ratios": [
+          0.4723230021351025,
+          0.4663555950567124,
+          0.4804253571752358,
+          0.47360694419235333
+        ],
+        "baseline_peer_median": 0.47427922753125773,
+        "median": 0.4729649731637279,
+        "wall_median": 0.8900463805019417
+      }
+    ],
+    "target_met": false
+  },
+  "bjt_cpu_profile": {
+    "path": "/tmp/kls-worst-peer-bjt-cpu-profile/function-counts.json",
+    "samples": 9201,
+    "stream_retained": false,
+    "leading_functions": [
+      "kls_egraph_refactor_worker_run",
+      "kls_egraph_refactor_dispatch_column",
+      "kls_egraph_refactor_wait_done"
+    ],
+    "next": "screen smaller internal EGraph crew; synchronization dominates samples"
+  },
+  "crew_screen": {
+    "path": "/tmp/kls-worst-peer-crew32-screen",
+    "all_qualified": true,
+    "diagnostic_only": true,
+    "medians": {
+      "8": 1.786485,
+      "4": 2.318595,
+      "2": 2.81498,
+      "1": 4.03724
+    },
+    "decision": "reject smaller crew"
+  },
+  "ordering_screen": {
+    "script": "/tmp/kls-worst-peer-ordering-screen.py",
+    "session": 93996,
+    "status": "complete; AUTO fastest; alternatives rejected; one SCOTCH grid mismatch retained in rejected-screen.json"
+  },
+  "normal_compact_solve_experiment": {
+    "source": "/tmp/kls-worst-peer-streaming-worktree",
+    "status": "native/portable/ASan all 69 tests passed; TSan 12 scoped tests plus controls passed; completed.json present; link and peer driver builds passed; balanced BJT screen started",
+    "diagnostic": "/tmp/kls-worst-peer-v14-normal32-diagnostic",
+    "incumbent": 0.00158408401,
+    "candidate": 0.00146838441,
+    "normal_runs_at_retention": 4,
+    "qualification": "/tmp/kls-worst-peer-v16-normal-core",
+    "next_session": 10788,
+    "next_script": "/tmp/kls-worst-peer-v16-next.py",
+    "grid_session": 17187,
+    "grid_script": "/tmp/kls-worst-peer-v16-grid-next.py",
+    "grid_status": "exploratory grid intentionally aborted after full BJT screen proved peer target fails; incomplete ledger and interrupted output retained, no acceptance evidence: /tmp/kls-worst-peer-v16-initial/aborted.json",
+    "qualification_session": "38061 completed exit 0",
+    "peer_build": "/tmp/kls-worst-peer-v16-standalone-peers/build.json",
+    "bjt_screen": "/tmp/kls-worst-peer-v16-bjt-screen",
+    "bjt_screen_status": "complete all qualified; serial beats both in both domains, 8-thread still loses; full grid live session17187",
+    "bjt_peer_medians": [
+      {
+        "domain": "llc96",
+        "threads": 1,
+        "peer": "baseline",
+        "median": 0.80657538331315
+      },
+      {
+        "domain": "llc96",
+        "threads": 1,
+        "peer": "ck",
+        "median": 0.8380169364778918
+      },
+      {
+        "domain": "llc96",
+        "threads": 1,
+        "peer": "st",
+        "median": 0.5312176816885561
+      },
+      {
+        "domain": "llc96",
+        "threads": 8,
+        "peer": "baseline",
+        "median": 0.7910196344105831
+      },
+      {
+        "domain": "llc96",
+        "threads": 8,
+        "peer": "ck",
+        "median": 1.0042712557221938
+      },
+      {
+        "domain": "llc96",
+        "threads": 8,
+        "peer": "st",
+        "median": 1.0729849090738943
+      },
+      {
+        "domain": "llc32",
+        "threads": 1,
+        "peer": "baseline",
+        "median": 0.8172365058601505
+      },
+      {
+        "domain": "llc32",
+        "threads": 1,
+        "peer": "ck",
+        "median": 0.9255050073037201
+      },
+      {
+        "domain": "llc32",
+        "threads": 1,
+        "peer": "st",
+        "median": 0.590266928186727
+      },
+      {
+        "domain": "llc32",
+        "threads": 8,
+        "peer": "baseline",
+        "median": 0.9165461014546961
+      },
+      {
+        "domain": "llc32",
+        "threads": 8,
+        "peer": "ck",
+        "median": 1.1367707946499883
+      },
+      {
+        "domain": "llc32",
+        "threads": 8,
+        "peer": "st",
+        "median": 1.2894662223495583
+      }
+    ]
+  },
+  "standalone_peer_evidence_tooling": {
+    "builder": "scripts/build_worst_peer_standalone_peers.py",
+    "collector": "scripts/collect_worst_peer_broad.py",
+    "auditor": "scripts/audit_worst_peer_broad.py",
+    "driver_validation": "/tmp/kls-worst-peer-standalone-driver-validation/build.json",
+    "tests": "21 worst_peer Python tests passed; five raw-log audit integration fixtures",
+    "status": "tooling implemented; no scientific broad campaign or peer exception acceptance yet",
+    "numerical_smoke": "/tmp/kls-worst-peer-standalone-smoke/checked.json",
+    "numerical_smoke_scope": "4x4 matrix, 100 entrywise-updated systems, all three drivers verify every refactor; not performance evidence"
+  },
+  "mux_cpu_profile": {
+    "script": "/tmp/kls-worst-peer-mux-profile-next.py",
+    "session": 35313,
+    "status": "complete, 833 samples; leading KLS kernels compact BTF solve23, mapped refactor22, certificate15; low sample count diagnostic only",
+    "counts": "/tmp/kls-worst-peer-mux-cpu-profile/function-counts.json"
+  },
+  "panel8_experiment": {
+    "session": "6592 complete exit0",
+    "script": "/tmp/kls-v16-panel8-next.py",
+    "source": "/tmp/kls-worst-peer-v16-panel8-diagnostic",
+    "status": "rejected; candidate1.709ms incumbent1.556ms; waveform and step review retained"
+  },
+  "singleton_btf_experiment": {
+    "source": "/tmp/kls-worst-peer-v16-singleton-diagnostic",
+    "status": "complete exact oracle and all16pairedruns pass; medians .99896 llc96, .98820 llc32; isolated only, insufficient to close CKTSO",
+    "session": 45655,
+    "script": "/tmp/kls-v16-singleton-next.py",
+    "result": "/tmp/kls-worst-peer-v16-singleton-diagnostic/completed.json"
+  },
+  "shortloop_btf_experiment": {
+    "source": "/tmp/kls-worst-peer-v16-shortloops-diagnostic",
+    "result": "/tmp/kls-worst-peer-v16-shortloops-diagnostic/completed.json",
+    "status": "exact oracle and all16runs pass; medians .98194 llc96, .97975 llc32; still not enough for peer target",
+    "implementation": "copied only small-BTF executor and branch-activation oracle test to streaming worktree; pending composed full qualification; qualified v16 snapshot immutable"
+  },
+  "btf_shape": {
+    "n": 170,
+    "blocks": 25,
+    "singletons": 24,
+    "histogram": "/tmp/kls-worst-peer-v16-btf-shape-diagnostic/run/stdout.log"
+  },
+  "orientation_experiment": {
+    "session": 31360,
+    "script": "/tmp/kls-worst-peer-orientation-screen.py",
+    "status": "complete; forced transpose rejected: all four waveform grid mismatches retained in rejected-screen.json; raw medians are diagnostic only",
+    "raw_medians_seconds": {
+      "AUTO": 1.80854,
+      "NORMAL": 1.83994,
+      "TRANSPOSE": 1.716625
+    },
+    "upstream_correction": "All12 retained waveforms pass Xyce verifier; original transpose rejection based solely on tiny grid shift withdrawn. See orientation_fresh_experiment for new32-run qualified screen."
+  },
+  "panel24_experiment": {
+    "path": "/tmp/kls-worst-peer-v16-panel24-diagnostic",
+    "incumbent": 0.0015657756,
+    "candidate": 0.00147852558,
+    "status": "reject after all16pairedruns correctness pass: 4.90% slower llc96 and1.51% slower llc32; early admission gain did not predict whole-run improvement",
+    "paired_session": 3537,
+    "paired_script": "/tmp/kls-v16-panel24-paired.py",
+    "paired_result": "/tmp/kls-worst-peer-v16-panel24-paired/completed.json"
+  },
+  "panel12_experiment": {
+    "path": "/tmp/kls-worst-peer-v16-panel12-diagnostic",
+    "incumbent": 0.00160937174,
+    "candidate": 0.00173703884,
+    "status": "reject candidate7.9%slower"
+  },
+  "private_balance_next": {
+    "source": "/tmp/kls-worst-peer-streaming-worktree/src/kls_snb_private.inc",
+    "rationale": "Root-to-thread assignment uses only work seen so far; descendant work may imbalance private queues. Rebalance whole dependency-closed private components after full graph is known.",
+    "implementation_outline": [
+      "Keep existing private/shared classification (2424private/709shared on BJT width16). Union private predecessor edges using private_nodes as temporary parent array.",
+      "Use a bounded temporary component array of {root,cost}, charge allocation through kls_snb_allocate and deadline checks; cost equals current width^2*height plus edge work estimate.",
+      "Accumulate full component costs, compact root records in-place, sort descending cost with deterministic root tie-break. Assign whole components to least-loaded worker; use private_pipeline as temporary root-to-worker map.",
+      "Apply remap only if predicted maximum queue work improves >=2%; preserve private owner otherwise. Recount counts, fill existing ptr/nodes/pipeline arrays as before; free temporary cost records on every path.",
+      "Private component predecessor closure means remapping cannot introduce cross-owner private dependencies; preserve ascending node order in each queue. Numeric values and per-target arithmetic unchanged.",
+      "Add a heterogeneous-root fixture: two heavy independent descendants initially on same worker, expect rebalanced max work and closure. Run exact stream L/U oracle before BJT diagnostics."
+    ],
+    "status": "implemented, exact heterogeneous fixture and sparse numeric oracle passed, all16 BJTpairedruns pass; no useful speedup; reverted production worktree helper and test to qualifiedv16 source, retained complete experiment",
+    "result": "/tmp/kls-worst-peer-v17-private-balance-paired/completed.json",
+    "source_archive": "/tmp/kls-worst-peer-v17-private-balance-diagnostic",
+    "stream_oracle_audit_note": "Earlier exact stream oracle claim invalidated by wrong object link; see diagnostic_oracle_link_audit. Separate product_tile/geometry and waveform checks remain valid. These experimental kernels were rejected."
+  },
+  "linear_scatter_experiment": {
+    "source": "/tmp/kls-worst-peer-v18-linear-scatter-diagnostic",
+    "result": "/tmp/kls-worst-peer-v18-linear-scatter-paired/completed.json",
+    "status": "exact factor/solve and FP oracle pass, all16 paired correctness pass; 96median .97029 but noisy,32median1.00779; rejected and reverted from production worktree; all source/tests/results retained",
+    "working_tree_test_note": "frozen native diagnostic tests precede later MXCSR denormal flag clearing and portable counter guard; those abandoned test edits were reverted with experiment",
+    "stream_oracle_audit_note": "Earlier exact stream oracle claim invalidated by wrong object link; see diagnostic_oracle_link_audit. Separate product_tile/geometry and waveform checks remain valid. These experimental kernels were rejected."
+  },
+  "deferred_writeback_next": {
+    "source": "/tmp/kls-worst-peer-streaming-worktree",
+    "status": "implemented two-pass version, exact oracle and all16pairs pass; rejected for19.97% slowdown llc96 despite1.28% gainllc32; testing worker-local batch variant",
+    "rationale": "Producers depend only on panel data. Immediate per-node native LU copy adds traffic and metadata pressure to factorization. Test batching native writeback after all panel factors are complete; public return still publishes complete native LU.",
+    "outline": [
+      "Extract kls_snb_writeback_target helper from current process_target final block; keep legacy paths immediate.",
+      "Add separate TLS owned-defer-writeback flag near numeric_schedule line1007. Owned callback saves/sets/restores it around factor work. Do not conflate deferral with FP environment validation.",
+      "Skip immediate copy only for owned defer scope. After first owned pool dispatch joins and failed flag is clear, dispatch a second writeback-only callback with atomic cursor reset, claims16 snodes at a time, copies each target via helper.",
+      "Reuse same stack job with writeback-mode field; writeback callback returns before FP environment work, performs only raw double loads/stores; preserve first dispatch exception arrays. Join full second crew before epilogue/public return.",
+      "On worker failure skip batch copy and use existing numeric failure recovery. Native Udiag remains written during pivots as before. All generic/serial/cooperative paths stay immediate.",
+      "Exact stream oracle must prove final native L/U matches scalar and current RHS solve, failure path joins and TLS restores. Then four balanced BJT pairs per domain against immutable v16 binary."
+    ],
+    "remaining_goal": "all56 peer wins in two audited opposite-order complete campaigns, original110 broad guard, composed final qualification and merge still required",
+    "two_pass_result": "/tmp/kls-worst-peer-v19-deferred-writeback-paired/completed.json",
+    "stream_oracle_audit_note": "Earlier exact stream oracle claim invalidated by wrong object link; see diagnostic_oracle_link_audit. Separate product_tile/geometry and waveform checks remain valid. These experimental kernels were rejected."
+  },
+  "local_writeback_experiment": {
+    "source": "/tmp/kls-worst-peer-v20-local-writeback-diagnostic",
+    "build_session": 20768,
+    "build_script": "/tmp/kls-v20-local-writeback-build.py",
+    "paired_script": "/tmp/kls-v20-local-writeback-paired.py",
+    "status": "exact oracle and all16 BJTpairs pass, no useful improvement: .99818 llc96,1.00403 llc32; reverted all writeback experiments from worktree to immutablev16 base, preserving short-loop BTF changes",
+    "result": "/tmp/kls-worst-peer-v20-local-writeback-paired/completed.json",
+    "stream_oracle_audit_note": "Earlier exact stream oracle claim invalidated by wrong object link; see diagnostic_oracle_link_audit. Separate product_tile/geometry and waveform checks remain valid. These experimental kernels were rejected."
+  },
+  "compact_scatter_maps_next": {
+    "status": "implemented; v21 failed allocation-injection partial-plan check, corrected v22 passes exact stream and geometry/fault-injection; all16 BJTpaired runs pass correctness; reject32median1.02565 (96 1.01058); reverted production files, complete source/tests/results retained",
+    "rationale": "Consider geometry compression before persistent authoritative panel factors: share an identity map for fully contiguous destination edges. Potentially reduce LLC footprint while preserving immediate native factor publication and all existing solve/recovery paths. Need measure actual BJT map bytes before claiming gain.",
+    "outline": [
+      "Add int32 dst_base_plus1 to existing four-byte padding in kls_snb_edge, positive only for all-contiguous nonnegative destination maps. Keep struct size32 on x86-64. Add per-block int32 identity_dsts[nk] pointer (allocated only if needed), free in destructor.",
+      "Use two row-map passes during construction: first classify edge affine destinations and count only non-affine producer below rows; assign dst_off into compact array for those edges. Do not allocate original full map even transiently. Check deadline in both passes and account every allocation in existing bounded builder.",
+      "Allocate compact edge_dsts and shared identity table once; second pass fills only nonlinear maps and clears temporary target row map as before. Positive base+rows must fit the validated target height<=nk.",
+      "Central helper kls_snb_edge_destinations(blk,edge) returns identity_dsts+(base_plus1-1) for linear edges, otherwise edge_dsts+dst_off. Use it in serial/narrow/wide/cooperative edge updates and test geometry consumers. No product/scatter arithmetic changes needed.",
+      "Manual zero-initialized test edge fixtures stay nonlinear by default. Search all edge_dsts consumers to avoid missed index interpretation. Test complete serial/owned L/U and current-RHS oracle; add conservation/geometric proof for both affine and gapped maps.",
+      "Diagnostic print old total edge-map bytes versus compressed retained bytes/allocation bytes on real BJT before paired timing. If maps are not substantial, abandon before complex ownership work."
+    ],
+    "persistent_panel_view_alternative": "Not yet implemented; would need panel-mapped native_i16 NORMAL solve, authoritative-layout flag and materialization at every native factor consumer/public API and fallback. More complex; pursue only with evidence geometry compression is insufficient.",
+    "result": "/tmp/kls-worst-peer-v22-compact-maps-paired/completed.json",
+    "bjt_map_bytes": {
+      "original": 1068576,
+      "compressed_plus_identity": 1057108
+    },
+    "stream_oracle_audit_note": "Earlier exact stream oracle claim invalidated by wrong object link; see diagnostic_oracle_link_audit. Separate product_tile/geometry and waveform checks remain valid. These experimental kernels were rejected."
+  },
+  "retained_profile": {
+    "script": "/tmp/kls-worst-peer-retained-profile.py",
+    "result": "/tmp/kls-worst-peer-v16-retained-profile/completed.json",
+    "status": "complete four alternating-domain diagnostic runs, all correctness pass, no saturation; retained onlylast96run; all runs retained, no acceptance timing evidence",
+    "retained_samples": 6846,
+    "target_samples": 2804,
+    "product_samples": 350,
+    "normal_solve_samples": 279,
+    "hot_instructions": "/tmp/kls-worst-peer-v16-retained-profile/3-llc96/target-instructions.json",
+    "findings": "~900 target samples in producer wait; strong scalar narrow-FMA loops at +0x1183/+0x1103/+0x1345; native writeback comparatively small; perf counters unavailable perf_event_paranoid4"
+  },
+  "narrow_contiguous_chunks_next": {
+    "status": "v24 exact stream and expanded FPoracle passed, all16 BJTpaired runs pass;32median1.00184 no gain; apparent96 .93357 driven by two baseline fallback outliers while candidate slightly slower whenbothretained; rejected kernel, numeric_schedule restoredv16; retain expanded exceptional FP tests",
+    "source": "/tmp/kls-worst-peer-streaming-worktree/src/kls_numeric_schedule.inc:1005",
+    "rationale": "Whole-edge linear maps rare, but large subranges may still be consecutive. Accelerate 8-row contiguous chunks in narrow edge updates, leaving metadata and product order unchanged.",
+    "outline": [
+      "New helper under __AVX512F__&&__AVX2__&&FLT_EVAL_METHOD0, called only after existing narrow_columns validated masked SSE environment (or owned TLS). No new map allocations or layout fields.",
+      "For each producer i, preserve existing TRSM and multipliers u0..u3 and zero skips. Load eight dst int32 with AVX2, compare to dst0+{0..7}; require dst0>=0.",
+      "For contiguous chunks, load lb[r:r+8] once and for each active column perform _mm512_fnmadd_pd(lb,broadcast(u),loadW), store. Each destination row is unique by builder proof. Never execute u==0 arithmetic.",
+      "For irregular chunks use existing scalar updates (all4 path shares lb, mixed masks can loop active lanes). Tail rows keep original scalar order. Distinct row/column operations may interleave under masked exceptions; per-output producer order must stay unchanged.",
+      "Extend tests/kls_snb_narrow_checks.inc in product_tile oracle to actually run exceptional pattern1..7 (currently code exists but only pattern0 and>=8 are called), all rounding modes and FTZ/DAZ, active zero masks and holes; verify outputs and complete MXCSR flags. Existing 67,200 finite oracle cases also required.",
+      "Use native product_tile oracle plus exact owned-stream L/U and current-RHS oracle before fresh 4balanced BJT pairs/domain. Candidate baseline immutable v16. If no worst-case benefit, revert production edits and preserve snapshots/results."
+    ],
+    "next_alternative": "Shared pipeline ordering by critical-path estimated work within each topological level (not private-root LPT, which was rejected). Investigate only if wait samples remain dominant after arithmetic improvement.",
+    "source_archive": "/tmp/kls-worst-peer-v24-narrow-chunks-diagnostic",
+    "build_session": "33724 complete exit0",
+    "paired_script": "/tmp/kls-v24-narrow-chunks-paired.py",
+    "result": "/tmp/kls-worst-peer-v24-narrow-chunks-paired/completed.json",
+    "stream_oracle_audit_note": "Earlier exact stream oracle claim invalidated by wrong object link; see diagnostic_oracle_link_audit. Separate product_tile/geometry and waveform checks remain valid. These experimental kernels were rejected."
+  },
+  "amf_explicit_screen": {
+    "script": "/tmp/kls-worst-peer-amf-screen.py",
+    "status": "complete; all4AMF waveform-invalid, no clear time improvement; rejected-screen.json retains all8runs"
+  },
+  "shared_priority_experiment": {
+    "source": "/tmp/kls-worst-peer-v26-priority-diagnostic",
+    "script": "/tmp/kls-v25-priority-build.py",
+    "paired_script": "/tmp/kls-v25-priority-paired.py",
+    "status": "corrected new-object oracle truly passes, including changed sparse work order; all16 waveform comparisons pass; medians .98437llc96 and .99666llc32; not enough for peer goal",
+    "result": "/tmp/kls-worst-peer-v26-priority-paired/completed.json",
+    "production_status": "reverted with private-priority experiment; no clear worst-case benefit"
+  },
+  "diagnostic_oracle_link_audit": {
+    "affected": [
+      "/tmp/kls-worst-peer-v17-private-balance-diagnostic",
+      "/tmp/kls-worst-peer-v21-compact-maps-diagnostic",
+      "/tmp/kls-worst-peer-v23-narrow-chunks-diagnostic",
+      "/tmp/kls-worst-peer-v25-priority-diagnostic",
+      "/tmp/kls-worst-peer-v20-local-writeback-diagnostic",
+      "/tmp/kls-worst-peer-v19-deferred-writeback-diagnostic",
+      "/tmp/kls-worst-peer-v24-narrow-chunks-diagnostic",
+      "/tmp/kls-worst-peer-v18-linear-scatter-diagnostic",
+      "/tmp/kls-worst-peer-v22-compact-maps-diagnostic"
+    ],
+    "status": "exact stream oracle claims invalidated; original numeric source was compiled but original qualified fixture object was linked; CMake qualification v16 unaffected; product_tile and geometry independently constructed links use new objects correctly; earlier singleton/small-BTF oracle links use correct new objects",
+    "action": "fix fresh driver, assert exactly one new test object and zero old CMake objects; rerun latest source before considering performance",
+    "corrected_driver": "/tmp/kls-v26-priority-build.py",
+    "corrected_evidence": "/tmp/kls-worst-peer-v26-priority-diagnostic/object-agreement.json"
+  },
+  "private_priority_experiment": {
+    "source": "/tmp/kls-worst-peer-v27-private-priority-diagnostic",
+    "build_session": "44209 complete exit0",
+    "script": "/tmp/kls-v27-private-priority-build.py",
+    "paired_script": "/tmp/kls-v27-private-priority-paired.py",
+    "status": "corrected linked-new-object oracle passed, all16BJTwaveforms pass; medians1.00897llc96 and1.00367llc32, rejected; reverted private scheduling source and test to v16, preserved short-loop BTF and expanded narrow FP tests",
+    "result": "/tmp/kls-worst-peer-v27-private-priority-paired/completed.json"
+  },
+  "narrow_single_column_next": {
+    "status": "v30 exact/correct-object FP and stream oracles pass, all16 waveformpairs pass; no speedup (.1.57%slower96,.33%slower32); testing masked gather/scatter8row variant",
+    "rationale": "New vector-chunk prototype only covered width>=4 through narrow_columns. Most BJT nodes are width1 (old shape3007singleton vs126width16 aftersplit). Retained hotloop +0x1183 likely remaining scalar tail of update_edge. Target width1..3 and rows2..7 as well as bigph.",
+    "outline": [
+      "Start clean current streamingworktree: v16 base plus small-BTFshortloops and expanded narrow_checks, all failed kernels/schedulers reverted.",
+      "Add owned-only narrow path for target width<4 and producer below rows>=2, inside narrow_columns before its existing rows<8 rejection. Process one target column at a time exactly as original scalar reference. Generic non-owned executor remains scalar for these widths, so owned-stream exact oracle has a real scalar reference.",
+      "Use explicit volatile ucomisd zero test (v24 helper) for each producer multiplier to preserve scalar comparison flags even when all destination rows are skipped; preserve zero skip and TRSM order.",
+      "Vectorize contiguous destination chunks of8 (AVX512), then4 (AVX2 FMA), then2 (SSE/FMA), remaining scalar tail. No gather/scatter for irregular chunks: scalar fallback. Each chunk needs nonnegative first destination and exact consecutive indices. Guard __AVX512F__/__AVX2__/__FMA__ compile features as needed; unsupported builds fallback.",
+      "Admit new path only under owned TLS (which proves masked nearest). Unit compare_narrow_edge should set TLS1 only in masked FE_TONEAREST cases, save/restore it; other modes test unchanged scalar fallback. Keep direct unmasked decline check TLS0.",
+      "Expand exceptional FP tests to width1,2,3 as current exceptional loops onlywidth8/9. Add pattern24 with all U/top inputs finite, but mixed nonfinite/subnormal only in Lbelow, so scalar zero compares cannot hide SIMD exception-flag suppression. Avoid pattern>=8 zero-mask handler for24 (restrict8..23). Check all flags and output as original oracle.",
+      "For exact owned-vs-serial full factor oracle, build custom one-column partition for existing N129dense stream fixture (all starts[k]=k, count=N), install that state and retire old wide state. This exercises actual width1 vector path while scalar generic refactor stays old, rather than only testing wide nodes.",
+      "CRITICAL build driver: use /tmp/kls-v26-priority-build.py corrected dynamic objects assertion, never oldv17-v25 oracle templates. Add separate product_tile oracle compilation/link with same explicit object assertions. Verify archive kls.c.o member hash matches compiled object.",
+      "If exact/FP oracles pass, run four fresh balanced BJT pairs/domain against immutablev16. Real microtiming from policy samples is not sufficient; all waveforms and complete paired results retained."
+    ],
+    "further_fp_note": "v23flagfailure expectedMXCSR1f83 observed1f81 in width9 rows33 count1 pattern1 holes2 (allscatterrowsabsent). Baselinev16 passes expanded tests; explicit scalar comparisons fixedv24. Packed FMA may have cross-lane exceptional priority: new LB-only pattern checks this. If needed restrict vector arithmetic to proof domain of normal/zero inputs |x| in [2^-400,2^400] (any nonzero exact fused result then >=2^-904, noUF/OF) and scalar-fallback exceptional chunks. Do not add heavy range guard unless test demonstrates need.",
+    "source_archive": "/tmp/kls-worst-peer-v30-small-column-diagnostic",
+    "object_agreement": "/tmp/kls-worst-peer-v30-small-column-diagnostic/object-agreement.json",
+    "build_session": "39564 complete exit0",
+    "paired_script": "/tmp/kls-v30-small-column-paired.py",
+    "result": "/tmp/kls-worst-peer-v30-small-column-paired/completed.json",
+    "rationale_correction": "Earlier 3007 singleton estimate incorrectly treated the old63wide count as all nonsingletons; this does not sum to n8903. Full width/work census pending. Profile scalar tail also includes leftover columns of wider nodes."
+  },
+  "small_gather_experiment": {
+    "source": "/tmp/kls-worst-peer-v31-small-gather-diagnostic",
+    "script": "/tmp/kls-v31-small-gather-build.py",
+    "paired_script": "/tmp/kls-v31-small-gather-paired.py",
+    "status": "correct-object exact stream and expandedFP/producttile oracles passed; all16BJTwaveforms pass; medians1.00827llc96 and.99344llc32, no useful improvement; rejected/reverted kernel and one-column fixture, retained stronger FP cases",
+    "result": "/tmp/kls-worst-peer-v31-small-gather-paired/completed.json"
+  },
+  "padded_publication_experiment": {
+    "source": "/tmp/kls-worst-peer-v32-padded-publication-diagnostic",
+    "script": "/tmp/kls-v32-padded-publication-build.py",
+    "paired_script": "/tmp/kls-v32-padded-publication-paired.py",
+    "status": "exact stream/expandedFP passed, all16 waveformpairs pass; reject32median1.08517 despite96.96290; isolated snapshot only, never applied to production worktree",
+    "build_session": "67167 complete exit0",
+    "result": "/tmp/kls-worst-peer-v32-padded-publication-paired/completed.json"
+  },
+  "publication_mask_experiment": {
+    "source": "/tmp/kls-worst-peer-v33-publication-mask-diagnostic",
+    "script": "/tmp/kls-v33-publication-mask-build.py",
+    "paired_script": "/tmp/kls-v33-publication-mask-paired.py",
+    "build_session": "80682 complete exit0",
+    "status": "correct-object exact stream, FP, builder invariants pass; all16BJT waveforms pass; medians1.02010llc96,.99546llc32, no useful gain; isolated rejected snapshot, no production change",
+    "result": "/tmp/kls-worst-peer-v33-publication-mask-paired/completed.json",
+    "publication_counts": {
+      "old": 7182,
+      "required": 3146
+    },
+    "census": [
+      {
+        "width": 1,
+        "nodes": 1084,
+        "narrow_updates": 574,
+        "scalar_updates": 574,
+        "dense_updates": 0
+      },
+      {
+        "width": 2,
+        "nodes": 1091,
+        "narrow_updates": 37416,
+        "scalar_updates": 37416,
+        "dense_updates": 32032
+      },
+      {
+        "width": 3,
+        "nodes": 547,
+        "narrow_updates": 147078,
+        "scalar_updates": 147078,
+        "dense_updates": 10062
+      },
+      {
+        "width": 4,
+        "nodes": 15,
+        "narrow_updates": 19428,
+        "scalar_updates": 636,
+        "dense_updates": 72584
+      },
+      {
+        "width": 5,
+        "nodes": 31,
+        "narrow_updates": 53155,
+        "scalar_updates": 11563,
+        "dense_updates": 209125
+      },
+      {
+        "width": 6,
+        "nodes": 110,
+        "narrow_updates": 252636,
+        "scalar_updates": 92832,
+        "dense_updates": 362400
+      },
+      {
+        "width": 7,
+        "nodes": 10,
+        "narrow_updates": 12068,
+        "scalar_updates": 5348,
+        "dense_updates": 26621
+      },
+      {
+        "width": 8,
+        "nodes": 6,
+        "narrow_updates": 39976,
+        "scalar_updates": 1064,
+        "dense_updates": 234200
+      },
+      {
+        "width": 9,
+        "nodes": 76,
+        "narrow_updates": 377127,
+        "scalar_updates": 58535,
+        "dense_updates": 205281
+      },
+      {
+        "width": 10,
+        "nodes": 16,
+        "narrow_updates": 88960,
+        "scalar_updates": 20192,
+        "dense_updates": 22820
+      },
+      {
+        "width": 11,
+        "nodes": 10,
+        "narrow_updates": 159951,
+        "scalar_updates": 46783,
+        "dense_updates": 735746
+      },
+      {
+        "width": 12,
+        "nodes": 28,
+        "narrow_updates": 224316,
+        "scalar_updates": 12108,
+        "dense_updates": 405204
+      },
+      {
+        "width": 13,
+        "nodes": 3,
+        "narrow_updates": 98735,
+        "scalar_updates": 9467,
+        "dense_updates": 477919
+      },
+      {
+        "width": 14,
+        "nodes": 6,
+        "narrow_updates": 145208,
+        "scalar_updates": 24524,
+        "dense_updates": 662284
+      },
+      {
+        "width": 15,
+        "nodes": 10,
+        "narrow_updates": 120120,
+        "scalar_updates": 29808,
+        "dense_updates": 328065
+      },
+      {
+        "width": 16,
+        "nodes": 90,
+        "narrow_updates": 3277792,
+        "scalar_updates": 88768,
+        "dense_updates": 17274464
+      }
+    ],
+    "allocation_bytes": 13996194
+  },
+  "temporary_row8_next": {
+    "status": "row8 edge microprototype implemented in streamingworktree src/kls_snb_row8.inc, included only by producttile test; correct-object native edge/layout/flag oracle1104cases passed. Not yet production integrated; no performance claim.",
+    "rationale": "Width16 accounts3,277,792/total narrow rowupdates and17,274,464/total dense rowupdates. Width1narrow work only574; earlier singleton targeting inference was wrong. Improve width16 target update storage while preserving producer column-major panels, old dense_product, and old getrf/native writeback.",
+    "outline": [
+      "Prototype only owned nodes width==16. Keep all persistent producer panels in current column-major layout. Allocate one bounded per-worker temporary row8 target buffer max(height*16) during paid AUTO construction; charge to same LLC/setup envelope. Extra peak~2MiB for8workers ifheight2003. Generic/serial executors stay unchanged.",
+      "Temporary offset(col,row)=(col/8)*8H+row*8+col%8; two groups of8, same H*16 double count. Zero scratch and scatter actual current AZ using existing col_blk_ptr and dst-sn.panel-col*H to recover row. All coefficient owners/generations remain ordinary native.",
+      "Schur edge updates operate in row8 scratch. Ldiag/Lbelow stay original column-major producer panels. Unit-lower TRSM uses 8target columns pervector, producer i then j order percell; U==0 mask exactly. Bit-based zero test allowed for normal/zero U; if U subnormal/nonfinite decline whole temporary attempt before publishing and replay old target.",
+      "For narrow edges compute TRSM then lower updates in i order; this reorders only independent B/Below operations within an edge (producer below rows cannot overlap its selected B rows). Broadcast each contiguous Lbelow scalar and FMA into 8contiguous target columns at destRow*8. Skip holes and zero U lanes. Guard abnormal scalar L by declining replay path.",
+      "For wide edges extract finished B into tiny col-major stack buffer doubleB[32*16], call original unchanged dense_product into existing gemm scratch. Transpose 8x8 tiles from col-major product T into row vectors with24 AVX512unpack/shuffle ops, then sub/store 8target columns per valid destination row. Scalar/packed tail rows preserve subtract order and skip holes.",
+      "After all edges, transpose scratch once into unchanged persistent column-major target W. Then call unchanged getrf/publish/native-writeback body extracted as static helper used by original and row8 target. This avoids changing factor/solve/API ownership and preserves partial publication semantics; no persistent row-major factor layout.",
+      "Transactional decline: while updates are in scratch, published target remains0 and persistent W unchanged. Save MXCSR flags, clear flags under already masked nearest owned environment; on any non-inexact arithmetic flag or nonfinite/abnormal scratch value decline, restore saved MXCSR, run original entire target with current AZ/parents. No consumer saw temporary values. Successful path merges old flags with new inexact before unchanged finalizer. Copy may write persistent W incrementally before detected nonfinite; still unpublished, original fallback memsets it fully before recompute.",
+      "Initial scatter abnormal AZ, TRSM U or scalar L should decline via integer classification (normal/zero fastdomain); replay handles all exceptional scalar comparison/flag semantics. Wide product remains original and exceptional flags trigger replay. Default certificate/recovery unchanged. Need rigorous flag/bitwise oracles for exceptional cases before performance.",
+      "8x8 double transpose verified layout: t0..7=unpacklo/hi(a0,a1), ...; s0/1=shuffle(t0/1,t2/3,0x44),s2/3=shuffle(t0/1,t2/3,0xee),s4..7 analogous rows4..7; out0/1=shuffle(s0/1,s4/5,0x88),out2/3=...0xdd; out4/5=shuffle(s2/3,s6/7,0x88),out6/7=...0xdd. Inputs T columns -> outputs T rows, same function transposes scratch rows back to panel columns.",
+      "Use corrected /tmp/kls-v26-priority-build.py test object checks and archive-member agreement; never old oracle templates. Existing wide16 stream fixture provides genuine scalar/column-major reference if only owned callback invokes row8 path; add activation check and per-edge/layout/flag oracle. Full default certification still follows every public answer."
+    ],
+    "alternative": "If row8 too complex for one turn, first implement direct row8 narrow-edge microkernel with frozen column-major oracle and explicit transpose cost; no acceptance from microbenchmarks.",
+    "oracle": "/tmp/kls-worst-peer-v34-row8-edge-oracle/completed.json",
+    "build_script": "/tmp/kls-v34-row8-edge-oracle.py",
+    "integration_next": [
+      "Extract unchanged old getrf+native-writeback section after update edges in process_target into kls_snb_factor_panel(s,st,blk,node,pipelined). Original process_target calls it. Include row8 module after helper definition, remove duplicate direct include from producttile tests.",
+      "Add st->row8_w[64] and row8_capacity; allocate one maxH*16-double buffer perworker in private builder only ifwidth16 nodes and nativeAVX512F/DQ feature. Check size overflow, deadline, existing memory budget, free all64 pointers on every destroy; conservative requested allocation count.",
+      "Implement row8 target attempt: only owned TLS, width16, unscaled singleblock and sufficient scratch. SaveMXCSR and require masked nearest SSE, clearflags for speculative updates; bitclassify AZ values normal/zero and scatter through old entry.dst-sn.panel-c*H into row8 scratch. No persistent W/native factor touched yet; require off-scatter empty (oneblock).",
+      "Wait for each producer exactly as old process_target whenpipelined; private inputs already closed. Call existing row8_edge helper in original edge order. On non-inexact FPflags or failed normal/zero guards decline early; restore savedMXCSR and replay complete original target. If shared failed flag set, no successful publication/answer allowed, preserve existing frame abort/join behavior.",
+      "After edges, transpose row8 scratch into ordinary column-major W in8x8 tiles, validate values normal/zero as copying; partial copy before decline is safe because target is unpublished and original replay memsets wholeW. Merge successful inexact with original caller flags, then run unchanged factor_panel to normalize/publish/native-copy using original operation order. No persistent layout ownership change, no solver/recovery API changes.",
+      "Ownedworker selects new target only when width16bufferavailable, otherwise original. Tests genuine serial reference calls old process_target while TLS0; stream callback uses new path. Add test activation atomic macro and per-call attempt/success instrumentation in diagnostic job local counters (avoid per-node global atomics in performance binary) to establish actual use and replay fraction.",
+      "Extend exactstream integration oracle (base original wide16 fixture, unlike rejected one-column fixture) plus all1104edge cases and expandedFPtests. Correct-link stream+product+builder unit driver object assertions, archive member equality. Then four balanced BJT pairs/domain against immutablev16. Final source must pass all qualification profiles/full peer campaigns/broad corpus before merge."
+    ]
+  },
+  "temporary_row8_integration": {
+    "status": "both integrated row8 variants rejected; solver runtime reverted to qualified v16; microprototype remains test-only",
+    "snapshot": "/tmp/kls-worst-peer-v35-row8-integrated-diagnostic",
+    "build_script": "/tmp/kls-v35-row8-build.py",
+    "activation_script": "/tmp/kls-v35-row8-activation.py",
+    "activation_session": 81287,
+    "paired_script": "/tmp/kls-v35-row8-paired.py",
+    "production_merged": false,
+    "performance_established": false,
+    "next": "Find a different width16 update or dependency critical-path improvement. Do not promote row8 from these noisy screens. Full qualification, two 56-comparison campaigns and 110-matrix broad audit remain pending.",
+    "activation_passed": true,
+    "paired_session": null,
+    "paired_summary": {
+      "diagnostic_only": true,
+      "all_qualified": true,
+      "ratios": {
+        "llc96": [
+          1.0572555967144468,
+          1.020622477232545,
+          1.0487389435424923,
+          1.0760622426754245
+        ],
+        "llc32": [
+          1.1936461298319714,
+          1.0509739569689451,
+          0.9721297970450096,
+          0.9318019725312793
+        ]
+      },
+      "medians": {
+        "llc96": 1.0529972701284696,
+        "llc32": 1.0115518770069774
+      }
+    },
+    "census_script": "/tmp/kls-v35-row8-census-build.py",
+    "census_session": 92645,
+    "activation_correction": "Original conditional assertion could be vacuous on width32 fixture; corrected fixture forces width16 and requires positive count. Earlier activation claim withdrawn.",
+    "census": {
+      "attempts": 102600,
+      "success": 100869,
+      "replay": 1731,
+      "success_fraction": 0.9831286549707602,
+      "waveform_valid": true,
+      "performance_evidence": false,
+      "log": "/tmp/kls-worst-peer-v35-row8-census-paired/llc32/0/candidate/stdout.log"
+    },
+    "corrected_activation_session": 87721,
+    "corrected_activation_passed": true,
+    "corrected_activation_snapshot": "/tmp/kls-worst-peer-v35-row8-activation-wide",
+    "next_snapshot": "/tmp/kls-worst-peer-v36-row8-no-scan-diagnostic",
+    "next_build_script": "/tmp/kls-v36-row8-build.py",
+    "next_build_session": null,
+    "next_paired_script": "/tmp/kls-v36-row8-paired.py",
+    "next_paired_session": null,
+    "v36_summary": {
+      "diagnostic_only": true,
+      "all_qualified": true,
+      "ratios": {
+        "llc96": [
+          1.1294809156184202,
+          0.9959117587532889,
+          0.9309434037017715,
+          0.9478713584657578
+        ],
+        "llc32": [
+          0.9063844232435362,
+          0.8165797054187728,
+          1.2544003184150008,
+          1.123661782379078
+        ]
+      },
+      "medians": {
+        "llc96": 0.9718915586095234,
+        "llc32": 1.015023102811307
+      }
+    }
+  },
+  "narrow_gather_experiment": {
+    "snapshot": "/tmp/kls-worst-peer-v37-narrow-gather4-diagnostic",
+    "summary": {
+      "diagnostic_only": true,
+      "all_qualified": true,
+      "ratios": {
+        "llc96": [
+          1.0637206456774437,
+          1.0351374651454126,
+          1.0506227867485198,
+          1.0450132213721968
+        ],
+        "llc32": [
+          1.1446497680498244,
+          0.9953220424699176,
+          0.7827753884722612,
+          0.978684458219146
+        ]
+      },
+      "medians": {
+        "llc96": 1.0478180040603582,
+        "llc32": 0.9870032503445318
+      }
+    },
+    "decision": "rejected; no >=2% worst-domain gain, 96 MiB slower"
+  },
+  "narrow_register_block_experiment": {
+    "status": "rejected after opposite-order confirmation; runtime reverted",
+    "snapshot": "/tmp/kls-worst-peer-v38-narrow-block-diagnostic",
+    "build_script": "/tmp/kls-v38-narrow-block-build.py",
+    "paired_script": "/tmp/kls-v38-narrow-block-paired.py",
+    "build_session": 61199,
+    "rationale": "Keep below target rows in registers across all narrow producer updates; upper block is disjoint, per-result producer FMA order unchanged. No persistent layout or allocation change.",
+    "screen": {
+      "diagnostic_only": true,
+      "all_qualified": true,
+      "ratios": {
+        "llc96": [
+          1.0312019674146942,
+          0.9521547139403707,
+          0.9967849000720962,
+          0.9969336604095563
+        ],
+        "llc32": [
+          1.0049662762994531,
+          0.9467806549415249,
+          0.8540431097033765,
+          0.7392720167884796
+        ]
+      },
+      "medians": {
+        "llc96": 0.9968592802408263,
+        "llc32": 0.9004118823224507
+      }
+    },
+    "confirmation": {
+      "diagnostic_only": true,
+      "all_qualified": true,
+      "ratios": {
+        "llc96": [
+          1.081509579440861,
+          1.0208909747982977,
+          0.9556435241575315,
+          1.1422245871420156
+        ],
+        "llc32": [
+          0.8843676829005522,
+          1.0615743932875608,
+          1.2060470632158036,
+          0.9778330490053837
+        ]
+      },
+      "medians": {
+        "llc96": 1.0512002771195794,
+        "llc32": 1.0197037211464721
+      }
+    },
+    "decision": "Initial LLC32 improvement did not repeat; confirmation worse in both domains."
+  },
+  "register8_experiment": {
+    "status": "rejected; runtime restored to qualified v16",
+    "snapshot": "/tmp/kls-worst-peer-v39-register8-diagnostic",
+    "build_script": "/tmp/kls-v39-register8-build.py",
+    "build_session": 89496,
+    "paired_script": "/tmp/kls-v39-register8-paired.py",
+    "rationale": "Eight-column register TRSM for 16 contiguous producer rows; no layout/allocation change; same per-lane order and zero masks.",
+    "summary": {
+      "diagnostic_only": true,
+      "all_qualified": true,
+      "ratios": {
+        "llc96": [
+          1.1471353637213841,
+          1.0039120170359837,
+          1.016487961388691,
+          1.039983956445695
+        ],
+        "llc32": [
+          1.2351336055301774,
+          1.1866520389655497,
+          1.0367976355657833,
+          0.9006627923730849
+        ]
+      },
+      "medians": {
+        "llc96": 1.028235958917193,
+        "llc32": 1.1117248372656665
+      }
+    },
+    "oracles": "67200 complete-edge register cases plus stream, expanded narrow and builder; all16 waveforms pass",
+    "decision": "medians1.02824 LLC96,1.11172 LLC32: slower both"
+  },
+  "other_loss_screens": {
+    "status": "screens and all32 CPU profiles complete, all qualified",
+    "controller_script": "/tmp/kls-v16-other-loss-screens.py",
+    "controller_session": 12672,
+    "dac_summary": {
+      "acceptance_policy": "worst-peer-v1",
+      "acceptance_gate": false,
+      "hybrid_gate": false,
+      "hybrid": {
+        "passed": false,
+        "complete": false,
+        "incremental_passed": false,
+        "worst_ratio": null,
+        "peer_wins": 0,
+        "regressions": []
+      },
+      "worst_ratio": null,
+      "peer_wins": 0,
+      "candidate_gate": false,
+      "expected": 66,
+      "observations": 66,
+      "all_qualified": true,
+      "duplicates": [],
+      "cells": [
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 1,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            1.0042532558673665,
+            0.9954851558676096,
+            0.9989004110770897,
+            0.9966766507370263
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 0.997788530907058,
+          "wall_median": 0.9990979173932113
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 1,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            1.0173030357866073,
+            1.044326994581961,
+            1.0433891416707162,
+            1.047808165864704
+          ],
+          "baseline_peer_median": 1.0468005279305177,
+          "median": 1.0438580681263385,
+          "wall_median": 1.0105366133218214
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 1,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            0.5530974902434797,
+            0.5588173988839095,
+            0.5528062538033048,
+            0.5569079318515175
+          ],
+          "baseline_peer_median": 0.5560898426736681,
+          "median": 0.5550027110474987,
+          "wall_median": 0.9090262338435496
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 8,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            0.844434025921674,
+            0.8433436017713055,
+            0.8170371876353544,
+            0.8256694295296182
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 0.8345065156504619,
+          "wall_median": 0.982777852831221
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 8,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            1.2553056228985617,
+            0.9053079054910987,
+            1.2106327522298916,
+            0.9592538982694995
+          ],
+          "baseline_peer_median": 1.3217622386260386,
+          "median": 1.0849433252496956,
+          "wall_median": 1.0095457030045303
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 8,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            1.0583411130270513,
+            1.05146149825803,
+            1.015877167915943,
+            1.0374589526820492
+          ],
+          "baseline_peer_median": 1.2500456295868114,
+          "median": 1.0444602254700395,
+          "wall_median": 1.0018490526855532
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 1,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            1.0037530690985619,
+            0.988881553802856,
+            1.0163004401732634,
+            0.9955746430531478
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 0.9996638560758548,
+          "wall_median": 1.0048874412927875
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 1,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            1.0607826965313365,
+            1.0559688340599203,
+            1.0754149772214852,
+            1.0613588662493731
+          ],
+          "baseline_peer_median": 1.0621215175174374,
+          "median": 1.0610707813903548,
+          "wall_median": 1.0213754218146673
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 1,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            0.5583750402435098,
+            0.5535597934434838,
+            0.5597544720472897,
+            0.5591434148918994
+          ],
+          "baseline_peer_median": 0.5580354871674371,
+          "median": 0.5587592275677047,
+          "wall_median": 0.912246351892346
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 8,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            0.8543130268060629,
+            1.279006320793791,
+            1.0190709091074999,
+            0.8412294499923597
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 0.9366919679567813,
+          "wall_median": 0.9928183548635457
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 8,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            0.5689074516842023,
+            0.5311533643689121,
+            0.8219755794184105,
+            1.266349411675561
+          ],
+          "baseline_peer_median": 0.7362585013066049,
+          "median": 0.6954415155513064,
+          "wall_median": 0.9401662312368696
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 8,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            1.083621742846163,
+            1.6412040433636776,
+            1.266373812785181,
+            1.0556918561432838
+          ],
+          "baseline_peer_median": 1.2616761218892822,
+          "median": 1.174997777815672,
+          "wall_median": 1.0188670486866034
+        }
+      ],
+      "incremental_gate": false,
+      "all56_peer_wins": false,
+      "independent_confirmation_required": true,
+      "unqualified": [],
+      "changed_inputs": []
+    },
+    "mem_output": "/tmp/kls-worst-peer-v16-mem-screen",
+    "queued_next_action": "After screen controller completes, run /tmp/kls-v16-dac-mem-profile.py under quiet lock. It links immutable qualified v16 with diagnostic CPU sampler and profiles 4 trials/case/domain/thread for DAC and memory. No performance acceptance from sampler runs.",
+    "profile_script": "/tmp/kls-v16-dac-mem-profile.py",
+    "profile_started": true,
+    "reason": "New BJT kernels v37/v38/v39 failed robust gain. Measure qualified v16 residual peer gaps before next implementation.",
+    "mem_summary": {
+      "acceptance_policy": "worst-peer-v1",
+      "acceptance_gate": false,
+      "hybrid_gate": false,
+      "hybrid": {
+        "passed": false,
+        "complete": false,
+        "incremental_passed": false,
+        "worst_ratio": null,
+        "peer_wins": 0,
+        "regressions": []
+      },
+      "worst_ratio": null,
+      "peer_wins": 0,
+      "candidate_gate": false,
+      "expected": 66,
+      "observations": 66,
+      "all_qualified": true,
+      "duplicates": [],
+      "cells": [
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 1,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            0.9946280617557839,
+            0.9937959499111366,
+            1.0013500737949657,
+            0.9994139790369987
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 0.9970210203963913,
+          "wall_median": 1.0003250237196744
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 1,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            1.0775798006057855,
+            1.0842765744998213,
+            1.0794649141672858,
+            1.0813863071628487
+          ],
+          "baseline_peer_median": 1.0827100754956227,
+          "median": 1.0804256106650674,
+          "wall_median": 1.0199679685444063
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 1,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            0.6457243634493148,
+            0.6488749870900158,
+            0.6478087737052844,
+            0.6518827400096115
+          ],
+          "baseline_peer_median": 0.6507384352948465,
+          "median": 0.6483418803976502,
+          "wall_median": 0.8924779556941067
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 8,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            0.6925183460097806,
+            0.6871969880981297,
+            0.6754291034479449,
+            0.700981318810166
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 0.6898576670539551,
+          "wall_median": 0.9329063455487334
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 8,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            1.0976269723512777,
+            1.0270652917718681,
+            1.1616147443225195,
+            1.1724694120142645
+          ],
+          "baseline_peer_median": 1.6287952021571066,
+          "median": 1.1296208583368985,
+          "wall_median": 1.0247713239904546
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 8,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            0.9751629507228871,
+            1.019502210755044,
+            0.9586800222062524,
+            1.0549220633540217
+          ],
+          "baseline_peer_median": 1.4514652887115156,
+          "median": 0.9973325807389655,
+          "wall_median": 1.0036764710121646
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 1,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            1.0279657071147121,
+            1.0007593972805648,
+            1.0034518626154498,
+            0.9975277568784268
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 1.0021056299480073,
+          "wall_median": 0.9964598956410331
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 1,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            1.1550809275519784,
+            1.1179235664188174,
+            1.1363953321802298,
+            1.1244239685317554
+          ],
+          "baseline_peer_median": 1.1254338853371388,
+          "median": 1.1304096503559926,
+          "wall_median": 1.057465941362072
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 1,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            0.5837833804868149,
+            0.575611380435826,
+            0.5705699832969751,
+            0.5855685762565044
+          ],
+          "baseline_peer_median": 0.5718909118361994,
+          "median": 0.5796973804613205,
+          "wall_median": 0.8586466926919012
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 8,
+          "peer": "baseline",
+          "complete": true,
+          "ratios": [
+            0.7410812870485436,
+            0.7612029074082158,
+            0.7351106540788308,
+            0.6967359099069759
+          ],
+          "baseline_peer_median": 1.0,
+          "median": 0.7380959705636871,
+          "wall_median": 0.9520031474406043
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 8,
+          "peer": "ck",
+          "complete": true,
+          "ratios": [
+            0.6680608142394318,
+            0.9273244103135466,
+            0.7208321667594563,
+            0.9092928574674604
+          ],
+          "baseline_peer_median": 1.099405959242032,
+          "median": 0.8150625121134583,
+          "wall_median": 1.0014843796209434
+        },
+        {
+          "domain": "llc32",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 8,
+          "peer": "st",
+          "complete": true,
+          "ratios": [
+            1.1327737321691247,
+            1.0593291130781335,
+            1.0513657371914222,
+            1.0611860977698466
+          ],
+          "baseline_peer_median": 1.4766482533185052,
+          "median": 1.06025760542399,
+          "wall_median": 1.0032374559943538
+        }
+      ],
+      "incremental_gate": false,
+      "all56_peer_wins": false,
+      "independent_confirmation_required": true,
+      "unqualified": [],
+      "changed_inputs": []
+    },
+    "profile_session": null,
+    "profile_output": "/tmp/kls-worst-peer-v16-dac-mem-profile"
+  },
+  "solver_runtime_reversion_after_v39": {
+    "src/kls_numeric_schedule.inc": true,
+    "src/kls_egraph_refactor.inc": true,
+    "src/kls_snb_stream.inc": true,
+    "tests/kls_snb_stream.c": true,
+    "tests/kls_snb_register.c": true
+  },
+  "current_experimental": "Persistentrowlayoutv68 diagnosticXyce nowBJT8screening withnative/TSanproof. Rootv7unadopted; fulltargetnotmet.",
+  "scatter_no_prefetch_experiment": {
+    "status": "rejected; slower in all8 cell medians, one waveform invalid; prefetch restored",
+    "snapshot": "/tmp/kls-worst-peer-v40-scatter-no-prefetch-diagnostic",
+    "build_script": "/tmp/kls-v40-scatter-no-prefetch-build.py",
+    "build_session": 13856,
+    "arithmetic_changed": false,
+    "rationale": "Native fixed-pattern refactor dominates serial DAC/memory; hottest scalar loops include indexed workspace prefetches. Test their removal before changing arithmetic or policy.",
+    "summary": {
+      "diagnostic_only": true,
+      "all_qualified": false,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            1.0213811160482036,
+            1.010859011702182,
+            1.0137664728847366,
+            1.0068233065374652
+          ],
+          "median": 1.0123127422934592
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0376255703893265,
+            1.0263599512159396,
+            0.8343327972886515,
+            1.0379297576160769
+          ],
+          "median": 1.0319927608026331
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            1.013147936284432,
+            1.0185670057496683,
+            0.9998864063332839,
+            1.0120648923836009
+          ],
+          "median": 1.0126064143340163
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            0.8250184267194658,
+            1.2004596737442659,
+            1.0153245485602733,
+            1.2588520079586631
+          ],
+          "median": 1.1078921111522697
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            1.0273665595402064,
+            1.038095227277632,
+            1.0156104725054367,
+            1.0198986493352813
+          ],
+          "median": 1.023632604437744
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0132105061637957,
+            1.0334201289417224,
+            1.0299517280112256,
+            1.0073719117375144
+          ],
+          "median": 1.0215811170875106
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            1.0183475660363834,
+            1.0233486033624752,
+            1.0038176125793532,
+            1.0116307131548452
+          ],
+          "median": 1.0149891395956143
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.3560470350466218,
+            1.0024942372312544,
+            1.029588737559932,
+            1.0324996119300536
+          ],
+          "median": 1.0310441747449928
+        }
+      ]
+    },
+    "waveform_correction": "All64 upstream waveform checks pass; original grid-mismatch label was overstrict. Rejection stands on slower medians."
+  },
+  "observed_crew4_experiment": {
+    "status": "rejected on timing; runtime restored to qualified v16",
+    "snapshot": "/tmp/kls-worst-peer-v41-observed-crew4-diagnostic",
+    "build_script": "/tmp/kls-v41-observed-crew4-build.py",
+    "paired_script": "/tmp/kls-v41-observed-crew4-paired.py",
+    "source_scope": "qualified v16 plus observed-EGraph 4-worker ceiling only; snapshot small-BTF source restored to v16 to isolate change",
+    "rationale": "DAC/memory eight-thread profiles have high worker/wait cost; bound crew only inside existing paid, default-certified observed consultation; caller options unchanged.",
+    "build_session": null,
+    "paired_session": 89694,
+    "oracle_passed": true,
+    "summary": {
+      "diagnostic_only": true,
+      "all_qualified": false,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.998260957655163,
+            0.9938640947844806,
+            0.9994787287708088,
+            0.9951235097277573
+          ],
+          "median": 0.9966922336914601
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.2158469373663485,
+            0.991450739774456,
+            1.184566295344129,
+            1.1777286697655516
+          ],
+          "median": 1.1811474825548403
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9895786174473271,
+            1.0150557799998248,
+            1.0008339631492535,
+            1.0109107533782893
+          ],
+          "median": 1.0058723582637714
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.0051453722645838,
+            1.0548986800520543,
+            1.1774713802889687,
+            0.9903652903635274
+          ],
+          "median": 1.030022026158319
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.9974296963007119,
+            0.9999036793360446,
+            1.0006998082887648,
+            1.004306528579277
+          ],
+          "median": 1.0003017438124047
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.4953240774688317,
+            1.462985147190243,
+            1.497206953888339,
+            1.4751915123806867
+          ],
+          "median": 1.4852577949247592
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9947399043338122,
+            0.989912231882624,
+            1.0058884822209306,
+            0.9966127129118528
+          ],
+          "median": 0.9956763086228325
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            0.939583662141582,
+            1.357396137706791,
+            1.3821859995582522,
+            1.3994612147600398
+          ],
+          "median": 1.3697910686325216
+        }
+      ]
+    },
+    "waveform_correction": "All64 upstream waveform checks pass. Two original baseline grid-mismatch labels corrected. No full qualification from legacy missing exit/timeout evidence.",
+    "decision": "4-worker cap slower in all eight-thread settings, up to48.5%; do not promote."
+  },
+  "diagnostic_waveform_policy_correction": {
+    "status": "Recent v40/v41 retained outputs verified with upstream protocol; all128 waveforms pass, correcting3 grid-only labels. Old ledgers lack explicit exit/timeout fields, so these audits do not claim full qualification or acceptance.",
+    "script": "scripts/audit_worst_peer_screen.py",
+    "official_campaign_changed": false,
+    "official_protocol": "Xyce xyce_verify.pl rtol1e-8 atol1e-10, exact successful/failed step counts; strict pointwise/grid diagnostics remain separate",
+    "audits": [
+      "/tmp/kls-worst-peer-v40-scatter-no-prefetch-upstream-audit/audit.json",
+      "/tmp/kls-worst-peer-v41-observed-crew4-upstream-audit/audit.json"
+    ],
+    "historical_followup": "Orientation12 and AMF8 retained outputs all pass upstream waveform checks, correcting8 more grid-only labels; legacy ledgers still cannot prove full execution qualification.",
+    "historical_audits": [
+      "/tmp/kls-worst-peer-orientation32-upstream-audit/audit.json",
+      "/tmp/kls-worst-peer-amf32-upstream-audit/audit.json"
+    ]
+  },
+  "orientation_fresh_experiment": {
+    "status": "all32 executions and upstream waveforms qualified; diagnostic8-pair medians1.00231 LLC96,.928375 LLC32; general AUTO adoption still unimplemented",
+    "script": "/tmp/kls-orientation-fresh.py",
+    "output": "/tmp/kls-worst-peer-orientation-fresh",
+    "session": null,
+    "next": "Prototype a general, bounded measured orientation choice for eligible AUTO repeated workloads, preserving explicit orientation, current A/RHS certification, owned numeric lifecycle and fallback. Do not hardcode BJT. Static estimated-flop orientation comparison ties on this case; a simple threshold flip lacks evidence. Full final peer/broad qualification remains required.",
+    "summary": {
+      "diagnostic_only": true,
+      "all_pointwise_diagnostics_pass": false,
+      "qualification_pending_upstream_audit": true,
+      "cells": [
+        {
+          "case": "PDE_2D_BJT/invertbjt.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0027740097666848,
+            0.9577984512239489,
+            0.9778088403480494,
+            1.001846078109616,
+            1.211791233198539,
+            1.0616236140352968,
+            1.1065748903746655,
+            0.9742820943144656
+          ],
+          "median": 1.0023100439381505
+        },
+        {
+          "case": "PDE_2D_BJT/invertbjt.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            0.9653429524322502,
+            0.9185017862422987,
+            0.8266868699664307,
+            0.9382486129355881,
+            0.9101300663824275,
+            1.0111431976038905,
+            0.9571732229123534,
+            0.9017282995227829
+          ],
+          "median": 0.9283751995889434
+        }
+      ]
+    },
+    "upstream_audit": "/tmp/kls-worst-peer-orientation-fresh-upstream-audit/audit.json",
+    "geometry": {
+      "valid_snapshot": "/tmp/kls-worst-peer-factor-geometry-v2",
+      "checked": "/tmp/kls-worst-peer-factor-geometry-v2-runs/checked-geometry.json",
+      "invalid_first_snapshot": "/tmp/kls-worst-peer-factor-geometry/invalidated.json",
+      "findings": "BJT AUTO normal; TRANSPOSE lowers actual factor flops only0.4%, identical estimated flops37968545. DAC/memory already TRANSPOSE. Static symbolic score cannot explain BJT7.2% measured gain. No timing evidence from instrumented geometry runs."
+    }
+  },
+  "short_division_experiment": {
+    "status": "rejected; runtime reverted to qualified v16 before next candidate",
+    "source": "/tmp/kls-worst-peer-v42-short-division-diagnostic",
+    "build_script": "/tmp/kls-v42-short-division-build.py",
+    "paired_script": "/tmp/kls-v42-short-division-paired.py",
+    "paired_session": 6663,
+    "rationale": "EGraph two/three-entry L extraction uses exact SSE2 packed division for first two distinct rows, with unchanged scalar third quotient and sorted/padded mirrors. No reciprocal approximation, allocation or public ABI change. Snapshot isolates this change from retained small-BTF microchange.",
+    "qualification": "diagnostic only; full native/portable/sanitizers, main/peers/broad still required if retained",
+    "next": "After timing completes, run audit_worst_peer_screen.py against qualified v16 DAC and memory reference campaigns; ledger now explicitly records exits/timeouts. Consider extending packed extraction only if robust gain.",
+    "summary": {
+      "diagnostic_only": true,
+      "all_pointwise_diagnostics_pass": false,
+      "qualification_pending_upstream_audit": true,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            1.0111495349391844,
+            1.0126632909237905,
+            1.0062851528088366,
+            1.0049457575731913
+          ],
+          "median": 1.0087173438740105
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0145326746702308,
+            0.9739287365278285,
+            1.2268178806672747,
+            0.94270878667367
+          ],
+          "median": 0.9942307055990296
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.996517330011492,
+            1.1058739557999366,
+            1.0062083559224217,
+            1.006283725590143
+          ],
+          "median": 1.0062460407562823
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.1322596961540545,
+            1.0970779234497066,
+            1.2363145533569095,
+            0.8882180043287344
+          ],
+          "median": 1.1146688098018807
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            1.0078350683572628,
+            1.01072255584806,
+            1.0103816710746223,
+            1.0101419992839613
+          ],
+          "median": 1.0102618351792918
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0471825475156504,
+            1.0310611280896746,
+            1.027712037866189,
+            1.021095403486366
+          ],
+          "median": 1.0293865829779318
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9908569286900488,
+            1.0030061952769584,
+            1.0128579349116829,
+            1.0125414120476541
+          ],
+          "median": 1.0077738036623063
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.031575408489926,
+            1.0495854508156774,
+            1.0498543356774759,
+            1.0239853918987496
+          ],
+          "median": 1.0405804296528016
+        }
+      ]
+    },
+    "upstream_audit": "/tmp/kls-worst-peer-v42-short-division-upstream-audit/audit.json",
+    "worktree_cleanup": "Rejected helper reverted and its test-only prototype removed; immutable v42 snapshot retained."
+  },
+  "cached_plain_experiment": {
+    "status": "v43 all64 upstream-qualified, serialDAC medians.94949/.95780 and memory96 .96790; DAC8 LLC32 worsened1.08756. v44 serial-only noinline revision oracle passed; opposite-order paired screen running",
+    "snapshot": "/tmp/kls-worst-peer-v43-cached-plain-diagnostic",
+    "build_script": "/tmp/kls-v43-cached-plain-build.py",
+    "build_session": null,
+    "paired_script": "/tmp/kls-v43-cached-plain-paired.py",
+    "rationale": "Serial dispatch already builds native LU pointer cache; specialize only mapped unscaled no-pivot/no-batch modes and reuse certified native pointers. Preserve every scalar operation, short-L update and reciprocal branch. Exclude alternate packed decks.",
+    "oracle": "Whole packed LU, Udiag, Offx and FP flags versus original block body over4BTF blocks, direct and prepared input maps and both native/i32 scatter modes; require actualactivation.",
+    "paired_session": null,
+    "activation_count": 128,
+    "object_agreement": "/tmp/kls-worst-peer-v43-cached-plain-diagnostic/object-agreement.json",
+    "next": "Poll session31743; then upstream-audit against v16 DAC and mem screens. Reject if no robust gain. If useful, confirm in opposite order and qualify native/portable/sanitizers, including cache ownership and singular/fallback boundaries before any composition. Full peer/broad completion still pending.",
+    "summary": {
+      "diagnostic_only": true,
+      "all_pointwise_diagnostics_pass": false,
+      "qualification_pending_upstream_audit": true,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.950161878298111,
+            0.9427143146659461,
+            0.9575658343566653,
+            0.9488135478062949
+          ],
+          "median": 0.949487713052203
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0298628691983123,
+            0.9625359457985303,
+            1.008097908778323,
+            0.9783434006628754
+          ],
+          "median": 0.9932206547205993
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9563699213026732,
+            0.9526961363696057,
+            0.9713351305961905,
+            0.959229509063045
+          ],
+          "median": 0.9577997151828591
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.1607425561399254,
+            1.033406831399815,
+            1.1417206898464876,
+            0.951616151957144
+          ],
+          "median": 1.0875637606231514
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.968100340556083,
+            0.9676970581249364,
+            0.9714456241397661,
+            0.9634524868745458
+          ],
+          "median": 0.9678986993405096
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0213389465257652,
+            0.9846323429538638,
+            0.990573445805166,
+            0.9772219841681514
+          ],
+          "median": 0.987602894379515
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9960339997070807,
+            1.0013177645404414,
+            0.9929298392046407,
+            0.9944666426403839
+          ],
+          "median": 0.9952503211737322
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            0.9900527043696034,
+            0.9816745941995206,
+            0.9952189814618636,
+            0.9642715581629243
+          ],
+          "median": 0.985863649284562
+        }
+      ]
+    },
+    "upstream_audit": "/tmp/kls-worst-peer-v43-cached-plain-upstream-audit/audit.json"
+  },
+  "cached_serial_experiment": {
+    "status": "v44serialDAC and memory96 gains repeat, but8-thread medians worsened despiteguard; superseded by caller-dispatch revision before qualification",
+    "snapshot": "/tmp/kls-worst-peer-v44-cached-serial-diagnostic",
+    "build_script": "/tmp/kls-v44-cached-serial-build.py",
+    "paired_script": "/tmp/kls-v44-cached-serial-paired.py",
+    "scope": "Specialize caller threads1 only; outlined64-aligned helper avoids generic-loop code growth. Keep original multiworker incumbent and consultation untouched.",
+    "next": "Poll returned paired session; audit all64 runs upstream. If gains hold, qualify composed source and measure all main/peer cells; optional next experiment is justified restrict annotations for disjoint input/workspace/native factor streams.",
+    "paired_session": null,
+    "composed_qualification_preparation": "Added private wholefactor oracle to worktree CMake and made FP flag checks portable; not yet built as composed source. Full profiles still pending screen outcome.",
+    "summary": {
+      "diagnostic_only": true,
+      "all_pointwise_diagnostics_pass": true,
+      "qualification_pending_upstream_audit": true,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.9615997274159888,
+            0.9568148610197298,
+            0.9638973466724663,
+            0.9559791703832071
+          ],
+          "median": 0.9592072942178593
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0340104189608326,
+            1.0478241231327798,
+            1.0568030733746152,
+            1.0003451025068786
+          ],
+          "median": 1.0409172710468062
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.962409854975477,
+            0.9729343724653524,
+            0.9559571408529742,
+            0.9604130808950087
+          ],
+          "median": 0.9614114679352428
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.2751511593655316,
+            0.8605141738768498,
+            1.0078103945050452,
+            0.9998541232383796
+          ],
+          "median": 1.0038322588717123
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.9676180751840382,
+            0.97269443023419,
+            0.9758276208704146,
+            0.9685974468604798
+          ],
+          "median": 0.9706459385473349
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0321231822919252,
+            1.0142513398995425,
+            1.0186988290917662,
+            1.0228808546175794
+          ],
+          "median": 1.0207898418546728
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9872698707689468,
+            0.981257553682886,
+            0.999022749916092,
+            1.0304413510418047
+          ],
+          "median": 0.9931463103425193
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.0498284799683486,
+            1.198276793801329,
+            1.028166445425083,
+            1.0150945835308312
+          ],
+          "median": 1.0389974626967158
+        }
+      ]
+    },
+    "upstream_audit": "/tmp/kls-worst-peer-v44-cached-serial-upstream-audit/audit.json"
+  },
+  "cached_dispatch_experiment": {
+    "status": "v45 all64 upstream-qualified; serialDAC .96104/.96701 medians, memory96 .98085; memory8 LLC32 median1.18502 from large outliers despite unchanged generic source. Investigating admission stability before qualification.",
+    "snapshot": "/tmp/kls-worst-peer-v45-cached-dispatch-diagnostic",
+    "build_script": "/tmp/kls-v45-cached-dispatch-build.py",
+    "build_session": null,
+    "paired_script": "/tmp/kls-v45-cached-dispatch-paired.py",
+    "rationale": "Keep original kls_parallel_refactor_block function source identical to v16; dispatch cached serial helper at existing callers. Dedicated ELF text section and noinline kernel isolate generic numeric body. Same capability guards and exact arithmetic.",
+    "source_agreement": "/tmp/kls-worst-peer-v45-cached-dispatch-diagnostic/generic-source-agreement.json",
+    "next": "Poll build session94562; if oracle+link succeed, run opposite-order paired64 DAC/memory script, then upstream audit. Only retain and qualify if serial gains hold and generic8-thread regression addressed.",
+    "paired_session": null,
+    "summary": {
+      "diagnostic_only": true,
+      "all_pointwise_diagnostics_pass": true,
+      "qualification_pending_upstream_audit": true,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.957576633155153,
+            0.9607145579752496,
+            0.97460457763537,
+            0.9613684005058092
+          ],
+          "median": 0.9610414792405294
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            0.9829201140881033,
+            1.0032435142557434,
+            0.9576068327500358,
+            1.0125169165091608
+          ],
+          "median": 0.9930818141719233
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9666147634002799,
+            0.9665335848725486,
+            0.9730737582940877,
+            0.9674030926392387
+          ],
+          "median": 0.9670089280197594
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.106109250198681,
+            0.7819960534726661,
+            0.8210496575920115,
+            1.0205734256915606
+          ],
+          "median": 0.9208115416417861
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.9799628550974401,
+            0.9756990994650957,
+            0.9817345125517817,
+            0.9840584079261424
+          ],
+          "median": 0.9808486838246109
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            0.9883674371082206,
+            1.008885491557651,
+            1.0248992495336287,
+            0.995476770094075
+          ],
+          "median": 1.002181130825863
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            1.0016290371676586,
+            0.9961716644819242,
+            0.9990381186928365,
+            0.9956312470738037
+          ],
+          "median": 0.9976048915873803
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            0.7292965664487829,
+            1.0121558877543193,
+            1.375110205637763,
+            1.3578914572267886
+          ],
+          "median": 1.185023672490554
+        }
+      ]
+    },
+    "upstream_audit": "/tmp/kls-worst-peer-v45-cached-dispatch-upstream-audit/audit.json"
+  },
+  "observed_admission_census": {
+    "status": "all4 diagnostic runs complete; one permanent rejection caused by first worker deadline, not numerical or measured-speed loss",
+    "snapshot": "/tmp/kls-worst-peer-v46-observed-diagnostic",
+    "source": "qualified v16 with admission-only diagnostic logging; no cached kernel",
+    "build_script": "/tmp/kls-v46-observed-diagnostic-build.py",
+    "run_script": "/tmp/kls-v46-observed-diagnostic-run.py",
+    "session": null,
+    "output": "/tmp/kls-worst-peer-v46-observed-diagnostic-paired",
+    "purpose": "Record preparation budget/deadline, candidate/incumbent timings, rejection and later capability drops. No performance evidence from this instrumented binary.",
+    "next": "Inspect all4 retained OBSERVED_DIAG/OBSERVED_DROP records before revising bounded admission. Composed cached source has new70th unit with pool join and singular oracle cases, not yet qualified.",
+    "findings": "Failed run: ready1, prep_late0, prep0.464ms, budget1.311ms; deadline_hit1, trialstatusKLS_OK after fallback, candidate1.805ms vsincumbent0.609ms, spent2.269ms/limit2.612ms, choice-1. Other3 runs candidate0.434\u20130.488ms vsincumbent0.648\u20130.655ms, retained after2 samples. No capability-drop logs."
+  },
+  "funded_deadline_retry": {
+    "status": "v50 unit oracles and all64 upstream-qualified paired8-thread runs complete. Timing medians .99798/1.00807 DAC,1.00910/1.02501 memory; one memory outlier remains. Full composed qualification/campaign now running; no timing-win or final acceptance claim.",
+    "source_worktree": "/tmp/kls-worst-peer-streaming-worktree",
+    "snapshot": "/tmp/kls-worst-peer-v50-funded-retry-diagnostic",
+    "build_script": "/tmp/kls-v50-funded-retry-build.py",
+    "paired_script": "/tmp/kls-v50-funded-retry-paired.py",
+    "rationale": "One transient first-worker deadline must not permanently discard a fast engine. Keep joined plan/pool, charge every prior cost, collect changed-input funding, then two fresh paid comparisons. At most1 retry. Numeric/cert failures and changed layout decline; incumbent restoration and staging remain mandatory.",
+    "budget": "Original first trial needs4 median cycles; deferred reuse needs2 newly available cycles after subtracting all spent costs from2% cumulative allowance. Retained plan never authorizes an unfunded automatic dispatch.",
+    "test_history": {
+      "v47": "policy+retry integration passed, cache fixture incorrectly requested unsupported1-worker pool; preserved failure",
+      "v48": "policy+retry integration+34cache/singular cases and real2-worker fallback join passed",
+      "v49": "strengthened no numeric-failure retry and incumbent success/layout guards; all3 oracles+build passed",
+      "v50": "funding reuse guard + explicit integration test now building"
+    },
+    "qualification_prepared": "Worktree CMake includes new70th private cache test; root/worktree qualification driver includes it as13th scoped TSan target. Full composed qualification not yet run.",
+    "next": "Poll new build handle, then run8 balanced paired trials per DAC/memory LLC setting at8 threads using immutable v50. Audit upstream. If stable/gains, qualify full composed native/portable/ASan/UBSan/TSan and measure fresh main/peers. Full56+confirmation and110-matrix broad gate still pending.",
+    "build_session": null,
+    "unit_oracles_passed": true,
+    "source_agreement": "/tmp/kls-worst-peer-v50-funded-retry-diagnostic/source-agreement.json",
+    "paired_session": null,
+    "summary": {
+      "diagnostic_only": true,
+      "all_pointwise_diagnostics_pass": true,
+      "qualification_pending_upstream_audit": true,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0331101476607647,
+            0.8130461191003738,
+            0.960473652014332,
+            1.0280353934242614,
+            0.9944579771142971,
+            1.001503960608007,
+            1.0064355021321172,
+            0.988373151354325
+          ],
+          "median": 0.9979809688611521
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            1.154179057062656,
+            1.0390858856929492,
+            0.9700832977572154,
+            0.8511506266845762,
+            1.0475693198239158,
+            0.9615105518768354,
+            1.0161858467843015,
+            0.9999447791844615
+          ],
+          "median": 1.0080653129843815
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": [
+            1.0016965744524455,
+            0.9928387723002368,
+            1.0083811913277296,
+            1.009827498456528,
+            1.0300299321501716,
+            1.018307501024344,
+            1.0050388323234847,
+            1.0116586245210257
+          ],
+          "median": 1.0091043448921289
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": [
+            0.9943391066415953,
+            1.034749387821457,
+            1.0361479294371878,
+            1.025321239053412,
+            1.0247054742045996,
+            0.9796807445942396,
+            1.3386558381224405,
+            0.9860881996328584
+          ],
+          "median": 1.0250133566290058
+        }
+      ]
+    },
+    "upstream_audit": "/tmp/kls-worst-peer-v50-funded-retry-upstream-audit/audit.json"
+  },
+  "composed_candidate_v51": {
+    "status": "Complete462-observation initial campaign and independent audit allqualified. Acceptance false;39/56peer wins,worst1.44244; no confirmation because full target fails. BJT32t8 mainreg1.02185 exceeds1.02 intermediategate.",
+    "controller": "/tmp/kls-v51-composed-controller.py",
+    "controller_session": null,
+    "controller_pid": 244164,
+    "state": "/tmp/kls-worst-peer-v51-controller/state.json",
+    "qualification_pid": null,
+    "core": "/tmp/kls-worst-peer-v51-composed-core",
+    "link": "/tmp/kls-worst-peer-v51-composed-link",
+    "campaign": "/tmp/kls-worst-peer-v51-initial",
+    "audit": "/tmp/kls-worst-peer-v51-initial-audit",
+    "scope": "Qualified-v16 features plus retained small-BTF short loops, cached native serial block path, one funded worker-deadline retry, expanded exact oracles; public headers unchanged.",
+    "sequence": "Upstream audit v50 passed; native+portable+ASan/UBSan+TSan source qualification, link, public header/global-symbol ABI comparison, complete462-observation main/CKTSO/SubtreeLU initial campaign and independent audit. Stop on qualification or ABI failure; no confirmation or broad acceptance is implied.",
+    "next": "Poll controller session97030/state and current child. Do not run competing builds/tests or timings. Source is frozen under core/source. Inspect whole-grid worst cells after initial campaign; opposite-order confirmation and110-matrix broad audit remain outstanding.",
+    "abi": "/tmp/kls-worst-peer-v51-controller/abi.json",
+    "live_prefix": {
+      "diagnostic_only": true,
+      "acceptance_evidence": false,
+      "completed_observations": 233,
+      "all_completed_qualified": true,
+      "complete_four_pair_cells": [
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.9529604331876226,
+            "ck": 0.9176302917249921,
+            "st": 0.5503273281776977
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.6640726332256894,
+            "ck": 0.9539887828859197,
+            "st": 0.7561063149104994
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "NEURON/rallpack3.cir",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.6990453521930251,
+            "ck": 0.9603795121202561,
+            "st": 0.5144129081015838
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "NEURON/rallpack3.cir",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.6625817597921637,
+            "ck": 0.16247834862703225,
+            "st": 0.9212092779303818
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.9626964153704414,
+            "ck": 0.9980406872992986,
+            "st": 0.5314358871232854
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.8409326230005812,
+            "ck": 1.2405230667980467,
+            "st": 1.0359471075664808
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2/mux8.cir",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.983648044231471,
+            "ck": 1.1490218413174094,
+            "st": 0.7269657957619625
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2/mux8.cir",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.9942958996985054,
+            "ck": 0.22281054036332038,
+            "st": 0.4710369796964279
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.9813552699155813,
+            "ck": 1.0625037879329362,
+            "st": 0.637886298999164
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.6782751622772638,
+            "ck": 1.0216043215139388,
+            "st": 1.0181283532272474
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "MOS13_IC/invert50_mos1.cir",
+          "threads": 1,
+          "ratios": {
+            "baseline": 1.0047130112153257,
+            "ck": 1.0418236335239022,
+            "st": 0.7153189524302369
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "MOS13_IC/invert50_mos1.cir",
+          "threads": 8,
+          "ratios": {
+            "baseline": 1.003552014894338,
+            "ck": 0.15266748343538808,
+            "st": 0.9054787492582788
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "PDE_2D_BJT/invertbjt.cir",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.8103931656730095,
+            "ck": 0.8386435449123619,
+            "st": 0.5310440731407315
+          }
+        },
+        {
+          "domain": "llc96",
+          "case": "PDE_2D_BJT/invertbjt.cir",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.7670379720961147,
+            "ck": 0.9498258145216045,
+            "st": 1.0211798959496496
+          }
+        }
+      ]
+    },
+    "live_observation_count": 290,
+    "live_all_qualified": true,
+    "complete_ram_prefix": {
+      "diagnostic_only": true,
+      "acceptance_evidence": false,
+      "all4cells": [
+        {
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.9529604331876226,
+            "ck": 0.9176302917249921,
+            "st": 0.5503273281776977
+          }
+        },
+        {
+          "domain": "llc96",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.6640726332256894,
+            "ck": 0.9539887828859197,
+            "st": 0.7561063149104994
+          }
+        },
+        {
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": {
+            "baseline": 0.9766382320211369,
+            "ck": 0.8939771252788676,
+            "st": 0.4394156501439516
+          }
+        },
+        {
+          "domain": "llc32",
+          "threads": 8,
+          "ratios": {
+            "baseline": 0.7339176299404468,
+            "ck": 0.6957539983228405,
+            "st": 0.6261093913275932
+          }
+        }
+      ],
+      "confirmation_pending": true
+    },
+    "summary": "/tmp/kls-worst-peer-v51-initial/summary.json",
+    "completed_controller": "/tmp/kls-worst-peer-v51-controller/completed.json"
+  },
+  "persistent_row_panel_experiment": {
+    "status": "v52 compile/link passed; exact oracle fails mixed exceptional wide product flags. Not integrated.",
+    "source_worktree": "/tmp/kls-worst-peer-row-panels-worktree",
+    "snapshot": "/tmp/kls-worst-peer-v52-row-panel-oracle",
+    "rationale": "Persistent width16 row8 panels avoid repeated temporary-layout conversions; two8-column vectors,8 dense accumulators, exact masked TRSM and normalized GETRF. Native LU layout unchanged. Full-node publication required to avoid rewriting published columns.",
+    "oracle": "tests/kls_snb_row_panel.c covers original edge vs row layout, producer layouts, gapped subsets/destinations, zero masks, all rounding and FTZ/DAZ modes, exceptional values, whole MXCSR flags and singular pivots. No correctness claim before execution.",
+    "next": "Build arithmetic oracle after quiet timing lock becomes free. No production integration until values and flags match.",
+    "build_script": "/tmp/kls-v52-row-panel-oracle-build.py",
+    "build_session": 62865,
+    "build_status": "waiting for quiet timing lock; no competing compilation while full peer campaign runs",
+    "failure": "count8 rows1 pattern4 holes0 normalproducer contiguous subset; expectedMXCSR1fbb actual1fa3 (OF/UF absent). Do not claim flags correct; inspect cross-lane exception priority and/or fused product before any adoption.",
+    "result": "/tmp/kls-worst-peer-v52-row-panel-oracle/state.json"
+  },
+  "mux_followup_evidence": {
+    "status": "profile and live losses inspected; no new runtime change or timing claim",
+    "profile": "/tmp/kls-worst-peer-mux-cpu-profile/function-counts.json",
+    "shape": "/tmp/kls-worst-peer-v16-btf-shape-diagnostic/run/stdout.log",
+    "factor": "Current compact path kls_lean_btf_map32_refactor enters kls_compact_btf_map32_refactor; it does not use new cached_plain block dispatcher. Optimizing singleton dispatcher overhead would not address settled mux path.",
+    "geometry": "n170,25 blocks,24 singleton; U counts0:88,1:62; L count2:94,3:26. Persistent width16 panels target a different workload.",
+    "candidate_next": "Inspect compact short-column instruction/metadata overhead and independent-row certificate work after quiet campaign, maintaining current-operator certification, exact scalar order and recovery."
+  },
+  "certificate_eight_experiment": {
+    "status": "v53 arithmetic/range proof passed; v54 actual native dispatch/API and all8 relevant tests passed, but paired serial end-to-end screen regressed in every cell. Rejected, not adopted to root. Worktree still holds rejected experiment for next revision.",
+    "snapshot": "/tmp/kls-worst-peer-v53-certificate-eight-diagnostic",
+    "build_script": "/tmp/kls-v53-certificate-eight-build.py",
+    "session": 81828,
+    "production_integrated": false,
+    "rationale": "Across8 independent rows preserve exact per-row order while overlapping gather/mul/sub/abs/add chains and vectorizing conservative outward witness. Each call traverses currentA,b,x. Zero magnitudes and unsupported proofs fall back; no retained answers.",
+    "oracle": "Compare per-row residual/magnitude bits and all positive/negative witness bits to original scalar helper across64-row duplicate-free CSC plans, densities0..64, both transpose directions, exceptional values and perturbed answers. No correctness or speed claim before execution.",
+    "next": "Audit retained96waveforms; then inspect real certificate row-length/padding geometry and capture currentA,b,x fixtures. Consider immutable degree-sorted packed traversal to remove4 dependent gathers and uneven-lane padding; actual native scalar order, x87first-use and complete proof/fallback must remain verified. Never infer speed from SIMD width.",
+    "integration_constraints": [
+      "Only native AVX512F+DQ,FLT_EVAL_METHOD0 and existing masked-nearest/gradual-underflow/x8764 guards; portable keeps original path. Include immintrin explicitly.",
+      "Do not convert long-double tolerance speculatively: process scalar rows until original cache.ready is set, then pass cache.value into eight-row batches. This preserves first-use conversion and x87 sticky-state placement, especially all-zero rows.",
+      "Batch only first+8<=last within the existing worker range. Preserve scalar tails. New proof mask must match original positive nonzero verdicts; zero magnitude lanes use original helper. Never infer correctness from finite output alone.",
+      "For each unproved lane call unchanged scalar verdict/extended fallback. Accepted batch lanes contribute same cached tolerance64 maximum. No matrix/RHS values or answers retained.",
+      "Existing plan_run restores complete SSE CSR around certificate. New helper uses only SSE/AVX and integer instructions; no additional x87 conversions. Check public flag tests and all existing correction/interval/detailed-bound semantics after integration.",
+      "Full private helper oracle, meaningful current-operator tests, native/portable/sanitizers and balanced end-to-end measurements required before adoption. No synthetic microtiming substitutes for peer target."
+    ],
+    "oracle_expanded": "Unequal row lengths and early-finished lanes, exceptional A/RHS/x, zero masks, plus .999/1.001 of the current-row tolerance denominator; manifest refreshed while campaign demonstrably owns timing lock and oracle is waiting.",
+    "range_prototype": "Unwired componentwise_eight_range added in isolated header: scalar first-use,8-row batches, unchanged per-row extended fallback, full original-range replay for negative status, same maximum conversion. Oracle compares whole-range verdict/bound and x87 exception flags across offset/tail worker ranges. Still waiting; no production integration.",
+    "run_log": "/tmp/kls-worst-peer-v53-certificate-eight-diagnostic/run.log",
+    "integration_build": {
+      "snapshot": "/tmp/kls-worst-peer-v54-certificate-eight-diagnostic",
+      "script": "/tmp/kls-v54-certificate-eight-build.py",
+      "session": null,
+      "status": "All8 test programs and diagnostic Xyce link passed; scientific paired screen REJECTED for all6 slower medians.",
+      "source_changes": [
+        "componentwise_eight.inc",
+        "componentwise_parallel.inc",
+        "new arithmetic/API oracle",
+        "CMake71stunit"
+      ],
+      "scope": "Recompile only certificate object, assert all other archive members unchanged. Rebuild standalone certificate suites; relink public caller/pool tests to new archive. Link diagnostic Xyce after8tests. Full fresh qualification still required before acceptance.",
+      "paired_script": "/tmp/kls-v54-certificate-eight-paired.py",
+      "paired_output": "/tmp/kls-worst-peer-v54-certificate-eight-paired",
+      "paired_session": null,
+      "paired_summary": {
+        "diagnostic_only": true,
+        "all_execution_and_steps_pass": true,
+        "qualification_pending_upstream_audit": true,
+        "cells": [
+          {
+            "case": "CircuitSim90/MOS2/mux8.cir",
+            "domain": "llc96",
+            "threads": 1,
+            "ratios": [
+              1.191747315871875,
+              1.1852312682956636,
+              1.1912139648300741,
+              1.2022638798332945,
+              1.2062996960946155,
+              1.204842839055168,
+              1.2155998098570895,
+              1.2017159736302105
+            ],
+            "median": 1.2019899267317524
+          },
+          {
+            "case": "CircuitSim90/MOS2/mux8.cir",
+            "domain": "llc32",
+            "threads": 1,
+            "ratios": [
+              1.2032358483594443,
+              1.1902819337811623,
+              1.202917962431697,
+              1.1922434620924747,
+              1.200805047542223,
+              1.1877765294941676,
+              1.1747326617612242,
+              1.196194292136243
+            ],
+            "median": 1.1942188771143587
+          },
+          {
+            "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+            "domain": "llc96",
+            "threads": 1,
+            "ratios": [
+              1.1121608377407135,
+              1.1168715798450715,
+              1.120470326330854,
+              1.113960013098852,
+              1.120805428660132,
+              1.1192162188379087,
+              1.1272991201826905,
+              1.1267436733974077
+            ],
+            "median": 1.1198432725843812
+          },
+          {
+            "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+            "domain": "llc32",
+            "threads": 1,
+            "ratios": [
+              1.1427226011740395,
+              1.1111060586769494,
+              1.1097994957814932,
+              1.1349597382064198,
+              1.0966141510888592,
+              1.1349556917640418,
+              1.1184354585599066,
+              1.1243621466314997
+            ],
+            "median": 1.1213988025957031
+          },
+          {
+            "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+            "domain": "llc96",
+            "threads": 1,
+            "ratios": [
+              1.0357657940840657,
+              1.0364656608663458,
+              1.0298600999023095,
+              1.0411177380778396,
+              1.0325382118673672,
+              1.032605967369742,
+              1.0362342160462672,
+              1.0360627014607457
+            ],
+            "median": 1.0359142477724057
+          },
+          {
+            "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+            "domain": "llc32",
+            "threads": 1,
+            "ratios": [
+              1.181917107348084,
+              1.184262518953743,
+              1.1652416944025472,
+              1.1573322227709926,
+              1.181678771773816,
+              1.154683599610291,
+              1.1783633059715521,
+              1.1613234715490033
+            ],
+            "median": 1.1718025001870496
+          }
+        ]
+      },
+      "upstream_audit": "/tmp/kls-worst-peer-v54-certificate-eight-upstream-audit/audit.json"
+    }
+  },
+  "certificate_input_fixtures": {
+    "status": "complete; all3 Xyce execution/steps/upstream waveforms qualified",
+    "controller": "/tmp/kls-v55-certificate-fixtures.py",
+    "captures": "/tmp/kls-worst-peer-v55-certificate-fixtures/captures.json",
+    "upstream_audit": "/tmp/kls-worst-peer-v55-certificate-fixtures-upstream-audit/audit.json",
+    "scope": "12 current certified A,b,x samples from3circuits atcalls2/128/256/512; diagnostic wrapper only,no performance evidence.",
+    "geometry": "Unpacked8 padded work mux1904/906,DAC100160/44958,memory199312/118157. Degree-sort and scalar outliers packed-slot+scalar work1006/906,46230/44958,118640/118157."
+  },
+  "packed_certificate_experiment": {
+    "status": "v60 correctbidirectional packedpath passed8nativeprograms+12currentfixtures; all96 execution/steps/upstreamwaveforms qualified. End-to-end gains small; memory32reg1.03346>1.02. REJECTED, notadopted.",
+    "source_worktree": "/tmp/kls-worst-peer-streaming-worktree",
+    "snapshot": "/tmp/kls-worst-peer-v60-range-guards-diagnostic",
+    "build_script": "/tmp/kls-v60-range-guards-build.py",
+    "paired_script": "/tmp/kls-v60-range-guards-paired.py",
+    "paired_output": "/tmp/kls-worst-peer-v60-range-guards-paired",
+    "algorithm": "Cache immutable degree-sorted8-row metadata with regularu32pos/col loads and2gathers perstep. Badly padded groups remain scalar. Metadata cap2MiB; preserve CSC order in eachrow. Scalar prefix owns tolerance first-use. Fastprepass onlyserial whole normal ranges; miss replays original remaining scalar rows. No A/RHS/answer caching.",
+    "tests": "307200 arithmetic batches, threshold whole-range verdict/bounds/x87flags; actualAPI1/4threads,changedA/RHS/x correctionchecks; both optionalalloc failures and no retries untilreset; metadataownership/allindices; exactzero plus nonzero underflow-tozero rejection.",
+    "next": "Park this variant. Optionalfuture u16compactindices/cache-budgetguard mayreduce memory32reg, but firstreturntoBJT8 worstcase factorization; do not assumeSIMD speed from passedoracles.",
+    "v56_screen": {
+      "status": "All96 executions/steps/upstreamwaveforms qualified, but real snapshots proveall3 cases use transpose1. v56pack supportedonly0, so timingsdidnotexercisepackedkernel. Rejectperformancevariant; do not inferpackedspeed fromit.",
+      "summary": "/tmp/kls-worst-peer-v56-packed-certificate-paired/completed.json",
+      "audit": "/tmp/kls-worst-peer-v56-packed-certificate-upstream-audit/audit.json"
+    },
+    "orientation_correction": "Directional immutable caches for0/1 under combined2MiBbudget; transpose1 packs CSC column entries directly, stable original order. Unsupported/nonwhole ranges dispatch original helper immediately. APIoracle nowbothdirections, and12capturedinputs mustproveactualsuccessfulfast-rangeactivation before anytiming.",
+    "build_history": {
+      "v57": "bidirectional exactrangeoracle failedextra x87PE expected0actual20 onfinite degree1",
+      "v58": "binary64-only scalaroutlierprepassstillfails samex87PE; preservedfailingartifact",
+      "v59": "constanttolerance specializationfixedfullrange; partialrangeforwardingstilladdedx87PE expected0actual20; preservedfailedoracle",
+      "v60": "partial-range fallback routed at original caller; specialized defaultbody preservesconstanttol first-use. Allbidirectional geometry,whole-range bounds/x87flags,allocationfailure,zero-underflow,APIs and12currentinputfixturespassed."
+    },
+    "build_session": null,
+    "actual_input_activation": "/tmp/kls-worst-peer-v60-range-guards-diagnostic/captured-current-inputs.log",
+    "paired_session": null,
+    "summary": {
+      "diagnostic_only": true,
+      "all_execution_and_steps_pass": true,
+      "qualification_pending_upstream_audit": true,
+      "cells": [
+        {
+          "case": "CircuitSim90/MOS2/mux8.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.9932947278962709,
+            1.0015491866769946,
+            0.9923270720695615,
+            0.9780519892533948,
+            0.9663177694180128,
+            0.9691040084650816,
+            0.9905302457498681,
+            1.0007474326583317
+          ],
+          "median": 0.9914286589097148
+        },
+        {
+          "case": "CircuitSim90/MOS2/mux8.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            0.9570974885567848,
+            0.9719964126635743,
+            0.9772515594341432,
+            0.9800399873284495,
+            0.9803271875036079,
+            0.9643823727574827,
+            0.9711221432207762,
+            0.9786924623885433
+          ],
+          "median": 0.9746239860488588
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            1.0028754759178893,
+            0.9897498903027644,
+            0.9928944875258781,
+            0.9935017349308235,
+            1.0025685765657246,
+            0.9924601748187374,
+            0.988272416513279,
+            0.9848433316763904
+          ],
+          "median": 0.9926773311723077
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            1.001557164321814,
+            1.0197988170001462,
+            1.0044459518920505,
+            0.977523833575352,
+            0.9876284509027021,
+            1.0125248163362397,
+            0.9838662605110994,
+            0.992124034987989
+          ],
+          "median": 0.9968405996549015
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc96",
+          "threads": 1,
+          "ratios": [
+            0.9795241229871481,
+            0.9832589854998539,
+            0.9872804206262948,
+            0.98369414802763,
+            0.9816956163169845,
+            0.9786643208893555,
+            0.9723251751669447,
+            0.9813761991592307
+          ],
+          "median": 0.9815359077381076
+        },
+        {
+          "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+          "domain": "llc32",
+          "threads": 1,
+          "ratios": [
+            1.0284753657833614,
+            1.0351296316913772,
+            1.013510989288836,
+            1.0317949211879596,
+            1.0262181049622687,
+            1.0360439706875963,
+            1.076422382427104,
+            1.037196661534382
+          ],
+          "median": 1.0334622764396684
+        }
+      ]
+    },
+    "upstream_audit": "/tmp/kls-worst-peer-v60-range-guards-upstream-audit/audit.json"
+  },
+  "row_panel_transaction_followup": {
+    "status": "implementation next; not yet coded or verified",
+    "source_worktree": "/tmp/kls-worst-peer-row-panels-worktree",
+    "base": "frozenv51 sources plus unintegratedv52 arithmetic; independentofrejectedcertificateworktree",
+    "objective": "Improve44% BJT32t8 Subtreegap withpersistentwidth16 row8layout. Preserveoriginal nativeLU andpubliccertificate; exceptionkernel cannotpublish authoritative result.",
+    "rationale": "v52 exceptionalpackedarithmetic dropped OF/UF whenmixedinvalidlanes. Avoid heavy per-FMAclassification/replay: own the entire optionalfactor as a transaction and decline whenever any worker reportsnewIV/DE/ZD/OF/UF. A finite-input scan beforemutation rejectsqNaN/Inf; startingeachrowworkerwithclearedflags separatesoldcallerflags. Successfulnormalcalls mergeonlycorrect flags; declinedcalls discardall speculativeflags.",
+    "implementation_constraints": [
+      "Private row_layout flag inSNBstate; onlyAUTOownedcrew. Convert A-scatter destinations and writeback offsets once atbuild forwidth16; row/colproducer-aware updates. KeepnativeLUcolmajor andallpublicheadersunchanged.",
+      "Publish rownodesonlyafterall getrfstores (fullvectorsrewriteearliercolumns). Prefer nativewritebackbeforepublication forclear lifetime. Keepoldpartialpublication forordinarycolpanels.",
+      "Clear workerflags onlyaftercapturing/restoringcallerfenv. After eachnode/atjoin detect newbadflags (MXCSRbits0..4 andx87exceptions; precisiononly isordinary). Markatomicdeclined/failed beforepublishingthatnode. Waitersobservefailed; ownedpoolmustjoin everyworkerbefore stackcontext teardown orfallback.",
+      "Any initialcurrentA nonfinite isstructuraldecline beforemutation, via integerbits toavoidraisingflags. Finiteinput arithmetic nonfinite canariseonlyfromexception detectedbeforeauthoritativepublication; explicitlytestoverflow,zeropivot,underflow,subnormalandNaNinputs.",
+      "A joineddecline mayfallthroughordinarynativefixed-pattern refactor evenafter partialnumericvaluewrites: nativeLUindices/counts/pivots remainimmutable, SNBusespanelsnotnativeXwork, andincumbent recomputescolumns inoriginalorder fromcurrentAusingfresh earliercolumns. ProveXworkzero, map/cachevalidity andoffdiagonal semantics; do not assume native partialvaluesneed answer/snapshotreuse.",
+      "Distinctintrinsicdeclineresult fromnumericalfailure; free/dropoptionalplan, discardcandidateworkerFPflags, thenrunincumbent samepubliccall. Chargeallattemptcosts. Successstillneedsoriginal-operator certificate andtwofreshpaidfull-call comparisons. Preserve explicit/portable/ordinary engines andABI.",
+      "Tests must compare wholepublicfallback status/nativeLU/Udiag/Offx/currentanswers/FPflags and unchangedfailed-outputstaging againstincumbent, assert actualworkerjoins/no stalecache ornextcalldispatch. Do not justskip failingmicrocases.",
+      "v52 microkernel exceptionalflags are NOTcorrect; treat those results asnonauthoritative onlyiftransactiondeclines andnativefallback is proven. The rollback andeligibility guards are productioncorrectness requirements, not testexceptions."
+    ],
+    "remaining_target": "All56peerwins in2freshbalancedoppositeordercampaigns plusoriginal110-matrix broadgate; root integration/commit andfullfreshqualification stillpending."
+  },
+  "row_transaction_implementation": {
+    "status": "v61 native+TSan AUTO/stream passed; v62 native+TSan stronger fullnativepayload andFPflag incumbent-replay oracle PASSED. Optionaltransaction mode stilltest-enabledonly; rowlayout notintegrated.",
+    "source_worktree": "/tmp/kls-worst-peer-row-panels-worktree",
+    "v61_snapshot": "/tmp/kls-worst-peer-v61-row-transaction-diagnostic",
+    "v61_script": "/tmp/kls-v61-row-transaction-build.py",
+    "v61_result": "/tmp/kls-worst-peer-v61-row-transaction-diagnostic/state.json",
+    "v62_snapshot": "/tmp/kls-worst-peer-v62-row-transaction-payload-diagnostic",
+    "v62_script": "/tmp/kls-v62-row-transaction-payload-build.py",
+    "v62_session": null,
+    "runtime": "Optionalst.transactional flag andatomicdeclined. Ownedworkers clearnewflags onlyinside restoredfenv scope; complete getrf+writeback+badflagcheck beforepublication. AnynewIV/DE/ZD/OF/UF triggersjoined-2; skipsmergingspeculativeflags. Environment-restorationerrors remainfailures. Integerfiniteinputscan declinesbeforemutation. Legacyserial/cooperativeenginesrejecttransaction-onlystates. ExistingAUTOnegative-result path freesplanandfalls throughordinarycurrentArefactor samecall.",
+    "verified_v61": "BothNORMAL/TRANSPOSE actualretainedAUTOcases: qNaN guardpayload+Xwork unchanged,no flags; forcedOF afterprovenchangednativewriteback ->sameAPIcallKLS_OK,currentanalyticalanswer,poisonflagabsent,pooljoined,plandropped,changednextepochcorrect. Legacyownedstreambusy/environment/FP/lifetimeoraclepassed. TSanbothprogramsclean.",
+    "correction_to_previous_plan": "Do not assume numericXwork iszero aftersolve. Proven requirement isthat optionalengine leavesnativeworkspace unchanged; ordinaryincumbent owns itsnormal preparation. qNaNguard testcaptures exactXwork before/after. Stronger v62 compares wholeUdiag/LUbx(includingindices)/Offx tosame-currentA incumbent replay withunchangedreuse explicitlydisabled.",
+    "next": "Pollv62,inspectexactpayload/flagandTSanresults. Thenintegratepersistentwidth16 rowlayoutwithproducer-awareupdates andbuild-time scatter/writebackconversion,activateonlyAUTOtransaction. Forceactualwidth16fixtureandverifybothsuccessfulnormalfactor andjoinedexceptiondecline beforeperformance.",
+    "v62_result": "/tmp/kls-worst-peer-v62-row-transaction-payload-diagnostic/state.json",
+    "verified_v62": "After forcedOF atprovenchanged nativewriteback, samepubliccallrecomputedcurrentA andcertifiedcorrectanswer. Disabledunchangedreuse thenrepeatedsamecurrentA throughunopposedincumbent: Udiag,rawLUbx(values+indices),Offx matchbyte-for-byte; fullMXCSR andx87exceptionbits match. BothNORMAL/TRANSPOSE,nativeandTSan; changednextepochalsofreshcorrect."
+  },
+  "row_panel_integration_next": {
+    "status": "nextimplementation; no rowdispatch yet",
+    "geometry_correction": "Do not assumeAUTOcap16. Currentv51builderwmax32 exceptserial exactAMF; BJTnaturallyhas90width16nodes. Productionconvertonlyexistingwidth16nodes,leaveother widthscolmajor,avoidchangingpartition. DenseN129AUTOunitwouldmostlywidth32,soforceanactualmixedpartitioninthetestfactory.",
+    "planned_changes": [
+      "Addprivate row_layout flagseparatefromtransactional. Include guarded rowmicrokernel once; enableonlyfreshAUTOcandidate afterbuild whennativeAVX512F/DQ andsomewidth16. Convert A-scatterdst andwritebackslots once usingknownmembercolumn; nativeLUstayscolmajor. No numericalpanelconversion: everycallzerosandfillsfreshpanels beforedependencypublication.",
+      "Implement enablehelper validatingoldoffsets,deadline/limits, idempotence; rowflagsetonlyafterallmapsconverted. Portableornowidth16 keeporiginalplan. AUTOprivatepaidbuildcallsonly; explicit/legacy plansunchanged.",
+      "Process width16targets usingrowedge/getrf. Rowproducer Lcoladdressbase=(col/8)*8H+col%8,rowstride8. Smalltargetreadingrowproducer needsstridedscalar/narrow+ordered-dense product fallback, whilebothcolplansuseexistingkernel. Firstproductandfinalsubtractmuststayseparatelyrounded; intermediateproductaccumulationmatchesoldFMAorder. Computeproductsforholes tooasoldkerneldoes.",
+      "WriteUDiag16 fromrowGETRF,recordfirstsingular. Makeanytransactionalsingularadeclineeveniflastpivothasnobelowdivision/noIEEEflag; authoritativeincumbentownthefinalrank/status. Fullgetrf+nativewriteback+badflagcheck beforepublication alreadyimplementedandtested.",
+      "Fortransactional mode requireSSEnearest andFTZ/DAZoff beforemutation (mx&0xe040==0); declineotherwise toincumbentunderoriginalcontrols. Workerflagclear/reset/join/discard mechanismv61retained. Finitescanisbitwisebeforemutation.",
+      "TestfactoryhookinAUTOonlytests createsmixed3/16/2/16/1/16...partition underoriginalwmax32,ensuringrowtargetswithsmallcolproducersandsmallcoltargetswithrowproducers. Do notchangeproductionpartitionjusttomakefixturesactivate. Staticfactorycanreturnvoid* withpublicopaque kls_solverprototypebeforeincludingkls.c.",
+      "Addatomic testhooks countingrowGETRF,row-targetedges,smalltarget-rowproduceredges;assertnonzero. ForceOF onlyafterawidth16nodewritebackwhenrow_layoutisactive; otherwisefirstsmallprefixwoulddeclinebeforetherowkernelandmakeoraclecoveragevacuous.",
+      "Reusev62 wholepublicfallback/nativepayload/FPflags/joins/currentnextAoracleinbothdirections. Addsingular/failed-outputstagingcase andcurrentenvironmentdeclines. Keepnormalfinitearithmeticbitwiseoracle separatefromuntrustedv52exceptionalproducts: exceptionresultsauthoritativeonlyafterfulltransactionguard,otherwiseincumbentrecomputes.",
+      "Onlyaftertheseoracles pass builddiagnosticnativeXyce andbalancedBJT8 llc96/32 screen. Retainfullexecution/steps/upstreamverification andobjectidentity,thenfullqualificationifcandidateimprovesworstcase."
+    ]
+  },
+  "row_panel_integration": {
+    "status": "v67 native+TSan AUTO/stream programs allpassed. 12091exactnormalcases nativecontraction3/TSan11; all6mixedAUTO/rollback/singularcasespassed. v68 production object/archive/Xyce andsameupdateddiagnosticAUTOoraclepassed; BJT8 balanced4pairs/domain running.",
+    "source_worktree": "/tmp/kls-worst-peer-row-panels-worktree",
+    "snapshot": "/tmp/kls-worst-peer-v67-row-math-probe-diagnostic",
+    "build_script": "/tmp/kls-v67-row-math-probe-build.py",
+    "session": null,
+    "algorithm": "Existingwidth16panels persistrow8; onlyscatter/writebackindicesconvertedonce. NativeLUandpartitionsunchanged. Rowtargets use2eightcolstreams; smallcoltargets readrowproducerswithstridedorderedproducts. Fullgetrf/writeback andFPguard beforepublication; transactionaldecline joinsanddiscardsflags thenincumbentrecomputescurrentA.",
+    "activation": "AUTOtestfactoryforcesmixed3/16/2/16/1/16partition. Countersassert rowGETRF,rowtargetedges,smalltarget-rowproduceredges allrun. ForcedOFwaitsforawidth16nodewriteback. BothNORMAL/TRANSPOSEsuccessfulcalls,partialnativepayloadreplay,FPflags,subsequentfreshA,singularfailed-outputstaging andunsupportedSSEcontrols covered.",
+    "history": {
+      "v63": "compilefailed guardinsertedwrongworker scope; fixedwithoutaltering frozenfailure",
+      "v64": "nativeAUTOall6casespassed; normalbitwisearithmetic oraclefound1ulp densepartial-rowdifference",
+      "v65": "matchedunfusedmaskedrowtails; allrowtargetmicrocasespassed; smallwidth1fullrow differed1ulp",
+      "v66": "matchedproductionGCC column-tail noncontraction; nativeAUTO+streampassed andTSanAUTOpassed. TSanordinarymicroreference contractsitscolumn-tail differently; assertionfailed, not arace report.",
+      "v67": "PASS all4programs native/TSan. Probe5bits correctlyadaptsnative3andTSan11; noflagsleak. Both12091ordinaryexactcases andactualrow16forcedfallbacknativepayload/flags/staging/nextA match.",
+      "v68": "Addedrow_layout field toexistingretained-planstderrdiagnostic; onlythisloggerdiffersfromv67mathsource. RecompiledAUTOunitpassed. Newcanonicalkls.c.o verifiedexactarchive member, allothermembersqualifiedv51unchanged,definedpublicsymbolsidentical; linkeddiagnosticXyce. Fullfreshqualificationpending."
+    },
+    "ordinary_oracle": "12091ordinary edge/getrf/mixedproducer cases, includingallzero/nonzero masks,holes,gappedsubsets,full/tailrows andwidths1..32. ExactbitsandfullMXCSR vsincumbent; exceptionalrawv52resultsremainuntrustedandmusttransactionallydecline. Obsoleteunregisteredfailingrawtest removedfromactiveworktree, preservedunderimmutablev52snapshot.",
+    "next": "Pollv67all4unitprograms. Ifpassbuildnativecanonicalkls.c.o+archive/Xycefromexactsource, verifyobjectidentity/publicsymbols andrealsourceflagactivation, thenbalancedBJT8 llc96/32 screen vsqualifiedv51 andindependentupstreamaudit. No other timing/build duringquietlock.",
+    "source_proof": "/tmp/kls-worst-peer-v67-row-math-probe-diagnostic/state.json",
+    "production_link": "/tmp/kls-worst-peer-v68-row-layout-link",
+    "production_build_script": "/tmp/kls-v68-row-layout-link.py",
+    "paired_script": "/tmp/kls-v68-row-layout-paired.py",
+    "paired_output": "/tmp/kls-worst-peer-v68-row-layout-paired"
+  },
+  "main_checkpoint_20261104": {
+    "status": "qualified v51 selected for local main merge",
+    "evidence": "docs/evidence/worst-peer-checkpoint-20261104/checkpoint.json",
+    "research_preserved_on": "work/worst-peer-20261104",
+    "full_optimization_goal_complete": false
+  }
+}

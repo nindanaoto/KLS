@@ -68,6 +68,8 @@
 
 #include "kls_tuning.inc"
 #include "kls_tuning_profile.h"
+#include "kls_observed_parallel_policy.h"
+#include "kls_snb_auto_policy.h"
 
 /* Pause hint for atomic spin waits: keeps a blocked worker from hammering
    the shared cache line at full speed and starving the producing thread of
@@ -391,6 +393,29 @@ typedef struct kls_small_btf_fallback {
   UF_long n,nnz;
   UF_long *pattern;
 } kls_small_btf_fallback;
+
+typedef struct kls_forest_leaf_plan {
+  UF_long n, count, remaining;
+  int32_t *remaining_plan;
+  int32_t *indices;
+  const void *numeric_owner;
+  const double *lu_owner;
+} kls_forest_leaf_plan;
+
+/* Bounded uint16 row streams with uint32 offsets into a live native factor. */
+typedef struct kls_native_i16_column {
+  const double *values;
+  uint32_t offset,length;
+} kls_native_i16_column;
+typedef struct kls_native_i16_plan {
+  UF_long n;
+  const void *numeric_owner,*lu_owner;
+  unsigned owner_epoch;
+  kls_native_i16_column *columns; /* L then U */
+  uint16_t *rows;
+  uint32_t count;
+  size_t allocation_bytes;
+} kls_native_i16_plan;
 
 struct kls_solver {
   kls_accuracy_policy accuracy_policy;
@@ -1303,11 +1328,59 @@ struct kls_solver {
   /* Optional small-BTF state follows existing fields to preserve their layout. */
   kls_small_btf_fallback small_btf_fallback;
   _Atomic int compact_btf_policy;
+  kls_observed_parallel_state observed_parallel;
+  unsigned observed_parallel_epoch;
+  /* Forest metadata is cold and owns no retained matrix values or answers. */
+  int forest_unscale_attempted, forest_combined_depth;
+  int forest_map_state;
+  int32_t *forest_input_slot;
+  UF_long forest_refactor_count;
+  kls_forest_leaf_plan *forest_leaves;
+  int forest_leaf_state, forest_leaf_ready;
+  uint64_t forest_leaf_numerics, forest_leaf_solves;
+  int auto_amf_exact;
+  double auto_amf_analysis_seconds;
+  const trilinos_klu_l_symbolic *auto_amf_owner;
+  trilinos_klu_l_symbolic *auto_amf_fallback;
+  trilinos_klu_l_common auto_amf_fallback_common;
+  kls_separator_analysis auto_amf_fallback_separator;
+  kls_ordering auto_amf_fallback_ordering;
+  /* Streaming consultation state is cold; preserve incumbent hot offsets. */
+  struct kls_native_i16_plan *native_i16;
+  kls_observed_parallel_state native_i16_policy;
+  unsigned native_i16_epoch,native_i16_combined_depth;
+  int native_i16_last_native;
+  uint64_t native_i16_runs,native_i16_serial_calls,native_i16_normal_runs;
+  unsigned snb_recipe;
+  kls_snb_auto_policy snb_auto;
+  struct kls_snb_state *snb_auto_candidate;
+  const trilinos_klu_l_numeric *snb_auto_numeric;
+  unsigned snb_auto_epoch;
+  size_t snb_auto_memory_limit;
+  double snb_auto_factor_seconds;
+
 };
+
+static int kls_observed_parallel_enabled(const kls_solver *s) {
+  return s->observed_parallel.active==1 ||
+    (s->observed_parallel.choice==2 && s->observed_parallel.active!=2);
+}
+
+static void kls_observed_parallel_invalidate(kls_solver *s) {
+  ++s->observed_parallel_epoch;
+  memset(&s->observed_parallel,0,sizeof(s->observed_parallel));
+}
 
 struct kls_generic_nd_trial;
 
 typedef struct kls_pattern_candidate {
+  int auto_amf_exact;
+  double auto_amf_analysis_seconds;
+  const trilinos_klu_l_symbolic *auto_amf_owner;
+  trilinos_klu_l_symbolic *auto_amf_fallback;
+  trilinos_klu_l_common auto_amf_fallback_common;
+  kls_separator_analysis auto_amf_fallback_separator;
+  kls_ordering auto_amf_fallback_ordering;
   kls_small_btf_fallback small_btf_fallback;
   UF_long n;
   UF_long nnz;
@@ -2108,6 +2181,12 @@ static int kls_small_btf_owner_matches(const kls_solver *s) {
     f->orientation==s->orientation;
 }
 
+static int kls_observed_parallel_build_expired(const kls_solver *s,
+    UF_long iteration) {
+  return s->observed_parallel.deadline>0 && !(iteration&255u) &&
+    kls_now_seconds()>s->observed_parallel.deadline;
+}
+
 static size_t kls_klu_units_for_indices(UF_long length) {
   const size_t bytes = (size_t)length * sizeof(UF_long);
   return (bytes + sizeof(double) - 1u) / sizeof(double);
@@ -2269,11 +2348,8 @@ static KLS_ALWAYS_INLINE void kls_scatter_subtract(
 #if defined(__GNUC__) && defined(__x86_64__) && !defined(__clang__)
 #define KLS_HAVE_AVX512_KERNELS 1
 static KLS_ALWAYS_INLINE int kls_avx512_scatter_enabled(void) {
-  static int cached = -1;
-  if (cached < 0) {
-    cached = __builtin_cpu_supports("avx512f") ? 1 : 0;
-  }
-  return cached;
+  /* GCC initializes this read-only feature table before worker creation. */
+  return __builtin_cpu_supports("avx512f") ? 1 : 0;
 }
 
 __attribute__((target("avx512f"), noinline)) static void
@@ -2529,10 +2605,37 @@ static int kls_compare_uf_long(const void *a,
   return av < bv ? -1 : (av > bv ? 1 : 0);
 }
 
+static void kls_native_i16_destroy(kls_native_i16_plan *p) {
+  if(p){free(p->columns);free(p->rows);free(p);}
+}
+static void kls_native_i16_drop(kls_solver *s) {
+  kls_native_i16_destroy(s->native_i16);s->native_i16=NULL;
+}
+static void kls_native_i16_invalidate(kls_solver *s) {
+  kls_native_i16_drop(s);++s->native_i16_epoch;
+  memset(&s->native_i16_policy,0,sizeof(s->native_i16_policy));
+  s->native_i16_last_native=0;
+}
+
+static void kls_free_forest_map(kls_solver *solver) {
+  kls_native_i16_invalidate(solver);
+  if (!solver->forest_map_state && !solver->forest_input_slot &&
+      !solver->forest_leaf_state && !solver->forest_leaves) return;
+  if (solver->forest_leaves) {
+    free(solver->forest_leaves->remaining_plan);
+    free(solver->forest_leaves->indices);
+    KLS_FREE_AND_NULL(solver->forest_leaves);
+  }
+  solver->forest_leaf_state = solver->forest_leaf_ready = 0;
+  KLS_FREE_AND_NULL(solver->forest_input_slot);
+  solver->forest_map_state = 0;
+}
+
 static void free_refactor_map(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
+  kls_free_forest_map(solver);
   KLS_FREE_AND_NULL(solver->refactor_col_ptr);
   KLS_FREE_AND_NULL(solver->refactor_row_idx);
   KLS_FREE_AND_NULL(solver->refactor_input_pos);
@@ -2559,6 +2662,7 @@ static void free_refactor_lu_pointer_cache(kls_solver *solver) {
   if (solver == NULL) {
     return;
   }
+  kls_free_forest_map(solver);
   KLS_FREE_AND_NULL(solver->refactor_l_indices);
   KLS_FREE_AND_NULL(solver->refactor_l_indices32);
   KLS_FREE_AND_NULL(solver->refactor_l_indices32_storage);
@@ -4399,6 +4503,9 @@ static void kls_invalidate_factor_etree_stats(kls_solver *solver) {
   }
   if(solver->small_btf_fallback.symbolic && !kls_small_btf_owner_matches(solver))
     kls_small_btf_fallback_clear(&solver->small_btf_fallback);
+  if(solver->auto_amf_owner && solver->auto_amf_owner!=solver->symbolic) {
+    solver->auto_amf_owner=NULL;solver->auto_amf_exact=0;
+  }
   solver->factor_etree_stats_valid = 0;
   solver->parallel_model_stats_valid = 0;
   solver->stats.factor_etree_block_size = 0;
@@ -6303,6 +6410,8 @@ static void kls_parallel_refactor_block(kls_parallel_refactor_worker *worker,
   }
 }
 
+#include "kls_cached_plain_refactor.inc"
+
 /* PTS-partitioned mapped refactor: the up-looking column body
    carries no cross-column workspace state, so the verified subtree
    partition makes bins fully independent -- every dependency of an
@@ -6728,7 +6837,7 @@ static void *kls_refactor_pool_worker_main(void *arg) {
         end = nblocks;
       }
       for (UF_long block = begin; block < end; ++block) {
-        kls_parallel_refactor_block(worker, block);
+        kls_refactor_block_dispatch(worker, block);
         if (worker->invalid || worker->pivot_rejected ||
             (worker->singular && shared->halt_if_singular)) {
           atomic_store_explicit(&shared->stop, 1, memory_order_release);
@@ -7128,6 +7237,10 @@ static int64_t read_index(kls_index_type type, const void *data, int64_t i) {
 }
 
 static void free_symbolic(kls_solver *solver) {
+  if(solver->auto_amf_fallback)
+    trilinos_klu_l_free_symbolic(&solver->auto_amf_fallback,&solver->auto_amf_fallback_common);
+  kls_separator_analysis_clear(&solver->auto_amf_fallback_separator);
+  solver->auto_amf_owner=NULL;solver->auto_amf_exact=0;
   kls_small_btf_fallback_clear(&solver->small_btf_fallback);
   if (solver->symbolic != NULL) {
     trilinos_klu_l_free_symbolic(&solver->symbolic, &solver->common);
@@ -7215,6 +7328,7 @@ static void free_pivot_nudges(kls_solver *solver) {
 }
 
 static void free_numeric(kls_solver *solver) {
+  kls_observed_parallel_invalidate(solver);
   atomic_store_explicit(&solver->compact_btf_policy,0,memory_order_relaxed);
   memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
   solver->numeric_needs_refinement = 0;
@@ -7259,9 +7373,12 @@ static void free_numeric(kls_solver *solver) {
    derived from the old numeric's pattern or storage is now stale and must
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_invalidate_i32_solve(kls_solver *solver) {
+  kls_free_forest_map(solver);
+  kls_observed_parallel_invalidate(solver);
   atomic_store_explicit(&solver->compact_btf_policy,0,memory_order_relaxed);
   memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
   solver->fused_refactor_solve_computed = 0;
+  solver->forest_leaf_ready = 0;
   /* The solve cache copies the numeric index layout; any in-place pattern or
      permutation mutation must drop it before later solves. */
   if (!solver->i32solve_indices_alias_refactor) {
@@ -7575,6 +7692,8 @@ static int private_original_input_values(const kls_solver *s,
 }
 
 static void clear_matrix(kls_solver *solver) {
+  solver->auto_amf_exact=0;solver->auto_amf_analysis_seconds=0;
+  solver->forest_unscale_attempted=0;
   kls_componentwise_team_destroy(solver->componentwise_team);
   solver->componentwise_team=NULL;
   solver->componentwise_team_declined=0;
@@ -7625,6 +7744,7 @@ static void clear_matrix(kls_solver *solver) {
   solver->fused_refactor_solve_work_n = 0u;
   solver->fused_refactor_solve_requested = 0;
   solver->fused_refactor_solve_computed = 0;
+  solver->forest_leaf_ready = 0;
   solver->fused_refactor_solve_ready = 0;
   solver->fused_refactor_solve_row_values = 0;
   solver->refactor_input_snapshot_valid = 0;
@@ -8332,6 +8452,15 @@ int kls_factor(kls_solver *solver, const double *values) {
   const double fallback_start=public_epoch && solver->small_btf_fallback.symbolic
     ?kls_now_seconds():0.0;
   int status=private_factor_body(solver,values);
+  if(values && solver && (status==KLS_ERR_FACTOR_FAILED || status==KLS_ERR_SINGULAR ||
+       status==KLS_ERR_OUT_OF_MEMORY) && solver->auto_amf_fallback &&
+       solver->auto_amf_owner==solver->symbolic) {
+    const double previous=solver->stats.factor_seconds,start=kls_now_seconds();
+    if(kls_auto_amf_restore(solver)) {
+      status=private_factor_body(solver,values);
+      solver->stats.factor_seconds=previous+kls_now_seconds()-start;
+    }
+  }
   if(public_epoch && values && kls_small_btf_numeric_failure(status) &&
      kls_small_btf_restore(solver)) {
     status=private_factor_body(solver,values);
@@ -8734,6 +8863,8 @@ static int private_factor_body(kls_solver *solver, const double *values) {
   }
 
   free_numeric(solver);
+  memset(&solver->snb_auto,0,sizeof(solver->snb_auto));
+  solver->snb_auto_factor_seconds=0;
   int generic_nd_robust_scale = 0;
   int initial_certified_unscaled_recovery_scale = 0;
   int initial_low_work_btf_public_unscaled = 0;
@@ -9861,6 +9992,41 @@ static int kls_prepare_unchanged_solve_contract(kls_solver *solver,
   return 1;
 }
 
+/* A once-per-pattern transition; keep its structural walk off the ordinary
+   refactor entry's hot instruction path. */
+__attribute__((noinline))
+static void kls_forest_consider_unscaled_update(kls_solver *solver,
+    const double *values) {
+  if(solver && values && solver->common.scale>0 && !solver->forest_unscale_attempted &&
+     solver->options.backend==KLS_BACKEND_AUTO && solver->options.scale==KLS_SCALE_AUTO &&
+     solver->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+     solver->private_caller_depth==1 && solver->forest_combined_depth==1 &&
+     !solver->private_solve_depth && solver->symbolic && solver->numeric &&
+     solver->symbolic->nblocks==1 && solver->n>1 && solver->n<=UINT16_MAX &&
+     solver->nnz<=(UF_long)4*solver->n && solver->numeric->Rs && solver->numeric->Llen &&
+     isfinite(solver->common.flops) && solver->common.flops>0 && solver->common.flops<100000 &&
+     !solver->snb && solver->lean_choice<=0 &&
+     !solver->observed_parallel.active && solver->observed_parallel.choice<=0 &&
+     !solver->padded_run_of && !solver->dense_tail_cols &&
+     !solver->row_refactor_values_ready && !solver->row_refactor_values_dirty &&
+     !solver->refactor_l_packed_valid && !solver->refactor_u_packed_valid &&
+     !solver->numeric_is_predicted && !solver->numeric_needs_refinement &&
+     !solver->tight_tol_refine && !solver->pivot_nudge_count && !solver->common.kls_perturb_count &&
+     kls_direct_klu_public_frame_capable(solver) && kls_forest_masked_environment() &&
+     fegetround()==FE_TONEAREST) {
+    int forest=1;solver->forest_unscale_attempted=-1;
+    for(UF_long k=0;k<solver->n;++k)if(solver->numeric->Llen[k]>1){forest=0;break;}
+    if(forest) {
+      kls_invalidate_i32_solve(solver);
+      solver->observed_parallel.choice=-1;
+      solver->numeric->Rs=trilinos_klu_l_free(solver->numeric->Rs,solver->n,sizeof(double),&solver->common);
+      solver->common.scale=-1;solver->auto_scale_checked=1;solver->auto_scale_deferred=0;
+      solver->unchanged_refactor_state=-1;solver->solve_contract_probe=0;
+      solver->low_rcond_solve_contract_state=0;solver->forest_unscale_attempted=1;
+    }
+  }
+}
+
 static int private_refactor_body(kls_solver *solver, const double *values);
 int kls_refactor(kls_solver *solver, const double *values) {
   const int public_epoch = solver && !solver->private_numeric_depth &&
@@ -9875,6 +10041,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
     }
     ++solver->private_numeric_depth;
   }
+  kls_forest_consider_unscaled_update(solver,values);
   const double fallback_start=public_epoch && solver->small_btf_fallback.symbolic
     ?kls_now_seconds():0.0;
   int status=private_refactor_body(solver,values);
@@ -10039,7 +10206,8 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
     (solver->transpose_cycle.active == 1 ||
      solver->transpose_cycle.choice > 0) &&
     kls_compact_transpose_cycle_capable(solver);
-  if ((settled_direct_klu ||
+  if (!kls_observed_parallel_enabled(solver) &&
+      (settled_direct_klu ||
        kls_low_work_single_block_direct_public_capable(solver) ||
        direct_low_work_public_btf || direct_compact_transpose) &&
       (solver->solve_contract_probe >= 1 || direct_compact_transpose) &&
@@ -10090,6 +10258,7 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
       } else {
         solver->transpose_cycle.choice = -1;
         solver->fused_refactor_solve_computed = 0;
+        solver->forest_leaf_ready = 0;
       }
     }
     if(!compact_used && solver->n<=4096 && direct_low_work_public_btf &&
@@ -13758,7 +13927,11 @@ static int private_solve_body(kls_solver *solver,
       solver->row_refactor_values_ready = 0;
     }
   }
-  if(kernel_transpose && nrhs==1 && kls_compact_btf_transpose_solve(solver,x)) {
+  if(!kernel_transpose && nrhs==1 && solver->snb_auto_candidate &&
+     solver->snb==solver->snb_auto_candidate && solver->native_i16 &&
+     kls_native_i16_normal_solve(solver,solver->native_i16,b,x,0,NULL)==1) {
+    ++solver->native_i16_normal_runs;ok=1;
+  } else if(kernel_transpose && nrhs==1 && kls_compact_btf_transpose_solve(solver,x)) {
     ok=1;
   } else if (compact_transpose_solve) {
     solver->common.status = TRILINOS_KLU_OK;
@@ -15062,12 +15235,14 @@ static int kls_compact_transpose_refactor_solve(kls_solver *solver,
   solver->transpose_cycle.active = compact ? 1 : 2;
   solver->fused_refactor_solve_rhs = compact ? b : NULL;
   solver->fused_refactor_solve_computed = 0;
+  solver->forest_leaf_ready = 0;
   if (certify) solver->row_solve_self_check = 1;
   int status = kls_refactor(solver, values);
   if (status == KLS_OK) status = kls_solve(solver, 1, b, 0, x, 0);
   const double seconds = kls_now_seconds() - start;
   solver->fused_refactor_solve_rhs = NULL;
   solver->fused_refactor_solve_computed = 0;
+  solver->forest_leaf_ready = 0;
   solver->transpose_cycle.active = 0;
   if (certify) solver->row_solve_self_check = 0;
   free(saved_rhs);
@@ -15183,6 +15358,7 @@ static int kls_refactor_solve_impl(kls_solver *solver,
   const double fusion_prepare_start = kls_now_seconds();
   solver->fused_refactor_solve_requested = 0;
   solver->fused_refactor_solve_computed = 0;
+  solver->forest_leaf_ready = 0;
   solver->fused_refactor_solve_ready = 0;
   solver->fused_refactor_solve_row_values = 0;
   if (solver->fused_refactor_solve_work_n != solver->n) {
@@ -15219,6 +15395,7 @@ static int kls_refactor_solve_impl(kls_solver *solver,
   solver->fused_refactor_solve_rhs = NULL;
   if (refactor_status != KLS_OK) {
     solver->fused_refactor_solve_computed = 0;
+    solver->forest_leaf_ready = 0;
     solver->fused_refactor_solve_row_values = 0;
     return refactor_status;
   }
@@ -15234,12 +15411,16 @@ static int kls_refactor_solve_impl(kls_solver *solver,
                                      x, effective_ldx);
   solver->fused_refactor_solve_ready = 0;
   solver->fused_refactor_solve_computed = 0;
+  solver->forest_leaf_ready = 0;
   solver->fused_refactor_solve_row_values = 0;
   solver->fused_refactor_solve_rhs = NULL;
   return solve_status;
 }
 
 #include "kls_snb_cycle.inc"
+#include "kls_observed_parallel.inc"
+#include "kls_native_i16_admission.inc"
+#include "kls_snb_auto.inc"
 
 int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     const double *b, int64_t ldb, double *x, int64_t ldx) {
@@ -15253,11 +15434,26 @@ int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
    * caller matrix even when its unchanged-matrix shortcut bypasses solve. */
   if (!s->private_caller_depth) s->private_cold_deadline = 0;
   ++s->private_caller_depth;
-  status = private_refactor_solve_body(s,values,nrhs,saved,0,candidate,0);
-  status = private_caller_finish(s,0,nrhs,saved,candidate,0,status);
+  ++s->forest_combined_depth;
+  ++s->native_i16_combined_depth;
+  const double snb_start=s->snb_auto.choice>0?kls_now_seconds():0;
+  const kls_snb_auto_call snb_call=snb_start>0?
+    kls_snb_auto_before(s,values,nrhs,snb_start):(kls_snb_auto_call){0};
+  const kls_native_i16_call native_i16=s->options.threads==1?
+    kls_native_i16_before(s,values,nrhs,saved,candidate):(kls_native_i16_call){0};
+  if(s->options.threads>1 || s->observed_parallel.choice>0) {
+    status=kls_observed_parallel_refactor_solve(s,values,nrhs,saved,candidate);
+  } else {
+    status=private_refactor_solve_body(s,values,nrhs,saved,0,candidate,0);
+    status=private_caller_finish(s,0,nrhs,saved,candidate,0,status);
+  }
 #ifdef KLS_SMALL_BTF_PUBLIC_TEST_EVENT
   KLS_SMALL_BTF_PUBLIC_TEST_EVENT(s,values,nrhs,status);
 #endif
+  kls_native_i16_after(s,native_i16,status,s->options.threads>1);
+  if(snb_call.start>0)kls_snb_auto_after(s,snb_call,status);
+  --s->native_i16_combined_depth;
+  --s->forest_combined_depth;
   --s->private_caller_depth;
   if (status != KLS_OK) s->verified_rhs_valid = 0;
   if (status == KLS_OK)

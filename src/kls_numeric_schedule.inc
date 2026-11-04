@@ -57,6 +57,7 @@ static void kls_snb_destroy(kls_snb_state *st) {
   }
   free(st->gemm_w);
   free(st->rs_tmp);
+  free(st->private_owner);free(st->private_nodes);free(st->private_pipeline);
   free(st->slevel_ptr);
   free(st->slevel_block);
   free(st->slevel_snode);
@@ -67,6 +68,12 @@ static void kls_snb_destroy(kls_snb_state *st) {
 
 static void kls_snb_free(kls_solver *solver) {
   kls_snb_group_cycle *g = solver->snb_group;
+  kls_snb_state *other=g?g->other:NULL;
+  if(solver->snb_auto_candidate && solver->snb_auto_candidate!=solver->snb &&
+     solver->snb_auto_candidate!=other)kls_snb_destroy(solver->snb_auto_candidate);
+  solver->snb_auto_candidate=NULL;solver->snb_auto_numeric=NULL;
+  ++solver->snb_auto_epoch;
+  if(solver->snb_auto.choice>0)solver->snb_auto.choice=-1;
   ++solver->snb_group_epoch;
   if (g != NULL) {
     if (g->started) solver->snb_group_disabled = 1;
@@ -125,6 +132,8 @@ static void *kls_snb_allocate(kls_snb_state *st, size_t count, size_t size,
   return p;
 }
 
+#include "kls_snb_private.inc"
+
 static kls_snb_state *kls_snb_build(kls_solver *solver,
     const kls_snb_partition *partition, double deadline, size_t limit) {
   const double build_start = kls_now_seconds();
@@ -139,7 +148,8 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
   if (st == NULL) return NULL;
   st->allocation_bytes = sizeof(*st);
   st->wnarrow = 8;
-  st->wmax = 32;
+  st->wmax = solver->options.backend==KLS_BACKEND_AUTO &&
+    solver->options.threads==1 && solver->auto_amf_exact ? 16 : 32;
   st->coop_min_doubles = solver->tuning.snb_coop_min_doubles;
   st->nblocks = symbolic->nblocks;
   st->blocks =
@@ -234,11 +244,14 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
           true_entries += len2;
           w++;
         }
-        starts[ns] = (int64_t)c;
-        for (UF_long i = 0; i < w; ++i) {
-          blk->col2snode[c + i] = (int32_t)ns;
+        /* Split a completed greedy group without moving later boundaries. */
+        const UF_long cap=solver->snb_auto.choice>0 && solver->options.threads>1?16u:w;
+        for(UF_long off=0;off<w;) {
+          const UF_long count=w-off<cap?w-off:cap;
+          starts[ns]=(int64_t)(c+off);
+          for(UF_long i=0;i<count;++i)blk->col2snode[c+off+i]=(int32_t)ns;
+          ++ns;off+=count;
         }
-        ns++;
         c += w;
       }
     }
@@ -869,6 +882,38 @@ static __attribute__((noinline)) void kls_snb_dense_product(
     const double *b0 = B + (size_t)c * bld;
     const double *b1 = b0 + bld, *b2 = b1 + bld, *b3 = b2 + bld;
     int32_t r = r0;
+    /* Eight independent accumulators cover FMA latency while reusing each
+       B broadcast over two adjacent row vectors. Producer order per output
+       is unchanged; the incumbent eight-row and masked tails follow. */
+    for (; r + 15 < r1; r += 16) {
+      __m512d l0=_mm512_loadu_pd(L+(size_t)sub[0]*ld+r);
+      __m512d l1=_mm512_loadu_pd(L+(size_t)sub[0]*ld+r+8);
+      __m512d v0=_mm512_set1_pd(b0[0]),v1=_mm512_set1_pd(b1[0]);
+      __m512d v2=_mm512_set1_pd(b2[0]),v3=_mm512_set1_pd(b3[0]);
+      __m512d t00=_mm512_mul_pd(l0,v0),t01=_mm512_mul_pd(l1,v0);
+      __m512d t10=_mm512_mul_pd(l0,v1),t11=_mm512_mul_pd(l1,v1);
+      __m512d t20=_mm512_mul_pd(l0,v2),t21=_mm512_mul_pd(l1,v2);
+      __m512d t30=_mm512_mul_pd(l0,v3),t31=_mm512_mul_pd(l1,v3);
+      for(int32_t i=1;i<sc;++i) {
+        l0=_mm512_loadu_pd(L+(size_t)sub[i]*ld+r);
+        l1=_mm512_loadu_pd(L+(size_t)sub[i]*ld+r+8);
+        v0=_mm512_set1_pd(b0[i]);v1=_mm512_set1_pd(b1[i]);
+        v2=_mm512_set1_pd(b2[i]);v3=_mm512_set1_pd(b3[i]);
+        t00=_mm512_add_pd(t00,_mm512_mul_pd(l0,v0));
+        t01=_mm512_add_pd(t01,_mm512_mul_pd(l1,v0));
+        t10=_mm512_add_pd(t10,_mm512_mul_pd(l0,v1));
+        t11=_mm512_add_pd(t11,_mm512_mul_pd(l1,v1));
+        t20=_mm512_add_pd(t20,_mm512_mul_pd(l0,v2));
+        t21=_mm512_add_pd(t21,_mm512_mul_pd(l1,v2));
+        t30=_mm512_add_pd(t30,_mm512_mul_pd(l0,v3));
+        t31=_mm512_add_pd(t31,_mm512_mul_pd(l1,v3));
+      }
+      double *out=T+(size_t)c*nr+r-r0;
+      _mm512_storeu_pd(out,t00);_mm512_storeu_pd(out+8,t01);
+      _mm512_storeu_pd(out+nr,t10);_mm512_storeu_pd(out+nr+8,t11);
+      _mm512_storeu_pd(out+2u*nr,t20);_mm512_storeu_pd(out+2u*nr+8,t21);
+      _mm512_storeu_pd(out+3u*nr,t30);_mm512_storeu_pd(out+3u*nr+8,t31);
+    }
     for (; r + 7 < r1; r += 8) {
       __m512d l = _mm512_loadu_pd(L + (size_t)sub[0] * ld + r);
       __m512d t0 = _mm512_mul_pd(l, _mm512_set1_pd(b0[0]));
@@ -951,6 +996,66 @@ static __attribute__((noinline)) void kls_snb_dense_product(
  * execution. The caller owns dependency waits and crew barriers; scratch is
  * private to the executing worker. Keep the same accumulation order and
  * dense product in both callers. */
+/* Columns of one panel are independent within an edge. A producer's below
+ * rows follow all its diagonal columns, so scatter cannot overwrite this
+ * edge's upper block. Share row decoding across four columns while retaining
+ * each column's producer and triangular-update order. */
+/* Valid only inside a worker with a freshly installed masked/nearest environment. */
+static _Thread_local int kls_snb_owned_masked_environment;
+
+static KLS_ALWAYS_INLINE int32_t kls_snb_narrow_columns(
+    double *W,int32_t H,int32_t width,const double *Ldiag,
+    const double *Lbelow,int32_t pld,const int32_t *sub,int32_t count,
+    const int32_t *dest,int32_t rows,int32_t upper) {
+  int32_t c=0;
+#if defined(__x86_64__) && FLT_EVAL_METHOD==0
+  if(rows<8)return 0;
+  if(!kls_snb_owned_masked_environment) {
+    unsigned control;__asm__ volatile("stmxcsr %0":"=m"(control)::"memory");
+    if((control&0x1f80u)!=0x1f80u)return 0;
+  }
+  for(;c+4<=width;c+=4) {
+    double *w0=W+(size_t)c*H,*w1=w0+H,*w2=w1+H,*w3=w2+H;
+    for(int32_t i=0;i<count;++i) {
+      const double u0=w0[upper+i],u1=w1[upper+i],u2=w2[upper+i],u3=w3[upper+i];
+      const int m0=u0!=0,m1=u1!=0,m2=u2!=0,m3=u3!=0;
+      if(!(m0|m1|m2|m3))continue;
+      const double *col=Ldiag+(size_t)sub[i]*pld;
+      for(int32_t j=i+1;j<count;++j) {
+        const double l=col[sub[j]];
+        if(m0)w0[upper+j]-=l*u0;
+        if(m1)w1[upper+j]-=l*u1;
+        if(m2)w2[upper+j]-=l*u2;
+        if(m3)w3[upper+j]-=l*u3;
+      }
+      const double *lb=Lbelow+(size_t)sub[i]*pld;
+      if(m0&m1&m2&m3) {
+        for(int32_t r=0;r<rows;++r) {
+          const int32_t at=dest[r];
+          if(at>=0) {
+            const double l=lb[r];
+            w0[at]-=l*u0;w1[at]-=l*u1;w2[at]-=l*u2;w3[at]-=l*u3;
+          }
+        }
+      } else {
+        const double multipliers[4]={u0,u1,u2,u3};
+        double *columns[4]={w0,w1,w2,w3};
+        for(int lane=0;lane<4;++lane)if(multipliers[lane]!=0) {
+          double *target=columns[lane];const double u=multipliers[lane];
+          for(int32_t r=0;r<rows;++r)if(dest[r]>=0)target[dest[r]]-=lb[r]*u;
+        }
+      }
+    }
+  }
+#else
+  (void)W;(void)H;(void)width;(void)Ldiag;(void)Lbelow;(void)pld;
+  (void)sub;(void)count;(void)dest;(void)rows;(void)upper;
+#endif
+  return c;
+}
+
+#include "kls_snb_register_trsm.inc"
+
 static KLS_ALWAYS_INLINE void kls_snb_update_edge(
   const kls_snb_block *blk, const kls_snb_snode *sn,
   const kls_snb_edge *edge, int wnarrow,
@@ -968,7 +1073,8 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
   const double *Ldiag = blk->panels + ps->panel + ps->uw;
   const double *Lbelow = Ldiag + ps->width;
   if (sc < wnarrow) {
-    for (int32_t c = 0; c < w; ++c) {
+    const int32_t first=kls_snb_narrow_columns(W,H,w,Ldiag,Lbelow,pld,sub,sc,dsts,ph,ustart);
+    for (int32_t c = first; c < w; ++c) {
       double *Wc = W + (size_t)c * H;
       for (int32_t i = 0; i < sc; ++i) {
         const double u = Wc[ustart + i];
@@ -998,10 +1104,23 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
      contiguous subset, direct row loads avoid gathers without changing the
      triangular update order. Gapped subsets retain the indexed kernel. */
   const int contiguous = sub[sc-1]-sub[0] == sc-1;
+  int32_t first_column=0;
+#if defined(__AVX512F__) && defined(__AVX512VL__) && FLT_EVAL_METHOD == 0
+  if(sc==16 && w>=4 && ph>0 && contiguous && (kls_snb_owned_masked_environment || fegetround()==FE_TONEAREST)) {
+    unsigned mx=0x1f80u;unsigned short cw=63u;
+    if(!kls_snb_owned_masked_environment) {
+      __asm__ volatile("stmxcsr %0":"=m"(mx)::"memory");
+      __asm__ volatile("fnstcw %0":"=m"(cw));
+    }
+    if((mx&0x7f80u)==0x1f80u && (cw&63u)==63u)
+      for(;first_column+3<w;first_column+=4)
+        kls_snb_register_trsm_16(B+(size_t)first_column*H,H,Ldiag,pld,sub[0]);
+  }
+#endif
   for (int32_t i = 0; i < sc; ++i) {
     {
       const double *lcol = Ldiag + (size_t)sub[i] * pld;
-      for (int32_t c = 0; c < w; ++c) {
+      for (int32_t c = first_column; c < w; ++c) {
         double *Bc = B + (size_t)c * H;
         const double u = Bc[i];
         if (u == 0.0) continue;
@@ -1103,6 +1222,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       const int32_t need = sub[sc - 1] + 1;
       while (atomic_load_explicit(&blk->published[edges[e].producer],
                                   memory_order_acquire) < need) {
+        if (atomic_load_explicit(&st->failed,memory_order_acquire)) return;
         kls_cpu_relax();
       }
     }
@@ -1237,6 +1357,8 @@ static UF_long kls_snb_refactor_epilogue(kls_solver *solver) {
 
   return 1;
 }
+
+#include "kls_snb_stream.inc"
 
 /* Keep this hot, inlined numeric body on a stable instruction-cache boundary
  * when unrelated code changes size. This changes placement, not arithmetic. */
@@ -1608,12 +1730,60 @@ static int kls_snb_env_disabled(void) {
   return value != NULL && value[0] == '1';
 }
 
+static int kls_native_i16_environment(void);
+/* Reserve a sorted native layout before position-based consumers publish.
+ * Expensive candidate construction waits for the first complete-call sample. */
+static int kls_snb_auto_factor_prepare(kls_solver *s,double *elapsed) {
+  if(s->snb_auto.choice)return s->snb_auto.choice>0;
+  if(s->snb_recipe || s->snb || s->options.backend!=KLS_BACKEND_AUTO ||
+     s->options.threads<2 || s->options.threads>64 ||
+     s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
+     s->stats.tuning_profile_active || !s->numeric || !s->symbolic ||
+     s->symbolic->nblocks!=1 || s->n<=1 || s->n>UINT16_MAX ||
+     (s->orientation!=KLS_ORIENTATION_TRANSPOSE && s->orientation!=KLS_ORIENTATION_NORMAL) ||
+     s->common.scale>0 || s->numeric->Rs ||
+     s->common.status!=TRILINOS_KLU_OK || !isfinite(s->common.flops) ||
+     s->common.flops<KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD*s->options.threads ||
+     s->row_perm || s->user_col_perm || s->row_scale || s->col_scale ||
+     s->numeric_is_predicted || s->numeric_needs_refinement || s->tight_tol_refine ||
+     s->pivot_nudge_count || s->common.kls_perturb_count || s->padded_run_of ||
+     s->row_refactor_values_ready || s->row_refactor_values_dirty ||
+     s->row_accept_pending_side || s->lean_reaudit_pending_side || s->lean_probe_arm ||
+     s->transpose_cycle.active || s->observed_parallel.active || s->native_i16_policy.active ||
+     s->observed_parallel.choice>0 || s->native_i16_policy.choice>0 ||
+     s->transpose_cycle.choice>0 || !kls_native_i16_environment() || fegetround()!=FE_TONEAREST)return 0;
+  extern char **environ;
+  for(char **entry=environ;entry && *entry;++entry)if(!strncmp(*entry,"KLS_",4))return 0;
+  const uint64_t llc=kls_execution_domain_llc_bytes();
+  if(!llc || llc>SIZE_MAX)return 0;
+  const double start=kls_now_seconds();
+  /* Deferred preparation must not turn application idle time into credit. */
+  const double credit=s->snb_auto_factor_seconds>0?s->snb_auto_factor_seconds:
+    start-s->snb_factor_start;
+  if(!(credit>0) || !isfinite(credit))return 0;
+  s->snb_auto.choice=1;s->snb_auto.factor_credit=credit;
+  s->snb_auto.spent=s->auto_amf_analysis_seconds;
+  s->snb_auto_memory_limit=(size_t)llc;
+  if(!s->snode_numeric_pre_sorted) {
+    if(s->refactor_col_ptr || s->refactor_level_ptr || s->refactor_l_indices32 ||
+       s->row_refactor_group_count || !kls_parallel_lu_sort(s))s->snb_auto.choice=-1;
+    else s->snode_numeric_pre_sorted=s->snode_prepared=1;
+  }
+  const double seconds=kls_now_seconds()-start;
+  s->snb_auto.spent+=seconds;*elapsed+=seconds;
+  if(seconds>credit)s->snb_auto.choice=-1;
+  if(s->snode_numeric_pre_sorted)s->snode_prepared=1;
+  s->snb_auto_numeric=s->numeric;
+  return s->snb_auto.choice>0;
+}
+
 /* Run supernodal acceptance at factor time so its one-time A/B cost lands
  * in the once-charged factor term instead of inflating the first repeated
  * refactor.  Panels have no separate batch-run floor. */
 static void kls_snb_maybe_accept(kls_solver *solver,
                                  const double *numeric_values,
                                  double *elapsed) {
+  if(solver && elapsed && kls_snb_auto_factor_prepare(solver,elapsed))return;
   if (solver == NULL || solver->snb_decision != 0 || solver->snb_declined ||
       solver->snb_trial_verdict < 0 ||
       solver->snb != NULL || kls_snb_env_disabled() ||
@@ -1738,6 +1908,16 @@ static int kls_snb_try_refactor(kls_solver *solver,
                                 const double *numeric_values,
                                 int check_pivots,
                                 UF_long *ok_out) {
+  if(!check_pivots && solver->snb_auto_candidate &&
+     solver->snb==solver->snb_auto_candidate && solver->snb_auto.choice>0) {
+    const int result=kls_snb_stream_refactor(solver,numeric_values,solver->options.threads);
+    if(result>=0) {
+      *ok_out=(UF_long)result;
+      kls_set_last_refactor_path(solver,KLS_REFACTOR_PATH_SNB);return 1;
+    }
+    kls_snb_free(solver);
+  }
+
   if (!check_pivots && solver->snb_retrial == 1 && solver->snb != NULL &&
       solver->snb_decision < 0 && !kls_snb_env_disabled() &&
       solver->numeric != NULL && solver->symbolic != NULL &&
@@ -2516,9 +2696,9 @@ static int kls_refactor_schedule_is_eligible(const kls_solver *solver) {
        worth of fixed-pivot work.  Its measured schedule makes the final
        admission decision; no benchmark-family signature is needed here. */
     return solver->n >= (UF_long)solver->tuning.egraph_min_size &&
-           solver->common.flops >=
+           (kls_observed_parallel_enabled(solver) || solver->common.flops >=
              solver->tuning.egraph_min_flops_per_thread *
-               (double)solver->options.threads;
+               (double)solver->options.threads);
   }
 }
 
@@ -2640,12 +2820,14 @@ static int kls_build_refactor_separator_private_plan(
     goto cleanup;
   }
   for (UF_long component = 0u; component < component_count; ++component) {
+    if(kls_observed_parallel_build_expired(solver,component)) goto cleanup;
     component_thread[component] = -1;
   }
 
   /* Check independence against the post-pivot numeric pattern rather than
      assuming that the ordering-time graph remained unchanged. */
   for (UF_long block = 0u; block < solver->symbolic->nblocks; ++block) {
+    if(kls_observed_parallel_build_expired(solver,block)) goto cleanup;
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
     const UF_long nk = k2 - k1;
@@ -2659,6 +2841,7 @@ static int kls_build_refactor_separator_private_plan(
     const UF_long *uip = solver->numeric->Uip + k1;
     const UF_long *ulen = solver->numeric->Ulen + k1;
     for (UF_long k = 0u; k < nk; ++k) {
+    if(kls_observed_parallel_build_expired(solver,k)) goto cleanup;
       const UF_long col = k1 + k;
       if (levels[col] >= cluster_levels) {
         continue;
@@ -2680,6 +2863,7 @@ static int kls_build_refactor_separator_private_plan(
         goto cleanup;
       }
       for (UF_long p = 0u; p < ucol_len; ++p) {
+    if(kls_observed_parallel_build_expired(solver,p)) goto cleanup;
         if (ui[p] >= k) {
           goto cleanup;
         }
@@ -2699,6 +2883,7 @@ static int kls_build_refactor_separator_private_plan(
 
   UF_long cluster_columns = 0u;
   for (UF_long col = 0u; col < solver->n; ++col) {
+    if(kls_observed_parallel_build_expired(solver,col)) goto cleanup;
     if (levels[col] >= cluster_levels) {
       continue;
     }
@@ -2718,6 +2903,7 @@ static int kls_build_refactor_separator_private_plan(
   UF_long unsafe_component_count = 0u;
   UF_long private_column_count = 0u;
   for (UF_long component = 0u; component < component_count; ++component) {
+    if(kls_observed_parallel_build_expired(solver,component)) goto cleanup;
     if (unsafe[component]) {
       unsafe_component_count++;
     }
@@ -2743,6 +2929,7 @@ static int kls_build_refactor_separator_private_plan(
         kls_compare_refactor_separator_component_work_desc);
 
   for (UF_long pos = 0u; pos < private_component_count; ++pos) {
+    if(kls_observed_parallel_build_expired(solver,pos)) goto cleanup;
     int target = 0;
     for (int tid = 1; tid < thread_count; ++tid) {
       if (thread_work[tid] < thread_work[target]) {
@@ -2781,6 +2968,7 @@ static int kls_build_refactor_separator_private_plan(
       goto cleanup;
     }
     for (UF_long col = 0u; col < solver->n; ++col) {
+    if(kls_observed_parallel_build_expired(solver,col)) goto cleanup;
       if (levels[col] < cluster_levels) {
         const unsigned int component = solver->separator.order_component[col];
         if ((UF_long)component >= component_count) {
@@ -2792,6 +2980,7 @@ static int kls_build_refactor_separator_private_plan(
       }
     }
     for (UF_long level = 0u; level < cluster_levels; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) goto cleanup;
       tail_level_ptr[level + 1u] += tail_level_ptr[level];
     }
     if (tail_level_ptr[cluster_levels] != tail_column_count) {
@@ -2805,6 +2994,7 @@ static int kls_build_refactor_separator_private_plan(
            (size_t)cluster_levels * sizeof(*tail_next));
   }
   for (UF_long col = 0u; col < solver->n; ++col) {
+    if(kls_observed_parallel_build_expired(solver,col)) goto cleanup;
     if (levels[col] >= cluster_levels) {
       continue;
     }
@@ -2828,6 +3018,7 @@ static int kls_build_refactor_separator_private_plan(
     }
   }
   for (UF_long level = 0u; level < cluster_levels; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) goto cleanup;
     if (tail_next != NULL && tail_next[level] != tail_level_ptr[level + 1u]) {
       KLS_FREE_AND_NULL(tail_next);
       goto cleanup;
@@ -2849,6 +3040,7 @@ static int kls_build_refactor_separator_private_plan(
       goto cleanup;
     }
     for (UF_long level = 0u; level < cluster_levels; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) goto cleanup;
       const UF_long begin = tail_level_ptr[level];
       const UF_long end = tail_level_ptr[level + 1u];
       UF_long *parts = tail_level_thread_ptr +
@@ -2857,6 +3049,7 @@ static int kls_build_refactor_separator_private_plan(
       parts[thread_count] = end;
       double total_level_work = 0.0;
       for (UF_long pos = begin; pos < end; ++pos) {
+    if(kls_observed_parallel_build_expired(solver,pos)) goto cleanup;
         total_level_work += column_work[tail_cols[pos]];
       }
       UF_long pos = begin;
@@ -2912,7 +3105,8 @@ cleanup:
 }
 
 static int kls_build_refactor_schedule(kls_solver *solver) {
-  if (!kls_refactor_schedule_is_eligible(solver)) {
+  if (!kls_refactor_schedule_is_eligible(solver) ||
+      kls_observed_parallel_build_expired(solver,0)) {
     return 0;
   }
   const int build_separator_private =
@@ -3010,6 +3204,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
 
   for (UF_long k = 0; k < solver->n; ++k) {
+    if(kls_observed_parallel_build_expired(solver,k)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
     first_successor[k] = KLS_KLU_EMPTY;
 
   }
@@ -3019,6 +3216,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   double total_work = 0.0;
 
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    if(kls_observed_parallel_build_expired(solver,block)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
     const UF_long nk = k2 - k1;
@@ -3047,6 +3247,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     const UF_long *ulen = solver->numeric->Ulen + k1;
 
     for (UF_long k = 0; k < nk; ++k) {
+    if(kls_observed_parallel_build_expired(solver,k)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
       UF_long *ui = NULL;
       double *ux = NULL;
       UF_long ucol_len = 0;
@@ -3055,6 +3258,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
       UF_long level = 0;
       double work = 1.0;
       for (UF_long p = 0; p < ucol_len; ++p) {
+    if(kls_observed_parallel_build_expired(solver,p)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
         const UF_long dep = ui[p];
         if (dep >= k) {
           KLS_FREE_REFACTOR_SCHEDULE_TEMP();
@@ -3113,6 +3319,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   }
 
   for (UF_long k = 0; k < solver->n; ++k) {
+    if(kls_observed_parallel_build_expired(solver,k)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
     if (levels[k] >= level_count) {
       KLS_FREE_REFACTOR_SCHEDULE_TEMP();
       return 0;
@@ -3120,6 +3329,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     counts[levels[k] + 1u]++;
   }
   for (UF_long level = 0; level < level_count; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
     counts[level + 1u] += counts[level];
     level_ptr[level] = counts[level];
   }
@@ -3135,6 +3347,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   const double cluster_width_limit =
     2.5 * (double)solver->options.threads;
   for (UF_long level = 0; level < level_count; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
     const UF_long width = level_ptr[level + 1u] - level_ptr[level];
     if (width > max_width) {
       max_width = width;
@@ -3150,6 +3365,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     cluster_levels_alpha3 = level_count;
     const double alpha3_limit = 3.0 * (double)solver->options.threads;
     for (UF_long level = 0u; level < level_count; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
       const UF_long width = level_ptr[level + 1u] - level_ptr[level];
       if (cluster_levels_alpha3 == level_count &&
           (double)width < alpha3_limit) {
@@ -3159,6 +3377,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     cluster_levels_alpha4 = level_count;
     const double alpha4_limit = 4.0 * (double)solver->options.threads;
     for (UF_long level = 0u; level < level_count; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
       const UF_long width = level_ptr[level + 1u] - level_ptr[level];
       if (cluster_levels_alpha4 == level_count &&
           (double)width < alpha4_limit) {
@@ -3171,6 +3392,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     UF_long *next = counts;
 
     for (UF_long k = 0; k < solver->n; ++k) {
+    if(kls_observed_parallel_build_expired(solver,k)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
       const UF_long level = levels[k];
       const UF_long dst = next[level]++;
       if (dst >= solver->n) {
@@ -3184,6 +3408,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
 
   if (level_thread_ptr != NULL) {
     for (UF_long level = 0; level < level_count; ++level) {
+    if(kls_observed_parallel_build_expired(solver,level)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
       const UF_long begin = level_ptr[level];
       const UF_long end = level_ptr[level + 1u];
       UF_long *parts =
@@ -3194,6 +3421,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
        * existing no-pivot column-work estimate instead of column count. */
       double level_work = 0.0;
       for (UF_long pos = begin; pos < end; ++pos) {
+    if(kls_observed_parallel_build_expired(solver,pos)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
         const UF_long col = level_cols[pos];
         if (col >= solver->n) {
           KLS_FREE_REFACTOR_SCHEDULE_TEMP();
@@ -3220,6 +3450,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
   double pipeline_max_column_work = 0.0;
   if (cluster_levels < level_count) {
     for (UF_long pos = level_ptr[cluster_levels]; pos < solver->n; ++pos) {
+    if(kls_observed_parallel_build_expired(solver,pos)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
       const UF_long col = level_cols[pos];
       if (col >= solver->n) {
         KLS_FREE_REFACTOR_SCHEDULE_TEMP();
@@ -3268,6 +3501,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
 
 
   for (UF_long block = 0; block < solver->symbolic->nblocks; ++block) {
+    if(kls_observed_parallel_build_expired(solver,block)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
     const UF_long k1 = solver->symbolic->R[block];
     const UF_long k2 = solver->symbolic->R[block + 1u];
     if (k2 - k1 <= 1u) {
@@ -3276,6 +3512,9 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     UF_long start = k1;
     UF_long width = 1u;
     for (UF_long k = k1; k + 1u < k2; ++k) {
+    if(kls_observed_parallel_build_expired(solver,k)) {
+      KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
+    }
       const UF_long next = k + 1u;
       const uint64_t next_hash1 = kls_supernode_hash1(next);
       const uint64_t next_hash2 = kls_supernode_hash2(next);
@@ -3299,6 +3538,10 @@ static int kls_build_refactor_schedule(kls_solver *solver) {
     kls_record_supernode_candidate(solver, start, width, successor_counts,
                                    supernode_pipeline_end);
 
+  }
+
+  if(kls_observed_parallel_build_expired(solver,0)) {
+    KLS_FREE_REFACTOR_SCHEDULE_TEMP();return 0;
   }
 
   free(levels);
@@ -3399,6 +3642,7 @@ static void maybe_prepare_refactor_schedule(kls_solver *solver,
 }
 
 static double kls_egraph_refactor_floor(const kls_solver *solver) {
+  if(kls_observed_parallel_enabled(solver)) return 0;
   double floor = solver->tuning.egraph_min_flops_per_thread;
   const char *floor_env = getenv("KLS_EGRAPH_REFACTOR_FLOOR");
   if (floor_env != NULL && floor_env[0] != '\0') {
@@ -3497,7 +3741,8 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
      live partial-BTF plan is durable evidence that a more specialized
      input-consuming route owns this factor; preserve it without naming its
      matrix. */
-  if (!check_pivots && kls_low_work_btf_map32_capable(solver) &&
+  if (!check_pivots && !kls_observed_parallel_enabled(solver) &&
+      kls_low_work_btf_map32_capable(solver) &&
       solver->solve_contract_probe != 0 &&
       solver->refactor_input_user_pos32 == NULL &&
       solver->snb == NULL && solver->lean_probe_arm <= 0 &&

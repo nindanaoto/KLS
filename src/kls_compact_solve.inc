@@ -954,6 +954,9 @@ static KLS_ALWAYS_INLINE double kls_lean_i16_row_solve_dot(
   return value;
 }
 
+#include "kls_native_i16.inc"
+
+
 static KLS_ALWAYS_INLINE double kls_i32_solve_diagonal(
   double value,
   const double *restrict udiag,
@@ -1153,6 +1156,8 @@ static UF_long kls_lean_single_block_prepared_solve(
    Reuse the independent-accumulator dot product to shorten the dependency
    chain; residual checking and refinement remain the caller's responsibility. */
 static UF_long kls_native_transpose_solve(kls_solver *solver, double *out) {
+  if(kls_native_i16_try_solve(solver,out))return 1u;
+  ++solver->native_i16_serial_calls;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const UF_long n = solver->n;
   double *work = (double *)numeric->Xwork;
@@ -1195,6 +1200,13 @@ static UF_long kls_compact_transpose_solve(kls_solver *solver,
   double *work = prepared ? solver->fused_refactor_solve_work
                           : (double *)numeric->Xwork;
   solver->fused_refactor_solve_computed = 0;
+  const int leaf_batch = prepared && solver->forest_leaf_ready &&
+    solver->forest_leaf_state > 0 && solver->forest_leaves &&
+    solver->forest_leaves->numeric_owner == numeric &&
+    solver->forest_leaves->lu_owner == numeric->LUbx[0] &&
+    solver->forest_leaves->n == n;
+  solver->forest_leaf_ready = 0;
+  if (leaf_batch) return kls_forest_leaf_finish(solver, work, out);
   const double *udiag = (const double *)numeric->Udiag;
   const double *rs = (const double *)numeric->Rs;
   const int narrow = solver->i16solve_l != NULL &&

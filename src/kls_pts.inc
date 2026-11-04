@@ -1830,7 +1830,7 @@ static void kls_pts_refactor_pool_worker_run(
     if (block == job->block) {
       continue;
     }
-    kls_parallel_refactor_block(worker, block);
+    kls_refactor_block_dispatch(worker, block);
     if (worker->invalid ||
         (worker->singular && job->shared->halt_if_singular)) {
       atomic_store_explicit(&job->failed, 1, memory_order_release);
@@ -2249,7 +2249,7 @@ static int kls_pts_mapped_refactor(kls_solver *solver,
     if (block == pts->block) {
       continue;
     }
-    kls_parallel_refactor_block(&sworker, block);
+    kls_refactor_block_dispatch(&sworker, block);
     if (sworker.invalid ||
         (sworker.singular && common->halt_if_singular)) {
       failed = 1;

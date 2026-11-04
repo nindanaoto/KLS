@@ -96,6 +96,18 @@ static UF_long kls_compact_btf_transpose_prechecked(kls_solver *s,double *out) {
   for(UF_long block=0;block<s->symbolic->nblocks;++block) {
     const UF_long first=s->i16solve_r[block],last=s->i16solve_r[block+1];
     double *local=work+first;
+    /* A singleton has no internal L or U entries. Keep the off-block
+       accumulation and division in exactly the ordinary column order. */
+    if(last-first==1u) {
+#ifdef KLS_COMPACT_BTF_SINGLETON_TEST_EVENT
+      KLS_COMPACT_BTF_SINGLETON_TEST_EVENT();
+#endif
+      double value=work[first];
+      for(uint32_t z=offp[first];z<offp[first+1];++z)
+        value-=offx[z]*work[offi[z]];
+      work[first]=value/diagonal[first];
+      continue;
+    }
     for(UF_long k=first;k<last;++k) {
       double value=work[k];
       for(uint32_t z=offp[k];z<offp[k+1];++z)value-=offx[z]*work[offi[z]];
@@ -104,18 +116,50 @@ static UF_long kls_compact_btf_transpose_prechecked(kls_solver *s,double *out) {
     for(UF_long k=first;k<last;++k) {
       double value=work[k];const double *ux=s->i16solve_ux[k];
       const uint32_t begin=up[k],end=up[k+1];
-      for(uint32_t z=begin;z<end;++z) {
-        const double previous=local[ui[z]];
-        value-=ux[z-begin]*previous;
+      switch(end-begin) {
+        case 0: break;
+        case 1:
+          value-=ux[0]*local[ui[begin+0u]];
+          break;
+        case 2:
+          value-=ux[0]*local[ui[begin+0u]];
+          value-=ux[1]*local[ui[begin+1u]];
+          break;
+        case 3:
+          value-=ux[0]*local[ui[begin+0u]];
+          value-=ux[1]*local[ui[begin+1u]];
+          value-=ux[2]*local[ui[begin+2u]];
+          break;
+        default:
+          for(uint32_t z=begin;z<end;++z) {
+            const double previous=local[ui[z]];
+            value-=ux[z-begin]*previous;
+          }
       }
       work[k]=value/diagonal[k];
     }
     for(UF_long k=last;k-->first;) {
       double value=work[k];const double *lx=s->i16solve_lx[k];
       const uint32_t begin=lp[k],end=lp[k+1];
-      for(uint32_t z=begin;z<end;++z) {
-        const double previous=local[li[z]];
-        value-=lx[z-begin]*previous;
+      switch(end-begin) {
+        case 0: break;
+        case 1:
+          value-=lx[0]*local[li[begin+0u]];
+          break;
+        case 2:
+          value-=lx[0]*local[li[begin+0u]];
+          value-=lx[1]*local[li[begin+1u]];
+          break;
+        case 3:
+          value-=lx[0]*local[li[begin+0u]];
+          value-=lx[1]*local[li[begin+1u]];
+          value-=lx[2]*local[li[begin+2u]];
+          break;
+        default:
+          for(uint32_t z=begin;z<end;++z) {
+            const double previous=local[li[z]];
+            value-=lx[z-begin]*previous;
+          }
       }
       work[k]=value;
     }

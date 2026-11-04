@@ -15635,6 +15635,9 @@ static int kls_single_block_mapped_refactor(kls_solver *solver,
    halve the hot index traffic, and one reciprocal per pivot replaces every L
    divide.  If the compact solve is already live, publish those same exact
    reciprocals so the post-refactor solve refresh becomes a no-op. */
+#include "kls_forest_refactor.inc"
+#include "kls_forest_leaves.inc"
+
 static int kls_lean_single_block_map32_refactor(kls_solver *solver,
                                                 double *numeric_values,
                                                 int fuse_transpose) {
@@ -15656,6 +15659,7 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
     return -1;
   }
 
+  solver->forest_leaf_ready = 0;
   trilinos_klu_l_common *common = &solver->common;
   trilinos_klu_l_numeric *numeric = solver->numeric;
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
@@ -15679,6 +15683,10 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
       (scaled && !kls_build_refactor_scale_rows(solver)))) {
     return -1;
   }
+  const int forest = fuse_transpose && kls_forest_masked_environment() &&
+    getenv("KLS_DISABLE_DIRECT_FOREST") == NULL && kls_prepare_forest_map(solver);
+  if (forest && solver->forest_refactor_count < UF_long_max)
+    ++solver->forest_refactor_count;
   /* A preceding triangular solve may have used this KLU workspace. */
   memset(x, 0, (size_t)solver->n * sizeof(*x));
 
@@ -15694,6 +15702,7 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
   }
   double *scale_recip = scaled && fuse_transpose ? y + solver->n : NULL;
   if (scale_recip != NULL) {
+    const int vector_scale = forest && kls_forest_vector_environment(solver);
     /* Reduce each original row in KLU's input order, then write its scale
        directly in pivot order. This avoids repeated scattered scale updates,
        an old-row lookup for each input entry, and the final scale permutation.
@@ -15711,16 +15720,29 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
       if (magnitude == 0.0) magnitude = 1.0;
       const UF_long pivot_row = numeric->Pinv[row];
       numeric_rs[pivot_row] = magnitude;
-      scale_recip[pivot_row] = 1.0 / magnitude;
+      if (!vector_scale) scale_recip[pivot_row] = 1.0 / magnitude;
     }
+#if KLS_HAVE_AVX512_KERNELS
+    if (vector_scale) kls_forest_scale_reciprocals(solver->n,numeric_rs,scale_recip);
+#endif
   }
 
-  for (UF_long k = 0u; k < solver->n; ++k) {
+  const int leaf_batch = forest && kls_forest_leaf_begin(
+    solver, numeric_values, rhs, scale_recip, y, diag_recip);
+  if (leaf_batch) {
+    if (!kls_forest_leaf_remaining(solver,numeric_values,rhs,scale_recip,y,diag_recip))
+      return 0;
+  } else for (UF_long k = 0u; k < solver->n; ++k) {
     /* U(:,k) becomes final in this iteration. Its transpose equation only
        uses y[0:k], so solve it while those entries are already hot. */
     double yk = fuse_transpose ? rhs[q[k]] : 0.0;
     const UF_long input_begin = solver->refactor_col_ptr[k];
     const UF_long input_end = solver->refactor_col_ptr[k + 1u];
+    UF_long *ui = NULL;
+    double *ux = NULL;
+    UF_long ucol_len = 0u;
+    kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
+    double diagonal = 0.0, lower = 0.0;
     for (UF_long p = input_begin; p < input_end; ++p) {
       double value = numeric_values[(UF_long)map_input[p]];
       if (scaled) {
@@ -15729,17 +15751,18 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
         value = scale_recip != NULL && isfinite(scale_recip[oldrow])
           ? value * scale_recip[oldrow] : value / rs[oldrow];
       }
-      x[(UF_long)map_row[p]] = value;
+      if (forest) {
+        const int32_t slot = solver->forest_input_slot[p];
+        if (slot >= 0) ux[slot] = value;
+        else if (slot == -1) diagonal = value;
+        else lower = value;
+      } else x[(UF_long)map_row[p]] = value;
     }
 
-    UF_long *ui = NULL;
-    double *ux = NULL;
-    UF_long ucol_len = 0u;
-    kls_klu_get_pointer(lu, uip, ulen, k, &ui, &ux, &ucol_len);
     for (UF_long up = 0u; up < ucol_len; ++up) {
       const UF_long j = ui[up];
-      const double ujk = x[j];
-      x[j] = 0.0;
+      const double ujk = forest ? ux[up] : x[j];
+      if (!forest) x[j] = 0.0;
       ux[up] = ujk;
       if (fuse_transpose) {
         yk -= ujk * y[j];
@@ -15749,14 +15772,13 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
         double *lx = NULL;
         UF_long lcol_len = 0u;
         kls_klu_get_pointer(lu, lip, llen, j, &li, &lx, &lcol_len);
-        /* Zero was checked above; retain row order without the shared
-           helper's manual unrolling and prefetch branches. */
-        for (UF_long p = 0u; p < lcol_len; ++p)
+        if (forest) diagonal -= lx[0] * ujk;
+        else for (UF_long p = 0u; p < lcol_len; ++p)
           x[li[p]] -= lx[p] * ujk;
       }
     }
 
-    const double ukk = x[k];
+    const double ukk = forest ? diagonal : x[k];
     x[k] = 0.0;
     if (ukk == 0.0) {
       common->status = TRILINOS_KLU_SINGULAR;
@@ -15784,7 +15806,8 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
     kls_klu_get_pointer(lu, lip, llen, k, &li, &lx, &lcol_len);
     for (UF_long p = 0u; p < lcol_len; ++p) {
       const UF_long i = li[p];
-      lx[p] = isfinite(reciprocal) ? x[i] * reciprocal : x[i] / ukk;
+      const double value = forest ? lower : x[i];
+      lx[p] = isfinite(reciprocal) ? value * reciprocal : value / ukk;
       x[i] = 0.0;
     }
   }
@@ -15803,6 +15826,9 @@ static int kls_lean_single_block_map32_refactor(kls_solver *solver,
   }
   if (fuse_transpose) {
     solver->fused_refactor_solve_computed = 1;
+    solver->forest_leaf_ready = leaf_batch && common->status == TRILINOS_KLU_OK;
+    if (solver->forest_leaf_ready && solver->forest_leaf_numerics < UINT64_MAX)
+      ++solver->forest_leaf_numerics;
   }
   return 1;
 }

@@ -105,6 +105,15 @@ def main():
         targets=['kls_accuracy_owner','kls_componentwise_team','kls_klu_allocator_ownership'] if profile=='tsan' else []
         if profile=='tsan' and (source/'tests/kls_small_btf.c').exists():
             targets.append('kls_small_btf')
+        if profile=='tsan' and (source/'tests/kls_observed_parallel.c').exists():
+            targets.append('kls_observed_parallel')
+        if profile=='tsan' and (source/'tests/kls_forest_leaves.c').exists():
+            targets.extend(['kls_forest_refactor','kls_forest_leaves','kls_avx512_feature_concurrent'])
+        if profile=='tsan':
+            for name in ('kls_cached_plain_refactor','kls_snb_stream','kls_snb_auto','kls_native_i16',
+                         'kls_native_i16_admission'):
+                if (source/'tests'/f'{name}.c').exists():
+                    targets.append(name)
         run(profile+'-build',['cmake','--build',build,'-j'+str(args.jobs),*(['--target',*targets] if targets else [])])
         run(profile+'-test',['ctest','--test-dir',build,'--output-on-failure','-j1',*(['-R','^('+'|'.join(targets)+')$'] if targets else [])])
     if any(sha(path)!=h for path,h in files.items()):

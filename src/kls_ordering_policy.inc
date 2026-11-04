@@ -216,7 +216,8 @@ static int kls_direct_klu_public_frame_capable(const kls_solver *solver) {
    An unused subtree descriptor does not own the factor and must not exclude
    this trial. Active packed, row, or subtree numerics retain their lifecycle. */
 static int kls_compact_transpose_cycle_capable(const kls_solver *solver) {
-  return kls_direct_klu_public_frame_capable(solver) &&
+  return solver && solver->snb_auto.choice<=0 &&
+    kls_direct_klu_public_frame_capable(solver) &&
     solver->options.backend != KLS_BACKEND_SERIAL &&
     solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
     solver->n > 0u && solver->n <= (UF_long)INT32_MAX &&
@@ -226,7 +227,7 @@ static int kls_compact_transpose_cycle_capable(const kls_solver *solver) {
     solver->symbolic->nblocks == 1u && solver->dense_tail_cols == 0u &&
     solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FIRST &&
     (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_KLU ||
-     (solver->transpose_cycle.cycles > 0 &&
+     ((solver->transpose_cycle.cycles > 0 || solver->forest_unscale_attempted > 0) &&
       solver->stats.last_refactor_path == KLS_REFACTOR_PATH_MAPPED)) &&
     !solver->factor_preps_deferred && !solver->prestatic_deferred &&
     !solver->rowmatch_deferred && !solver->metis_race_deferred &&
@@ -3152,6 +3153,7 @@ static _Thread_local int kls_value_matched_ordering_ctx;
 static _Thread_local int kls_amf3_power_override_active;
 static _Thread_local double kls_amf3_power_override;
 static _Thread_local int kls_amf3_exact_clique_bound;
+static _Thread_local int kls_amf3_exact_selected;
 static _Thread_local int kls_amf3_span_variant_selected;
 
 #ifdef KLS_HAVE_MTMETIS
@@ -12593,6 +12595,20 @@ static UF_long kls_symbolic_symmetric_etree_levels(
    full ordering portfolio without multiplying a complete structural pass
    by every ordering.  Legacy callers leave the verdict pointer NULL and
    retain their historical independent comparison. */
+/* Preserve the already-paid ordinary ordering, in the identical public
+ * coordinate frame, before installing the exact-bound candidate. */
+static void kls_auto_amf_capture(kls_pattern_candidate *c,
+    trilinos_klu_l_symbolic **old,trilinos_klu_l_common *common,
+    kls_ordering ordering,kls_separator_analysis *separator,
+    const trilinos_klu_l_symbolic *owner) {
+  if(c->auto_amf_fallback)
+    trilinos_klu_l_free_symbolic(&c->auto_amf_fallback,&c->auto_amf_fallback_common);
+  kls_separator_analysis_clear(&c->auto_amf_fallback_separator);
+  c->auto_amf_fallback=*old;*old=NULL;c->auto_amf_fallback_common=*common;
+  c->auto_amf_fallback_ordering=ordering;c->auto_amf_owner=owner;
+  kls_separator_analysis_move(&c->auto_amf_fallback_separator,separator);
+}
+
 struct kls_amf_spec_job {
   UF_long n;
   UF_long *col_ptr;
@@ -13585,10 +13601,14 @@ generic_ordering_tournament:;
             dependency_depth_pareto_refinement ||
             span_parallel_refinement ||
             matched_decisive_span_refinement) {
-          trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
+          if(spec->amf3_exact_clique_bound && kls_generic_btf_capture_candidate)
+            kls_auto_amf_capture(kls_generic_btf_capture_candidate,&best_symbolic,
+              &best_common,best_ordering,&best_separator,spec->symbolic);
+          else trilinos_klu_l_free_symbolic(&best_symbolic, &best_common);
           best_symbolic = spec->symbolic;
           best_common = spec->common;
           best_ordering = spec->ordering;
+          kls_amf3_exact_selected = spec->amf3_exact_clique_bound;
           best_score = spec->score;
           best_etree_levels = spec->etree_levels;
           if (spec->amf3_span_variant) {
@@ -14164,6 +14184,9 @@ static void free_candidate(kls_pattern_candidate *candidate) {
   if (candidate == NULL) {
     return;
   }
+  if(candidate->auto_amf_fallback)
+    trilinos_klu_l_free_symbolic(&candidate->auto_amf_fallback,&candidate->auto_amf_fallback_common);
+  kls_separator_analysis_clear(&candidate->auto_amf_fallback_separator);
   kls_small_btf_fallback_clear(&candidate->small_btf_fallback);
   if (candidate->symbolic != NULL) {
     trilinos_klu_l_free_symbolic(&candidate->symbolic, &candidate->common);
@@ -14259,6 +14282,53 @@ static int transpose_candidate(const kls_pattern_candidate *source,
   return KLS_OK;
 }
 
+/* An additional bounded ordering arm for the AUTO executor.
+ * Compare realized symbolic costs; the public dimension is only an index
+ * representation constraint, never a workload identifier. */
+static int kls_auto_exact_improves(double fill,double work,UF_long depth,
+    double old_fill,double old_work,UF_long old_depth) {
+  if(!(fill>0) || !(work>0) || !(old_fill>0) || !(old_work>0) ||
+     !isfinite(fill) || !isfinite(work) || !isfinite(old_fill) || !isfinite(old_work))return 0;
+  return fill<=.90*old_fill || (fill<=old_fill && work<=.80*old_work) ||
+    (depth>0 && old_depth>0 && fill<=1.01*old_fill && work<=1.02*old_work &&
+      (double)depth<=.90*(double)old_depth);
+}
+static void kls_auto_exact_candidate(kls_pattern_candidate *c,const kls_options *o) {
+  if(c->auto_amf_exact || o->ordering!=KLS_ORDERING_AUTO ||
+     o->backend!=KLS_BACKEND_AUTO || o->threads<1 || o->threads>64 ||
+     o->tuning_profile_path || kls_prestatic_ordering_ctx ||
+     kls_matched_low_pair_ordering_ctx || !c->symbolic ||
+     c->symbolic->nblocks!=1 || c->n<=1 || c->n>UINT16_MAX ||
+     !isfinite(c->symbolic->est_flops) ||
+     c->symbolic->est_flops<KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD*o->threads ||
+     ((long double)c->n+1+c->nnz)*sizeof(UF_long)>128.0L*1024*1024)return;
+  struct kls_amf_spec_job job={0};job.n=c->n;job.col_ptr=c->col_ptr;job.row_idx=c->row_idx;
+  job.options=*o;job.options.use_btf=c->symbolic->do_btf!=0;
+  job.ordering=KLS_ORDERING_AMF3;job.amf3_exact_clique_bound=1;
+  job.measure_etree_levels=1;
+  atomic_int verdict;atomic_init(&verdict,job.options.use_btf?1:2);
+  job.representation_verdict=&verdict;
+  const double start=kls_now_seconds();
+  kls_amf_spec_main(&job);
+  if(job.status==KLS_OK && job.symbolic) {
+    UF_long depth=0;
+    if(job.score<=1.01*c->score && job.est_flops<=1.02*c->symbolic->est_flops)
+      depth=kls_symbolic_symmetric_etree_levels(c->n,c->col_ptr,c->row_idx,c->symbolic);
+    if(kls_auto_exact_improves(job.score,job.est_flops,job.etree_levels,
+          c->score,c->symbolic->est_flops,depth)) {
+      kls_auto_amf_capture(c,&c->symbolic,&c->common,c->selected_ordering,
+        &c->separator,job.symbolic);
+      c->symbolic=job.symbolic;job.symbolic=NULL;c->common=job.common;
+      c->score=job.score;c->selected_ordering=KLS_ORDERING_AMF3;
+      c->generic_amf3_span_variant_selected=0;c->auto_amf_exact=1;
+      kls_separator_analysis_move(&c->separator,&job.separator);
+    }
+  }
+  if(job.symbolic)trilinos_klu_l_free_symbolic(&job.symbolic,&job.common);
+  kls_separator_analysis_clear(&job.separator);
+  c->auto_amf_analysis_seconds+=kls_now_seconds()-start;
+}
+
 static int analyze_candidate(kls_pattern_candidate *candidate,
                              const kls_options *options) {
   {
@@ -14267,6 +14337,12 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
        the ordering tournament consumes realized symbolic scores directly. */
     KLS_FREE_AND_NULL(kls_block_order_proposal);
     kls_amf3_span_variant_selected = 0;
+    kls_amf3_exact_selected = 0;
+    candidate->auto_amf_exact=0;candidate->auto_amf_analysis_seconds=0;
+    if(candidate->auto_amf_fallback)
+      trilinos_klu_l_free_symbolic(&candidate->auto_amf_fallback,&candidate->auto_amf_fallback_common);
+    kls_separator_analysis_clear(&candidate->auto_amf_fallback_separator);
+    candidate->auto_amf_owner=NULL;
     if (candidate->generic_btf_value_symbolic != NULL) {
       trilinos_klu_l_free_symbolic(
         &candidate->generic_btf_value_symbolic,
@@ -14287,6 +14363,10 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
       status == KLS_OK &&
       candidate->selected_ordering == KLS_ORDERING_AMF3 &&
       kls_amf3_span_variant_selected;
+    candidate->auto_amf_exact=status==KLS_OK &&
+      candidate->selected_ordering==KLS_ORDERING_AMF3 && kls_amf3_exact_selected;
+    kls_amf3_exact_selected=0;
+    if(status==KLS_OK)kls_auto_exact_candidate(candidate,options);
     kls_amf3_span_variant_selected = 0;
     free(candidate->block_order_perm);
     candidate->block_order_perm = kls_block_order_proposal;
@@ -14762,6 +14842,14 @@ static int select_candidate(kls_pattern_candidate *normal,
 #include "kls_small_btf_ordering.inc"
 
 static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate) {
+  solver->auto_amf_owner=candidate->auto_amf_owner;
+  solver->auto_amf_fallback=candidate->auto_amf_fallback;candidate->auto_amf_fallback=NULL;
+  solver->auto_amf_fallback_common=candidate->auto_amf_fallback_common;
+  solver->auto_amf_fallback_ordering=candidate->auto_amf_fallback_ordering;
+  kls_separator_analysis_move(&solver->auto_amf_fallback_separator,&candidate->auto_amf_fallback_separator);
+  solver->auto_amf_exact=candidate->auto_amf_exact &&
+    candidate->auto_amf_owner==candidate->symbolic;
+  solver->auto_amf_analysis_seconds=candidate->auto_amf_analysis_seconds;
   kls_small_btf_fallback_clear(&solver->small_btf_fallback);
   solver->small_btf_fallback=candidate->small_btf_fallback;
   memset(&candidate->small_btf_fallback,0,sizeof(candidate->small_btf_fallback));
@@ -14814,6 +14902,24 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
     candidate->symbolic = NULL;
     return;
   }
+}
+
+/* A failed exact-bound factor may restore only the symbolic it displaced.
+ * Any independent symbolic replacement revokes that lease. */
+static int kls_auto_amf_restore(kls_solver *s) {
+  if(!s || !s->auto_amf_fallback || s->symbolic!=s->auto_amf_owner)return 0;
+  kls_metis_race_abandon(s);
+  free_numeric(s);
+  trilinos_klu_l_free_symbolic(&s->symbolic,&s->common);
+  kls_separator_analysis_clear(&s->separator);
+  s->symbolic=s->auto_amf_fallback;s->auto_amf_fallback=NULL;
+  s->common=s->auto_amf_fallback_common;
+  kls_separator_analysis_move(&s->separator,&s->auto_amf_fallback_separator);
+  s->stats.selected_ordering=s->auto_amf_fallback_ordering;
+  s->auto_amf_owner=NULL;s->auto_amf_exact=0;s->generic_amf3_span_variant_selected=0;
+  s->generic_nd_portfolio_selected=0;
+  kls_invalidate_factor_etree_stats(s);
+  return 1;
 }
 
 /* A pre-numeric ND choice is provisional until the ordinary predicted-factor

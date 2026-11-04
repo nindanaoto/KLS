@@ -52,6 +52,19 @@ static int check_build(int n,int transpose,int csr,int alias,int reject) {
   if(!p.starts||!p.counts)return 4;
   for(UF_long block=0;block<incumbent->nblocks;++block) {
     kls_snb_block *blk=&incumbent->blocks[block];
+    /* Distinct producer below rows must map injectively into the target. */
+    for(int64_t j=0;j<blk->snode_count;++j) {
+      const kls_snb_snode *target=&blk->snodes[j];
+      for(int32_t e=0;e<target->edge_count;++e) {
+        const kls_snb_edge *edge=&blk->edges[target->edges_off+e];
+        const kls_snb_snode *producer=&blk->snodes[edge->producer];
+        const int32_t *dest=blk->edge_dsts+edge->dst_off;
+        for(int32_t r=0;r<producer->below;++r) if(dest[r]>=0) {
+          if(dest[r]>=target->height)return 49;
+          for(int32_t prior=0;prior<r;++prior)if(dest[prior]==dest[r])return 50;
+        }
+      }
+    }
     p.counts[block]=blk->snode_count;
     for(int64_t j=0;j<blk->snode_count;++j)p.starts[blk->k1+j]=blk->snodes[j].start;
   }

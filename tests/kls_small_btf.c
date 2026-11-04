@@ -9,9 +9,11 @@ static _Thread_local unsigned long long small_btf_proposals,small_btf_selected;
 #define KLS_SMALL_BTF_AUTO_TEST_EVENT(c,trial,score,accepted) ((void)(c),(void)(trial),(void)(score),++small_btf_proposals,small_btf_selected+=(accepted))
 static _Thread_local int small_btf_fail_pattern;
 #define KLS_SMALL_BTF_PATTERN_MALLOC(n) (small_btf_fail_pattern ? (small_btf_fail_pattern=0,(void*)0) : malloc(n))
+static _Thread_local unsigned long long singleton_calls;
+#define KLS_COMPACT_BTF_SINGLETON_TEST_EVENT() (++singleton_calls)
 #include "../src/kls.c"
 #include "kls_small_btf_oracles.inc"
 #define KLS_SCALED_BTF_MAPPED_TEST 1
 #include "kls_small_btf_native.inc"
 #include "kls_small_btf_selection.inc"
-int main(void) {if(native_btf_checks())return 1;return small_btf_selection_checks();}
+int main(void) {if(native_btf_checks())return 1;int result=small_btf_selection_checks();if(!singleton_calls){fprintf(stderr,"singleton branch was not exercised\n");return 1;}return result;}

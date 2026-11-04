@@ -113,3 +113,6 @@
 #define KLS_FAST_FACTOR_PIPELINE_REFACTOR_MIN_SHARE 0.95
 
 #endif /* KLS_TUNING_INC */
+
+/* Bounded initial consultation allowance in successful call equivalents. */
+#define KLS_SNB_AUTO_EARLY_CALL_ALLOWANCE 8.0
