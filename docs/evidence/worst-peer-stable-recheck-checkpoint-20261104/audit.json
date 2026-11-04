@@ -1,0 +1,897 @@
+{
+  "recorded_acceptance_policy": "worst-peer-v1",
+  "acceptance_policy": "worst-peer-v1",
+  "acceptance_gate": false,
+  "hybrid_gate": false,
+  "hybrid": {
+    "passed": false,
+    "complete": true,
+    "incremental_passed": false,
+    "worst_ratio": 1.3644906119848927,
+    "peer_wins": 40,
+    "regressions": [
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 8,
+        "lost_peer_wins": []
+      }
+    ]
+  },
+  "all_qualified": true,
+  "observations": 462,
+  "errors": [],
+  "cells": [
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.997177718743326,
+      "wall_median": 0.9918593833181348
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.1267951181839848,
+      "median": 1.1297895500592883,
+      "wall_median": 1.0142046514905272
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.7373589499401598,
+      "median": 0.7305888928270967,
+      "wall_median": 0.9679881630562066
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9768798327353032,
+      "wall_median": 0.9921953277539299
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.1968524644310663,
+      "median": 0.19325985229355358,
+      "wall_median": 0.7161615958795067
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.47817334714058213,
+      "median": 0.467644992637019,
+      "wall_median": 0.9083059507535834
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9906910459605911,
+      "wall_median": 0.9949008576266278
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.003922464800241,
+      "median": 0.9949582969863274,
+      "wall_median": 1.0015070702999243
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.535597933056938,
+      "median": 0.5274336562381515,
+      "wall_median": 0.8995492298927985
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.040479884680733,
+      "wall_median": 1.002385498770777
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.191963377322427,
+      "median": 1.2238849455166694,
+      "wall_median": 1.0186167013998457
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 1.0311403395383087,
+      "median": 1.058261452859287,
+      "wall_median": 0.9955543988061897
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.0000423834914576,
+      "wall_median": 0.9982447334718588
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.0568343325660345,
+      "median": 1.0549325976529738,
+      "wall_median": 1.0151590434710873
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.6383562256365245,
+      "median": 0.6393398896007124,
+      "wall_median": 0.8923933449679751
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9977756571097913,
+      "wall_median": 0.9962721503064127
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.1356619461654804,
+      "median": 1.1196211003938437,
+      "wall_median": 1.0207509265895003
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 1.0248563555595236,
+      "median": 1.0287931687111467,
+      "wall_median": 1.0058820885576285
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.000730175091167,
+      "wall_median": 0.9977721565445667
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.915621678445212,
+      "median": 0.9174020639679356,
+      "wall_median": 0.9854107167923749
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.5468742952814836,
+      "median": 0.548233124869556,
+      "wall_median": 0.8718524446500295
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9885819043283648,
+      "wall_median": 0.9932003815603183
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.8862487826256726,
+      "median": 0.8721014784094965,
+      "wall_median": 0.9849593686896241
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.765950891576916,
+      "median": 0.752996077126344,
+      "wall_median": 0.9629512683041873
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9972471487876222,
+      "wall_median": 0.9959846308235334
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.040912316149568,
+      "median": 1.0404930922138051,
+      "wall_median": 1.0041333173886193
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.7090668991707196,
+      "median": 0.7070836751503753,
+      "wall_median": 0.9379513110455651
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.984755344809817,
+      "wall_median": 1.0063404906052298
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.16355577202702282,
+      "median": 0.16281631139335534,
+      "wall_median": 0.5406747521861988
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.9532748375313529,
+      "median": 0.9317684355941249,
+      "wall_median": 0.9898308250595904
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.004572311302605,
+      "wall_median": 1.0011938368696067
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.9492246756069869,
+      "median": 0.9555437120112806,
+      "wall_median": 0.9999720665906984
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.512089550168711,
+      "median": 0.5144204701222708,
+      "wall_median": 0.9151738891480976
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9972752091205275,
+      "wall_median": 1.0054804825059769
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.15673141895408588,
+      "median": 0.15630608819575206,
+      "wall_median": 0.7028004583651417
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.9280832292980188,
+      "median": 0.9255558764493461,
+      "wall_median": 0.9963020436406999
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9984805196361741,
+      "wall_median": 0.9997036646985096
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.8385288162030606,
+      "median": 0.838463103363471,
+      "wall_median": 0.9012972926301237
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.5335052943609995,
+      "median": 0.5329706540545374,
+      "wall_median": 0.6629899802016335
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9494047953519246,
+      "wall_median": 0.9926841896549624
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.9389007341839786,
+      "median": 0.8911877027740102,
+      "wall_median": 0.9719382373622282
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 1.0452471837063917,
+      "median": 0.9662813240103347,
+      "wall_median": 0.9969420792670712
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.0027602170505001,
+      "wall_median": 0.999689168963522
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.1534265855196135,
+      "median": 1.1548043147878977,
+      "wall_median": 1.0146103001478384
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.7356499589627702,
+      "median": 0.7409019131229952,
+      "wall_median": 0.9634302542896173
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.0003242884458796,
+      "wall_median": 0.9983970886684326
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.20833725813921486,
+      "median": 0.20843555714939624,
+      "wall_median": 0.7293619899371091
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.45185647614424707,
+      "median": 0.4515028921295209,
+      "wall_median": 0.8785721061998117
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9862719885301128,
+      "wall_median": 0.9891735689437249
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.0282950596101643,
+      "median": 1.0143088804419453,
+      "wall_median": 1.005258443850478
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.5360631122407834,
+      "median": 0.52530096078225,
+      "wall_median": 0.8878599413340644
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.0044645911598717,
+      "wall_median": 0.9942621707876622
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.5695463103089577,
+      "median": 0.6037321160308013,
+      "wall_median": 0.9267770155409107
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 1.1162448505600702,
+      "median": 1.0983713307284422,
+      "wall_median": 1.0012566711236621
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9989611842452646,
+      "wall_median": 0.9817641540621176
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.1243559194677695,
+      "median": 1.1231810232920412,
+      "wall_median": 1.0433372241538637
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.5668084014913408,
+      "median": 0.5662171373632483,
+      "wall_median": 0.842672721469971
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9940220338642547,
+      "wall_median": 0.9770651899549518
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.9006859845485448,
+      "median": 0.8923040931450805,
+      "wall_median": 1.0133357657791222
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 1.0428131477014126,
+      "median": 1.0436281783219867,
+      "wall_median": 0.9910954003099607
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9901942256835525,
+      "wall_median": 0.9608617605764441
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.9001179513997932,
+      "median": 0.8885876797074824,
+      "wall_median": 0.9504911578498316
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.4393875869860565,
+      "median": 0.4337569308787744,
+      "wall_median": 0.7706835107877206
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9863236448758543,
+      "wall_median": 0.9498720494761641
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.6498442361506261,
+      "median": 0.6448256999014372,
+      "wall_median": 0.9321750395964041
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.642476044630063,
+      "median": 0.6335864791546533,
+      "wall_median": 0.9064027375563268
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.0048537934472597,
+      "wall_median": 0.9944378735638091
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.0570329978555466,
+      "median": 1.051990140303755,
+      "wall_median": 0.9994594070429972
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.7211968103036422,
+      "median": 0.718588425574771,
+      "wall_median": 0.932040062240743
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9938647263657397,
+      "wall_median": 0.9909617822324366
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.15161515172313747,
+      "median": 0.1519775546040385,
+      "wall_median": 0.516272648682991
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.9004971212368262,
+      "median": 0.89542621645786,
+      "wall_median": 0.9716844513747391
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 1.0027196949166988,
+      "wall_median": 0.9989901382796743
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.9444379435587833,
+      "median": 0.9463512113819128,
+      "wall_median": 0.9985653043593001
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.507154746273016,
+      "median": 0.5081767416036828,
+      "wall_median": 0.9169482569956338
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.988496758285659,
+      "wall_median": 0.9925781465959448
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.13589673282210546,
+      "median": 0.13429189573802786,
+      "wall_median": 0.6633931307558414
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.9445102358008799,
+      "median": 0.9107723785391972,
+      "wall_median": 0.983170798927596
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.9947693734966031,
+      "wall_median": 0.9995841023722813
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 0.9251886531550686,
+      "median": 0.9214403783360254,
+      "wall_median": 0.9628695534161749
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 0.5904929140135877,
+      "median": 0.5863317212029266,
+      "wall_median": 0.7100622404915128
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "baseline_peer_median": 1.0,
+      "median": 0.8892404900721678,
+      "wall_median": 0.9493710208935171
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "baseline_peer_median": 1.30315101405535,
+      "median": 1.174801473670244,
+      "wall_median": 1.076854392582112
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "baseline_peer_median": 1.5335479222965909,
+      "median": 1.3644906119848927,
+      "wall_median": 1.1298679480917113
+    }
+  ],
+  "policy_reassessment": false,
+  "assessor_sha256": "ccf938738e8df067b90f747221b42836dd427a896c1ddea076f86f2d9aabf344",
+  "incremental_gate": false,
+  "all56_peer_wins": false,
+  "input_sha256": {
+    "/tmp/kls-worst-peer-v51-composed-link/Xyce": "e7dfd4e7cb47a83f68e5b1a8c941e7988fe3b0d1b1f12544d94c4f776eeb4e47",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-initial/binaries/baseline": "e7dfd4e7cb47a83f68e5b1a8c941e7988fe3b0d1b1f12544d94c4f776eeb4e47",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-link/Xyce": "4dfb9fef9d7aa5901306d06c2d8b64b06064614e6b97ed41c655ad4bebc8717b",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-initial/binaries/candidate": "4dfb9fef9d7aa5901306d06c2d8b64b06064614e6b97ed41c655ad4bebc8717b",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/scripts/run_worst_peer_campaign.py": "1fefe2c7aa3338e1eff8054efbab2bba78e950209b32856b9a1246e4e50cb1a3",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/scripts/worst_peer_gate.py": "ebe0ab0f34a34c79ccb2ecdabac19091860ff7954723ea0766d842a330d4831e",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/bench/process_session_cleanup.py": "6785b28f427bdaf5d5776f9c11df2d3b3e7a2d5ddef0ed9ee6eed1ff108e53e6",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/scripts/auto_btf_merge_gate.py": "8847b2d93052514d8356721559ef7ce92a21b7ff91e36a238f9419db8b3b5b59",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/build/kls-xyce-private.sif": "23503f55a69b0ec342abd7f82a65e4b22ff5482e0eac0090bafd6fa0175ebd2c",
+    "/tmp/kls-goal-cktso/cktso.lic": "1c2b48a6fad102a3c1bb58df30c827a4f0e82f1d56acdfb8a40830fa0bf20d91",
+    "/tmp/kls-xyce-regression/TestScripts/xyce_verify.pl": "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
+    "/tmp/kls-xyce-regression/Netlists/CircuitSim90/MOS2_LARGE/ram2k.cir": "67ccac70d1c253d20bdeea6f15877d4222de43cc102a377c9990cd1e94a23818",
+    "/tmp/kls-xyce-regression/Netlists/NEURON/rallpack3.cir": "245376a06cadaaa01c20b5fd805ddca478f7366d60ba2fdfddbbea6b0987f779",
+    "/tmp/kls-xyce-regression/Netlists/CircuitSim90/MOS2_LARGE/dac.cir": "daff3bedde91fafd24d5a4123738d7845cd2f067d1c918f73dc07f8d9c3ab637",
+    "/tmp/kls-xyce-regression/Netlists/CircuitSim90/MOS2/mux8.cir": "68e478bafb2daf900300d319c665e63e9482afa6766573fee913c8a033f1e2bc",
+    "/tmp/kls-xyce-regression/Netlists/CircuitSim90/MOS2_LARGE/mem_plus.cir": "8018590341994b176a192a86b448166bd33d1d3b1d7d733af8ffffe355d2dbed",
+    "/tmp/kls-xyce-regression/Netlists/MOS13_IC/invert50_mos1.cir": "0fcf0679468068146ae72ef6ace3547a8b9cec513913c0323f36d02afc2fb479",
+    "/tmp/kls-xyce-regression/Netlists/PDE_2D_BJT/invertbjt.cir": "7ac6f2d1807596d3bdd8fb92c31678b960e74a861097ef56d95e792a91a99be4",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/cktso/rocky8_x64_gcc850/libcktso.so": "3243a882ed5b10bdac897ac0db6cf2b712a46bd4ea1c9c531080a6ff182b0adf",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/SubtreeLU/lib/libsubtree_lu.so": "cd3b7f78bd2cfffb075725c790d9649033dc15235c9132760b35441c75c0e542",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-link/build.json": "d740d8a88892d9b747d1817af1343664304e713bea290f5f258e65b242f82a83",
+    "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/scripts/audit_worst_peer_campaign.py": "ccf938738e8df067b90f747221b42836dd427a896c1ddea076f86f2d9aabf344",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-initial/metadata.json": "5ca342a501b76373442858be2cbc51931bdc5c39a84fc80099f929ee1c404d01",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-initial/observations.jsonl": "08699f13696a12a34894b54f6be67c45a8e923d5e0f98e93df982011e6251415"
+  },
+  "separate_confirmation_required": true
+}

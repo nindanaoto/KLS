@@ -1,0 +1,24 @@
+{
+  "reviewed_utc": "2026-11-04T19:28:29.326848+00:00",
+  "checkpoint_eligible": true,
+  "main_wins": 39,
+  "candidate_wins": 40,
+  "main_worst_ratio": 1.5335479222965909,
+  "candidate_worst_ratio": 1.3644906119848927,
+  "all_84_cells_independently_agree": true,
+  "all_462_observations_qualified": true,
+  "runtime_inputs_match": 135,
+  "test_inputs_match": 86,
+  "qualification_passed": true,
+  "abi_equal": true,
+  "baseline_is_current_main": true,
+  "goal_complete": false,
+  "evidence_sha256": {
+    "/tmp/kls-worst-peer-v111-aligned-candidate-initial/summary.json": "ba15a344fe7ed59be79c6c7d9100d0f2b75065960373a3982566977b9f0a7a68",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-initial-audit/audit.json": "0a12ada5647f9a9ccbeb654a1d1ce3cea038ec41896aa58724af9507b8dcbe03",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-controller/checkpoint.json": "cac027a9d992cf75a2e67cc54f7688a7c2141007a952d53328d483ab66f3d4d7",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-core/completed.json": "f15a896c583b8015e231238d114f7c2b211aa242b0449fbac5a653a98fa82266",
+    "/tmp/kls-worst-peer-v111-aligned-candidate-controller/abi.json": "0b95ca7844a3c001ced0186a1226d22f74cee2f15bfbfd6ea30ab6189dbef5eb",
+    "/tmp/kls-v111-checkpoint-review.py": "61aed7b8664e93e5224649ebc889861668de89c7b44123da46058851d40e1773"
+  }
+}

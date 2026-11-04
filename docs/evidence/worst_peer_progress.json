@@ -24,11 +24,9 @@
     "worst_peer_broad_gate": 6
   },
   "pending": [
-    "Monitor composed v51 controller session97030: full qualification, link/ABI check, complete initial peer campaign and independent audit are queued sequentially under quiet timing protocol.",
-    "Implement and qualify a candidate that closes residual BJT, DAC, memory and serial peer losses while preserving default certification and public options",
-    "Run two fresh complete opposite-order 56-peer-comparison campaigns, independent audits, and matching binary/input pin confirmation",
-    "Run full original 110-matrix broad candidate/baseline comparison plus fresh peer evidence for every >2% regression, with independent audit",
-    "Selectively compose proven changes into main worktree, qualify composed source, verify ABI and all gates, then commit"
+    "Close remaining CKTSO/SubtreeLU losses while applying the user-authorized incremental merge rule",
+    "Run fresh complete opposite-order peer confirmation for the eventual full winner",
+    "Run original 110-matrix broad comparison and fresh peer evidence for any material regression, preserving all failed and timeout rows"
   ],
   "baseline_native_tests": 55,
   "baseline_src_files_match_main": 34,
@@ -4380,5 +4378,18 @@
     "evidence": "docs/evidence/worst-peer-checkpoint-20261104/checkpoint.json",
     "research_preserved_on": "work/worst-peer-20261104",
     "full_optimization_goal_complete": false
+  },
+  "latest_checkpoint": {
+    "evidence": "docs/evidence/worst-peer-stable-recheck-checkpoint-20261104",
+    "implementation_commit": "9477c35d960d55298c7e850951468e01a94b6b65",
+    "baseline_commit": "b5d984cb",
+    "user_merge_criterion": "More wins, or lower worst ratio with equal wins; user-authorized incremental merge checkpoint",
+    "peer_wins": 40,
+    "baseline_peer_wins": 39,
+    "worst_ratio": 1.3644906119848927,
+    "baseline_worst_ratio": 1.5335479222965909,
+    "qualification": "native70 portable70 ASan/UBSan70 scopedTSan13 plus runtime controls",
+    "all56_peer_wins": false,
+    "goal_complete": false
   }
 }

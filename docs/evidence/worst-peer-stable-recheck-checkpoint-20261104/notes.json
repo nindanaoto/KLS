@@ -1,0 +1,36 @@
+{
+  "implementation_commit": "9477c35d960d55298c7e850951468e01a94b6b65",
+  "baseline_commit": "b5d984cb",
+  "goal_complete": false,
+  "scope": "User-authorized incremental main checkpoint; local merge only",
+  "features": [
+    "Eight-column row panels for width-16 owned SNB targets, admitted against retained resident streams and execution-domain cache capacity",
+    "Column mirrors and local underflow repair; joined fallback recomputes current A before publishing a declined transaction",
+    "Unchanged incumbent column hot kernel isolated from generic transaction addressing",
+    "At most one late eight-call ABBA recheck after a sustained sixteen-call median slowdown; original setup budget retained",
+    "Explicit masked-TRSM fixture metadata alignment preserves strict ASan fake-stack coverage"
+  ],
+  "tests": {
+    "native": 70,
+    "portable": 70,
+    "asan_ubsan": 70,
+    "tsan": 13,
+    "tsan_clean_control": "pass",
+    "tsan_intentional_race_control": "detected expected race"
+  },
+  "all56_peer_wins": false,
+  "independent_opposite_order_confirmation": false,
+  "broad110_complete": false,
+  "remaining": "Close residual peer losses; obtain full opposite-order confirmation and original 110-matrix peer-aware validation before claiming the full goal complete.",
+  "source_files": {
+    "summary.json": "ba15a344fe7ed59be79c6c7d9100d0f2b75065960373a3982566977b9f0a7a68",
+    "audit.json": "0a12ada5647f9a9ccbeb654a1d1ce3cea038ec41896aa58724af9507b8dcbe03",
+    "checkpoint.json": "cac027a9d992cf75a2e67cc54f7688a7c2141007a952d53328d483ab66f3d4d7",
+    "qualification.json": "f15a896c583b8015e231238d114f7c2b211aa242b0449fbac5a653a98fa82266",
+    "qualified-source.json": "2327d7c7e777a6abdc8ba720fd9ddc0dfe973acf5725a3d14ec6ef6d50675eb3",
+    "abi.json": "0b95ca7844a3c001ced0186a1226d22f74cee2f15bfbfd6ea30ab6189dbef5eb",
+    "review.json": "4986edf102bad266b046d6e542115ca7d45963313df82057153c4fd9356d47bd",
+    "integrated-runtime-sha256.json": "5562802f5e2c650187869a2991209d60e70d0050072b0489348c712885d1bb0f",
+    "integration-preflight.json": "1f65522ef5409d2eac0e5c66f715ca69f4b2c563aef593cd9cb5480db4dbe9dd"
+  }
+}
