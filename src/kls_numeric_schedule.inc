@@ -34,6 +34,7 @@ static void kls_snb_destroy(kls_snb_state *st) {
   if (st->blocks != NULL) {
     for (UF_long b = 0; b < st->nblocks; ++b) {
       kls_snb_block *blk = &st->blocks[b];
+      if(blk->snodes)for(int64_t j=0;j<blk->snode_count;++j)free(blk->snodes[j].column_panel);
       free(blk->snodes);
       free(blk->col2snode);
       free(blk->below_rows);
@@ -147,6 +148,7 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
   kls_snb_state *st = (kls_snb_state *)calloc(1u, sizeof(*st));
   if (st == NULL) return NULL;
   st->allocation_bytes = sizeof(*st);
+  atomic_init(&st->declined,0);
   st->wnarrow = 8;
   st->wmax = solver->options.backend==KLS_BACKEND_AUTO &&
     solver->options.threads==1 && solver->auto_amf_exact ? 16 : 32;
@@ -853,6 +855,10 @@ static int kls_snb_prepare(kls_solver *solver) {
 /* Record the first (lowest-index) singular pivot seen this refactor. */
 static void kls_snb_record_singular(kls_snb_state *st, kls_solver *solver,
                                     UF_long gk) {
+  if(st->transactional) {
+    atomic_store_explicit(&st->declined,1,memory_order_release);
+    atomic_store_explicit(&st->failed,1,memory_order_release);
+  }
   int64_t seen = atomic_load_explicit(&st->singular_rank,
                                       memory_order_relaxed);
   while ((seen < 0 || (int64_t)gk < seen) &&
@@ -1056,21 +1062,20 @@ static KLS_ALWAYS_INLINE int32_t kls_snb_narrow_columns(
 
 #include "kls_snb_register_trsm.inc"
 
-static KLS_ALWAYS_INLINE void kls_snb_update_edge(
+static KLS_ALWAYS_INLINE void kls_snb_update_edge_to(
   const kls_snb_block *blk, const kls_snb_snode *sn,
   const kls_snb_edge *edge, int wnarrow,
-  double *gemm_scratch) {
+  double *gemm_scratch,double *W) {
   const kls_snb_snode *ps = &blk->snodes[edge->producer];
   const int32_t w = sn->width;
   const int32_t H = sn->height;
-  double *W = blk->panels + sn->panel;
   const int32_t ph = ps->below;
   const int32_t sc = edge->sub_count;
   const int32_t *sub = blk->subcols + edge->sub_off;
   const int32_t *dsts = blk->edge_dsts + edge->dst_off;
   const int32_t ustart = edge->u_start;
   const int32_t pld = ps->height;
-  const double *Ldiag = blk->panels + ps->panel + ps->uw;
+  const double *Ldiag = (ps->column_panel?ps->column_panel:blk->panels + ps->panel) + ps->uw;
   const double *Lbelow = Ldiag + ps->width;
   if (sc < wnarrow) {
     const int32_t first=kls_snb_narrow_columns(W,H,w,Ldiag,Lbelow,pld,sub,sc,dsts,ph,ustart);
@@ -1177,15 +1182,51 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
       if (dsts[r] >= 0) W[(size_t)c * H + dsts[r]] -= T[(size_t)c * ph + r];
 }
 
+static KLS_ALWAYS_INLINE void kls_snb_update_edge(
+    const kls_snb_block *blk,const kls_snb_snode *sn,
+    const kls_snb_edge *edge,int wnarrow,double *scratch) {
+  kls_snb_update_edge_to(blk,sn,edge,wnarrow,scratch,blk->panels+sn->panel);
+}
+
+#include "kls_snb_row_panel.inc"
+#include "kls_snb_row_layout.inc"
+
+/* Only newly executed row arithmetic is speculative. Completed incumbent
+ * column kernels may legitimately underflow; keep their sticky flags apart
+ * while checking each row target in a clean local flag frame. */
+static _Thread_local unsigned kls_snb_column_mxflags;
+static _Thread_local int kls_snb_column_flags;
+static KLS_ALWAYS_INLINE void kls_snb_row_transaction_begin(void) {
+#if defined(__x86_64__) || defined(__i386__)
+  const unsigned mx=_mm_getcsr();
+  kls_snb_column_mxflags|=mx&63u;
+  kls_snb_column_flags|=fetestexcept(FE_ALL_EXCEPT);
+  __asm__ volatile("fnclex":::"memory");
+  _mm_setcsr(mx&~63u);
+#endif
+}
+static KLS_ALWAYS_INLINE int kls_snb_transaction_bad_flags(void) {
+#if defined(__x86_64__) || defined(__i386__)
+  unsigned short x87;__asm__ volatile("fnstsw %0":"=am"(x87));
+  return (x87|_mm_getcsr())&0x1fu;
+#else
+  return 1;
+#endif
+}
+
 /* Process one supernode: panel compute (memset, A-scatter program, edge
  * updates, fused no-pivot getrf) followed by an immediate writeback of
  * its member columns into the packed numeric, so consumers that read
  * LUbx (including a future pipelined tail) always see finished columns.
  * Thread-safe across distinct snodes of one level. */
-static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
+static KLS_ALWAYS_INLINE int64_t kls_snb_row_to_column_index(int H,int64_t at) {
+  const int64_t group=at/((int64_t)8*H),local=at%((int64_t)8*H);
+  return (group*8+(local&7))*H+local/8;
+}
+static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
                                    kls_snb_block *blk, int64_t s,
                                    const double *az, const double *rs,
-                                   int scale, double *gemm_scratch, int pipelined) {
+                                   int scale, double *gemm_scratch, int pipelined,int column_repair) {
   const UF_long k1 = blk->k1;
   double *panels = blk->panels;
   double *offx = (double *)solver->numeric->Offx;
@@ -1195,7 +1236,8 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
   const int32_t w = sn->width;
   const int32_t H = sn->height;
   const int32_t uw = sn->uw;
-  double *W = panels + sn->panel;
+  double *W = column_repair?sn->column_panel:panels+sn->panel;
+  if(st->transactional&&st->row_layout&&w==16&&!column_repair)kls_snb_row_transaction_begin();
   memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
   for (int32_t c = 0; c < w; ++c) {
     const UF_long gk = k1 + sn->start + c;
@@ -1207,9 +1249,9 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
     }
     for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
          ++p) {
-      panels[st->blk[p].dst] =
-        scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
-                  : az[st->blk[p].src];
+      const double value=scale>0?az[st->blk[p].src]/rs[st->blk[p].oldrow]:az[st->blk[p].src];
+      if(column_repair)W[kls_snb_row_to_column_index(H,st->blk[p].dst-sn->panel)]=value;
+      else panels[st->blk[p].dst]=value;
     }
   }
   const kls_snb_edge *edges = blk->edges + sn->edges_off;
@@ -1226,10 +1268,30 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
         kls_cpu_relax();
       }
     }
-    kls_snb_update_edge(blk, sn, &edges[e], wnarrow,
-                        gemm_scratch);
+    if(column_repair)kls_snb_update_edge_to(blk,sn,edges+e,wnarrow,gemm_scratch,W);
+    else
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+    if(st->row_layout&&w==16&&!column_repair) {
+      if(!kls_rpanel_edge(blk,sn,edges+e,wnarrow,W,
+          blk->snodes[edges[e].producer].width==16,st->row_product_math)) {
+        atomic_store_explicit(&st->declined,1,memory_order_release);
+        atomic_store_explicit(&st->failed,1,memory_order_release);return;
+      }
+    } else if(st->row_layout&&blk->snodes[edges[e].producer].width==16)
+      kls_rpanel_small_target_edge(blk,sn,edges+e,wnarrow,st->row_product_math,gemm_scratch);
+    else
+#endif
+      kls_snb_update_edge(blk, sn, &edges[e], wnarrow,gemm_scratch);
   }
   /* fused no-pivot getrf/TRSM */
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+  if(st->row_layout&&w==16&&!column_repair) {
+    double diagonal[16];int singular=kls_rpanel_getrf(W,H,uw,diagonal);
+    if(sn->column_panel)kls_rpanel_to_columns(W,H,sn->column_panel);
+    for(int i=0;i<16;++i)udiag[k1+sn->start+i]=diagonal[i];
+    if(singular>=0)kls_snb_record_singular(st,solver,k1+sn->start+singular);
+  } else
+#endif
   {
     double *diag = W + uw;
 
@@ -1244,7 +1306,7 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       double *lsub = ci + i + 1;
       for (int32_t r = 0; r < hrem; ++r) lsub[r] /= pivot;
 
-      if (pipelined) {
+      if (pipelined && !st->transactional) {
         atomic_store_explicit(&blk->published[s], i + 1,
                               memory_order_release);
       }
@@ -1259,6 +1321,9 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
       }
     }
   }
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+  if(column_repair)kls_rpanel_from_columns(W,H,panels+sn->panel);
+#endif
   /* immediate writeback of this snode's columns */
   {
     trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -1267,21 +1332,59 @@ static void kls_snb_process_target(kls_solver *solver, kls_snb_state *st,
     const UF_long *uip = numeric->Uip + k1;
     const UF_long *ulen = numeric->Ulen + k1;
     double *lu = (double *)numeric->LUbx[blk - st->blocks];
-    const double *base = panels + sn->panel;
+    const double *base = W;
     for (int64_t k = sn->start; k < sn->start + sn->width; ++k) {
       const int32_t *wb = blk->writeback + blk->wb_col_off[k];
       int64_t wc = 0;
       UF_long *ri; double *rv; UF_long rl;
       kls_klu_get_pointer(lu, lip, llen, (UF_long)k, &ri, &rv, &rl);
       for (UF_long p = 0; p < rl; ++p) {
-        rv[p] = base[wb[wc++]];
+        const int32_t at=wb[wc++];
+        rv[p]=base[column_repair?kls_snb_row_to_column_index(H,at):at];
       }
       kls_klu_get_pointer(lu, uip, ulen, (UF_long)k, &ri, &rv, &rl);
       for (UF_long p = 0; p < rl; ++p) {
-        rv[p] = base[wb[wc++]];
+        const int32_t at=wb[wc++];
+        rv[p]=base[column_repair?kls_snb_row_to_column_index(H,at):at];
       }
     }
   }
+  if(st->transactional) {
+#ifdef KLS_SNB_TRANSACTION_AFTER_WRITEBACK
+    KLS_SNB_TRANSACTION_AFTER_WRITEBACK(solver,s);
+#endif
+    unsigned bad_flags=kls_snb_transaction_bad_flags();
+    if(!st->row_layout||w!=16||column_repair)bad_flags&=~0x10u; /* Incumbent underflow. */
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+    if(bad_flags==0x10u&&st->row_layout&&w==16&&!column_repair&&
+       !atomic_load_explicit(&st->failed,memory_order_acquire)) {
+      /* Discard only this target's speculative flags. Its completed producers
+       * remain published; the mirror rerun uses ordinary column kernels and
+       * current A. No consumer observes a partially repaired row panel. */
+      __asm__ volatile("fnclex":::"memory");_mm_setcsr(_mm_getcsr()&~63u);
+#ifdef KLS_SNB_ROW_UNDERFLOW_REPAIR
+      KLS_SNB_ROW_UNDERFLOW_REPAIR();
+#endif
+      kls_snb_process_target_impl(solver,st,blk,s,az,rs,scale,gemm_scratch,pipelined,1);
+      return;
+    }
+#endif
+    if(bad_flags) {
+      atomic_store_explicit(&st->declined,1,memory_order_release);
+      atomic_store_explicit(&st->failed,1,memory_order_release);return;
+    }
+    if(pipelined)atomic_store_explicit(&blk->published[s],w,memory_order_release);
+  }
+}
+
+#include "kls_snb_column_target.inc"
+
+static void kls_snb_process_target(kls_solver *solver,kls_snb_state *st,
+    kls_snb_block *blk,int64_t node,const double *az,const double *rs,
+    int scale,double *scratch,int pipelined) {
+  if(!st->row_layout&&!st->transactional)
+    kls_snb_column_process_target(solver,st,blk,node,az,rs,scale,scratch,pipelined);
+  else kls_snb_process_target_impl(solver,st,blk,node,az,rs,scale,scratch,pipelined,0);
 }
 
 /* Shared prelude: scale recompute + singleton blocks + state reset. */
@@ -1368,6 +1471,7 @@ __attribute__((aligned(64)))
 static UF_long kls_snb_refactor(kls_solver *solver,
                                 const double *numeric_values) {
   kls_snb_state *st = solver->snb;
+  if(st->transactional)return 0; /* Owned, joined execution only. */
   const int scale = (int)solver->common.scale;
   if (!kls_snb_refactor_prelude(solver, numeric_values)) {
     return 0;
@@ -1656,6 +1760,7 @@ static UF_long kls_snb_refactor_parallel(kls_solver *solver,
                                          const double *numeric_values,
                                          int nthreads) {
   kls_snb_state *st = solver->snb;
+  if(st->transactional)return 0;
   if (st->slevel_ptr == NULL || st->slevel_count <= 0 ||
       st->seg_ptr == NULL || st->seg_count <= 0) {
     return kls_snb_refactor(solver, numeric_values);
@@ -1915,6 +2020,9 @@ static int kls_snb_try_refactor(kls_solver *solver,
       *ok_out=(UF_long)result;
       kls_set_last_refactor_path(solver,KLS_REFACTOR_PATH_SNB);return 1;
     }
+    /* A joined transaction decline may have written coefficient payloads,
+       but never native indices/counts or native workspaces. Discard its plan
+       and let the ordinary engine recompute current A in dependency order. */
     kls_snb_free(solver);
   }
 

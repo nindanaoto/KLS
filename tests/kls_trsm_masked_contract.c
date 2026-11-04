@@ -44,7 +44,8 @@ int main(void) {
       const int w=widths[wi];
       double *L=(double *)(map+span)-sc*sc;
       double *B=(double *)(map+2*span+page)-sc*w;
-      kls_snb_snode nodes[2]={{0}};
+      /* Make the vectorized metadata initializer alignment explicit. */
+      _Alignas(64) kls_snb_snode nodes[2]={{0}};
       nodes[0].width=sc; nodes[0].height=sc;
       nodes[1].width=w; nodes[1].height=sc;
       kls_snb_edge edge={0}; edge.sub_count=sc;

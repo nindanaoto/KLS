@@ -8216,6 +8216,7 @@ typedef struct kls_snb_snode {
   int64_t rows_off;
   int64_t edges_off;
   int32_t edge_count;
+  double *column_panel; /* Fresh mirror for column-layout consumers only. */
 } kls_snb_snode;
 
 typedef struct kls_snb_block {
@@ -8263,6 +8264,12 @@ typedef struct kls_snb_state {
   unsigned char *seg_coop; /* segment is a single cooperative snode */
   _Atomic int64_t singular_rank; /* min singular pivot seen this refactor */
   _Atomic int failed;            /* halt_if_singular tripped */
+  /* Optional owned transactions may decline after joined numeric work.
+     Native structure and workspaces remain suitable for recomputation. */
+  int transactional;
+  int row_layout;
+  int row_product_math;
+  _Atomic int declined;
   double coop_work_share; /* fraction in cooperative fat-chain snodes */
   uint64_t coop_min_doubles;
   size_t allocation_bytes; /* Requested retained bytes, including scratch. */

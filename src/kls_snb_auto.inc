@@ -44,9 +44,14 @@ static int kls_snb_auto_build(kls_solver *s) {
   const long double fallback_bytes=s->auto_amf_fallback?s->auto_amf_fallback_common.memusage:0;
   if(fallback_bytes>=s->snb_auto_memory_limit)return 0;
   const size_t limit=s->snb_auto_memory_limit-(size_t)fallback_bytes;
+#ifdef KLS_SNB_AUTO_TEST_BUILD
+  kls_snb_state *st=KLS_SNB_AUTO_TEST_BUILD(s,deadline,limit);
+#else
   kls_snb_state *st=kls_snb_build(s,NULL,deadline,limit);
+#endif
   s->snb_auto_candidate=st;
   int ok=st!=NULL && kls_snb_build_private(st,deadline,limit) &&
+    kls_snb_try_row_layout(s,st,deadline,limit) &&
     kls_now_seconds()<deadline &&
     ensure_egraph_refactor_pool(s,s->options.threads)!=NULL;
   if(ok && s->orientation==KLS_ORIENTATION_NORMAL) {
@@ -72,7 +77,7 @@ static __attribute__((noinline)) kls_snb_auto_call kls_snb_auto_before(kls_solve
     const double cleanup=kls_now_seconds();kls_snb_auto_drop(s);
     call.extra=kls_now_seconds()-cleanup;return call;
   }
-  if(s->snb_auto.choice!=3) {
+  if(s->snb_auto.choice!=3 || !s->snb_auto.rechecked) {
     if(!s->private_original_valid || !s->private_original ||
        !private_original_operator_input_order(s->private_original) ||
        s->private_original->nnz!=(size_t)s->nnz || !s->private_original->values) {
@@ -117,13 +122,17 @@ static __attribute__((noinline)) void kls_snb_auto_after(kls_solver *s,kls_snb_a
 #ifdef KLS_SNB_AUTO_TEST_SECONDS
   seconds=KLS_SNB_AUTO_TEST_SECONDS(call.arm,seconds);
 #endif
+  if(s->snb_auto.choice==3) {
+    (void)kls_snb_auto_recheck(&s->snb_auto,seconds);return;
+  }
   kls_snb_auto_sample(&s->snb_auto,1,clean,seconds);
   if(s->snb_auto.choice<0)kls_snb_auto_drop(s);
   else if(s->snb_auto.choice==3) {
     /* The final sample is incumbent. Publish only the decision; the next
        changed call executes fresh values in the retained representation. */
-    fprintf(stderr,"KLS_AUTO_SNB retained=1 incumbent=%.9g candidate=%.9g spent=%.9g\n",
+    fprintf(stderr,"KLS_AUTO_SNB retained=1 incumbent=%.9g candidate=%.9g spent=%.9g row_layout=%d\n",
       kls_snb_auto_median(s->snb_auto.seconds[0]),
-      kls_snb_auto_median(s->snb_auto.seconds[1]),s->snb_auto.spent);
+      kls_snb_auto_median(s->snb_auto.seconds[1]),s->snb_auto.spent,
+      s->snb_auto_candidate?s->snb_auto_candidate->row_layout:0);
   }
 }
