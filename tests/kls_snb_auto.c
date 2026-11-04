@@ -55,6 +55,24 @@ static size_t transaction_capture(kls_solver *s,double *out) {
  }
  memcpy(out+at,n->Offx,(size_t)n->Offp[s->n]*sizeof(double));return at+(size_t)n->Offp[s->n];
 }
+/* These checks require the candidate arithmetic to execute. Idle workers may
+ * briefly own the pool mutex while entering their wait; production correctly
+ * declines in that case. Warm a joined generation and keep this two-thread
+ * fixture polling so incidental wait transitions cannot skip the trial. Busy
+ * pool refusal is checked separately by kls_snb_stream. */
+static void auto_test_pool_noop(void *opaque,int tid) {(void)opaque;(void)tid;}
+static void auto_test_warm_pool(kls_solver *s) {
+ kls_egraph_refactor_pool *pool=ensure_egraph_refactor_pool(s,s->options.threads);
+ assert(pool&&pool->created_count==s->options.threads-1);
+ assert(!s->componentwise_work&&!s->componentwise_work_context);
+ atomic_store_explicit(&pool->worker_spin_iters,UINT_MAX,memory_order_relaxed);
+ assert(!pthread_mutex_lock(&pool->shared.lock));
+ pool->shared.solver=s;s->componentwise_work=auto_test_pool_noop;
+ kls_egraph_pool_dispatch_and_spin_wait(pool,&pool->shared,s->options.threads);
+ s->componentwise_work=NULL;s->componentwise_work_context=NULL;
+ assert(!atomic_load_explicit(&pool->active_workers,memory_order_acquire));
+ assert(!pthread_mutex_unlock(&pool->shared.lock));
+}
 static void exercise(int transpose,int transactional) {
  unsigned before_getrfs=atomic_load_explicit(&row_getrfs,memory_order_relaxed);
  unsigned before_edges=atomic_load_explicit(&row_edges,memory_order_relaxed);
@@ -70,6 +88,7 @@ static void exercise(int transpose,int transactional) {
     tests. Instrumentation and scheduler delays must not skip their kernels;
     the policy test separately checks fixed setup-credit boundaries. */
  s->snb_auto.factor_credit=1.;
+ auto_test_warm_pool(s);
  const kls_snb_auto_policy prepared=s->snb_auto;
  for(int other=0;other<3;++other) {
   int *active=other==0?&s->transpose_cycle.active:

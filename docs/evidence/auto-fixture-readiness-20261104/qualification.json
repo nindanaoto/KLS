@@ -1,0 +1,1 @@
+{"status": "passed", "profiles": ["native", "portable", "asan", "tsan"], "variants": ["main", "alignment"], "initial_programs": 8, "balanced_tsan_repeats": 50, "production_readiness_or_busy_pool_semantics_changed": false, "original_failures_preserved": true, "full_alignment_qualification": false}

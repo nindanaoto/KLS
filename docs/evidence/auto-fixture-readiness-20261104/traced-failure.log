@@ -1,0 +1,23 @@
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.0038411757 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00341518503 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00354946638 row_layout=1
+STREAM_DECLINE line=98
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00339293014 row_layout=1
+STREAM_DECLINE line=98
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00355596095 row_layout=1
+STREAM_DECLINE line=98
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00334772607 row_layout=1
+STREAM_DECLINE line=98
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00351231685 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00336475903 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00349242799 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00332501298 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00349440333 row_layout=1
+STREAM_DECLINE line=98
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00332775805 row_layout=1
+STREAM_DECLINE line=98
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00350495335 row_layout=1
+STREAM_DECLINE line=98
+STREAM_DECLINE line=113
+AUTO_TEST activation epoch=2 phase=1 choice=-1 spent=0.00340462383 limit=1.016 transpose=1 transactional=2
+test: /tmp/kls-worst-peer-v117-alignment-decline-diagnostic/tests/kls_snb_auto.c:106: exercise: Assertion `s->snb_auto.phase==epoch' failed.

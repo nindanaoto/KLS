@@ -1,0 +1,5 @@
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00378702069 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.0033387905 row_layout=1
+KLS_AUTO_SNB retained=1 incumbent=0.002 candidate=0.001 spent=0.00342003582 row_layout=1
+AUTO_TEST activation epoch=2 phase=1 choice=-1 spent=0.00327957002 limit=1.016 transpose=1 transactional=1
+tsan-kls_snb_auto: /tmp/kls-worst-peer-v115-node-alignment-diagnostic/source/tests/kls_snb_auto.c:96: exercise: Assertion `s->snb_auto.phase==epoch' failed.

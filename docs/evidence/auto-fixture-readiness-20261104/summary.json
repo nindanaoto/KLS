@@ -1,0 +1,35 @@
+{
+  "scope": "Test fixture only; no production source or benchmark change",
+  "cause": "A functional arithmetic test required all eight AUTO trial calls to execute, but an idle pool worker could transiently own the mutex. Traced stream decline at pthread_mutex_trylock safely fell back, then the phase assertion failed.",
+  "fix": "Warm one joined no-op pool generation with completion handshakes and keep the fixture workers polling before requiring candidate arithmetic. Production trylock and safe busy-pool fallback are unchanged.",
+  "main_runtime_files_unchanged": 135,
+  "test_sha256": "0089d1163f25f32aeee5f21149044dd1d8f45663fbd33eceb72cd9799c4bafbf",
+  "busy_pool_contract_test_unchanged": "2205aa759746785a128100696bdafe1e6050a0cfa55e6ff9e8b38c76cafee7fd",
+  "validation": {
+    "status": "passed",
+    "profiles": [
+      "native",
+      "portable",
+      "asan",
+      "tsan"
+    ],
+    "variants": [
+      "main",
+      "alignment"
+    ],
+    "initial_programs": 8,
+    "balanced_tsan_repeats": 50,
+    "production_readiness_or_busy_pool_semantics_changed": false,
+    "original_failures_preserved": true,
+    "full_alignment_qualification": false
+  },
+  "original_failures_preserved": true,
+  "source_files_sha256": {
+    "qualification.json": "fb5288ba7d035ab98be40483443be027bafbfe233adb6117477f2bf5a2672654",
+    "commands.json": "a4b6b156410a6b32b3ac0b9831c86804c3ea28bcd1b7bbfb811d73277f5212ed",
+    "source-manifest.json": "cf184f4255b033af5bae53d745f47e2d902744b6b3c3588f436b84ae114afbc8",
+    "original-failure.log": "1e4e9885b85717570ac857ffc75511cfb667c64bb26f668604ee1de0de22c1e0",
+    "traced-failure.log": "8e2587712b748cf8abbef08eb7f6b0383a179272b8b4d671a4b77099416ea245"
+  },
+  "goal_complete": false
+}
