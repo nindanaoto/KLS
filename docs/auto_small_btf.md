@@ -36,6 +36,10 @@ saved symbolic/pattern are included in the LLC/32 budget.
 
 ## Validation and merge decision
 
+Merged into `main` on 2026-11-04 as `f7b3319f`. The merged production files
+match the qualified source, public headers are unchanged, and all 17 new
+policy/gate tests pass from the merged tree.
+
 The latest user-approved gate, `auto-btf-v3`, allows a cell to regress against
 main in linear and wall time when its paired linear-time medians strictly beat
 both CKTSO and SubtreeLU. Otherwise the v2 limits below apply. The inverter

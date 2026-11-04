@@ -3720,7 +3720,10 @@
     "approved_broad_all_recorded_gate_pass": true,
     "original_failures_preserved": true,
     "merge_authorized": true,
-    "merge_performed": false
+    "merge_performed": true,
+    "merged_commit": "f7b3319f21ccf0de46dc5d687d34d1c18de6db06",
+    "post_merge_gate_tests_passed": 17,
+    "post_merge_production_files_matching_qualification": 129
   },
   "durable_approved_gate_archive": {
     "archive": "/home/work-bleaker/kmatsuoka/sources/kls-workspace/KLS/build/spice-evidence-20261103/auto-small-btf-approved-gate.tar.gz",
