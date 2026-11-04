@@ -13672,7 +13672,8 @@ static int private_caller_finish_storage(kls_solver *s, int transpose, int64_t n
           }
     }
     s->stats.solve_seconds+=kls_now_seconds()-start;
-    if(owns_saved)free(saved);return status;
+    if(owns_saved)free(saved);
+    return status;
   }
   if(s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR) {
     const double start=kls_now_seconds(),prior=s->stats.solve_seconds;
@@ -13681,7 +13682,8 @@ static int private_caller_finish_storage(kls_solver *s, int transpose, int64_t n
     if(kernel_status==KLS_OK && status==KLS_ERR_SOLVE_FAILED)
       status=private_componentwise_scaled_recover(s,transpose,nrhs,saved,x,ldx);
     s->stats.solve_seconds=prior+kls_now_seconds()-start;
-    if(owns_saved)free(saved);return status;
+    if(owns_saved)free(saved);
+    return status;
   }
   if (status == KLS_OK || status == KLS_ERR_SOLVE_FAILED) {
     const private_original_operator *a = s->private_original;
