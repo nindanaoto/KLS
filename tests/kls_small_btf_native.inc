@@ -42,6 +42,7 @@ static int native_btf_checks(void) {
         BTF_REQUIRE(kls_factor(reference,a)==KLS_OK);
         BTF_REQUIRE(kls_build_refactor_map(reference) && kls_build_refactor_map(s));
         BTF_REQUIRE(kls_i32_solve_ready(s) && kls_small_btf_cache_ready(s));
+        BTF_REQUIRE(btf_descriptor_checks(s,reference,a));
       }
       const unsigned long long factors_before=compact_btf_factor_calls,solves_before=compact_btf_solve_calls;
       int mapped=0;
@@ -66,11 +67,13 @@ static int native_btf_checks(void) {
         const unsigned long long public_solves_before=compact_btf_solve_calls;
         const unsigned long long public_direct_before=direct_btf_solve_calls;
         const unsigned long long public_factors_before=compact_btf_factor_calls;
+        const unsigned long long descriptors_before=compact_btf_descriptor_calls;
         BTF_REQUIRE(kls_refactor_solve(s,a,1,b,0,x,0)==KLS_OK);
         if(compact_fixture) {
           BTF_REQUIRE(compact_btf_solve_calls>public_solves_before);
           BTF_REQUIRE(direct_btf_solve_calls>public_direct_before);
           BTF_REQUIRE(compact_btf_factor_calls>public_factors_before);
+          BTF_REQUIRE(compact_btf_descriptor_calls>descriptors_before);
         } else {
           BTF_REQUIRE(compact_btf_solve_calls==public_solves_before);
           BTF_REQUIRE(direct_btf_solve_calls==public_direct_before);

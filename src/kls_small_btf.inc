@@ -55,7 +55,7 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
 #ifdef __linux__
   /* Include simultaneous i32/i16 mirrors, pointer tables, and native input
      maps. A complete pre-existing cache and map require no additional memory. */
-  const uint64_t bytes=256+160*(uint64_t)s->n+16*(uint64_t)s->nnz+
+  const uint64_t bytes=256+(160+sizeof(kls_btf_l_descriptor))*(uint64_t)s->n+16*(uint64_t)s->nnz+
     8*((uint64_t)s->numeric->lnz+(uint64_t)s->numeric->unz)+
     4*(uint64_t)s->numeric->Offp[s->n]+8*(uint64_t)s->symbolic->nblocks;
   const uint64_t llc=kls_execution_domain_llc_bytes();

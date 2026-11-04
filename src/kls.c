@@ -417,6 +417,12 @@ typedef struct kls_native_i16_plan {
   size_t allocation_bytes;
 } kls_native_i16_plan;
 
+typedef struct kls_btf_l_descriptor {
+  double *values;
+  uint16_t short_rows[3],count;
+  uint32_t offset;
+} kls_btf_l_descriptor;
+
 struct kls_solver {
   kls_accuracy_policy accuracy_policy;
   int accuracy_policy_locked;
@@ -499,6 +505,7 @@ struct kls_solver {
   uint16_t *i16solve_offi;
   uint16_t *i16solve_offcols;
   uint16_t *i16solve_offcol_block_ptr;
+  kls_btf_l_descriptor *compact_btf_l_descriptors;
   double **i16solve_lx;
   double **i16solve_ux;
   double *i32solve_udiag_recip;
@@ -5853,7 +5860,7 @@ static int kls_native_btf_map32_refactor(kls_solver *solver,
   return 1;
 }
 
-static int kls_compact_btf_map32_refactor(kls_solver *solver,
+static int kls_compact_btf_plain_refactor(kls_solver *solver,
                                        double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->common.scale > 0 ||
@@ -6001,6 +6008,207 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
       const UF_long lcount=(UF_long)lp[global+1]-lp[global];
       const uint16_t *restrict li=lrows+lp[global];
       double *restrict lx=solver->i16solve_lx[global];
+      const double pivot_recip = 1.0 / pivot;
+      if (lcount <= 3u) {
+        if (lcount > 0u) {
+          const UF_long i = li[0];
+          lx[0] = x[i] * pivot_recip;
+          x[i] = 0.0;
+        }
+        if (lcount > 1u) {
+          const UF_long i = li[1];
+          lx[1] = x[i] * pivot_recip;
+          x[i] = 0.0;
+        }
+        if (lcount > 2u) {
+          const UF_long i = li[2];
+          lx[2] = x[i] * pivot_recip;
+          x[i] = 0.0;
+        }
+      } else {
+        for (UF_long p = 0u; p < lcount; ++p) {
+          const UF_long i = li[p];
+          lx[p] = x[i] * pivot_recip;
+          x[i] = 0.0;
+        }
+      }
+    }
+    if (singular && common->halt_if_singular) {
+      memset(x, 0, (size_t)symbolic->maxblock * sizeof(*x));
+      break;
+    }
+  }
+  if (singular) {
+    common->status = TRILINOS_KLU_SINGULAR;
+    common->numerical_rank = numerical_rank;
+    common->singular_col = singular_col;
+    return !common->halt_if_singular;
+  }
+  common->status = TRILINOS_KLU_OK;
+#ifdef KLS_COMPACT_BTF_FACTOR_TEST_EVENT
+  KLS_COMPACT_BTF_FACTOR_TEST_EVENT();
+#endif
+#ifdef KLS_COMPACT_BTF_FACTOR_DIAGNOSTIC_EVENT
+  KLS_COMPACT_BTF_FACTOR_DIAGNOSTIC_EVENT(solver);
+#endif
+  return 1;
+}
+
+static int kls_compact_btf_map32_refactor(kls_solver *solver,
+                                       double *numeric_values) {
+  if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
+      numeric_values == NULL || solver->common.scale > 0 ||
+      solver->numeric->Rs != NULL || solver->symbolic->nblocks <= 1u ||
+      solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
+      solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Udiag == NULL || solver->numeric->Lip == NULL ||
+      solver->numeric->Llen == NULL || solver->numeric->Uip == NULL ||
+      solver->numeric->Ulen == NULL || solver->numeric->LUbx == NULL ||
+      solver->numeric->Xwork == NULL || solver->refactor_col_ptr == NULL ||
+      solver->refactor_block_start == NULL ||
+      solver->refactor_row_idx32 == NULL ||
+      (solver->refactor_direct_user_values_active
+         ? solver->refactor_input_user_pos32
+         : solver->refactor_input_pos32) == NULL) {
+    return -1;
+  }
+
+  const kls_btf_l_descriptor *descriptors=solver->compact_btf_l_descriptors;
+  if(!descriptors)return kls_compact_btf_plain_refactor(solver,numeric_values);
+#ifdef KLS_COMPACT_BTF_DESCRIPTOR_TEST_EVENT
+  KLS_COMPACT_BTF_DESCRIPTOR_TEST_EVENT();
+#endif
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  const UF_long *restrict r = symbolic->R;
+  const UF_long *restrict q = symbolic->Q;
+  const UF_long *restrict map_col_ptr = solver->refactor_col_ptr;
+  const UF_long *restrict map_block_start = solver->refactor_block_start;
+  const int32_t *restrict map_row = solver->refactor_row_idx32;
+  const int direct_user_values = solver->refactor_direct_user_values_active;
+  const int32_t *restrict map_input = direct_user_values
+    ? solver->refactor_input_user_pos32
+    : solver->refactor_input_pos32;
+  const uint16_t *restrict uptr=solver->i16solve_uoff;
+  const uint16_t *restrict lrows=solver->i16solve_l,*restrict urows=solver->i16solve_u;
+  const UF_long *restrict offp = numeric->Offp;
+  double *restrict offx = (double *)numeric->Offx;
+  double *restrict udiag = (double *)numeric->Udiag;
+  double *restrict x = (double *)numeric->Xwork;
+  if (!kls_build_lean_btf_off_map(solver, direct_user_values)) {
+    return -1;
+  }
+  const uint32_t *restrict off_input = direct_user_values
+    ? solver->lean_btf_off_user_pos
+    : solver->lean_btf_off_input_pos;
+  const uint32_t *restrict off_runs = direct_user_values
+    ? solver->lean_btf_off_user_runs
+    : solver->lean_btf_off_input_runs;
+  const UF_long off_run_count = direct_user_values
+    ? solver->lean_btf_off_user_run_count
+    : solver->lean_btf_off_input_run_count;
+  const UF_long offcount = offp[solver->n];
+  UF_long p = 0u;
+  for (UF_long run = 0u; run < off_run_count; ++run) {
+    const UF_long dst = (UF_long)off_runs[3u * run];
+    const UF_long src = (UF_long)off_runs[3u * run + 1u];
+    const UF_long len = (UF_long)off_runs[3u * run + 2u];
+    for (; p < dst; ++p) {
+      offx[p] = numeric_values[(UF_long)off_input[p]];
+    }
+    memcpy(offx + dst, numeric_values + src, (size_t)len * sizeof(*offx));
+    p = dst + len;
+  }
+  for (; p < offcount; ++p) {
+    offx[p] = numeric_values[(UF_long)off_input[p]];
+  }
+
+  int singular = 0;
+  UF_long numerical_rank = UF_long_max;
+  UF_long singular_col = KLS_KLU_EMPTY;
+
+  trilinos_klu_l_common *common = &solver->common;
+  common->status = TRILINOS_KLU_OK;
+  common->numerical_rank = KLS_KLU_EMPTY;
+  common->singular_col = KLS_KLU_EMPTY;
+  common->nrealloc = 0;
+
+  for (UF_long block = 0u; block < symbolic->nblocks; ++block) {
+    const UF_long k1 = r[block];
+    const UF_long k2 = r[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (nk == 1u) {
+      double pivot = 0.0;
+      for (UF_long p = map_block_start[k1];
+           p < map_col_ptr[k1 + 1u]; ++p) {
+        pivot = numeric_values[(UF_long)map_input[p]];
+      }
+      udiag[k1] = pivot;
+      if (pivot == 0.0) {
+        kls_record_singular_status(&singular, &numerical_rank,
+                                   &singular_col, k1, q[k1]);
+        if (common->halt_if_singular) {
+          break;
+        }
+      }
+      continue;
+    }
+
+    double *restrict lu = (double *)numeric->LUbx[block];
+    if (lu == NULL) {
+      return -1;
+    }
+    for (UF_long k = 0u; k < nk; ++k) {
+      const UF_long global = k1 + k;
+      for (UF_long p = map_block_start[global];
+           p < map_col_ptr[global + 1u]; ++p) {
+        x[(UF_long)map_row[p] - k1] =
+          numeric_values[(UF_long)map_input[p]];
+      }
+
+      const UF_long ucount=(UF_long)uptr[global+1]-uptr[global];
+      const uint16_t *restrict ui=urows+uptr[global];
+      double *restrict ux=solver->i16solve_ux[global];
+      for (UF_long up = 0u; up < ucount; ++up) {
+        const UF_long j = ui[up];
+        const double ujk = x[j];
+        x[j] = 0.0;
+        ux[up] = ujk;
+        if (ujk != 0.0) {
+          const UF_long producer=k1+j;
+          const kls_btf_l_descriptor *desc=descriptors+producer;
+          const UF_long lcount=desc->count;
+          const uint16_t *restrict li=lcount<=3?desc->short_rows:lrows+desc->offset;
+          const double *restrict lx=desc->values;
+          /* This compact factor averages only a few L entries per U
+             dependency.  The general scatter's 8/4/tail dispatch costs more
+             branches than it removes at that length. */
+          if (lcount <= 3u) {
+            if (lcount > 0u) x[li[0]] -= lx[0] * ujk;
+            if (lcount > 1u) x[li[1]] -= lx[1] * ujk;
+            if (lcount > 2u) x[li[2]] -= lx[2] * ujk;
+          } else {
+            for (UF_long lp = 0u; lp < lcount; ++lp) {
+              x[li[lp]] -= lx[lp] * ujk;
+            }
+          }
+        }
+      }
+
+      const double pivot = x[k];
+      x[k] = 0.0;
+      udiag[global] = pivot;
+      if (pivot == 0.0) {
+        kls_record_singular_status(&singular, &numerical_rank,
+                                   &singular_col, global, q[global]);
+        if (common->halt_if_singular) {
+          break;
+        }
+      }
+      const kls_btf_l_descriptor *desc=descriptors+global;
+      const UF_long lcount=desc->count;
+      const uint16_t *restrict li=lcount<=3?desc->short_rows:lrows+desc->offset;
+      double *restrict lx=desc->values;
       const double pivot_recip = 1.0 / pivot;
       if (lcount <= 3u) {
         if (lcount > 0u) {
@@ -7410,6 +7618,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   KLS_FREE_AND_NULL(solver->i16solve_offi);
   KLS_FREE_AND_NULL(solver->i16solve_offcols);
   KLS_FREE_AND_NULL(solver->i16solve_offcol_block_ptr);
+  KLS_FREE_AND_NULL(solver->compact_btf_l_descriptors);
   KLS_FREE_AND_NULL(solver->i16solve_lx);
   KLS_FREE_AND_NULL(solver->i16solve_ux);
   KLS_FREE_AND_NULL(solver->i32solve_udiag_recip);
@@ -13357,8 +13566,8 @@ static int kls_try_lsqr_solve_recovery(kls_solver *solver,
 extern int kls_accuracy_certify(size_t, const int64_t *, const int64_t *,
                         const double *, const double *, const double *, int,
                         double *);
-static int private_caller_rhs(kls_solver *s, int64_t nrhs, const double *b,
-    int64_t ldb, double *x, int64_t ldx, double **saved) {
+static int private_caller_rhs_storage(kls_solver *s, int64_t nrhs, const double *b,
+    int64_t ldb, double *x, int64_t ldx, double **saved,double *storage) {
   *saved = NULL;
   if (!s || !s->symbolic || s->n <= 0 || !b || !x || nrhs <= 0)
     return KLS_ERR_INVALID_ARGUMENT;
@@ -13371,12 +13580,17 @@ static int private_caller_rhs(kls_solver *s, int64_t nrhs, const double *b,
       (uint64_t)(nrhs - 1) > (limit - n) / (uint64_t)ldb ||
       (uint64_t)(nrhs - 1) > (limit - n) / (uint64_t)ldx)
     return KLS_ERR_INVALID_ARGUMENT;
-  *saved = malloc((size_t)nrhs * (size_t)n * sizeof(double));
+  *saved = storage?storage:malloc((size_t)nrhs * (size_t)n * sizeof(double));
   if (!*saved) return KLS_ERR_OUT_OF_MEMORY;
   for (int64_t k = 0; k < nrhs; ++k)
     memcpy(*saved + (size_t)k * n, b + (size_t)k * ldb,
            (size_t)n * sizeof(double));
   return KLS_OK;
+}
+
+static int private_caller_rhs(kls_solver *s,int64_t nrhs,const double *b,
+    int64_t ldb,double *x,int64_t ldx,double **saved) {
+  return private_caller_rhs_storage(s,nrhs,b,ldb,x,ldx,saved,NULL);
 }
 
 #include "kls_caller_recovery.inc"
@@ -13442,8 +13656,8 @@ done:
 
 #include "kls_componentwise_recovery.inc"
 
-static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
-    double *saved, double *x, int64_t ldx, int status) {
+static int private_caller_finish_storage(kls_solver *s, int transpose, int64_t nrhs,
+    double *saved, double *x, int64_t ldx, int status,int owns_saved) {
   if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) {
     /* Opting out of residual certification never turns a failed kernel into
      * success. Public wrappers still publish all RHSs atomically. */
@@ -13458,7 +13672,7 @@ static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
           }
     }
     s->stats.solve_seconds+=kls_now_seconds()-start;
-    free(saved);return status;
+    if(owns_saved)free(saved);return status;
   }
   if(s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR) {
     const double start=kls_now_seconds(),prior=s->stats.solve_seconds;
@@ -13467,7 +13681,7 @@ static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
     if(kernel_status==KLS_OK && status==KLS_ERR_SOLVE_FAILED)
       status=private_componentwise_scaled_recover(s,transpose,nrhs,saved,x,ldx);
     s->stats.solve_seconds=prior+kls_now_seconds()-start;
-    free(saved);return status;
+    if(owns_saved)free(saved);return status;
   }
   if (status == KLS_OK || status == KLS_ERR_SOLVE_FAILED) {
     const private_original_operator *a = s->private_original;
@@ -13496,8 +13710,13 @@ static int private_caller_finish(kls_solver *s, int transpose, int64_t nrhs,
       }
     }
   }
-  free(saved);
+  if(owns_saved)free(saved);
   return status;
+}
+
+static int private_caller_finish(kls_solver *s,int transpose,int64_t nrhs,
+    double *saved,double *x,int64_t ldx,int status) {
+  return private_caller_finish_storage(s,transpose,nrhs,saved,x,ldx,status,1);
 }
 
 static int private_solve_body(kls_solver *, int, int64_t, const double *, int64_t, double *, int64_t);
@@ -15425,11 +15644,20 @@ static int kls_refactor_solve_impl(kls_solver *solver,
 int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     const double *b, int64_t ldb, double *x, int64_t ldx) {
   if (!values) return KLS_ERR_INVALID_ARGUMENT;
+  /* A bounded frame belongs to this call, including nested recovery. */
+  double local_rhs[512],local_candidate[512];
+  const int local=s && s->symbolic && s->symbolic->nblocks>1 &&
+    nrhs==1 && s->n>0 && s->n<=512 &&
+    s->options.threads==1 && s->observed_parallel.choice<=0;
   double *saved = NULL;
-  int status = private_caller_rhs(s,nrhs,b,ldb,x,ldx,&saved);
+  int status = private_caller_rhs_storage(s,nrhs,b,ldb,x,ldx,&saved,local?local_rhs:NULL);
   if (status != KLS_OK) return status;
-  double *candidate = calloc((size_t)nrhs*(size_t)s->n,sizeof(double));
-  if (!candidate) { free(saved);return KLS_ERR_OUT_OF_MEMORY; }
+  double *candidate = local?local_candidate:calloc((size_t)nrhs*(size_t)s->n,sizeof(double));
+  if(local)memset(candidate,0,(size_t)s->n*sizeof(double));
+#ifdef KLS_CALLER_LOCAL_FRAME_TEST_EVENT
+  KLS_CALLER_LOCAL_FRAME_TEST_EVENT(local);
+#endif
+  if (!candidate) { if(!local)free(saved);return KLS_ERR_OUT_OF_MEMORY; }
   /* Do not mark numeric updates as nested recovery: this API publishes a new
    * caller matrix even when its unchanged-matrix shortcut bypasses solve. */
   if (!s->private_caller_depth) s->private_cold_deadline = 0;
@@ -15445,7 +15673,7 @@ int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     status=kls_observed_parallel_refactor_solve(s,values,nrhs,saved,candidate);
   } else {
     status=private_refactor_solve_body(s,values,nrhs,saved,0,candidate,0);
-    status=private_caller_finish(s,0,nrhs,saved,candidate,0,status);
+    status=private_caller_finish_storage(s,0,nrhs,saved,candidate,0,status,!local);
   }
 #ifdef KLS_SMALL_BTF_PUBLIC_TEST_EVENT
   KLS_SMALL_BTF_PUBLIC_TEST_EVENT(s,values,nrhs,status);
@@ -15460,7 +15688,7 @@ int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     for (int64_t k=0;k<nrhs;++k)
       memcpy(x+(size_t)k*(ldx?ldx:s->n),candidate+(size_t)k*s->n,
              (size_t)s->n*sizeof(double));
-  free(candidate);
+  if(!local)free(candidate);
   return status;
 }
 

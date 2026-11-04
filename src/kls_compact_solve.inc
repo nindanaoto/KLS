@@ -267,6 +267,24 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
       }
     }
   }
+  /* Optional immutable descriptors share the cache's numeric lifetime.
+     Failure retains the existing compact executor. */
+  if(n<=4096 && nblocks>1) {
+#ifdef KLS_BTF_DESCRIPTOR_MALLOC
+    kls_btf_l_descriptor *desc=KLS_BTF_DESCRIPTOR_MALLOC((size_t)n*sizeof(*desc));
+#else
+    kls_btf_l_descriptor *desc=malloc((size_t)n*sizeof(*desc));
+#endif
+    if(desc) {
+      for(UF_long k=0;k<n;++k) {
+        desc[k].values=lx[k];desc[k].offset=loff[k];
+        desc[k].count=(uint16_t)(loff[k+1]-loff[k]);
+        for(unsigned j=0;j<3;++j)desc[k].short_rows[j]=
+          j<desc[k].count?lrows[loff[k]+j]:0;
+      }
+      solver->compact_btf_l_descriptors=desc;
+    }
+  }
   solver->i16solve_l = lrows;
   solver->i16solve_u = urows;
   solver->i16solve_loff = loff;
