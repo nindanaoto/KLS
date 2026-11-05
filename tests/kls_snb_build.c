@@ -18,6 +18,75 @@ static void *checked_calloc(size_t n,size_t size) {return fail_allocation()?NULL
 #undef malloc
 #undef calloc
 
+/* Exercise the largest short offset and the first geometry requiring the
+ * wide map, including row layout, column repair, scaling, and arena guards. */
+static int check_scatter_boundaries(void) {
+  kls_solver *solver=calloc(1,sizeof(*solver));kls_snb_state *st=calloc(1,sizeof(*st));
+  kls_snb_block *block=calloc(1,sizeof(*block));kls_snb_snode *node=calloc(1,sizeof(*node));
+  if(!solver||!st||!block||!node)return 70;
+  solver->symbolic=calloc(1,sizeof(*solver->symbolic));if(!solver->symbolic)return 70;
+  UF_long q[16]={0},cp[2]={0,1},ri[1]={0};double az[1]={6.},rs[1]={2.};
+  solver->symbolic->Q=q;solver->col_ptr=cp;solver->row_idx=ri;
+  st->nblocks=1;st->blocks=block;block->snode_count=1;block->snodes=node;node->width=16;
+  if(sizeof(*node)!=64)return 71; /* column_ld uses existing descriptor padding. */
+  const unsigned columns[]={0,7,8,15};
+  for(int wide=0;wide<2;++wide) {
+    const int H=65536+wide;node->height=H;node->below=H-16;
+    if(kls_snb_short_scatter_fits(st)!=!wide)return 72;
+    const size_t count=(size_t)16*H;double *arena=calloc(count+2,8),*repair=calloc(count+2,8);
+    if(!arena||!repair)return 70;
+    block->panels=arena+1;
+    const uint64_t guard=UINT64_C(0x123456789abcdef0);
+    memcpy(arena,&guard,8);memcpy(arena+count+1,&guard,8);
+    memcpy(repair,&guard,8);memcpy(repair+count+1,&guard,8);
+    uint16_t short_row=UINT16_MAX;uint32_t wide_at=0;
+    st->scatter_row=wide?NULL:&short_row;st->scatter_dst=wide?&wide_at:NULL;
+    for(int row=0;row<2;++row)for(unsigned ci=0;ci<4;++ci)for(int scale=0;scale<=2;scale+=2) {
+      const size_t c=columns[ci],r=(size_t)H-1;
+      const size_t at=row?(c/8)*8*(size_t)H+r*8+c%8:c*(size_t)H+r;
+      st->row_layout=row;wide_at=(uint32_t)at;
+      const double expected=scale?3.:6.;
+      kls_snb_scatter_input_column(solver,st,block,node,(UF_long)c,az,rs,scale,NULL,NULL);
+      if(block->panels[at]!=expected)return 73;
+      block->panels[at]=0.;
+      if(row) {
+        kls_snb_scatter_input_column(solver,st,block,node,(UF_long)c,az,rs,scale,NULL,repair+1);
+        if(repair[1+c*(size_t)H+r]!=expected)return 74;
+        repair[1+c*(size_t)H+r]=0.;
+      }
+      if(memcmp(arena,&guard,8)||memcmp(arena+count+1,&guard,8)||
+          memcmp(repair,&guard,8)||memcmp(repair+count+1,&guard,8))return 75;
+    }
+    free(arena);free(repair);
+  }
+  free(solver->symbolic);free(solver);free(st);free(block);free(node);
+  puts("SHORT_SCATTER_BOUNDARIES short_rows=65536 wide_rows=65537 row_column=1 repair=1 scaled=1 guards=1 descriptor_bytes=64");
+  return 0;
+}
+static int check_compact_image_policy(void) {
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+  kls_snb_state *st=calloc(1,sizeof(*st));kls_snb_block *block=calloc(1,sizeof(*block));
+  kls_snb_snode *nodes=calloc(3,sizeof(*nodes));kls_snb_edge *edges=calloc(4,sizeof(*edges));
+  if(!st||!block||!nodes||!edges)return 76;
+  st->nblocks=1;st->blocks=block;st->wnarrow=8;st->allocation_bytes=100;
+  block->snodes=nodes;block->snode_count=3;block->edges=edges;
+  for(int j=0;j<2;++j){nodes[j].width=16;nodes[j].height=32;nodes[j].below=16;}
+  nodes[2].width=1;nodes[2].edge_count=4;
+  for(int j=0;j<4;++j){edges[j].producer=j?1:0;edges[j].sub_count=16;}
+  const size_t bytes=32*16*sizeof(double);
+  if(!kls_snb_row_compact_images(st,0,100+bytes-1)||st->allocation_bytes!=100||
+      nodes[0].column_panel||nodes[1].column_panel||nodes[0].column_ld||nodes[1].column_ld)return 77;
+  allocation_failure=0;
+  if(!kls_snb_row_compact_images(st,0,100+bytes)||allocation_failure!=-1||st->allocation_bytes!=100||
+      nodes[0].column_panel||nodes[1].column_panel||nodes[0].column_ld||nodes[1].column_ld)return 78;
+  if(!kls_snb_row_compact_images(st,0,100+bytes)||st->allocation_bytes!=100+bytes||
+      nodes[0].column_panel||!nodes[1].column_panel||nodes[0].column_ld||nodes[1].column_ld!=32)return 79;
+  if(!kls_snb_row_compact_images(st,0,100+bytes)||st->allocation_bytes!=100+bytes||nodes[0].column_panel)return 80;
+  free(nodes[1].column_panel);free(edges);free(nodes);free(block);free(st);
+  puts("COMPACT_IMAGE_POLICY reuse_rank=1 exact_limit=1 one_short=1 allocation_failure=1 repeat=1 ledger_exact=1");
+#endif
+  return 0;
+}
 static int check_build(int n,int transpose,int csr,int alias,int reject) {
   int *ptr=calloc((size_t)n+1,sizeof(int));
   int *idx=malloc((size_t)n*n*sizeof(int));
@@ -54,11 +123,21 @@ static int check_build(int n,int transpose,int csr,int alias,int reject) {
   }
   if(sizeof(kls_snb_entry)!=16 || sizeof(*incumbent->col_off_ptr)!=4 ||
       sizeof(*incumbent->col_blk_ptr)!=4)return 51;
-  if(incumbent->scatter_dst) {
+  if(incumbent->scatter_row||incumbent->scatter_dst) {
     if(incumbent->off||incumbent->blk||incumbent->col_off_ptr||incumbent->col_blk_ptr||
         incumbent->nblocks!=1||sizeof(*incumbent->blocks[0].wb_col_off)!=4)return 52;
     for(UF_long at=0;at<s->nnz;++at)
-      if(incumbent->scatter_dst[at]>=(uint64_t)incumbent->blocks[0].panel_doubles)return 53;
+      if(incumbent->scatter_dst&&incumbent->scatter_dst[at]>=(uint64_t)incumbent->blocks[0].panel_doubles)return 53;
+    if(incumbent->scatter_row) {
+      if(sizeof(*incumbent->scatter_row)!=2||incumbent->scatter_dst)return 62;
+      const kls_snb_block *block=incumbent->blocks;
+      for(UF_long c=0;c<s->n;++c) {
+        const kls_snb_snode *node=block->snodes+block->col2snode[c];
+        const UF_long oldcol=s->symbolic->Q[c];
+        for(UF_long at=s->col_ptr[oldcol];at<s->col_ptr[oldcol+1];++at)
+          if(incumbent->scatter_row[at]>=node->height)return 63;
+      }
+    }
   } else {
     for(UF_long c=0;c<s->n;++c) {
       if(incumbent->col_off_ptr[c]>incumbent->col_off_ptr[c+1] ||
@@ -277,7 +356,7 @@ static int check_general_btf(int transpose,int scale) {
   kls_solver *s=NULL;if(kls_create(&s)||kls_analyze_csc(s,KLS_INDEX_INT32,N,ap,ai,0,&o)||kls_factor(s,a))return 60;
   s->snode_prepared=1;s->snb_declined=0;
   if(!kls_parallel_lu_sort(s)||!kls_snb_prepare(s)||s->symbolic->nblocks<2||
-      s->snb->scatter_dst||!s->snb->off||!s->snb->blk||!s->snb->col_off_ptr||!s->snb->col_blk_ptr)return 61;
+      s->snb->scatter_row||s->snb->scatter_dst||!s->snb->off||!s->snb->blk||!s->snb->col_off_ptr||!s->snb->col_blk_ptr)return 61;
   if(!s->snb->col_off_ptr[N])return 62;
   s->snb_decision=1;
   for(int epoch=1;epoch<=3;++epoch) {
@@ -293,6 +372,8 @@ static int check_general_btf(int transpose,int scale) {
   kls_destroy(s);return 0;
 }
 int main(void) {
+  {int boundary=check_scatter_boundaries();if(boundary)return boundary;}
+  {int policy=check_compact_image_policy();if(policy)return policy;}
   /* Budget tests use no matrix identity, synthetic model, or CPU coefficient.
      A short hinted workload cannot fund the complete search/build/trial envelope;
      an unhinted workload earns its allowance from completed real work. */

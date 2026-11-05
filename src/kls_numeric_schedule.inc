@@ -27,6 +27,15 @@ typedef struct kls_snb_group_cycle {
   double incumbent_total, experiment_limit;
 } kls_snb_group_cycle;
 
+/* Row offsets, unlike absolute panel indices, can fit in 16 bits even
+ * when the combined panel arena is large. Full 65536-row panels fit. */
+static int kls_snb_short_scatter_fits(const kls_snb_state *st) {
+  if(!st||st->nblocks!=1||!st->blocks||!st->blocks[0].snodes)return 0;
+  const kls_snb_block *b=st->blocks;
+  for(int64_t j=0;j<b->snode_count;++j)
+    if(b->snodes[j].height<1||(uint32_t)b->snodes[j].height>UINT32_C(65536))return 0;
+  return b->snode_count>0;
+}
 static void kls_snb_destroy(kls_snb_state *st) {
   if (st == NULL) {
     return;
@@ -52,6 +61,7 @@ static void kls_snb_destroy(kls_snb_state *st) {
     }
     free(st->blocks);
   }
+  free(st->scatter_row);
   free(st->scatter_dst);
   free(st->off);
   free(st->blk);
@@ -750,7 +760,11 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
       }
     }
     const int compact=st->nblocks==1&&n>=2&&solver->nnz>0&&off_count==0&&nzoff==0;
-    if(compact) {
+    const int short_rows=compact&&kls_snb_short_scatter_fits(st);
+    if(short_rows) {
+      st->scatter_row=kls_snb_allocate(st,(size_t)solver->nnz,sizeof(*st->scatter_row),0,deadline,limit);
+      ok=st->scatter_row!=NULL;
+    } else if(compact) {
       st->scatter_dst=kls_snb_allocate(st,(size_t)solver->nnz,sizeof(*st->scatter_dst),0,deadline,limit);
       ok=st->scatter_dst!=NULL;
     } else {
@@ -785,7 +799,7 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
               poff++;
               continue;
             }
-            int64_t dst = 0;
+            int64_t dst = 0;int32_t panel_row=-1;
             if (blk->nk >= 2u) {
               const int32_t s = blk->col2snode[k - k1];
               const kls_snb_snode *sn = &blk->snodes[s];
@@ -807,9 +821,12 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
                 lr = kls_snb_upper_panel_row(blk, sn, newrow);
               }
               if (lr < 0) { ok = 0; break; }
-              dst = sn->panel + (int64_t)c * sn->height + lr;
+              dst = sn->panel + (int64_t)c * sn->height + lr;panel_row=lr;
             }
-            if(compact) {
+            if(short_rows) {
+              if(panel_row<0||panel_row>UINT16_MAX){ok=0;break;}
+              st->scatter_row[p]=(uint16_t)panel_row;
+            } else if(compact) {
               if(dst<0||(uint64_t)dst>UINT32_MAX){ok=0;break;}
               st->scatter_dst[p]=(uint32_t)dst;
             } else {
@@ -1102,8 +1119,8 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge_to(
   const int32_t ustart = edge->u_start;
   /* A compact image aliases only dead upper storage. Its column stride
      excludes the upper rows; ordinary mirrors retain the full height. */
-  const int compact=ps->column_panel&&ps->column_panel==blk->panels+ps->panel;
-  const int32_t pld = compact?ps->width+ps->below:ps->height;
+  const int compact=ps->column_panel&&ps->column_ld>0;
+  const int32_t pld = compact?ps->column_ld:ps->height;
   const double *Ldiag = (ps->column_panel?ps->column_panel:blk->panels + ps->panel) + (compact?0:ps->uw);
   const double *Lbelow = Ldiag + ps->width;
   if (sc < wnarrow) {
@@ -1269,9 +1286,9 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
   const int32_t w = sn->width;
   const int32_t H = sn->height;
   const int32_t uw = sn->uw;
-  const int compact_image=sn->column_panel&&sn->column_panel==panels+sn->panel;
+  const int compact_image=sn->column_panel&&sn->column_ld>0;
   const int inplace_repair=column_repair&&(!sn->column_panel||compact_image);
-  double *W = column_repair&&sn->column_panel?sn->column_panel:panels+sn->panel;
+  double *W = column_repair&&sn->column_panel&&!compact_image?sn->column_panel:panels+sn->panel;
   if(inplace_repair) {
 #ifdef KLS_SNB_HAVE_ROW_PANEL
     if(!st->row_layout||w!=16||H<16||!gemm_scratch||

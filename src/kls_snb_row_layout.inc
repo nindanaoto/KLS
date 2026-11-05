@@ -62,6 +62,48 @@ static int kls_snb_row_inplace_cache_fits(const kls_snb_state *st,
     st->allocation_bytes<=capacity-native_bytes;
 }
 #endif
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+static int kls_snb_row_compact_images(kls_snb_state *st,double deadline,size_t limit) {
+  kls_snb_block *b=st->blocks;
+    /* Count avoidable packs in existing descriptor padding. Negative values
+     * are temporary reuse counts; no coefficient or new allocation is used.
+     * Only mixed-width dense edges need a packed L-below rectangle. */
+    for(int64_t j=0;j<b->snode_count;++j) {
+      if((j&63)==0&&deadline>0&&kls_now_seconds()>=deadline)return 0;
+      if(b->snodes[j].width==16)continue;
+      const kls_snb_snode *target=b->snodes+j;
+      for(int32_t e=0;e<target->edge_count;++e) {
+        const kls_snb_edge *edge=b->edges+target->edges_off+e;
+        kls_snb_snode *producer=b->snodes+edge->producer;
+        if(producer->width==16&&!producer->column_panel&&producer->below>=8&&
+            edge->sub_count>=st->wnarrow&&producer->column_ld>INT32_MIN)
+          --producer->column_ld;
+      }
+    }
+    for(;;) {
+      kls_snb_snode *best=NULL;uint64_t best_score=0;
+      if(deadline>0&&kls_now_seconds()>=deadline)return 0;
+      for(int64_t j=0;j<b->snode_count;++j) {
+        kls_snb_snode *producer=b->snodes+j;
+        if(producer->column_ld>=0)continue;
+        const size_t ld=(size_t)16+producer->below;
+        if(ld>SIZE_MAX/(16*sizeof(double)))continue;
+        const size_t bytes=ld*16*sizeof(double);
+        if(st->allocation_bytes>limit||bytes>limit-st->allocation_bytes)continue;
+        const uint64_t uses=(uint64_t)(-(int64_t)producer->column_ld);
+        const uint64_t score=uses*(uint64_t)producer->below/ld;
+        if(!best||score>best_score){best=producer;best_score=score;}
+      }
+      if(!best)break;
+      const int32_t ld=16+best->below;
+      best->column_panel=kls_snb_allocate(st,(size_t)ld*16,sizeof(double),0,deadline,limit);
+      if(!best->column_panel)break; /* Optional image; existing row plan survives. */
+      best->column_ld=ld;
+    }
+    for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].column_ld<0)b->snodes[j].column_ld=0;
+  return 1;
+}
+#endif
 static int kls_snb_enable_row_layout_mode(kls_solver *solver,kls_snb_state *st,double deadline,
     size_t limit,int column_mirrors) {
 #ifdef KLS_SNB_HAVE_ROW_PANEL
@@ -86,14 +128,17 @@ static int kls_snb_enable_row_layout_mode(kls_solver *solver,kls_snb_state *st,d
     kls_snb_snode *producer=b->snodes+j;
     if(producer->width==16&&producer->below>=0&&
         producer->uw>=2*((int64_t)16+producer->below))
-      producer->column_panel=b->panels+producer->panel;
+      {producer->column_panel=b->panels+producer->panel;producer->column_ld=16+producer->below;}
   }
+  if(!column_mirrors&&!kls_snb_row_compact_images(st,deadline,limit))return 0;
   for(int64_t j=0;j<b->snode_count;++j) {
     if(deadline>0&&kls_now_seconds()>=deadline)return 0;
     const kls_snb_snode *sn=b->snodes+j;if(sn->width!=16)continue;
     for(int c=0;c<16;++c) {
       const int64_t k=sn->start+c;const UF_long g=b->k1+(UF_long)k;
-      if(st->scatter_dst) {
+      if(st->scatter_row) {
+        /* Original row offsets remain valid in either panel layout. */
+      } else if(st->scatter_dst) {
         const UF_long oldcol=solver->symbolic->Q[g];
         for(UF_long p=solver->col_ptr[oldcol];p<solver->col_ptr[oldcol+1];++p) {
           int64_t r=(int64_t)st->scatter_dst[p]-sn->panel-(int64_t)c*sn->height;
@@ -217,7 +262,7 @@ static int kls_snb_try_row_layout(kls_solver *s,kls_snb_state *st,
 #ifdef KLS_SNB_HAVE_ROW_PANEL
   /* AUTO builds its required solve cache before this resident-ledger check. */
   if(kls_snb_row_inplace_cache_fits(st,native_bytes,capacity))
-    return kls_snb_enable_row_layout_mode(s,st,deadline,capacity,0);
+    return kls_snb_enable_row_layout_mode(s,st,deadline,capacity-native_bytes,0);
 #endif
   return 1;
 }

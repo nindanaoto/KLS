@@ -7,6 +7,7 @@ static _Atomic int parallel_underflow_enabled;
 static _Atomic uint64_t parallel_underflow_mask;
 static _Atomic unsigned parallel_underflow_arrived,parallel_repair_arrived,parallel_barrier_timeout;
 static double *parallel_scratch[4],*parallel_panels[4];
+static int parallel_repair_start;
 static void parallel_wait(_Atomic unsigned *arrived) {
   unsigned spins=0;
   while(atomic_load_explicit(arrived,memory_order_acquire)<4) {
@@ -18,8 +19,8 @@ static void parallel_wait(_Atomic unsigned *arrived) {
 }
 static int parallel_root(kls_solver *s,int64_t node) {
   int64_t start=s->snb->blocks[0].snodes[node].start;
-  if(start<64||start>=384||(start-64)%96)return -1;
-  return (int)((start-64)/96);
+  if(start<parallel_repair_start||start>=384||(start-parallel_repair_start)%96)return -1;
+  return (int)((start-parallel_repair_start)/96);
 }
 static void mirrorless_parallel_after_writeback(kls_solver *s,int64_t node) {
   if(!atomic_load_explicit(&parallel_underflow_enabled,memory_order_acquire))return;
@@ -55,7 +56,8 @@ static void parallel_reset(void) {
   atomic_store_explicit(&parallel_barrier_timeout,0,memory_order_relaxed);
   memset(parallel_scratch,0,sizeof parallel_scratch);memset(parallel_panels,0,sizeof parallel_panels);
 }
-static void mirrorless_parallel_checks(void) {
+static void mirrorless_parallel_case(int owned_compact) {
+  parallel_repair_start=owned_compact?16:64;
   enum{N=384,NZ=N*96};
   int64_t *ap=malloc((N+1)*sizeof(*ap)),*ai=malloc(NZ*sizeof(*ai));
   double *a=malloc(NZ*sizeof(*a)),b[N],x[N];assert(ap&&ai&&a);
@@ -91,6 +93,19 @@ static void mirrorless_parallel_checks(void) {
     }
   }
   assert(test_use_dead_upper_images(st)==8);
+  if(owned_compact) {
+    size_t old_bytes=st->allocation_bytes;unsigned images=0;
+    for(int64_t j=0;j<st->blocks[0].snode_count;++j) {
+      kls_snb_snode *sn=st->blocks[0].snodes+j;
+      if(sn->start%96!=16)continue;
+      assert(!sn->column_panel&&sn->width==16&&sn->uw==16&&sn->below==64);
+      sn->column_ld=16+sn->below;
+      sn->column_panel=kls_snb_allocate(st,(size_t)sn->column_ld*16,sizeof(double),0,0,SIZE_MAX);
+      assert(sn->column_panel&&sn->column_panel!=st->blocks[0].panels+sn->panel);++images;
+      kls_rpanel_pack_below(st->blocks[0].panels+sn->panel,sn->height,sn->uw,sn->column_ld,sn->column_panel);
+    }
+    assert(images==4&&st->allocation_bytes-old_bytes==4*80*16*sizeof(double));
+  }
   for(int64_t j=0;j<st->blocks[0].snode_count;++j) {
     const kls_snb_snode *sn=st->blocks[0].snodes+j;
     if(sn->start%96==64)assert(sn->uw==2*(16+sn->below)&&sn->column_panel==st->blocks[0].panels+sn->panel);
@@ -129,7 +144,7 @@ static void mirrorless_parallel_checks(void) {
       assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_SNB);
       assert(atomic_load_explicit(&parallel_repair_arrived,memory_order_acquire)==4);
       assert(atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed)==before+4);
-      assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)==packed_before+16);
+      assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)==packed_before+(owned_compact?4u:16u));
       assert(!memcmp(expected,actual,capacity*sizeof(double)));
       for(int i=0;i<4;++i)for(int j=0;j<i;++j) {
         assert(parallel_scratch[i]&&parallel_scratch[i]!=parallel_scratch[j]);
@@ -151,8 +166,10 @@ static void mirrorless_parallel_checks(void) {
     }
   }
   free(expected);free(actual);kls_destroy(s);parallel_partition=0;free(ap);free(ai);free(a);
-  puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=32 alias_repairs=8 exact_dead_upper_boundary=1 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
+  if(owned_compact)puts("COMPACT_OWNED_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=8 owned_images=4 ledger_exact=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
+  else puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=32 alias_repairs=8 exact_dead_upper_boundary=1 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
 }
+static void mirrorless_parallel_checks(void) {mirrorless_parallel_case(0);mirrorless_parallel_case(1);}
 #else
 static void mirrorless_parallel_after_writeback(kls_solver *s,int64_t node) {(void)s;(void)node;}
 static void mirrorless_parallel_repair_begin(kls_solver *s,int64_t node,double *scratch) {(void)s;(void)node;(void)scratch;}

@@ -92,12 +92,12 @@ static unsigned test_use_dead_upper_images(kls_snb_state *st) {
  for(int64_t j=0;j<b->snode_count;++j) {
   kls_snb_snode *sn=b->snodes+j;double *base=b->panels+sn->panel;
   if(sn->column_panel&&sn->column_panel!=base) {
-   size_t bytes=(size_t)sn->height*16*sizeof(double);
+   size_t bytes=(size_t)(sn->column_ld>0?sn->column_ld:sn->height)*16*sizeof(double);
    assert(st->allocation_bytes>=bytes);st->allocation_bytes-=bytes;free(sn->column_panel);
   }
-  sn->column_panel=NULL;
+  sn->column_panel=NULL;sn->column_ld=0;
   if(sn->width==16&&sn->uw>=2*((int64_t)16+sn->below)) {
-   sn->column_panel=base;++aliases;
+   sn->column_panel=base;sn->column_ld=16+sn->below;++aliases;
    kls_rpanel_pack_below(base,sn->height,sn->uw,16+sn->below,base);
   }
  }
@@ -150,7 +150,7 @@ static void exercise(int transpose,int transactional) {
  assert(s->snb_auto.column_only==!s->snb_auto_candidate->row_layout);
  assert(s->snb_auto_candidate->stream_jobs>=4);
  if(!transpose)assert(s->native_i16_normal_runs>=4);
- assert(s->snb_auto_candidate->scatter_dst);
+ assert(s->snb_auto_candidate->scatter_row&&!s->snb_auto_candidate->scatter_dst);
  assert(!s->snb_auto_candidate->off&&!s->snb_auto_candidate->blk&&
    !s->snb_auto_candidate->col_off_ptr&&!s->snb_auto_candidate->col_blk_ptr);
  if(!transpose)assert(s->native_i16&&row_solve_plan_bytes==s->native_i16->allocation_bytes);
@@ -326,12 +326,12 @@ static void exercise(int transpose,int transactional) {
  size_t bytes_before=cache_control->allocation_bytes;
  kls_snb_block *cb=cache_control->blocks;
  int64_t *scatter_before=malloc((size_t)s->nnz*sizeof(int64_t));assert(scatter_before);
- size_t scatter_count=cache_control->scatter_dst?(size_t)s->nnz:(size_t)cache_control->col_blk_ptr[s->n];
- for(size_t i=0;i<scatter_count;++i)scatter_before[i]=cache_control->scatter_dst?(int64_t)cache_control->scatter_dst[i]:cache_control->blk[i].dst;
+ size_t scatter_count=(cache_control->scatter_row||cache_control->scatter_dst)?(size_t)s->nnz:(size_t)cache_control->col_blk_ptr[s->n];
+ for(size_t i=0;i<scatter_count;++i)scatter_before[i]=cache_control->scatter_row?(int64_t)cache_control->scatter_row[i]:cache_control->scatter_dst?(int64_t)cache_control->scatter_dst[i]:cache_control->blk[i].dst;
  assert(kls_snb_try_row_layout(s,cache_control,0,0));
  assert(!cache_control->row_layout&&!cache_control->transactional&&cache_control->allocation_bytes==bytes_before);
  for(int64_t j=0;j<cb->snode_count;++j)assert(!cb->snodes[j].column_panel);
- for(size_t i=0;i<scatter_count;++i)assert(scatter_before[i]==(cache_control->scatter_dst?(int64_t)cache_control->scatter_dst[i]:cache_control->blk[i].dst));
+ for(size_t i=0;i<scatter_count;++i)assert(scatter_before[i]==(cache_control->scatter_row?(int64_t)cache_control->scatter_row[i]:cache_control->scatter_dst?(int64_t)cache_control->scatter_dst[i]:cache_control->blk[i].dst));
 #ifdef KLS_SNB_HAVE_ROW_PANEL
  assert(row_resident_bytes<=SIZE_MAX-bytes_before);
  const size_t exact=row_resident_bytes+bytes_before;

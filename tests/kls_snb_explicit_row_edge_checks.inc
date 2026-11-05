@@ -88,10 +88,12 @@ static void explicit_row_edge_case(int width,int count,int rows,int gap,
   const size_t available=128*32,needed=(size_t)(16+width)*rows;
   const size_t limits[]={0,needed&&needed<=available?needed-1:available,
     needed<=available?needed:available,available};
-  for(unsigned image=0;image<2;++image) {
+  for(unsigned image=0;image<3;++image) {
+    double *owned=NULL;
     if(image) {
-      kls_rpanel_pack_below(actual,PH,nodes[0].uw,16+rows,actual);
-      nodes[0].column_panel=actual;
+      if(image==2){owned=malloc(((size_t)16*(16+rows)+2)*8);assert(owned);memset(owned,0xa5,((size_t)16*(16+rows)+2)*8);}
+      nodes[0].column_panel=image==2?owned+1:actual;nodes[0].column_ld=16+rows;
+      kls_rpanel_pack_below(actual,PH,nodes[0].uw,16+rows,nodes[0].column_panel);
       memcpy(before,actual,SIZE*sizeof(double));
     }
   for(unsigned mode=0;mode<4;++mode) {
@@ -113,6 +115,10 @@ static void explicit_row_edge_case(int width,int count,int rows,int gap,
       memcpy(&canary,scratch+limits[mode],8);assert(canary==UINT64_C(0x5a5a5a5a5a5a5a5a));
     }
   }
+    if(owned) {
+      uint64_t canary;memcpy(&canary,owned,8);assert(canary==UINT64_C(0xa5a5a5a5a5a5a5a5));
+      memcpy(&canary,owned+1+(size_t)16*(16+rows),8);assert(canary==UINT64_C(0xa5a5a5a5a5a5a5a5));free(owned);
+    }
   }
   ++explicit_edge_cases;_mm_setcsr(control);
   free(expected);free(actual);free(before);free(target);free(nodes);free(block);
@@ -139,7 +145,7 @@ static void explicit_row_edge_checks(void) {
   fprintf(stderr,"PACK_ROW_BITS_ORACLES cases=480 nan_payloads=1 rounding=4 ftz_daz=4 guards=1 flags=1\n");
   assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)>packed_before);
   assert(atomic_load_explicit(&scalar_row_calls,memory_order_relaxed)>scalar_before);
-  fprintf(stderr,"EXPLICIT_ROW_EDGE_ORACLES cases=%llu capacities=4 images=2 ftz_daz=4 external_target=1 producer_immutable=1 flags=1 packed_and_scalar=1\n",
+  fprintf(stderr,"EXPLICIT_ROW_EDGE_ORACLES cases=%llu capacities=4 images=3 ftz_daz=4 external_target=1 producer_immutable=1 flags=1 packed_and_scalar=1\n",
     (unsigned long long)explicit_edge_cases);
   kls_snb_owned_masked_environment=saved_owned;assert(!fesetenv(&saved));
 }

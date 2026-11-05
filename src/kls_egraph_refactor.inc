@@ -8216,6 +8216,7 @@ typedef struct kls_snb_snode {
   int64_t rows_off;
   int64_t edges_off;
   int32_t edge_count;
+  int32_t column_ld; /* 0: full mirror; positive: compact L stride. */
   double *column_panel; /* Owned full mirror or panel-base alias of dead U storage. */
 } kls_snb_snode;
 
@@ -8249,6 +8250,7 @@ typedef struct kls_snb_state {
   UF_long nblocks;
   kls_snb_entry *off;      /* off-diagonal scatter entries, Offx order */
   kls_snb_entry *blk;      /* in-panel scatter entries */
+  uint16_t *scatter_row; /* Original panel row per CSC entry; no layout remap. */
   uint32_t *scatter_dst;  /* Single-block destinations, indexed by original CSC p. */
   uint32_t *col_off_ptr;    /* per global col: range in off[] */
   uint32_t *col_blk_ptr;    /* per global col: range in blk[] */

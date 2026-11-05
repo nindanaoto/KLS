@@ -5,6 +5,21 @@
 static KLS_ALWAYS_INLINE void kls_snb_scatter_input_column(kls_solver *solver,
     const kls_snb_state *st,const kls_snb_block *blk,const kls_snb_snode *sn,
     UF_long g,const double *az,const double *rs,int scale,double *offx,double *to) {
+  if(st->scatter_row) {
+    const UF_long oldcol=solver->symbolic->Q[g];
+    const size_t c=(size_t)(g-blk->k1-sn->start),H=(size_t)sn->height;
+    const int row_layout=st->row_layout&&sn->width==16;
+    for(UF_long p=solver->col_ptr[oldcol];p<solver->col_ptr[oldcol+1];++p) {
+      const double value=scale>0?az[p]/rs[solver->row_idx[p]]:az[p];
+      const size_t row=st->scatter_row[p];
+      if(to)to[c*H+row]=value;
+      else {
+        const size_t at=row_layout?(c/8)*8*H+row*8+c%8:c*H+row;
+        blk->panels[sn->panel+at]=value;
+      }
+    }
+    return;
+  }
   if(st->scatter_dst) {
     const UF_long oldcol=solver->symbolic->Q[g];
     for(UF_long p=solver->col_ptr[oldcol];p<solver->col_ptr[oldcol+1];++p) {
