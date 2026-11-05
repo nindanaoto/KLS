@@ -28,8 +28,21 @@ static void late_recheck_checks(void) {
  p.spent=p.limit+.001;kls_snb_auto_sample(&p,1,1,.004);
  assert(p.choice==-1&&p.limit==limit);
 }
+static void column_confidence_checks(void) {
+ for(int column=0;column<2;++column)for(int strong=0;strong<2;++strong) {
+  kls_snb_auto_policy p={.choice=1,.factor_credit=.01,.spent=.001,.column_only=column};
+  for(int i=0;i<8;++i) {
+   const int arm=kls_snb_auto_arm(&p);
+   kls_snb_auto_sample(&p,1,1,arm?(strong?.0075:.0085):.01);
+  }
+  assert(p.choice==((!column||strong)?3:-1));
+  assert(p.phase==8&&p.count[0]==4&&p.count[1]==4);
+  assert(fabs(p.limit-.09)<1e-15&&p.spent==.001);
+ }
+}
 int main(void) {
   late_recheck_checks();
+  column_confidence_checks();
   const int arms[8]={0,1,1,0,0,1,1,0};
   for(int verdict=0;verdict<4;++verdict) {
     kls_snb_auto_policy p={.choice=1,.factor_credit=.01,.spent=.001};

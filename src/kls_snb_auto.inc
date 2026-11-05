@@ -65,6 +65,7 @@ static int kls_snb_auto_build(kls_solver *s) {
       s->native_i16=kls_native_i16_build(s,until,limit-st->allocation_bytes);
     ok=s->native_i16!=NULL;
   }
+  p->column_only=ok && !st->row_layout;
   p->spent+=kls_now_seconds()-start;
   return ok && p->spent<=p->limit && kls_now_seconds()<deadline;
 }

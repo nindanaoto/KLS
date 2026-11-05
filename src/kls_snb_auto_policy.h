@@ -6,12 +6,13 @@
 /* Initial ABBA consultation; at most one late ABBA recheck, without
  * increasing setup credit or performing duplicate numeric calls. */
 enum {KLS_SNB_AUTO_MONITOR_SAMPLES=16};
+#define KLS_SNB_AUTO_COLUMN_MIN_RELATIVE_SAVING .20
 typedef struct {
   int choice,phase,count[2]; /* 0 untried, 1 prepared, 2 sampling, 3 retained, -1 declined */
   double seconds[2][4],factor_credit,limit,spent;
   double retained[KLS_SNB_AUTO_MONITOR_SAMPLES];
   unsigned retained_count,retained_cursor;
-  int rechecked;
+  int rechecked,column_only;
 } kls_snb_auto_policy;
 static inline int kls_snb_auto_arm(const kls_snb_auto_policy *p) {
   static const unsigned char arms[8]={0,1,1,0,0,1,1,0};
@@ -38,7 +39,13 @@ static inline void kls_snb_auto_sample(kls_snb_auto_policy *p,int changed,
   if(p->phase==8){
     const double incumbent=kls_snb_auto_median(p->seconds[0]);
     const double candidate=kls_snb_auto_median(p->seconds[1]);
-    p->choice=candidate<=(1.0-KLS_COMPACT_CYCLE_MIN_RELATIVE_SAVING)*incumbent &&
+    /* Column-only duplication has shown small cold-window gains that reverse
+     * after sparse values/cache behavior settle. Demand a wider saving; row
+     * panels retain the ordinary threshold. No extra numerical trials. */
+    const double saving=p->column_only &&
+      KLS_SNB_AUTO_COLUMN_MIN_RELATIVE_SAVING>KLS_COMPACT_CYCLE_MIN_RELATIVE_SAVING
+      ?KLS_SNB_AUTO_COLUMN_MIN_RELATIVE_SAVING:KLS_COMPACT_CYCLE_MIN_RELATIVE_SAVING;
+    p->choice=candidate<=(1.0-saving)*incumbent &&
       incumbent-candidate>=KLS_COMPACT_CYCLE_MIN_SECONDS_SAVED?3:-1;
   }
 }

@@ -116,6 +116,7 @@ static void exercise(int transpose,int transactional) {
   }
  }
  assert(s->snb_auto.choice==3 && s->snb_auto_candidate);
+ assert(s->snb_auto.column_only==!s->snb_auto_candidate->row_layout);
  assert(s->snb_auto_candidate->stream_jobs>=4);
  if(!transpose)assert(s->native_i16_normal_runs>=4);
 #ifdef KLS_SNB_HAVE_ROW_PANEL
