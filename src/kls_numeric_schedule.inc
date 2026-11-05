@@ -140,6 +140,10 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
   const double build_start = kls_now_seconds();
   const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
   trilinos_klu_l_numeric *numeric = solver->numeric;
+  /* Optional compact plans may decline; the native numeric remains owned by
+   * the caller. Check every narrowed source/range domain before allocation. */
+  if((uint64_t)solver->n>UINT32_MAX || (uint64_t)solver->nnz>UINT32_MAX ||
+      (uint64_t)solver->n+1>SIZE_MAX/sizeof(uint32_t))return NULL;
   if (symbolic == NULL || numeric == NULL || numeric->LUbx == NULL ||
       !solver->snode_prepared ||
       (double)(numeric->lnz + numeric->unz) > (double)KLS_SNB_MAX_ENTRIES ||
@@ -741,8 +745,8 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
       (size_t)(off_count > 0 ? off_count : 1) * sizeof(kls_snb_entry), 1u, 0, deadline, limit);
     st->blk = (kls_snb_entry *)kls_snb_allocate(st,
       (size_t)(blk_count > 0 ? blk_count : 1) * sizeof(kls_snb_entry), 1u, 0, deadline, limit);
-    st->col_off_ptr = (int64_t *)kls_snb_allocate(st, (size_t)n + 1u,  sizeof(int64_t), 1, deadline, limit);
-    st->col_blk_ptr = (int64_t *)kls_snb_allocate(st, (size_t)n + 1u,  sizeof(int64_t), 1, deadline, limit);
+    st->col_off_ptr = (uint32_t *)kls_snb_allocate(st, (size_t)n + 1u, sizeof(uint32_t), 1, deadline, limit);
+    st->col_blk_ptr = (uint32_t *)kls_snb_allocate(st, (size_t)n + 1u, sizeof(uint32_t), 1, deadline, limit);
     ok = st->off != NULL && st->blk != NULL && st->col_off_ptr != NULL &&
          st->col_blk_ptr != NULL;
     if (ok) {
@@ -754,8 +758,8 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
         const kls_snb_block *blk = &st->blocks[block];
         for (UF_long k = k1; ok && k < k2; ++k) {
           if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
-          st->col_off_ptr[k] = poff;
-          st->col_blk_ptr[k] = pblk;
+          st->col_off_ptr[k] = (uint32_t)poff;
+          st->col_blk_ptr[k] = (uint32_t)pblk;
           const UF_long oldcol = symbolic->Q[k];
           for (UF_long p = solver->col_ptr[oldcol];
                p < solver->col_ptr[oldcol + 1u]; ++p) {
@@ -763,8 +767,8 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
             const UF_long newrow = pinv[oldrow] - k1;
             if (newrow < 0 && poff < (int64_t)nzoff) {
               st->off[poff].dst = poff;
-              st->off[poff].src = (int64_t)p;
-              st->off[poff].oldrow = (int64_t)oldrow;
+              st->off[poff].src = (uint32_t)p;
+              st->off[poff].oldrow = (uint32_t)oldrow;
               poff++;
               continue;
             }
@@ -793,14 +797,14 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
               dst = sn->panel + (int64_t)c * sn->height + lr;
             }
             st->blk[pblk].dst = dst;
-            st->blk[pblk].src = (int64_t)p;
-            st->blk[pblk].oldrow = (int64_t)oldrow;
+            st->blk[pblk].src = (uint32_t)p;
+            st->blk[pblk].oldrow = (uint32_t)oldrow;
             pblk++;
           }
         }
       }
-      st->col_off_ptr[n] = poff;
-      st->col_blk_ptr[n] = pblk;
+      st->col_off_ptr[n] = (uint32_t)poff;
+      st->col_blk_ptr[n] = (uint32_t)pblk;
     }
   }
 
@@ -813,10 +817,12 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
     st->gemm_w = (double **)kls_snb_allocate(st, (size_t)nworkers,  sizeof(double *), 1, deadline, limit);
     st->rs_tmp = (double *)kls_snb_allocate(st, (size_t)symbolic->n * sizeof(double), 1u, 0, deadline, limit);
     ok = st->gemm_w != NULL && st->rs_tmp != NULL;
+    if((uint64_t)gmax_below>SIZE_MAX/((size_t)st->wmax*sizeof(double)))ok=0;
+    else st->gemm_scratch_bytes=(size_t)gmax_below*(size_t)st->wmax*sizeof(double);
     for (int t = 0; ok && t < nworkers; ++t) {
       /* Dense updates reuse these SIMD scratch streams. Give them the
          same alignment guarantee as the other numeric work buffers. */
-      const size_t scratch_bytes = (size_t)gmax_below * (size_t)st->wmax * sizeof(double);
+      const size_t scratch_bytes = st->gemm_scratch_bytes;
       if (scratch_bytes > limit || st->allocation_bytes > limit - scratch_bytes ||
           (deadline > 0.0 && kls_now_seconds() >= deadline)) { ok = 0; break; }
       st->allocation_bytes += scratch_bytes;
@@ -1189,6 +1195,9 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge(
 }
 
 #include "kls_snb_row_panel.inc"
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+#include "kls_snb_inplace_panel.inc"
+#endif
 #include "kls_snb_row_layout.inc"
 
 /* Only newly executed row arithmetic is speculative. Completed incumbent
@@ -1236,7 +1245,19 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
   const int32_t w = sn->width;
   const int32_t H = sn->height;
   const int32_t uw = sn->uw;
-  double *W = column_repair?sn->column_panel:panels+sn->panel;
+  const int inplace_repair=column_repair&&!sn->column_panel;
+  double *W = column_repair&&sn->column_panel?sn->column_panel:panels+sn->panel;
+  if(inplace_repair) {
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+    if(!st->row_layout||w!=16||H<16||!gemm_scratch||
+        (size_t)H>st->gemm_scratch_bytes/2) {
+#else
+    {
+#endif
+      atomic_store_explicit(&st->declined,1,memory_order_release);
+      atomic_store_explicit(&st->failed,1,memory_order_release);return;
+    }
+  }
   if(st->transactional&&st->row_layout&&w==16&&!column_repair)kls_snb_row_transaction_begin();
   memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
   for (int32_t c = 0; c < w; ++c) {
@@ -1268,7 +1289,15 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
         kls_cpu_relax();
       }
     }
-    if(column_repair)kls_snb_update_edge_to(blk,sn,edges+e,wnarrow,gemm_scratch,W);
+    if(column_repair) {
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+      if(st->row_layout&&blk->snodes[edges[e].producer].width==16)
+        kls_rpanel_small_target_edge_to(blk,sn,edges+e,wnarrow,
+          st->row_product_math,gemm_scratch,W);
+      else
+#endif
+        kls_snb_update_edge_to(blk,sn,edges+e,wnarrow,gemm_scratch,W);
+    }
     else
 #ifdef KLS_SNB_HAVE_ROW_PANEL
     if(st->row_layout&&w==16&&!column_repair) {
@@ -1321,9 +1350,6 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
       }
     }
   }
-#ifdef KLS_SNB_HAVE_ROW_PANEL
-  if(column_repair)kls_rpanel_from_columns(W,H,panels+sn->panel);
-#endif
   /* immediate writeback of this snode's columns */
   {
     trilinos_klu_l_numeric *numeric = solver->numeric;
@@ -1349,6 +1375,24 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
       }
     }
   }
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+  /* Write native LU while W is still in columns. This target is unpublished;
+   * its completed producer edges no longer use the worker's GEMM scratch. */
+  if(column_repair) {
+    if(inplace_repair) {
+#ifdef KLS_SNB_INPLACE_REPAIR_BEGIN
+      KLS_SNB_INPLACE_REPAIR_BEGIN(solver,s,gemm_scratch);
+#endif
+      if(!kls_snb_column_panel_to_rows_inplace(W,H,gemm_scratch,st->gemm_scratch_bytes)) {
+        atomic_store_explicit(&st->declined,1,memory_order_release);
+        atomic_store_explicit(&st->failed,1,memory_order_release);return;
+      }
+#ifdef KLS_SNB_INPLACE_REPAIR_EVENT
+      KLS_SNB_INPLACE_REPAIR_EVENT();
+#endif
+    } else kls_rpanel_from_columns(W,H,panels+sn->panel);
+  }
+#endif
   if(st->transactional) {
 #ifdef KLS_SNB_TRANSACTION_AFTER_WRITEBACK
     KLS_SNB_TRANSACTION_AFTER_WRITEBACK(solver,s);

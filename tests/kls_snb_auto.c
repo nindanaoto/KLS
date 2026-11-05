@@ -7,6 +7,15 @@
 static void *row_test_build(kls_solver *,double,size_t);
 #define KLS_SNB_AUTO_TEST_BUILD(s,deadline,limit) row_test_build(s,deadline,limit)
 static _Atomic unsigned row_edges,row_getrfs,row_small_edges;
+static int force_mirrorless;
+static int parallel_partition;
+static void mirrorless_parallel_after_writeback(kls_solver *,int64_t);
+static void mirrorless_parallel_repair_begin(kls_solver *,int64_t,double *);
+#define KLS_SNB_INPLACE_REPAIR_BEGIN(s,node,scratch) mirrorless_parallel_repair_begin(s,node,scratch)
+static size_t row_resident_bytes;
+#define KLS_SNB_ROW_RESIDENT_BYTES(s,st,bytes) ((void)(row_resident_bytes=(bytes)))
+static _Atomic unsigned row_inplace_repairs;
+#define KLS_SNB_INPLACE_REPAIR_EVENT() ((void)atomic_fetch_add_explicit(&row_inplace_repairs,1,memory_order_relaxed))
 #define KLS_RPANEL_TEST_EDGE() ((void)atomic_fetch_add_explicit(&row_edges,1,memory_order_relaxed))
 #define KLS_RPANEL_TEST_GETRF() ((void)atomic_fetch_add_explicit(&row_getrfs,1,memory_order_relaxed))
 #define KLS_RPANEL_TEST_SMALL_EDGE() ((void)atomic_fetch_add_explicit(&row_small_edges,1,memory_order_relaxed))
@@ -23,6 +32,7 @@ static _Atomic unsigned transaction_writebacks;
 static double transaction_old_diagonal[129];
 #define KLS_SNB_TRANSACTION_AFTER_WRITEBACK(s,node) do { \
   atomic_fetch_add_explicit(&transaction_writebacks,1,memory_order_relaxed); \
+  mirrorless_parallel_after_writeback((s),(node)); \
   int uf_width=atomic_load_explicit(&underflow_width,memory_order_relaxed); \
   if(uf_width&&(s)->snb->blocks[0].snodes[node].width==uf_width&& \
      atomic_exchange_explicit(&underflow_width,0,memory_order_relaxed)) { \
@@ -44,7 +54,7 @@ static double transaction_old_diagonal[129];
 static void *row_test_build(kls_solver *s,double deadline,size_t limit) {
  assert(s->symbolic->nblocks==1);int64_t *starts=malloc((size_t)s->n*sizeof(*starts));assert(starts);
  const int widths[]={3,16,2,16,1,16};int64_t count=0,col=0;
- while(col<(int64_t)s->n){starts[count]=col;col+=widths[count%6];++count;}
+ while(col<(int64_t)s->n){starts[count]=col;col+=parallel_partition?16:widths[count%6];++count;}
  kls_snb_partition p={starts,&count};void *st=kls_snb_build(s,&p,deadline,limit);free(starts);return st;
 }
 static size_t transaction_capture(kls_solver *s,double *out) {
@@ -132,6 +142,16 @@ static void exercise(int transpose,int transactional) {
    assert(!memcmp(node->column_panel+(size_t)c*node->height+r,mirror_block->panels+node->panel+kls_rpanel_at(node->height,c,r),8));
  }
  assert(mirrors>0);
+ if(force_mirrorless) {
+  kls_snb_state *st=s->snb_auto_candidate;
+  for(int64_t j=0;j<mirror_block->snode_count;++j) {
+   kls_snb_snode *node=mirror_block->snodes+j;if(!node->column_panel)continue;
+   size_t bytes=(size_t)node->height*16*sizeof(double);
+   assert(st->allocation_bytes>=bytes);st->allocation_bytes-=bytes;
+   free(node->column_panel);node->column_panel=NULL;
+  }
+  assert(kls_snb_row_inplace_storage_fits(st));
+ }
  assert(kls_snb_enable_row_layout(s->snb_auto_candidate,0,SIZE_MAX)); /* Idempotent. */
 #else
  (void)before_getrfs;(void)before_edges;(void)before_small;
@@ -193,13 +213,20 @@ static void exercise(int transpose,int transactional) {
   assert(kls_snb_refactor_parallel(s,prepared_values,2)==0);
   assert(!memcmp(old_lu,s->numeric->LUbx[0],units*sizeof(double)));
 #ifdef KLS_SNB_HAVE_ROW_PANEL
-  for(int which=0;which<3;++which) {
+  for(int which=0;which<4;++which) {
    assert(!feclearexcept(FE_ALL_EXCEPT));
    unsigned injections=atomic_load_explicit(&underflow_injections,memory_order_relaxed);
    unsigned repairs=atomic_load_explicit(&row_underflow_repairs,memory_order_relaxed);
+   unsigned inplace_before=atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed);
+   const size_t scratch_before=s->snb->gemm_scratch_bytes;
+   if(which==3&&force_mirrorless)s->snb->gemm_scratch_bytes=0;
    atomic_store_explicit(&repair_overflow,which==2,memory_order_relaxed);
    atomic_store_explicit(&underflow_width,which?16:3,memory_order_relaxed);
-   assert(kls_snb_stream_refactor(s,prepared_values,2)==(which==2?-2:1));
+   assert(kls_snb_stream_refactor(s,prepared_values,2)==
+     ((which==2||(which==3&&force_mirrorless))?-2:1));
+   s->snb->gemm_scratch_bytes=scratch_before;
+   assert(atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed)==
+     inplace_before+(unsigned)(force_mirrorless&&which>0&&which<3));
    assert(!atomic_load_explicit(&repair_overflow,memory_order_relaxed));
    assert(atomic_load_explicit(&row_underflow_repairs,memory_order_relaxed)==repairs+(unsigned)(which!=0));
    assert(atomic_load_explicit(&underflow_injections,memory_order_relaxed)==injections+1);
@@ -284,6 +311,16 @@ static void exercise(int transpose,int transactional) {
  assert(!cache_control->row_layout&&!cache_control->transactional&&cache_control->allocation_bytes==bytes_before);
  for(int64_t j=0;j<cb->snode_count;++j)assert(!cb->snodes[j].column_panel);
  for(int64_t i=0;i<cache_control->col_blk_ptr[s->n];++i)assert(scatter_before[i]==cache_control->blk[i].dst);
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+ assert(row_resident_bytes<=SIZE_MAX-bytes_before);
+ const size_t exact=row_resident_bytes+bytes_before;
+ assert(exact>0&&kls_snb_try_row_layout(s,cache_control,0,exact-1));
+ assert(!cache_control->row_layout&&cache_control->allocation_bytes==bytes_before);
+ assert(kls_snb_try_row_layout(s,cache_control,0,exact));
+ assert(cache_control->row_layout==!!transpose);
+ assert(cache_control->allocation_bytes==bytes_before);
+ for(int64_t j=0;j<cb->snode_count;++j)assert(!cb->snodes[j].column_panel);
+#endif
  free(scatter_before);kls_snb_destroy(cache_control);
  /* An independent schedule must survive retirement of the candidate. */
  kls_snb_state *ordinary=kls_snb_build(s,NULL,0,SIZE_MAX);assert(ordinary);
@@ -310,6 +347,17 @@ static void row_cache_checks(void) {
  assert(!kls_snb_row_cache_fits(&st,SIZE_MAX,total));
  st.allocation_bytes=SIZE_MAX;assert(!kls_snb_row_cache_fits(&st,200,SIZE_MAX));
  st.allocation_bytes=100;node.height=0;assert(!kls_snb_row_cache_fits(&st,200,total));
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+ node.height=17;double scratch[5]={0};double *workers[]={scratch};
+ st.gemm_w=workers;st.nworkers=1;st.gemm_scratch_bytes=34;
+ assert(kls_snb_row_inplace_cache_fits(&st,200,300));
+ assert(!kls_snb_row_inplace_cache_fits(&st,200,299));
+ st.gemm_scratch_bytes=33;assert(!kls_snb_row_inplace_cache_fits(&st,200,300));
+ st.gemm_scratch_bytes=34;workers[0]=NULL;
+ assert(!kls_snb_row_inplace_cache_fits(&st,200,300));workers[0]=scratch;
+ st.nworkers=0;assert(!kls_snb_row_inplace_cache_fits(&st,200,300));
+ st.nworkers=1;node.height=15;assert(!kls_snb_row_inplace_cache_fits(&st,200,300));
+#endif
  puts("PASS combined native and mirrored panel cache capacity boundaries");
 }
 static void flag_scope_checks(void) {
@@ -324,4 +372,20 @@ static void flag_scope_checks(void) {
  kls_snb_column_mxflags=old_mx;kls_snb_column_flags=old_flags;assert(!fesetenv(&saved));
  puts("PASS incumbent underflow preservation and fresh speculative row flag frame");
 }
-int main(void){row_cache_checks();flag_scope_checks();unsigned original=_mm_getcsr(); for(int ftz=0;ftz<4;++ftz){_mm_setcsr((original&~0x8040u)|((ftz&1?0x8000u:0)|(ftz&2?0x40u:0)));exercise(0,0);exercise(1,0);exercise(0,1);exercise(1,1);exercise(0,2);exercise(1,2);exercise(0,3);exercise(1,3);} _mm_setcsr(original);return 0;}
+#include "kls_snb_mirrorless_parallel.inc"
+int main(void){row_cache_checks();flag_scope_checks();unsigned original=_mm_getcsr();
+ for(force_mirrorless=0;force_mirrorless<2;++force_mirrorless)
+  for(int ftz=0;ftz<4;++ftz){_mm_setcsr((original&~0x8040u)|((ftz&1?0x8000u:0)|(ftz&2?0x40u:0)));
+   exercise(0,0);exercise(1,0);exercise(0,1);exercise(1,1);
+   exercise(0,2);exercise(1,2);exercise(0,3);exercise(1,3);}
+ for(int ftz=0;ftz<4;++ftz) {
+  _mm_setcsr((original&~0x8040u)|((ftz&1?0x8000u:0)|(ftz&2?0x40u:0)));
+  mirrorless_parallel_checks();
+ }
+ _mm_setcsr(original);
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+ assert(atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed)>0);
+ fprintf(stderr,"MIRRORLESS_PUBLIC_ORACLES orientations=2 ftz_daz=4 modes=4 exact_budget=1 scratch_failure=1 inplace_repairs=%u\n",
+   atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed));
+#endif
+ return 0;}

@@ -8235,20 +8235,24 @@ typedef struct kls_snb_block {
   _Atomic int32_t *published; /* per snode: getrf columns finalized */
 } kls_snb_block;
 
+/* The builder validates global input geometry before allocating a plan.
+ * Destinations retain their full panel offset range. */
 typedef struct kls_snb_entry {
   int64_t dst;
-  int64_t src;
-  int64_t oldrow;
+  uint32_t src;
+  uint32_t oldrow;
 } kls_snb_entry;
+_Static_assert(sizeof(kls_snb_entry)==16,"compact scatter entry expected");
 
 typedef struct kls_snb_state {
   kls_snb_block *blocks;
   UF_long nblocks;
   kls_snb_entry *off;      /* off-diagonal scatter entries, Offx order */
   kls_snb_entry *blk;      /* in-panel scatter entries */
-  int64_t *col_off_ptr;    /* per global col: range in off[] */
-  int64_t *col_blk_ptr;    /* per global col: range in blk[] */
+  uint32_t *col_off_ptr;    /* per global col: range in off[] */
+  uint32_t *col_blk_ptr;    /* per global col: range in blk[] */
   double **gemm_w;
+  size_t gemm_scratch_bytes; /* Exact capacity of every owned worker buffer. */
   int nworkers;
   double *rs_tmp;          /* n scratch for the Rs permute */
   int wnarrow;

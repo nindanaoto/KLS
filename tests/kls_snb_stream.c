@@ -6,6 +6,7 @@ static int fail_worker=-1;
 #undef NDEBUG
 #include <assert.h>
 #include "kls_snb_row_normal.inc"
+#include "kls_snb_explicit_row_edge_checks.inc"
 static size_t capture(kls_solver *s,double *out) {
   size_t at=0;trilinos_klu_l_numeric *n=s->numeric;
   for(UF_long k=0;k<s->n;++k) {
@@ -66,6 +67,7 @@ static void direct_product_oracle(void) {
 }
 int main(void) {
   kls_snb_row_normal_checks();
+  explicit_row_edge_checks();
   direct_product_oracle();
   private_closure();
   enum {N=129};int64_t ap[N+1],ai[N*N];double a[N*N],b[N],x[N];

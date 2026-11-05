@@ -43,17 +43,38 @@ static int kls_snb_row_cache_fits(const kls_snb_state *st,size_t native_bytes,
   }
   return 1;
 }
-static int kls_snb_enable_row_layout(kls_snb_state *st,double deadline,size_t limit) {
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+static int kls_snb_row_inplace_storage_fits(const kls_snb_state *st) {
+  if(!st||st->nblocks!=1||!st->blocks||st->nworkers<1||st->nworkers>64||
+      !st->gemm_w)return 0;
+  for(int t=0;t<st->nworkers;++t)if(!st->gemm_w[t])return 0;
+  const kls_snb_block *b=st->blocks;
+  for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].width==16) {
+    const int32_t H=b->snodes[j].height;
+    if(H<16||(size_t)H>SIZE_MAX/(16*sizeof(double))||
+        (size_t)H>st->gemm_scratch_bytes/2)return 0;
+  }
+  return 1;
+}
+static int kls_snb_row_inplace_cache_fits(const kls_snb_state *st,
+    size_t native_bytes,size_t capacity) {
+  return kls_snb_row_inplace_storage_fits(st)&&native_bytes<=capacity&&
+    st->allocation_bytes<=capacity-native_bytes;
+}
+#endif
+static int kls_snb_enable_row_layout_mode(kls_snb_state *st,double deadline,
+    size_t limit,int column_mirrors) {
 #ifdef KLS_SNB_HAVE_ROW_PANEL
   if(!st||st->nblocks!=1)return 0;
   if(st->row_layout)return 1;
+  if(!column_mirrors&&!kls_snb_row_inplace_storage_fits(st))return 0;
   kls_snb_block *b=st->blocks;int found=0;
   for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].width==16)found=1;
   if(!found)return 1;
   int product_math=kls_snb_row_product_math();if(product_math<0)return 0;
-  /* Every row producer has an ordinary column image, also used to repair
-   * a rare underflowing target without discarding the whole owned job. */
-  for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].width==16) {
+  /* Existing admitted plans retain their column images. A budgeted
+   * mirrorless plan reads row producers directly and repairs in place. */
+  if(column_mirrors)for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].width==16) {
     kls_snb_snode *producer=b->snodes+j;
     producer->column_panel=kls_snb_allocate(st,(size_t)producer->height*16,sizeof(double),0,deadline,limit);
     if(!producer->column_panel)return 0;
@@ -77,9 +98,12 @@ static int kls_snb_enable_row_layout(kls_snb_state *st,double deadline,size_t li
   }
   st->row_product_math=product_math;st->row_layout=1;st->transactional=1;
 #else
-  (void)st;(void)deadline;(void)limit;
+  (void)st;(void)deadline;(void)limit;(void)column_mirrors;
 #endif
   return 1;
+}
+static int kls_snb_enable_row_layout(kls_snb_state *st,double deadline,size_t limit) {
+  return kls_snb_enable_row_layout_mode(st,deadline,limit,1);
 }
 static int kls_snb_add_resident_bytes(size_t *bytes,uint64_t count,size_t unit) {
   if(unit&&count>(SIZE_MAX-*bytes)/unit)return 0;
@@ -167,8 +191,19 @@ static int kls_snb_try_row_layout(kls_solver *s,kls_snb_state *st,
     }
   }
 #undef KLS_SNB_RESIDENT
-  if(!kls_snb_row_cache_fits(st,native_bytes,capacity))return 1;
-  return kls_snb_enable_row_layout(st,deadline,capacity);
+#ifdef KLS_SNB_ROW_RESIDENT_BYTES
+  KLS_SNB_ROW_RESIDENT_BYTES(s,st,native_bytes);
+#endif
+  if(kls_snb_row_cache_fits(st,native_bytes,capacity))
+    return kls_snb_enable_row_layout(st,deadline,capacity);
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+  /* Normal orientation builds a solve cache later. Until that future cache
+   * is reserved here, only transpose may use this tighter admission. */
+  if(s->orientation==KLS_ORIENTATION_TRANSPOSE&&
+      kls_snb_row_inplace_cache_fits(st,native_bytes,capacity))
+    return kls_snb_enable_row_layout_mode(st,deadline,capacity,0);
+#endif
+  return 1;
 }
 #ifdef KLS_SNB_HAVE_ROW_PANEL
 static KLS_ALWAYS_INLINE double kls_rpanel_mul(double a,double b) {
@@ -183,19 +218,20 @@ static KLS_ALWAYS_INLINE double kls_rpanel_sub(double a,double b) {
 /* Rare mixed-width consumers retain the original per-output producer order.
  * GCC also leaves its final one-to-three output columns uncontracted.
  * The first dense product and final subtraction remain separately rounded. */
-static void kls_rpanel_small_target_edge(const kls_snb_block *blk,
-    const kls_snb_snode *sn,const kls_snb_edge *edge,int narrow,int product_math,double *scratch) {
+static void kls_rpanel_small_target_edge_to(const kls_snb_block *blk,
+    const kls_snb_snode *sn,const kls_snb_edge *edge,int narrow,int product_math,
+    double *scratch,double *W) {
 #ifdef KLS_RPANEL_TEST_SMALL_EDGE
   KLS_RPANEL_TEST_SMALL_EDGE();
 #endif
   const kls_snb_snode *ps=blk->snodes+edge->producer;
   if(ps->column_panel) {
     /* Reuse the incumbent vector kernels and the owned worker scratch. */
-    kls_snb_update_edge(blk,sn,edge,narrow,scratch);return;
+    kls_snb_update_edge_to(blk,sn,edge,narrow,scratch,W);return;
   }
   const int sc=edge->sub_count,ph=ps->below,H=sn->height;
   const int32_t *sub=blk->subcols+edge->sub_off,*dst=blk->edge_dsts+edge->dst_off;
-  const double *panel=blk->panels+ps->panel;double *W=blk->panels+sn->panel;
+  const double *panel=blk->panels+ps->panel;
   for(int c=0;c<sn->width;++c) {
     double *wc=W+(size_t)c*H;
     for(int i=0;i<sc;++i) {
@@ -219,5 +255,11 @@ static void kls_rpanel_small_target_edge(const kls_snb_block *blk,
       if(dst[r]>=0)wc[dst[r]]=kls_rpanel_sub(wc[dst[r]],t);
     }
   }
+}
+static void kls_rpanel_small_target_edge(const kls_snb_block *blk,
+    const kls_snb_snode *sn,const kls_snb_edge *edge,int narrow,int product_math,
+    double *scratch) {
+  kls_rpanel_small_target_edge_to(blk,sn,edge,narrow,product_math,scratch,
+    blk->panels+sn->panel);
 }
 #endif

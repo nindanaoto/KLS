@@ -48,6 +48,26 @@ static int check_build(int n,int transpose,int csr,int alias,int reject) {
   if(!kls_parallel_lu_sort(s)||!kls_snb_prepare(s))return 3;
   kls_snb_state *incumbent=s->snb;
   const int decision=s->snb_decision;
+  if(sizeof(kls_snb_entry)!=16 || sizeof(*incumbent->col_off_ptr)!=4 ||
+      sizeof(*incumbent->col_blk_ptr)!=4)return 51;
+  for(UF_long c=0;c<s->n;++c) {
+    if(incumbent->col_off_ptr[c]>incumbent->col_off_ptr[c+1] ||
+        incumbent->col_blk_ptr[c]>incumbent->col_blk_ptr[c+1])return 52;
+  }
+  if((uint64_t)incumbent->col_off_ptr[s->n]+incumbent->col_blk_ptr[s->n]!=(uint64_t)s->nnz)return 53;
+  for(uint64_t at=0;at<incumbent->col_off_ptr[s->n];++at)
+    if(incumbent->off[at].src>=(uint64_t)s->nnz||incumbent->off[at].oldrow>=(uint64_t)s->n)return 54;
+  for(uint64_t at=0;at<incumbent->col_blk_ptr[s->n];++at)
+    if(incumbent->blk[at].src>=(uint64_t)s->nnz||incumbent->blk[at].oldrow>=(uint64_t)s->n)return 55;
+  if(sizeof(UF_long)>4) {
+    UF_long saved=s->n;s->n=(UF_long)((uint64_t)UINT32_MAX+1);
+    allocation_calls=0;kls_snb_state *bad=kls_snb_build(s,NULL,0,SIZE_MAX);s->n=saved;
+    if(bad||allocation_calls||s->snb!=incumbent||s->snb_decision!=decision)return 56;
+    saved=s->nnz;s->nnz=(UF_long)((uint64_t)UINT32_MAX+1);
+    allocation_calls=0;bad=kls_snb_build(s,NULL,0,SIZE_MAX);s->nnz=saved;
+    if(bad||allocation_calls||s->snb!=incumbent||s->snb_decision!=decision)return 57;
+  }
+
   kls_snb_partition p={malloc((size_t)n*sizeof(int64_t)),calloc((size_t)s->symbolic->nblocks,sizeof(int64_t))};
   if(!p.starts||!p.counts)return 4;
   for(UF_long block=0;block<incumbent->nblocks;++block) {
