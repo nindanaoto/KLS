@@ -14,7 +14,8 @@ static void mirrorless_parallel_repair_begin(kls_solver *,int64_t,double *);
 #define KLS_SNB_INPLACE_REPAIR_BEGIN(s,node,scratch) mirrorless_parallel_repair_begin(s,node,scratch)
 static size_t row_resident_bytes,row_solve_plan_bytes;
 #define KLS_SNB_ROW_RESIDENT_BYTES(s,st,bytes) do {row_resident_bytes=(bytes);row_solve_plan_bytes=(s)->native_i16?(s)->native_i16->allocation_bytes:0;} while(0)
-static _Atomic unsigned row_inplace_repairs,row_lower_repairs,row_preferred_columns;
+static _Atomic unsigned row_inplace_repairs,row_lower_repairs,row_preferred_columns,row_retries;
+#define KLS_SNB_ROW_RETRY_EVENT(s,node) ((void)atomic_fetch_add_explicit(&row_retries,1,memory_order_relaxed))
 #define KLS_SNB_PREFERRED_COLUMN_EVENT(s,node) ((void)atomic_fetch_add_explicit(&row_preferred_columns,1,memory_order_relaxed))
 #define KLS_SNB_LOWER_REPAIR_EVENT() ((void)atomic_fetch_add_explicit(&row_lower_repairs,1,memory_order_relaxed))
 static _Atomic unsigned packed_row_calls;
@@ -265,6 +266,27 @@ static void exercise(int transpose,int transactional) {
    assert(!memcmp(transaction_old_diagonal,s->numeric->Udiag,sizeof transaction_old_diagonal));
    assert(!atomic_load_explicit(&s->egraph_pool->active_workers,memory_order_acquire));
    assert(!s->componentwise_work&&!s->componentwise_work_context);
+   if(which==1) {
+    const unsigned preferred_before=atomic_load_explicit(&row_preferred_columns,memory_order_relaxed);
+    const unsigned retries_before=atomic_load_explicit(&row_retries,memory_order_relaxed);
+    const unsigned repairs_before=atomic_load_explicit(&row_underflow_repairs,memory_order_relaxed);
+    assert(!feclearexcept(FE_ALL_EXCEPT));
+    atomic_store_explicit(&underflow_width,16,memory_order_relaxed);
+    assert(kls_snb_stream_refactor(s,prepared_values,2)==1);
+    assert(fetestexcept(FE_UNDERFLOW)); /* Legitimate incumbent flags survive. */
+    assert(atomic_load_explicit(&row_preferred_columns,memory_order_relaxed)==preferred_before+1);
+    assert(atomic_load_explicit(&row_retries,memory_order_relaxed)==retries_before);
+    assert(atomic_load_explicit(&row_underflow_repairs,memory_order_relaxed)==repairs_before);
+    assert(!memcmp(old_lu,s->numeric->LUbx[0],units*sizeof(double)));
+    assert(!feclearexcept(FE_ALL_EXCEPT));
+    assert(kls_snb_stream_refactor(s,prepared_values,2)==1);
+    assert(!fetestexcept(FE_UNDERFLOW|FE_INVALID|FE_DIVBYZERO|FE_OVERFLOW));
+    assert(atomic_load_explicit(&row_preferred_columns,memory_order_relaxed)==preferred_before+2);
+    assert(atomic_load_explicit(&row_retries,memory_order_relaxed)==retries_before+1);
+    assert(!memcmp(old_lu,s->numeric->LUbx[0],units*sizeof(double)));
+    assert(!memcmp(transaction_old_diagonal,s->numeric->Udiag,sizeof transaction_old_diagonal));
+    puts("GUARDED_ROW_FLAGS_ORACLE retained_on_underflow=1 cleared_on_clean=1 incumbent_flags=1 native_bits=1");
+   }
   }
 #endif
   assert(!fesetenv(&environment));free(bad);free(old_lu);s->snb=selected;
@@ -410,7 +432,7 @@ static void flag_scope_checks(void) {
  puts("PASS incumbent underflow preservation and fresh speculative row flag frame");
 }
 #include "kls_snb_mirrorless_parallel.inc"
-int main(void){row_cache_checks();flag_scope_checks();unsigned original=_mm_getcsr();
+int main(void){setvbuf(stdout,NULL,_IOLBF,0);row_cache_checks();flag_scope_checks();unsigned original=_mm_getcsr();
  for(force_mirrorless=0;force_mirrorless<2;++force_mirrorless)
   for(int ftz=0;ftz<4;++ftz){_mm_setcsr((original&~0x8040u)|((ftz&1?0x8000u:0)|(ftz&2?0x40u:0)));
    exercise(0,0);exercise(1,0);exercise(0,1);exercise(1,1);

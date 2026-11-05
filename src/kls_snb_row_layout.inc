@@ -25,8 +25,9 @@ static int kls_snb_row_product_math(void) {
   _mm_setcsr(csr);return result;
 }
 #endif
-/* A repaired row node may use the incumbent column kernel on subsequent
- * calls. Its current coefficients are still scattered and factored afresh.
+/* A repaired row node uses the incumbent column kernel on its next visit.
+ * A clean column visit permits another row trial; persistent underflow keeps
+ * the column choice. Current coefficients are always factored afresh.
  * Atomic bytes let independent workers mark nodes sharing the same byte. */
 static size_t kls_snb_row_preference_bytes(const kls_snb_state *st) {
   if(!st||st->nblocks!=1||!st->blocks||st->blocks[0].snode_count<1)return SIZE_MAX;
@@ -43,6 +44,10 @@ static int kls_snb_prefers_column(const kls_snb_state *st,int64_t node) {
 static void kls_snb_prefer_column(kls_snb_state *st,int64_t node) {
   if(st->row_column_preferred)atomic_fetch_or_explicit(st->row_column_preferred+(size_t)node/8,
     (unsigned char)(1u<<((unsigned)node&7u)),memory_order_relaxed);
+}
+static void kls_snb_retry_row(kls_snb_state *st,int64_t node) {
+  if(st->row_column_preferred)atomic_fetch_and_explicit(st->row_column_preferred+(size_t)node/8,
+    (unsigned char)~(1u<<((unsigned)node&7u)),memory_order_relaxed);
 }
 /* Duplication must fit alongside the native factor, which every certified
  * solve still reads. A miss keeps the existing column candidate unchanged. */

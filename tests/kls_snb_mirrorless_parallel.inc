@@ -120,11 +120,17 @@ static void mirrorless_parallel_case(int owned_compact) {
     if(epoch<11) {
       parallel_rhs(a,b,epoch+3);
       const unsigned preferred_before=atomic_load_explicit(&row_preferred_columns,memory_order_relaxed);
+      const unsigned retries_before=atomic_load_explicit(&row_retries,memory_order_relaxed);
       assert(!feclearexcept(FE_ALL_EXCEPT));
       assert(kls_refactor_solve(s,a,1,b,0,x,0)==KLS_OK);
       assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_SNB);
       normal_csr=_mm_getcsr();normal_flags=fetestexcept(FE_ALL_EXCEPT);
-      if(epoch==10)assert(atomic_load_explicit(&row_preferred_columns,memory_order_relaxed)==preferred_before+4);
+      if(epoch==10) {
+        assert(atomic_load_explicit(&row_preferred_columns,memory_order_relaxed)==preferred_before+4);
+        assert(atomic_load_explicit(&row_retries,memory_order_relaxed)==retries_before+4);
+        for(int64_t j=0;j<st->blocks[0].snode_count;++j)
+          if(st->blocks[0].snodes[j].start%96==parallel_repair_start)assert(!kls_snb_prefers_column(st,j));
+      }
     }
     assert(transaction_capture(s,expected)==capacity);
     parallel_rhs(a,b,epoch+3);for(int r=0;r<N;++r)x[r]=733.;
@@ -159,6 +165,7 @@ static void mirrorless_parallel_case(int owned_compact) {
         assert(csr==normal_csr&&flags==normal_flags);
         for(int64_t j=0;j<st->blocks[0].snode_count;++j)
           if(st->blocks[0].snodes[j].start%96==parallel_repair_start)assert(kls_snb_prefers_column(st,j));
+        puts("GUARDED_ROW_RETRY_ORACLES workers=4 cleared=4 changed_A=1 native_bits_flags=1 atomic_shared_byte=1");
         puts("PREFERRED_COLUMN_ORACLES workers=4 visits=4 changed_A=1 fresh_rhs=1 native_bits_flags=1 atomic_shared_byte=1");
       }
       for(int i=0;i<4;++i)for(int j=0;j<i;++j) {

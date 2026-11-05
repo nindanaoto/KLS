@@ -114,6 +114,8 @@ static int check_preferred_storage(void) {
       if(kls_snb_prefers_column(st,0))return 86;
       kls_snb_prefer_column(st,0);kls_snb_prefer_column(st,0);
       if(!kls_snb_prefers_column(st,0)||st->allocation_bytes!=expected)return 87;
+      kls_snb_retry_row(st,0);kls_snb_retry_row(st,0);
+      if(kls_snb_prefers_column(st,0)||st->allocation_bytes!=expected)return 88;
     }
     kls_snb_destroy(st);
   }
@@ -406,6 +408,7 @@ static int check_general_btf(int transpose,int scale) {
   kls_destroy(s);return 0;
 }
 int main(void) {
+  setvbuf(stdout,NULL,_IOLBF,0);
   {int boundary=check_scatter_boundaries();if(boundary)return boundary;}
   {int policy=check_compact_image_policy();if(policy)return policy;}
   {int storage=check_preferred_storage();if(storage)return storage;}

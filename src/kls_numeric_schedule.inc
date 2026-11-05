@@ -1288,8 +1288,9 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
   const int32_t w = sn->width;
   const int32_t H = sn->height;
   const int32_t uw = sn->uw;
+  int preferred_column=0;
   if(!column_repair&&st->row_layout&&w==16&&kls_snb_prefers_column(st,s)) {
-    column_repair=1;
+    column_repair=1;preferred_column=1;
 #ifdef KLS_SNB_PREFERRED_COLUMN_EVENT
     KLS_SNB_PREFERRED_COLUMN_EVENT(solver,s);
 #endif
@@ -1308,7 +1309,7 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
       atomic_store_explicit(&st->failed,1,memory_order_release);return;
     }
   }
-  if(st->transactional&&st->row_layout&&w==16&&!column_repair)kls_snb_row_transaction_begin();
+  if(st->transactional&&st->row_layout&&w==16&&(!column_repair||preferred_column))kls_snb_row_transaction_begin();
   memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
   for (int32_t c = 0; c < w; ++c) {
     const UF_long gk = k1 + sn->start + c;
@@ -1443,6 +1444,14 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
     KLS_SNB_TRANSACTION_AFTER_WRITEBACK(solver,s);
 #endif
     unsigned bad_flags=kls_snb_transaction_bad_flags();
+    /* Isolate this incumbent visit from earlier columns' legitimate flags.
+     * A clean result makes the faster row kernel eligible on the next call. */
+    if(preferred_column&&!bad_flags&&!atomic_load_explicit(&st->failed,memory_order_acquire)) {
+      kls_snb_retry_row(st,s);
+#ifdef KLS_SNB_ROW_RETRY_EVENT
+      KLS_SNB_ROW_RETRY_EVENT(solver,s);
+#endif
+    }
     if(!st->row_layout||w!=16||column_repair)bad_flags&=~0x10u; /* Incumbent underflow. */
 #ifdef KLS_SNB_HAVE_ROW_PANEL
     if(bad_flags==0x10u&&st->row_layout&&w==16&&!column_repair&&
