@@ -18,18 +18,7 @@ static void kls_snb_process_target_slice(kls_solver *solver, kls_snb_state *st,
   memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
   for (int32_t c = 0; c < w; ++c) {
     const UF_long gk = k1 + sn->start + c;
-    for (int64_t p = st->col_off_ptr[gk]; p < st->col_off_ptr[gk + 1u];
-         ++p) {
-      offx[st->off[p].dst] =
-        scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
-                  : az[st->off[p].src];
-    }
-    for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
-         ++p) {
-      panels[st->blk[p].dst] =
-        scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
-                  : az[st->blk[p].src];
-    }
+    kls_snb_scatter_input_column(solver,st,blk,sn,gk,az,rs,scale,offx,NULL);
   }
   const kls_snb_edge *edges = blk->edges + sn->edges_off;
   for (int32_t e = 0; e < sn->edge_count; ++e) {

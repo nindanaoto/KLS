@@ -3,7 +3,7 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include <stdlib.h>
-static int allocation_failure=-1,allocation_calls=0;
+static int allocation_failure=-1,allocation_calls=0,alternate_ordering;
 static int fail_allocation(void) {
   ++allocation_calls;
   if(allocation_failure<0)return 0;
@@ -34,7 +34,7 @@ static int check_build(int n,int transpose,int csr,int alias,int reject) {
   ptr[n]=nz;
   kls_options opts;kls_default_options(&opts);
   opts.threads=1;opts.backend=KLS_BACKEND_SERIAL;
-  opts.ordering=KLS_ORDERING_NATURAL;opts.use_btf=0;
+  opts.ordering=alternate_ordering?KLS_ORDERING_AMD:KLS_ORDERING_NATURAL;opts.use_btf=0;
   opts.orientation=transpose?KLS_ORIENTATION_TRANSPOSE:KLS_ORIENTATION_NORMAL;
   kls_solver *s=NULL;
   if(kls_create(&s)||(csr?kls_analyze_csr:kls_analyze_csc)(s,KLS_INDEX_INT32,n,ptr,idx,0,&opts)||
@@ -48,17 +48,28 @@ static int check_build(int n,int transpose,int csr,int alias,int reject) {
   if(!kls_parallel_lu_sort(s)||!kls_snb_prepare(s))return 3;
   kls_snb_state *incumbent=s->snb;
   const int decision=s->snb_decision;
+  if(alternate_ordering) {
+    int changed=0;for(UF_long k=0;k<s->n;++k)changed|=s->symbolic->Q[k]!=k;
+    if(!changed)return 59;
+  }
   if(sizeof(kls_snb_entry)!=16 || sizeof(*incumbent->col_off_ptr)!=4 ||
       sizeof(*incumbent->col_blk_ptr)!=4)return 51;
-  for(UF_long c=0;c<s->n;++c) {
-    if(incumbent->col_off_ptr[c]>incumbent->col_off_ptr[c+1] ||
-        incumbent->col_blk_ptr[c]>incumbent->col_blk_ptr[c+1])return 52;
+  if(incumbent->scatter_dst) {
+    if(incumbent->off||incumbent->blk||incumbent->col_off_ptr||incumbent->col_blk_ptr||
+        incumbent->nblocks!=1||sizeof(*incumbent->blocks[0].wb_col_off)!=4)return 52;
+    for(UF_long at=0;at<s->nnz;++at)
+      if(incumbent->scatter_dst[at]>=(uint64_t)incumbent->blocks[0].panel_doubles)return 53;
+  } else {
+    for(UF_long c=0;c<s->n;++c) {
+      if(incumbent->col_off_ptr[c]>incumbent->col_off_ptr[c+1] ||
+          incumbent->col_blk_ptr[c]>incumbent->col_blk_ptr[c+1])return 52;
+    }
+    if((uint64_t)incumbent->col_off_ptr[s->n]+incumbent->col_blk_ptr[s->n]!=(uint64_t)s->nnz)return 53;
+    for(uint64_t at=0;at<incumbent->col_off_ptr[s->n];++at)
+      if(incumbent->off[at].src>=(uint64_t)s->nnz||incumbent->off[at].oldrow>=(uint64_t)s->n)return 54;
+    for(uint64_t at=0;at<incumbent->col_blk_ptr[s->n];++at)
+      if(incumbent->blk[at].src>=(uint64_t)s->nnz||incumbent->blk[at].oldrow>=(uint64_t)s->n)return 55;
   }
-  if((uint64_t)incumbent->col_off_ptr[s->n]+incumbent->col_blk_ptr[s->n]!=(uint64_t)s->nnz)return 53;
-  for(uint64_t at=0;at<incumbent->col_off_ptr[s->n];++at)
-    if(incumbent->off[at].src>=(uint64_t)s->nnz||incumbent->off[at].oldrow>=(uint64_t)s->n)return 54;
-  for(uint64_t at=0;at<incumbent->col_blk_ptr[s->n];++at)
-    if(incumbent->blk[at].src>=(uint64_t)s->nnz||incumbent->blk[at].oldrow>=(uint64_t)s->n)return 55;
   if(sizeof(UF_long)>4) {
     UF_long saved=s->n;s->n=(UF_long)((uint64_t)UINT32_MAX+1);
     allocation_calls=0;kls_snb_state *bad=kls_snb_build(s,NULL,0,SIZE_MAX);s->n=saved;
@@ -252,6 +263,35 @@ done:
   free(ptr);free(idx);free(a);free(b);free(x);
   return 0;
 }
+static int check_general_btf(int transpose,int scale) {
+  enum{N=12};int ap[N+1],ai[N*N],nz=0;double a[N*N],b[N],x[N];
+  for(int c=0;c<N;++c) {
+    ap[c]=nz;
+    for(int r=0;r<N;++r)if(r/6==c/6||(r<6&&c>=6&&r==c%6)) {
+      ai[nz]=r;a[nz++]=r==c?8.:.03125;
+    }
+  }
+  ap[N]=nz;kls_options o;kls_default_options(&o);o.backend=KLS_BACKEND_SERIAL;
+  o.threads=1;o.use_btf=1;o.scale=scale;o.ordering=KLS_ORDERING_NATURAL;
+  o.orientation=transpose?KLS_ORIENTATION_TRANSPOSE:KLS_ORIENTATION_NORMAL;
+  kls_solver *s=NULL;if(kls_create(&s)||kls_analyze_csc(s,KLS_INDEX_INT32,N,ap,ai,0,&o)||kls_factor(s,a))return 60;
+  s->snode_prepared=1;s->snb_declined=0;
+  if(!kls_parallel_lu_sort(s)||!kls_snb_prepare(s)||s->symbolic->nblocks<2||
+      s->snb->scatter_dst||!s->snb->off||!s->snb->blk||!s->snb->col_off_ptr||!s->snb->col_blk_ptr)return 61;
+  if(!s->snb->col_off_ptr[N])return 62;
+  s->snb_decision=1;
+  for(int epoch=1;epoch<=3;++epoch) {
+    memset(b,0,sizeof b);
+    for(int c=0;c<N;++c)for(int p=ap[c];p<ap[c+1];++p) {
+      if(ai[p]==c)a[p]+=.125;
+      b[ai[p]]+=a[p]*(1.+.125*((c+epoch)%7));
+    }
+    if(kls_refactor_solve(s,a,1,b,0,x,0))return 63;
+    if(s->stats.last_refactor_path!=KLS_REFACTOR_PATH_SNB)return 65;
+    for(int r=0;r<N;++r)if(!isfinite(x[r])||fabs(x[r]-(1.+.125*((r+epoch)%7)))>1e-11)return 64;
+  }
+  kls_destroy(s);return 0;
+}
 int main(void) {
   /* Budget tests use no matrix identity, synthetic model, or CPU coefficient.
      A short hinted workload cannot fund the complete search/build/trial envelope;
@@ -282,5 +322,16 @@ int main(void) {
       if(status){fprintf(stderr,"SNB cycle transpose=%d csr=%d alias=%d reject=%d failed at %d\n",
         transpose,csr,alias,reject,status);return status;}
     }
+  alternate_ordering=1;
+  for(int transpose=0;transpose<2;++transpose)for(int csr=0;csr<2;++csr) {
+    int status=check_build(129,transpose,csr,0,0);
+    if(status){fprintf(stderr,"SNB compact AMD CSC/CSR failed at %d\n",status);return status;}
+  }
+  alternate_ordering=0;
+  for(int transpose=0;transpose<2;++transpose)for(int scale=0;scale<=2;scale+=2) {
+    int status=check_general_btf(transpose,scale);
+    if(status){fprintf(stderr,"SNB general BTF transpose=%d scale=%d failed at %d\n",transpose,scale,status);return status;}
+  }
+  puts("CSC_SCATTER_ORACLES compact_map=1 amd_permutation=1 csc_csr=1 scaled=1 btf_offdiag_fallback=1 current_rhs=1");
   return 0;
 }

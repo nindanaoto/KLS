@@ -51,7 +51,6 @@ static int kls_snb_auto_build(kls_solver *s) {
 #endif
   s->snb_auto_candidate=st;
   int ok=st!=NULL && kls_snb_build_private(st,deadline,limit) &&
-    kls_snb_try_row_layout(s,st,deadline,limit) &&
     kls_now_seconds()<deadline &&
     ensure_egraph_refactor_pool(s,s->options.threads)!=NULL;
   if(ok && s->orientation==KLS_ORIENTATION_NORMAL) {
@@ -65,6 +64,9 @@ static int kls_snb_auto_build(kls_solver *s) {
       s->native_i16=kls_native_i16_build(s,until,limit-st->allocation_bytes);
     ok=s->native_i16!=NULL;
   }
+  /* Count the actual required normal solve representation before admitting
+   * either row mode. No future solve-cache allocation is left unreserved. */
+  if(ok)ok=kls_snb_try_row_layout(s,st,deadline,limit)&&kls_now_seconds()<deadline;
   p->column_only=ok && !st->row_layout;
   p->spent+=kls_now_seconds()-start;
   return ok && p->spent<=p->limit && kls_now_seconds()<deadline;

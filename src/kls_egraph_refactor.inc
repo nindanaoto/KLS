@@ -8231,7 +8231,7 @@ typedef struct kls_snb_block {
   double *panels;
   int64_t panel_doubles;
   int32_t *writeback;   /* per LU entry (block walk order): panel index */
-  int64_t *wb_col_off;  /* per local column: offset into writeback[] */
+  uint32_t *wb_col_off;  /* per local column: offset into writeback[] */
   _Atomic int32_t *published; /* per snode: getrf columns finalized */
 } kls_snb_block;
 
@@ -8249,6 +8249,7 @@ typedef struct kls_snb_state {
   UF_long nblocks;
   kls_snb_entry *off;      /* off-diagonal scatter entries, Offx order */
   kls_snb_entry *blk;      /* in-panel scatter entries */
+  uint32_t *scatter_dst;  /* Single-block destinations, indexed by original CSC p. */
   uint32_t *col_off_ptr;    /* per global col: range in off[] */
   uint32_t *col_blk_ptr;    /* per global col: range in blk[] */
   double **gemm_w;

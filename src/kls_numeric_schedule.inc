@@ -49,6 +49,7 @@ static void kls_snb_destroy(kls_snb_state *st) {
     }
     free(st->blocks);
   }
+  free(st->scatter_dst);
   free(st->off);
   free(st->blk);
   free(st->col_off_ptr);
@@ -470,12 +471,16 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
     {
       int64_t wb_total = 0;
       for (UF_long k = 0; k < nk; ++k) {
+        if(llen[k]<0||ulen[k]<0||(uint64_t)llen[k]>UINT32_MAX-(uint64_t)wb_total||
+            (uint64_t)ulen[k]>UINT32_MAX-(uint64_t)wb_total-(uint64_t)llen[k]) {
+          ok=0;goto build_done;
+        }
         wb_total += llen[k] + ulen[k];
       }
       blk->writeback = (int32_t *)kls_snb_allocate(st,
-        (size_t)(wb_total > 0 ? wb_total : 1) * sizeof(int32_t), 1u, 0, deadline, limit);
+        (size_t)(wb_total > 0 ? wb_total : 1), sizeof(int32_t), 0, deadline, limit);
       blk->wb_col_off =
-        (int64_t *)kls_snb_allocate(st, ((size_t)nk + 1u) * sizeof(int64_t), 1u, 0, deadline, limit);
+        (uint32_t *)kls_snb_allocate(st, (size_t)nk + 1u, sizeof(uint32_t), 0, deadline, limit);
       if (blk->writeback == NULL || blk->wb_col_off == NULL) {
         ok = 0;
         break;
@@ -483,7 +488,7 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
       int64_t wb = 0;
       for (UF_long k = 0; ok && k < nk; ++k) {
         if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
-        blk->wb_col_off[k] = wb;
+        blk->wb_col_off[k] = (uint32_t)wb;
         const int32_t s = blk->col2snode[k];
         const kls_snb_snode *sn = &blk->snodes[s];
         const int32_t c = (int32_t)(k - sn->start);
@@ -521,7 +526,7 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
         }
       }
       if (ok) {
-        blk->wb_col_off[nk] = wb;
+        blk->wb_col_off[nk] = (uint32_t)wb;
       }
     }
   }
@@ -741,14 +746,17 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
         }
       }
     }
-    st->off = (kls_snb_entry *)kls_snb_allocate(st,
-      (size_t)(off_count > 0 ? off_count : 1) * sizeof(kls_snb_entry), 1u, 0, deadline, limit);
-    st->blk = (kls_snb_entry *)kls_snb_allocate(st,
-      (size_t)(blk_count > 0 ? blk_count : 1) * sizeof(kls_snb_entry), 1u, 0, deadline, limit);
-    st->col_off_ptr = (uint32_t *)kls_snb_allocate(st, (size_t)n + 1u, sizeof(uint32_t), 1, deadline, limit);
-    st->col_blk_ptr = (uint32_t *)kls_snb_allocate(st, (size_t)n + 1u, sizeof(uint32_t), 1, deadline, limit);
-    ok = st->off != NULL && st->blk != NULL && st->col_off_ptr != NULL &&
-         st->col_blk_ptr != NULL;
+    const int compact=st->nblocks==1&&n>=2&&solver->nnz>0&&off_count==0&&nzoff==0;
+    if(compact) {
+      st->scatter_dst=kls_snb_allocate(st,(size_t)solver->nnz,sizeof(*st->scatter_dst),0,deadline,limit);
+      ok=st->scatter_dst!=NULL;
+    } else {
+      st->off=kls_snb_allocate(st,(size_t)(off_count>0?off_count:1),sizeof(*st->off),0,deadline,limit);
+      st->blk=kls_snb_allocate(st,(size_t)(blk_count>0?blk_count:1),sizeof(*st->blk),0,deadline,limit);
+      st->col_off_ptr=kls_snb_allocate(st,(size_t)n+1,sizeof(*st->col_off_ptr),1,deadline,limit);
+      st->col_blk_ptr=kls_snb_allocate(st,(size_t)n+1,sizeof(*st->col_blk_ptr),1,deadline,limit);
+      ok=st->off&&st->blk&&st->col_off_ptr&&st->col_blk_ptr;
+    }
     if (ok) {
       int64_t poff = 0;
       int64_t pblk = 0;
@@ -758,8 +766,10 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
         const kls_snb_block *blk = &st->blocks[block];
         for (UF_long k = k1; ok && k < k2; ++k) {
           if (deadline > 0.0 && kls_now_seconds() >= deadline) goto build_done;
-          st->col_off_ptr[k] = (uint32_t)poff;
-          st->col_blk_ptr[k] = (uint32_t)pblk;
+          if(!compact) {
+            st->col_off_ptr[k] = (uint32_t)poff;
+            st->col_blk_ptr[k] = (uint32_t)pblk;
+          }
           const UF_long oldcol = symbolic->Q[k];
           for (UF_long p = solver->col_ptr[oldcol];
                p < solver->col_ptr[oldcol + 1u]; ++p) {
@@ -796,15 +806,22 @@ static kls_snb_state *kls_snb_build(kls_solver *solver,
               if (lr < 0) { ok = 0; break; }
               dst = sn->panel + (int64_t)c * sn->height + lr;
             }
-            st->blk[pblk].dst = dst;
-            st->blk[pblk].src = (uint32_t)p;
-            st->blk[pblk].oldrow = (uint32_t)oldrow;
+            if(compact) {
+              if(dst<0||(uint64_t)dst>UINT32_MAX){ok=0;break;}
+              st->scatter_dst[p]=(uint32_t)dst;
+            } else {
+              st->blk[pblk].dst = dst;
+              st->blk[pblk].src = (uint32_t)p;
+              st->blk[pblk].oldrow = (uint32_t)oldrow;
+            }
             pblk++;
           }
         }
       }
-      st->col_off_ptr[n] = (uint32_t)poff;
-      st->col_blk_ptr[n] = (uint32_t)pblk;
+      if(!compact) {
+        st->col_off_ptr[n] = (uint32_t)poff;
+        st->col_blk_ptr[n] = (uint32_t)pblk;
+      }
     }
   }
 
@@ -1232,6 +1249,7 @@ static KLS_ALWAYS_INLINE int64_t kls_snb_row_to_column_index(int H,int64_t at) {
   const int64_t group=at/((int64_t)8*H),local=at%((int64_t)8*H);
   return (group*8+(local&7))*H+local/8;
 }
+#include "kls_snb_scatter.inc"
 static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
                                    kls_snb_block *blk, int64_t s,
                                    const double *az, const double *rs,
@@ -1262,18 +1280,7 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
   memset(W, 0, (size_t)H * (size_t)w * sizeof(double));
   for (int32_t c = 0; c < w; ++c) {
     const UF_long gk = k1 + sn->start + c;
-    for (int64_t p = st->col_off_ptr[gk]; p < st->col_off_ptr[gk + 1u];
-         ++p) {
-      offx[st->off[p].dst] =
-        scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
-                  : az[st->off[p].src];
-    }
-    for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
-         ++p) {
-      const double value=scale>0?az[st->blk[p].src]/rs[st->blk[p].oldrow]:az[st->blk[p].src];
-      if(column_repair)W[kls_snb_row_to_column_index(H,st->blk[p].dst-sn->panel)]=value;
-      else panels[st->blk[p].dst]=value;
-    }
+    kls_snb_scatter_input_column(solver,st,blk,sn,gk,az,rs,scale,offx,column_repair?W:NULL);
   }
   const kls_snb_edge *edges = blk->edges + sn->edges_off;
   for (int32_t e = 0; e < sn->edge_count; ++e) {
@@ -1604,18 +1611,7 @@ static void kls_snb_process_target_coop(kls_snb_par_ctx *ctx,
   kls_snb_spin_barrier_wait(&ctx->coop, crew);
   for (int32_t c = tid; c < w; c += crew) {
     const UF_long gk = k1 + sn->start + c;
-    for (int64_t p = st->col_off_ptr[gk]; p < st->col_off_ptr[gk + 1u];
-         ++p) {
-      offx[st->off[p].dst] =
-        scale > 0 ? az[st->off[p].src] / rs[st->off[p].oldrow]
-                  : az[st->off[p].src];
-    }
-    for (int64_t p = st->col_blk_ptr[gk]; p < st->col_blk_ptr[gk + 1u];
-         ++p) {
-      panels[st->blk[p].dst] =
-        scale > 0 ? az[st->blk[p].src] / rs[st->blk[p].oldrow]
-                  : az[st->blk[p].src];
-    }
+    kls_snb_scatter_input_column(solver,st,blk,sn,gk,az,rs,scale,offx,NULL);
   }
   kls_snb_spin_barrier_wait(&ctx->coop, crew);
   const kls_snb_edge *edges = blk->edges + sn->edges_off;

@@ -62,7 +62,7 @@ static int kls_snb_row_inplace_cache_fits(const kls_snb_state *st,
     st->allocation_bytes<=capacity-native_bytes;
 }
 #endif
-static int kls_snb_enable_row_layout_mode(kls_snb_state *st,double deadline,
+static int kls_snb_enable_row_layout_mode(kls_solver *solver,kls_snb_state *st,double deadline,
     size_t limit,int column_mirrors) {
 #ifdef KLS_SNB_HAVE_ROW_PANEL
   if(!st||st->nblocks!=1)return 0;
@@ -84,7 +84,16 @@ static int kls_snb_enable_row_layout_mode(kls_snb_state *st,double deadline,
     const kls_snb_snode *sn=b->snodes+j;if(sn->width!=16)continue;
     for(int c=0;c<16;++c) {
       const int64_t k=sn->start+c;const UF_long g=b->k1+(UF_long)k;
-      for(int64_t p=st->col_blk_ptr[g];p<st->col_blk_ptr[g+1];++p) {
+      if(st->scatter_dst) {
+        const UF_long oldcol=solver->symbolic->Q[g];
+        for(UF_long p=solver->col_ptr[oldcol];p<solver->col_ptr[oldcol+1];++p) {
+          int64_t r=(int64_t)st->scatter_dst[p]-sn->panel-(int64_t)c*sn->height;
+          if(r<0||r>=sn->height)return 0;
+          uint64_t at=(uint64_t)sn->panel+kls_rpanel_at(sn->height,c,(int)r);
+          if(at>UINT32_MAX)return 0;
+          st->scatter_dst[p]=(uint32_t)at;
+        }
+      } else for(int64_t p=st->col_blk_ptr[g];p<st->col_blk_ptr[g+1];++p) {
         int64_t r=st->blk[p].dst-sn->panel-(int64_t)c*sn->height;
         if(r<0||r>=sn->height)return 0;
         st->blk[p].dst=sn->panel+(int64_t)kls_rpanel_at(sn->height,c,(int)r);
@@ -98,12 +107,12 @@ static int kls_snb_enable_row_layout_mode(kls_snb_state *st,double deadline,
   }
   st->row_product_math=product_math;st->row_layout=1;st->transactional=1;
 #else
-  (void)st;(void)deadline;(void)limit;(void)column_mirrors;
+  (void)solver;(void)st;(void)deadline;(void)limit;(void)column_mirrors;
 #endif
   return 1;
 }
-static int kls_snb_enable_row_layout(kls_snb_state *st,double deadline,size_t limit) {
-  return kls_snb_enable_row_layout_mode(st,deadline,limit,1);
+static int kls_snb_enable_row_layout(kls_solver *solver,kls_snb_state *st,double deadline,size_t limit) {
+  return kls_snb_enable_row_layout_mode(solver,st,deadline,limit,1);
 }
 static int kls_snb_add_resident_bytes(size_t *bytes,uint64_t count,size_t unit) {
   if(unit&&count>(SIZE_MAX-*bytes)/unit)return 0;
@@ -195,13 +204,11 @@ static int kls_snb_try_row_layout(kls_solver *s,kls_snb_state *st,
   KLS_SNB_ROW_RESIDENT_BYTES(s,st,native_bytes);
 #endif
   if(kls_snb_row_cache_fits(st,native_bytes,capacity))
-    return kls_snb_enable_row_layout(st,deadline,capacity);
+    return kls_snb_enable_row_layout(s,st,deadline,capacity);
 #ifdef KLS_SNB_HAVE_ROW_PANEL
-  /* Normal orientation builds a solve cache later. Until that future cache
-   * is reserved here, only transpose may use this tighter admission. */
-  if(s->orientation==KLS_ORIENTATION_TRANSPOSE&&
-      kls_snb_row_inplace_cache_fits(st,native_bytes,capacity))
-    return kls_snb_enable_row_layout_mode(st,deadline,capacity,0);
+  /* AUTO builds its required solve cache before this resident-ledger check. */
+  if(kls_snb_row_inplace_cache_fits(st,native_bytes,capacity))
+    return kls_snb_enable_row_layout_mode(s,st,deadline,capacity,0);
 #endif
   return 1;
 }
