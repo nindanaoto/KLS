@@ -225,9 +225,25 @@ static KLS_ALWAYS_INLINE double kls_rpanel_sub(double a,double b) {
 /* Rare mixed-width consumers retain the original per-output producer order.
  * GCC also leaves its final one-to-three output columns uncontracted.
  * The first dense product and final subtraction remain separately rounded. */
+/* Move only the producer's L-below rectangle into an owned worker buffer.
+ * Each8x8 transpose consists entirely of bit moves, including exceptional
+ * payloads. The caller checks space for both this block and the product T. */
+static void kls_rpanel_pack_below(const double *R,int H,int first,int rows,double *L) {
+  for(int group=0;group<2;++group) {
+    int r=0;
+    for(;r+7<rows;r+=8) {
+      __m512d tile[8];
+      for(int i=0;i<8;++i)tile[i]=_mm512_loadu_pd(R+(size_t)group*8*H+(size_t)(first+r+i)*8);
+      kls_rpanel_transpose8(tile);
+      for(int c=0;c<8;++c)_mm512_storeu_pd(L+(size_t)(group*8+c)*rows+r,tile[c]);
+    }
+    for(;r<rows;++r)for(int c=0;c<8;++c)
+      memcpy(L+(size_t)(group*8+c)*rows+r,R+(size_t)group*8*H+(size_t)(first+r)*8+c,sizeof(double));
+  }
+}
 static void kls_rpanel_small_target_edge_to(const kls_snb_block *blk,
     const kls_snb_snode *sn,const kls_snb_edge *edge,int narrow,int product_math,
-    double *scratch,double *W) {
+    double *scratch,size_t scratch_doubles,double *W) {
 #ifdef KLS_RPANEL_TEST_SMALL_EDGE
   KLS_RPANEL_TEST_SMALL_EDGE();
 #endif
@@ -249,7 +265,27 @@ static void kls_rpanel_small_target_edge_to(const kls_snb_block *blk,
       if(sc<narrow)for(int r=0;r<ph;++r)if(dst[r]>=0)
         wc[dst[r]]=fma(-lc[(size_t)(ps->uw+ps->width+r)*8],u,wc[dst[r]]);
     }
-    if(sc>=narrow)for(int r=0;r<ph;++r) {
+  }
+  if(sc<narrow)return;
+  if(ph>=8&&scratch&&(size_t)(16+sn->width)<=scratch_doubles/(size_t)ph) {
+#ifdef KLS_SNB_PACKED_ROW_EDGE_EVENT
+    KLS_SNB_PACKED_ROW_EDGE_EVENT();
+#endif
+    double *T=scratch+(size_t)16*ph;
+    kls_rpanel_pack_below(panel,ps->height,ps->uw+ps->width,ph,scratch);
+    kls_snb_dense_product(scratch,ph,sub,sc,W+edge->u_start,H,sn->width,0,ph,T);
+    for(int c=0;c<sn->width;++c)for(int r=0;r<ph;++r)if(dst[r]>=0) {
+      double *wc=W+(size_t)c*H;
+      wc[dst[r]]=kls_rpanel_sub(wc[dst[r]],T[(size_t)c*ph+r]);
+    }
+    return;
+  }
+#ifdef KLS_SNB_SCALAR_ROW_EDGE_EVENT
+  KLS_SNB_SCALAR_ROW_EDGE_EVENT();
+#endif
+  for(int c=0;c<sn->width;++c) {
+    double *wc=W+(size_t)c*H;
+    for(int r=0;r<ph;++r) {
       const double *lc=kls_rpanel_column(panel,ps->height,sub[0],1);
       double t=kls_rpanel_mul(lc[(size_t)(ps->uw+ps->width+r)*8],wc[edge->u_start]);
       for(int i=1;i<sc;++i) {
@@ -265,8 +301,8 @@ static void kls_rpanel_small_target_edge_to(const kls_snb_block *blk,
 }
 static void kls_rpanel_small_target_edge(const kls_snb_block *blk,
     const kls_snb_snode *sn,const kls_snb_edge *edge,int narrow,int product_math,
-    double *scratch) {
-  kls_rpanel_small_target_edge_to(blk,sn,edge,narrow,product_math,scratch,
+    double *scratch,size_t scratch_doubles) {
+  kls_rpanel_small_target_edge_to(blk,sn,edge,narrow,product_math,scratch,scratch_doubles,
     blk->panels+sn->panel);
 }
 #endif

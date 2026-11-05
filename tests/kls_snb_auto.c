@@ -15,6 +15,8 @@ static void mirrorless_parallel_repair_begin(kls_solver *,int64_t,double *);
 static size_t row_resident_bytes,row_solve_plan_bytes;
 #define KLS_SNB_ROW_RESIDENT_BYTES(s,st,bytes) do {row_resident_bytes=(bytes);row_solve_plan_bytes=(s)->native_i16?(s)->native_i16->allocation_bytes:0;} while(0)
 static _Atomic unsigned row_inplace_repairs;
+static _Atomic unsigned packed_row_calls;
+#define KLS_SNB_PACKED_ROW_EDGE_EVENT() ((void)atomic_fetch_add_explicit(&packed_row_calls,1,memory_order_relaxed))
 #define KLS_SNB_INPLACE_REPAIR_EVENT() ((void)atomic_fetch_add_explicit(&row_inplace_repairs,1,memory_order_relaxed))
 #define KLS_RPANEL_TEST_EDGE() ((void)atomic_fetch_add_explicit(&row_edges,1,memory_order_relaxed))
 #define KLS_RPANEL_TEST_GETRF() ((void)atomic_fetch_add_explicit(&row_getrfs,1,memory_order_relaxed))

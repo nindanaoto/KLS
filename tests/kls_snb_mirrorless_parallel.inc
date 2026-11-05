@@ -18,8 +18,8 @@ static void parallel_wait(_Atomic unsigned *arrived) {
 }
 static int parallel_root(kls_solver *s,int64_t node) {
   int64_t start=s->snb->blocks[0].snodes[node].start;
-  if(start<0||start>=384||start%96)return -1;
-  return (int)(start/96);
+  if(start<16||start>=384||(start-16)%96)return -1;
+  return (int)((start-16)/96);
 }
 static void mirrorless_parallel_after_writeback(kls_solver *s,int64_t node) {
   if(!atomic_load_explicit(&parallel_underflow_enabled,memory_order_acquire))return;
@@ -110,6 +110,7 @@ static void mirrorless_parallel_checks(void) {
     s->unchanged_refactor_state=-1;s->refactor_input_snapshot_valid=0;
     parallel_reset();
     const unsigned before=atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed);
+    const unsigned packed_before=atomic_load_explicit(&packed_row_calls,memory_order_relaxed);
     if(epoch==11)st->gemm_scratch_bytes=0;
     assert(!feclearexcept(FE_ALL_EXCEPT));
     atomic_store_explicit(&parallel_underflow_enabled,1,memory_order_release);
@@ -128,6 +129,7 @@ static void mirrorless_parallel_checks(void) {
       assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_SNB);
       assert(atomic_load_explicit(&parallel_repair_arrived,memory_order_acquire)==4);
       assert(atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed)==before+4);
+      assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)==packed_before+4);
       assert(!memcmp(expected,actual,capacity*sizeof(double)));
       for(int i=0;i<4;++i)for(int j=0;j<i;++j) {
         assert(parallel_scratch[i]&&parallel_scratch[i]!=parallel_scratch[j]);
@@ -149,7 +151,7 @@ static void mirrorless_parallel_checks(void) {
     }
   }
   free(expected);free(actual);kls_destroy(s);parallel_partition=0;free(ap);free(ai);free(a);
-  puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
+  puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=8 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
 }
 #else
 static void mirrorless_parallel_after_writeback(kls_solver *s,int64_t node) {(void)s;(void)node;}

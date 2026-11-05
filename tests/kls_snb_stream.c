@@ -1,3 +1,7 @@
+#include <stdatomic.h>
+static _Atomic unsigned packed_row_calls,scalar_row_calls;
+#define KLS_SNB_PACKED_ROW_EDGE_EVENT() ((void)atomic_fetch_add_explicit(&packed_row_calls,1,memory_order_relaxed))
+#define KLS_SNB_SCALAR_ROW_EDGE_EVENT() ((void)atomic_fetch_add_explicit(&scalar_row_calls,1,memory_order_relaxed))
 static int fail_worker=-1;
 #define KLS_SNB_STREAM_TEST_ENV_FAILURE(tid) ((tid)==fail_worker)
 #include "../src/kls.c"

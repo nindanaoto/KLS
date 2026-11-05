@@ -1300,7 +1300,7 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
 #ifdef KLS_SNB_HAVE_ROW_PANEL
       if(st->row_layout&&blk->snodes[edges[e].producer].width==16)
         kls_rpanel_small_target_edge_to(blk,sn,edges+e,wnarrow,
-          st->row_product_math,gemm_scratch,W);
+          st->row_product_math,gemm_scratch,st->gemm_scratch_bytes/sizeof(double),W);
       else
 #endif
         kls_snb_update_edge_to(blk,sn,edges+e,wnarrow,gemm_scratch,W);
@@ -1314,7 +1314,7 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
         atomic_store_explicit(&st->failed,1,memory_order_release);return;
       }
     } else if(st->row_layout&&blk->snodes[edges[e].producer].width==16)
-      kls_rpanel_small_target_edge(blk,sn,edges+e,wnarrow,st->row_product_math,gemm_scratch);
+      kls_rpanel_small_target_edge(blk,sn,edges+e,wnarrow,st->row_product_math,gemm_scratch,st->gemm_scratch_bytes/sizeof(double));
     else
 #endif
       kls_snb_update_edge(blk, sn, &edges[e], wnarrow,gemm_scratch);

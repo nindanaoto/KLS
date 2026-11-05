@@ -99,7 +99,7 @@ static void row_normal_small(int width,int rows,int count,int holes,int gap) {
   for(int c=0;c<16;++c)for(int r=0;r<PH;++r)actual[kls_rpanel_at(PH,c,r)]=expected[c*PH+r];
   memcpy(producer,actual,sizeof producer);unsigned control=_mm_getcsr()&~63u;_mm_setcsr(control);
   block.panels=expected;reference_narrow_edge(&block,nodes+1,&edge,8,scratch);unsigned ef=_mm_getcsr();_mm_setcsr(control);
-  block.panels=actual;kls_rpanel_small_target_edge(&block,nodes+1,&edge,8,row_normal_math,scratch);unsigned af=_mm_getcsr();
+  block.panels=actual;kls_rpanel_small_target_edge(&block,nodes+1,&edge,8,row_normal_math,scratch,sizeof(scratch)/sizeof(double));unsigned af=_mm_getcsr();
   if(ef!=af){fprintf(stderr,"small row-producer flags width=%d rows=%d count=%d expected=%x actual=%x\n",width,rows,count,ef,af);abort();}
   assert(!memcmp(producer,actual,sizeof producer));
   row_normal_equal(expected+BASE,actual+BASE,width*H,"small row producer");++row_normal_cases;_mm_setcsr(control);
