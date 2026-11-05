@@ -1,0 +1,24 @@
+{
+  "library": {
+    "equal": true,
+    "count": 36,
+    "added": [],
+    "removed": [],
+    "baseline_sha256": "dc937531f27ba2e17bd7a5eba793afa199531cdcdcaa61e5a6441b195a162b61",
+    "candidate_sha256": "17f96206caabc714eddcfbcb6058e4af1dd0796f251d61b7549a558bf0fbb0db"
+  },
+  "binary": {
+    "equal": true,
+    "count": 68640,
+    "added": [],
+    "removed": [],
+    "baseline_sha256": "adf13c52d5cbd740aa960506fc23f3ba547dc06473925a65553d1284f83b8c72",
+    "candidate_sha256": "ce072dd32bd00753425917c7cc8aad4753862fc97d9c09a5a65916419e732f61"
+  },
+  "headers": {
+    "equal": true,
+    "files": {
+      "kls/kls.h": "be2fc37020e541a07afa23a81926277bf7de1e1c467540cfda979998e16c0eee"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "profiles": [
+    "native",
+    "portable",
+    "asan",
+    "tsan"
+  ],
+  "source_sha256": "ddb1bbee033ca81b60b43ae868c4d78ad8e16ba6988701687ca61f9d2a20f886",
+  "commands_sha256": "fa7b256c3c88b64aff87c4374b383a78268b6f44e6e147ac9374bbdf99e3df78",
+  "libraries": {
+    "native": "17f96206caabc714eddcfbcb6058e4af1dd0796f251d61b7549a558bf0fbb0db",
+    "portable": "95a2a1ce52e1b45879354e4ade94afe11671b65e3abee54739c53236a6b8ea67",
+    "asan": "d6fda2c46e1f1bb1996b81e97e63712a1fc9f03afefcf71c8b671c7204f28d51",
+    "tsan": "cbe03806e52d488f416dc9fe3d1fff89db06a8065815008943f56076dd90e5e8"
+  }
+}

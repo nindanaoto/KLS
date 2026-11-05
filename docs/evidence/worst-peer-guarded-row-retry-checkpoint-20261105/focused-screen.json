@@ -1,0 +1,19 @@
+{
+  "status": "complete",
+  "all36_waveforms_independently_qualified": true,
+  "compact_images_fit_final_cache": true,
+  "focused_ratios": {
+    "llc96": [
+      0.9879905450852107,
+      0.9927780093885985
+    ],
+    "llc32": [
+      0.9567860783547129,
+      0.9122537102281555
+    ]
+  },
+  "robust_smaller_cache_gain": true,
+  "candidate_head": "20b35817d640f9b1015c27badd361de794d25576",
+  "goal_complete": false,
+  "remaining": "Full 71 native/portable/ASan and scoped TSan qualification plus fresh full peer campaign required before merge, only if focused gains justify it."
+}

@@ -1,0 +1,11 @@
+{
+  "baseline_commit": "a8639f8fc44da3965d157289543f5ec0bceb02be",
+  "candidate_commit": "20b35817d640f9b1015c27badd361de794d25576",
+  "main_wins": 39,
+  "candidate_wins": 40,
+  "main_worst_ratio": 1.3041275265430026,
+  "candidate_worst_ratio": 1.6197563132685109,
+  "win_margin": 0.02,
+  "passed": true,
+  "criterion": "More wins, or lower worst peer ratio with equal wins; user-authorized incremental merge"
+}

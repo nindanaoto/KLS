@@ -4380,15 +4380,15 @@
     "full_optimization_goal_complete": false
   },
   "latest_checkpoint": {
-    "evidence": "docs/evidence/worst-peer-column-confidence-checkpoint-20261105",
-    "implementation_commit": "c2a24f45849f076d3688b9967c2ca834b5523514",
-    "baseline_commit": "6f061835",
-    "user_merge_criterion": "More wins, or lower worst ratio with equal wins; user-authorized incremental merge checkpoint",
+    "evidence": "docs/evidence/worst-peer-guarded-row-retry-checkpoint-20261105",
+    "implementation_commit": "20b35817d640f9b1015c27badd361de794d25576",
+    "baseline_commit": "a8639f8fc44da3965d157289543f5ec0bceb02be",
+    "user_merge_criterion": "More wins, or lower worst peer ratio with equal wins; user-authorized incremental merge",
     "peer_wins": 40,
-    "baseline_peer_wins": 40,
-    "worst_ratio": 1.3268266647541407,
-    "baseline_worst_ratio": 1.396406540795751,
-    "qualification": "native70 portable70 ASan/UBSan70 scopedTSan13 plus runtime controls",
+    "baseline_peer_wins": 39,
+    "worst_ratio": 1.6197563132685109,
+    "baseline_worst_ratio": 1.3041275265430026,
+    "qualification": "native71 portable71 ASan/UBSan71 scopedTSan13 plus detector controls and four strict final-ASan programs",
     "all56_peer_wins": false,
     "goal_complete": false
   }

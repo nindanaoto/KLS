@@ -1,0 +1,1404 @@
+{
+  "acceptance_policy": "worst-peer-v1",
+  "acceptance_gate": false,
+  "hybrid_gate": false,
+  "hybrid": {
+    "passed": false,
+    "complete": true,
+    "incremental_passed": false,
+    "worst_ratio": 1.6197563132685109,
+    "peer_wins": 40,
+    "regressions": [
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 1,
+        "lost_peer_wins": []
+      },
+      {
+        "domain": "llc32",
+        "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+        "threads": 8,
+        "lost_peer_wins": []
+      },
+      {
+        "domain": "llc32",
+        "case": "PDE_2D_BJT/invertbjt.cir",
+        "threads": 8,
+        "lost_peer_wins": [
+          "ck"
+        ]
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2/mux8.cir",
+        "threads": 1,
+        "lost_peer_wins": []
+      },
+      {
+        "domain": "llc96",
+        "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+        "threads": 8,
+        "lost_peer_wins": []
+      }
+    ]
+  },
+  "worst_ratio": 1.6197563132685109,
+  "peer_wins": 40,
+  "candidate_gate": false,
+  "expected": 462,
+  "observations": 462,
+  "all_qualified": true,
+  "duplicates": [],
+  "cells": [
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9218330182107672,
+        0.9941957666387726,
+        0.993432596291013,
+        0.9952498734670737
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9938141814648929,
+      "wall_median": 0.9997371186986457
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9147313868348855,
+        0.912678068044638,
+        0.9176375055384348,
+        0.9151015844042656
+      ],
+      "baseline_peer_median": 0.9215865104614458,
+      "median": 0.9149164856195755,
+      "wall_median": 0.9893469741975853
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5507922823081725,
+        0.5465585058903156,
+        0.5519616779281511,
+        0.5514413119952435
+      ],
+      "baseline_peer_median": 0.5548419134848959,
+      "median": 0.5511167971517079,
+      "wall_median": 0.8772051472073965
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.1001844893154655,
+        0.9835432927427378,
+        0.989477801466497,
+        0.9949728199575946
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9922253107120458,
+      "wall_median": 1.003427808927247
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.0284778652446251,
+        0.8914332307129575,
+        0.9791587164865837,
+        0.9361195851128737
+      ],
+      "baseline_peer_median": 0.9378362478547829,
+      "median": 0.9576391507997287,
+      "wall_median": 1.0052579775481802
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.8116236689997224,
+        0.7564404879941371,
+        0.7724988333659489,
+        0.7569996224537078
+      ],
+      "baseline_peer_median": 0.7649608604385749,
+      "median": 0.7647492279098284,
+      "wall_median": 0.9707665415754576
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9953472199225089,
+        0.9990496444473981,
+        0.9985066305603122,
+        0.9943573210694251
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9969269252414106,
+      "wall_median": 0.991762168012686
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9763644218931203,
+        0.9361414608781211,
+        0.9539846858700994,
+        0.984086281016668
+      ],
+      "baseline_peer_median": 0.9681699672388134,
+      "median": 0.9651745538816099,
+      "wall_median": 0.998245535019506
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5118979899788474,
+        0.514102798672396,
+        0.5150642627755219,
+        0.5080016385839113
+      ],
+      "baseline_peer_median": 0.514441358096048,
+      "median": 0.5130003943256217,
+      "wall_median": 0.9052947745225519
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9996023246290989,
+        0.9981057926589639,
+        0.9970255263209529,
+        0.992909135071183
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9975656594899585,
+      "wall_median": 0.996056450688083
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.16762072653805016,
+        0.15828809682586176,
+        0.1519426620180721,
+        0.16437808880183674
+      ],
+      "baseline_peer_median": 0.16207024598071113,
+      "median": 0.16133309281384925,
+      "wall_median": 0.7092209889600315
+    },
+    {
+      "domain": "llc96",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.9207510354482348,
+        0.9182073882329121,
+        0.9093925380826939,
+        0.9200800107455448
+      ],
+      "baseline_peer_median": 0.9205336526685066,
+      "median": 0.9191436994892285,
+      "wall_median": 0.9944848579331629
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9934715124473613,
+        0.9951672411702552,
+        0.9921386535148701,
+        0.995201226256521
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9943193768088083,
+      "wall_median": 0.9992913633278189
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9983750293276792,
+        1.0018047551374492,
+        0.9840242844752819,
+        1.00134950401346
+      ],
+      "baseline_peer_median": 1.0055568320068016,
+      "median": 0.9998622666705695,
+      "wall_median": 0.9985216114178792
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5386757686861772,
+        0.5359378352410004,
+        0.5300933496547278,
+        0.5332816867885961
+      ],
+      "baseline_peer_median": 0.5371967980766796,
+      "median": 0.5346097610147982,
+      "wall_median": 0.9003560264463308
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.1957735572010284,
+        1.0844246397486657,
+        0.9726484652167207,
+        0.9733391844794946
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0288819121140802,
+      "wall_median": 1.0086941345388227
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.1463735307782796,
+        1.3013788221534863,
+        1.224234313176039,
+        1.245079685851845
+      ],
+      "baseline_peer_median": 1.2293622377806084,
+      "median": 1.234656999513942,
+      "wall_median": 1.0245195633695623
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        1.2768098581004308,
+        1.1083709139601152,
+        1.0072413455271914,
+        1.0172022115757904
+      ],
+      "baseline_peer_median": 1.0403150692695755,
+      "median": 1.0627865627679527,
+      "wall_median": 1.003911099191876
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0230497050217624,
+        1.0343331896456054,
+        0.9913188834551825,
+        1.0272696769022134
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.025159690961988,
+      "wall_median": 1.001894827555799
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.1202941251174723,
+        1.1139820688509823,
+        1.0910002525795155,
+        1.1164373154511982
+      ],
+      "baseline_peer_median": 1.0909270398015833,
+      "median": 1.1152096921510903,
+      "wall_median": 1.0099412575998599
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.7034344723097167,
+        0.7053004293554888,
+        0.6985774287507442,
+        0.7133384571821528
+      ],
+      "baseline_peer_median": 0.6909940759698779,
+      "median": 0.7043674508326028,
+      "wall_median": 0.96100793941156
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.989331019793005,
+        1.0092627111031263,
+        1.0140726379324387,
+        1.0151048088779284
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0116676745177826,
+      "wall_median": 1.012086642391013
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.19684656173648243,
+        0.20790604073418686,
+        0.1882886780683386,
+        0.20953668721415789
+      ],
+      "baseline_peer_median": 0.20248365161827525,
+      "median": 0.20237630123533465,
+      "wall_median": 0.7426964987032296
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.4523651621106167,
+        0.45930246818948334,
+        0.45497530995772495,
+        0.4572583774070368
+      ],
+      "baseline_peer_median": 0.45277073906688237,
+      "median": 0.45611684368238087,
+      "wall_median": 0.9154777690842566
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0007887022981272,
+        0.9968713456642933,
+        1.0000618047678944,
+        1.0021276400198518
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.000425253533011,
+      "wall_median": 1.0010166882575986
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.0592624049795853,
+        1.0722418126109643,
+        1.063607857648889,
+        1.0718757641553833
+      ],
+      "baseline_peer_median": 1.0665710829895312,
+      "median": 1.0677418109021362,
+      "wall_median": 1.0154392200016873
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.64138399712004,
+        0.6457842745220006,
+        0.6437107705908355,
+        0.6437448341008383
+      ],
+      "baseline_peer_median": 0.6430245367172831,
+      "median": 0.6437278023458368,
+      "wall_median": 0.8906404698941948
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0152272190756462,
+        0.9808098263623005,
+        0.9930280437417169,
+        0.9550459219053226
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9869189350520087,
+      "wall_median": 0.9997923873913102
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.087489210247128,
+        1.1509277023581126,
+        0.8238992508790705,
+        1.0797588227663186
+      ],
+      "baseline_peer_median": 1.1008806458723082,
+      "median": 1.0836240165067235,
+      "wall_median": 1.0278738013995528
+    },
+    {
+      "domain": "llc96",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        1.0300212314989727,
+        1.0208477311443276,
+        1.0017659223458883,
+        1.029205203425702
+      ],
+      "baseline_peer_median": 1.0276966958238374,
+      "median": 1.0250264672850147,
+      "wall_median": 1.0073649645043847
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0074858186844393,
+        1.009159932420054,
+        0.9882364844356009,
+        0.9904230807760376
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9989544497302385,
+      "wall_median": 1.0026621152451045
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9912279520667834,
+        1.0,
+        0.9802558509855347,
+        0.9900131511311974
+      ],
+      "baseline_peer_median": 0.9914237895477542,
+      "median": 0.9906205515989903,
+      "wall_median": 0.9938570776141982
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.672612983833022,
+        0.6759578239331,
+        0.6799537758966362,
+        0.6745799255829186
+      ],
+      "baseline_peer_median": 0.6754625444823364,
+      "median": 0.6752688747580093,
+      "wall_median": 0.9398114982201435
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.010742887779379,
+        1.0081786535127217,
+        1.0163017324350336,
+        1.0034969243113132
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0094607706460503,
+      "wall_median": 1.0014999677256082
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.14948904241294889,
+        0.14662177350782374,
+        0.15000147974232753,
+        0.15174475683206798
+      ],
+      "baseline_peer_median": 0.14774779311429131,
+      "median": 0.1497452610776382,
+      "wall_median": 0.5156985686284197
+    },
+    {
+      "domain": "llc96",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.7980252818947136,
+        0.8109178968534966,
+        0.927170287623705,
+        0.8908536187236972
+      ],
+      "baseline_peer_median": 0.846044354893015,
+      "median": 0.8508857577885969,
+      "wall_median": 0.9749870893642685
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0095810006359534,
+        1.0146553948901629,
+        1.0121920973279204,
+        1.0141718172841312
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.013181957306026,
+      "wall_median": 1.0053457427111363
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.8472043603404985,
+        0.8503723867928856,
+        0.8484459218441918,
+        0.8504480861867658
+      ],
+      "baseline_peer_median": 0.8383951477247314,
+      "median": 0.8494091543185387,
+      "wall_median": 0.9089812910716363
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5383388091148136,
+        0.5380164569577158,
+        0.5384612179594014,
+        0.5393562351607467
+      ],
+      "baseline_peer_median": 0.5318973555055584,
+      "median": 0.5384000135371074,
+      "wall_median": 0.6667201153207365
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9761010681126684,
+        0.9625307698380232,
+        0.909395317500421,
+        0.9848669895416579
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9693159189753457,
+      "wall_median": 0.995165079865151
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9358761520225725,
+        0.9404142534602925,
+        0.8310521681843649,
+        0.8717375232201989
+      ],
+      "baseline_peer_median": 0.9363207982972632,
+      "median": 0.9038068376213857,
+      "wall_median": 0.9707311823645008
+    },
+    {
+      "domain": "llc96",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.9750658409851234,
+        0.9371222549067559,
+        0.9501006574409077,
+        0.9890461555812446
+      ],
+      "baseline_peer_median": 1.001591403732458,
+      "median": 0.9625832492130155,
+      "wall_median": 0.9888955911879349
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0096203772308017,
+        1.0083718236443928,
+        1.0047617942858469,
+        0.9952378822786033
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0065668089651199,
+      "wall_median": 1.078399460424764
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.8843984842329048,
+        0.8825582367894806,
+        0.8936041803147616,
+        0.8802855181460206
+      ],
+      "baseline_peer_median": 0.8802344548150633,
+      "median": 0.8834783605111927,
+      "wall_median": 1.0763888410333695
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.4383272966743497,
+        0.4473570276919519,
+        0.43985857290668223,
+        0.44468093335052217
+      ],
+      "baseline_peer_median": 0.4407084552989401,
+      "median": 0.44226975312860217,
+      "wall_median": 0.8567236956999552
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.7241087341389907,
+        1.0161201685290346,
+        1.047144466411772,
+        0.7857894854024001
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9009548269657174,
+      "wall_median": 1.0775639449783188
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.789801183791167,
+        0.6577851680466326,
+        0.6746929653372971,
+        0.7739610157703802
+      ],
+      "baseline_peer_median": 0.8161484026466158,
+      "median": 0.7243269905538386,
+      "wall_median": 1.098248478132739
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/ram2k.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.6616083335362076,
+        0.6861551233135783,
+        0.6758864118114147,
+        0.6653712217311561
+      ],
+      "baseline_peer_median": 0.7610123605575309,
+      "median": 0.6706288167712855,
+      "wall_median": 1.0487186669201765
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9912740330874134,
+        1.004159657655248,
+        1.0017038164085232,
+        1.0015789713229397
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0016413938657314,
+      "wall_median": 1.0029207259452422
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9685119453924916,
+        0.9882931559988917,
+        0.9670353473134146,
+        0.9568276987705193
+      ],
+      "baseline_peer_median": 0.9712140209012314,
+      "median": 0.9677736463529532,
+      "wall_median": 1.0081681089637755
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5036499330002574,
+        0.5091792887835658,
+        0.5066225048139492,
+        0.5120119125814112
+      ],
+      "baseline_peer_median": 0.5075767516795056,
+      "median": 0.5079008967987575,
+      "wall_median": 0.9226558689538058
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9918627015830744,
+        1.0004539714245624,
+        1.0082411660337938,
+        1.002861757641017
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0016578645327896,
+      "wall_median": 1.0020043280959525
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.161474077196363,
+        0.15027772267407258,
+        0.15736839380920337,
+        0.13770158997338672
+      ],
+      "baseline_peer_median": 0.15314581359273544,
+      "median": 0.15382305824163797,
+      "wall_median": 0.711079106183441
+    },
+    {
+      "domain": "llc32",
+      "case": "NEURON/rallpack3.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.9120088879147789,
+        0.918117226438819,
+        0.9203488922104704,
+        0.8235840297121635
+      ],
+      "baseline_peer_median": 0.9152633785049049,
+      "median": 0.9150630571767989,
+      "wall_median": 0.9915987299440973
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9886833397598572,
+        0.986642644135189,
+        0.9883773030324755,
+        0.9721831800309569
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9875099735838322,
+      "wall_median": 0.9984774109543535
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.0173283999372562,
+        1.0185631430901312,
+        1.0310256506132216,
+        1.001677298724153
+      ],
+      "baseline_peer_median": 1.0313453354237447,
+      "median": 1.0179457715136937,
+      "wall_median": 1.0054362343635006
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5273769150925798,
+        0.5458460178729254,
+        0.5283668747335292,
+        0.5294168939441648
+      ],
+      "baseline_peer_median": 0.5395725485296663,
+      "median": 0.528891884338847,
+      "wall_median": 0.9006010478646288
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.8553285719287189,
+        0.9230209935147423,
+        1.1323767988121873,
+        0.9463436850068567
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9346823392607995,
+      "wall_median": 0.9887373803352759
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.5960609461536585,
+        1.4900152988125206,
+        0.7913639062455824,
+        0.4049368387775694
+      ],
+      "baseline_peer_median": 0.6978658002504314,
+      "median": 0.6937124261996204,
+      "wall_median": 0.9532398754966362
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/dac.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.6686852513308974,
+        1.2765684471624685,
+        1.2527848303813105,
+        1.0667789270011203
+      ],
+      "baseline_peer_median": 1.1167979354188362,
+      "median": 1.1597818786912155,
+      "wall_median": 1.0015022953961352
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0116042984565157,
+        1.0496045374563534,
+        1.0223449214271794,
+        1.0095639134662597
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0169746099418475,
+      "wall_median": 0.9969169307308898
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.1187061611625677,
+        1.1147033935397275,
+        1.1243078807404794,
+        1.1092887792815727
+      ],
+      "baseline_peer_median": 1.0992572715160538,
+      "median": 1.1167047773511476,
+      "wall_median": 1.0114975989180597
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.7095534333176408,
+        0.7244951639634886,
+        0.7148841973385704,
+        0.7030060002681684
+      ],
+      "baseline_peer_median": 0.6978027542847038,
+      "median": 0.7122188153281056,
+      "wall_median": 0.9555431962844794
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0120694859061605,
+        1.0134845860267296,
+        1.0170956819856065,
+        1.0244382260863005
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0152901340061682,
+      "wall_median": 0.997616177759497
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.2233183658178715,
+        0.2117163366773558,
+        0.20152393739576294,
+        0.17311639265240755
+      ],
+      "baseline_peer_median": 0.20351803534186763,
+      "median": 0.20662013703655935,
+      "wall_median": 0.732201963859611
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2/mux8.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.42176664521169177,
+        0.41843677470309765,
+        0.45443789791278755,
+        0.4590487508582897
+      ],
+      "baseline_peer_median": 0.4317682002690163,
+      "median": 0.4381022715622397,
+      "wall_median": 0.8771074854811133
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9839320741911722,
+        1.0048306610416673,
+        0.9821681770544356,
+        1.0325552651244037
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9943813676164197,
+      "wall_median": 1.0315936438914348
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        1.1134770040591058,
+        1.1314261098603915,
+        1.1429539927254988,
+        1.162367294880153
+      ],
+      "baseline_peer_median": 1.1288236445529276,
+      "median": 1.1371900512929451,
+      "wall_median": 1.0904415070045421
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5562884583889006,
+        0.5593277086621483,
+        0.5633973406888747,
+        0.5546995951691313
+      ],
+      "baseline_peer_median": 0.5610058012216899,
+      "median": 0.5578080835255245,
+      "wall_median": 0.8760191507061214
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0444275182156562,
+        0.9633316624519154,
+        0.9953890051574414,
+        0.9874718488208056
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9914304269891235,
+      "wall_median": 1.043604749929651
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9183934206219725,
+        0.8638790855656501,
+        0.5262684477803093,
+        0.6252486148600654
+      ],
+      "baseline_peer_median": 0.7562541522956727,
+      "median": 0.7445638502128578,
+      "wall_median": 1.0235650814472101
+    },
+    {
+      "domain": "llc32",
+      "case": "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        1.125509910144308,
+        1.0753138732938936,
+        1.0944137157864091,
+        1.0887995188241497
+      ],
+      "baseline_peer_median": 1.101048326094882,
+      "median": 1.0916066173052794,
+      "wall_median": 1.062669970768901
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9975949874475222,
+        0.997568670990591,
+        0.9763724288244109,
+        1.0374924653405666
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9975818292190566,
+      "wall_median": 0.9991313474189969
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9978756779190083,
+        0.999169487827366,
+        0.9957558244536753,
+        1.0183906445774744
+      ],
+      "baseline_peer_median": 1.0009430427991517,
+      "median": 0.9985225828731872,
+      "wall_median": 0.9953089293274842
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.6778299655496997,
+        0.682130724544367,
+        0.6842627818059448,
+        0.6980157158737959
+      ],
+      "baseline_peer_median": 0.6816286680576594,
+      "median": 0.6831967531751559,
+      "wall_median": 0.93534762736834
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        0.9695505368082653,
+        0.9791093932877867,
+        1.0004213719871904,
+        1.025280446191467
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 0.9897653826374886,
+      "wall_median": 0.9834910867757928
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.1523218496443928,
+        0.12025273081326834,
+        0.17552298832163196,
+        0.15982467311891144
+      ],
+      "baseline_peer_median": 0.15649474569566457,
+      "median": 0.15607326138165212,
+      "wall_median": 0.5282114469780756
+    },
+    {
+      "domain": "llc32",
+      "case": "MOS13_IC/invert50_mos1.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.8947623756833913,
+        0.753838980253679,
+        0.788766396642322,
+        0.9107187313284206
+      ],
+      "baseline_peer_median": 0.8383486088891878,
+      "median": 0.8417643861628566,
+      "wall_median": 0.9491108196768598
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.0025501932149257,
+        1.0065425939202404,
+        0.9858248885775368,
+        1.0038217552810815
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.0031859742480036,
+      "wall_median": 1.0047468724352
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9340715754085887,
+        0.9411889446525764,
+        0.9299533310849611,
+        0.9404027274178467
+      ],
+      "baseline_peer_median": 0.9359467875940924,
+      "median": 0.9372371514132176,
+      "wall_median": 0.9733549081330664
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 1,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        0.5978476895811253,
+        0.597191457470373,
+        0.5947028649704177,
+        0.5984356179889418
+      ],
+      "baseline_peer_median": 0.5962420957651271,
+      "median": 0.5975195735257492,
+      "wall_median": 0.7192464543426577
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "baseline",
+      "complete": true,
+      "ratios": [
+        1.2158388033324918,
+        0.9915240988073435,
+        1.242790866415277,
+        1.2464085328592858
+      ],
+      "baseline_peer_median": 1.0,
+      "median": 1.2293148348738843,
+      "wall_median": 1.1008583444701427
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "ck",
+      "complete": true,
+      "ratios": [
+        0.9452513555288404,
+        1.041470438163829,
+        1.1661809535108034,
+        1.2945113402299782
+      ],
+      "baseline_peer_median": 0.9884748418331291,
+      "median": 1.1038256958373163,
+      "wall_median": 1.0611750131078068
+    },
+    {
+      "domain": "llc32",
+      "case": "PDE_2D_BJT/invertbjt.cir",
+      "threads": 8,
+      "peer": "st",
+      "complete": true,
+      "ratios": [
+        1.6741381807647742,
+        1.287674212869636,
+        1.627525788780351,
+        1.611986837756671
+      ],
+      "baseline_peer_median": 1.3041275265430026,
+      "median": 1.6197563132685109,
+      "wall_median": 1.217901006386888
+    }
+  ],
+  "incremental_gate": false,
+  "all56_peer_wins": false,
+  "independent_confirmation_required": true,
+  "unqualified": [],
+  "changed_inputs": []
+}

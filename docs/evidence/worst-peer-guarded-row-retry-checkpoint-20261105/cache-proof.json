@@ -1,0 +1,51 @@
+{
+  "diagnostic_only": true,
+  "timing_eligible": false,
+  "qualified_waveforms": 4,
+  "budgets": [
+    {
+      "n": 8903,
+      "native": 21099450,
+      "plan": 12169668,
+      "capacity": 33269384,
+      "short_rows": 1,
+      "aliases": 45,
+      "compact_owned": 17,
+      "image_bytes": 187648,
+      "row": 1,
+      "ok": 1
+    },
+    {
+      "n": 8903,
+      "native": 21099450,
+      "plan": 12169668,
+      "capacity": 33269384,
+      "short_rows": 1,
+      "aliases": 45,
+      "compact_owned": 17,
+      "image_bytes": 187648,
+      "row": 1,
+      "ok": 1
+    }
+  ],
+  "repair_traffic": [
+    {
+      "learned": 0,
+      "row_nodes": 90,
+      "speculative": 181,
+      "preferred": 728,
+      "retried": 181,
+      "all": 909,
+      "lower": 909
+    },
+    {
+      "learned": 0,
+      "row_nodes": 90,
+      "speculative": 513,
+      "preferred": 1561,
+      "retried": 513,
+      "all": 2074,
+      "lower": 2074
+    }
+  ]
+}

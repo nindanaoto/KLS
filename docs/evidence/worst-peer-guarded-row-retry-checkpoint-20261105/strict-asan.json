@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "detect_stack_use_after_return": true,
+  "programs": {
+    "kls_small_btf": {
+      "binary_sha256": "20191aed3bb0a70752fcd2c95f361b041a4a24c1c22f2956411efac4693209a6",
+      "log_sha256": "3cbbf9c859df89291790a5aef0a15d1840617835589e147d116090dd910b9e92"
+    },
+    "kls_snb_build": {
+      "binary_sha256": "5dd70789c2ae4efb49e5c21897122550e70ca6d00de223d28014063658cf6670",
+      "log_sha256": "0fb4bba44faa12d08fe6efaa362947ba050234fcb74eb0500ccd1460100dc5ef"
+    },
+    "kls_snb_auto": {
+      "binary_sha256": "f919a3e8753cfc5c4e14af640b31eb2375f24d1a12977313d8be7c8f4f19e1d4",
+      "log_sha256": "7f96ab1ed6569a8b18efd579248750c70afc740d8bd87c528ac084d2edac5a29"
+    },
+    "kls_snb_stream": {
+      "binary_sha256": "a87d2cf08794e01cd8be2266db2e42b03fd6f30418c77aff3a595d8b8ca3134f",
+      "log_sha256": "d086e10af838a16be9c35edc4b364a4bd758801722962e99c20385a26a427f1f"
+    }
+  }
+}
