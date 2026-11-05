@@ -34,7 +34,10 @@ static void kls_snb_destroy(kls_snb_state *st) {
   if (st->blocks != NULL) {
     for (UF_long b = 0; b < st->nblocks; ++b) {
       kls_snb_block *blk = &st->blocks[b];
-      if(blk->snodes)for(int64_t j=0;j<blk->snode_count;++j)free(blk->snodes[j].column_panel);
+      if(blk->snodes)for(int64_t j=0;j<blk->snode_count;++j){
+        double *image=blk->snodes[j].column_panel;
+        if(image&&(!blk->panels||image!=blk->panels+blk->snodes[j].panel))free(image);
+      }
       free(blk->snodes);
       free(blk->col2snode);
       free(blk->below_rows);
@@ -1097,8 +1100,11 @@ static KLS_ALWAYS_INLINE void kls_snb_update_edge_to(
   const int32_t *sub = blk->subcols + edge->sub_off;
   const int32_t *dsts = blk->edge_dsts + edge->dst_off;
   const int32_t ustart = edge->u_start;
-  const int32_t pld = ps->height;
-  const double *Ldiag = (ps->column_panel?ps->column_panel:blk->panels + ps->panel) + ps->uw;
+  /* A compact image aliases only dead upper storage. Its column stride
+     excludes the upper rows; ordinary mirrors retain the full height. */
+  const int compact=ps->column_panel&&ps->column_panel==blk->panels+ps->panel;
+  const int32_t pld = compact?ps->width+ps->below:ps->height;
+  const double *Ldiag = (ps->column_panel?ps->column_panel:blk->panels + ps->panel) + (compact?0:ps->uw);
   const double *Lbelow = Ldiag + ps->width;
   if (sc < wnarrow) {
     const int32_t first=kls_snb_narrow_columns(W,H,w,Ldiag,Lbelow,pld,sub,sc,dsts,ph,ustart);
@@ -1263,7 +1269,8 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
   const int32_t w = sn->width;
   const int32_t H = sn->height;
   const int32_t uw = sn->uw;
-  const int inplace_repair=column_repair&&!sn->column_panel;
+  const int compact_image=sn->column_panel&&sn->column_panel==panels+sn->panel;
+  const int inplace_repair=column_repair&&(!sn->column_panel||compact_image);
   double *W = column_repair&&sn->column_panel?sn->column_panel:panels+sn->panel;
   if(inplace_repair) {
 #ifdef KLS_SNB_HAVE_ROW_PANEL
@@ -1323,7 +1330,7 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
 #ifdef KLS_SNB_HAVE_ROW_PANEL
   if(st->row_layout&&w==16&&!column_repair) {
     double diagonal[16];int singular=kls_rpanel_getrf(W,H,uw,diagonal);
-    if(sn->column_panel)kls_rpanel_to_columns(W,H,sn->column_panel);
+    if(sn->column_panel&&!compact_image)kls_rpanel_to_columns(W,H,sn->column_panel);
     for(int i=0;i<16;++i)udiag[k1+sn->start+i]=diagonal[i];
     if(singular>=0)kls_snb_record_singular(st,solver,k1+sn->start+singular);
   } else
@@ -1399,6 +1406,11 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
 #endif
     } else kls_rpanel_from_columns(W,H,panels+sn->panel);
   }
+#endif
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+  /* Native LU already owns U-upper. Consumers read row L only at uw and
+   * below. Pack before release publication, after any in-place repair. */
+  if(compact_image)kls_rpanel_pack_below(panels+sn->panel,H,uw,w+sn->below,sn->column_panel);
 #endif
   if(st->transactional) {
 #ifdef KLS_SNB_TRANSACTION_AFTER_WRITEBACK

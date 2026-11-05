@@ -8216,7 +8216,7 @@ typedef struct kls_snb_snode {
   int64_t rows_off;
   int64_t edges_off;
   int32_t edge_count;
-  double *column_panel; /* Fresh mirror for column-layout consumers only. */
+  double *column_panel; /* Owned full mirror or panel-base alias of dead U storage. */
 } kls_snb_snode;
 
 typedef struct kls_snb_block {

@@ -85,6 +85,25 @@ static void auto_test_warm_pool(kls_solver *s) {
  assert(!atomic_load_explicit(&pool->active_workers,memory_order_acquire));
  assert(!pthread_mutex_unlock(&pool->shared.lock));
 }
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+/* Drop only owned images; late producers reuse dead U with no ledger cost. */
+static unsigned test_use_dead_upper_images(kls_snb_state *st) {
+ kls_snb_block *b=st->blocks;unsigned aliases=0;
+ for(int64_t j=0;j<b->snode_count;++j) {
+  kls_snb_snode *sn=b->snodes+j;double *base=b->panels+sn->panel;
+  if(sn->column_panel&&sn->column_panel!=base) {
+   size_t bytes=(size_t)sn->height*16*sizeof(double);
+   assert(st->allocation_bytes>=bytes);st->allocation_bytes-=bytes;free(sn->column_panel);
+  }
+  sn->column_panel=NULL;
+  if(sn->width==16&&sn->uw>=2*((int64_t)16+sn->below)) {
+   sn->column_panel=base;++aliases;
+   kls_rpanel_pack_below(base,sn->height,sn->uw,16+sn->below,base);
+  }
+ }
+ return aliases;
+}
+#endif
 static void exercise(int transpose,int transactional) {
  unsigned before_getrfs=atomic_load_explicit(&row_getrfs,memory_order_relaxed);
  unsigned before_edges=atomic_load_explicit(&row_edges,memory_order_relaxed);
@@ -150,12 +169,7 @@ static void exercise(int transpose,int transactional) {
  assert(mirrors>0);
  if(force_mirrorless) {
   kls_snb_state *st=s->snb_auto_candidate;
-  for(int64_t j=0;j<mirror_block->snode_count;++j) {
-   kls_snb_snode *node=mirror_block->snodes+j;if(!node->column_panel)continue;
-   size_t bytes=(size_t)node->height*16*sizeof(double);
-   assert(st->allocation_bytes>=bytes);st->allocation_bytes-=bytes;
-   free(node->column_panel);node->column_panel=NULL;
-  }
+  (void)test_use_dead_upper_images(st);
   assert(kls_snb_row_inplace_storage_fits(st));
  }
  assert(kls_snb_enable_row_layout(s,s->snb_auto_candidate,0,SIZE_MAX)); /* Idempotent. */
@@ -326,7 +340,11 @@ static void exercise(int transpose,int transactional) {
  assert(kls_snb_try_row_layout(s,cache_control,0,exact));
  assert(cache_control->row_layout);
  assert(cache_control->allocation_bytes==bytes_before);
- for(int64_t j=0;j<cb->snode_count;++j)assert(!cb->snodes[j].column_panel);
+ for(int64_t j=0;j<cb->snode_count;++j) {
+  const kls_snb_snode *sn=cb->snodes+j;
+  const int fits=sn->width==16&&sn->uw>=2*((int64_t)16+sn->below);
+  assert(sn->column_panel==(fits?cb->panels+sn->panel:NULL));
+ }
 #endif
  free(scatter_before);kls_snb_destroy(cache_control);
  /* An independent schedule must survive retirement of the candidate. */

@@ -79,6 +79,15 @@ static int kls_snb_enable_row_layout_mode(kls_solver *solver,kls_snb_state *st,d
     producer->column_panel=kls_snb_allocate(st,(size_t)producer->height*16,sizeof(double),0,deadline,limit);
     if(!producer->column_panel)return 0;
   }
+  /* The first row group owns 8*uw dead upper doubles after writeback.
+   * A 16-column L image fits there iff uw >= 2*(16+below), keeping
+   * destination and both live row groups disjoint. No new allocation. */
+  if(!column_mirrors)for(int64_t j=0;j<b->snode_count;++j) {
+    kls_snb_snode *producer=b->snodes+j;
+    if(producer->width==16&&producer->below>=0&&
+        producer->uw>=2*((int64_t)16+producer->below))
+      producer->column_panel=b->panels+producer->panel;
+  }
   for(int64_t j=0;j<b->snode_count;++j) {
     if(deadline>0&&kls_now_seconds()>=deadline)return 0;
     const kls_snb_snode *sn=b->snodes+j;if(sn->width!=16)continue;
@@ -248,11 +257,12 @@ static void kls_rpanel_small_target_edge_to(const kls_snb_block *blk,
   KLS_RPANEL_TEST_SMALL_EDGE();
 #endif
   const kls_snb_snode *ps=blk->snodes+edge->producer;
-  if(ps->column_panel) {
+  const int sc=edge->sub_count,ph=ps->below,H=sn->height;
+  if(ps->column_panel&&(sc<narrow||ph==0||
+      (scratch&&(size_t)sn->width<=scratch_doubles/(size_t)ph))) {
     /* Reuse the incumbent vector kernels and the owned worker scratch. */
     kls_snb_update_edge_to(blk,sn,edge,narrow,scratch,W);return;
   }
-  const int sc=edge->sub_count,ph=ps->below,H=sn->height;
   const int32_t *sub=blk->subcols+edge->sub_off,*dst=blk->edge_dsts+edge->dst_off;
   const double *panel=blk->panels+ps->panel;
   for(int c=0;c<sn->width;++c) {

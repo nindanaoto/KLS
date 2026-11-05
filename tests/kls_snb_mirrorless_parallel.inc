@@ -18,8 +18,8 @@ static void parallel_wait(_Atomic unsigned *arrived) {
 }
 static int parallel_root(kls_solver *s,int64_t node) {
   int64_t start=s->snb->blocks[0].snodes[node].start;
-  if(start<16||start>=384||(start-16)%96)return -1;
-  return (int)((start-16)/96);
+  if(start<64||start>=384||(start-64)%96)return -1;
+  return (int)((start-64)/96);
 }
 static void mirrorless_parallel_after_writeback(kls_solver *s,int64_t node) {
   if(!atomic_load_explicit(&parallel_underflow_enabled,memory_order_acquire))return;
@@ -89,11 +89,11 @@ static void mirrorless_parallel_checks(void) {
       assert(st->private_owner[j]>=0&&st->private_owner[j]<4);
       owners|=1u<<(unsigned)st->private_owner[j];++roots;
     }
-    if(sn->column_panel) {
-      size_t bytes=(size_t)sn->height*16*sizeof(double);
-      assert(st->allocation_bytes>=bytes);st->allocation_bytes-=bytes;
-      free(sn->column_panel);sn->column_panel=NULL;
-    }
+  }
+  assert(test_use_dead_upper_images(st)==8);
+  for(int64_t j=0;j<st->blocks[0].snode_count;++j) {
+    const kls_snb_snode *sn=st->blocks[0].snodes+j;
+    if(sn->start%96==64)assert(sn->uw==2*(16+sn->below)&&sn->column_panel==st->blocks[0].panels+sn->panel);
   }
   assert(roots==4&&owners==15&&kls_snb_row_inplace_storage_fits(st));
   size_t capacity=N+(size_t)s->numeric->LUsize[0]+(size_t)s->numeric->Offp[N];
@@ -129,7 +129,7 @@ static void mirrorless_parallel_checks(void) {
       assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_SNB);
       assert(atomic_load_explicit(&parallel_repair_arrived,memory_order_acquire)==4);
       assert(atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed)==before+4);
-      assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)==packed_before+4);
+      assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)==packed_before+16);
       assert(!memcmp(expected,actual,capacity*sizeof(double)));
       for(int i=0;i<4;++i)for(int j=0;j<i;++j) {
         assert(parallel_scratch[i]&&parallel_scratch[i]!=parallel_scratch[j]);
@@ -151,7 +151,7 @@ static void mirrorless_parallel_checks(void) {
     }
   }
   free(expected);free(actual);kls_destroy(s);parallel_partition=0;free(ap);free(ai);free(a);
-  puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=8 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
+  puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=32 alias_repairs=8 exact_dead_upper_boundary=1 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
 }
 #else
 static void mirrorless_parallel_after_writeback(kls_solver *s,int64_t node) {(void)s;(void)node;}

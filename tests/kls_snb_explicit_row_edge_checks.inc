@@ -40,6 +40,17 @@ static void explicit_row_pack_bits(void) {
           assert(packed[1+(size_t)c*rows+r]==original[1+kls_rpanel_at(H,c,first+r)]);
         assert(packed[0]==UINT64_C(0xa5a5a5a5a5a5a5a5));
         assert(packed[1+(size_t)16*rows]==UINT64_C(0xa5a5a5a5a5a5a5a5));
+        if(first>=2*(int64_t)rows) {
+          kls_rpanel_pack_below((const double *)(original+1),H,first,rows,(double *)(original+1));
+          assert(_mm_getcsr()==csr&&fetestexcept(FE_ALL_EXCEPT)==flags);
+          for(int c=0;c<16;++c)for(int rr=0;rr<rows;++rr) {
+            assert(original[1+(size_t)c*rows+rr]==copy[1+kls_rpanel_at(H,c,first+rr)]);
+            assert(original[1+kls_rpanel_at(H,c,first+rr)]==copy[1+kls_rpanel_at(H,c,first+rr)]);
+          }
+          assert(original[0]==copy[0]&&original[count+1]==copy[count+1]);
+          assert(!memcmp(original+1+16*(size_t)rows,copy+1+16*(size_t)rows,(count-16*(size_t)rows)*8));
+          memcpy(original,copy,(count+2)*8);
+        }
         ++explicit_pack_cases;
       }
       free(original);free(copy);free(packed);
@@ -49,13 +60,13 @@ static void explicit_row_pack_bits(void) {
 }
 static void explicit_row_edge_case(int width,int count,int rows,int gap,
     int holes,int pattern,int math) {
-  enum{PH=192,H=384,BASE=4096,SIZE=BASE+32*H};
+  enum{PH=384,H=384,BASE=8192,SIZE=BASE+32*H};
   double *expected=malloc(SIZE*sizeof(double)),*actual=malloc(SIZE*sizeof(double));
   double *before=malloc(SIZE*sizeof(double)),*target=malloc((32*H+2)*sizeof(double));
   double scratch_storage[128*32+2];double *scratch=scratch_storage+1;int32_t sub[16],dest[95];
   assert(expected&&actual&&before&&target);
   kls_snb_snode *nodes=calloc(2,sizeof(*nodes));assert(nodes);nodes[0].width=16;nodes[0].height=PH;
-  nodes[0].uw=3;nodes[0].below=rows;nodes[1].width=width;
+  nodes[0].uw=256;nodes[0].below=rows;nodes[1].width=width;
   nodes[1].height=H;nodes[1].panel=BASE;
   kls_snb_edge edge={0};edge.sub_count=count;edge.u_start=4;
   kls_snb_block *block=calloc(1,sizeof(*block));assert(block);
@@ -77,6 +88,12 @@ static void explicit_row_edge_case(int width,int count,int rows,int gap,
   const size_t available=128*32,needed=(size_t)(16+width)*rows;
   const size_t limits[]={0,needed&&needed<=available?needed-1:available,
     needed<=available?needed:available,available};
+  for(unsigned image=0;image<2;++image) {
+    if(image) {
+      kls_rpanel_pack_below(actual,PH,nodes[0].uw,16+rows,actual);
+      nodes[0].column_panel=actual;
+      memcpy(before,actual,SIZE*sizeof(double));
+    }
   for(unsigned mode=0;mode<4;++mode) {
     memcpy(target+1,before+BASE,(size_t)width*H*sizeof(double));
     memset(scratch_storage,0x5a,sizeof scratch_storage);
@@ -95,6 +112,7 @@ static void explicit_row_edge_case(int width,int count,int rows,int gap,
     if(limits[mode]<available) {
       memcpy(&canary,scratch+limits[mode],8);assert(canary==UINT64_C(0x5a5a5a5a5a5a5a5a));
     }
+  }
   }
   ++explicit_edge_cases;_mm_setcsr(control);
   free(expected);free(actual);free(before);free(target);free(nodes);free(block);
@@ -121,7 +139,7 @@ static void explicit_row_edge_checks(void) {
   fprintf(stderr,"PACK_ROW_BITS_ORACLES cases=480 nan_payloads=1 rounding=4 ftz_daz=4 guards=1 flags=1\n");
   assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)>packed_before);
   assert(atomic_load_explicit(&scalar_row_calls,memory_order_relaxed)>scalar_before);
-  fprintf(stderr,"EXPLICIT_ROW_EDGE_ORACLES cases=%llu capacities=4 ftz_daz=4 external_target=1 producer_immutable=1 flags=1 packed_and_scalar=1\n",
+  fprintf(stderr,"EXPLICIT_ROW_EDGE_ORACLES cases=%llu capacities=4 images=2 ftz_daz=4 external_target=1 producer_immutable=1 flags=1 packed_and_scalar=1\n",
     (unsigned long long)explicit_edge_cases);
   kls_snb_owned_masked_environment=saved_owned;assert(!fesetenv(&saved));
 }
