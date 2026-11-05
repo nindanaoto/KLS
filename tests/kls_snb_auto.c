@@ -14,7 +14,8 @@ static void mirrorless_parallel_repair_begin(kls_solver *,int64_t,double *);
 #define KLS_SNB_INPLACE_REPAIR_BEGIN(s,node,scratch) mirrorless_parallel_repair_begin(s,node,scratch)
 static size_t row_resident_bytes,row_solve_plan_bytes;
 #define KLS_SNB_ROW_RESIDENT_BYTES(s,st,bytes) do {row_resident_bytes=(bytes);row_solve_plan_bytes=(s)->native_i16?(s)->native_i16->allocation_bytes:0;} while(0)
-static _Atomic unsigned row_inplace_repairs,row_lower_repairs;
+static _Atomic unsigned row_inplace_repairs,row_lower_repairs,row_preferred_columns;
+#define KLS_SNB_PREFERRED_COLUMN_EVENT(s,node) ((void)atomic_fetch_add_explicit(&row_preferred_columns,1,memory_order_relaxed))
 #define KLS_SNB_LOWER_REPAIR_EVENT() ((void)atomic_fetch_add_explicit(&row_lower_repairs,1,memory_order_relaxed))
 static _Atomic unsigned packed_row_calls;
 #define KLS_SNB_PACKED_ROW_EDGE_EVENT() ((void)atomic_fetch_add_explicit(&packed_row_calls,1,memory_order_relaxed))
@@ -87,6 +88,11 @@ static void auto_test_warm_pool(kls_solver *s) {
  assert(!pthread_mutex_unlock(&pool->shared.lock));
 }
 #ifdef KLS_SNB_HAVE_ROW_PANEL
+static void test_clear_column_preferences(kls_snb_state *st) {
+ assert(st->row_column_preferred);
+ const size_t slots=((size_t)st->blocks[0].snode_count+7)/8;
+ for(size_t i=0;i<slots;++i)atomic_store_explicit(st->row_column_preferred+i,0,memory_order_relaxed);
+}
 /* Drop only owned images; late producers reuse dead U with no ledger cost. */
 static unsigned test_use_dead_upper_images(kls_snb_state *st) {
  kls_snb_block *b=st->blocks;unsigned aliases=0;
@@ -235,6 +241,7 @@ static void exercise(int transpose,int transactional) {
   assert(!memcmp(old_lu,s->numeric->LUbx[0],units*sizeof(double)));
 #ifdef KLS_SNB_HAVE_ROW_PANEL
   for(int which=0;which<4;++which) {
+   test_clear_column_preferences(s->snb); /* Force each injected speculative case. */
    assert(!feclearexcept(FE_ALL_EXCEPT));
    unsigned injections=atomic_load_explicit(&underflow_injections,memory_order_relaxed);
    unsigned repairs=atomic_load_explicit(&row_underflow_repairs,memory_order_relaxed);
@@ -264,6 +271,7 @@ static void exercise(int transpose,int transactional) {
   if(transactional==2) {
    unsigned before=atomic_load_explicit(&transaction_writebacks,memory_order_relaxed);
 #ifdef KLS_SNB_HAVE_ROW_PANEL
+   test_clear_column_preferences(candidate); /* Keep the singular-row oracle speculative. */
    unsigned row_before=atomic_load_explicit(&row_getrfs,memory_order_relaxed);
 #endif
    for(int c=0;c<N;++c)for(int r=0;r<N;++r)a[c*N+r]=r==c&&r!=3?1.:0.;
@@ -335,12 +343,13 @@ static void exercise(int transpose,int transactional) {
  for(size_t i=0;i<scatter_count;++i)assert(scatter_before[i]==(cache_control->scatter_dst16?(int64_t)cache_control->scatter_dst16[i]:cache_control->scatter_dst?(int64_t)cache_control->scatter_dst[i]:cache_control->blk[i].dst));
 #ifdef KLS_SNB_HAVE_ROW_PANEL
  assert(row_resident_bytes<=SIZE_MAX-bytes_before);
- const size_t exact=row_resident_bytes+bytes_before;
+ const size_t preference_bytes=kls_snb_row_preference_bytes(cache_control);
+ const size_t exact=row_resident_bytes+bytes_before+preference_bytes;
  assert(exact>0&&kls_snb_try_row_layout(s,cache_control,0,exact-1));
  assert(!cache_control->row_layout&&cache_control->allocation_bytes==bytes_before);
  assert(kls_snb_try_row_layout(s,cache_control,0,exact));
- assert(cache_control->row_layout);
- assert(cache_control->allocation_bytes==bytes_before);
+ assert(cache_control->row_layout&&cache_control->row_column_preferred);
+ assert(cache_control->allocation_bytes==bytes_before+preference_bytes);
  for(int64_t j=0;j<cb->snode_count;++j) {
   const kls_snb_snode *sn=cb->snodes+j;
   const int fits=sn->width==16&&sn->uw>=2*((int64_t)16+sn->below);
@@ -367,7 +376,9 @@ static void row_cache_checks(void) {
  kls_snb_snode node={0};node.width=16;node.height=17;
  kls_snb_block block={0};block.snodes=&node;block.snode_count=1;
  kls_snb_state st={0};st.blocks=&block;st.nblocks=1;st.allocation_bytes=100;
- const size_t total=100+200+17*16*sizeof(double);
+ const size_t metadata=kls_snb_row_preference_bytes(&st);
+ assert(metadata==sizeof(*st.row_column_preferred));
+ const size_t total=100+200+17*16*sizeof(double)+metadata;
  assert(kls_snb_row_cache_fits(&st,200,total));
  assert(!kls_snb_row_cache_fits(&st,200,total-1));
  assert(!kls_snb_row_cache_fits(&st,SIZE_MAX,total));
@@ -376,13 +387,13 @@ static void row_cache_checks(void) {
 #ifdef KLS_SNB_HAVE_ROW_PANEL
  node.height=17;double scratch[5]={0};double *workers[]={scratch};
  st.gemm_w=workers;st.nworkers=1;st.gemm_scratch_bytes=34;
- assert(kls_snb_row_inplace_cache_fits(&st,200,300));
- assert(!kls_snb_row_inplace_cache_fits(&st,200,299));
- st.gemm_scratch_bytes=33;assert(!kls_snb_row_inplace_cache_fits(&st,200,300));
+ assert(kls_snb_row_inplace_cache_fits(&st,200,300+metadata));
+ assert(!kls_snb_row_inplace_cache_fits(&st,200,299+metadata));
+ st.gemm_scratch_bytes=33;assert(!kls_snb_row_inplace_cache_fits(&st,200,300+metadata));
  st.gemm_scratch_bytes=34;workers[0]=NULL;
- assert(!kls_snb_row_inplace_cache_fits(&st,200,300));workers[0]=scratch;
- st.nworkers=0;assert(!kls_snb_row_inplace_cache_fits(&st,200,300));
- st.nworkers=1;node.height=15;assert(!kls_snb_row_inplace_cache_fits(&st,200,300));
+ assert(!kls_snb_row_inplace_cache_fits(&st,200,300+metadata));workers[0]=scratch;
+ st.nworkers=0;assert(!kls_snb_row_inplace_cache_fits(&st,200,300+metadata));
+ st.nworkers=1;node.height=15;assert(!kls_snb_row_inplace_cache_fits(&st,200,300+metadata));
 #endif
  puts("PASS combined native and mirrored panel cache capacity boundaries");
 }

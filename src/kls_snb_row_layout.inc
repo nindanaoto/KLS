@@ -25,13 +25,35 @@ static int kls_snb_row_product_math(void) {
   _mm_setcsr(csr);return result;
 }
 #endif
+/* A repaired row node may use the incumbent column kernel on subsequent
+ * calls. Its current coefficients are still scattered and factored afresh.
+ * Atomic bytes let independent workers mark nodes sharing the same byte. */
+static size_t kls_snb_row_preference_bytes(const kls_snb_state *st) {
+  if(!st||st->nblocks!=1||!st->blocks||st->blocks[0].snode_count<1)return SIZE_MAX;
+  if(st->row_column_preferred)return 0;
+  const uint64_t slots=((uint64_t)st->blocks[0].snode_count+7)/8;
+  if(slots>SIZE_MAX/sizeof(*st->row_column_preferred))return SIZE_MAX;
+  return (size_t)slots*sizeof(*st->row_column_preferred);
+}
+static int kls_snb_prefers_column(const kls_snb_state *st,int64_t node) {
+  return st->row_column_preferred&&
+    (atomic_load_explicit(st->row_column_preferred+(size_t)node/8,memory_order_relaxed)&
+      (unsigned char)(1u<<((unsigned)node&7u)));
+}
+static void kls_snb_prefer_column(kls_snb_state *st,int64_t node) {
+  if(st->row_column_preferred)atomic_fetch_or_explicit(st->row_column_preferred+(size_t)node/8,
+    (unsigned char)(1u<<((unsigned)node&7u)),memory_order_relaxed);
+}
 /* Duplication must fit alongside the native factor, which every certified
  * solve still reads. A miss keeps the existing column candidate unchanged. */
 static int kls_snb_row_cache_fits(const kls_snb_state *st,size_t native_bytes,
     size_t capacity) {
-  if(!st||st->nblocks!=1||native_bytes>capacity||
+  if(!st||st->nblocks!=1||!st->blocks||native_bytes>capacity||
       st->allocation_bytes>capacity-native_bytes)return 0;
   size_t used=native_bytes+st->allocation_bytes;
+  const size_t metadata=kls_snb_row_preference_bytes(st);
+  if(metadata==SIZE_MAX||metadata>capacity-used)return 0;
+  used+=metadata;
   const kls_snb_block *b=st->blocks;
   for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].width==16) {
     const kls_snb_snode *sn=b->snodes+j;
@@ -59,7 +81,8 @@ static int kls_snb_row_inplace_storage_fits(const kls_snb_state *st) {
 static int kls_snb_row_inplace_cache_fits(const kls_snb_state *st,
     size_t native_bytes,size_t capacity) {
   return kls_snb_row_inplace_storage_fits(st)&&native_bytes<=capacity&&
-    st->allocation_bytes<=capacity-native_bytes;
+    st->allocation_bytes<=capacity-native_bytes&&
+    kls_snb_row_preference_bytes(st)<=capacity-native_bytes-st->allocation_bytes;
 }
 #endif
 #ifdef KLS_SNB_HAVE_ROW_PANEL
@@ -114,6 +137,13 @@ static int kls_snb_enable_row_layout_mode(kls_solver *solver,kls_snb_state *st,d
   for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].width==16)found=1;
   if(!found)return 1;
   int product_math=kls_snb_row_product_math();if(product_math<0)return 0;
+  if(!st->row_column_preferred) {
+    const size_t bytes=kls_snb_row_preference_bytes(st);
+    if(bytes==SIZE_MAX)return 0;
+    st->row_column_preferred=kls_snb_allocate(st,bytes,1,1,deadline,limit);
+    if(!st->row_column_preferred)return 0;
+    for(size_t j=0;j<bytes/sizeof(*st->row_column_preferred);++j)atomic_init(st->row_column_preferred+j,0);
+  }
   /* Existing admitted plans retain their column images. A budgeted
    * mirrorless plan reads row producers directly and repairs in place. */
   if(column_mirrors)for(int64_t j=0;j<b->snode_count;++j)if(b->snodes[j].width==16) {

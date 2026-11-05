@@ -89,6 +89,38 @@ static int check_compact_image_policy(void) {
 #endif
   return 0;
 }
+static int check_preferred_storage(void) {
+#ifdef KLS_SNB_HAVE_ROW_PANEL
+  for(int failure=0;failure<3;++failure) {
+    kls_snb_state *st=calloc(1,sizeof(*st));kls_snb_block *block=calloc(1,sizeof(*block));
+    kls_snb_snode *node=calloc(1,sizeof(*node));uint32_t *ranges=calloc(17,sizeof(*ranges));
+    uint32_t *writeback=calloc(17,sizeof(*writeback));
+    if(!st||!block||!node||!ranges||!writeback)return 81;
+    st->blocks=block;st->nblocks=1;st->col_blk_ptr=ranges;
+    block->snodes=node;block->snode_count=1;block->nk=16;block->wb_col_off=writeback;
+    node->width=16;node->height=32;node->below=16;
+    const size_t original=sizeof(*st)+sizeof(*block)+sizeof(*node)+34*sizeof(uint32_t);
+    st->allocation_bytes=original;
+    const size_t metadata=kls_snb_row_preference_bytes(st);
+    allocation_failure=failure<2?failure:-1;
+    const int enabled=kls_snb_enable_row_layout_mode(NULL,st,0,SIZE_MAX,1);
+    allocation_failure=-1;
+    if(enabled!=(failure==2)||st->row_layout!=(failure==2))return 82;
+    if(!!st->row_column_preferred!=(failure>0)||!!node->column_panel!=(failure==2))return 83;
+    const size_t expected=original+(failure>0?metadata:0)+(failure==2?32*16*sizeof(double):0);
+    if(st->allocation_bytes!=expected)return 84;
+    for(int j=0;j<17;++j)if(ranges[j]||writeback[j])return 85;
+    if(failure==2) {
+      if(kls_snb_prefers_column(st,0))return 86;
+      kls_snb_prefer_column(st,0);kls_snb_prefer_column(st,0);
+      if(!kls_snb_prefers_column(st,0)||st->allocation_bytes!=expected)return 87;
+    }
+    kls_snb_destroy(st);
+  }
+  puts("PREFERRED_STORAGE_ORACLES metadata_failure=1 mirror_failure=1 zeroed=1 ledger_exact=1 destruction=1");
+#endif
+  return 0;
+}
 static int check_build(int n,int transpose,int csr,int alias,int reject) {
   int *ptr=calloc((size_t)n+1,sizeof(int));
   int *idx=malloc((size_t)n*n*sizeof(int));
@@ -376,6 +408,7 @@ static int check_general_btf(int transpose,int scale) {
 int main(void) {
   {int boundary=check_scatter_boundaries();if(boundary)return boundary;}
   {int policy=check_compact_image_policy();if(policy)return policy;}
+  {int storage=check_preferred_storage();if(storage)return storage;}
   /* Budget tests use no matrix identity, synthetic model, or CPU coefficient.
      A short hinted workload cannot fund the complete search/build/trial envelope;
      an unhinted workload earns its allowance from completed real work. */

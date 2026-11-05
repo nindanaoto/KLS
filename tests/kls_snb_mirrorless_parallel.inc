@@ -116,14 +116,21 @@ static void mirrorless_parallel_case(int owned_compact) {
   assert(expected&&actual);
   for(int epoch=9;epoch<=11;++epoch) {
     parallel_matrix(a,b,epoch);
+    unsigned normal_csr=0;int normal_flags=0;
     if(epoch<11) {
+      parallel_rhs(a,b,epoch+3);
+      const unsigned preferred_before=atomic_load_explicit(&row_preferred_columns,memory_order_relaxed);
+      assert(!feclearexcept(FE_ALL_EXCEPT));
       assert(kls_refactor_solve(s,a,1,b,0,x,0)==KLS_OK);
       assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_SNB);
+      normal_csr=_mm_getcsr();normal_flags=fetestexcept(FE_ALL_EXCEPT);
+      if(epoch==10)assert(atomic_load_explicit(&row_preferred_columns,memory_order_relaxed)==preferred_before+4);
     }
     assert(transaction_capture(s,expected)==capacity);
     parallel_rhs(a,b,epoch+3);for(int r=0;r<N;++r)x[r]=733.;
     s->unchanged_refactor_state=-1;s->refactor_input_snapshot_valid=0;
     parallel_reset();
+    test_clear_column_preferences(st); /* Exercise each forced row repair, including scratch decline. */
     const unsigned before=atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed);
     const unsigned lower_before=atomic_load_explicit(&row_lower_repairs,memory_order_relaxed);
     const unsigned packed_before=atomic_load_explicit(&packed_row_calls,memory_order_relaxed);
@@ -148,6 +155,12 @@ static void mirrorless_parallel_case(int owned_compact) {
       assert(atomic_load_explicit(&row_lower_repairs,memory_order_relaxed)==lower_before+4);
       assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)==packed_before+(owned_compact?4u:16u));
       assert(!memcmp(expected,actual,capacity*sizeof(double)));
+      if(epoch==10) {
+        assert(csr==normal_csr&&flags==normal_flags);
+        for(int64_t j=0;j<st->blocks[0].snode_count;++j)
+          if(st->blocks[0].snodes[j].start%96==parallel_repair_start)assert(kls_snb_prefers_column(st,j));
+        puts("PREFERRED_COLUMN_ORACLES workers=4 visits=4 changed_A=1 fresh_rhs=1 native_bits_flags=1 atomic_shared_byte=1");
+      }
       for(int i=0;i<4;++i)for(int j=0;j<i;++j) {
         assert(parallel_scratch[i]&&parallel_scratch[i]!=parallel_scratch[j]);
         assert(parallel_panels[i]&&parallel_panels[i]!=parallel_panels[j]);

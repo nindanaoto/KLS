@@ -8275,6 +8275,7 @@ typedef struct kls_snb_state {
      Native structure and workspaces remain suitable for recomputation. */
   int transactional;
   int row_layout;
+  _Atomic unsigned char *row_column_preferred; /* Plan-local kernel choice, never coefficients. */
   int row_product_math;
   _Atomic int declined;
   double coop_work_share; /* fraction in cooperative fat-chain snodes */

@@ -62,6 +62,7 @@ static void kls_snb_destroy(kls_snb_state *st) {
     }
     free(st->blocks);
   }
+  free(st->row_column_preferred);
   free(st->scatter_dst16);
   free(st->scatter_dst);
   free(st->off);
@@ -1287,6 +1288,12 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
   const int32_t w = sn->width;
   const int32_t H = sn->height;
   const int32_t uw = sn->uw;
+  if(!column_repair&&st->row_layout&&w==16&&kls_snb_prefers_column(st,s)) {
+    column_repair=1;
+#ifdef KLS_SNB_PREFERRED_COLUMN_EVENT
+    KLS_SNB_PREFERRED_COLUMN_EVENT(solver,s);
+#endif
+  }
   const int compact_image=sn->column_panel&&sn->column_ld>0;
   const int inplace_repair=column_repair&&(!sn->column_panel||compact_image);
   double *W = column_repair&&sn->column_panel&&!compact_image?sn->column_panel:panels+sn->panel;
@@ -1440,6 +1447,7 @@ static void kls_snb_process_target_impl(kls_solver *solver, kls_snb_state *st,
 #ifdef KLS_SNB_HAVE_ROW_PANEL
     if(bad_flags==0x10u&&st->row_layout&&w==16&&!column_repair&&
        !atomic_load_explicit(&st->failed,memory_order_acquire)) {
+      kls_snb_prefer_column(st,s);
       /* Discard only this target's speculative flags. Its completed producers
        * remain published; the mirror rerun uses ordinary column kernels and
        * current A. No consumer observes a partially repaired row panel. */
