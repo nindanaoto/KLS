@@ -1,0 +1,11 @@
+{
+  "baseline_commit": "6f061835",
+  "baseline": "qualified v111, exact runtime on current main",
+  "main_wins": 40,
+  "candidate_wins": 40,
+  "main_worst_ratio": 1.396406540795751,
+  "candidate_worst_ratio": 1.3268266647541407,
+  "win_margin": 0.02,
+  "passed": true,
+  "criterion": "More wins, or lower worst ratio with equal wins; user-authorized incremental merge checkpoint"
+}

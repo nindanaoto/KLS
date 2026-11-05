@@ -1,0 +1,10 @@
+{
+  "head": "c2a24f45849f076d3688b9967c2ca834b5523514",
+  "clean": true,
+  "runtime_files": 135,
+  "prototype": "/tmp/kls-worst-peer-v169-column-confidence-prototype",
+  "screen_audits": [
+    "/tmp/kls-worst-peer-v170-column-confidence-audit/audit.json",
+    "/tmp/kls-worst-peer-v171-column-confidence-opposite-audit/audit.json"
+  ]
+}

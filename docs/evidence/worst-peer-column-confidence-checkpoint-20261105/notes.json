@@ -1,0 +1,39 @@
+{
+  "implementation_commit": "c2a24f45849f076d3688b9967c2ca834b5523514",
+  "baseline_commit": "6f061835",
+  "goal_complete": false,
+  "scope": "User-authorized incremental main checkpoint; local merge only",
+  "features": [
+    "Column-only AUTO plans require 20 percent measured savings; row plans retain the original threshold without extra trials or credit",
+    "Immutable compact BTF dependency descriptors store current native-value pointers and validated short row geometry; canonical solve-cache invalidation owns their lifetime",
+    "Descriptor allocation is optional, cache-capacity accounting includes its bytes, and allocation failure retains the existing compact refactor",
+    "Single-RHS serial multi-BTF systems up to 512 rows use bounded call-owned staging; larger and other calls retain heap staging",
+    "Every public call still copies the fresh RHS, certifies against current A, and publishes output only after success",
+    "Dedicated activation, allocation-fallback, cache invalidation, 512/513 boundary, in-place RHS and failed-output tests"
+  ],
+  "tests": {
+    "native": 70,
+    "portable": 70,
+    "asan_ubsan": 70,
+    "tsan": 13,
+    "tsan_clean_control": "pass",
+    "tsan_intentional_race_control": "detected expected race",
+    "strict_asan_boundary_precheck": "pass; detect_stack_use_after_return=1"
+  },
+  "all56_peer_wins": false,
+  "independent_opposite_order_confirmation": false,
+  "broad110_complete": false,
+  "remaining": "Close residual peer losses; obtain full opposite-order confirmation and original 110-matrix peer-aware validation before claiming the full goal complete.",
+  "source_files": {
+    "summary.json": "87bf2a6f0e5d3a52467f8a4d5ada5918d28cdf5c303664056fae20caa09308c5",
+    "audit.json": "14fa79cc64ad0c35d7f75785a6c69eff4ed13d340002461663660947c4642903",
+    "checkpoint.json": "a4161f1c416b8e1d773bd7397cd32116a75b5c3206da89c3f560702860a20664",
+    "qualification.json": "45e2a377c0873df359589003bf67edbaaf07c10c17c12258cfdc08f061c74c61",
+    "qualified-source.json": "5d4ebf96b66f3f5d59037d66076e28357b43ac5533215868035621acd5a877f0",
+    "strict-asan.json": "115fdd2b690b26d1784fa5315753aa7ceef907dc9e72c161e7d6946b021223ff",
+    "abi.json": "712db98ba392948ca27a3cf7410fbf1e54e2fccd5489642a1cdf1e5e2e2b9d83",
+    "review.json": "cbc7ac30100f21abe7eb8785bc3def03ab3cea411cdda11dbd3fd722cee504c2",
+    "integrated-runtime-sha256.json": "9b9796135f3943234b252dfd5329d9783fbec9cdd089ecf921cea32cb30b2f89",
+    "integration-preflight.json": "bd4e4881d4c05705fd0eb1146236438f470ddfcaa5ae5805ba78cfb365423610"
+  }
+}

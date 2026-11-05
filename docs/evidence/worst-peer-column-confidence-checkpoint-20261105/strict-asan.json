@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "binary": "/tmp/kls-worst-peer-v173-column-confidence-core/asan/kls_small_btf",
+  "binary_sha256": "bf7f87bb72378ff046c581d8a1132e2fce25efadfc4701ebd64e3de4e1edd1c0",
+  "log_sha256": "3cbbf9c859df89291790a5aef0a15d1840617835589e147d116090dd910b9e92",
+  "detect_stack_use_after_return": true
+}

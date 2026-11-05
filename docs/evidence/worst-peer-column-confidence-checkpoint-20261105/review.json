@@ -1,0 +1,25 @@
+{
+  "reviewed_utc": "2026-11-05T01:43:24.899359+00:00",
+  "checkpoint_eligible": true,
+  "main_wins": 40,
+  "candidate_wins": 40,
+  "main_worst_ratio": 1.396406540795751,
+  "candidate_worst_ratio": 1.3268266647541407,
+  "all_84_cells_independently_agree": true,
+  "all_462_observations_qualified": true,
+  "runtime_inputs_match": 135,
+  "test_inputs_match": 90,
+  "qualification_passed": true,
+  "abi_equal": true,
+  "baseline_is_current_main": true,
+  "goal_complete": false,
+  "evidence_sha256": {
+    "/tmp/kls-worst-peer-v173-column-confidence-initial/summary.json": "87bf2a6f0e5d3a52467f8a4d5ada5918d28cdf5c303664056fae20caa09308c5",
+    "/tmp/kls-worst-peer-v173-column-confidence-initial-audit/audit.json": "14fa79cc64ad0c35d7f75785a6c69eff4ed13d340002461663660947c4642903",
+    "/tmp/kls-worst-peer-v173-column-confidence-controller/checkpoint.json": "a4161f1c416b8e1d773bd7397cd32116a75b5c3206da89c3f560702860a20664",
+    "/tmp/kls-worst-peer-v173-column-confidence-core/completed.json": "45e2a377c0873df359589003bf67edbaaf07c10c17c12258cfdc08f061c74c61",
+    "/tmp/kls-worst-peer-v173-column-confidence-controller/abi.json": "712db98ba392948ca27a3cf7410fbf1e54e2fccd5489642a1cdf1e5e2e2b9d83",
+    "/tmp/kls-worst-peer-v173-column-confidence-controller/strict-asan.json": "115fdd2b690b26d1784fa5315753aa7ceef907dc9e72c161e7d6946b021223ff",
+    "/tmp/kls-v173-checkpoint-review.py": "1431780b7132fec4c25a2e203bb2e17acc8dab7f8f9e751143285ead085bd2e4"
+  }
+}
