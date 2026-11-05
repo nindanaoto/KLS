@@ -3,7 +3,7 @@
  * remain unchanged. Finite random mantissas expose contraction differences. */
 #ifdef KLS_SNB_HAVE_ROW_PANEL
 static uint64_t explicit_edge_cases;
-static unsigned explicit_pack_cases;
+static unsigned explicit_pack_cases,explicit_lower_cases;
 static double explicit_edge_value(unsigned index,int pattern) {
   uint64_t word=((uint64_t)index+17)*UINT64_C(0x9e3779b97f4a7c15);
   word^=word>>29;word*=UINT64_C(0xbf58476d1ce4e5b9);word^=word>>31;
@@ -54,6 +54,58 @@ static void explicit_row_pack_bits(void) {
         ++explicit_pack_cases;
       }
       free(original);free(copy);free(packed);
+    }
+  }
+  assert(!fesetenv(&saved));
+}
+static void explicit_lower_repair_bits(void) {
+  fenv_t saved;assert(!fegetenv(&saved));
+  const int rounds[]={FE_TONEAREST,FE_UPWARD,FE_DOWNWARD,FE_TOWARDZERO};
+  const int heights[]={16,17,31,32,124,1967};
+  for(unsigned m=0;m<4;++m) {
+    assert(!fesetround(rounds[m]));
+    for(unsigned h=0;h<6;++h) {
+      const int H=heights[h],uppers[]={0,(H-16)/2,H>140?H-140:0,H-16};
+      const size_t count=(size_t)16*H;
+      uint64_t *original=malloc((count+2)*8),*actual=malloc((count+2)*8),*work=malloc((count+2)*8);
+      assert(original&&actual&&work);
+      for(size_t i=0;i<count+2;++i)original[i]=UINT64_C(0x7ff0000000000000)^(UINT64_C(0x123456789abcdef)*i);
+      original[1]=UINT64_C(0x7ff0000000000001);original[2]=UINT64_C(0xfff8123456789abc);
+      original[3]=UINT64_C(0x8000000000000000);original[4]=1;
+      for(unsigned u=0;u<4;++u) {
+        const int uw=uppers[u],rows=H-uw;const size_t bytes=(size_t)16*rows*8;
+        const size_t limits[]={0,bytes-1,bytes};
+        for(unsigned limit=0;limit<3;++limit) {
+          memcpy(actual,original,(count+2)*8);memset(work,0xa5,(count+2)*8);
+          const unsigned csr=_mm_getcsr();const int flags=fetestexcept(FE_ALL_EXCEPT);
+          assert(kls_rpanel_repair_lower_inplace((double *)(actual+1),H,uw,rows-16,work+1,limits[limit])==(limit==2));
+          assert(_mm_getcsr()==csr&&fetestexcept(FE_ALL_EXCEPT)==flags);
+          if(limit<2) {
+            assert(!memcmp(actual,original,(count+2)*8));
+            for(size_t i=0;i<count+2;++i)assert(work[i]==UINT64_C(0xa5a5a5a5a5a5a5a5));
+          } else {
+            for(size_t i=0;i<count;++i) {
+              const size_t group=i/((size_t)8*H),local=i%((size_t)8*H),row=local/8,column=group*8+local%8;
+              assert(actual[1+i]==original[1+(row>=(size_t)uw?column*H+row:i)]);
+            }
+            assert(actual[0]==original[0]&&actual[count+1]==original[count+1]);
+            assert(work[0]==UINT64_C(0xa5a5a5a5a5a5a5a5));
+            assert(work[1+(size_t)16*rows]==UINT64_C(0xa5a5a5a5a5a5a5a5));
+          }
+        }
+        memcpy(actual,original,(count+2)*8);
+        const unsigned csr=_mm_getcsr();const int flags=fetestexcept(FE_ALL_EXCEPT);
+        assert(!kls_rpanel_repair_lower_inplace((double *)(actual+1),H,uw,rows-16,actual+1,bytes));
+        assert(!kls_rpanel_repair_lower_inplace((double *)(actual+1),H,uw,rows-15,work+1,bytes));
+        assert(!kls_rpanel_repair_lower_inplace(NULL,H,uw,rows-16,work+1,bytes));
+        assert(!kls_rpanel_repair_lower_inplace((double *)(actual+1),H,uw,rows-16,NULL,bytes));
+        assert(!kls_rpanel_repair_lower_inplace((double *)(actual+1),H,-1,rows-16,work+1,bytes));
+        assert(!kls_rpanel_repair_lower_inplace((double *)(UINTPTR_MAX-7),H,uw,rows-16,work+1,bytes));
+        assert(!kls_rpanel_repair_lower_inplace((double *)(actual+1),H,uw,rows-16,(void *)(UINTPTR_MAX-7),bytes));
+        assert(!memcmp(actual,original,(count+2)*8));assert(_mm_getcsr()==csr&&fetestexcept(FE_ALL_EXCEPT)==flags);
+        ++explicit_lower_cases;
+      }
+      free(original);free(actual);free(work);
     }
   }
   assert(!fesetenv(&saved));
@@ -125,7 +177,7 @@ static void explicit_row_edge_case(int width,int count,int rows,int gap,
 }
 static void explicit_row_edge_checks(void) {
   fenv_t saved;assert(!feholdexcept(&saved));assert(!fesetround(FE_TONEAREST));
-  const unsigned original=_mm_getcsr();explicit_edge_cases=0;explicit_pack_cases=0;
+  const unsigned original=_mm_getcsr();explicit_edge_cases=0;explicit_pack_cases=0;explicit_lower_cases=0;
   unsigned packed_before=atomic_load_explicit(&packed_row_calls,memory_order_relaxed);
   unsigned scalar_before=atomic_load_explicit(&scalar_row_calls,memory_order_relaxed);
   const int saved_owned=kls_snb_owned_masked_environment;kls_snb_owned_masked_environment=1;
@@ -134,7 +186,7 @@ static void explicit_row_edge_checks(void) {
   for(unsigned mode=0;mode<4;++mode) {
     _mm_setcsr((original&~(0x8040u|63u))|((mode&1)?0x8000u:0)|((mode&2)?0x40u:0));
     int math=kls_snb_row_product_math();assert(math>=0);
-    explicit_row_pack_bits();
+    explicit_row_pack_bits();explicit_lower_repair_bits();
     for(unsigned w=0;w<7;++w)for(unsigned c=0;c<7;++c)for(unsigned r=0;r<10;++r)
       for(int gap=0;gap<2;++gap)if((counts[c]-1)*(gap?2:1)<16)
         for(int holes=0;holes<3;++holes)for(int pattern=0;pattern<3;++pattern)
@@ -142,6 +194,8 @@ static void explicit_row_edge_checks(void) {
   }
   assert(explicit_edge_cases==30240);
   assert(explicit_pack_cases==480);
+  assert(explicit_lower_cases==384);
+  fprintf(stderr,"LOWER_REPAIR_BITS_ORACLES cases=384 capacities=3 nan_payloads=1 rounding=4 ftz_daz=4 untouched_upper=1 guards=1 flags=1 invalid_bounds=1\n");
   fprintf(stderr,"PACK_ROW_BITS_ORACLES cases=480 nan_payloads=1 rounding=4 ftz_daz=4 guards=1 flags=1\n");
   assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)>packed_before);
   assert(atomic_load_explicit(&scalar_row_calls,memory_order_relaxed)>scalar_before);

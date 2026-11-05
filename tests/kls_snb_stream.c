@@ -117,7 +117,9 @@ int main(void) {
           s->snb->gemm_w[0],0,begin,begin+4<width?begin+4:width);
       kls_snb_finalize_target(s,s->snb,&s->snb->blocks[0],j);
     }
-    assert(kls_snb_refactor_epilogue(s));
+    if(!kls_snb_refactor_epilogue(s)) {
+      fprintf(stderr,"SLICE_EPILOGUE_FAILURE epoch=%d row=%d short16=%d wide32=%d diagonal0=%.17g diagonal128=%.17g\n",epoch,s->snb->row_layout,s->snb->scatter_dst16!=NULL,s->snb->scatter_dst!=NULL,((double*)s->numeric->Udiag)[0],((double*)s->numeric->Udiag)[128]);abort();
+    }
     assert(capture(s,actual)==count && !memcmp(actual,oracle,count*sizeof(double)));
 
     assert(kls_snb_stream_refactor(s,v,4)==1);

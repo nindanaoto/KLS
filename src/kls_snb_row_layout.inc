@@ -136,8 +136,15 @@ static int kls_snb_enable_row_layout_mode(kls_solver *solver,kls_snb_state *st,d
     const kls_snb_snode *sn=b->snodes+j;if(sn->width!=16)continue;
     for(int c=0;c<16;++c) {
       const int64_t k=sn->start+c;const UF_long g=b->k1+(UF_long)k;
-      if(st->scatter_row) {
-        /* Original row offsets remain valid in either panel layout. */
+      if(st->scatter_dst16) {
+        const UF_long oldcol=solver->symbolic->Q[g];
+        for(UF_long p=solver->col_ptr[oldcol];p<solver->col_ptr[oldcol+1];++p) {
+          const int64_t row=(int64_t)st->scatter_dst16[p]-(int64_t)c*sn->height;
+          if(row<0||row>=sn->height)return 0;
+          const size_t at=kls_rpanel_at(sn->height,c,(int)row);
+          if(at>UINT16_MAX)return 0;
+          st->scatter_dst16[p]=(uint16_t)at;
+        }
       } else if(st->scatter_dst) {
         const UF_long oldcol=solver->symbolic->Q[g];
         for(UF_long p=solver->col_ptr[oldcol];p<solver->col_ptr[oldcol+1];++p) {
@@ -294,6 +301,38 @@ static void kls_rpanel_pack_below(const double *R,int H,int first,int rows,doubl
     for(;r<rows;++r)for(int c=0;c<8;++c)
       memcpy(L+(size_t)(group*8+c)*rows+r,R+(size_t)group*8*H+(size_t)(first+r)*8+c,sizeof(double));
   }
+}
+/* Native LU already owns U-upper when repairing an unpublished panel.
+ * Stage only L-diagonal and L-below before writing their row representation;
+ * consumers never read the dead upper region. Exceptional bits are moved
+ * without arithmetic, and the worker buffer remains exclusively owned. */
+static int kls_rpanel_repair_lower_inplace(double *R,int H,int uw,int below,
+    void *work,size_t work_bytes) {
+  if(!R||!work||H<16||uw<0||uw>H-16||below!=H-uw-16||
+      (size_t)H>SIZE_MAX/(16*sizeof(double)))return 0;
+  const size_t rows=(size_t)H-(size_t)uw,bytes=rows*16*sizeof(double);
+  if(work_bytes<bytes)return 0;
+  const uintptr_t first=(uintptr_t)R,scratch=(uintptr_t)work;
+  const size_t panel_bytes=(size_t)H*16*sizeof(double);
+  if(first>UINTPTR_MAX-panel_bytes||scratch>UINTPTR_MAX-bytes||
+      (first<scratch+bytes&&scratch<first+panel_bytes))return 0;
+  double *L=work;
+  for(int c=0;c<16;++c)memcpy(L+(size_t)c*rows,R+(size_t)c*H+uw,rows*sizeof(double));
+  for(int group=0;group<2;++group) {
+    size_t r=0;
+    for(;r+7<rows;r+=8) {
+      __m512d tile[8];
+      for(int c=0;c<8;++c)tile[c]=_mm512_loadu_pd(L+(size_t)(group*8+c)*rows+r);
+      kls_rpanel_transpose8(tile);
+      for(int i=0;i<8;++i)_mm512_storeu_pd(R+(size_t)group*8*H+((size_t)uw+r+i)*8,tile[i]);
+    }
+    for(;r<rows;++r)for(int c=0;c<8;++c)
+      memcpy(R+(size_t)group*8*H+((size_t)uw+r)*8+c,L+(size_t)(group*8+c)*rows+r,sizeof(double));
+  }
+#ifdef KLS_SNB_LOWER_REPAIR_EVENT
+  KLS_SNB_LOWER_REPAIR_EVENT();
+#endif
+  return 1;
 }
 static void kls_rpanel_small_target_edge_to(const kls_snb_block *blk,
     const kls_snb_snode *sn,const kls_snb_edge *edge,int narrow,int product_math,

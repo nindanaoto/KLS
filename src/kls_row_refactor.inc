@@ -5592,7 +5592,7 @@ static int kls_lean_row_refactor_numeric(kls_solver *solver,
   return 1;
 }
 
-static int kls_scatter_row_refactor_l_prefix_values(kls_solver *solver,
+static int kls_scatter_dst16_refactor_l_prefix_values(kls_solver *solver,
                                                     UF_long end_row) {
   if (solver == NULL || solver->row_refactor_l_ptr == NULL ||
       solver->row_refactor_l_values == NULL) {
@@ -5615,7 +5615,7 @@ static int kls_scatter_row_refactor_l_prefix_values(kls_solver *solver,
   return 1;
 }
 
-static int kls_scatter_row_refactor_u_prefix_values(kls_solver *solver,
+static int kls_scatter_dst16_refactor_u_prefix_values(kls_solver *solver,
                                                     UF_long end_row) {
   if (solver == NULL || solver->row_refactor_u_ptr == NULL ||
       solver->row_refactor_u_values == NULL) {
@@ -5638,18 +5638,18 @@ static int kls_scatter_row_refactor_u_prefix_values(kls_solver *solver,
   return 1;
 }
 
-static int kls_scatter_row_refactor_prefix_values(kls_solver *solver,
+static int kls_scatter_dst16_refactor_prefix_values(kls_solver *solver,
                                                   UF_long end_row) {
-  return kls_scatter_row_refactor_l_prefix_values(solver, end_row) &&
-         kls_scatter_row_refactor_u_prefix_values(solver, end_row);
+  return kls_scatter_dst16_refactor_l_prefix_values(solver, end_row) &&
+         kls_scatter_dst16_refactor_u_prefix_values(solver, end_row);
 }
 
 static int kls_publish_row_refactor_values(kls_solver *solver) {
   if (solver == NULL || !solver->row_refactor_values_dirty) {
     return 1;
   }
-  if (!kls_scatter_row_refactor_l_prefix_values(solver, solver->n) ||
-      !kls_scatter_row_refactor_u_prefix_values(solver, solver->n)) {
+  if (!kls_scatter_dst16_refactor_l_prefix_values(solver, solver->n) ||
+      !kls_scatter_dst16_refactor_u_prefix_values(solver, solver->n)) {
     solver->common.status = TRILINOS_KLU_INVALID;
     return 0;
   }
@@ -7840,7 +7840,7 @@ static void kls_clear_row_refactor_input_residuals(kls_solver *solver,
   }
 }
 
-static int kls_scatter_row_refactor_row_values(kls_solver *solver,
+static int kls_scatter_dst16_refactor_row_values(kls_solver *solver,
                                                UF_long row) {
   if (solver == NULL || row >= solver->n ||
       solver->row_refactor_l_ptr == NULL ||
@@ -8325,7 +8325,7 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   if (shared.pivot_rejected) {
     const UF_long rejected_pivot = shared.rejected_pivot;
     if (defer_value_scatter &&
-        !kls_scatter_row_refactor_prefix_values(solver, rejected_pivot)) {
+        !kls_scatter_dst16_refactor_prefix_values(solver, rejected_pivot)) {
       pthread_mutex_destroy(&shared.lock);
       common->status = TRILINOS_KLU_INVALID;
       return 0;
@@ -8360,8 +8360,8 @@ static int kls_serial_row_refactor_numeric(kls_solver *solver,
   if (defer_value_scatter) {
     if (lazy_value_scatter) {
       kls_record_row_refactor_lazy_value_scatter_run(solver);
-    } else if (!kls_scatter_row_refactor_l_prefix_values(solver, solver->n) ||
-               !kls_scatter_row_refactor_u_prefix_values(solver, solver->n)) {
+    } else if (!kls_scatter_dst16_refactor_l_prefix_values(solver, solver->n) ||
+               !kls_scatter_dst16_refactor_u_prefix_values(solver, solver->n)) {
       common->status = TRILINOS_KLU_INVALID;
       return 0;
     }
@@ -10691,7 +10691,7 @@ static int kls_parallel_row_refactor_process_dense_group_native(
       }
     }
     if (!shared->row_refactor_defer_value_scatter &&
-        !kls_scatter_row_refactor_row_values(solver, row)) {
+        !kls_scatter_dst16_refactor_row_values(solver, row)) {
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
@@ -11407,7 +11407,7 @@ static int kls_compact_dense_panel_factor_blocked_checked(
         }
       }
       if (!shared->row_refactor_defer_value_scatter &&
-          !kls_scatter_row_refactor_row_values(solver, row)) {
+          !kls_scatter_dst16_refactor_row_values(solver, row)) {
         kls_egraph_refactor_record_invalid(shared);
         return -1;
       }
@@ -12776,7 +12776,7 @@ static int kls_parallel_row_refactor_process_dense_group_compact_checked(
       }
     }
     if (!shared->row_refactor_defer_value_scatter &&
-        !kls_scatter_row_refactor_row_values(solver, row)) {
+        !kls_scatter_dst16_refactor_row_values(solver, row)) {
       kls_egraph_refactor_record_invalid(shared);
       return 0;
     }
@@ -15419,7 +15419,7 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
     const int prefix_ready =
       kls_egraph_refreshed_prefix(shared, shared->rejected_pivot);
     if (prefix_ready && shared->row_refactor_defer_value_scatter &&
-        !kls_scatter_row_refactor_prefix_values(solver,
+        !kls_scatter_dst16_refactor_prefix_values(solver,
                                                 shared->rejected_pivot)) {
       common->status = TRILINOS_KLU_INVALID;
       return 0;
@@ -15480,8 +15480,8 @@ static int kls_threaded_row_refactor_numeric(kls_solver *solver,
       }
     } else if (shared->row_refactor_lazy_value_scatter) {
       kls_record_row_refactor_lazy_value_scatter_run(solver);
-    } else if (!kls_scatter_row_refactor_l_prefix_values(solver, solver->n) ||
-               !kls_scatter_row_refactor_u_prefix_values(solver, solver->n)) {
+    } else if (!kls_scatter_dst16_refactor_l_prefix_values(solver, solver->n) ||
+               !kls_scatter_dst16_refactor_u_prefix_values(solver, solver->n)) {
       common->status = TRILINOS_KLU_INVALID;
       return 0;
     }

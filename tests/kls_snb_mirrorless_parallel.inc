@@ -125,6 +125,7 @@ static void mirrorless_parallel_case(int owned_compact) {
     s->unchanged_refactor_state=-1;s->refactor_input_snapshot_valid=0;
     parallel_reset();
     const unsigned before=atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed);
+    const unsigned lower_before=atomic_load_explicit(&row_lower_repairs,memory_order_relaxed);
     const unsigned packed_before=atomic_load_explicit(&packed_row_calls,memory_order_relaxed);
     if(epoch==11)st->gemm_scratch_bytes=0;
     assert(!feclearexcept(FE_ALL_EXCEPT));
@@ -144,6 +145,7 @@ static void mirrorless_parallel_case(int owned_compact) {
       assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_SNB);
       assert(atomic_load_explicit(&parallel_repair_arrived,memory_order_acquire)==4);
       assert(atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed)==before+4);
+      assert(atomic_load_explicit(&row_lower_repairs,memory_order_relaxed)==lower_before+4);
       assert(atomic_load_explicit(&packed_row_calls,memory_order_relaxed)==packed_before+(owned_compact?4u:16u));
       assert(!memcmp(expected,actual,capacity*sizeof(double)));
       for(int i=0;i<4;++i)for(int j=0;j<i;++j) {
@@ -154,6 +156,7 @@ static void mirrorless_parallel_case(int owned_compact) {
       assert(!s->snb_auto_candidate&&s->snb_auto.choice<0);
       assert(s->stats.last_refactor_path!=KLS_REFACTOR_PATH_SNB);
       assert(atomic_load_explicit(&row_inplace_repairs,memory_order_relaxed)==before);
+      assert(atomic_load_explicit(&row_lower_repairs,memory_order_relaxed)==lower_before);
       assert(memcmp(expected,actual,capacity*sizeof(double))); /* Current A changed. */
       s->unchanged_refactor_state=-1;s->refactor_input_snapshot_valid=0;
       parallel_rhs(a,b,epoch+5);assert(!feclearexcept(FE_ALL_EXCEPT));
@@ -166,8 +169,8 @@ static void mirrorless_parallel_case(int owned_compact) {
     }
   }
   free(expected);free(actual);kls_destroy(s);parallel_partition=0;free(ap);free(ai);free(a);
-  if(owned_compact)puts("COMPACT_OWNED_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=8 owned_images=4 ledger_exact=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
-  else puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 packed_producer_edges=32 alias_repairs=8 exact_dead_upper_boundary=1 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
+  if(owned_compact)puts("COMPACT_OWNED_PARALLEL_ORACLES workers=4 repairs=8 lower_only=8 packed_producer_edges=8 owned_images=4 ledger_exact=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
+  else puts("MIRRORLESS_PARALLEL_ORACLES workers=4 repairs=8 lower_only=8 packed_producer_edges=32 alias_repairs=8 exact_dead_upper_boundary=1 distinct_scratch=1 fresh_rhs=1 joined_scratch_decline=1 current_A_native_bits_flags=1");
 }
 static void mirrorless_parallel_checks(void) {mirrorless_parallel_case(0);mirrorless_parallel_case(1);}
 #else

@@ -30,21 +30,23 @@ static int check_scatter_boundaries(void) {
   st->nblocks=1;st->blocks=block;block->snode_count=1;block->snodes=node;node->width=16;
   if(sizeof(*node)!=64)return 71; /* column_ld uses existing descriptor padding. */
   const unsigned columns[]={0,7,8,15};
-  for(int wide=0;wide<2;++wide) {
-    const int H=65536+wide;node->height=H;node->below=H-16;
+  const int heights[]={65536,65537,4096,4097},widths[]={1,1,16,16};
+  for(int shape=0;shape<4;++shape) {
+    const int H=heights[shape],width=widths[shape],wide=shape&1;
+    node->height=H;node->width=width;node->below=H-width;
     if(kls_snb_short_scatter_fits(st)!=!wide)return 72;
-    const size_t count=(size_t)16*H;double *arena=calloc(count+2,8),*repair=calloc(count+2,8);
+    const size_t count=(size_t)width*H;double *arena=calloc(count+2,8),*repair=calloc(count+2,8);
     if(!arena||!repair)return 70;
     block->panels=arena+1;
     const uint64_t guard=UINT64_C(0x123456789abcdef0);
     memcpy(arena,&guard,8);memcpy(arena+count+1,&guard,8);
     memcpy(repair,&guard,8);memcpy(repair+count+1,&guard,8);
-    uint16_t short_row=UINT16_MAX;uint32_t wide_at=0;
-    st->scatter_row=wide?NULL:&short_row;st->scatter_dst=wide?&wide_at:NULL;
-    for(int row=0;row<2;++row)for(unsigned ci=0;ci<4;++ci)for(int scale=0;scale<=2;scale+=2) {
+    uint16_t short_at=0;uint32_t wide_at=0;
+    st->scatter_dst16=wide?NULL:&short_at;st->scatter_dst=wide?&wide_at:NULL;
+    for(int row=0;row<(width==16?2:1);++row)for(unsigned ci=0;ci<(width==16?4u:1u);++ci)for(int scale=0;scale<=2;scale+=2) {
       const size_t c=columns[ci],r=(size_t)H-1;
       const size_t at=row?(c/8)*8*(size_t)H+r*8+c%8:c*(size_t)H+r;
-      st->row_layout=row;wide_at=(uint32_t)at;
+      st->row_layout=row;wide_at=(uint32_t)at;short_at=(uint16_t)at;
       const double expected=scale?3.:6.;
       kls_snb_scatter_input_column(solver,st,block,node,(UF_long)c,az,rs,scale,NULL,NULL);
       if(block->panels[at]!=expected)return 73;
@@ -60,7 +62,7 @@ static int check_scatter_boundaries(void) {
     free(arena);free(repair);
   }
   free(solver->symbolic);free(solver);free(st);free(block);free(node);
-  puts("SHORT_SCATTER_BOUNDARIES short_rows=65536 wide_rows=65537 row_column=1 repair=1 scaled=1 guards=1 descriptor_bytes=64");
+  puts("SHORT_SCATTER_BOUNDARIES short_panel=65536 wide_panel=65537 row_panel=65536 row_wide_panel=65552 row_column=1 repair=1 scaled=1 guards=1 descriptor_bytes=64");
   return 0;
 }
 static int check_compact_image_policy(void) {
@@ -123,19 +125,19 @@ static int check_build(int n,int transpose,int csr,int alias,int reject) {
   }
   if(sizeof(kls_snb_entry)!=16 || sizeof(*incumbent->col_off_ptr)!=4 ||
       sizeof(*incumbent->col_blk_ptr)!=4)return 51;
-  if(incumbent->scatter_row||incumbent->scatter_dst) {
+  if(incumbent->scatter_dst16||incumbent->scatter_dst) {
     if(incumbent->off||incumbent->blk||incumbent->col_off_ptr||incumbent->col_blk_ptr||
         incumbent->nblocks!=1||sizeof(*incumbent->blocks[0].wb_col_off)!=4)return 52;
     for(UF_long at=0;at<s->nnz;++at)
       if(incumbent->scatter_dst&&incumbent->scatter_dst[at]>=(uint64_t)incumbent->blocks[0].panel_doubles)return 53;
-    if(incumbent->scatter_row) {
-      if(sizeof(*incumbent->scatter_row)!=2||incumbent->scatter_dst)return 62;
+    if(incumbent->scatter_dst16) {
+      if(sizeof(*incumbent->scatter_dst16)!=2||incumbent->scatter_dst)return 62;
       const kls_snb_block *block=incumbent->blocks;
       for(UF_long c=0;c<s->n;++c) {
         const kls_snb_snode *node=block->snodes+block->col2snode[c];
         const UF_long oldcol=s->symbolic->Q[c];
         for(UF_long at=s->col_ptr[oldcol];at<s->col_ptr[oldcol+1];++at)
-          if(incumbent->scatter_row[at]>=node->height)return 63;
+          if(incumbent->scatter_dst16[at]>=(uint64_t)node->height*node->width)return 63;
       }
     }
   } else {
@@ -356,7 +358,7 @@ static int check_general_btf(int transpose,int scale) {
   kls_solver *s=NULL;if(kls_create(&s)||kls_analyze_csc(s,KLS_INDEX_INT32,N,ap,ai,0,&o)||kls_factor(s,a))return 60;
   s->snode_prepared=1;s->snb_declined=0;
   if(!kls_parallel_lu_sort(s)||!kls_snb_prepare(s)||s->symbolic->nblocks<2||
-      s->snb->scatter_row||s->snb->scatter_dst||!s->snb->off||!s->snb->blk||!s->snb->col_off_ptr||!s->snb->col_blk_ptr)return 61;
+      s->snb->scatter_dst16||s->snb->scatter_dst||!s->snb->off||!s->snb->blk||!s->snb->col_off_ptr||!s->snb->col_blk_ptr)return 61;
   if(!s->snb->col_off_ptr[N])return 62;
   s->snb_decision=1;
   for(int epoch=1;epoch<=3;++epoch) {

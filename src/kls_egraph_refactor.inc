@@ -8250,7 +8250,7 @@ typedef struct kls_snb_state {
   UF_long nblocks;
   kls_snb_entry *off;      /* off-diagonal scatter entries, Offx order */
   kls_snb_entry *blk;      /* in-panel scatter entries */
-  uint16_t *scatter_row; /* Original panel row per CSC entry; no layout remap. */
+  uint16_t *scatter_dst16; /* Panel-relative destination per original CSC entry. */
   uint32_t *scatter_dst;  /* Single-block destinations, indexed by original CSC p. */
   uint32_t *col_off_ptr;    /* per global col: range in off[] */
   uint32_t *col_blk_ptr;    /* per global col: range in blk[] */
