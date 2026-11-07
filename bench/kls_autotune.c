@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 int kls_snb_calibrate_model(kls_snb_cost_model *model,uint64_t seed);
+int kls_policy_calibrate_model(const char *,int,uint64_t,int,int);
 
 typedef struct synthetic_matrix {
   int64_t n, nnz;
@@ -231,7 +232,7 @@ static int pin_cpus(const char *list, int threads) {
 }
 
 static void usage(const char *name) {
-  fprintf(stderr, "Usage: %s --threads N --output FILE [--cpus C,C,...] [--seed N] [--force] [--self-test] [--snb-only]\n", name);
+  fprintf(stderr, "Usage: %s --threads N --output FILE [--cpus C,C,...] [--seed N] [--force] [--self-test] [--snb-only] [--policy-only]\n", name);
 }
 
 int main(int argc, char **argv) {
@@ -240,7 +241,7 @@ int main(int argc, char **argv) {
   fprintf(stderr, "kls-autotune currently supports Linux x86-64 only\n");
   return 2;
 #else
-  int threads = 0, force = 0, self_test = 0, snb_only = 0;
+  int threads = 0, force = 0, self_test = 0, snb_only = 0, policy_only = 0;
   const char *output = NULL, *cpus = NULL;
   uint64_t seed = UINT64_C(0x4b4c5354554e4531);
   for (int i = 1; i < argc; ++i) {
@@ -251,6 +252,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--force")) force = 1;
     else if (!strcmp(argv[i], "--self-test")) self_test = 1;
     else if (!strcmp(argv[i], "--snb-only")) snb_only = 1;
+    else if (!strcmp(argv[i], "--policy-only")) policy_only = 1;
     else { usage(argv[0]); return 2; }
   }
   if (threads <= 0 || output == NULL || !pin_cpus(cpus, threads)) {
@@ -259,6 +261,10 @@ int main(int argc, char **argv) {
   if (!force && access(output, F_OK) == 0) {
     fprintf(stderr, "%s exists; pass --force to replace it\n", output);
     return 2;
+  }
+  if(policy_only) {
+    if(snb_only){usage(argv[0]);return 2;}
+    return kls_policy_calibrate_model(output,threads,seed,force,self_test)?0:1;
   }
   if (snb_only) {
     if (threads != 1 || self_test) { usage(argv[0]); return 2; }

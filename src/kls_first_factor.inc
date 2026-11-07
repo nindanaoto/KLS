@@ -11163,7 +11163,45 @@ static int kls_block_trial_entry_cmp(const void *a, const void *b) {
 static int kls_ufl_cmp(const void *a, const void *b) {
   const UF_long x = *(const UF_long *)a;
   const UF_long y = *(const UF_long *)b;
-  return x < y ? -1 : x > y ? 1 : 0;
+  return (x > y) - (x < y);
+}
+
+/* Selection avoids sorting every vertex just to locate the coupler cutoff.
+   Three-way partitioning also makes repeated degrees a single linear pass.
+   Bound pathological partitions before falling back to the library sort. */
+static UF_long kls_degree_quantile(UF_long *a, size_t n, size_t rank) {
+  size_t lo = 0, hi = n;
+  for (unsigned pass = 0; hi - lo > 1 && pass < 64; ++pass) {
+    UF_long x = a[lo], y = a[lo + (hi - lo) / 2], z = a[hi - 1];
+    const UF_long pivot = x < y ? (y < z ? y : (x < z ? z : x))
+                                : (x < z ? x : (y < z ? z : y));
+    size_t below = lo, at = lo, above = hi;
+    while (at < above) {
+      const UF_long value = a[at];
+      if (value < pivot) {
+        a[at++] = a[below]; a[below++] = value;
+      } else if (value > pivot) {
+        a[at] = a[--above]; a[above] = value;
+      } else {
+        ++at;
+      }
+    }
+    if (rank < below) hi = below;
+    else if (rank >= above) lo = above;
+    else return pivot;
+  }
+  if (hi - lo > 1) qsort(a + lo, hi - lo, sizeof(*a), kls_ufl_cmp);
+  return a[rank];
+}
+
+typedef struct kls_block_component {
+  UF_long id, size;
+} kls_block_component;
+
+static int kls_block_component_cmp(const void *a, const void *b) {
+  const kls_block_component *x = a, *y = b;
+  if (x->size != y->size) return x->size > y->size ? -1 : 1;
+  return (x->id > y->id) - (x->id < y->id);
 }
 
 static int kls_build_block_structured_order(UF_long n,
@@ -11173,126 +11211,73 @@ static int kls_build_block_structured_order(UF_long n,
                                             UF_long **comp_out) {
   *perm_out = NULL;
   *comp_out = NULL;
-  if (n < 10000 || n > 2000000) {
-    return 0;
-  }
+  /* The coupler definition permits at most one percent of the vertices.
+     This minimum follows from that definition. The storage limit bounds
+     allocations and work rather than identifying a matrix-size cohort. */
+  if (n < 100 || col_ptr == NULL || row_idx == NULL) return 0;
   const UF_long nnz = col_ptr[n];
-  UF_long *deg = (UF_long *)calloc((size_t)n, sizeof(*deg));
-  if (deg == NULL) {
+  const double workspace = ((double)n * 9.0 + 2.0 * (double)nnz + 2.0) *
+    (double)sizeof(UF_long) + (double)n;
+  if (!isfinite(workspace) || workspace > KLS_POLICY_GRAPH_WORKSPACE_BYTES)
     return 0;
-  }
+  int usable = 0;
+  UF_long *deg = calloc((size_t)n, sizeof(*deg));
+  UF_long *xadj = NULL, *adj = NULL, *comp = NULL, *queue = NULL;
+  UF_long *perm = NULL, *comp_start = NULL, *degree_copy = NULL;
+  kls_block_component *components = NULL;
+  unsigned char *placed = NULL;
+  if (!deg) goto done;
+  UF_long max_degree = 0;
   for (UF_long j = 0; j < n; ++j) {
     for (UF_long p = col_ptr[j]; p < col_ptr[j + 1u]; ++p) {
       const UF_long i = row_idx[p];
-      if (i == j) {
-        continue;
-      }
-      deg[i]++;
-      deg[j]++;
+      if (i >= n) goto done;
+      if (i != j) { ++deg[i]; ++deg[j]; }
     }
   }
-  UF_long *xadj = (UF_long *)malloc(((size_t)n + 1u) * sizeof(*xadj));
-  UF_long *adj = (UF_long *)malloc(2u * (size_t)nnz * sizeof(*adj));
-  if (xadj == NULL || adj == NULL) {
-    free(deg);
-    free(xadj);
-    free(adj);
-    return 0;
-  }
+  for (UF_long v = 0; v < n; ++v)
+    if (deg[v] > max_degree) max_degree = deg[v];
+  UF_long dense_floor = 24;
+  if (max_degree <= dense_floor) goto done;
+  degree_copy = malloc((size_t)n * sizeof(*degree_copy));
+  if (!degree_copy) goto done;
+  memcpy(degree_copy, deg, (size_t)n * sizeof(*degree_copy));
+  const UF_long p99 = kls_degree_quantile(degree_copy, (size_t)n,
+    ((size_t)n - 1u) * 99u / 100u);
+  free(degree_copy); degree_copy = NULL;
+  if (2u * p99 > dense_floor) dense_floor = 2u * p99;
+  UF_long dense_count = 0;
+  for (UF_long v = 0; v < n; ++v) dense_count += deg[v] > dense_floor;
+  if (dense_count == 0 || dense_count > n / 100u) goto done;
+
+  /* Only a real coupler distribution merits building the symmetric graph.
+     Ordinary patterns now reject before allocating or populating adjacency. */
+  xadj = malloc(((size_t)n + 1u) * sizeof(*xadj));
+  adj = malloc(2u * (size_t)nnz * sizeof(*adj));
+  comp = malloc((size_t)n * sizeof(*comp));
+  queue = malloc((size_t)n * sizeof(*queue));
+  perm = malloc((size_t)n * sizeof(*perm));
+  comp_start = malloc(((size_t)n + 1u) * sizeof(*comp_start));
+  components = malloc((size_t)n * sizeof(*components));
+  placed = calloc((size_t)n, 1u);
+  if (!xadj || !adj || !comp || !queue || !perm || !comp_start ||
+      !components || !placed) goto done;
   xadj[0] = 0;
   for (UF_long v = 0; v < n; ++v) {
     xadj[v + 1u] = xadj[v] + deg[v];
     deg[v] = xadj[v];
+    comp[v] = KLS_KLU_EMPTY;
   }
   for (UF_long j = 0; j < n; ++j) {
     for (UF_long p = col_ptr[j]; p < col_ptr[j + 1u]; ++p) {
       const UF_long i = row_idx[p];
-      if (i == j) {
-        continue;
-      }
-      adj[deg[i]++] = j;
-      adj[deg[j]++] = i;
+      if (i != j) { adj[deg[i]++] = j; adj[deg[j]++] = i; }
     }
   }
-  /* degrees again (deg was reused as cursor); duplicates in adj are
-     harmless for BFS/RCM */
+  for (UF_long v = 0; v < n; ++v) deg[v] = xadj[v + 1u] - xadj[v];
+  UF_long ncomp = 0, covered = 0, max_comp = 0, fill_ptr = 0;
   for (UF_long v = 0; v < n; ++v) {
-    deg[v] = xadj[v + 1u] - xadj[v];
-  }
-  /* Coupler degrees greatly exceed the block-interior distribution; a
-     floor relative to p99 separates them where absolute thresholds fail. */
-  UF_long dense_floor = 24;
-  {
-    UF_long *deg_sorted = (UF_long *)malloc((size_t)n * sizeof(*deg_sorted));
-    if (deg_sorted != NULL) {
-      memcpy(deg_sorted, deg, (size_t)n * sizeof(*deg_sorted));
-      qsort(deg_sorted, (size_t)n, sizeof(*deg_sorted), kls_ufl_cmp);
-      const UF_long p99 = deg_sorted[(size_t)((double)(n - 1) * 0.99)];
-      if (2u * p99 > dense_floor) {
-        dense_floor = 2u * p99;
-      }
-      free(deg_sorted);
-    } else {
-      const double avg = (double)xadj[n] / (double)n;
-      if ((UF_long)(avg * 8.0) > dense_floor) {
-        dense_floor = (UF_long)(avg * 8.0);
-      }
-    }
-  }
-  UF_long dense_count = 0;
-  for (UF_long v = 0; v < n; ++v) {
-    if (deg[v] > dense_floor) {
-      dense_count++;
-    }
-  }
-  if (dense_count == 0 || dense_count > n / 100u) {
-    free(deg);
-    free(xadj);
-    free(adj);
-    return 0;
-  }
-  UF_long *comp = (UF_long *)malloc((size_t)n * sizeof(*comp));
-  UF_long *queue = (UF_long *)malloc((size_t)n * sizeof(*queue));
-  UF_long *perm = (UF_long *)malloc((size_t)n * sizeof(*perm));
-  if (comp == NULL || queue == NULL || perm == NULL) {
-    free(deg);
-    free(xadj);
-    free(adj);
-    free(comp);
-    free(queue);
-    free(perm);
-    return 0;
-  }
-  for (UF_long v = 0; v < n; ++v) {
-    comp[v] = KLS_KLU_EMPTY;
-  }
-  UF_long ncomp = 0;
-  UF_long covered = 0;
-  UF_long max_comp = 0;
-  /* Pass 1: collect components contiguously into queue[] so they can be
-     emitted largest-first; a big leading component anchors the band and
-     the matched diagonal downstream. */
-  UF_long *comp_start =
-    (UF_long *)malloc(((size_t)n + 1u) * sizeof(*comp_start));
-  UF_long *comp_order = (UF_long *)malloc((size_t)n * sizeof(*comp_order));
-  unsigned char *placed = (unsigned char *)calloc((size_t)n, 1u);
-  if (comp_start == NULL || comp_order == NULL || placed == NULL) {
-    free(comp_start);
-    free(comp_order);
-    free(placed);
-    free(deg);
-    free(xadj);
-    free(adj);
-    free(comp);
-    free(queue);
-    free(perm);
-    return 0;
-  }
-  UF_long fill_ptr = 0;
-  for (UF_long v = 0; v < n; ++v) {
-    if (comp[v] != KLS_KLU_EMPTY || deg[v] > dense_floor) {
-      continue;
-    }
+    if (comp[v] != KLS_KLU_EMPTY || deg[v] > dense_floor) continue;
     comp_start[ncomp] = fill_ptr;
     UF_long head = fill_ptr;
     queue[fill_ptr++] = v;
@@ -11301,65 +11286,43 @@ static int kls_build_block_structured_order(UF_long n,
       const UF_long u = queue[head++];
       for (UF_long p = xadj[u]; p < xadj[u + 1u]; ++p) {
         const UF_long w = adj[p];
-        if (comp[w] != KLS_KLU_EMPTY || deg[w] > dense_floor) {
-          continue;
-        }
+        if (comp[w] != KLS_KLU_EMPTY || deg[w] > dense_floor) continue;
         comp[w] = ncomp;
         queue[fill_ptr++] = w;
       }
+      /* This component alone disproves the final decomposition contract. */
+      if (fill_ptr - comp_start[ncomp] > n / 2u) goto done;
     }
-    const UF_long sz = fill_ptr - comp_start[ncomp];
-    covered += sz;
-    if (sz > max_comp) {
-      max_comp = sz;
-    }
-    ncomp++;
+    const UF_long size = fill_ptr - comp_start[ncomp];
+    covered += size;
+    if (size > max_comp) max_comp = size;
+    components[ncomp] = (kls_block_component){ncomp, size};
+    ++ncomp;
   }
   comp_start[ncomp] = fill_ptr;
-  for (UF_long c = 0; c < ncomp; ++c) {
-    comp_order[c] = c;
-  }
-  for (UF_long a = 1; a < ncomp; ++a) {
-    const UF_long c = comp_order[a];
-    const UF_long csz = comp_start[c + 1u] - comp_start[c];
-    UF_long b = a;
-    while (b > 0 &&
-           comp_start[comp_order[b - 1u] + 1u] -
-             comp_start[comp_order[b - 1u]] < csz) {
-      comp_order[b] = comp_order[b - 1u];
-      b--;
-    }
-    comp_order[b] = c;
-  }
-  /* Pass 2, largest component first: Reverse Cuthill-McKee from the
-     component's minimum-degree member with each vertex's undiscovered
-     neighbours enqueued in ascending degree, then the whole order
-     reversed.  The degree sorting is what keeps the component banded;
-     without it the no-pivot fill bound explodes. */
+  UF_long equal_mass = 0;
+  for (UF_long c = 0; c < ncomp; ++c)
+    if ((double)components[c].size >= 0.95 * (double)max_comp)
+      equal_mass += components[c].size;
+  if (ncomp < 3u || covered * 10u < n * 6u || equal_mass * 2u < n)
+    goto done;
+  qsort(components, (size_t)ncomp, sizeof(*components), kls_block_component_cmp);
   UF_long write = 0;
   for (UF_long ci = 0; ci < ncomp; ++ci) {
-    const UF_long c = comp_order[ci];
-    const UF_long ms = comp_start[c];
-    const UF_long me = comp_start[c + 1u];
+    const UF_long c = components[ci].id;
+    const UF_long ms = comp_start[c], me = comp_start[c + 1u];
     UF_long start = queue[ms];
-    for (UF_long p = ms; p < me; ++p) {
-      if (deg[queue[p]] < deg[start]) {
-        start = queue[p];
-      }
-    }
-    UF_long head = 0;
-    UF_long tail = 0;
-    UF_long *cq = perm + write; /* RCM order built in place, reversed after */
+    for (UF_long p = ms; p < me; ++p)
+      if (deg[queue[p]] < deg[start]) start = queue[p];
+    UF_long head = 0, tail = 0;
+    UF_long *cq = perm + write;
     cq[tail++] = start;
     placed[start] = 1;
     while (head < tail) {
-      const UF_long u = cq[head++];
-      const UF_long first = tail;
+      const UF_long u = cq[head++], first = tail;
       for (UF_long p = xadj[u]; p < xadj[u + 1u]; ++p) {
         const UF_long w = adj[p];
-        if (placed[w] || comp[w] != c) {
-          continue;
-        }
+        if (placed[w] || comp[w] != c) continue;
         placed[w] = 1;
         cq[tail++] = w;
       }
@@ -11367,57 +11330,28 @@ static int kls_build_block_structured_order(UF_long n,
         const UF_long w = cq[a];
         UF_long b = a;
         while (b > first && deg[cq[b - 1u]] > deg[w]) {
-          cq[b] = cq[b - 1u];
-          b--;
+          cq[b] = cq[b - 1u]; --b;
         }
         cq[b] = w;
       }
     }
-    for (UF_long p = ms; p < me; ++p) {
-      if (!placed[queue[p]]) {
-        placed[queue[p]] = 1;
-        cq[tail++] = queue[p];
-      }
-    }
+    for (UF_long p = ms; p < me; ++p)
+      if (!placed[queue[p]]) { placed[queue[p]] = 1; cq[tail++] = queue[p]; }
     for (UF_long a = 0; a < tail / 2u; ++a) {
-      const UF_long tmp = cq[a];
-      cq[a] = cq[tail - 1u - a];
+      const UF_long tmp = cq[a]; cq[a] = cq[tail - 1u - a];
       cq[tail - 1u - a] = tmp;
     }
     write += tail;
   }
-  /* Repeated-physics-block signature: near-equal-size components must carry
-     most of the matrix; irregular profiles stay on regular orderings. */
-  UF_long equal_mass = 0;
-  for (UF_long c = 0; c < ncomp; ++c) {
-    const UF_long sz = comp_start[c + 1u] - comp_start[c];
-    if ((double)sz >= 0.95 * (double)max_comp) {
-      equal_mass += sz;
-    }
-  }
-  free(comp_start);
-  free(comp_order);
-  free(placed);
-  for (UF_long v = 0; v < n; ++v) {
-    if (deg[v] > dense_floor) {
-      perm[write++] = v;
-    }
-  }
-  free(deg);
-  free(xadj);
-  free(adj);
-  free(queue);
-  const int usable =
-    write == n && ncomp >= 3u && covered * 10u >= n * 6u &&
-    max_comp * 2u <= n && equal_mass * 2u >= n;
-  if (!usable) {
-    free(perm);
-    free(comp);
-    return 0;
-  }
-  *perm_out = perm;
-  *comp_out = comp;
-  return 1;
+  for (UF_long v = 0; v < n; ++v)
+    if (deg[v] > dense_floor) perm[write++] = v;
+  usable = write == n;
+done:
+  free(deg); free(xadj); free(adj); free(queue); free(comp_start);
+  free(components); free(placed); free(degree_copy);
+  if (usable) { *perm_out = perm; *comp_out = comp; }
+  else { free(perm); free(comp); }
+  return usable;
 }
 
 #ifdef KLS_HAVE_SPRAL_SCALING
@@ -11432,22 +11366,15 @@ static void maybe_select_block_structured_ordering(kls_solver *solver,
       solver->options.scale > 0) {
     return;
   }
-  /* Reordering thousands of already-tiny full-rank SCCs is more work than
-     their bounded AMD symbolic.  This decision is structural; the stricter
-     factor profile still controls every recurring numeric shortcut. */
-
-  if (solver->n > 200000 ||
-      (solver->col_ptr != NULL && solver->col_ptr[solver->n] > 4000000)) {
-    /* class ceiling, same as the choose fast path and the race gate:
-       every block-structured adopter sits under 200K/4M, and the
-       detector walk has a bad worst case on large patterns (the
-       rajat29 lesson: 1.9s hunting a class the matrix cannot be) */
+  if (solver->n < 10000 || solver->n > 200000 || solver->nnz > 4000000)
     return;
-  }
+  if (solver->block_order_perm == NULL && solver->block_order_checked)
+    return;
   const double start = kls_now_seconds();
   UF_long *block_perm = solver->block_order_perm;
   solver->block_order_perm = NULL;
   UF_long *block_comp = NULL;
+  solver->block_order_checked = 1;
   if (block_perm == NULL &&
       !kls_build_block_structured_order(solver->n, solver->col_ptr,
                                         solver->row_idx, &block_perm,

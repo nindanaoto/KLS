@@ -51,6 +51,7 @@ def main():
     files={str(source/name):sha(source/name) for name in names}
     write_json(args.output/'source.json',dict(head=git('rev-parse','HEAD').decode().strip(),
         source=str(args.source),input_sha256=files,dependencies=pins,image_sha256=sha(args.image)))
+    write_json(args.output/'build-options.json',dict(auto_policy='generalized'))
     (args.output/'source.patch').write_bytes(git('diff','HEAD','--'))
     commands=[]
     env={k:v for k,v in os.environ.items() if not k.startswith(('LD_','KLS_','OMP_','GOMP_','OPENBLAS_','APPTAINERENV_','ASAN_','UBSAN_','TSAN_'))}
@@ -110,6 +111,8 @@ def main():
         if profile=='tsan' and (source/'tests/kls_forest_leaves.c').exists():
             targets.extend(['kls_forest_refactor','kls_forest_leaves','kls_avx512_feature_concurrent'])
         if profile=='tsan':
+            if (source/'tests/kls_policy.c').exists():
+                targets.append('kls_policy')
             for name in ('kls_cached_plain_refactor','kls_snb_stream','kls_snb_auto','kls_native_i16',
                          'kls_native_i16_admission'):
                 if (source/'tests'/f'{name}.c').exists():
@@ -119,6 +122,7 @@ def main():
     if any(sha(path)!=h for path,h in files.items()):
         raise RuntimeError('frozen source changed during qualification')
     write_json(args.output/'completed.json',dict(passed=True,profiles=args.profiles,source_sha256=sha(args.output/'source.json'),
+        build_options_sha256=sha(args.output/'build-options.json'),
         commands_sha256=sha(args.output/'commands.json'),libraries={p:sha(args.output/p/'libkls.a') for p in args.profiles if (args.output/p/'libkls.a').exists()}))
 
 

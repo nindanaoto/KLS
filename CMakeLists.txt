@@ -5,6 +5,7 @@ project(KLS
   DESCRIPTION "Standalone sparse direct solver for SPICE-style repeated linear solves"
   LANGUAGES C)
 
+
 # Profiles are accepted only by the exact performance implementation that
 # produced them. This fingerprint changes with solver sources and codegen.
 file(GLOB KLS_TUNING_FINGERPRINT_INPUTS CONFIGURE_DEPENDS
@@ -16,12 +17,15 @@ file(GLOB KLS_TUNING_FINGERPRINT_INPUTS CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_*.inc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_tuning_profile.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/kls_policy.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/KLU/Source/*.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/KLU/Include/*.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/AMD/Source/*.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/suitesparse/AMD/Include/*.h")
 list(APPEND KLS_TUNING_FINGERPRINT_INPUTS
-  "${CMAKE_CURRENT_SOURCE_DIR}/bench/kls_snb_calibrate.c")
+  "${CMAKE_CURRENT_SOURCE_DIR}/bench/kls_snb_calibrate.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/bench/kls_autotune.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/bench/kls_policy_calibrate.c")
 string(TOUPPER "${CMAKE_BUILD_TYPE}" KLS_BUILD_TYPE_UPPER)
 set(KLS_TUNING_FINGERPRINT_TEXT
   "${CMAKE_C_COMPILER_ID};${CMAKE_C_COMPILER_VERSION};${CMAKE_C_COMPILER}"
@@ -547,6 +551,7 @@ endif()
 
 if(KLS_BUILD_AUTOTUNER)
   add_executable(kls-autotune bench/kls_autotune.c bench/kls_snb_calibrate.c)
+  target_sources(kls-autotune PRIVATE bench/kls_policy_calibrate.c)
   target_include_directories(kls-autotune PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(kls-autotune PRIVATE KLS::kls)
@@ -732,7 +737,11 @@ if(KLS_BUILD_TESTS)
   add_executable(kls_snb_profile tests/kls_snb_profile.c)
   target_link_libraries(kls_snb_profile PRIVATE kls)
   add_test(NAME kls_snb_profile COMMAND kls_snb_profile)
-  set(KLS_PRIVATE_TESTS kls_snb_inplace_panel kls_cached_plain_refactor kls_snb_auto kls_snb_auto_policy kls_snb_stream kls_native_i16_admission kls_native_i16 kls_auto_exact_ordering kls_snb_register kls_snb_product_tile kls_forest_refactor kls_forest_leaves kls_avx512_feature_concurrent kls_observed_parallel kls_small_btf kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan kls_egraph_numeric_startup)
+  add_executable(kls_policy tests/kls_policy.c)
+  target_link_libraries(kls_policy PRIVATE KLS::kls)
+  target_compile_options(kls_policy PRIVATE -UNDEBUG)
+  add_test(NAME kls_policy COMMAND kls_policy)
+  set(KLS_PRIVATE_TESTS kls_policy_ordering kls_snb_inplace_panel kls_cached_plain_refactor kls_snb_auto kls_snb_auto_policy kls_snb_stream kls_native_i16_admission kls_native_i16 kls_auto_exact_ordering kls_snb_register kls_snb_product_tile kls_forest_refactor kls_forest_leaves kls_avx512_feature_concurrent kls_observed_parallel kls_small_btf kls_compact_transpose kls_snb_product kls_snb_build kls_snb_calibration_layouts kls_egraph_batch_plan kls_egraph_numeric_startup)
   add_executable(kls_observed_parallel_policy tests/kls_observed_parallel_policy.c)
   target_link_libraries(kls_observed_parallel_policy PRIVATE m)
   add_test(NAME kls_observed_parallel_policy COMMAND kls_observed_parallel_policy)
@@ -826,6 +835,8 @@ if(KLS_BUILD_TESTS)
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_btf_gate_v3.py")
     add_test(NAME kls_auto_broad_pooled_gate
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_auto_broad_pooled.py")
+    add_test(NAME kls_generalization_gate
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_generalization_gate.py")
     add_test(NAME kls_spice_campaign_contract
       COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spice_campaign.py")
     add_test(NAME kls_session_settle

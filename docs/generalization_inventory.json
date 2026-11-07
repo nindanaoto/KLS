@@ -1,0 +1,277 @@
+{
+  "schema": "kls-generalization-inventory-v1",
+  "baseline": "build/generalization-20261106/control/source.json",
+  "policy": "generalization-v2",
+  "acceptance": {
+    "updated": "2026-11-07",
+    "per_case": "Allow KLS regressions while preserving every prior pairwise win against CKTSO and SubtreeLU, separately for each matrix, configuration, and KLS control.",
+    "previous_win": "Protect the union of paired-median control/peer ratios < 1 identified in either campaign; candidate/peer paired medians must remain <= 1 in both campaigns.",
+    "aggregate": "No geometric-mean slowdown for any configuration/KLS control; SPICE protects both linear and wall time.",
+    "evidence": "Both peers, valid solves, frozen external inputs, eight balanced pairs and a separate matching opposite-order confirmation.",
+    "legacy_policy": "generalization-v1 decisions remain unchanged; their 1.02 per-case cap does not veto v2."
+  },
+  "status": "generalized-amd-default; remaining-stages-pending",
+  "rules": [
+    {
+      "rule": "AMD input envelope and narrow symbolic bands",
+      "source": "src/kls_ordering_policy.inc:choose_symbolic_for_pattern",
+      "stage": 1,
+      "classification": "performance heuristic",
+      "replacement": "Build AMD once; reserve additional graph work from declared lifecycle cost",
+      "status": "prototype-implemented-awaiting-qualification"
+    },
+    {
+      "rule": "one-shot AMD row/nonzero floor",
+      "source": "src/kls_ordering_policy.inc:kls_choose_symbolic_inner",
+      "stage": 1,
+      "classification": "performance heuristic",
+      "replacement": "Use the same lifecycle cost admission as repeated calls",
+      "status": "prototype-implemented-awaiting-qualification"
+    },
+    {
+      "rule": "single-component BTF transversal",
+      "source": "discarded prototypes E/F; snapshots retained in build/generalization-20261106/",
+      "stage": 1,
+      "classification": "representation proposal",
+      "replacement": "Retain the current comparison of actual BTF/no-BTF symbolic results before ordering admission",
+      "status": "rejected-proposal",
+      "reason": "One block and exact structural symmetry did not establish numeric payback."
+    },
+    {
+      "rule": "AMF portfolio size and pair-work floors",
+      "source": "src/kls_ordering_policy.inc:kls_choose_symbolic_inner",
+      "stage": 1,
+      "classification": "performance heuristic",
+      "replacement": "Per-arm setup reservations and worker/memory limits",
+      "status": "pending"
+    },
+    {
+      "rule": "no-BTF speculative row/nonzero ceilings",
+      "source": "src/kls_ordering_policy.inc:kls_choose_symbolic_inner",
+      "stage": 1,
+      "classification": "performance heuristic",
+      "replacement": "Representation-specific setup and recurring costs",
+      "status": "pending"
+    },
+    {
+      "rule": "ND overlap size floor",
+      "source": "src/kls_ordering_policy.inc:kls_generic_nd_trial_start",
+      "stage": 1,
+      "classification": "performance heuristic",
+      "replacement": "Graph setup reservation against selected symbolic lifecycle",
+      "status": "pending"
+    },
+    {
+      "rule": "ND normalized fill/work admission",
+      "source": "src/kls_ordering_policy.inc:kls_maybe_promote_selected_generic_nd",
+      "stage": 1,
+      "classification": "performance heuristic",
+      "replacement": "Price the incumbent and symbolic/numeric trial separately; preserve expansion certificate",
+      "status": "pending"
+    },
+    {
+      "rule": "orientation worker spawn size floors",
+      "source": "src/kls_ordering_policy.inc:select_candidate_inner",
+      "stage": 1,
+      "classification": "performance heuristic",
+      "replacement": "Estimate graph work and dispatch overhead inside caller worker allowance",
+      "status": "pending"
+    },
+    {
+      "rule": "matching setup row/nonzero envelopes",
+      "source": "src/kls_ordering_policy.inc:choose_symbolic_for_pattern",
+      "stage": 2,
+      "classification": "performance heuristic",
+      "replacement": "Graph allocation bytes, pair/sort work, missing-diagonal work and lifecycle budget",
+      "status": "pending"
+    },
+    {
+      "rule": "prestatic missing-diagonal pattern classifier",
+      "source": "src/kls_ordering_policy.inc:is_prestatic_bound_missing_diagonal_pattern",
+      "stage": 2,
+      "classification": "performance heuristic",
+      "replacement": "Record a concrete supported pending match; on rejection analyze normally once",
+      "status": "pending"
+    },
+    {
+      "rule": "prestatic value-dependent admission",
+      "source": "src/kls_ordering_policy.inc:maybe_select_pre_static_row_match",
+      "stage": 2,
+      "classification": "mixed capability and performance",
+      "replacement": "Keep coordinate/value checks; replace size cohorts with bounded matching work",
+      "status": "pending"
+    },
+    {
+      "rule": "reactive matching setup thresholds",
+      "source": "src/kls_ordering_policy.inc:should_try_auto_row_match",
+      "stage": 2,
+      "classification": "performance heuristic",
+      "replacement": "Measured pivot pressure and factor cost versus matching setup",
+      "status": "pending"
+    },
+    {
+      "rule": "block proposal detector size ceilings",
+      "source": "src/kls_first_factor.inc:kls_build_block_structured_order",
+      "stage": 2,
+      "classification": "performance heuristic",
+      "replacement": "Bound adjacency/sort/BFS storage and work; prove actual decomposition",
+      "status": "prepared-not-enabled",
+      "activation": "Current caller admission remains in both build modes until the separate block/matching stage qualifies."
+    },
+    {
+      "rule": "block proposal analysis/factor duplicate gates",
+      "source": "src/kls_first_factor.inc:maybe_select_block_structured_ordering",
+      "stage": 2,
+      "classification": "performance heuristic",
+      "replacement": "Retain one proposal without comparing a placeholder to a real baseline; keep the correct baseline and coordinate frame on rejection.",
+      "status": "partial-implementation; orientation/rollback qualification pending",
+      "risk": "A one-sided pending no-BTF placeholder can displace the better BTF orientation before numeric validation; demonstrated by discarded revision G."
+    },
+    {
+      "rule": "compact scale race admission",
+      "source": "src/kls_ordering_policy.inc:kls_maybe_start_metis_race",
+      "stage": 3,
+      "classification": "mixed capability and performance",
+      "replacement": "Preserve index/frame checks; price duplicate scale numerics",
+      "status": "pending"
+    },
+    {
+      "rule": "large shape exceptions below compact race gate",
+      "source": "src/kls_ordering_policy.inc:kls_maybe_start_metis_race",
+      "stage": 3,
+      "classification": "reachability audit required",
+      "replacement": "Remove impossible branches; do not retune unreachable predicates",
+      "status": "pending",
+      "audit_evidence": "The only production constructor requires generic_compact_scale_race and n <= 4096. Later n >= 1000000 and maxblock >= 30000 exclusions are unreachable; metis_wanted is assigned only zero. Cleanup belongs to the pending scale/pivot stage."
+    },
+    {
+      "rule": "scale portfolio admission",
+      "source": "src/kls_ordering_policy.inc:should_try_auto_scale",
+      "stage": 3,
+      "classification": "mixed value evidence and performance",
+      "replacement": "Keep value/quality checks and compare actual saved passes with setup",
+      "status": "pending"
+    },
+    {
+      "rule": "pivot tolerance size admission",
+      "source": "src/kls_ordering_policy.inc:should_try_auto_pivot_tolerance",
+      "stage": 3,
+      "classification": "performance heuristic",
+      "replacement": "Retained pivot pressure and numeric trial payback",
+      "status": "pending"
+    },
+    {
+      "rule": "factor-time METIS admission",
+      "source": "src/kls_ordering_policy.inc:should_try_auto_metis",
+      "stage": 3,
+      "classification": "performance heuristic",
+      "replacement": "Realized lifecycle economics within remaining budget",
+      "status": "pending"
+    },
+    {
+      "rule": "low-work native versus compact solve size tiers",
+      "source": "src/kls_ordering_policy.inc:kls_low_work_btf_prefers_native_solve",
+      "stage": 4,
+      "classification": "performance heuristic",
+      "replacement": "Actual representation bytes and measured solve lifecycle cost",
+      "status": "pending"
+    },
+    {
+      "rule": "single-block and fragmented lean crossover bands",
+      "source": "src/kls_ordering_policy.inc:kls_moderate_work_single_block_lean_policy_enabled",
+      "stage": 4,
+      "classification": "performance heuristic",
+      "replacement": "Bounded equivalent-executor comparison; retain ordinary fallback",
+      "status": "pending"
+    },
+    {
+      "rule": "compact two-block AMF symbolic envelope",
+      "source": "src/kls.c:kls_compact_amf_two_block_symbolic_profile",
+      "stage": 4,
+      "classification": "mixed capability and performance",
+      "replacement": "Audit callers, preserve actual layout requirements, replace normalized shape bands",
+      "status": "pending"
+    },
+    {
+      "rule": "small-BTF ordering proposal envelope",
+      "source": "src/kls_small_btf_ordering.inc:kls_auto_small_btf_candidate",
+      "stage": 4,
+      "classification": "mixed capability and performance",
+      "replacement": "Retain fallback lease and index limits; use setup/storage cost for admission",
+      "status": "pending"
+    },
+    {
+      "rule": "fixed-width indices, public coordinate frames, singleton substitution and sparse-layout prerequisites",
+      "stage": 0,
+      "classification": "capability",
+      "replacement": "Retain with representation proof and boundary tests",
+      "status": "retained"
+    },
+    {
+      "rule": "numerical quality, accuracy contracts, singularity and residual recovery",
+      "stage": 0,
+      "classification": "correctness",
+      "replacement": "Unchanged; recovery is never charged against optional exploration credit",
+      "status": "retained"
+    }
+  ],
+  "default": "Generalized AMD admission and optimized block detector, promoted at user request; historical qualification limitations remain disclosed.",
+  "qualification_blocker": {
+    "source": "https://sparse.tamu.edu/",
+    "checked": "2026-11-06",
+    "reason": "Collection downloads are offline; required development and fresh holdout matrices are not locally available."
+  },
+  "legacy_checkpoint": {
+    "revision": "stage1i",
+    "source_digest": "ae23665ac2132d33e3355faae6425b608d8e47a10ae47290c5896f8ac9f32bf1",
+    "receipt": "build/generalization-20261106/stage1i-checkpoint.json",
+    "combined_gate": "build/generalization-20261106/stage1i-paper-small-initial/confirmed.json",
+    "matching_confirmation": true,
+    "performance_gate_passed": false,
+    "initial_regressing_cell_reference_comparisons": 11,
+    "confirmation_regressing_cell_reference_comparisons": 13,
+    "valid_matrices": 46,
+    "selected_matrices": 48,
+    "candidate_only_correctness_failures": 0,
+    "calibration_profiles_published": 0,
+    "promoted": false,
+    "stage_progression": "Remaining stage-1 ordering rules and stages 2 through 4 remain pending. The current AMD prototype did not qualify.",
+    "policy": "generalization-v1"
+  },
+  "latest_checkpoint": {
+    "revision": "stage1i; unchanged solver binaries",
+    "policy": "generalization-v2",
+    "receipt": "build/generalization-20261107/stage1i-peer-checkpoint.json",
+    "combined_gate": "build/generalization-20261107/stage1i-peer-initial/confirmed.json",
+    "matching_confirmation": true,
+    "performance_gate_passed": false,
+    "initial_prior_wins": 317,
+    "confirmation_prior_wins": 320,
+    "per_run_lost_peer_wins": 0,
+    "cross_campaign_lost_win_comparisons": 2,
+    "cross_campaign_issue": {
+      "matrix": "gemat12",
+      "config": "h1_llc96_t8",
+      "peer": "st",
+      "candidate_ratio_in_initial": 1.051898537765771,
+      "reason": "Both KLS controls beat this peer in confirmation; the candidate trails it in initial order."
+    },
+    "missing_peer_comparisons_per_campaign": 12,
+    "missing_peer_matrices": [
+      "bips98_1142",
+      "bips98_1450",
+      "bips98_606"
+    ],
+    "valid_kls_matrices": 46,
+    "valid_all_five_arm_matrices": 43,
+    "selected_matrices": 48,
+    "candidate_only_correctness_failures": 0,
+    "promoted": false,
+    "stage_progression": "The old 1.02 case cap is no longer a blocker. Peer confirmation and coverage remain incomplete; remaining ordering rules and stages 2 through 4 remain pending."
+  },
+  "promotion": {
+    "requested_by_user": true,
+    "legacy_amd_and_block_implementations_removed": true,
+    "full_performance_qualification_complete": false
+  }
+}

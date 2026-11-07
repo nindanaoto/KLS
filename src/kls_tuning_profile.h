@@ -1,7 +1,19 @@
 #ifndef KLS_TUNING_PROFILE_H
 #define KLS_TUNING_PROFILE_H
 
+
 #include <stdint.h>
+
+enum { KLS_POLICY_SCAN, KLS_POLICY_PAIR, KLS_POLICY_SORT, KLS_POLICY_FLOP,
+  KLS_POLICY_ENTRY, KLS_POLICY_SOLVE_ENTRY, KLS_POLICY_COPY_ENTRY,
+  KLS_POLICY_DISPATCH, KLS_POLICY_FACTOR_FLOP, KLS_POLICY_FACTOR_ENTRY,
+  KLS_POLICY_FACTOR_DISPATCH, KLS_POLICY_FIRST_REFACTOR_ENTRY,
+  KLS_POLICY_COST_COUNT };
+typedef struct kls_policy_cost_model {
+  int enabled;
+  double seconds[KLS_POLICY_COST_COUNT];
+  uint64_t cache_bytes;
+} kls_policy_cost_model;
 
 /* Costs are seconds per generated-kernel operation, never CPU defaults.
    Kept separate from hot tuning fields to preserve solver field offsets. */
@@ -33,6 +45,8 @@ typedef struct kls_tuning_metadata {
   int field_count;
   int threads;
   kls_snb_cost_model snb_cost;
+  kls_policy_cost_model policy_cost;
+  int kernel_overrides;
 } kls_tuning_metadata;
 
 void kls_tuning_defaults(kls_tuning_values *values);
@@ -49,5 +63,8 @@ int kls_tuning_write_host_profile_model(const char *path, int threads,
                                   const kls_snb_cost_model *model,
                                   unsigned long long seed, int force,
                                   kls_tuning_metadata *metadata);
+uint64_t kls_tuning_policy_cache_bytes(void);
+int kls_tuning_write_policy_profile(const char *path,int threads,
+    const kls_policy_cost_model *model,unsigned long long seed,int force);
 
 #endif

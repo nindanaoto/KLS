@@ -317,230 +317,6 @@ static int kls_low_work_single_block_direct_public_capable(
     solver->common.scale == -1;
 }
 
-/* Degree-balanced sparse systems with a moderate two-way hub have two useful
-   AMD regimes.  A nearly spanning SCC retains BTF, while a 75--90% core plus
-   a bounded number of coarse fringe SCCs exposes substantially more repeated
-   numeric parallelism as one AMD block.  Full structural diagonal permits an
-   identity matching, so a direct strong-component pass classifies the two
-   regimes without a maximum-transversal or an ordering tournament.  The
-   degree and SCC predicates are invariant under transpose. */
-
-/* Candidate analyzes can run on independent threads.  Keep their structural
-   policy local to the analyze call so an AMF trial for another orientation
-   cannot inherit this class verdict. */
-/* Medium, almost fully diagonal circuits with one macroscopic spike are a
-   distinct ordering regime: mean-local-fill AMMF removes substantially more
-   update work than AMD without destroying the wide dependency front.  The
-   bounds are resource tiers for the serial deficiency analysis; the spike
-   proof, rather than a narrow order/nonzero window, separates ordinary
-   bounded-degree circuits. */
-static int is_medium_full_diagonal_spike_minfill_pattern(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  if (n < 65536u || n > 262144u || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 8u || col_ptr[n] < 4u * n || col_ptr[n] > 8u * n) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0u;
-  UF_long max_col_degree = 0u;
-  for (UF_long col = 0u; col < n; ++col) {
-    const UF_long degree = col_ptr[col + 1u] - col_ptr[col];
-    if (degree > max_col_degree) {
-      max_col_degree = degree;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      if (row_idx[p] >= n) {
-        return 0;
-      }
-      diagonal_count += row_idx[p] == col;
-    }
-  }
-  return 1000.0 * (double)diagonal_count >= 999.0 * (double)n &&
-         4u * max_col_degree >= n && 2u * max_col_degree <= n;
-}
-
-/* The input spike is only a proposal.  Retain AMMF when its actual symbolic
-   exposes one nearly spanning BTF core, bounded fragmentation, balanced fill,
-   and enough work to amortize the dependency-aware recurring numeric. */
-static int kls_medium_full_diagonal_spike_minfill_symbolic_contract(
-  UF_long n,
-  const trilinos_klu_l_symbolic *symbolic) {
-  if (n < 65536u || n > 262144u || symbolic == NULL || !symbolic->do_btf ||
-      symbolic->nblocks < 2u || symbolic->nblocks > n / 1024u ||
-      symbolic->maxblock * 200u < 199u * n ||
-      (symbolic->structural_rank != KLS_KLU_EMPTY &&
-       symbolic->structural_rank != n) ||
-      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
-      !(symbolic->est_flops > 0.0)) {
-    return 0;
-  }
-  const double rows = (double)n;
-  const double fill = symbolic->lnz + symbolic->unz;
-  return fill >= 8.0 * rows && fill <= 32.0 * rows &&
-    symbolic->est_flops >= 512.0 * rows &&
-    symbolic->est_flops <= 2048.0 * rows &&
-    symbolic->est_flops <= 5.0e8 &&
-    symbolic->lnz <= 2.0 * symbolic->unz &&
-    symbolic->unz <= 2.0 * symbolic->lnz;
-}
-
-static int kls_exact_structural_symmetry(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx,
-  int columns_sorted,
-  UF_long max_column_degree);
-
-static int is_medium_sparse_full_diagonal_amd_pattern(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  /* A sparse, nearly full-diagonal graph is only an inexpensive AMD
-     proposal.  The actual symbolic below must prove either bounded recurring
-     work or the regular symmetric high-work regime before AUTO may skip its
-     remaining ordering analyses. */
-  return n >= 32768u && n <= 131072u && col_ptr != NULL &&
-         n <= UF_long_max / 4u && col_ptr[n] >= 2u * n &&
-         col_ptr[n] <= 4u * n &&
-         is_large_diagonal_circuit_like_pattern(n, col_ptr, row_idx);
-}
-
-static int kls_medium_sparse_full_diagonal_amd_high_work_input(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  int columns_sorted = 1;
-  for (UF_long col = 0u; col < n; ++col) {
-    const UF_long begin = col_ptr[col];
-    const UF_long end = col_ptr[col + 1u];
-    if (begin >= end || end - begin > 16u) {
-      return 0;
-    }
-    int has_diagonal = 0;
-    for (UF_long p = begin; p < end; ++p) {
-      if (row_idx[p] >= n) {
-        return 0;
-      }
-      columns_sorted &= p == begin || row_idx[p - 1u] <= row_idx[p];
-      has_diagonal |= row_idx[p] == col;
-    }
-    if (!has_diagonal) {
-      return 0;
-    }
-  }
-  return kls_exact_structural_symmetry(
-    n, col_ptr, row_idx, columns_sorted, 16u);
-}
-
-/* The low-work branch makes skipping NodeND an analysis-economics decision.
-   The separate high-work branch covers bounded-degree symmetric grids: AMD's
-   realized one-block symbolic must land in the measured regular-grid band.
-   Rejection resumes the ordinary AUTO tournament. */
-static int kls_medium_sparse_full_diagonal_amd_symbolic_contract(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx,
-  const trilinos_klu_l_symbolic *symbolic) {
-  if (!is_medium_sparse_full_diagonal_amd_pattern(
-        n, col_ptr, row_idx) || symbolic == NULL ||
-      (symbolic->structural_rank != KLS_KLU_EMPTY &&
-       symbolic->structural_rank != n) ||
-      symbolic->nblocks == 0u || symbolic->nblocks > n ||
-      symbolic->maxblock > n || 16u * symbolic->maxblock < 7u * n ||
-      !(symbolic->lnz > 0.0) || !(symbolic->unz > 0.0) ||
-      !(symbolic->est_flops > 0.0)) {
-    return 0;
-  }
-  const double rows = (double)n;
-  const double fill = symbolic->lnz + symbolic->unz;
-  const int balanced =
-    symbolic->lnz <= 2.0 * symbolic->unz &&
-    symbolic->unz <= 2.0 * symbolic->lnz;
-  const int fragmented_low_work =
-    symbolic->do_btf && symbolic->nblocks >= 2u &&
-    fill >= 4.0 * rows && fill <= 16.0 * rows &&
-    symbolic->est_flops >= 32.0 * rows &&
-    symbolic->est_flops <= 256.0 * rows;
-  const int single_low_work =
-    symbolic->do_btf && symbolic->nblocks == 1u &&
-    symbolic->maxblock == n && fill >= 8.0 * rows &&
-    fill <= 16.0 * rows &&
-    symbolic->est_flops >= 96.0 * rows &&
-    symbolic->est_flops <= 256.0 * rows;
-  const int regular_symmetric_high_work =
-    symbolic->do_btf && symbolic->nblocks == 1u &&
-    symbolic->maxblock == n && fill >= 56.0 * rows &&
-    fill <= 64.0 * rows &&
-    symbolic->est_flops >= 12800.0 * rows &&
-    symbolic->est_flops <= 16384.0 * rows &&
-    kls_medium_sparse_full_diagonal_amd_high_work_input(
-      n, col_ptr, row_idx);
-  return balanced && (fragmented_low_work || single_low_work ||
-                       regular_symmetric_high_work);
-}
-
-/* A many-component matrix with one dominant SCC can have a cheap numeric
-   factor even when AMD's column order leaves long, cache-unfriendly solve
-   streams.  Over a retained-factor lifecycle, COLAMD's unsymmetric order is
-   preferable for this bounded low-flop shape.  The flop ceiling excludes
-   higher-work shapes where COLAMD can expand the factor substantially. */
-
-static int is_medium_sparse_high_degree_diagonal_pattern(UF_long n,
-                                                         const UF_long *col_ptr,
-                                                         const UF_long *row_idx) {
-  if (n < 35000 || n > 45000 || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 8 || col_ptr[n] > 6u * n) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  UF_long max_col_degree = 0;
-  int valid = 1;
-  for (UF_long col = 0; col < n && valid; ++col) {
-    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] == UF_long_max) {
-        valid = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        diagonal_count++;
-      }
-    }
-  }
-
-  UF_long max_row_degree = 0;
-  int no_empty_rows = 1;
-  for (UF_long row = 0; row < n && valid; ++row) {
-    if (row_degree[row] == 0) {
-      no_empty_rows = 0;
-      break;
-    }
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-
-  return valid && no_empty_rows &&
-         max_col_degree >= 512u && max_row_degree >= 512u &&
-         max_col_degree <= 4096u && max_row_degree <= 4096u &&
-         100.0 * (double)diagonal_count >= 90.0 * (double)n &&
-         100.0 * (double)diagonal_count < 99.0 * (double)n;
-}
-
 
 static int is_large_very_low_degree_full_diagonal_pattern(UF_long n,
                                                           const UF_long *col_ptr,
@@ -594,213 +370,6 @@ static int is_large_very_low_degree_full_diagonal_pattern(UF_long n,
 
   return very_low_degree && max_col_degree <= 8 && max_row_degree <= 8 &&
          diagonal_count == n;
-}
-
-static int is_large_diagonal_metis_start_pattern(UF_long n,
-                                                 const UF_long *col_ptr,
-                                                 const UF_long *row_idx) {
-  if (n < 90000 || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 10) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  UF_long max_col_degree = 0;
-  int valid = 1;
-  for (UF_long col = 0; col < n && valid; ++col) {
-    const UF_long col_degree = col_ptr[col + 1] - col_ptr[col];
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] == UF_long_max) {
-        valid = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        diagonal_count++;
-      }
-    }
-  }
-
-  UF_long max_row_degree = 0;
-  for (UF_long row = 0; row < n && valid; ++row) {
-    if (row_degree[row] == 0) {
-      valid = 0;
-      break;
-    }
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-
-  if (!valid) {
-    return 0;
-  }
-
-  const int full_sparse =
-    diagonal_count == n && col_ptr[n] <= 6u * n &&
-    max_col_degree <= 512u && max_row_degree <= 512u &&
-    (max_col_degree > 64u || max_row_degree > 64u);
-  const int dense_spike_density =
-    col_ptr[n] >= 8u * n || (n >= 250000 && col_ptr[n] >= 6u * n);
-  const int dense_spike =
-    1000.0 * (double)diagonal_count >= 999.0 * (double)n &&
-    dense_spike_density &&
-    col_ptr[n] <= 10u * n &&
-    (2.0 * (double)max_col_degree >= (double)n ||
-     2.0 * (double)max_row_degree >= (double)n);
-  return full_sparse || dense_spike;
-}
-
-static int is_large_nearly_diagonal_spiked_metis_pattern(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  if (n < 200000 || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 12 || col_ptr[n] < 6u * n ||
-      col_ptr[n] > 12u * n) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  UF_long max_col_degree = 0;
-  int valid = 1;
-  for (UF_long col = 0; col < n && valid; ++col) {
-    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
-    int has_diagonal = 0;
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] == UF_long_max) {
-        valid = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        has_diagonal = 1;
-      }
-    }
-    diagonal_count += (UF_long)has_diagonal;
-  }
-
-  UF_long max_row_degree = 0;
-  int no_empty_rows = 1;
-  for (UF_long row = 0; row < n && valid; ++row) {
-    if (row_degree[row] == 0) {
-      no_empty_rows = 0;
-      break;
-    }
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-  if (!valid || !no_empty_rows) {
-    return 0;
-  }
-
-  const double nnz = (double)col_ptr[n];
-  const double avg_degree = nnz / (double)n;
-  const double max_degree =
-    (double)(max_col_degree > max_row_degree ? max_col_degree : max_row_degree);
-  const int sparse_spike =
-    1000.0 * (double)diagonal_count >= 995.0 * (double)n &&
-    avg_degree >= 6.0 && avg_degree <= 8.0 &&
-    max_degree >= 0.05 * (double)n &&
-    max_degree <= 0.25 * (double)n;
-  const int dense_spike =
-    1000.0 * (double)diagonal_count >= 980.0 * (double)n &&
-    avg_degree >= 8.0 && avg_degree <= 12.0 &&
-    max_degree >= 0.50 * (double)n;
-  return sparse_spike || dense_spike;
-}
-
-/* Keep dense spikes on the serial NodeNDP/refinement route; parallel
-   separator preservation is intended only for the sparse-spike class. */
-static int is_large_sparse_nearly_diagonal_spiked_metis_pattern(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  return col_ptr != NULL && col_ptr[n] < 8u * n &&
-         is_large_nearly_diagonal_spiked_metis_pattern(n, col_ptr, row_idx);
-}
-
-static int is_large_moderate_degree_weak_diagonal_metis_pattern(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  if (n < 500000u || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 12u ||
-      col_ptr[n] < 6u * n || col_ptr[n] > 12u * n) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  UF_long max_col_degree = 0;
-  int valid = 1;
-  for (UF_long col = 0; col < n && valid; ++col) {
-    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    if (col_degree > 4096u) {
-      valid = 0;
-      break;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] >= 4096u) {
-        valid = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        diagonal_count++;
-      }
-    }
-  }
-
-  UF_long max_row_degree = 0;
-  int no_empty_rows = 1;
-  for (UF_long row = 0; row < n && valid; ++row) {
-    if (row_degree[row] == 0u) {
-      no_empty_rows = 0;
-      break;
-    }
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-  if (!valid || !no_empty_rows) {
-    return 0;
-  }
-
-  return max_col_degree <= 4096u && max_row_degree <= 4096u &&
-         (max_col_degree >= 64u || max_row_degree >= 64u) &&
-         10.0 * (double)diagonal_count >= 2.0 * (double)n &&
-         10.0 * (double)diagonal_count <= 6.0 * (double)n;
 }
 
 static int is_large_sparse_diagonal_low_degree_pattern(UF_long n,
@@ -860,56 +429,6 @@ static int is_large_sparse_diagonal_low_degree_pattern(UF_long n,
          100.0 * (double)diagonal_count <= 20.0 * (double)n;
 }
 
-static int is_medium_bounded_degree_diagonal_pattern(UF_long n,
-                                                     const UF_long *col_ptr,
-                                                     const UF_long *row_idx) {
-  if (n < 7000 || n > 12000 || col_ptr == NULL || row_idx == NULL ||
-      col_ptr[n] > (UF_long)(5 * n)) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  UF_long max_col_degree = 0;
-  int low_degree = 1;
-  for (UF_long col = 0; col < n && low_degree; ++col) {
-    const UF_long col_degree = col_ptr[col + 1] - col_ptr[col];
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    if (col_degree > 128) {
-      low_degree = 0;
-      break;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] >= 128) {
-        low_degree = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        diagonal_count++;
-      }
-    }
-  }
-
-  UF_long max_row_degree = 0;
-  for (UF_long row = 0; row < n && low_degree; ++row) {
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-
-  return low_degree && max_col_degree <= 128 && max_row_degree <= 128 &&
-         1000.0 * (double)diagonal_count >= 990.0 * (double)n;
-}
-
 static int symbolic_is_low_work_dominant_btf(
   UF_long n,
   const trilinos_klu_l_symbolic *symbolic);
@@ -955,137 +474,6 @@ static int symbolic_is_low_work_dominant_btf(
    entirely scalar fringe.  Normalized fill/work and balance bounds keep the
    subtype inside the same low-work PTS resource class as the broader
    many-fringe policy. */
-
-static int kls_sparse_symmetric_compare_uf_long(const void *lhs,
-                                                 const void *rhs) {
-  const UF_long a = *(const UF_long *)lhs;
-  const UF_long b = *(const UF_long *)rhs;
-  return a < b ? -1 : (a > b ? 1 : 0);
-}
-
-/* Exact multiplicity-aware structural-symmetry proof shared by sparse
-   topology proposals.  Sorted CSC uses reciprocal binary searches without
-   allocation.  Unsorted input builds and sorts one transpose, then compares
-   each original column through a scratch buffer bounded by the proposal's
-   already-proved maximum column degree. */
-__attribute__((noinline, cold))
-static int kls_exact_structural_symmetry(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx,
-  int columns_sorted,
-  UF_long max_column_degree) {
-  const UF_long nnz = col_ptr[n];
-  if (columns_sorted) {
-    for (UF_long col = 0u; col < n; ++col) {
-      const UF_long begin = col_ptr[col];
-      const UF_long end = col_ptr[col + 1u];
-      for (UF_long p = begin; p < end; ++p) {
-        const UF_long row = row_idx[p];
-        if (row <= col || (p > begin && row_idx[p - 1u] == row)) {
-          continue;
-        }
-        UF_long forward_end = p + 1u;
-        while (forward_end < end && row_idx[forward_end] == row) {
-          ++forward_end;
-        }
-        UF_long lo = col_ptr[row];
-        UF_long hi = col_ptr[row + 1u];
-        while (lo < hi) {
-          const UF_long mid = lo + (hi - lo) / 2u;
-          if (row_idx[mid] < col) {
-            lo = mid + 1u;
-          } else {
-            hi = mid;
-          }
-        }
-        const UF_long reciprocal_begin = lo;
-        hi = col_ptr[row + 1u];
-        while (lo < hi) {
-          const UF_long mid = lo + (hi - lo) / 2u;
-          if (row_idx[mid] <= col) {
-            lo = mid + 1u;
-          } else {
-            hi = mid;
-          }
-        }
-        if (forward_end - p != lo - reciprocal_begin) {
-          return 0;
-        }
-      }
-    }
-    return 1;
-  }
-
-  if ((size_t)n + 1u > SIZE_MAX / sizeof(UF_long) ||
-      (size_t)nnz > SIZE_MAX / sizeof(UF_long) ||
-      (size_t)max_column_degree > SIZE_MAX / sizeof(UF_long)) {
-    return 0;
-  }
-  UF_long *transpose_ptr =
-    (UF_long *)calloc((size_t)n + 1u, sizeof(*transpose_ptr));
-  UF_long *transpose_idx =
-    (UF_long *)malloc((size_t)nnz * sizeof(*transpose_idx));
-  UF_long *next = (UF_long *)malloc((size_t)n * sizeof(*next));
-  if (transpose_ptr == NULL || transpose_idx == NULL || next == NULL) {
-    free(transpose_ptr);
-    free(transpose_idx);
-    free(next);
-    return 0;
-  }
-  for (UF_long p = 0u; p < nnz; ++p) {
-    transpose_ptr[row_idx[p] + 1u]++;
-  }
-  for (UF_long row = 0u; row < n; ++row) {
-    transpose_ptr[row + 1u] += transpose_ptr[row];
-    next[row] = transpose_ptr[row];
-  }
-  for (UF_long col = 0u; col < n; ++col) {
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      transpose_idx[next[row_idx[p]]++] = col;
-    }
-  }
-  free(next);
-  for (UF_long col = 0u; col < n; ++col) {
-    const UF_long degree = transpose_ptr[col + 1u] - transpose_ptr[col];
-    if (degree > 1u) {
-      qsort(transpose_idx + transpose_ptr[col], (size_t)degree,
-            sizeof(*transpose_idx), kls_sparse_symmetric_compare_uf_long);
-    }
-  }
-
-  UF_long *sorted_column = (UF_long *)malloc(
-    (size_t)(max_column_degree > 0u ? max_column_degree : 1u) *
-      sizeof(*sorted_column));
-  if (sorted_column == NULL) {
-    free(transpose_ptr);
-    free(transpose_idx);
-    return 0;
-  }
-  int symmetric = 1;
-  for (UF_long col = 0u; col < n && symmetric; ++col) {
-    const UF_long begin = col_ptr[col];
-    const UF_long degree = col_ptr[col + 1u] - begin;
-    const UF_long transpose_degree =
-      transpose_ptr[col + 1u] - transpose_ptr[col];
-    if (degree != transpose_degree) {
-      symmetric = 0;
-      break;
-    }
-    memcpy(sorted_column, row_idx + begin,
-           (size_t)degree * sizeof(*sorted_column));
-    if (degree > 1u) {
-      qsort(sorted_column, (size_t)degree, sizeof(*sorted_column),
-            kls_sparse_symmetric_compare_uf_long);
-    }
-    symmetric = memcmp(sorted_column, transpose_idx + transpose_ptr[col],
-                       (size_t)degree * sizeof(*sorted_column)) == 0;
-  }
-  free(sorted_column);
-  free(transpose_ptr);
-  free(transpose_idx);
-  return symmetric;
-}
 
 /* A full-diagonal, structurally symmetric sparse graph with a small scalar
    SCC fringe and moderate hubs is a proposal for a tuned NodeNDP ordering.
@@ -2927,14 +2315,6 @@ static UF_long kls_metis_refine_with_camd(UF_long n,
     : (UF_long)-1;
 }
 
-/* CKTSO-style incomplete-ND refinement: keep every recorded NodeNDP leaf
-   and separator component in postorder, but let constrained AMD reorder all
-   vertices within that component.  Fixed-size rank windows approximate this
-   idea poorly: they split natural separator components and over-constrain
-   large leaves.  The NodeNDP sizes array gives the exact top separator tree,
-   so reuse the same component reconstruction used by KLS's subtree
-   scheduler and feed those component ids to CAMD. */
-
 static UF_long kls_metis_order(UF_long n, UF_long *col_ptr,
                                      UF_long *row_idx, UF_long *perm_out,
                                      trilinos_klu_l_common *common);
@@ -2946,199 +2326,41 @@ static UF_long kls_metis_order(UF_long n, UF_long *col_ptr,
    2: dense reciprocal mega-hub, 3: sparse symmetric scalar fringe). */
 static _Thread_local int kls_fragmented_metis_tuning_ctx;
 
-/* The retained proposal must expose a nearly spanning BTF core whose small
-   fringe is substantially represented by separate components.  Symbolic fill
-   and separator bounds keep the tuned eight-leaf ordering inside its intended
-   resource and parallel-work regime. */
-
-/* Scale suppression additionally requires the actual unscaled, no-pivot
-   numeric to remain in the balanced fill/work band.  Cache this measured
-   verdict after each factor; a replacement invalidates it. */
-
-/* Recurring kernel choices require the measured numeric to stay within the
-   normalized fill/work regime that motivated retaining the NodeNDP order.
-   A structurally accepted candidate outside this range remains a valid METIS
-   factor but uses the ordinary adaptive kernels. */
-
-/* Scoped to the generic bounded-degree/full-diagonal AUTO proposal.  One is
-   the fine sparse resource class; two is its wider giant-graph class. */
-static _Thread_local int kls_sparse_full_diagonal_metis_row_ctx;
-
 /* Thread budget supplied by analyze_with_ordering.  The CAMD refinement
    policy is defined before the optional mt-metis bridge but consumes the
    same resource count. */
 static _Thread_local int kls_metis_order_threads;
 
-/* A sparse full-diagonal block with a moderate hub and balanced triangular
-   structure can benefit from a fine CAMD pass over the NodeND ranks even when
-   it reached explicit METIS without an enclosing AUTO topology proposal.
-   Recognize the callback's realized block rather than an outer matrix order
-   or density coordinate. */
 __attribute__((noinline, cold))
-static int kls_sparse_full_diagonal_hubbed_metis_core_refine_profile(
-  UF_long n,
-  const UF_long *col_ptr,
-  const UF_long *row_idx) {
-  if (col_ptr == NULL || row_idx == NULL || n < 32768u || n > 262144u ||
-      n > UF_long_max / 8u || col_ptr[0] != 0u ||
-      col_ptr[n] < 4u * n || col_ptr[n] > 8u * n) {
-    return 0;
-  }
-  const UF_long nnz = col_ptr[n];
-  UF_long diagonal_columns = 0u;
-  UF_long scalar_columns = 0u;
-  UF_long max_column_degree = 0u;
-  UF_long lower_entries = 0u;
-  UF_long upper_entries = 0u;
-  for (UF_long col = 0u; col < n; ++col) {
-    const UF_long begin = col_ptr[col];
-    const UF_long end = col_ptr[col + 1u];
-    if (begin >= end || end > nnz || end - begin > 512u) {
-      return 0;
-    }
-    const UF_long degree = end - begin;
-    scalar_columns += degree == 1u;
-    if (degree > max_column_degree) {
-      max_column_degree = degree;
-    }
-    int has_diagonal = 0;
-    for (UF_long p = begin; p < end; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n) {
-        return 0;
-      }
-      has_diagonal |= row == col;
-      lower_entries += row > col;
-      upper_entries += row < col;
-    }
-    diagonal_columns += (UF_long)has_diagonal;
-  }
-  return diagonal_columns == n && 1024u * scalar_columns <= n &&
-         512u * max_column_degree >= n && 64u * max_column_degree <= n &&
-         4.0 * (double)lower_entries <= 5.0 * (double)upper_entries &&
-         4.0 * (double)upper_entries <= 5.0 * (double)lower_entries;
-}
-
-__attribute__((noinline, cold))
-static UF_long kls_metis_camd_group_size(UF_long n,
-                                         const UF_long *col_ptr,
-                                         const UF_long *row_idx) {
-  {
-    /* Generic NodeND uses only a resource-scaled refinement window.  Smaller
-       graphs retain the exact NodeND order (group size zero is converted to
-       singleton constraints by the caller); larger graphs amortize CAMD in
-       progressively wider cache-bounded windows. */
-    if (kls_generic_metis_tuning_ctx == 4) {
-      /* When the retained minimum-degree estimate exposes exceptionally
-         high arithmetic intensity, separator concurrency is worth more than
-         a very wide refinement window.  Scale the window only with the
-         execution resource count; the caller selected this context from
-         realized symbolic work per active row, not graph dimensions or an
-         input-family signature. */
-      UF_long group = 384u *
-        (UF_long)(kls_metis_order_threads > 0 ? kls_metis_order_threads : 1);
-      if (group < 1024u) {
-        group = 1024u;
-      }
-      if (group > 8192u) {
-        group = 8192u;
-      }
-      return group < n ? group : n;
-    }
-    if (n >= 3000000u) {
-      return 16384u;
-    }
-    if (n >= 1000000u) {
-      return 8192u;
-    }
-    return n >= 200000u ? 4096u : 0u;
-  }
-  if (kls_sparse_full_diagonal_metis_row_ctx == 2) {
-    /* The higher-fill resource class needs wider windows to preserve the
-       useful NodeNDP forest.  Keep roughly 37 windows per worker under the
-       eight-thread policy, round to a cache-friendly 128-column unit, and
-       cap ordering resources. */
-    UF_long group = n / 296u;
-    group = ((group + 64u) / 128u) * 128u;
-    if (group < 4096u) {
-      group = 4096u;
+static UF_long kls_metis_camd_group_size(UF_long n) {
+  /* Generic NodeND uses only a resource-scaled refinement window.  Smaller
+     graphs retain the exact NodeND order (group size zero is converted to
+     singleton constraints by the caller); larger graphs amortize CAMD in
+     progressively wider cache-bounded windows. */
+  if (kls_generic_metis_tuning_ctx == 4) {
+    /* When the retained minimum-degree estimate exposes exceptionally
+       high arithmetic intensity, separator concurrency is worth more than
+       a very wide refinement window.  Scale the window only with the
+       execution resource count; the caller selected this context from
+       realized symbolic work per active row, not graph dimensions or an
+       input-family signature. */
+    UF_long group = 384u *
+      (UF_long)(kls_metis_order_threads > 0 ? kls_metis_order_threads : 1);
+    if (group < 1024u) {
+      group = 1024u;
     }
     if (group > 8192u) {
       group = 8192u;
     }
-    return group;
+    return group < n ? group : n;
   }
-  if (kls_sparse_full_diagonal_metis_row_ctx == 1) {
-    /* Scale the constrained-AMD window with the graph instead of keying it
-       to one matrix dimension.  The clamps are ordering-resource limits;
-       n/608 retains the measured fine-refinement density across the input
-       band (864 columns at n=525825). */
-    UF_long group = n / 608u;
-    if (group < 320u) {
-      group = 320u;
-    }
-    if (group > 4096u) {
-      group = 4096u;
-    }
-    return group;
+  if (n >= 3000000u) {
+    return 16384u;
   }
-  if (is_large_sparse_nearly_diagonal_spiked_metis_pattern(
-        n, col_ptr, row_idx)) {
-    /* This smaller window reduces fill and recurring work while preserving
-       CAMD's schedule-shaping benefit.  Do not skip refinement for this
-       class merely because raw NodeNDP has lower fill. */
-    return 2304u;
+  if (n >= 1000000u) {
+    return 8192u;
   }
-  if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx) &&
-      n >= 125000u && n <= 175000u) {
-    /* On the large single-SCC circuit shape, plain NodeND leaves enough
-       fill to dominate 99 refactors.  A modest constrained-AMD window
-       removes that fill without the analysis cost of refining thousands of
-       exact separator components (G2_circuit: 3.13e9 -> 3.10e9 flops while
-       retaining the cheaper ~0.47 s analysis). */
-    return 320u;
-  }
-  if (kls_fragmented_metis_tuning_ctx == 2 && n >= 65536u) {
-    /* The callback sees the dominant BTF core rather than the outer matrix.
-       When diagnostic CAMD refinement is enabled, 1536-column windows retain
-       more of NodeNDP's balanced forest than the generic 1024-column pass.
-       The scoped context prevents explicit METIS from inheriting AUTO. */
-    return 1536u;
-  }
-  if (kls_fragmented_metis_tuning_ctx == 3 && n >= 32768u) {
-    /* Preserve the accepted eight-leaf NodeNDP forest while CAMD trims within
-       moderately wide rank windows.  The scoped context is set only by the
-       structurally proposed and post-symbolically guarded AUTO route. */
-    return 2304u;
-  }
-  if (kls_sparse_full_diagonal_hubbed_metis_core_refine_profile(
-        n, col_ptr, row_idx)) {
-    /* Keep roughly 96 vertices per refined NodeND rank window, rounded to a
-       cache-friendly unit.  The clamps bound ordering work across the full
-       structural resource tier. */
-    UF_long group = n / 96u;
-    group = ((group + 64u) / 128u) * 128u;
-    if (group < 512u) {
-      group = 512u;
-    }
-    if (group > 2304u) {
-      group = 2304u;
-    }
-    return group;
-  }
-  if (is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx)) {
-    return 1024;
-  }
-  if (n >= 200000) {
-    if (n >= 3000000) {
-      return 16384;
-    }
-    if (n >= 1000000) {
-      return 8192;
-    }
-    return 4096;
-  }
-  return 0;
+  return n >= 200000u ? 4096u : 0u;
 }
 
 /* These symbolic-selection contexts are used by the common ordering path,
@@ -4017,7 +3239,7 @@ static UF_long kls_metis_order(UF_long n,
   }
   UF_long order_lnz = 0;
   if (metis_status == METIS_OK) {
-    UF_long camd_group_size = kls_metis_camd_group_size(n, col_ptr, row_idx);
+    UF_long camd_group_size = kls_metis_camd_group_size(n);
     if (kls_generic_metis_tuning_ctx) {
       /* A BTF challenger spends its ND pass independently inside each
            irreducible block, while no-BTF uses a coarser whole-graph budget.
@@ -4401,6 +3623,9 @@ static int analyze_with_ordering(UF_long n,
                                  trilinos_klu_l_common *common_out,
                                  kls_separator_analysis *separator_out) {
   kls_separator_analysis_clear(separator_out);
+#ifdef KLS_POLICY_ANALYZE_EVENT
+  KLS_POLICY_ANALYZE_EVENT(ordering);
+#endif
 #ifdef KLS_HAVE_MTMETIS
   kls_metis_order_threads = options != NULL ? options->threads : 1;
 #endif
@@ -4872,50 +4097,6 @@ static void maybe_retry_without_btf(UF_long n,
   kls_separator_analysis_clear(&no_btf_separator);
 }
 
-static int should_start_auto_with_metis(UF_long n,
-                                        const UF_long *col_ptr,
-                                        const UF_long *row_idx,
-                                        int large_spiked_metis_no_btf) {
-  if (is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  if (is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  if (is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  if (large_spiked_metis_no_btf) {
-    return 1;
-  }
-  if (is_large_moderate_degree_weak_diagonal_metis_pattern(n, col_ptr,
-                                                           row_idx)) {
-    return 1;
-  }
-  /* The 30K--45K dense-diagonal class is cheap enough that NodeND cannot
-     repay its own latency.  Its high-work pivoted one-block AMD lifecycle
-     beats the METIS choice, while the METIS analyze alone can cost several
-     times the AMD numeric.  Keep the classifier for scale/BTF policy below,
-     but let the ordinary minimum-degree competition select its ordering. */
-  if (is_medium_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  if (is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
-    return 1;
-  }
-  return is_medium_bounded_degree_diagonal_pattern(n, col_ptr, row_idx);
-}
-
-static int metis_start_should_skip_no_btf_retry(UF_long n,
-                                                const UF_long *col_ptr,
-                                                const UF_long *row_idx) {
-  /* Full or nearly-full diagonal matrices use BTF to keep the off-diagonal
-     fringe cheap; a no-BTF retry only repeats analysis with worse structure. */
-  return is_large_diagonal_metis_start_pattern(n, col_ptr, row_idx) ||
-         is_large_moderate_degree_weak_diagonal_metis_pattern(n, col_ptr,
-                                                              row_idx);
-}
-
 /* Set for the duration of the top-level analyze so the pattern-level
    ordering gates can see whether a background METIS race already covers
    the nested-dissection trial. */
@@ -4924,53 +4105,6 @@ static _Thread_local const kls_solver *kls_analyze_nd_race_solver;
    nested-dissection trial; the chosen orientation re-analyzes once with
    the full path afterwards, so only the winner pays NodeND. */
 static _Thread_local int kls_analyze_defer_nd;
-
-static int should_try_symbolic_nested_dissection_before_numeric(
-  UF_long n,
-  const trilinos_klu_l_symbolic *symbolic,
-  kls_ordering selected_ordering,
-  kls_ordering trial_ordering,
-  double score) {
-  if (selected_ordering == trial_ordering || symbolic == NULL ||
-      n < 30000u) {
-    return 0;
-  }
-  if (kls_analyze_defer_nd) {
-    return 0;
-  }
-  if (trial_ordering == KLS_ORDERING_METIS &&
-      kls_analyze_nd_race_solver != NULL &&
-      kls_analyze_nd_race_solver->metis_race != NULL) {
-    /* The race computes the METIS ordering off the critical path and
-       the factor-time promotion adopts it under timed acceptance. */
-    return 0;
-  }
-  if (trial_ordering == KLS_ORDERING_METIS &&
-      symbolic_is_high_work_dominant_btf_nd_candidate(n, symbolic)) {
-    return isfinite(score) && score > 0.0;
-  }
-  /* A minimum-degree factor whose predicted arithmetic and storage dwarf
-     the pattern can make even the *first* numeric effectively unbounded.
-     In that regime, paying once for nested dissection is justified before
-     values arrive.  This is an engine-cost test (Baumann: 44G predicted
-     flops and 46M entries from a 112K-row pattern), not an input-family or
-     dimension window. */
-  const int predicted_factor_dominates_nd =
-    trial_ordering == KLS_ORDERING_METIS &&
-    symbolic->est_flops >= 1.0e10 &&
-    isfinite(score) && score >= 64.0 * (double)n;
-  if (predicted_factor_dominates_nd) {
-    return 1;
-  }
-  if (n < 200000u) {
-    return 0;
-  }
-  if (symbolic->do_btf || symbolic->nblocks != 1 ||
-      symbolic->maxblock != n || symbolic->est_flops < 1.0e9) {
-    return 0;
-  }
-  return isfinite(score) && score > 0.0;
-}
 
 static int should_accept_high_work_dominant_btf_nd_trial(
   UF_long n,
@@ -5487,21 +4621,6 @@ static void kls_maybe_promote_selected_generic_nd(
   candidate->generic_nd_fallback_fill = incumbent_fill;
   candidate->generic_nd_fallback_flops = incumbent_flops;
   kls_separator_analysis_move(&candidate->separator, &trial_separator);
-}
-
-static int should_start_auto_without_btf(UF_long n,
-                                         const UF_long *col_ptr,
-                                         const UF_long *row_idx,
-                                         const kls_options *options,
-                                         int large_spiked_metis_no_btf) {
-  if (options == NULL || !options->use_btf) {
-    return 0;
-  }
-
-  return is_medium_low_degree_full_diagonal_pattern(n, col_ptr, row_idx) ||
-         is_medium_sparse_high_degree_diagonal_pattern(n, col_ptr, row_idx) ||
-         large_spiked_metis_no_btf ||
-         is_medium_dense_diagonal_high_degree_pattern(n, col_ptr, row_idx);
 }
 
 static int numeric_candidate_is_better(const trilinos_klu_l_common *current_common,
@@ -8292,7 +7411,7 @@ select_exact_match_symbolic:;
     kls_value_matched_ordering_ctx = 1;
     status = choose_symbolic_for_pattern(
       solver->n, trial_col_ptr, trial_row_idx, &trial_options,
-      &trial_symbolic, &trial_common, &trial_ordering, &trial_score,
+      &solver->policy, &trial_symbolic, &trial_common, &trial_ordering, &trial_score,
       &trial_separator);
     kls_value_matched_ordering_ctx = saved_value_matched_ordering_ctx;
   }
@@ -8548,13 +7667,6 @@ static int should_try_spral_hungarian_numeric_trial(
     return 0;
   }
 
-  if (solver->dense_spiked_original_pivot_path) {
-    /* On dense-spike systems the incumbent pivoted METIS numeric already
-       supports the faster repeated row engine.  Converting it to a matched
-       static numeric costs a full symbolic/factor setup and lengthens the
-       repeated solve/refactor lifecycle even when accepted. */
-    return 0;
-  }
 
   const UF_long fill = solver->numeric->lnz + solver->numeric->unz;
   const double offdiag_ratio =
@@ -8936,7 +8048,7 @@ static int maybe_select_auto_row_match(kls_solver *solver,
     kls_value_matched_ordering_ctx;
   kls_value_matched_ordering_ctx = 1;
   status = choose_symbolic_for_pattern(solver->n, trial_col_ptr, trial_row_idx,
-                                       &trial_options, &trial_symbolic,
+                                       &trial_options, &solver->policy, &trial_symbolic,
                                        &trial_common, &trial_ordering,
                                        &trial_score, &trial_separator);
   kls_value_matched_ordering_ctx = saved_value_matched_ordering_ctx;
@@ -9658,9 +8770,7 @@ matching_attempt:;
      tournament, alternate numeric factor, and incumbent Pareto gates below
      supply measured evidence for the combined candidate. */
 
-  if (solver->medium_partial_static_metis_path) {
-    trial_options.ordering = KLS_ORDERING_METIS;
-  }
+
   if (trial_options.scale == KLS_SCALE_AUTO) {
     if (match_row_scale != NULL && match_col_scale != NULL) {
       trial_row_scale = match_row_scale;
@@ -9784,7 +8894,7 @@ matching_attempt:;
     kls_value_matched_ordering_ctx = 1;
     status = choose_symbolic_for_pattern(
       solver->n, trial_col_ptr, trial_row_idx, &trial_options,
-      &trial_symbolic, &trial_common, &trial_ordering, &trial_score,
+      &solver->policy, &trial_symbolic, &trial_common, &trial_ordering, &trial_score,
       &trial_separator);
     kls_value_matched_ordering_ctx = saved_value_matched_ordering_ctx;
     matched_low_pair_ordering_selected =
@@ -10019,22 +9129,6 @@ matching_attempt:;
     choose_auto_scale_from_pattern(solver->n, trial_col_ptr,
                                        trial_row_idx, &trial_options,
                                        trial_values);
-  const int preapplied_matching_equilibration =
-    solver->medium_partial_static_metis_path &&
-    trial_options.scale == KLS_SCALE_AUTO &&
-    trial_row_scale != NULL && trial_col_scale != NULL;
-  if (preapplied_matching_equilibration) {
-    /* The ordinary path first factors KLU's internally equilibrated values,
-       then maybe_use_matching_equilibration factors the explicitly matched
-       equilibration and keeps that second numeric when it is better.  A
-       caller which already knows the matched equilibration is the desired
-       candidate can build that same numeric directly.  Keep the scale arrays
-       installed with the adopted pattern so refactor input preparation and
-       solves retain the usual compensation. */
-    apply_value_scaling(solver->n, trial_col_ptr, trial_row_idx,
-                        trial_row_scale, trial_col_scale, trial_values);
-    trial_common.scale = -1;
-  }
   const int generic_recurring_matched_candidate =
     kls_repeated_update_workload(&trial_options) &&
     fabs(trial_options.pivot_tolerance - 0.001) <= 1.0e-12;
@@ -10514,7 +9608,7 @@ matching_attempt:;
   }
   int retain_resource_scaled_native_match = 0;
   if (!deferred &&
-      !preapplied_matching_equilibration && !selected_unmatched_colamd &&
+      !selected_unmatched_colamd &&
       trial_row_scale != NULL && trial_col_scale != NULL &&
       trial_numeric_ok && trial_common.scale <= 0 &&
       isfinite(trial_common.rcond) && trial_common.rcond > 0.0 &&
@@ -10564,8 +9658,7 @@ matching_attempt:;
     trial_row_scale = NULL;
     trial_col_scale = NULL;
   }
-  if (!preapplied_matching_equilibration &&
-             !selected_unmatched_colamd) {
+  if (!selected_unmatched_colamd) {
     maybe_use_matching_equilibration(solver->n, solver->nnz, trial_col_ptr,
                                      trial_row_idx, &trial_options,
                                      trial_symbolic, &trial_values,
@@ -10997,22 +10090,6 @@ static int kls_compact_medium_dominant_btf_symbolic_shape(
          solver->symbolic->lnz + solver->symbolic->unz >= 1.0e6;
 }
 
-/* Very large, low-degree circuits can consist mostly of scalar BTF blocks
-   around one moderate core.  The generic pre-static deferral leaves this
-   class on AMD after its inexpensive matching probe rejects, but a tuned
-   NodeND order of the core repays its analysis cost over repeated work. Use a tight
-   pattern-only gate for the direct ordering decision, then confirm the BTF
-   geometry before suppressing later speculative numeric work. */
-static int kls_large_low_degree_fragmented_pattern(
-  UF_long n,
-  const UF_long *col_ptr) {
-  if (col_ptr == NULL || n < 600000u || n > 800000u) {
-    return 0;
-  }
-  const double nnz = (double)col_ptr[n];
-  return nnz >= 2.0 * (double)n && nnz < 3.0 * (double)n;
-}
-
 /* A medium-size dominant BTF block with thousands of small fringe blocks is
    already well served by the incumbent AMD factor.  In this shape, ordering
    the dominant block with nested dissection destroys the useful local
@@ -11136,10 +10213,7 @@ static void kls_maybe_start_metis_race(kls_solver *solver) {
          giants remain eligible because METIS can materially reduce fill. */
       (solver->col_ptr != NULL && solver->n >= 1000000u &&
        solver->col_ptr[solver->n] / solver->n >= 8u) ||
-      kls_sparse_fragmented_dominant_btf_symbolic_work(solver) ||
-      solver->medium_partial_static_metis_path ||
-      solver->medium_spike_minfill_path ||
-      solver->large_bounded_no_btf_amf_path) {
+      kls_sparse_fragmented_dominant_btf_symbolic_work(solver)) {
     return;
   }
   if (!generic_compact_scale_race &&
@@ -12694,10 +11768,15 @@ static void *kls_amf_spec_main(void *arg) {
   return NULL;
 }
 
+/* Owned by the analysis candidate after a validated proposal. */
+static _Thread_local UF_long *kls_block_order_proposal;
+static _Thread_local int kls_block_order_checked;
+
 static int kls_choose_symbolic_inner(UF_long n,
                                      UF_long *col_ptr,
                                      UF_long *row_idx,
                                      const kls_options *options,
+                                     kls_policy_context *policy,
                                      trilinos_klu_l_symbolic **symbolic_out,
                                      trilinos_klu_l_common *common_out,
                                      kls_ordering *selected_ordering_out,
@@ -12706,373 +11785,54 @@ static int kls_choose_symbolic_inner(UF_long n,
   kls_separator_analysis_clear(separator_out);
   kls_amf3_span_variant_selected = 0;
   const kls_options *symbolic_options = options;
-  if (options->ordering == KLS_ORDERING_AUTO) {
-    kls_no_btf_retry_hopeless = 0;
-    if (!kls_repeated_update_workload(options) &&
-        (n < 8192u || col_ptr[n] < 65536u)) {
-      /* On cache-sized inputs, another complete ordering pass costs more
-         than the numeric work its estimate can distinguish for a one-shot
-         lifecycle.  A repeated-update request is different: one extra
-         symbolic comparison can select a cheaper representation for every
-         later numeric, so let it reach the ordinary ordering/BTF tournament.
-         Use the stable minimum-degree baseline only when that comparison
-         cannot be amortized; orientation is still compared independently by
-         the caller.  This is a lifecycle bound, not a matrix family. */
-      const int status = analyze_with_ordering(
-        n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMD,
-        symbolic_out, common_out, separator_out);
-      if (status == KLS_OK) {
-        *selected_ordering_out = KLS_ORDERING_AMD;
-        *score_out = symbolic_score(*symbolic_out);
-      }
-      return status;
-    }
-    goto generic_ordering_tournament;
-  }
-  int small_spiked_ordering_class = 0;
-  small_spiked_ordering_class =
-    is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx);
-  if (options->ordering == KLS_ORDERING_AUTO && n < 49152 &&
-      col_ptr[n] < 262144 && !small_spiked_ordering_class) {
-    /* For tiny sparse systems the ordering competition costs more than the
-       fill deltas it arbitrates.  The nnz cap retains full competition for
-       heavier mid-size systems.  Small spiked systems stay on their
-       downstream AMF rule because AMD can increase fill substantially. */
-    kls_options amd_opts = *options;
-    amd_opts.ordering = KLS_ORDERING_AMD;
-
-    int status = analyze_with_ordering(n, col_ptr, row_idx, &amd_opts,
-                                       KLS_ORDERING_AMD, symbolic_out,
-                                       common_out, separator_out);
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_AMD;
-      *score_out = symbolic_score(*symbolic_out);
-      return KLS_OK;
-    }
-    return status;
-  }
   if (options->ordering != KLS_ORDERING_AUTO) {
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
-                                       options->ordering, symbolic_out,
-                                       common_out, separator_out);
-    if (status == KLS_OK) {
-      *selected_ordering_out = options->ordering;
-      *score_out = symbolic_score(*symbolic_out);
-    }
+    const int status=analyze_with_ordering(n,col_ptr,row_idx,options,
+      options->ordering,symbolic_out,common_out,separator_out);
+    if(status==KLS_OK){*selected_ordering_out=options->ordering;
+      *score_out=symbolic_score(*symbolic_out);}
     return status;
   }
-
-
-
-  if (options->threads == 8 &&
-      is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx)) {
-    /* This class's retained AMMF numeric outperforms AMD despite a slightly
-       higher pre-pivot symbolic fill estimate; skip the redundant AMD pass. */
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
-                                       KLS_ORDERING_AMF, symbolic_out,
-                                       common_out, separator_out);
-    if (status == KLS_OK &&
-        kls_medium_full_diagonal_spike_minfill_symbolic_contract(
-          n, *symbolic_out)) {
-      *selected_ordering_out = KLS_ORDERING_AMF;
-      *score_out = symbolic_score(*symbolic_out);
-      return KLS_OK;
-    }
-    if (*symbolic_out != NULL) {
-      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
-    }
-    kls_separator_analysis_clear(separator_out);
-    /* Preserve the ordinary ordering competition as a recovery path if the
-       deficiency analysis cannot allocate or its symbolic contract rejects
-       the proposal. */
-  }
-
-#ifdef KLS_HAVE_SPRAL_SCALING
-  {
-    /* Block-structured candidates (repeated physics blocks behind dense
-       couplers) get replaced by the factor-time block trial once values
-       confirm the matched diagonal; the ND trials below would be thrown
-       away.  Analyze with AMD only - its estimate doubles as the trial's
-       acceptance baseline. */
-    const int medium_spike_minfill =
-      options->ordering == KLS_ORDERING_AUTO && options->threads == 8 &&
-      is_medium_full_diagonal_spike_minfill_pattern(n, col_ptr, row_idx);
-    if (!medium_spike_minfill &&
-        options->static_pivoting && options->scale <= 0 &&
-        n >= 50000 && n <= 200000 &&
-        col_ptr[n] <= 4000000) {
-      /* Bound the detector: its graph walk is pathological on huge patterns
-         with near-full rows. */
-      /* Below ~50k the ND analyses cost almost nothing and their scores
-         steer orientation/scale heuristics the factor-time trial relies
-         on; only shortcut where the analysis itself is the cost. */
-      UF_long *bs_perm = NULL;
-      UF_long *bs_comp = NULL;
-      if (kls_build_block_structured_order(n, col_ptr, row_idx, &bs_perm,
-                                           &bs_comp)) {
-        free(bs_perm);
-        free(bs_comp);
-        int status = analyze_with_ordering(n, col_ptr, row_idx, options,
-                                           KLS_ORDERING_AMD, symbolic_out,
-                                           common_out, separator_out);
-        if (status == KLS_OK) {
-          *selected_ordering_out = KLS_ORDERING_AMD;
-          *score_out = symbolic_score(*symbolic_out);
-          return KLS_OK;
-        }
+  kls_no_btf_retry_hopeless=0;
+  trilinos_klu_l_symbolic *seed_symbolic=NULL;
+  trilinos_klu_l_common seed_common={0};
+  kls_separator_analysis seed_separator={0};
+  const int seed_status=analyze_with_ordering(n,col_ptr,row_idx,options,
+    KLS_ORDERING_AMD,&seed_symbolic,&seed_common,&seed_separator);
+  int seed_representation_compared = 0;
+  if (seed_status == KLS_OK && seed_symbolic && seed_symbolic->do_btf &&
+      seed_symbolic->nblocks == 1) {
+    /* A congruent permutation has no separate matching coordinate frame.
+       Keep its AMD allocation instead of paying to rediscover that graph. */
+    for (UF_long k = 0; k < n; ++k)
+      if (seed_symbolic->P[k] != seed_symbolic->Q[k]) {
+        seed_representation_compared = 1;
+        break;
       }
-    }
   }
+  kls_options seed_options;
+  if (seed_representation_compared) {
+    /* Preserve the current representation comparison before deciding whether
+       further orderings are worth exploring. A single matched component can
+       still have a substantially better ordering than its unmatched graph.
+       Retain the actual winner instead of inferring one from topology. BTF
+       admission itself is a separate pending generalization step. */
+    double seed_score = symbolic_score(seed_symbolic);
+    maybe_retry_without_btf(n, col_ptr, row_idx, options, KLS_ORDERING_AMD,
+      &seed_symbolic, &seed_common, &seed_score, 1, &seed_separator, NULL);
+    seed_options = *options;
+    seed_options.use_btf = seed_symbolic->do_btf ? 1 : 0;
+    symbolic_options = &seed_options;
+  }
+#ifdef KLS_POLICY_SEED_EVENT
+  KLS_POLICY_SEED_EVENT(seed_symbolic);
 #endif
-
-  if (!kls_analyze_defer_nd && options->threads == 8 &&
-      kls_large_low_degree_fragmented_pattern(n, col_ptr)) {
-    /* The fragmented low-degree class has one moderate BTF core surrounded
-       by scalar blocks.  A tuned NodeND ordering is repaid by its smaller
-       retained factor over the declared refactor/solve horizon. */
-    const int old_tuning_ctx = kls_fragmented_metis_tuning_ctx;
-    kls_fragmented_metis_tuning_ctx = 1;
-    int status = analyze_with_ordering(n, col_ptr, row_idx, options,
-                                       KLS_ORDERING_METIS, symbolic_out,
-                                       common_out, separator_out);
-    kls_fragmented_metis_tuning_ctx = old_tuning_ctx;
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_METIS;
-      *score_out = symbolic_score(*symbolic_out);
-      return KLS_OK;
-    }
-    /* Retain the ordinary AMD/AMF competition as the allocation/failure
-       recovery path. */
+  if(seed_status==KLS_OK && seed_symbolic) {
+    const double lifecycle=kls_policy_numeric_seconds(policy,(double)col_ptr[n],
+      symbolic_score(seed_symbolic),seed_symbolic->est_flops,
+      (double)seed_symbolic->nblocks,
+      (double)options->expected_refactorizations,(double)options->expected_solves);
+    kls_policy_fund(policy,lifecycle);
   }
-
-  const int large_very_low_degree_full_diagonal =
-    is_large_very_low_degree_full_diagonal_pattern(n, col_ptr, row_idx);
-  if (!kls_analyze_defer_nd && large_very_low_degree_full_diagonal) {
-    kls_options metis_options = *options;
-    metis_options.use_btf = 0;
-    const int saved_sparse_full_diagonal_metis_row_ctx =
-      kls_sparse_full_diagonal_metis_row_ctx;
-    kls_sparse_full_diagonal_metis_row_ctx = 0;
-
-    int status = analyze_with_ordering(n, col_ptr, row_idx, &metis_options,
-                                       KLS_ORDERING_METIS, symbolic_out,
-                                       common_out, separator_out);
-    kls_sparse_full_diagonal_metis_row_ctx =
-      saved_sparse_full_diagonal_metis_row_ctx;
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_METIS;
-      double selected_score = symbolic_score(*symbolic_out);
-      *score_out = selected_score;
-      return KLS_OK;
-    }
-  }
-
-  kls_no_btf_retry_hopeless = 0;
-  kls_options auto_options = *options;
-  symbolic_options = options;
-  const int large_spiked_metis_no_btf =
-    is_large_nearly_diagonal_spiked_metis_pattern(n, col_ptr, row_idx);
-  if (should_start_auto_without_btf(n, col_ptr, row_idx, options,
-                                    large_spiked_metis_no_btf)) {
-    auto_options.use_btf = 0;
-    symbolic_options = &auto_options;
-  }
-
-  if (kls_prestatic_ordering_ctx && options->threads >= 3 &&
-      n > 150000u && n <= 750000u && (UF_long)col_ptr[n] <= 8000000 &&
-      !is_large_sparse_diagonal_low_degree_pattern(n, col_ptr, row_idx)) {
-    if (col_ptr[n] < 8 * n) {
-      /* light-column matched pattern: the factor this ordering feeds
-         is bounded by ~1e7-1e8 flops (rajat29's trial: 1.25e7 =
-         0.11s serial), so the METIS/AMF candidates' own analyze cost
-         (~1-2.4s here) can never repay itself.  AMD alone; the
-         pre-static trial's quality gates police a bad draw (their
-         rejection redo rebuilds the full competition). */
-      trilinos_klu_l_symbolic *a_sym = NULL;
-      trilinos_klu_l_common a_common;
-      kls_separator_analysis a_sep;
-      memset(&a_sep, 0, sizeof(a_sep));
-      if (analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
-                                KLS_ORDERING_AMD, &a_sym, &a_common,
-                                &a_sep) == KLS_OK && a_sym != NULL) {
-        *symbolic_out = a_sym;
-        *common_out = a_common;
-        *selected_ordering_out = KLS_ORDERING_AMD;
-        *score_out = symbolic_score(a_sym);
-        kls_separator_analysis_move(separator_out, &a_sep);
-        return KLS_OK;
-      }
-      kls_separator_analysis_clear(&a_sep);
-      /* AMD failed: fall through to the full competition */
-    }
-    /* Pre-static METIS analyzes on this thread so the only legacy
-       libc-rand drawer stays serial, while AMD and AMF analyze on
-       workers.  The comparisons replay in the canonical order at the
-       join with the standard margins (AMF 0.95 vs the AMD base,
-       METIS 0.90 vs the base winner). */
-    struct kls_amf_spec_job amd_job, amf_job;
-    pthread_t amd_tid, amf_tid;
-    memset(&amd_job, 0, sizeof(amd_job));
-    amd_job.n = n; amd_job.col_ptr = col_ptr; amd_job.row_idx = row_idx;
-    amd_job.ordering = KLS_ORDERING_AMD;
-    amd_job.options = *symbolic_options;
-    amd_job.representation_verdict = NULL;
-    amf_job = amd_job; amf_job.ordering = KLS_ORDERING_AMF;
-    const int amd_sp =
-      pthread_create(&amd_tid, NULL, kls_amf_spec_main, &amd_job) == 0;
-    const int amf_sp =
-      pthread_create(&amf_tid, NULL, kls_amf_spec_main, &amf_job) == 0;
-    trilinos_klu_l_symbolic *m_sym = NULL;
-    trilinos_klu_l_common m_common;
-    kls_separator_analysis m_sep;
-    memset(&m_sep, 0, sizeof(m_sep));
-    const int m_status = analyze_with_ordering(n, col_ptr, row_idx,
-                                               symbolic_options,
-                                               KLS_ORDERING_METIS, &m_sym,
-                                               &m_common, &m_sep);
-    if (amd_sp) pthread_join(amd_tid, NULL);
-    if (amf_sp) pthread_join(amf_tid, NULL);
-    trilinos_klu_l_symbolic *b_sym = NULL;
-    trilinos_klu_l_common b_common;
-    kls_separator_analysis b_sep;
-    kls_ordering b_ord = KLS_ORDERING_AMD;
-    double b_score = DBL_MAX;
-    int b_ok = 0;
-    memset(&b_sep, 0, sizeof(b_sep));
-    if (amd_sp && amd_job.status == KLS_OK && amd_job.symbolic != NULL) {
-      b_sym = amd_job.symbolic; b_common = amd_job.common;
-      b_score = amd_job.score; b_ok = 1;
-      kls_separator_analysis_move(&b_sep, &amd_job.separator);
-    }
-    if (amf_sp && amf_job.status == KLS_OK && amf_job.symbolic != NULL) {
-      if (b_ok && isfinite(amf_job.score) && b_score < DBL_MAX &&
-          amf_job.score <= 0.95 * b_score) {
-        trilinos_klu_l_free_symbolic(&b_sym, &b_common);
-        kls_separator_analysis_clear(&b_sep);
-        b_sym = amf_job.symbolic; b_common = amf_job.common;
-        b_ord = KLS_ORDERING_AMF; b_score = amf_job.score;
-        kls_separator_analysis_move(&b_sep, &amf_job.separator);
-      } else if (!b_ok) {
-        b_sym = amf_job.symbolic; b_common = amf_job.common;
-        b_ord = KLS_ORDERING_AMF; b_score = amf_job.score; b_ok = 1;
-        kls_separator_analysis_move(&b_sep, &amf_job.separator);
-      } else {
-        trilinos_klu_l_free_symbolic(&amf_job.symbolic, &amf_job.common);
-        kls_separator_analysis_clear(&amf_job.separator);
-      }
-    }
-    if (m_status == KLS_OK && m_sym != NULL) {
-      const double m_score = symbolic_score(m_sym);
-      if (!b_ok ||
-          (isfinite(m_score) && m_score > 0.0 && b_score < DBL_MAX &&
-           m_score <= 0.90 * b_score)) {
-        if (b_ok) {
-          trilinos_klu_l_free_symbolic(&b_sym, &b_common);
-          kls_separator_analysis_clear(&b_sep);
-        }
-        b_sym = m_sym; b_common = m_common;
-        b_ord = KLS_ORDERING_METIS; b_score = m_score; b_ok = 1;
-        kls_separator_analysis_move(&b_sep, &m_sep);
-      } else {
-        trilinos_klu_l_free_symbolic(&m_sym, &m_common);
-        kls_separator_analysis_clear(&m_sep);
-      }
-    } else {
-      kls_separator_analysis_clear(&m_sep);
-    }
-    if (b_ok) {
-      *symbolic_out = b_sym;
-      *common_out = b_common;
-      *selected_ordering_out = b_ord;
-      *score_out = b_score;
-      kls_separator_analysis_move(separator_out, &b_sep);
-      return KLS_OK;
-    }
-    /* every candidate failed: fall through to the standard path */
-  }
-
-  if (n <= 49152u && !kls_analyze_defer_nd &&
-      kls_analyze_nd_race_solver != NULL &&
-      kls_analyze_nd_race_solver->metis_race != NULL &&
-      should_start_auto_with_metis(n, col_ptr, row_idx,
-                                   large_spiked_metis_no_btf)) {
-    /* The background race covers the NodeND trial for this small
-       METIS-start matrix: deficiency ordering carries the first numeric
-       while factor-time promotion arbitrates the NodeND comparison. */
-    int amf_status = analyze_with_ordering(
-      n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
-      symbolic_out, common_out, separator_out);
-    if (amf_status == KLS_OK) {
-      const double amf_score = symbolic_score(*symbolic_out);
-      if (isfinite(amf_score) && amf_score > 0.0 &&
-          amf_score < DBL_MAX / 4.0) {
-        *selected_ordering_out = KLS_ORDERING_AMF;
-        *score_out = amf_score;
-        return KLS_OK;
-      }
-      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
-      kls_separator_analysis_clear(separator_out);
-    }
-  }
-  if (!kls_analyze_defer_nd &&
-      !(kls_analyze_nd_race_solver != NULL &&
-        kls_analyze_nd_race_solver->metis_race != NULL) &&
-      should_start_auto_with_metis(n, col_ptr, row_idx,
-                                   large_spiked_metis_no_btf)) {
-    if (n <= 30000u &&
-        is_small_spiked_low_diagonal_pattern(n, col_ptr, row_idx)) {
-      /* For small fused dense blocks behind spikes, try deficiency ordering
-         before nested dissection.  Fall through if AMF fails. */
-      int amf_status = analyze_with_ordering(
-        n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
-        symbolic_out, common_out, separator_out);
-      if (amf_status == KLS_OK) {
-        const double amf_score = symbolic_score(*symbolic_out);
-        if (isfinite(amf_score) && amf_score > 0.0 &&
-            amf_score < DBL_MAX / 4.0) {
-          *selected_ordering_out = KLS_ORDERING_AMF;
-          *score_out = amf_score;
-          return KLS_OK;
-        }
-        trilinos_klu_l_free_symbolic(symbolic_out, common_out);
-        kls_separator_analysis_clear(separator_out);
-      }
-    }
-    int status = analyze_with_ordering(n, col_ptr, row_idx, symbolic_options,
-                                       KLS_ORDERING_METIS, symbolic_out,
-                                       common_out, separator_out);
-    if (status == KLS_OK) {
-      *selected_ordering_out = KLS_ORDERING_METIS;
-      double selected_score = symbolic_score(*symbolic_out);
-      if (!metis_start_should_skip_no_btf_retry(n, col_ptr, row_idx)) {
-        maybe_retry_without_btf(n, col_ptr, row_idx, symbolic_options,
-                                KLS_ORDERING_METIS, symbolic_out, common_out,
-                                &selected_score, 0, separator_out, NULL);
-      }
-      if (n <= 30000u) {
-        /* At this size, cheaply promote deficiency ordering only under the
-           strict estimate margin. */
-        maybe_promote_symbolic_ordering(
-          n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_AMF,
-          symbolic_out, common_out, selected_ordering_out,
-          &selected_score, 0.90, separator_out);
-      }
-#ifdef KLS_HAVE_SCOTCH
-      if (should_try_symbolic_nested_dissection_before_numeric(
-            n, *symbolic_out, *selected_ordering_out, KLS_ORDERING_SCOTCH,
-            selected_score)) {
-        maybe_promote_symbolic_ordering(
-          n, col_ptr, row_idx, symbolic_options, KLS_ORDERING_SCOTCH,
-          symbolic_out, common_out, selected_ordering_out,
-          &selected_score, 0.90, separator_out);
-      }
-#endif
-      *score_out = selected_score;
-      return KLS_OK;
-    }
-  }
-
-generic_ordering_tournament:;
   struct kls_amf_spec_job amf_spec[3];
   pthread_t amf_spec_tid[3];
   int amf_spec_spawned[3] = {0, 0, 0};
@@ -13131,7 +11891,7 @@ generic_ordering_tournament:;
   const double no_btf_lifecycle_work =
     (double)col_ptr[n] * requested_numeric_horizon;
   const int parallel_no_btf_trial_wanted =
-    symbolic_options->use_btf && n >= 4000u &&
+    !seed_representation_compared && symbolic_options->use_btf && n >= 4000u &&
     kls_repeated_update_workload(options) && options->threads >= 4 &&
     (!broad_amf_portfolio || options->threads >= 8) &&
     n <= 1000000u && col_ptr[n] <= 8000000u &&
@@ -13149,6 +11909,20 @@ generic_ordering_tournament:;
     !kls_matched_low_pair_ordering_ctx;
   const int amf_spec_count = amf3_span_portfolio ? 3 :
     (broad_amf_portfolio ? 2 : 1);
+  const double policy_estimate=policy?kls_policy_graph_seconds(policy,
+    (double)n,(double)col_ptr[n],column_pair_work)*(amf_spec_count+1):0;
+  const int policy_reserved=seed_status==KLS_OK && seed_symbolic &&
+    kls_policy_reserve(policy,policy_estimate);
+  const int policy_admitted=seed_status!=KLS_OK || !seed_symbolic || policy_reserved;
+  if(!policy_admitted) {
+#ifdef KLS_POLICY_REUSE_EVENT
+    KLS_POLICY_REUSE_EVENT(seed_symbolic);
+#endif
+    *symbolic_out=seed_symbolic;*common_out=seed_common;
+    *selected_ordering_out=KLS_ORDERING_AMD;*score_out=symbolic_score(seed_symbolic);
+    kls_separator_analysis_move(separator_out,&seed_separator);return KLS_OK;
+  }
+  const double policy_start=kls_now_seconds();
   atomic_int generic_representation_verdict;
   atomic_init(&generic_representation_verdict,
               !symbolic_options->use_btf ? 2 : 0);
@@ -13229,15 +12003,14 @@ generic_ordering_tournament:;
   }
   const kls_ordering candidates[] = {KLS_ORDERING_AMD, KLS_ORDERING_COLAMD};
   const size_t candidate_count = 1u;
-  trilinos_klu_l_symbolic *best_symbolic = NULL;
-  trilinos_klu_l_common best_common;
+  trilinos_klu_l_symbolic *best_symbolic = seed_symbolic;
+  trilinos_klu_l_common best_common = seed_common;
   kls_ordering best_ordering = KLS_ORDERING_AMD;
-  double best_score = 0.0;
-  kls_separator_analysis best_separator;
-  memset(&best_separator, 0, sizeof(best_separator));
-  int any_ok = 0;
+  double best_score = seed_symbolic?symbolic_score(seed_symbolic):0;
+  kls_separator_analysis best_separator = seed_separator;
+  int any_ok = seed_status==KLS_OK && seed_symbolic!=NULL;
 
-  for (size_t i = 0; i < candidate_count; ++i) {
+  for (size_t i = 0; !any_ok && i < candidate_count; ++i) {
     trilinos_klu_l_symbolic *candidate_symbolic = NULL;
     trilinos_klu_l_common candidate_common;
     kls_separator_analysis candidate_separator;
@@ -13327,6 +12100,7 @@ generic_ordering_tournament:;
       kls_separator_analysis_clear(
         &aligned_btf_ammf_spec.separator);
     }
+    if(policy_reserved)kls_policy_charge(policy,policy_estimate,kls_now_seconds()-policy_start);
     return KLS_ERR_ANALYZE_FAILED;
   }
 
@@ -13364,7 +12138,7 @@ generic_ordering_tournament:;
       !isfinite(settled_base_lifecycle) ||
       settled_base_lifecycle <= 0.0 ||
       column_pair_work < 0.90 * settled_base_lifecycle);
-    if (cache_challenger_economic) {
+    if (cache_challenger_economic && !seed_representation_compared) {
       maybe_retry_without_btf(
         n, col_ptr, row_idx, symbolic_options, best_ordering,
         &best_symbolic, &best_common, &best_score, 1, &best_separator,
@@ -13736,9 +12510,6 @@ generic_ordering_tournament:;
      multiply it by the orientation candidates and let an optimistic
      symbolic estimate install a pivot-inflated numeric. */
 
-#ifdef KLS_HAVE_SCOTCH
-
-#endif
 
   /* Generic AUTO already settled BTF/no-BTF once on the base graph and
      aligned every ordering candidate to that representation.  Repeating the
@@ -13751,6 +12522,7 @@ generic_ordering_tournament:;
   *selected_ordering_out = best_ordering;
   *score_out = best_score;
   kls_separator_analysis_move(separator_out, &best_separator);
+  if(policy_reserved)kls_policy_charge(policy,policy_estimate,kls_now_seconds()-policy_start);
   return KLS_OK;
 }
 
@@ -13803,12 +12575,12 @@ static _Thread_local int kls_ps_ana_probe_disable;
    Carry a detected block-order proposal through the recursive AMD-placeholder
    call without sharing ownership between those threads.  analyze_candidate
    immediately moves this pointer into its candidate. */
-static _Thread_local UF_long *kls_block_order_proposal;
 
 static int choose_symbolic_for_pattern(UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx,
                                        const kls_options *options,
+                                       kls_policy_context *policy,
                                        trilinos_klu_l_symbolic **symbolic_out,
                                        trilinos_klu_l_common *common_out,
                                        kls_ordering *selected_ordering_out,
@@ -13945,29 +12717,6 @@ static int choose_symbolic_for_pattern(UF_long n,
      (double)(n - generic_pattern_diagonal) *
          (1.0 + (double)options->expected_refactorizations) >=
        4.0 * (double)col_ptr[n]);
-  /* The cheap NATURAL probe avoids an ordering that value-aware matching
-     normally replaces.  The compact proposal still has to prove a dominant
-     SCC here, then match coverage and numeric quality at factor time. */
-  if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
-      is_medium_sparse_full_diagonal_amd_pattern(n, col_ptr, row_idx)) {
-    kls_options amd_options = *options;
-    amd_options.ordering = KLS_ORDERING_AMD;
-    const int status = choose_symbolic_for_pattern(
-      n, col_ptr, row_idx, &amd_options, symbolic_out, common_out,
-      selected_ordering_out, score_out, separator_out);
-    if (status == KLS_OK &&
-        kls_medium_sparse_full_diagonal_amd_symbolic_contract(
-          n, col_ptr, row_idx, *symbolic_out)) {
-      return KLS_OK;
-    }
-    if (*symbolic_out != NULL) {
-      trilinos_klu_l_free_symbolic(symbolic_out, common_out);
-    }
-    kls_separator_analysis_clear(separator_out);
-    *score_out = DBL_MAX;
-    /* A topology proposal is never authoritative: allocation failure or a
-       rejected AMD symbolic resumes the complete AUTO selection below. */
-  }
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
       options->static_pivoting && options->use_btf &&
       !kls_prestatic_ordering_ctx && !kls_ps_ana_probe_disable &&
@@ -14010,28 +12759,46 @@ static int choose_symbolic_for_pattern(UF_long n,
     }
   }
   if (options != NULL && options->ordering == KLS_ORDERING_AUTO &&
-      options->static_pivoting && n <= 200000 && n >= 64 &&
-      col_ptr[n] <= 2000000) {
-    /* Block-structured systems adopt their factor-time trial ordering; avoid
-       redundant scoring here.  This is a pattern-only detector. */
-    UF_long *bs_perm = NULL, *bs_comp = NULL;
-    if (kls_build_block_structured_order(n, col_ptr, row_idx, &bs_perm,
-                                         &bs_comp)) {
-      free(bs_comp);
-      free(kls_block_order_proposal);
-      kls_block_order_proposal = bs_perm;
-      kls_options amd_opts = *options;
-      amd_opts.ordering = KLS_ORDERING_AMD;
-      /* Block ordering supersedes BTF, avoiding its unnecessary maximum
-         transversal. */
-      amd_opts.use_btf = 0;
-      return choose_symbolic_for_pattern(n, col_ptr, row_idx, &amd_opts,
-                                         symbolic_out, common_out,
-                                         selected_ordering_out, score_out,
-                                         separator_out);
+      options->static_pivoting && n >= 10000u && n <= 200000u &&
+      col_ptr[n] <= 2000000u) {
+    /* Keep the current baseline proposal domain and selection protocol.
+       Optional budget admission of only one orientation can otherwise compare
+       a disposable placeholder to the other side's real BTF candidate. The
+       separate block/matching stage must qualify that protocol change first. */
+    kls_block_order_checked = 1;
+    UF_long *permutation = NULL, *components = NULL;
+#ifdef KLS_POLICY_BLOCK_EVENT
+    KLS_POLICY_BLOCK_EVENT();
+#endif
+    const int found = kls_build_block_structured_order(n, col_ptr, row_idx,
+                                                        &permutation, &components);
+    free(components);
+    if (found) {
+      kls_options direct_options = *options;
+      direct_options.ordering = KLS_ORDERING_AMD;
+      direct_options.use_btf = 0;
+      const int status = analyze_with_ordering(n, col_ptr, row_idx,
+        &direct_options, KLS_ORDERING_AMD, symbolic_out, common_out,
+        separator_out);
+#ifdef KLS_POLICY_SEED_EVENT
+      KLS_POLICY_SEED_EVENT(*symbolic_out);
+#endif
+      if (status == KLS_OK && *symbolic_out != NULL) {
+        free(kls_block_order_proposal);
+        kls_block_order_proposal = permutation;
+        *selected_ordering_out = KLS_ORDERING_AMD;
+        *score_out = symbolic_score(*symbolic_out);
+        kls_policy_fund(policy, kls_policy_numeric_seconds(policy,
+          (double)col_ptr[n], *score_out, (*symbolic_out)->est_flops,
+          (double)(*symbolic_out)->nblocks,
+          (double)options->expected_refactorizations,
+          (double)options->expected_solves));
+        return KLS_OK;
+      }
+      free(permutation);
     }
   }
-  return kls_choose_symbolic_inner(n, col_ptr, row_idx, options,
+  return kls_choose_symbolic_inner(n, col_ptr, row_idx, options, policy,
                                    symbolic_out, common_out,
                                    selected_ordering_out, score_out,
                                    separator_out);
@@ -14296,7 +13063,7 @@ static int kls_auto_exact_improves(double fill,double work,UF_long depth,
 static void kls_auto_exact_candidate(kls_pattern_candidate *c,const kls_options *o) {
   if(c->auto_amf_exact || o->ordering!=KLS_ORDERING_AUTO ||
      o->backend!=KLS_BACKEND_AUTO || o->threads<1 || o->threads>64 ||
-     o->tuning_profile_path || kls_prestatic_ordering_ctx ||
+     (o->tuning_profile_path && !kls_policy_model_only(c->policy)) || kls_prestatic_ordering_ctx ||
      kls_matched_low_pair_ordering_ctx || !c->symbolic ||
      c->symbolic->nblocks!=1 || c->n<=1 || c->n>UINT16_MAX ||
      !isfinite(c->symbolic->est_flops) ||
@@ -14336,6 +13103,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
        do not compute or publish any of the archived input-family contexts:
        the ordering tournament consumes realized symbolic scores directly. */
     KLS_FREE_AND_NULL(kls_block_order_proposal);
+    kls_block_order_checked = 0;
     kls_amf3_span_variant_selected = 0;
     kls_amf3_exact_selected = 0;
     candidate->auto_amf_exact=0;candidate->auto_amf_analysis_seconds=0;
@@ -14355,7 +13123,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_generic_btf_capture_candidate = candidate;
     const int status = choose_symbolic_for_pattern(
       candidate->n, candidate->col_ptr, candidate->row_idx, options,
-      &candidate->symbolic, &candidate->common,
+      candidate->policy, &candidate->symbolic, &candidate->common,
       &candidate->selected_ordering, &candidate->score,
       &candidate->separator);
     kls_generic_btf_capture_candidate = saved_capture;
@@ -14370,6 +13138,7 @@ static int analyze_candidate(kls_pattern_candidate *candidate,
     kls_amf3_span_variant_selected = 0;
     free(candidate->block_order_perm);
     candidate->block_order_perm = kls_block_order_proposal;
+    candidate->block_order_checked = kls_block_order_checked;
     kls_block_order_proposal = NULL;
     return status;
   }
@@ -14389,12 +13158,6 @@ static void *kls_candidate_analyze_main(void *arg) {
   job->status = analyze_candidate(job->candidate, job->options);
   kls_analyze_defer_nd = 0;
   return NULL;
-}
-
-static int auto_orientation_prefers_transpose(UF_long n) {
-  /* On small and medium SPICE-like matrices, the second symbolic analysis
-     usually costs more than the normal-vs-transpose fill estimate saves. */
-  return n <= 30000;
 }
 
 /* Compare representations over the caller's stated lifecycle, rather than
@@ -14538,26 +13301,6 @@ static int select_candidate_inner(kls_pattern_candidate *normal,
     return status;
   }
 
-  {
-    goto generic_orientation_comparison;
-  }
-
-  if (transpose != NULL && auto_orientation_prefers_transpose(transpose->n)) {
-    const int transpose_status = analyze_candidate(transpose, options);
-    if (transpose_status == KLS_OK) {
-      *chosen_out = transpose;
-      return KLS_OK;
-    }
-    if (normal != NULL) {
-      const int normal_status = analyze_candidate(normal, options);
-      if (normal_status == KLS_OK) {
-        *chosen_out = normal;
-        return KLS_OK;
-      }
-    }
-    return transpose_status;
-  }
-generic_orientation_comparison:
   if (normal == NULL || transpose == NULL) {
     kls_pattern_candidate *candidate = normal != NULL ? normal : transpose;
     if (candidate == NULL) {
@@ -14689,7 +13432,10 @@ static int kls_candidate_symmetric_union_is_bounded(
 static int select_candidate(kls_pattern_candidate *normal,
                             kls_pattern_candidate *transpose,
                             const kls_options *options,
-                            kls_pattern_candidate **chosen_out) {
+                            kls_pattern_candidate **chosen_out,
+                            kls_policy_context *policy) {
+  if(normal)normal->policy=policy;
+  if(transpose)transpose->policy=policy;
   {
     kls_options direct_options;
     const kls_options *generic_options = options;
@@ -14808,35 +13554,6 @@ static int select_candidate(kls_pattern_candidate *normal,
     return status;
   }
 
-  /* A pre-static trial replaces the analyze-time symbolic at factor time, so
-     defer nested dissection during analyze.  On rejection, the normal
-     factor-time race can recover it under timed acceptance. */
-  kls_pattern_candidate *ref = normal != NULL ? normal : transpose;
-  int defer = 0;
-  if (ref != NULL && options != NULL && options->static_pivoting &&
-      options->ordering == KLS_ORDERING_AUTO &&
-      ref->n > 150000u && ref->n <= 750000u && ref->nnz <= 8000000u &&
-      !is_large_sparse_diagonal_low_degree_pattern(ref->n, ref->col_ptr,
-                                                   ref->row_idx) &&
-      !kls_large_low_degree_fragmented_pattern(ref->n, ref->col_ptr) &&
-      !is_large_very_low_degree_full_diagonal_pattern(
-        ref->n, ref->col_ptr, ref->row_idx)) {
-    defer = 1;
-  }
-  const int saved = kls_analyze_defer_nd;
-  if (defer) {
-    kls_analyze_defer_nd = 1;
-  }
-  /* the pre-static adoption forces the NORMAL orientation for this
-     class, overriding whatever the two-orientation comparison picks:
-     skip the transpose side entirely (a class member that fails the
-     pre-static trial falls back to the normal orientation - correct,
-     at worst slower, and policed by the same measured acceptance) */
-  const int status = select_candidate_inner(
-    normal, defer && normal != NULL ? NULL : transpose, options,
-    chosen_out);
-  kls_analyze_defer_nd = saved;
-  return status;
 }
 
 #include "kls_small_btf_ordering.inc"
@@ -14893,6 +13610,7 @@ static void adopt_candidate(kls_solver *solver, kls_pattern_candidate *candidate
   solver->generic_nd_fallback_flops = candidate->generic_nd_fallback_flops;
   free(solver->block_order_perm);
   solver->block_order_perm = candidate->block_order_perm;
+  solver->block_order_checked = candidate->block_order_checked;
   candidate->block_order_perm = NULL;
   {
     candidate->col_ptr = NULL;

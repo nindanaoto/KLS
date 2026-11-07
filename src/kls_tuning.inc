@@ -36,6 +36,17 @@
 #define KLS_COMPACT_CYCLE_MIN_RELATIVE_SAVING 0.02
 #define KLS_COMPACT_CYCLE_MIN_SECONDS_SAVED 1.0e-6
 #define KLS_COMPACT_CYCLE_PREPARATION_PAYBACK 2.0
+/* Portable seconds per operation for bounded AUTO exploration. Optional
+ * synthetic calibration overrides these rates, never correctness gates. */
+#define KLS_POLICY_SCAN_SECONDS 1.0e-9
+#define KLS_POLICY_PAIR_SECONDS 4.0e-9
+#define KLS_POLICY_SORT_SECONDS 2.0e-9
+#define KLS_POLICY_FLOP_SECONDS 2.0e-10
+#define KLS_POLICY_ENTRY_SECONDS 3.0e-9
+#define KLS_POLICY_SOLVE_ENTRY_SECONDS 2.0e-9
+#define KLS_POLICY_COPY_ENTRY_SECONDS 1.0e-9
+#define KLS_POLICY_DISPATCH_SECONDS 5.0e-8
+#define KLS_POLICY_EXPLORATION_FRACTION 0.02
 /* One bounded grouping search and four paired lifecycle samples. */
 #define KLS_SNB_GROUP_SAMPLES 4
 /* Total speculative allowance relative to observed or caller-estimated work.
@@ -116,3 +127,6 @@
 
 /* Bounded initial consultation allowance in successful call equivalents. */
 #define KLS_SNB_AUTO_EARLY_CALL_ALLOWANCE 8.0
+
+/* Maximum transient storage for an optional graph representation. */
+#define KLS_POLICY_GRAPH_WORKSPACE_BYTES (128.0 * 1024.0 * 1024.0)

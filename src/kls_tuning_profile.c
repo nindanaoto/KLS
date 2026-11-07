@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include "kls_tuning_profile.h"
 #include "kls/kls.h"
@@ -13,6 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sched.h>
+#endif
 #if defined(__x86_64__) || defined(__i386__)
 #include <cpuid.h>
 #endif
@@ -231,6 +235,76 @@ static int kls_tuning_consistent(const kls_tuning_values *v) {
          v->solve_trapezoid_slices >= 2u;
 }
 
+static const char *const kls_policy_names[KLS_POLICY_COST_COUNT]={
+  "policy_scan","policy_pair","policy_sort","policy_flop","policy_entry",
+  "policy_solve_entry","policy_copy_entry","policy_dispatch",
+  "policy_factor_flop","policy_factor_entry","policy_factor_dispatch",
+  "policy_first_refactor_entry"};
+
+uint64_t kls_tuning_policy_cache_bytes(void) {
+#ifdef __linux__
+  cpu_set_t pending; CPU_ZERO(&pending);
+  if (sched_getaffinity(0, sizeof pending, &pending)) return 0;
+  uint64_t minimum = UINT64_MAX;
+  for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) if (CPU_ISSET(cpu, &pending)) {
+    char path[160], line[512];
+    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/cache/index3/size", cpu);
+    FILE *f = fopen(path, "r"); if (!f) return 0;
+    int ok = fgets(line, sizeof line, f) != NULL; fclose(f); if (!ok) return 0;
+    char *end = NULL; errno = 0;
+    unsigned long long size = strtoull(line, &end, 10);
+    if (errno || !size || (*end != 'K' && *end != 'M')) return 0;
+    const uint64_t scale = *end == 'K' ? 1024u : 1024u * 1024u;
+    if (size > UINT64_MAX / scale) return 0;
+    const uint64_t bytes = size * scale;
+    if (bytes < minimum) minimum = bytes;
+    CPU_CLR(cpu, &pending);
+    /* Members of one shared cache have the same capacity. Read each cache
+       once per call, while still respecting a changed caller affinity. No
+       learned policy or affinity-sensitive result is cached globally. */
+    snprintf(path, sizeof path,
+      "/sys/devices/system/cpu/cpu%d/cache/index3/shared_cpu_list", cpu);
+    f = fopen(path, "r"); if (!f) continue;
+    ok = fgets(line, sizeof line, f) != NULL; fclose(f);
+    if (!ok || !strchr(line, '\n')) continue;
+    cpu_set_t shared; CPU_ZERO(&shared);
+    const char *at = line;
+    while (*at && *at != '\n') {
+      errno = 0; long first = strtol(at, &end, 10);
+      if (errno || end == at || first < 0 || first >= CPU_SETSIZE) break;
+      at = end; long last = first;
+      if (*at == '-') {
+        ++at; errno = 0; last = strtol(at, &end, 10);
+        if (errno || end == at || last < first || last >= CPU_SETSIZE) break;
+        at = end;
+      }
+      if (*at != ',' && *at != '\n' && *at) break;
+      for (long member = first; member <= last; ++member) CPU_SET((int)member, &shared);
+      if (*at == ',') ++at;
+    }
+    if (*at == '\n' || !*at)
+      for (int member = 0; member < CPU_SETSIZE; ++member)
+        if (CPU_ISSET(member, &shared)) CPU_CLR(member, &pending);
+  }
+  return minimum == UINT64_MAX ? 0 : minimum;
+#else
+  return 0;
+#endif
+}
+
+static int kls_policy_model_valid(const kls_policy_cost_model *p) {
+  if(!p || !p->enabled)return 1;
+  if(p->enabled!=1 || !p->cache_bytes ||
+      p->cache_bytes!=kls_tuning_policy_cache_bytes())return 0;
+  for(int i=0;i<KLS_POLICY_COST_COUNT;++i)
+    if(!isfinite(p->seconds[i]) || p->seconds[i]<0)return 0;
+  return p->seconds[KLS_POLICY_SCAN]+p->seconds[KLS_POLICY_PAIR]>0 &&
+    p->seconds[KLS_POLICY_FLOP]+p->seconds[KLS_POLICY_ENTRY]>0 &&
+    p->seconds[KLS_POLICY_FACTOR_FLOP]+p->seconds[KLS_POLICY_FACTOR_ENTRY]>0 &&
+    p->seconds[KLS_POLICY_SOLVE_ENTRY]>0 && p->seconds[KLS_POLICY_COPY_ENTRY]>0 &&
+    p->seconds[KLS_POLICY_SORT]>0;
+}
+
 int kls_tuning_load_host_profile(const char *path, int threads,
                                  kls_tuning_values *values,
                                  kls_tuning_metadata *metadata) {
@@ -242,6 +316,9 @@ int kls_tuning_load_host_profile(const char *path, int threads,
   kls_snb_cost_model cost = {0};
   unsigned cost_seen = 0;
   int cost_version_seen = 0;
+  kls_policy_cost_model policy={0};
+  unsigned policy_seen=0;
+  int policy_version_seen=0,policy_cache_seen=0;
   kls_tuning_defaults(&candidate);
   unsigned char seen[sizeof(kls_tuning_fields) / sizeof(kls_tuning_fields[0])] = {0};
   int format_seen = 0, build_seen = 0, cpu_seen = 0, threads_seen = 0;
@@ -281,9 +358,24 @@ int kls_tuning_load_host_profile(const char *path, int threads,
     } else if (strcmp(line, "snb_cost_version") == 0) {
       if (cost_version_seen++ || strcmp(value,"1") || threads != 1) goto fail;
       cost.enabled=1;
+    } else if(strcmp(line,"policy_cost_version")==0) {
+      if(policy_version_seen++ || strcmp(value,"1"))goto fail;
+      policy.enabled=1;
+    } else if(strcmp(line,"policy_cache_bytes")==0) {
+      char *end=NULL;errno=0;
+      unsigned long long bytes=strtoull(value,&end,10);
+      if(policy_cache_seen++ || errno || !*value || *value=='-' || *end || !bytes)goto fail;
+      policy.cache_bytes=bytes;
     } else {
       int result = kls_set_field(&candidate, line, value, seen);
       if (result < 0) result = kls_set_cost_field(&cost, line, value, &cost_seen);
+      if(result<0)for(int i=0;i<KLS_POLICY_COST_COUNT;++i)
+        if(!strcmp(line,kls_policy_names[i])) {
+          char *end=NULL;errno=0;double v=strtod(value,&end);
+          if((policy_seen&(1u<<i)) || errno || end==value || *end ||
+             !isfinite(v) || v<0)goto fail;
+          policy.seconds[i]=v;policy_seen|=1u<<i;result=1;break;
+        }
       if (result <= 0) goto fail;
     }
   }
@@ -293,13 +385,18 @@ int kls_tuning_load_host_profile(const char *path, int threads,
   if (!format_seen || !build_seen || !cpu_seen || !threads_seen || !seed_seen ||
       !checksum_seen || hash != expected_hash || !kls_tuning_consistent(&candidate) ||
       (cost_version_seen ? cost_seen != (1u<<KLS_COST_FIELD_COUNT)-1u : cost_seen != 0) ||
+      (policy_version_seen ? (!policy_cache_seen || policy_seen!=(1u<<KLS_POLICY_COST_COUNT)-1u)
+                           : (policy_cache_seen || policy_seen)) ||
+      !kls_policy_model_valid(&policy) ||
       !kls_cost_model_valid(&cost))
     return KLS_ERR_TUNING_PROFILE;
   *values = candidate;
-  *metadata = (kls_tuning_metadata){hash,
-                                    kls_tuning_changed_fields(&candidate) +
-                                      (cost.enabled ? (int)KLS_COST_FIELD_COUNT : 0),
-                                    threads, cost};
+  *metadata = (kls_tuning_metadata){.profile_id=hash,
+    .field_count=kls_tuning_changed_fields(&candidate)+
+      (cost.enabled?(int)KLS_COST_FIELD_COUNT:0)+
+      (policy.enabled?KLS_POLICY_COST_COUNT:0),
+    .threads=threads,.snb_cost=cost,.policy_cost=policy,
+    .kernel_overrides=kls_tuning_changed_fields(&candidate)+(cost.enabled!=0)};
   return KLS_OK;
 fail:
   fclose(file);
@@ -320,13 +417,15 @@ int kls_tuning_write_host_profile(const char *path, int threads,
   return kls_tuning_write_host_profile_model(path,threads,values,NULL,seed,force,metadata);
 }
 
-int kls_tuning_write_host_profile_model(const char *path, int threads,
+static int kls_tuning_write_profile(const char *path, int threads,
                                   const kls_tuning_values *values,
                                   const kls_snb_cost_model *model,
+                                  const kls_policy_cost_model *policy,
                                   unsigned long long seed, int force,
                                   kls_tuning_metadata *metadata) {
   if (path == NULL || values == NULL || threads <= 0 ||
       !kls_tuning_consistent(values) || !kls_cost_model_valid(model) ||
+      !kls_policy_model_valid(policy) ||
       (model != NULL && model->enabled && threads != 1)) return KLS_ERR_INVALID_ARGUMENT;
   if (!force && access(path, F_OK) == 0) return KLS_ERR_TUNING_PROFILE;
   char temp[4096];
@@ -359,6 +458,12 @@ int kls_tuning_write_host_profile_model(const char *path, int threads,
       EMIT("%s=%.17g\n",kls_cost_fields[i].name,value);
     }
   }
+  if(policy && policy->enabled) {
+    EMIT("policy_cost_version=1\n");
+    EMIT("policy_cache_bytes=%" PRIu64 "\n",policy->cache_bytes);
+    for(int i=0;i<KLS_POLICY_COST_COUNT;++i)
+      EMIT("%s=%.17g\n",kls_policy_names[i],policy->seconds[i]);
+  }
   if (fprintf(f, "checksum=%016" PRIx64 "\n", hash) < 0 ||
       fflush(f) != 0 || fsync(fileno(f)) != 0 || fclose(f) != 0) {
     f = NULL; goto write_fail;
@@ -370,14 +475,30 @@ int kls_tuning_write_host_profile_model(const char *path, int threads,
     if (link(temp, path) != 0 || unlink(temp) != 0) goto write_fail;
   }
   if (metadata != NULL)
-    *metadata = (kls_tuning_metadata){hash,
-                                      kls_tuning_changed_fields(values) +
-                                        (model && model->enabled ? (int)KLS_COST_FIELD_COUNT : 0),
-                                      threads, model ? *model : (kls_snb_cost_model){0}};
+    *metadata = (kls_tuning_metadata){.profile_id=hash,
+      .field_count=kls_tuning_changed_fields(values)+
+        (model&&model->enabled?(int)KLS_COST_FIELD_COUNT:0)+
+        (policy&&policy->enabled?KLS_POLICY_COST_COUNT:0),
+      .threads=threads,.snb_cost=model?*model:(kls_snb_cost_model){0},
+      .policy_cost=policy?*policy:(kls_policy_cost_model){0},
+      .kernel_overrides=kls_tuning_changed_fields(values)+(model&&model->enabled)};
   return KLS_OK;
 write_fail:
   if (f != NULL) fclose(f);
   unlink(temp);
   return KLS_ERR_TUNING_PROFILE;
 #undef EMIT
+}
+
+int kls_tuning_write_host_profile_model(const char *path,int threads,
+    const kls_tuning_values *values,const kls_snb_cost_model *model,
+    unsigned long long seed,int force,kls_tuning_metadata *metadata) {
+  return kls_tuning_write_profile(path,threads,values,model,NULL,seed,force,metadata);
+}
+
+int kls_tuning_write_policy_profile(const char *path,int threads,
+    const kls_policy_cost_model *model,unsigned long long seed,int force) {
+  if(!model || !model->enabled)return KLS_ERR_INVALID_ARGUMENT;
+  kls_tuning_values values;kls_tuning_defaults(&values);
+  return kls_tuning_write_profile(path,threads,&values,NULL,model,seed,force,NULL);
 }

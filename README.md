@@ -103,12 +103,14 @@ tests, recovery policy, and measured control overhead.
 
 ## AUTO policy
 
-The production `AUTO` path is matrix-family agnostic. It compares affordable
+The `AUTO` path compares affordable
 orientation, ordering, BTF, matching, scaling, and numeric candidates, then
 uses realized fill, factor work, pivot behavior, residual checks, dependency
 parallelism, and timed recurring kernels to retain a choice. Small problems
-use resource-based amortization floors so candidate setup cannot dominate the
-numeric work. Fixed-width index limits and storage prerequisites remain hard
+use resource-based amortization floors to limit candidate setup. The active
+shortcut inventory and staged generalization status are recorded in
+[the qualification record](docs/generalization.md); this work does not yet
+establish generalization of every remaining empirical admission rule. Fixed-width index limits and storage prerequisites remain hard
 capability gates.
 
 In particular, a retained row-matched factor can compare both minimum-degree
@@ -186,6 +188,11 @@ When a recurring solve contract needs a snapshot of the current coefficient
 values, an already-active numeric worker pool also copies disjoint value
 slices while completing the refactor.
 
+The unreachable historical ordering, orientation, and METIS refinement
+branches and their unused classifier helpers have been removed from the
+implementation. Active structural proposals still exist and must be assessed
+separately from those removed branches.
+
 Many later sections in this README document the development history of the
 removed profile selectors. Unless a section explicitly describes a capability-
 or measurement-based default, treat its named AUTO policy as historical
@@ -210,6 +217,11 @@ support, independently of the optional mt-METIS build. Without OpenMP, it
 retains the stateless certificate with the same accuracy requirement.
 
 ### CPU tuning profiles
+
+AUTO uses the generalized AMD admission policy by default. The superseded AMD
+and block-detector implementations have been removed. `kls-autotune --policy-only`
+provides optional synthetic cost calibration. Remaining generalization work and
+performance evidence are recorded in [the qualification record](docs/generalization.md).
 
 KLS uses portable thresholds unless an application supplies a profile. On
 Linux x86-64, the installed tool calibrates hardware-sensitive crossover

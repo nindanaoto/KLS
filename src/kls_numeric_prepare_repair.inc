@@ -10649,16 +10649,6 @@ static double kls_row_refactor_group_work(const kls_solver *solver,
   return kls_row_refactor_compute_group_work(solver, group);
 }
 
-/* Dense-spiked separator chains also incur fixed per-group scheduling
-   overhead. Keep that default estimate alongside the symbolic work model. */
-static double kls_row_refactor_separator_schedule_work(
-  const kls_solver *solver,
-  UF_long group,
-  int include_overhead) {
-  const double work = kls_row_refactor_group_work(solver, group);
-  return include_overhead ? work + 2000.0 : work;
-}
-
 static int kls_sort_row_refactor_group_list_by_work(
   const kls_solver *solver,
   UF_long *groups,
@@ -11198,8 +11188,6 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
 
   const UF_long group_count = solver->row_refactor_group_count;
   const UF_long component_count = solver->separator.component_count;
-  const int include_group_overhead =
-    solver->dense_spiked_original_pivot_path;
   const double separator_balance_beta =
     KLS_ROW_REFACTOR_SEPARATOR_BALANCE_BETA;
   const size_t group_count_size = (size_t)group_count;
@@ -11316,8 +11304,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     group_component[group] = component;
     component_group_count[component]++;
     component_work[component] +=
-      kls_row_refactor_separator_schedule_work(
-        solver, group, include_group_overhead);
+      kls_row_refactor_group_work(solver, group);
   }
 
   for (UF_long component = 0; component < component_count; ++component) {
@@ -11498,65 +11485,7 @@ static int kls_prepare_row_refactor_separator_flop_ready_queue(
     }
   }
 
-  /* The initial component assignment uses the work of every group in each
-     component.  Pipeline closure above can subsequently remove most (or all)
-     of a component's groups, leaving the retained private queues badly
-     imbalanced even though the pre-closure estimate was balanced.  Recompute
-     component weights from the groups that actually remain private and run
-     the same largest-first assignment again. */
-  if (solver->dense_spiked_original_pivot_path) {
-    memset(component_group_count, 0,
-           component_count_size * sizeof(*component_group_count));
-    memset(component_work, 0,
-           component_count_size * sizeof(*component_work));
-    memset(thread_work, 0, thread_count_size * sizeof(*thread_work));
-    for (UF_long component = 0; component < component_count; ++component) {
-      component_thread[component] = -1;
-    }
 
-    UF_long retained_component_count = 0;
-    for (UF_long group = 0; group < group_count; ++group) {
-      if (!private_group_mask[group]) {
-        continue;
-      }
-      const unsigned int component = group_component[group];
-      if ((UF_long)component >= component_count) {
-        KLS_FREE_SEPARATOR_QUEUE_TEMP();
-        return 0;
-      }
-      if (component_group_count[component] == 0u) {
-        candidate_entries[retained_component_count].component = component;
-        candidate_entries[retained_component_count].kind = 0u;
-        candidate_entries[retained_component_count].work = 0.0;
-        retained_component_count++;
-      }
-      component_group_count[component]++;
-      component_work[component] +=
-        kls_row_refactor_separator_schedule_work(
-          solver, group, include_group_overhead);
-    }
-    for (UF_long pos = 0; pos < retained_component_count; ++pos) {
-      candidate_entries[pos].work =
-        component_work[candidate_entries[pos].component];
-    }
-    qsort(candidate_entries, (size_t)retained_component_count,
-          sizeof(*candidate_entries),
-          kls_compare_separator_component_work_desc);
-    for (UF_long pos = 0; pos < retained_component_count; ++pos) {
-      const unsigned int component = candidate_entries[pos].component;
-      int target = 0;
-      double target_work = thread_work[0];
-      for (int tid = 1; tid < thread_count; ++tid) {
-        if (thread_work[tid] < target_work) {
-          target = tid;
-          target_work = thread_work[tid];
-        }
-      }
-      component_thread[component] = target;
-      thread_work[target] += component_work[component];
-    }
-    assigned_component_count = retained_component_count;
-  }
 
 
   UF_long private_group_count = 0;

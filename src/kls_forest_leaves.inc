@@ -162,7 +162,7 @@ static UF_long kls_forest_leaf_publish_avx512(kls_solver *s,
 static int kls_forest_vector_environment(const kls_solver *s) {
 #if defined(__x86_64__) && FLT_EVAL_METHOD==0 && KLS_HAVE_AVX512_KERNELS
   return s->n>=64 && s->options.backend==KLS_BACKEND_AUTO &&
-    !s->stats.tuning_profile_active &&
+    !kls_kernel_tuning_overridden(s) &&
     s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
     s->private_caller_depth==1 && !s->private_scaled_recovery &&
     !s->in_solve_refinement && s->solve_contract_probe==2 &&

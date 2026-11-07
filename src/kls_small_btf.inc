@@ -30,7 +30,7 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
   if(!s || s->n<=1 || s->n>4096 || s->nnz<=0 || s->nnz>UINT16_MAX ||
      s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
   if(!s->symbolic || !s->numeric ||
-     s->options.backend!=KLS_BACKEND_AUTO || s->stats.tuning_profile_active ||
+     s->options.backend!=KLS_BACKEND_AUTO || kls_kernel_tuning_overridden(s) ||
      s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
      s->common.scale>0 || s->numeric->Rs || !s->numeric->Offp ||
      !s->numeric->Udiag || !s->numeric->Xwork || !s->numeric->LUbx ||

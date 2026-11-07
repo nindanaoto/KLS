@@ -23,6 +23,7 @@
 
 #include "kls/kls.h"
 #include "kls_componentwise.h"
+#include "kls_policy.h"
 
 #include <stdio.h>
 
@@ -532,14 +533,6 @@ struct kls_solver {
   int row_accept_publish_preferred; /* measured: column solve beats row solve */
   int prestatic_adopted_unfactored; /* matched pattern installed, numeric
                                        deferred to the parallel first factor */
-  int medium_partial_static_metis_path; /* structurally guaranteed medium
-                                           pre-static METIS adoption */
-  int dense_spiked_original_pivot_path; /* dense spike kept the incumbent
-                                           pivoted METIS numeric */
-  int medium_spike_minfill_path; /* full-diagonal medium spike selected the
-                                    retained AMMF numeric */
-  int large_bounded_no_btf_amf_path; /* bounded-degree diagonal system
-                                        passed the one-block AMF contract */
   int generic_nd_portfolio_selected; /* AUTO selected ND before numeric;
                                         predicted-fill rejection restores the
                                         recorded minimum-degree ordering */
@@ -1218,7 +1211,6 @@ struct kls_solver {
   int auto_scale_deferred;
   int tight_pivot_deferred; /* repeated lifecycle: evaluate the tight-pivot
                                numeric after pending representation trials */
-  int auto_amd_shortcut;
   int exact_matching_selected;
   int exact_matching_scaling_selected;
   int spral_matching_selected;
@@ -1365,8 +1357,14 @@ struct kls_solver {
   unsigned snb_auto_epoch;
   size_t snb_auto_memory_limit;
   double snb_auto_factor_seconds;
+  kls_policy_context policy;
+  int block_order_checked;
 
 };
+
+static int kls_kernel_tuning_overridden(const kls_solver *s) {
+  return s->stats.tuning_profile_active && !kls_policy_model_only(&s->policy);
+}
 
 static int kls_observed_parallel_enabled(const kls_solver *s) {
   return s->observed_parallel.active==1 ||
@@ -1416,6 +1414,8 @@ typedef struct kls_pattern_candidate {
   double generic_nd_fallback_flops;
   /* Analyze-time handoff only; owned by select_candidate's stack. */
   struct kls_generic_nd_trial *generic_nd_overlap_target;
+  kls_policy_context *policy;
+  int block_order_checked;
 } kls_pattern_candidate;
 
 typedef struct kls_parallel_refactor_shared {
@@ -2142,6 +2142,7 @@ static int choose_symbolic_for_pattern(UF_long n,
                                        UF_long *col_ptr,
                                        UF_long *row_idx,
                                        const kls_options *options,
+                                       kls_policy_context *policy,
                                        trilinos_klu_l_symbolic **symbolic_out,
                                        trilinos_klu_l_common *common_out,
                                        kls_ordering *selected_ordering_out,
@@ -7933,6 +7934,7 @@ static void clear_matrix(kls_solver *solver) {
   KLS_FREE_AND_NULL(solver->col_scale);
   KLS_FREE_AND_NULL(solver->values);
   KLS_FREE_AND_NULL(solver->block_order_perm);
+  solver->block_order_checked = 0;
   KLS_FREE_AND_NULL(solver->prepared_value_scale);
   KLS_FREE_AND_NULL(solver->prepared_value_input_pos);
   KLS_FREE_AND_NULL(solver->refactor_input_snapshot);
@@ -7975,13 +7977,9 @@ static void clear_matrix(kls_solver *solver) {
   solver->auto_scale_checked = 0;
   solver->auto_scale_value_certified = 0;
   solver->auto_scale_unscaled_trial_certified = 0;
-  solver->auto_amd_shortcut = 0;
   solver->exact_matching_selected = 0;
   solver->exact_matching_scaling_selected = 0;
   solver->spral_matching_selected = 0;
-  solver->dense_spiked_original_pivot_path = 0;
-  solver->medium_spike_minfill_path = 0;
-  solver->large_bounded_no_btf_amf_path = 0;
   solver->value_tolerance_crossing_cycle = 0;
   solver->compact_missing_diagonal_match_selected = 0;
   solver->fast_block_restarts = 0;
@@ -8033,122 +8031,6 @@ static int compare_double(const void *a, const void *b) {
   const double left = *(const double *)a;
   const double right = *(const double *)b;
   return (left > right) - (left < right);
-}
-
-/* A large, bounded-degree, nearly full-diagonal system can be cheaper as one
-   AMF-ordered factor than as many BTF components.  These are normalized
-   topology and resource limits; the real one-block symbolic must still pass
-   the independent fill/work contract below before the policy is retained. */
-
-static int is_medium_low_degree_full_diagonal_pattern(UF_long n,
-                                                      const UF_long *col_ptr,
-                                                      const UF_long *row_idx) {
-  if (n < 15000 || n > 25000 || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 8 || col_ptr[n] > 8u * n) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_columns = 0;
-  UF_long max_col_degree = 0;
-  int low_degree = 1;
-  for (UF_long col = 0; col < n && low_degree; ++col) {
-    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
-    int has_diagonal = 0;
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    if (col_degree > 64u) {
-      low_degree = 0;
-      break;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] >= 64u) {
-        low_degree = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        has_diagonal = 1;
-      }
-    }
-    if (has_diagonal) {
-      diagonal_columns++;
-    }
-  }
-
-  UF_long max_row_degree = 0;
-  for (UF_long row = 0; row < n && low_degree; ++row) {
-    if (row_degree[row] == 0) {
-      low_degree = 0;
-      break;
-    }
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-
-  return low_degree && max_col_degree <= 64u && max_row_degree <= 64u &&
-         diagonal_columns == n;
-}
-
-static int is_medium_dense_diagonal_high_degree_pattern(UF_long n,
-                                                        const UF_long *col_ptr,
-                                                        const UF_long *row_idx) {
-  if (n < 30000 || n > 45000 || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 16 || col_ptr[n] < 10u * n || col_ptr[n] > 16u * n) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  UF_long max_col_degree = 0;
-  int valid = 1;
-  for (UF_long col = 0; col < n && valid; ++col) {
-    const UF_long col_degree = col_ptr[col + 1u] - col_ptr[col];
-    if (col_degree > max_col_degree) {
-      max_col_degree = col_degree;
-    }
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] == UF_long_max) {
-        valid = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        diagonal_count++;
-      }
-    }
-  }
-
-  UF_long max_row_degree = 0;
-  int no_empty_rows = 1;
-  for (UF_long row = 0; row < n && valid; ++row) {
-    if (row_degree[row] == 0) {
-      no_empty_rows = 0;
-      break;
-    }
-    if (row_degree[row] > max_row_degree) {
-      max_row_degree = row_degree[row];
-    }
-  }
-  free(row_degree);
-
-  return valid && no_empty_rows &&
-         max_col_degree >= 512u && max_row_degree >= 512u &&
-         max_col_degree <= 4096u && max_row_degree <= 4096u &&
-         1000.0 * (double)diagonal_count >= 995.0 * (double)n;
 }
 
 static int is_medium_spiked_low_diagonal_pattern(UF_long n,
@@ -8261,48 +8143,6 @@ static int is_small_spiked_low_diagonal_pattern(UF_long n,
          10.0 * (double)max_row_degree >= 4.0 * (double)n &&
          10.0 * (double)max_col_degree <= 6.0 * (double)n &&
          10.0 * (double)max_row_degree <= 6.0 * (double)n;
-}
-
-static int is_large_diagonal_circuit_like_pattern(UF_long n,
-                                                  const UF_long *col_ptr,
-                                                  const UF_long *row_idx) {
-  if (n < 35000 || col_ptr == NULL || row_idx == NULL ||
-      n > UF_long_max / 16 || col_ptr[n] > 16u * n) {
-    return 0;
-  }
-
-  UF_long *row_degree = (UF_long *)calloc((size_t)n, sizeof(*row_degree));
-  if (row_degree == NULL) {
-    return 0;
-  }
-
-  UF_long diagonal_count = 0;
-  int valid = 1;
-  for (UF_long col = 0; col < n && valid; ++col) {
-    for (UF_long p = col_ptr[col]; p < col_ptr[col + 1u]; ++p) {
-      const UF_long row = row_idx[p];
-      if (row >= n || row_degree[row] == UF_long_max) {
-        valid = 0;
-        break;
-      }
-      row_degree[row]++;
-      if (row == col) {
-        diagonal_count++;
-      }
-    }
-  }
-
-  int no_empty_rows = 1;
-  for (UF_long row = 0; row < n && valid; ++row) {
-    if (row_degree[row] == 0) {
-      no_empty_rows = 0;
-      break;
-    }
-  }
-  free(row_degree);
-
-  return valid && no_empty_rows &&
-         10.0 * (double)diagonal_count >= 9.0 * (double)n;
 }
 
 /* Sparse, fully diagonal systems with a modest number of broad columns form a
@@ -8467,6 +8307,9 @@ int kls_analyze_csc(kls_solver *solver,
   clear_matrix(solver);
   solver->tuning = tuning;
   solver->snb_cost = tuning_metadata.snb_cost;
+  kls_policy_init(&solver->policy,&tuning_metadata.policy_cost);
+  solver->policy.kernel_overrides=normalized.tuning_profile_path &&
+    (!tuning_metadata.policy_cost.enabled || tuning_metadata.kernel_overrides);
   solver->options = normalized;
   solver->options.tuning_profile_path = NULL;
   solver->stats.tuning_profile_active = normalized.tuning_profile_path != NULL;
@@ -8497,7 +8340,7 @@ int kls_analyze_csc(kls_solver *solver,
   kls_analyze_nd_race_solver = solver;
   status = select_candidate(&normal,
                             (normalized.orientation == KLS_ORIENTATION_NORMAL) ? NULL : &transpose,
-                            &normalized, &chosen);
+                            &normalized, &chosen, &solver->policy);
   kls_analyze_nd_race_solver = NULL;
   if(status==KLS_OK && solver->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
      !solver->metis_race)kls_auto_small_btf_candidate(chosen,&normalized);
@@ -8563,6 +8406,9 @@ int kls_analyze_csr(kls_solver *solver,
   clear_matrix(solver);
   solver->tuning = tuning;
   solver->snb_cost = tuning_metadata.snb_cost;
+  kls_policy_init(&solver->policy,&tuning_metadata.policy_cost);
+  solver->policy.kernel_overrides=normalized.tuning_profile_path &&
+    (!tuning_metadata.policy_cost.enabled || tuning_metadata.kernel_overrides);
   solver->options = normalized;
   solver->options.tuning_profile_path = NULL;
   solver->stats.tuning_profile_active = normalized.tuning_profile_path != NULL;
@@ -8593,7 +8439,7 @@ int kls_analyze_csr(kls_solver *solver,
 
   status = select_candidate(normal.col_ptr == NULL ? NULL : &normal,
                             &transpose,
-                            &normalized, &chosen);
+                            &normalized, &chosen, &solver->policy);
   if(status==KLS_OK && solver->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
      !solver->metis_race)kls_auto_small_btf_candidate(chosen,&normalized);
   const double elapsed = kls_now_seconds() - start;
@@ -8735,24 +8581,7 @@ static int private_factor_body(kls_solver *solver, const double *values) {
   solver->solve_contract_probe = 0;
   solver->solve_contract_verified = 0;
   solver->low_rcond_solve_contract_state = 0;
-  solver->dense_spiked_original_pivot_path =
-    0;
-  if (solver->dense_spiked_original_pivot_path &&
-      solver->options.scale == KLS_SCALE_AUTO) {
-    /* Row/column max scaling adds solve traffic and makes this class's
-       original-pivot row engine slower without improving its checked
-       residual.  Select the measured unscaled candidate directly instead
-       of building two more full trial numerics at the first refactor. */
-    solver->common.scale = -1;
-    solver->auto_scale_checked = 1;
-  }
-  if (solver->medium_spike_minfill_path &&
-      solver->options.scale == KLS_SCALE_AUTO) {
-    /* Scaling adds factor work to this accurate full-diagonal spike.  Verify
-       the compact unscaled AMMF numeric after each entrywise update. */
-    solver->common.scale = -1;
-    solver->auto_scale_checked = 1;
-  }
+
 
   if (solver->options.backend == KLS_BACKEND_SERIAL) {
     status = kls_serial_factor(solver, numeric_values);
@@ -8820,12 +8649,11 @@ static int private_factor_body(kls_solver *solver, const double *values) {
       solver->row_perm == NULL && solver->user_col_perm == NULL &&
       solver->input_format == KLS_INPUT_CSC &&
       solver->options.ordering == KLS_ORDERING_AUTO &&
-      solver->options.scale <= 0 && solver->n <= 200000 &&
-      solver->nnz <= 4000000 && !solver->auto_amd_shortcut &&
-      !solver->medium_spike_minfill_path &&
-      !solver->large_bounded_no_btf_amf_path) {
+      solver->options.scale <= 0 &&
+      solver->n >= 10000 && solver->n <= 200000 && solver->nnz <= 4000000) {
     block_order_candidate = solver->block_order_perm != NULL;
-    if (!block_order_candidate) {
+    if (!block_order_candidate && !solver->block_order_checked) {
+      solver->block_order_checked = 1;
       UF_long *block_perm = NULL;
       UF_long *block_comp = NULL;
       block_order_candidate = kls_build_block_structured_order(
@@ -8844,11 +8672,10 @@ static int private_factor_body(kls_solver *solver, const double *values) {
     /* one-shot-lean deferral decided inside the match entry once the
        weak-diagonal census is known (majority-weak rows must stay
        inline; see the gate there) */
-    if (
 #ifdef KLS_HAVE_SPRAL_SCALING
-        !block_order_candidate &&
+    if (!block_order_candidate)
 #endif
-        !solver->large_bounded_no_btf_amf_path) {
+    {
       if (solver->generic_nd_portfolio_selected &&
           getenv("KLS_FORCE_STATIC_MATCH") == NULL) {
         /* The ND portfolio has already compared admissible orderings from
@@ -8885,7 +8712,7 @@ static int private_factor_body(kls_solver *solver, const double *values) {
       kls_ps_ana_probe_disable = 1;
       const int redo_status = choose_symbolic_for_pattern(
         solver->n, solver->col_ptr, solver->row_idx, &solver->options,
-        &redo_sym, &redo_common, &redo_ord, &redo_score, &redo_sep);
+        &solver->policy, &redo_sym, &redo_common, &redo_ord, &redo_score, &redo_sep);
       kls_ps_ana_probe_disable = 0;
       if (redo_status == KLS_OK && redo_sym != NULL) {
         trilinos_klu_l_common old_common = solver->common;
@@ -9078,10 +8905,7 @@ static int private_factor_body(kls_solver *solver, const double *values) {
   int initial_certified_unscaled_recovery_scale = 0;
   int initial_low_work_btf_public_unscaled = 0;
   if (!had_numeric && !solver->prestatic_adopted_unfactored) {
-    int selected_scale =
-      (solver->dense_spiked_original_pivot_path ||
-       solver->medium_spike_minfill_path)
-        ? -1 : choose_auto_scale_from_values(solver, numeric_values);
+    int selected_scale = choose_auto_scale_from_values(solver, numeric_values);
     if (solver->generic_nd_portfolio_selected &&
         solver->symbolic != NULL && solver->symbolic->do_btf &&
         selected_scale == 1) {
@@ -9132,10 +8956,7 @@ static int private_factor_body(kls_solver *solver, const double *values) {
     if (!had_numeric && solver->numeric == NULL) {
       /* This ordering is the block-structured one-shot path, not deferred
          cycle machinery. */
-      if (block_order_candidate &&
-          !solver->auto_amd_shortcut &&
-          !solver->medium_spike_minfill_path &&
-          !solver->large_bounded_no_btf_amf_path) {
+      if (block_order_candidate) {
         maybe_select_block_structured_ordering(solver, &elapsed,
                                                numeric_values);
       }

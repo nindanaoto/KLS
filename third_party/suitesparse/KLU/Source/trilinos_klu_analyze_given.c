@@ -368,6 +368,9 @@ TRILINOS_KLU_symbolic *TRILINOS_KLU_analyze_given	    /* returns NULL if error, 
     Symbolic->maxblock = maxblock ;
     Symbolic->lnz = TRILINOS_KLU_EMPTY ;
     Symbolic->unz = TRILINOS_KLU_EMPTY ;
+    /* A supplied ordering has no arithmetic estimate.  Do not expose an
+       uninitialized heap value as measured work to callers. */
+    Symbolic->est_flops = TRILINOS_KLU_EMPTY ;
     Symbolic->nzoff = nzoff ;
 
     return (Symbolic) ;

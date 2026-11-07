@@ -71,6 +71,60 @@ def hybrid_acceptance(cells, official):
                 complete=True,targets=[{k:c[k] for k in ('domain','case','threads','median','wall_median')} for c in targets],regressions=regressions)
 
 
+def peer_generalization_acceptance(cells, official, passes):
+    # Reconstruct the new rule independently of the launcher and its reducer.
+    keys={(d,case,t,p) for d in ('llc96','llc32') for case in CASES
+          for t in (1,8) for p in ('baseline','ck','st')}
+    records={(c['domain'],c['case'],c['threads'],c['peer']):c for c in cells}
+    valid=(official is True and passes>=8 and passes%4==0 and
+           len(records)==len(cells)==84 and set(records)==keys and
+           all(c.get('complete',True) is True for c in cells))
+    for key,c in records.items():
+        fields=['median','wall_median']
+        if key[-1]!='baseline':fields+=['baseline_median','baseline_wall_median']
+        valid=valid and all(type(c.get(f)) in (int,float) and math.isfinite(c[f]) and c[f]>0 for f in fields)
+    if not valid:return dict(passed=False,complete=False,protected_wins=0,lost_wins=[])
+    controls=[c for key,c in records.items() if key[-1]=='baseline']
+    linear=math.exp(sum(math.log(c['median']) for c in controls)/28)
+    wall=math.exp(sum(math.log(c['wall_median']) for c in controls)/28)
+    count=0;losses=[]
+    for key in sorted(keys):
+        if key[-1]=='baseline':continue
+        c=records[key]
+        for metric,base,new in [('linear','baseline_median','median'),('wall','baseline_wall_median','wall_median')]:
+            if c[base]>=1:continue
+            count+=1
+            if c[new]>1:
+                losses.append(dict(domain=key[0],case=key[1],threads=key[2],peer=key[3],metric=metric,
+                                   reference_ratio=c[base],candidate_ratio=c[new]))
+    return dict(passed=not losses and linear<=1 and wall<=1,complete=True,
+                protected_wins=count,lost_wins=losses,linear_geomean=linear,wall_geomean=wall)
+
+
+def confirmation_peer_wins(summaries):
+    # Independent cross-campaign reconstruction, including incomplete cells.
+    keys=('domain','case','threads','peer')
+    records=[];protected=set()
+    for summary in summaries:
+        run={}
+        for c in summary['cells']:
+            if c['peer'] not in ('ck','st'):continue
+            key=tuple(c[k] for k in keys);run[key]=c
+            for metric,prior in (('linear','baseline_median'),('wall','baseline_wall_median')):
+                if type(c.get(prior)) in (float,int) and 0<c[prior]<1:protected.add((key,metric))
+        records.append(run)
+    failures=[];absent=[]
+    for i,run in enumerate(records):
+        for key,metric in sorted(protected):
+            c=run.get(key,{})
+            value=c.get({'linear':'median','wall':'wall_median'}[metric])
+            detail=dict(zip(keys,key),campaign=('first','second')[i],metric=metric)
+            if type(value) not in (int,float) or not math.isfinite(value) or value<=0:absent.append(detail)
+            elif value>1:failures.append(dict(detail,candidate_ratio=value))
+    return dict(passed=not failures and not absent,protected_wins=len(protected),
+                lost_peer_wins=failures,missing_peer_comparisons=absent)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--campaign', required=True, type=Path)
@@ -184,6 +238,11 @@ def main():
                         cells.append(dict(domain=domain, case=case, threads=threads, peer=peer,
                             median=statistics.median(a['linear']/b['linear'] for a,b in pairs),
                             wall_median=statistics.median(a['wall']/b['wall'] for a,b in pairs)))
+                        if peer in ('ck','st'):
+                            prior=[(observations[(domain,case,threads,t,'baseline')],
+                                    observations[(domain,case,threads,t,peer)]) for t in range(metadata['passes'])]
+                            cells[-1].update(baseline_median=statistics.median(a['linear']/b['linear'] for a,b in prior),
+                                             baseline_wall_median=statistics.median(a['wall']/b['wall'] for a,b in prior))
     official = (not errors and not metadata['diagnostic_only'] and metadata['complete_grid'] and
                 metadata['passes'] >= 4 and metadata['passes'] % 4 == 0)
     baseline = [c for c in cells if c['peer'] == 'baseline']
@@ -192,8 +251,15 @@ def main():
     hybrid=hybrid_acceptance(cells,official)
     policy=metadata.get('acceptance_policy','incremental')
     incremental=stable and any(c['median']<=.98 for c in baseline)
+    generalization=(stable and metadata['passes']>=8 and
+      math.exp(sum(math.log(c['median']) for c in baseline)/len(baseline))<=1 and
+      math.exp(sum(math.log(c['wall_median']) for c in baseline)/len(baseline))<=1)
+    peer_generalization=peer_generalization_acceptance(cells,official,metadata['passes'])
     result = dict(acceptance_policy=policy,
-                  acceptance_gate=hybrid['passed'] if policy=='auto-btf' else incremental,
+                  acceptance_gate=(peer_generalization['passed'] if policy=='generalization-v2' else
+                                   generalization if policy=='generalization-v1' else hybrid['passed'] if policy=='auto-btf' else incremental),
+                  generalization_gate=generalization,
+                  peer_generalization_gate=peer_generalization['passed'],peer_generalization=peer_generalization,
                   hybrid_gate=hybrid['passed'],hybrid=hybrid,
                   all_qualified=not errors, observations=len(ledger), errors=errors, cells=cells,
                   incremental_gate=stable and any(c['median'] <= .98 for c in baseline),

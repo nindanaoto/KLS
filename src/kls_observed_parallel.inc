@@ -4,7 +4,7 @@ static int kls_observed_parallel_capable(const kls_solver *s) {
     s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
     s->options.backend==KLS_BACKEND_AUTO && s->options.threads>1 &&
     s->options.expected_refactorizations<=0 && s->options.expected_solves<=0 &&
-    !s->stats.tuning_profile_active &&
+    !kls_kernel_tuning_overridden(s) &&
     s->n>=(UF_long)s->tuning.egraph_min_size &&
     s->common.flops>0 && s->common.flops<
       s->tuning.egraph_min_flops_per_thread*s->options.threads &&

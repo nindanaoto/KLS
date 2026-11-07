@@ -13,7 +13,8 @@ static int kls_small_btf_metis_improves(double old_fill,double old_work,
 }
 static void kls_auto_small_btf_candidate(kls_pattern_candidate *c,const kls_options *o) {
   if(!c || !o || o->ordering!=KLS_ORDERING_AUTO || o->backend!=KLS_BACKEND_AUTO ||
-     o->scale!=KLS_SCALE_AUTO || o->threads<1 || o->threads>64 || o->tuning_profile_path ||
+     o->scale!=KLS_SCALE_AUTO || o->threads<1 || o->threads>64 ||
+     (o->tuning_profile_path && !kls_policy_model_only(c->policy)) ||
      c->orientation!=KLS_ORIENTATION_TRANSPOSE || c->selected_ordering!=KLS_ORDERING_AMD ||
      c->small_btf_fallback.symbolic || c->block_order_perm || !c->symbolic ||
      c->n<=1 || c->n>4096 || !c->nnz || c->nnz>UINT16_MAX ||

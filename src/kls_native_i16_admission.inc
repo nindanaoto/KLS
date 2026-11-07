@@ -19,7 +19,7 @@ static int kls_native_i16_capable(const kls_solver *s) {
     s->options.backend==KLS_BACKEND_AUTO &&
     s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
     s->orientation==KLS_ORIENTATION_TRANSPOSE && s->unchanged_refactor_state<0 &&
-    !s->stats.tuning_profile_active && !s->options.tuning_profile_path &&
+    !kls_kernel_tuning_overridden(s) && !s->options.tuning_profile_path &&
     s->options.expected_refactorizations<=0 && s->options.expected_solves<=0 &&
     s->stats.last_refactor_path!=KLS_REFACTOR_PATH_NONE &&
     s->stats.last_refactor_path!=KLS_REFACTOR_PATH_UNCHANGED &&
