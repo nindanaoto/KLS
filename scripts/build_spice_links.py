@@ -78,10 +78,14 @@ def main():
             if flag.startswith('-I') and flag.endswith('/include') and 'kls-' in flag.lower() and 'trilinos' not in flag.lower():
                 flag = '-I' + str(args.kls_source / 'include')
             replaced.append(flag)
-        # The option registry lives outside the adapters; rebuild it too so new
-        # `.options linsol` names are accepted.
+        # Rebuild everything that depends on the adapter headers (the factories
+        # allocate the adapter objects, so a changed class layout must reach
+        # them) and the option registry that accepts `.options linsol` names.
         for package, name in (('LinearAlgebraServicesPKG', 'N_LAS_KLSSolver'),
                               ('LinearAlgebraServicesPKG', 'N_LAS_ThirdPartySolver'),
+                              ('LinearAlgebraServicesPKG', 'N_LAS_TranSolverFactory'),
+                              ('LinearAlgebraServicesPKG', 'N_LAS_ESSolverFactory'),
+                              ('LinearAlgebraServicesPKG', 'N_LAS_PCESolverFactory'),
                               ('NonlinearSolverPKG', 'N_NLS_Manager')):
             source = args.xyce_source / 'src' / package / (name + '.C')
             obj = args.output.resolve() / (name + '.C.o')
