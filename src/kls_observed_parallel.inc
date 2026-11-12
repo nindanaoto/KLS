@@ -1,7 +1,12 @@
-/* Complete-call consultation. Speculative success is never a caller answer. */
+/* Complete-call consultation. Speculative success is never a caller answer.
+   Whether a parallel engine pays is a property of the matrix and the machine,
+   not of who checks accuracy: an application-managed caller gets the same
+   consultation, and each speculative candidate is still certified below
+   against the retained operator before it can be compared or retained. */
 static int kls_observed_parallel_capable(const kls_solver *s) {
   return s && s->symbolic && s->numeric &&
-    s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+    (s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
+     s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) &&
     s->options.backend==KLS_BACKEND_AUTO && s->options.threads>1 &&
     s->options.expected_refactorizations<=0 && s->options.expected_solves<=0 &&
     !kls_kernel_tuning_overridden(s) &&
@@ -79,6 +84,11 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
   const double prior_spent=g->spent;
   const double budget=kls_observed_parallel_preparation_budget(g);
   const int retained_retry=g->retry_pending && s->egraph_pool && s->refactor_level_ptr;
+  /* The confirming sample waits for funding; the first one never does. Its
+     whole extra cost must stay inside the allowance or the record is void:
+     one cycle bounds the candidate (its deadline), a second covers its
+     validation and the restoration of the incumbent representation. */
+  if(g->samples>0 && !retained_retry && !(budget>g->cycle)) return call;
   g->active=1;g->deadline=start+(retained_retry?fmax(budget,g->cycle):budget);
   /* The complete plan and joined pool survived a deadline, not a layout
      change. The actual refactor still revalidates every map/cache under its
@@ -92,8 +102,15 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
     const double trial_start=kls_now_seconds();
     g->deadline=trial_start+fmin(g->cycle,remaining);
     int status=kls_refactor_solve_impl(s,values,1,b,0,x,0);
+    /* The comparison must price what a retained candidate will cost. An
+       application-managed caller pays no certificate afterwards, so the one
+       that validates this speculative candidate is exploration cost (charged
+       to the budget through call.extra below), not candidate time. */
+    const double kernel_seconds=kls_now_seconds()-trial_start;
     status=private_componentwise_finish(s,0,1,b,x,0,status);
-    call.candidate_seconds=kls_now_seconds()-trial_start;
+    call.candidate_seconds=
+      s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED?kernel_seconds:
+      kls_now_seconds()-trial_start;
     call.sampled=1;
     call.candidate_ok=status==KLS_OK &&
       call.epoch==s->observed_parallel_epoch &&
@@ -149,6 +166,8 @@ static void kls_observed_parallel_after(kls_solver *s,
     const int clean=status==KLS_OK && kls_observed_parallel_capable(s) &&
       s->stats.last_refactor_path==KLS_REFACTOR_PATH_MAPPED;
     kls_observed_parallel_observe(g,call.changed,clean,
+        s->stats.refactor_seconds+s->stats.solve_seconds);
+    if(call.changed) kls_observed_parallel_fund(g,clean,
         s->stats.refactor_seconds+s->stats.solve_seconds);
     if(!clean) kls_observed_parallel_invalidate(s);
   }

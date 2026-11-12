@@ -70,7 +70,10 @@ static void exercise(int pipeline,int csr) {
   assert(!kls_observed_parallel_capable(s));s->stats.tuning_profile_active=0;
   s->rowmatch_deferred=1;assert(!kls_observed_parallel_capable(s));
   s->rowmatch_deferred=0;
+  /* Who checks accuracy does not decide whether a parallel engine pays. */
   s->accuracy_policy=KLS_ACCURACY_APPLICATION_MANAGED;
+  assert(kls_observed_parallel_capable(s));
+  s->accuracy_policy=KLS_ACCURACY_STRICT_RHS_L2;
   assert(!kls_observed_parallel_capable(s));
   s->accuracy_policy=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR;
   /* Invalidation resets the one-attempt policy without relying on graph free. */
@@ -152,7 +155,24 @@ static void exercise(int pipeline,int csr) {
   kls_destroy(s);
 }
 
+/* The confirming sample is funded by later incumbent calls, never forgiven. */
+static void funding(void) {
+  kls_observed_parallel_state g={0};
+  kls_observed_parallel_fund(&g,1,1.0);assert(g.total==0 && g.limit==0);
+  g.choice=1;g.cycle=1.0;g.total=400.0;g.limit=8.0;g.spent=7.5;
+  kls_observed_parallel_fund(&g,1,1.0);assert(g.total==400.0); /* no first sample yet */
+  g.samples=1;
+  assert(kls_observed_parallel_preparation_budget(&g)==0);
+  kls_observed_parallel_fund(&g,0,1.0);assert(g.total==400.0);
+  kls_observed_parallel_fund(&g,1,NAN);assert(g.total==400.0);
+  kls_observed_parallel_fund(&g,1,100.0);
+  assert(g.total==500.0 && g.limit==10.0 && g.spent==7.5);
+  assert(kls_observed_parallel_preparation_budget(&g)==1.5);
+  g.choice=2;kls_observed_parallel_fund(&g,1,100.0);assert(g.total==500.0);
+}
+
 int main(void) {
+  funding();
   caller_thread=pthread_self();atomic_init(&expire_worker,0);
   for(int pipeline=0;pipeline<2;++pipeline) for(int csr=0;csr<2;++csr)
     exercise(pipeline,csr);

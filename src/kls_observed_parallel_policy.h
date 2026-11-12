@@ -40,6 +40,17 @@ static int kls_observed_parallel_start(kls_observed_parallel_state *g) {
   return 1;
 }
 
+/* A first paired sample was taken but the allowance cannot cover the second.
+ * Declining here would let a one-time validation cost decide the engine, so
+ * later changed incumbent calls extend the same 2% allowance instead. The
+ * confirming sample is taken only once the allowance again covers it. */
+static void kls_observed_parallel_fund(kls_observed_parallel_state *g,
+    int successful,double seconds) {
+  if(g->choice!=1 || g->samples<=0 || !successful || !(seconds>0) ||
+      !isfinite(seconds) || !isfinite(g->total+seconds)) return;
+  g->total+=seconds;g->limit=0.02*g->total;
+}
+
 static double kls_observed_parallel_preparation_budget(
     const kls_observed_parallel_state *g) {
   if(g->choice!=1 || g->samples<0 || g->samples>=2) return 0;
