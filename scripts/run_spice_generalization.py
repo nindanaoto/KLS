@@ -79,7 +79,7 @@ def geomean(values):
 
 
 def reduce_results(metadata, rows):
-    index = {(r['domain'], r['case'], r['threads'], r['trial'], r['side']): r for r in rows}
+    index = {(r['domain'], r['case'], r['threads'], r['trial'], r['side']): r for r in rows}  # last attempt wins
     passes, peers = metadata['passes'], metadata['peers']
 
     def paired(domain, case, threads, side, other_threads, other_side, metric):
@@ -159,6 +159,7 @@ def reduce_results(metadata, rows):
                    kls_failures=len(kls_failures),
                    peer_cells_without_valid_configuration=len(unscored),
                    thread_scaling=aggregate(scaling),
+                   peer_hangs=sum(bool(r.get('timed_out')) and r['side'] not in KLS_SIDES for r in rows),
                    baseline=aggregate([b for b in baseline]) if baseline else None)
     detail = dict(cells=cells, kls_failures=kls_failures, unscored_peer_cells=unscored,
                   thread_scaling=scaling, baseline=baseline)
@@ -235,9 +236,13 @@ def run(args):
     rows = []
     quiet = metadata['sealed']
 
-    def execute(domain, cpus, case, count, trial, side, reference=None):
+    def execute(domain, cpus, case, count, trial, side, reference=None, attempt=0):
+        # A hung solver must not hold the machine for the full timeout: after the KLU
+        # reference has run, every other run gets a bound scaled from its wall time.
+        limit = args.timeout if reference is None else min(
+            args.timeout, max(args.min_timeout, args.timeout_factor * reference['wall_seconds']))
         label = hashes[str((args.regression / 'Netlists' / case).resolve())][:12] if quiet else Path(case).stem
-        dest = output / domain / label / f't{count}-p{trial}-{side}'
+        dest = output / domain / label / (f't{count}-p{trial}-{side}' + (f'-retry{attempt}' if attempt else ''))
         if side == 'klu':
             solver, extra, overrides = 'KLU', '', {}
         elif side in KLS_SIDES:
@@ -254,7 +259,7 @@ def run(args):
         with (dest / 'stdout.log').open('x') as stream:
             child = subprocess.Popen(cmd, stdout=stream, stderr=subprocess.STDOUT, env=env, start_new_session=True)
             try:
-                code, timeout = wait_child(child, args.timeout)
+                code, timeout = wait_child(child, limit)
             except BaseException:
                 os.killpg(child.pid, signal.SIGKILL)
                 child.wait()
@@ -263,7 +268,7 @@ def run(args):
         wall = time.monotonic() - start
         closure = cleanup.drain_exited_apptainer_session(child.pid, args.image)
         row = dict(domain=domain, case=case, threads=count, trial=trial, side=side, directory=str(dest),
-                   exit_code=code, timed_out=timeout, wall_seconds=wall)
+                   exit_code=code, timed_out=timeout, wall_seconds=wall, attempt=attempt)
         log = parse_log((dest / 'stdout.log').read_text(errors='replace'))
         values = waveform(dest / 'input.cir.prn')
         row['qualified'] = bool(
@@ -312,7 +317,13 @@ def run(args):
                 sides = sides_for(count, peers, bool(args.baseline))
                 for trial in range(args.passes):
                     for side in rotate(sides, index, trial, args.order == 'confirmation'):
-                        execute(domain, cpus, case, count, trial, side, reference)
+                        row = execute(domain, cpus, case, count, trial, side, reference)
+                        # Peers get retries after a hang so their flakiness is recorded, not
+                        # scored as a KLS win; KLS itself never gets a second attempt.
+                        attempt = 0
+                        while row['timed_out'] and side not in KLS_SIDES and attempt < args.peer_retries:
+                            attempt += 1
+                            row = execute(domain, cpus, case, count, trial, side, reference, attempt)
     changed = [p for p, h in hashes.items() if not Path(p).exists() or sha(p) != h]
     summary, detail = reduce_results(metadata, rows)
     summary['changed_inputs'] = changed
@@ -340,6 +351,10 @@ def main():
     p.add_argument('--domain', action='append', choices=[d[0] for d in DOMAINS], default=[])
     p.add_argument('--order', choices=['initial', 'confirmation'], default='initial')
     p.add_argument('--timeout', type=float, default=1800)
+    p.add_argument('--timeout-factor', type=float, default=30,
+                   help='Per-run bound as a multiple of the KLU reference wall time')
+    p.add_argument('--min-timeout', type=float, default=60)
+    p.add_argument('--peer-retries', type=int, default=3, help='Retries of a peer run that hung')
     p.add_argument('--diagnostic', action='store_true', help='Allow a busy machine; the gate cannot pass')
     args = p.parse_args()
     if args.set != 'tune' and not args.manifest:
