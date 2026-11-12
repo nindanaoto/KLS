@@ -76,9 +76,18 @@ def test_tune_gate_needs_every_cell_and_holdout_needs_geomean_and_cap():
     assert not g.reduce_results(metadata(['a'], 'holdout'), rows_for(outlier))[0]['gate']
 
 
+def test_gate_applies_to_application_managed_mode_and_reports_certified():
+    times = {('a', 1, 'kls'): 1.2, ('a', 8, 'kls'): 1.2, ('a', 1, 'kls-app'): 1.0, ('a', 8, 'kls-app'): 1.0}
+    times.update({('a', t, s): 1.1 for t in (1, 8) for s in g.peer_sides(t, ['ck', 'st'])})
+    summary, detail = g.reduce_results(metadata(['a'], 'tune'), rows_for(times))
+    assert summary['gated_mode'] == 'kls-app' and summary['gate']
+    assert summary['certified_overall']['losses'] == 4 and summary['overall']['losses'] == 0
+    assert {c['mode'] for c in detail['cells']} == {'kls', 'kls-app'}
+
+
 def test_sides_and_rotation():
-    assert g.sides_for(1, ['ck', 'st'], False) == ['kls', 'ck', 'st']
-    assert g.sides_for(8, ['ck', 'st'], True) == ['kls', 'baseline', 'ck', 'ck-auto', 'ck-busy', 'st', 'st-active']
+    assert g.sides_for(1, ['ck', 'st'], False) == ['kls', 'kls-app', 'ck', 'st']
+    assert g.sides_for(8, ['ck', 'st'], True) == ['kls', 'kls-app', 'baseline', 'ck', 'ck-auto', 'ck-busy', 'st', 'st-active']
     sides = g.sides_for(8, ['ck', 'st'], False)
     firsts = {g.rotate(sides, 0, trial, False)[0] for trial in range(len(sides))}
     assert firsts == set(sides)            # every side leads once per cycle

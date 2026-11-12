@@ -21,7 +21,8 @@ import time
 
 from run_spice_campaign import CASES, parse_log, sha, stage
 
-ANALYSES = r'step|sampling|embeddedsampling|pce|hb|mpde|ac|noise|dc|op|sens|lin|four|measure|meas|fft|result'
+# Analyses that change what is solved; post-processing (.measure, .four, .fft) is fine.
+ANALYSES = r'step|sampling|embeddedsampling|pce|hb|mpde|ac|noise|dc|sens|lin|result'
 
 
 def candidate(path):
@@ -84,13 +85,19 @@ def main():
     p.add_argument('--per-directory', type=int, default=3,
                    help='Cap per regression directory so one deck family cannot dominate')
     p.add_argument('--jobs', type=int, default=4)
+    p.add_argument('--rows', type=Path, help='Reuse or record the raw KLU screening rows')
     args = p.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     root = args.regression / 'Netlists'
     cases = sorted(str(path.relative_to(root)) for path in root.rglob('*.cir')
                    if str(path.relative_to(root)) not in CASES and candidate(path))
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        rows = list(pool.map(lambda case: screen(args, case), cases))
+    if args.rows and args.rows.exists():
+        rows = json.loads(args.rows.read_text())
+    else:
+        with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+            rows = list(pool.map(lambda case: screen(args, case), cases))
+        if args.rows:
+            args.rows.write_text(json.dumps(rows, indent=1) + '\n')
     eligible = [r for r in rows if r['status'] == 'ran' and
                 r['klu_linear_seconds'] >= args.min_linear_seconds]
     # Deterministic, timing-independent choice inside a directory.

@@ -6,7 +6,10 @@ circuits.  Differences:
 
   * The deck list comes from a set: `tune` (the seven campaign circuits), or
     `dev` / `holdout` from a manifest built by build_spice_holdout_manifest.py.
-  * KLS runs exactly one configuration: library defaults and a thread count.
+  * KLS runs library defaults and a thread count, in two accuracy modes:
+    `kls` certifies every solve (the library default) and `kls-app` uses the
+    application-managed mode, which is how the peers run under Xyce's Newton
+    loop.  The win gate applies to `kls-app`; `kls` is always reported.
   * Each peer is scored at its best.  For a KLS run at T threads the peer
     score is the most favourable (for the peer) of all its documented
     configurations at T threads and at one thread, so a peer is never charged
@@ -36,7 +39,9 @@ from run_spice_campaign import (CASES, DOMAINS, compare_waveforms, parse_log, sh
                                 wait_child, waveform, write_json)
 
 # side -> (Xyce solver type, extra `.options linsol` text, environment overrides)
-KLS_SIDE = ('KLS', '', {})
+KLS_SIDES = {'kls': ('KLS', '', {}), 'baseline': ('KLS', '', {}),
+             'kls-app': ('KLS', 'KLS_ACCURACY=APPLICATION', {})}
+GATED_MODE = 'kls-app'
 PEER_CONFIGS = {
     'ck': {
         'ck': ('CKTSO', '', {}),
@@ -61,7 +66,7 @@ def peer_sides(threads, peers):
 
 
 def sides_for(threads, peers, baseline):
-    return ['kls'] + (['baseline'] if baseline else []) + peer_sides(threads, peers)
+    return ['kls', 'kls-app'] + (['baseline'] if baseline else []) + peer_sides(threads, peers)
 
 
 def rotate(sides, case_index, trial, confirmation):
@@ -87,35 +92,39 @@ def reduce_results(metadata, rows):
         return statistics.median(values) if len(values) == passes else None
 
     cells, kls_failures, scaling, baseline = [], [], [], []
+    modes = [m for m in ('kls', 'kls-app') if any(r['side'] == m for r in rows)]
     for domain, _ in metadata['domains']:
         for case in metadata['cases']:
             for threads in metadata['threads']:
-                if any(not index.get((domain, case, threads, t, 'kls'), {}).get('qualified')
-                       for t in range(passes)):
-                    kls_failures.append(dict(domain=domain, case=case, threads=threads))
-                    continue
-                if threads > 1 and 1 in metadata['threads']:
-                    ratio = paired(domain, case, threads, 'kls', 1, 'kls', 'linear')
-                    if ratio is not None:
-                        scaling.append(dict(domain=domain, case=case, threads=threads, ratio=ratio))
-                if metadata['baseline']:
-                    ratio = paired(domain, case, threads, 'kls', threads, 'baseline', 'linear')
-                    wall = paired(domain, case, threads, 'kls', threads, 'baseline', 'wall_seconds')
-                    baseline.append(dict(domain=domain, case=case, threads=threads, ratio=ratio, wall=wall))
-                for peer in peers:
-                    candidates = {}
-                    for other in sorted({threads, 1} & set(metadata['threads'])):
-                        for side in peer_sides(other, [peer]):
-                            ratio = paired(domain, case, threads, 'kls', other, side, 'linear')
-                            if ratio is not None:
-                                candidates[f'{side}@t{other}'] = ratio
-                    cell = dict(domain=domain, case=case, threads=threads, peer=peer, configurations=candidates)
-                    if candidates:
-                        best = max(candidates, key=candidates.get)
-                        cell.update(ratio=candidates[best], peer_best=best)
-                    else:
-                        cell.update(ratio=None, peer_best=None)
-                    cells.append(cell)
+                for mode in modes:
+                    if any(not index.get((domain, case, threads, t, mode), {}).get('qualified')
+                           for t in range(passes)):
+                        kls_failures.append(dict(domain=domain, case=case, threads=threads, mode=mode))
+                        continue
+                    if threads > 1 and 1 in metadata['threads']:
+                        ratio = paired(domain, case, threads, mode, 1, mode, 'linear')
+                        if ratio is not None:
+                            scaling.append(dict(domain=domain, case=case, threads=threads, mode=mode, ratio=ratio))
+                    if metadata['baseline'] and mode == 'kls':
+                        ratio = paired(domain, case, threads, 'kls', threads, 'baseline', 'linear')
+                        wall = paired(domain, case, threads, 'kls', threads, 'baseline', 'wall_seconds')
+                        baseline.append(dict(domain=domain, case=case, threads=threads, ratio=ratio, wall=wall))
+                    for peer in peers:
+                        candidates = {}
+                        for other in sorted({threads, 1} & set(metadata['threads'])):
+                            for side in peer_sides(other, [peer]):
+                                ratio = paired(domain, case, threads, mode, other, side, 'linear')
+                                if ratio is not None:
+                                    candidates[f'{side}@t{other}'] = ratio
+                        cell = dict(domain=domain, case=case, threads=threads, peer=peer, mode=mode,
+                                    configurations=candidates)
+                        if candidates:
+                            best = max(candidates, key=candidates.get)
+                            cell.update(ratio=candidates[best], peer_best=best)
+                        else:
+                            cell.update(ratio=None, peer_best=None)
+                        cells.append(cell)
+    gated_mode = GATED_MODE if GATED_MODE in modes else 'kls'
 
     def aggregate(selection):
         values = sorted(c['ratio'] for c in selection if c['ratio'] is not None)
@@ -125,10 +134,14 @@ def reduce_results(metadata, rows):
                     p90=values[min(len(values) - 1, math.ceil(0.9 * len(values)) - 1)],
                     wins=sum(v <= WIN for v in values), losses=sum(v > 1 for v in values))
 
-    groups = {f'{peer}-t{threads}': aggregate([c for c in cells if c['peer'] == peer and c['threads'] == threads])
-              for peer in peers for threads in metadata['threads']}
-    scored = [c for c in cells if c['ratio'] is not None]
-    unscored = [dict(domain=c['domain'], case=c['case'], threads=c['threads'], peer=c['peer'])
+    def groups_for(mode):
+        return {f'{peer}-t{threads}': aggregate([c for c in cells if c['mode'] == mode and c['peer'] == peer
+                                                 and c['threads'] == threads])
+                for peer in peers for threads in metadata['threads']}
+
+    groups = groups_for(gated_mode)
+    scored = [c for c in cells if c['mode'] == gated_mode and c['ratio'] is not None]
+    unscored = [dict(domain=c['domain'], case=c['case'], threads=c['threads'], peer=c['peer'], mode=c['mode'])
                 for c in cells if c['ratio'] is None]
     monotone = all(s['ratio'] <= THREAD_MONOTONE for s in scaling)
     complete = not kls_failures and bool(scored)
@@ -139,8 +152,11 @@ def reduce_results(metadata, rows):
                                 for g in groups.values())
     summary = dict(set=metadata['set'], sealed=metadata['sealed'], peer_policy='peer-best',
                    cases=len(metadata['cases']), passes=passes, complete=complete,
-                   gate=gate, thread_monotone=monotone,
-                   groups=groups, overall=aggregate(scored), kls_failures=len(kls_failures),
+                   gated_mode=gated_mode, gate=gate, thread_monotone=monotone,
+                   groups=groups, overall=aggregate(scored),
+                   certified_groups=groups_for('kls') if gated_mode != 'kls' else None,
+                   certified_overall=aggregate([c for c in cells if c['mode'] == 'kls']) if gated_mode != 'kls' else None,
+                   kls_failures=len(kls_failures),
                    peer_cells_without_valid_configuration=len(unscored),
                    thread_scaling=aggregate(scaling),
                    baseline=aggregate([b for b in baseline]) if baseline else None)
@@ -224,12 +240,12 @@ def run(args):
         dest = output / domain / label / f't{count}-p{trial}-{side}'
         if side == 'klu':
             solver, extra, overrides = 'KLU', '', {}
-        elif side in ('kls', 'baseline'):
-            solver, extra, overrides = KLS_SIDE
+        elif side in KLS_SIDES:
+            solver, extra, overrides = KLS_SIDES[side]
         else:
             solver, extra, overrides = next(c[side] for c in PEER_CONFIGS.values() if side in c)
         stage(args.regression / 'Netlists' / case, dest, solver, count, args.license, extra)
-        executable = binaries['baseline' if side == 'baseline' else 'kls']
+        executable = binaries['baseline' if side == 'baseline' and 'baseline' in binaries else 'kls']
         cmd = ['taskset', '-c', cpus, 'apptainer', 'exec', '--bind', f'{args.workspace}:/work',
                '--bind', f'{args.workspace}:{args.workspace}', '--bind', '/tmp:/tmp',
                '--pwd', str(dest), str(args.image), str(executable), 'input.cir']
