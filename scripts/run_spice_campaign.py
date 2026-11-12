@@ -59,7 +59,7 @@ def wait_child(child, seconds):
         timer.join()
 
 
-def stage(source, destination, solver, threads, license_file):
+def stage(source, destination, solver, threads, license_file, extra=''):
     destination.mkdir(parents=True)
     text = source.read_text()
     if re.search(r'^\s*\.(?:include|inc|lib)\b', text, re.I | re.M):
@@ -67,6 +67,8 @@ def stage(source, destination, solver, threads, license_file):
     option = f'.options linsol type={solver}'
     if solver != 'KLU':
         option += f' {solver}_THREADS={threads}'
+    if extra:
+        option += ' ' + extra
     if re.search(r'^\s*\.options\s+linsol\b', text, re.I | re.M):
         def replace_options(match):
             line = re.sub(r'\btype\s*=\s*\w+', '', match[0], flags=re.I)

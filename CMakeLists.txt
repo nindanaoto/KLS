@@ -688,6 +688,14 @@ if(KLS_BUILD_TESTS)
       COMMAND "${Python3_EXECUTABLE}"
               "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_license_boundary.py"
               --root "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME kls_spice_generalization_scoring
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_spice_generalization.py")
+    add_test(
+      NAME kls_shape_gate_ratchet
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/scripts/audit_shape_gates.py"
+              --root "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(
       NAME kls_generalization_manifests
       COMMAND "${Python3_EXECUTABLE}"

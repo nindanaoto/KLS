@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+"""Peer-best SPICE comparison on the tuning, development or held-out decks.
+
+This complements run_spice_campaign.py, whose gates select on the seven tuning
+circuits.  Differences:
+
+  * The deck list comes from a set: `tune` (the seven campaign circuits), or
+    `dev` / `holdout` from a manifest built by build_spice_holdout_manifest.py.
+  * KLS runs exactly one configuration: library defaults and a thread count.
+  * Each peer is scored at its best.  For a KLS run at T threads the peer
+    score is the most favourable (for the peer) of all its documented
+    configurations at T threads and at one thread, so a peer is never charged
+    for a thread count or wait policy that makes it slower.
+  * `holdout` results are sealed: per-deck numbers go to cells.sealed.json and
+    only aggregates are printed or written to summary.json.
+
+Ratios are medians over passes of paired KLS/peer linear-solution times; a
+ratio below one means KLS is faster.  Correctness of every run is checked
+against a fresh KLU reference (identical step counts and the upstream waveform
+verifier), exactly as in run_spice_campaign.py.
+"""
+import argparse
+import fcntl
+import importlib.util
+import json
+import math
+import os
+from pathlib import Path
+import re
+import signal
+import statistics
+import subprocess
+import time
+
+from run_spice_campaign import (CASES, DOMAINS, compare_waveforms, parse_log, sha, stage,
+                                wait_child, waveform, write_json)
+
+# side -> (Xyce solver type, extra `.options linsol` text, environment overrides)
+KLS_SIDE = ('KLS', '', {})
+PEER_CONFIGS = {
+    'ck': {
+        'ck': ('CKTSO', '', {}),
+        'ck-auto': ('CKTSO', 'CKTSO_AUTO_THREADS=1', {}),
+        'ck-busy': ('CKTSO', 'CKTSO_THREAD_SYNC=-1', {}),
+    },
+    'st': {
+        'st': ('SUBTREELU', '', {}),
+        'st-active': ('SUBTREELU', '', {'OMP_WAIT_POLICY': 'active'}),
+    },
+}
+# Configurations that only differ from the base one when several threads run.
+MULTITHREAD_ONLY = {'ck-auto', 'ck-busy', 'st-active'}
+WIN = 0.98
+HELD_OUT_WORST = 1.10
+THREAD_MONOTONE = 1.03
+
+
+def peer_sides(threads, peers):
+    return [side for peer in peers for side in PEER_CONFIGS[peer]
+            if threads > 1 or side not in MULTITHREAD_ONLY]
+
+
+def sides_for(threads, peers, baseline):
+    return ['kls'] + (['baseline'] if baseline else []) + peer_sides(threads, peers)
+
+
+def rotate(sides, case_index, trial, confirmation):
+    shift = (case_index + trial + int(not confirmation)) % len(sides)
+    return sides[shift:] + sides[:shift]
+
+
+def geomean(values):
+    return math.exp(statistics.mean(math.log(v) for v in values))
+
+
+def reduce_results(metadata, rows):
+    index = {(r['domain'], r['case'], r['threads'], r['trial'], r['side']): r for r in rows}
+    passes, peers = metadata['passes'], metadata['peers']
+
+    def paired(domain, case, threads, side, other_threads, other_side, metric):
+        values = []
+        for trial in range(passes):
+            a = index.get((domain, case, threads, trial, side))
+            b = index.get((domain, case, other_threads, trial, other_side))
+            if a and b and a['qualified'] and b['qualified']:
+                values.append(a[metric] / b[metric])
+        return statistics.median(values) if len(values) == passes else None
+
+    cells, kls_failures, scaling, baseline = [], [], [], []
+    for domain, _ in metadata['domains']:
+        for case in metadata['cases']:
+            for threads in metadata['threads']:
+                if any(not index.get((domain, case, threads, t, 'kls'), {}).get('qualified')
+                       for t in range(passes)):
+                    kls_failures.append(dict(domain=domain, case=case, threads=threads))
+                    continue
+                if threads > 1 and 1 in metadata['threads']:
+                    ratio = paired(domain, case, threads, 'kls', 1, 'kls', 'linear')
+                    if ratio is not None:
+                        scaling.append(dict(domain=domain, case=case, threads=threads, ratio=ratio))
+                if metadata['baseline']:
+                    ratio = paired(domain, case, threads, 'kls', threads, 'baseline', 'linear')
+                    wall = paired(domain, case, threads, 'kls', threads, 'baseline', 'wall_seconds')
+                    baseline.append(dict(domain=domain, case=case, threads=threads, ratio=ratio, wall=wall))
+                for peer in peers:
+                    candidates = {}
+                    for other in sorted({threads, 1} & set(metadata['threads'])):
+                        for side in peer_sides(other, [peer]):
+                            ratio = paired(domain, case, threads, 'kls', other, side, 'linear')
+                            if ratio is not None:
+                                candidates[f'{side}@t{other}'] = ratio
+                    cell = dict(domain=domain, case=case, threads=threads, peer=peer, configurations=candidates)
+                    if candidates:
+                        best = max(candidates, key=candidates.get)
+                        cell.update(ratio=candidates[best], peer_best=best)
+                    else:
+                        cell.update(ratio=None, peer_best=None)
+                    cells.append(cell)
+
+    def aggregate(selection):
+        values = sorted(c['ratio'] for c in selection if c['ratio'] is not None)
+        if not values:
+            return dict(count=0)
+        return dict(count=len(values), geomean=geomean(values), worst=values[-1],
+                    p90=values[min(len(values) - 1, math.ceil(0.9 * len(values)) - 1)],
+                    wins=sum(v <= WIN for v in values), losses=sum(v > 1 for v in values))
+
+    groups = {f'{peer}-t{threads}': aggregate([c for c in cells if c['peer'] == peer and c['threads'] == threads])
+              for peer in peers for threads in metadata['threads']}
+    scored = [c for c in cells if c['ratio'] is not None]
+    unscored = [dict(domain=c['domain'], case=c['case'], threads=c['threads'], peer=c['peer'])
+                for c in cells if c['ratio'] is None]
+    monotone = all(s['ratio'] <= THREAD_MONOTONE for s in scaling)
+    complete = not kls_failures and bool(scored)
+    if metadata['set'] == 'tune':
+        gate = complete and all(c['ratio'] <= WIN for c in scored)
+    else:
+        gate = complete and all(g.get('count', 0) and g['geomean'] < 1 and g['worst'] <= HELD_OUT_WORST
+                                for g in groups.values())
+    summary = dict(set=metadata['set'], sealed=metadata['sealed'], peer_policy='peer-best',
+                   cases=len(metadata['cases']), passes=passes, complete=complete,
+                   gate=gate, thread_monotone=monotone,
+                   groups=groups, overall=aggregate(scored), kls_failures=len(kls_failures),
+                   peer_cells_without_valid_configuration=len(unscored),
+                   thread_scaling=aggregate(scaling),
+                   baseline=aggregate([b for b in baseline]) if baseline else None)
+    detail = dict(cells=cells, kls_failures=kls_failures, unscored_peer_cells=unscored,
+                  thread_scaling=scaling, baseline=baseline)
+    return summary, detail
+
+
+def run(args):
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location('cleanup', root / 'bench/process_session_cleanup.py')
+    cleanup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cleanup)
+    if args.set == 'tune':
+        cases = list(CASES)
+    else:
+        manifest = json.loads(args.manifest.read_text())
+        cases = [c['case'] for c in manifest['cases'] if c['split'] == args.set]
+    if args.case:
+        if args.set == 'holdout':
+            raise SystemExit('held-out decks are never run individually')
+        cases = [c for c in cases if any(pattern in c for pattern in args.case)]
+    if not cases:
+        raise SystemExit('no decks selected')
+    if not args.diagnostic:
+        busy = []
+        for process in Path('/proc').iterdir():
+            if process.name.isdigit() and int(process.name) != os.getpid():
+                try:
+                    name = (process / 'comm').read_text().strip()
+                except (FileNotFoundError, ProcessLookupError, PermissionError):
+                    continue
+                if name in ('cc1', 'cc1plus', 'f951', 'ctest', 'cmake', 'Xyce', 'kls_bench'):
+                    busy.append((int(process.name), name))
+        if busy:
+            raise RuntimeError(f'timing requires idle build/test/solver processes: {busy}')
+    output = args.output.resolve()
+    output.mkdir(parents=True)
+    lock = open(args.workspace / '.spice-timing.lock', 'w')
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    binaries = {'kls': args.candidate.resolve()}
+    if args.baseline:
+        binaries['baseline'] = args.baseline.resolve()
+    frozen = output / 'binaries'
+    frozen.mkdir()
+    hashes = {}
+    for name, original in list(binaries.items()):
+        hashes[str(original)] = sha(original)
+        target = frozen / name
+        target.write_bytes(original.read_bytes())
+        target.chmod(0o755)
+        binaries[name] = target
+    inputs = [Path(__file__), Path(__file__).with_name('run_spice_campaign.py'), args.image, args.license,
+              args.regression / 'TestScripts/xyce_verify.pl', *args.peer_library,
+              *[args.regression / 'Netlists' / c for c in cases]]
+    if args.manifest:
+        inputs.append(args.manifest)
+    hashes.update({str(p.resolve()): sha(p) for p in inputs})
+    domains = [d for d in DOMAINS if d[0] in args.domain]
+    if args.order == 'confirmation':
+        domains.reverse()
+    else:
+        cases.reverse()
+    peers = [] if args.no_peers else list(PEER_CONFIGS)
+    metadata = dict(set=args.set, sealed=args.set == 'holdout', cases=cases, domains=domains,
+                    threads=args.threads, passes=args.passes, peers=peers, baseline=bool(args.baseline),
+                    order=args.order, diagnostic=args.diagnostic, timeout=args.timeout,
+                    peer_configurations={p: {s: list(v[:2]) + [v[2]] for s, v in c.items()}
+                                         for p, c in PEER_CONFIGS.items()},
+                    input_sha256=hashes, cpu_topology=subprocess.check_output(['lscpu'], text=True),
+                    primary_metric='final Total Linear Solution Time')
+    write_json(output / 'metadata.json', metadata)
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith(
+        ('LD_', 'KLS_', 'OMP_', 'GOMP_', 'OPENBLAS_', 'APPTAINERENV_', 'ASAN_', 'UBSAN_', 'TSAN_'))}
+    base_env.update(OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', XYCE_NO_TRACKING='1')
+    rows = []
+    quiet = metadata['sealed']
+
+    def execute(domain, cpus, case, count, trial, side, reference=None):
+        label = hashes[str((args.regression / 'Netlists' / case).resolve())][:12] if quiet else Path(case).stem
+        dest = output / domain / label / f't{count}-p{trial}-{side}'
+        if side == 'klu':
+            solver, extra, overrides = 'KLU', '', {}
+        elif side in ('kls', 'baseline'):
+            solver, extra, overrides = KLS_SIDE
+        else:
+            solver, extra, overrides = next(c[side] for c in PEER_CONFIGS.values() if side in c)
+        stage(args.regression / 'Netlists' / case, dest, solver, count, args.license, extra)
+        executable = binaries['baseline' if side == 'baseline' else 'kls']
+        cmd = ['taskset', '-c', cpus, 'apptainer', 'exec', '--bind', f'{args.workspace}:/work',
+               '--bind', f'{args.workspace}:{args.workspace}', '--bind', '/tmp:/tmp',
+               '--pwd', str(dest), str(args.image), str(executable), 'input.cir']
+        env = dict(base_env, **overrides)
+        start = time.monotonic()
+        with (dest / 'stdout.log').open('x') as stream:
+            child = subprocess.Popen(cmd, stdout=stream, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+            try:
+                code, timeout = wait_child(child, args.timeout)
+            except BaseException:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.wait()
+                cleanup.drain_exited_apptainer_session(child.pid, args.image)
+                raise
+        wall = time.monotonic() - start
+        closure = cleanup.drain_exited_apptainer_session(child.pid, args.image)
+        row = dict(domain=domain, case=case, threads=count, trial=trial, side=side, directory=str(dest),
+                   exit_code=code, timed_out=timeout, wall_seconds=wall)
+        log = parse_log((dest / 'stdout.log').read_text(errors='replace'))
+        values = waveform(dest / 'input.cir.prn')
+        row['qualified'] = bool(
+            code == 0 and not timeout and closure['all_session_processes_absent'] and log['end_of_simulation'] and
+            not log['linear_failure_messages'] and log['successful_steps'] and log['failed_steps'] and
+            log['linear_seconds'] and all(math.isfinite(v) and v > 0 for v in log['linear_seconds']) and
+            values and all(math.isfinite(v) for r in values for v in r))
+        row['linear'] = log['linear_seconds'][-1] if log['linear_seconds'] else None
+        row['steps'] = [log['successful_steps'][-1] if log['successful_steps'] else None,
+                        log['failed_steps'][-1] if log['failed_steps'] else None]
+        if reference is not None and row['qualified']:
+            ref_output, test_output = Path(reference['directory']) / 'input.cir.prn', dest / 'input.cir.prn'
+            row['waveform'] = compare_waveforms(ref_output, test_output)['status']
+            names = ref_output.read_text().splitlines()[0].split()[2:]
+            netlist = re.sub(r'^\s*\*comp[^\n]*\n', '', (dest / 'input.cir').read_text(), flags=re.I | re.M)
+            comments = ''.join(f'*comp {name} reltol=1e-8 abstol=1e-10 zerotol=0 absdifftol=0 numfail=0\n'
+                               for name in names)
+            netlist = re.sub(r'^(\s*\.end\s*)$', lambda m: comments + m[0], netlist, flags=re.I | re.M)
+            (dest / 'verification.cir').write_text(netlist)
+            try:
+                with (dest / 'verification.log').open('x') as stream:
+                    row['verifier'] = subprocess.run(
+                        ['perl', str(args.regression / 'TestScripts/xyce_verify.pl'), '--verbose',
+                         str(dest / 'verification.cir'), str(ref_output), str(test_output)],
+                        stdout=stream, stderr=subprocess.STDOUT, timeout=120).returncode
+            except subprocess.TimeoutExpired:
+                row['verifier'] = 'timeout'
+            row['qualified'] = bool(reference['qualified'] and row['steps'] == reference['steps'] and
+                                    row['verifier'] == 0)
+        elif reference is not None:
+            row['qualified'] = False
+        rows.append(row)
+        with (output / 'observations.jsonl').open('a') as stream:
+            stream.write(json.dumps(row, allow_nan=False) + '\n')
+        if quiet:
+            print('.', end='', flush=True)
+        else:
+            print(domain, Path(case).stem, count, trial, side, 'PASS' if row['qualified'] else 'FAIL',
+                  f"{row['linear']}", flush=True)
+        return row
+
+    for domain, cpus in domains:
+        for index, case in enumerate(cases):
+            reference = execute(domain, cpus, case, 1, -1, 'klu')
+            for count in args.threads:
+                sides = sides_for(count, peers, bool(args.baseline))
+                for trial in range(args.passes):
+                    for side in rotate(sides, index, trial, args.order == 'confirmation'):
+                        execute(domain, cpus, case, count, trial, side, reference)
+    changed = [p for p, h in hashes.items() if not Path(p).exists() or sha(p) != h]
+    summary, detail = reduce_results(metadata, rows)
+    summary['changed_inputs'] = changed
+    if changed or args.diagnostic:
+        summary['gate'] = False
+    write_json(output / 'summary.json', summary)
+    write_json(output / ('cells.sealed.json' if metadata['sealed'] else 'cells.json'), detail)
+    print()
+    print(json.dumps(summary, indent=2))
+    return 0 if summary['complete'] else 1
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    for name in ('workspace', 'regression', 'image', 'license', 'candidate', 'output'):
+        p.add_argument('--' + name, type=Path, required=True)
+    p.add_argument('--baseline', type=Path, help='Optional second KLS Xyce binary for an A/B ratio')
+    p.add_argument('--manifest', type=Path, help='Held-out manifest (required for dev and holdout)')
+    p.add_argument('--set', choices=['tune', 'dev', 'holdout'], required=True)
+    p.add_argument('--case', action='append', default=[], help='Substring filter; not allowed for holdout')
+    p.add_argument('--peer-library', type=Path, action='append', default=[])
+    p.add_argument('--no-peers', action='store_true')
+    p.add_argument('--passes', type=int, default=4)
+    p.add_argument('--threads', type=lambda s: [int(x) for x in s.split(',')], default=[1, 8])
+    p.add_argument('--domain', action='append', choices=[d[0] for d in DOMAINS], default=[])
+    p.add_argument('--order', choices=['initial', 'confirmation'], default='initial')
+    p.add_argument('--timeout', type=float, default=1800)
+    p.add_argument('--diagnostic', action='store_true', help='Allow a busy machine; the gate cannot pass')
+    args = p.parse_args()
+    if args.set != 'tune' and not args.manifest:
+        p.error('--manifest is required for dev and holdout')
+    if not args.domain:
+        args.domain = [d[0] for d in DOMAINS]
+    if args.passes < 1:
+        p.error('--passes must be positive')
+    return run(args)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
