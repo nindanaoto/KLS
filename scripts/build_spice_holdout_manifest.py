@@ -65,7 +65,13 @@ def screen(args, case):
         shutil.rmtree(dest, ignore_errors=True)
         return dict(row, status='timeout')
     wall = time.monotonic() - start
-    log = parse_log((dest / 'stdout.log').read_text(errors='replace'))
+    text = (dest / 'stdout.log').read_text(errors='replace')
+    log = parse_log(text)
+    # Xyce itself reports a structurally singular circuit (a node with no DC path to
+    # ground).  Such decks test error handling: every solver follows a different
+    # trajectory, so they cannot be timed against each other.  A node with a single
+    # terminal is not singular by itself and does not exclude a deck.
+    ill_posed = 'does not have a DC path' in text
     ok = (code == 0 and log['end_of_simulation'] and log['linear_seconds'] and
           log['successful_steps'] and not log['linear_failure_messages'] and
           (dest / 'input.cir.prn').exists())
@@ -73,7 +79,8 @@ def screen(args, case):
     if not ok:
         return dict(row, status='failed', exit_code=code)
     return dict(row, status='ran', wall_seconds=wall, klu_linear_seconds=log['linear_seconds'][-1],
-                successful_steps=log['successful_steps'][-1], failed_steps=log['failed_steps'][-1])
+                successful_steps=log['successful_steps'][-1], failed_steps=log['failed_steps'][-1],
+                ill_posed=ill_posed)
 
 
 def main():
@@ -98,7 +105,7 @@ def main():
             rows = list(pool.map(lambda case: screen(args, case), cases))
         if args.rows:
             args.rows.write_text(json.dumps(rows, indent=1) + '\n')
-    eligible = [r for r in rows if r['status'] == 'ran' and
+    eligible = [r for r in rows if r['status'] == 'ran' and not r['ill_posed'] and
                 r['klu_linear_seconds'] >= args.min_linear_seconds]
     # Deterministic, timing-independent choice inside a directory.
     eligible.sort(key=lambda r: hashlib.sha256(r['case'].encode()).hexdigest())
@@ -121,6 +128,7 @@ def main():
             ['git', '-C', str(args.regression), 'rev-parse', 'HEAD'], text=True).strip(),
         tuning_cases=list(CASES), min_linear_seconds=args.min_linear_seconds,
         per_directory=args.per_directory, screened=len(rows), screen_statuses=statuses,
+        ill_posed_excluded=sum(bool(r.get('ill_posed')) for r in rows),
         eligible=len(eligible), cases=kept)
     args.output.write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(dict(screened=len(rows), statuses=statuses, eligible=len(eligible),
