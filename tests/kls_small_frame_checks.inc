@@ -27,7 +27,8 @@ static int small_frame_checks(void) {
       }
       const unsigned long long local=caller_local_frames,heap=caller_heap_frames;
       ok=kls_refactor_solve(s,a,1,x,0,x,0)==KLS_OK;
-      ok=ok && (n==512?caller_local_frames==local+1:caller_heap_frames==heap+1);
+      /* The solver-owned frame serves every size: no per-call allocation. */
+      ok=ok && caller_local_frames==local+1 && caller_heap_frames==heap;
       for(int c=0;c<n&&ok;++c)ok=fabs(x[c]-(1.+epoch))<1e-12;
     }
     if(ok) {

@@ -121,10 +121,12 @@ int main(void) {
   assert(s->solve_refine_values);
   /* Aliased RHS preservation is mandatory when verification is armed. */
   for(int transpose=0;transpose<2;++transpose) {
-    memcpy(x,rhs,sizeof x);fault_seen=0;fail_size=sizeof x;
+    /* A nested public call cannot use the solver-owned frame; its heap frame
+       must fail cleanly. */
+    memcpy(x,rhs,sizeof x);fault_seen=0;fail_size=sizeof x;s->caller_frame_busy=1;
     int status=transpose?kls_solve_transpose(s,1,x,N,x,N)
                         :kls_solve(s,1,x,N,x,N);
-    fail_size=0;
+    fail_size=0;s->caller_frame_busy=0;
     assert(fault_seen && status==KLS_ERR_OUT_OF_MEMORY);
     assert(!memcmp(x,rhs,sizeof x));
   }

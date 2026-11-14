@@ -18,7 +18,6 @@
   "src/kls.c: nnz<8u": 1,
   "src/kls.c: nnz>16u": 1,
   "src/kls.c: s->n<=4096": 1,
-  "src/kls.c: s->n<=512": 1,
   "src/kls.c: solver->n<(UF_long)512u": 1,
   "src/kls.c: solver->n<1000000": 2,
   "src/kls.c: solver->n<2048u": 2,

@@ -1146,6 +1146,12 @@ struct kls_solver {
      while publishing each new L row.  The ordinary solve dispatcher then
      consumes it only after the refactor has returned successfully. */
   double *fused_refactor_solve_work;
+  /* Saved RHS and candidate answer of the outermost one-RHS public call.  The
+     solver keeps the storage for its lifetime so a call of any size does not
+     allocate; a nested public call finds it busy and allocates its own. */
+  double *caller_frame;
+  size_t caller_frame_n;
+  int caller_frame_busy;
   const double *fused_refactor_solve_rhs;
   UF_long fused_refactor_solve_work_n;
   int fused_refactor_solve_requested;
@@ -8265,6 +8271,7 @@ void kls_destroy(kls_solver *solver) {
     return;
   }
   clear_matrix(solver);
+  free(solver->caller_frame);
   free(solver);
 }
 
@@ -13409,6 +13416,32 @@ static int private_caller_rhs_storage(kls_solver *s, int64_t nrhs, const double 
   return KLS_OK;
 }
 
+/* Two n-vectors (saved RHS, candidate) owned by the solver, or NULL when the
+ * call must allocate: several RHSs, a nested public call, or no memory. */
+static double *private_caller_frame_acquire(kls_solver *s,int64_t nrhs) {
+  if(!s || !s->symbolic || s->n<=0 || nrhs!=1 || s->caller_frame_busy ||
+     (uint64_t)s->n>(uint64_t)PTRDIFF_MAX/(2*sizeof(double))) return NULL;
+  if(s->caller_frame_n!=(size_t)s->n) {
+    double *frame=realloc(s->caller_frame,2*(size_t)s->n*sizeof(double));
+    if(!frame) return NULL;
+    s->caller_frame=frame;s->caller_frame_n=(size_t)s->n;
+  }
+  s->caller_frame_busy=1;
+  return s->caller_frame;
+}
+
+/* Branch-free so the scan vectorizes: an all-ones exponent is Inf or NaN. */
+static int private_all_finite(const double *v,size_t count) {
+  uint64_t bad=0;
+  for(size_t i=0;i<count;++i) {
+    uint64_t bits;memcpy(&bits,v+i,sizeof bits);
+    bad|=(uint64_t)((bits&UINT64_C(0x7ff0000000000000))==UINT64_C(0x7ff0000000000000));
+  }
+  return !bad;
+}
+
+/* Heap-owning form, kept for the accuracy fixtures. */
+__attribute__((unused))
 static int private_caller_rhs(kls_solver *s,int64_t nrhs,const double *b,
     int64_t ldb,double *x,int64_t ldx,double **saved) {
   return private_caller_rhs_storage(s,nrhs,b,ldb,x,ldx,saved,NULL);
@@ -13486,11 +13519,9 @@ static int private_caller_finish_storage(kls_solver *s, int transpose, int64_t n
     if(status==KLS_OK) {
       if(!ldx) ldx=s->n;
       for(int64_t rhs=0;rhs<nrhs && status==KLS_OK;++rhs)
-        for(UF_long i=0;i<s->n;++i)
-          if(!isfinite(saved[(size_t)rhs*(size_t)s->n+i]) ||
-             !isfinite(x[(size_t)rhs*(size_t)ldx+i])) {
-            status=KLS_ERR_SOLVE_FAILED;break;
-          }
+        if(!private_all_finite(saved+(size_t)rhs*(size_t)s->n,(size_t)s->n) ||
+           !private_all_finite(x+(size_t)rhs*(size_t)ldx,(size_t)s->n))
+          status=KLS_ERR_SOLVE_FAILED;
     }
     s->stats.solve_seconds+=kls_now_seconds()-start;
     if(owns_saved)free(saved);
@@ -13537,6 +13568,7 @@ static int private_caller_finish_storage(kls_solver *s, int transpose, int64_t n
   return status;
 }
 
+__attribute__((unused))
 static int private_caller_finish(kls_solver *s,int transpose,int64_t nrhs,
     double *saved,double *x,int64_t ldx,int status) {
   return private_caller_finish_storage(s,transpose,nrhs,saved,x,ldx,status,1);
@@ -13552,11 +13584,14 @@ static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
   const int caller_gate = public_call && !solver->private_caller_depth;
   double *saved = NULL;
   double *candidate = NULL;
+  double *frame = NULL;
   if (caller_gate) {
-    int status = private_caller_rhs(solver,nrhs,b,ldb,x,ldx,&saved);
-    if (status != KLS_OK) return status;
-    candidate = calloc((size_t)nrhs*(size_t)solver->n,sizeof(double));
+    frame = private_caller_frame_acquire(solver,nrhs);
+    int status = private_caller_rhs_storage(solver,nrhs,b,ldb,x,ldx,&saved,frame);
+    if (status != KLS_OK) { if(frame) solver->caller_frame_busy=0;return status; }
+    candidate = frame?frame+solver->n:calloc((size_t)nrhs*(size_t)solver->n,sizeof(double));
     if (!candidate) { free(saved);return KLS_ERR_OUT_OF_MEMORY; }
+    if (frame) memset(candidate,0,(size_t)solver->n*sizeof(double));
     solver->private_cold_deadline = 0;
     ++solver->private_caller_depth;
   }
@@ -13579,12 +13614,12 @@ static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
       caller_gate?candidate:x,caller_gate?(int64_t)solver->n:ldx);
   --solver->private_solve_depth;
   if (caller_gate) {
-    status = private_caller_finish(solver,transpose,nrhs,saved,candidate,0,status);
+    status = private_caller_finish_storage(solver,transpose,nrhs,saved,candidate,0,status,!frame);
     if (status == KLS_OK)
       for (int64_t k=0;k<nrhs;++k)
         memcpy(x+(size_t)k*(ldx?ldx:solver->n),
                candidate+(size_t)k*solver->n,(size_t)solver->n*sizeof(double));
-    free(candidate);
+    if (frame) solver->caller_frame_busy=0; else free(candidate);
     --solver->private_caller_depth;
   }
   if (public_call && status != KLS_OK) solver->verified_rhs_valid = 0;
@@ -15467,15 +15502,13 @@ static int kls_refactor_solve_impl(kls_solver *solver,
 int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     const double *b, int64_t ldb, double *x, int64_t ldx) {
   if (!values) return KLS_ERR_INVALID_ARGUMENT;
-  /* A bounded frame belongs to this call, including nested recovery. */
-  double local_rhs[512],local_candidate[512];
-  const int local=s && s->symbolic && s->symbolic->nblocks>1 &&
-    nrhs==1 && s->n>0 && s->n<=512 &&
-    s->options.threads==1 && s->observed_parallel.choice<=0;
+  /* The frame belongs to this call, including nested recovery. */
+  double *const frame=private_caller_frame_acquire(s,nrhs);
+  const int local=frame!=NULL;
   double *saved = NULL;
-  int status = private_caller_rhs_storage(s,nrhs,b,ldb,x,ldx,&saved,local?local_rhs:NULL);
-  if (status != KLS_OK) return status;
-  double *candidate = local?local_candidate:calloc((size_t)nrhs*(size_t)s->n,sizeof(double));
+  int status = private_caller_rhs_storage(s,nrhs,b,ldb,x,ldx,&saved,frame);
+  if (status != KLS_OK) { if(local) s->caller_frame_busy=0;return status; }
+  double *candidate = local?frame+s->n:calloc((size_t)nrhs*(size_t)s->n,sizeof(double));
   if(local)memset(candidate,0,(size_t)s->n*sizeof(double));
 #ifdef KLS_CALLER_LOCAL_FRAME_TEST_EVENT
   KLS_CALLER_LOCAL_FRAME_TEST_EVENT(local);
@@ -15493,7 +15526,7 @@ int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
   const kls_native_i16_call native_i16=s->options.threads==1?
     kls_native_i16_before(s,values,nrhs,saved,candidate):(kls_native_i16_call){0};
   if(s->options.threads>1 || s->observed_parallel.choice>0) {
-    status=kls_observed_parallel_refactor_solve(s,values,nrhs,saved,candidate);
+    status=kls_observed_parallel_refactor_solve(s,values,nrhs,saved,candidate,!local);
   } else {
     status=private_refactor_solve_body(s,values,nrhs,saved,0,candidate,0);
     status=private_caller_finish_storage(s,0,nrhs,saved,candidate,0,status,!local);
@@ -15511,7 +15544,7 @@ int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     for (int64_t k=0;k<nrhs;++k)
       memcpy(x+(size_t)k*(ldx?ldx:s->n),candidate+(size_t)k*s->n,
              (size_t)s->n*sizeof(double));
-  if(!local)free(candidate);
+  if(local) s->caller_frame_busy=0; else free(candidate);
   return status;
 }
 

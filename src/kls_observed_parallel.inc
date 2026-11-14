@@ -178,7 +178,7 @@ static void kls_observed_parallel_after(kls_solver *s,
    instruction footprint, including small serial solves. */
 __attribute__((noinline))
 static int kls_observed_parallel_refactor_solve(kls_solver *s,
-    const double *values,int64_t nrhs,double *b,double *x) {
+    const double *values,int64_t nrhs,double *b,double *x,int owns_rhs) {
   const kls_observed_parallel_call call=
     kls_observed_parallel_before(s,values,nrhs,b,x);
   int status;
@@ -186,7 +186,7 @@ static int kls_observed_parallel_refactor_solve(kls_solver *s,
     status=kls_factor(s,values);
     if(status==KLS_OK) status=kls_solve(s,nrhs,b,0,x,0);
   } else status=private_refactor_solve_body(s,values,nrhs,b,0,x,0);
-  status=private_caller_finish(s,0,nrhs,b,x,0,status);
+  status=private_caller_finish_storage(s,0,nrhs,b,x,0,status,owns_rhs);
   kls_observed_parallel_after(s,call,status);
   return status;
 }
