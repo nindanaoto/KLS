@@ -31,7 +31,10 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
      s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
   if(!s->symbolic || !s->numeric ||
      s->options.backend!=KLS_BACKEND_AUTO || kls_kernel_tuning_overridden(s) ||
-     s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
+     /* The compact kernels keep the native operation order, so a caller
+        that manages accuracy itself receives the same factors and answers. */
+     (s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+      s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED) ||
      s->common.scale>0 || s->numeric->Rs || !s->numeric->Offp ||
      !s->numeric->Udiag || !s->numeric->Xwork || !s->numeric->LUbx ||
      s->snb || s->snb_group ||
