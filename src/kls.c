@@ -1149,6 +1149,12 @@ struct kls_solver {
      while publishing each new L row.  The ordinary solve dispatcher then
      consumes it only after the refactor has returned successfully. */
   double *fused_refactor_solve_work;
+  /* Application-managed small-BTF fusion: the refactor kernel also solves the
+     pending right-hand side when it runs on exactly these caller values. */
+  const double *small_btf_fused_values, *small_btf_fused_rhs;
+  double *small_btf_fused_work;
+  UF_long small_btf_fused_n;
+  int small_btf_fused_ready;
   /* Saved RHS and candidate answer of the outermost one-RHS public call.  The
      solver keeps the storage for its lifetime so a call of any size does not
      allocate; a nested public call finds it busy and allocates its own. */
@@ -6201,6 +6207,22 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
   common->singular_col = KLS_KLU_EMPTY;
   common->nrealloc = 0;
 
+  /* U(:,k) and its pivot are final in iteration k, and the transpose forward
+     equation for k only reads earlier answers, so it is solved here while the
+     pivot chain is still running; the backward sweep follows each block. The
+     arithmetic is that of kls_compact_btf_transpose_scaled. */
+  solver->small_btf_fused_ready = 0;
+  const double *restrict fused_rhs =
+    solver->small_btf_fused_values == numeric_values &&
+    solver->small_btf_fused_work != NULL &&
+    solver->small_btf_fused_n == solver->n ? solver->small_btf_fused_rhs : NULL;
+  double *restrict sol = solver->small_btf_fused_work;
+  const uint16_t *restrict sq = solver->i16solve_q;
+  const uint16_t *restrict soffp = solver->i16solve_offp;
+  const uint16_t *restrict soffi = solver->i16solve_offi;
+  const uint16_t *restrict slp = solver->i16solve_loff;
+  const uint16_t *restrict sli = solver->i16solve_l;
+
   for (UF_long block = 0u; block < symbolic->nblocks; ++block) {
     const UF_long k1 = r[block];
     const UF_long k2 = r[block + 1u];
@@ -6218,6 +6240,13 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
         if (common->halt_if_singular) {
           break;
         }
+      }
+      if (fused_rhs != NULL) {
+        double value = fused_rhs[sq[k1]];
+        for (uint32_t z = soffp[k1]; z < soffp[k1 + 1u]; ++z)
+          value -= offx[z] * sol[soffi[z]];
+        const double inverse = 1.0 / pivot;
+        sol[k1] = isfinite(inverse) ? value * inverse : value / pivot;
       }
       continue;
     }
@@ -6278,6 +6307,21 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
       const uint16_t *restrict li=lcount<=3?desc->short_rows:lrows+desc->offset;
       double *restrict lx=desc->values;
       const double pivot_recip = 1.0 / pivot;
+      if (fused_rhs != NULL) {
+        double value = fused_rhs[sq[global]];
+        for (uint32_t z = soffp[global]; z < soffp[global + 1u]; ++z)
+          value -= offx[z] * sol[soffi[z]];
+        if (isfinite(pivot_recip)) {
+          value *= pivot_recip;
+          for (UF_long up = 0u; up < ucount; ++up)
+            value -= (ux[up] * pivot_recip) * sol[k1 + ui[up]];
+        } else {
+          for (UF_long up = 0u; up < ucount; ++up)
+            value -= ux[up] * sol[k1 + ui[up]];
+          value /= pivot;
+        }
+        sol[global] = value;
+      }
       if (lcount <= 3u) {
         if (lcount > 0u) {
           const UF_long i = li[0];
@@ -6306,6 +6350,16 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
       memset(x, 0, (size_t)symbolic->maxblock * sizeof(*x));
       break;
     }
+    if (fused_rhs != NULL) {
+      for (UF_long k = k2; k-- > k1;) {
+        double value = sol[k];
+        const double *restrict slx = solver->i16solve_lx[k];
+        const uint32_t begin = slp[k], end = slp[k + 1u];
+        for (uint32_t z = begin; z < end; ++z)
+          value -= slx[z - begin] * sol[k1 + sli[z]];
+        sol[k] = value;
+      }
+    }
   }
   if (singular) {
     common->status = TRILINOS_KLU_SINGULAR;
@@ -6314,6 +6368,7 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
     return !common->halt_if_singular;
   }
   common->status = TRILINOS_KLU_OK;
+  solver->small_btf_fused_ready = fused_rhs != NULL;
 #ifdef KLS_COMPACT_BTF_FACTOR_TEST_EVENT
   KLS_COMPACT_BTF_FACTOR_TEST_EVENT();
 #endif
@@ -8018,6 +8073,11 @@ static void clear_matrix(kls_solver *solver) {
   KLS_FREE_AND_NULL(solver->lean_scale_rs_snapshot);
   KLS_FREE_AND_NULL(solver->solve_perm_workspace);
   KLS_FREE_AND_NULL(solver->fused_refactor_solve_work);
+  KLS_FREE_AND_NULL(solver->small_btf_fused_work);
+  solver->small_btf_fused_n = 0;
+  solver->small_btf_fused_ready = 0;
+  solver->small_btf_fused_values = NULL;
+  solver->small_btf_fused_rhs = NULL;
   KLS_FREE_AND_NULL(solver->native_pivot_recip);
   free_solve_refine_workspace(solver);   /* incl. solve_refine_rinv:
      it was only ever freed here-ish; a reused solver otherwise kept a
@@ -10156,6 +10216,7 @@ int kls_refactor(kls_solver *solver, const double *values) {
   int status=private_refactor_body(solver,values);
   if(public_epoch && values && kls_small_btf_numeric_failure(status) &&
      kls_small_btf_restore(solver)) {
+    solver->small_btf_fused_ready=0;
     status=private_factor_body(solver,values);
     solver->stats.refactor_seconds=kls_now_seconds()-fallback_start;
     kls_set_last_refactor_path(solver,KLS_REFACTOR_PATH_KLU);
@@ -13848,8 +13909,24 @@ static int private_solve_body(kls_solver *solver,
      !solver->in_solve_refinement && !solver->certified_unscaled_l2_contract &&
      !transpose && nrhs==1 && solver->symbolic->nblocks>1 && ldb==(int64_t)solver->n && ldx==(int64_t)solver->n &&
      kls_small_btf_cache_capable(solver) && kls_small_btf_cache_ready(solver)) {
-    if(b!=x)memmove(x,b,(size_t)solver->n*sizeof(*x));
-    if(kls_compact_btf_transpose_prechecked(solver,x)) {
+    int compact_solved;
+    if(solver->small_btf_fused_ready && b==solver->small_btf_fused_rhs &&
+       solver->small_btf_fused_work) {
+      /* The refactor kernel already solved this right-hand side. */
+      solver->small_btf_fused_ready=0;
+#ifdef KLS_SMALL_BTF_FUSED_TEST_EVENT
+      KLS_SMALL_BTF_FUSED_TEST_EVENT();
+#endif
+      const uint16_t *fused_pnum=solver->i16solve_pnum;
+      const double *fused_solution=solver->small_btf_fused_work;
+      for(UF_long k=0;k<solver->n;++k)x[fused_pnum[k]]=fused_solution[k];
+      solver->common.status=TRILINOS_KLU_OK;
+      compact_solved=1;
+    } else {
+      if(b!=x)memmove(x,b,(size_t)solver->n*sizeof(*x));
+      compact_solved=kls_compact_btf_transpose_prechecked(solver,x)!=0;
+    }
+    if(compact_solved) {
       const double seconds=kls_now_seconds()-start;
       solver->base_solve_seconds=seconds;solver->stats.solve_seconds=seconds;
       kls_lean_reaudit_record_solve(solver,seconds);
@@ -15522,10 +15599,36 @@ static int kls_refactor_solve_impl(kls_solver *solver,
     solver->row_refactor_u_cols != NULL &&
     solver->n <= (UF_long)(SIZE_MAX / sizeof(double));
   if (!fusion_candidate) {
+    solver->small_btf_fused_ready = 0;
+    if (nrhs == 1 && b != x &&
+        solver->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED &&
+        solver->orientation == KLS_ORIENTATION_TRANSPOSE &&
+        effective_ldb == (int64_t)solver->n &&
+        effective_ldx == (int64_t)solver->n &&
+        kls_small_btf_cache_capable(solver) &&
+        kls_small_btf_cache_ready(solver)) {
+      if (solver->small_btf_fused_n != solver->n) {
+        double *work = (double *)realloc(solver->small_btf_fused_work,
+          (size_t)solver->n * sizeof(*work));
+        if (work != NULL) {
+          solver->small_btf_fused_work = work;
+          solver->small_btf_fused_n = solver->n;
+        }
+      }
+      if (solver->small_btf_fused_n == solver->n) {
+        solver->small_btf_fused_values = values;
+        solver->small_btf_fused_rhs = b;
+      }
+    }
     const int refactor_status = kls_refactor(solver, values);
-    return refactor_status == KLS_OK
+    solver->small_btf_fused_values = NULL;
+    if (refactor_status != KLS_OK) solver->small_btf_fused_ready = 0;
+    const int combined_status = refactor_status == KLS_OK
       ? kls_solve(solver, nrhs, b, effective_ldb, x, effective_ldx)
       : refactor_status;
+    solver->small_btf_fused_ready = 0;
+    solver->small_btf_fused_rhs = NULL;
+    return combined_status;
   }
 
   const double fusion_prepare_start = kls_now_seconds();

@@ -72,6 +72,55 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
 #endif
 }
 
+/* Application-managed variant of the walk below. The pivot division is taken
+   off the forward-substitution dependency chain: each row is scaled by its
+   reciprocal pivot before the chain reaches it, so consecutive rows are one
+   multiply-subtract apart instead of one multiply-subtract plus one division.
+   Answers differ from the native walk by rounding only; a pivot whose
+   reciprocal is not finite keeps the native division. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline,hot,aligned(64)))
+#endif
+static UF_long kls_compact_btf_transpose_scaled(kls_solver *s,double *out) {
+  const UF_long n=s->n;
+  double *work=s->numeric->Xwork;
+  const double *diagonal=s->numeric->Udiag,*offx=s->numeric->Offx;
+  const uint16_t *q=s->i16solve_q,*pnum=s->i16solve_pnum;
+  const uint16_t *offp=s->i16solve_offp,*offi=s->i16solve_offi;
+  const uint16_t *up=s->i16solve_uoff,*ui=s->i16solve_u;
+  const uint16_t *lp=s->i16solve_loff,*li=s->i16solve_l;
+  for(UF_long k=0;k<n;++k)work[k]=out[q[k]];
+  for(UF_long block=0;block<s->symbolic->nblocks;++block) {
+    const UF_long first=s->i16solve_r[block],last=s->i16solve_r[block+1];
+    double *local=work+first;
+    for(UF_long k=first;k<last;++k) {
+      double value=work[k];
+      for(uint32_t z=offp[k];z<offp[k+1];++z)value-=offx[z]*work[offi[z]];
+      const double *ux=s->i16solve_ux[k];
+      const uint32_t begin=up[k],end=up[k+1];
+      const double pivot=diagonal[k],inverse=1.0/pivot;
+      if(isfinite(inverse)) {
+        value*=inverse;
+        for(uint32_t z=begin;z<end;++z)
+          value-=(ux[z-begin]*inverse)*local[ui[z]];
+        work[k]=value;
+      } else {
+        for(uint32_t z=begin;z<end;++z)value-=ux[z-begin]*local[ui[z]];
+        work[k]=value/pivot;
+      }
+    }
+    for(UF_long k=last;k-->first;) {
+      double value=work[k];const double *lx=s->i16solve_lx[k];
+      const uint32_t begin=lp[k],end=lp[k+1];
+      for(uint32_t z=begin;z<end;++z)value-=lx[z-begin]*local[li[z]];
+      work[k]=value;
+    }
+  }
+  for(UF_long k=0;k<n;++k)out[pnum[k]]=work[k];
+  s->common.status=TRILINOS_KLU_OK;
+  return 1;
+}
+
 /* The linked long-index one-RHS KLU walk uses separate multiply/subtract,
    without zero skips. Preserve that native column order and division.
    There is one solve of the actual RHS, followed by the existing refinement
@@ -88,6 +137,8 @@ static UF_long kls_compact_btf_transpose_prechecked(kls_solver *s,double *out) {
 #pragma clang fp contract(off)
 #endif
   if(!kls_small_btf_environment())return 0; /* current execution environment */
+  if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED)
+    return kls_compact_btf_transpose_scaled(s,out);
   const UF_long n=s->n;
   double *work=s->numeric->Xwork;
   const double *diagonal=s->numeric->Udiag,*offx=s->numeric->Offx;
