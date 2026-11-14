@@ -1771,10 +1771,13 @@ static UF_long kls_i32_solve(kls_solver *solver,
 /* Whether the subtree partition may carry this transpose solve.  The pool
    must already exist: a factor whose refactor stayed serial has no awake
    crew, and creating one for the solve alone is a cost no trial here could
-   charge fairly. */
+   charge fairly.  Any published partition qualifies, including one whose
+   shared top is too wide for the untimed normal-orientation gate: the
+   gather kernel needs only the tree containment every partition is verified
+   for, and the caller's timed trial judges whether that geometry pays. */
 static int kls_pts_transpose_solve_candidate(const kls_solver *solver) {
   const kls_pts *pts = solver != NULL ? solver->pts : NULL;
-  return pts != NULL && pts->solve_ok && pts->tsolve_decision >= 0 &&
+  return pts != NULL && pts->tsolve_decision >= 0 &&
     pts->nthreads >= 2 && solver->egraph_pool != NULL &&
     solver->egraph_pool->thread_count == pts->nthreads &&
     solver->symbolic != NULL && solver->numeric != NULL &&
