@@ -353,6 +353,29 @@ Int TRILINOS_KLU_tsolve
 	    }
 	    else
 	    {
+#ifndef COMPLEX
+		if (nr == 1 && Common->kls_pivot_reciprocals != NULL)
+		{
+		    /* KLS: the one-RHS forward sweep of TRILINOS_KLU_utsolve
+		       with the pivot division replaced by a multiplication. */
+		    const double *kls_recip = Common->kls_pivot_reciprocals + k1 ;
+		    Entry *kls_x = X + k1, *kls_ux, kls_acc ;
+		    Int *kls_ui, kls_len ;
+		    for (k = 0 ; k < nk ; k++)
+		    {
+			GET_POINTER (LUbx [block], (Uip + k1), (Ulen + k1),
+				kls_ui, kls_ux, k, kls_len) ;
+			kls_acc = kls_x [k] ;
+			for (p = 0 ; p < kls_len ; p++)
+			{
+			    KLS_TRANSPOSE_MULT_SUB (kls_acc, kls_ux [p],
+				    kls_x [kls_ui [p]]) ;
+			}
+			kls_x [k] = kls_acc * kls_recip [k] ;
+		    }
+		}
+		else
+#endif
 		TRILINOS_KLU_utsolve (nk, Uip + k1, Ulen + k1, LUbx [block],
 			Udiag + k1, nr,
 #ifdef COMPLEX

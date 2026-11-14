@@ -1180,6 +1180,10 @@ struct kls_solver {
   /* Saved RHS and candidate answer of the outermost one-RHS public call.  The
      solver keeps the storage for its lifetime so a call of any size does not
      allocate; a nested public call finds it busy and allocates its own. */
+  /* Pivots as last seen by a one-RHS transpose solve, followed by their
+     reciprocals.  The solve compares before use, so no numeric engine has to
+     announce an update. */
+  double *native_pivot_recip;
   double *caller_frame;
   size_t caller_frame_n;
   int caller_frame_busy;
@@ -8042,6 +8046,7 @@ static void clear_matrix(kls_solver *solver) {
   KLS_FREE_AND_NULL(solver->lean_scale_rs_snapshot);
   KLS_FREE_AND_NULL(solver->solve_perm_workspace);
   KLS_FREE_AND_NULL(solver->fused_refactor_solve_work);
+  KLS_FREE_AND_NULL(solver->native_pivot_recip);
   free_solve_refine_workspace(solver);   /* incl. solve_refine_rinv:
      it was only ever freed here-ish; a reused solver otherwise kept a
      STALE row-perm inverse sized to the previous matrix */
@@ -13709,6 +13714,43 @@ static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
   if (public_call && status != KLS_OK) solver->verified_rhs_valid = 0;
   return status;
 }
+/* Reciprocals of the current pivots for a one-RHS transpose solve, or NULL
+   without memory.  Each forward step of U^T y = b feeds the next, so dividing
+   by the pivot there sets the pace of the whole sweep; multiplying does not.
+   The reciprocals are formed off that chain in one vectorized pass, and only
+   when the pivots differ from the ones they were formed from. */
+static const double *kls_pivot_reciprocals(kls_solver *solver) {
+  const size_t n = (size_t)solver->n;
+  const double *diag = (const double *)solver->numeric->Udiag;
+  double *seen = solver->native_pivot_recip;
+  /* Without a block of more than one row there is no chain to shorten. */
+  if (diag == NULL || n == 0u || solver->symbolic->maxblock <= 1) return NULL;
+  if (seen == NULL) {
+    if (n > SIZE_MAX / (2u * sizeof(double))) return NULL;
+    seen = (double *)malloc(2u * n * sizeof(*seen));
+    if (seen == NULL) return NULL;
+    solver->native_pivot_recip = seen;
+    /* Finite pivots never equal these bytes; NaN pivots get NaN reciprocals. */
+    for (size_t k = 0; k < 2u * n; ++k) seen[k] = NAN;
+  }
+  if (memcmp(seen, diag, n * sizeof(*diag))) {
+    memcpy(seen, diag, n * sizeof(*diag));
+#pragma omp simd
+    for (size_t k = 0; k < n; ++k) seen[n + k] = 1.0 / diag[k];
+  }
+  return seen + n;
+}
+
+static UF_long kls_vendor_transpose_solve(kls_solver *solver, UF_long ld,
+                                          UF_long nrhs, double *x) {
+  solver->common.kls_pivot_reciprocals =
+    nrhs == 1 ? kls_pivot_reciprocals(solver) : NULL;
+  const UF_long ok = trilinos_klu_l_tsolve(solver->symbolic, solver->numeric,
+                                           ld, nrhs, x, &solver->common);
+  solver->common.kls_pivot_reciprocals = NULL;
+  return ok;
+}
+
 static int private_solve_body(kls_solver *solver,
                       int transpose,
                       int64_t nrhs,
@@ -13911,8 +13953,7 @@ static int private_solve_body(kls_solver *solver,
     kls_sync_authoritative_packed_u_values(solver);
     const UF_long direct_ok =
       solver->orientation == KLS_ORIENTATION_TRANSPOSE
-        ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric, solver->n,
-                                1u, x, &solver->common)
+        ? kls_vendor_transpose_solve(solver, solver->n, 1u, x)
         : trilinos_klu_l_solve(solver->symbolic, solver->numeric, solver->n,
                                1u, x, &solver->common);
     const double direct_seconds = kls_now_seconds() - start;
@@ -14227,9 +14268,7 @@ static int private_solve_body(kls_solver *solver,
         kls_sync_authoritative_packed_l_values(solver);
         kls_sync_authoritative_packed_u_values(solver);
         ok = kernel_transpose
-          ? trilinos_klu_l_tsolve(solver->symbolic, solver->numeric,
-                                  (UF_long)ldx, (UF_long)nrhs, x,
-                                  &solver->common)
+          ? kls_vendor_transpose_solve(solver, (UF_long)ldx, (UF_long)nrhs, x)
           : trilinos_klu_l_solve(solver->symbolic, solver->numeric,
                                  (UF_long)ldx, (UF_long)nrhs, x,
                                  &solver->common);

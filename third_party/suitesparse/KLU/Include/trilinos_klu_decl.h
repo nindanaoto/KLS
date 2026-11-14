@@ -235,6 +235,10 @@ typedef struct trilinos_klu_common_struct
     int *kls_zero_pivots ;
     int kls_zero_pivot_capacity ;
     int kls_zero_pivot_count ;
+    /* Optional 1/Udiag, set by KLS around a one-RHS transpose solve.  When
+       non-NULL the forward sweep multiplies by these instead of dividing by
+       the pivot, which shortens the dependency chain between rows. */
+    const double *kls_pivot_reciprocals ;
 
 } trilinos_klu_common ;
 
@@ -287,6 +291,10 @@ typedef struct trilinos_klu_l_common_struct /* 64-bit version (otherwise same as
     UF_long *kls_zero_pivots ;  /* optional discovered global pivot indices */
     UF_long kls_zero_pivot_capacity ;
     UF_long kls_zero_pivot_count ;
+    /* Optional 1/Udiag, set by KLS around a one-RHS transpose solve.  When
+       non-NULL the forward sweep multiplies by these instead of dividing by
+       the pivot, which shortens the dependency chain between rows. */
+    const double *kls_pivot_reciprocals ;
 
 } trilinos_klu_l_common ;
 

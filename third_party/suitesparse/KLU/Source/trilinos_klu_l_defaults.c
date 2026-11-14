@@ -75,6 +75,7 @@ Int TRILINOS_KLU_defaults
     Common->kls_zero_pivot_replacement = 0 ;
     Common->kls_zero_pivots = NULL ;
     Common->kls_zero_pivot_capacity = 0 ;
+    Common->kls_pivot_reciprocals = NULL ;
     Common->kls_zero_pivot_count = 0 ;
     return (TRUE) ;
 }
