@@ -1692,7 +1692,21 @@ typedef struct kls_egraph_refactor_worker {
 
 static _Thread_local kls_egraph_refactor_worker *kls_dense_help_self;
 
+/* Recent idle gaps between a pool's jobs, as seen by its dispatching thread.
+   A sleeping crew costs every numeric phase a wake-up of each worker, which
+   for sub-millisecond phases is a large share of the phase. When the last
+   gaps were all short enough, workers keep polling for that long (plus half)
+   before they sleep; a longer or unknown gap leaves the ordinary short spin
+   in charge, so an idle solver does not hold processors. */
+typedef struct {
+  _Atomic uint64_t budget_ns;       /* 0: no extended polling */
+  uint64_t last_finish_ns;
+  uint64_t gaps[KLS_IDLE_GAP_HISTORY];
+  unsigned next, count;
+} kls_idle_gap;
+
 struct kls_egraph_refactor_pool {
+  kls_idle_gap idle_gap;
   kls_egraph_refactor_shared shared;
   pthread_cond_t work_cond;
   pthread_cond_t done_cond;
@@ -1712,6 +1726,7 @@ struct kls_egraph_refactor_pool {
 };
 
 struct kls_refactor_pool {
+  kls_idle_gap idle_gap;
   kls_parallel_refactor_shared shared;
   pthread_cond_t work_cond;
   pthread_cond_t done_cond;
@@ -2237,6 +2252,44 @@ static double kls_now_seconds(void) {
 #else
 static double kls_now_seconds(void) { return kls_monotonic_seconds(); }
 #endif
+
+static uint64_t kls_idle_gap_now(void) {
+  return (uint64_t)(kls_now_seconds() * 1e9);
+}
+/* Dispatching thread, immediately before it publishes a job. */
+static void kls_idle_gap_dispatch(kls_idle_gap *g) {
+  const uint64_t now = kls_idle_gap_now();
+  if (g->last_finish_ns && now >= g->last_finish_ns) {
+    g->gaps[g->next] = now - g->last_finish_ns;
+    g->next = (g->next + 1u) % KLS_IDLE_GAP_HISTORY;
+    if (g->count < KLS_IDLE_GAP_HISTORY) ++g->count;
+  }
+  uint64_t longest = 0;
+  for (unsigned i = 0; i < g->count; ++i)
+    if (g->gaps[i] > longest) longest = g->gaps[i];
+  const uint64_t want = longest + longest / 2u;
+  atomic_store_explicit(&g->budget_ns,
+    g->count == KLS_IDLE_GAP_HISTORY && want <= KLS_IDLE_GAP_SPIN_CAP_NS
+      ? want : 0u, memory_order_relaxed);
+}
+/* Dispatching thread, after the job's workers have finished. */
+static void kls_idle_gap_finish(kls_idle_gap *g) {
+  g->last_finish_ns = kls_idle_gap_now();
+}
+/* Idle worker whose ordinary spin budget is spent: 1 to keep polling. */
+static KLS_ALWAYS_INLINE int kls_idle_gap_poll(const kls_idle_gap *g,
+    uint64_t *idle_start, unsigned *tick) {
+  const uint64_t budget =
+    atomic_load_explicit(&g->budget_ns, memory_order_relaxed);
+  if (!budget) return 0;
+  if (!((*tick)++ & 127u)) {
+    const uint64_t now = kls_idle_gap_now();
+    if (!*idle_start) *idle_start = now;
+    if (now - *idle_start >= budget) return 0;
+  }
+  kls_cpu_relax();
+  return 1;
+}
 
 /* Full calls on one route before replay starts, and replays between two
    full calls. The full call keeps every adaptive policy advancing. */
@@ -7131,7 +7184,8 @@ static void *kls_refactor_pool_worker_main(void *arg) {
        SPICE refactors arrive back to back, and at BTF-fragment scale
        (~1ms per refactor) the futex round trips dominate dispatch. */
     unsigned long generation;
-    unsigned spin = 0;
+    unsigned spin = 0, gap_tick = 0;
+    uint64_t idle_start = 0;
     for (;;) {
       if (atomic_load_explicit(&pool->shutdown, memory_order_acquire)) {
         return NULL;
@@ -7146,6 +7200,7 @@ static void *kls_refactor_pool_worker_main(void *arg) {
         kls_cpu_relax();
         continue;
       }
+      if (kls_idle_gap_poll(&pool->idle_gap, &idle_start, &gap_tick)) continue;
       pthread_mutex_lock(&shared->lock);
       while (!atomic_load_explicit(&pool->shutdown, memory_order_acquire) &&
              atomic_load_explicit(&pool->generation, memory_order_acquire) ==
@@ -7153,7 +7208,7 @@ static void *kls_refactor_pool_worker_main(void *arg) {
         pthread_cond_wait(&pool->work_cond, &shared->lock);
       }
       pthread_mutex_unlock(&shared->lock);
-      spin = 0;
+      spin = 0; gap_tick = 0; idle_start = 0;
     }
     seen_generation = generation;
 
@@ -7493,6 +7548,7 @@ static int run_refactor_pool(kls_solver *solver,
   }
   pool->scratch_dirty = 0;
 
+  kls_idle_gap_dispatch(&pool->idle_gap);
   atomic_fetch_add_explicit(&pool->generation, 1ul, memory_order_release);
   pthread_cond_broadcast(&pool->work_cond);
   pthread_mutex_unlock(&shared->lock);
@@ -7509,6 +7565,7 @@ static int run_refactor_pool(kls_solver *solver,
     pthread_cond_wait(&pool->done_cond, &shared->lock);
   }
   pthread_mutex_unlock(&shared->lock);
+  kls_idle_gap_finish(&pool->idle_gap);
 
   int invalid = 0;
   int pivot_rejected = 0;

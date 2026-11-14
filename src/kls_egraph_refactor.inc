@@ -5231,7 +5231,8 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
 
   for (;;) {
     unsigned long generation;
-    unsigned spin = 0;
+    unsigned spin = 0, gap_tick = 0;
+    uint64_t idle_start = 0;
     for (;;) {
       if (atomic_load_explicit(&pool->shutdown, memory_order_acquire)) {
         return NULL;
@@ -5249,6 +5250,7 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
         kls_cpu_relax();
         continue;
       }
+      if (kls_idle_gap_poll(&pool->idle_gap, &idle_start, &gap_tick)) continue;
       /* Repeated SPICE refactors arrive back to back, so a short spin
          usually catches the next generation without a futex round trip;
          fall back to the condition variable when the solver goes idle. */
@@ -5260,7 +5262,7 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
         pthread_cond_wait(&pool->work_cond, &shared->lock);
       }
       pthread_mutex_unlock(&shared->lock);
-      spin = 0;
+      spin = 0; gap_tick = 0; idle_start = 0;
     }
     seen_generation = generation;
 
@@ -5293,6 +5295,7 @@ static void kls_egraph_pool_dispatch_and_wait(
   atomic_store_explicit(&pool->active_workers, thread_count - 1,
                         memory_order_relaxed);
   atomic_store_explicit(&pool->spin_completion, 0, memory_order_relaxed);
+  kls_idle_gap_dispatch(&pool->idle_gap);
   atomic_fetch_add_explicit(&pool->generation, 1ul, memory_order_release);
   pthread_cond_broadcast(&pool->work_cond);
   pthread_mutex_unlock(&shared->lock);
@@ -5302,6 +5305,7 @@ static void kls_egraph_pool_dispatch_and_wait(
                               memory_order_acquire) > 0) {
     pthread_cond_wait(&pool->done_cond, &shared->lock);
   }
+  kls_idle_gap_finish(&pool->idle_gap);
   kls_affinity_scope_leave(&affinity);
 }
 
@@ -5314,6 +5318,7 @@ static void kls_egraph_pool_dispatch_and_spin_wait(
   atomic_store_explicit(&pool->active_workers, thread_count - 1,
                         memory_order_relaxed);
   atomic_store_explicit(&pool->spin_completion, 1, memory_order_relaxed);
+  kls_idle_gap_dispatch(&pool->idle_gap);
   const unsigned long generation =
     atomic_fetch_add_explicit(&pool->generation, 1ul,
                               memory_order_release) + 1ul;
@@ -5329,6 +5334,7 @@ static void kls_egraph_pool_dispatch_and_spin_wait(
   }
   atomic_store_explicit(&pool->active_workers, 0, memory_order_release);
   atomic_store_explicit(&pool->spin_completion, 0, memory_order_release);
+  kls_idle_gap_finish(&pool->idle_gap);
   pthread_mutex_lock(&shared->lock);
   kls_affinity_scope_leave(&affinity);
 }
