@@ -106,7 +106,8 @@
  * grace period between SPICE refactors, avoiding contention in serial phases. */
 #define KLS_EGRAPH_WORKER_SPIN_ITERS 4096u
 /* Idle workers stay awake across the caller's gap between numeric phases
- * only when the recent gaps predict the next phase within this bound. */
+ * only when the upper quartile of recent gaps predicts the next phase within
+ * this bound. */
 #define KLS_IDLE_GAP_SPIN_CAP_NS UINT64_C(20000000)
 #define KLS_IDLE_GAP_HISTORY 16
 #define KLS_SNB_MAX_ENTRIES 150000000

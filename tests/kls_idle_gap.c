@@ -28,19 +28,35 @@ int main(void) {
   while(kls_idle_gap_poll(&g,&start,&tick))++polls;
   const uint64_t waited=kls_idle_gap_now()-begin;
   assert(polls>0 && waited>=budget/2 && waited<=budget+50000000);
-  /* The longest recent gap sets the budget. */
+  /* A longest gap that fits under the cap sets the budget. */
   feed(&g,4000000);
   assert(atomic_load(&g.budget_ns)>=6000000);
-  /* One gap beyond the cap withdraws extended polling until it ages out. */
-  feed(&g,KLS_IDLE_GAP_SPIN_CAP_NS);
+  for(int i=0;i<KLS_IDLE_GAP_HISTORY;++i) feed(&g,1000000);
+  /* Otherwise the upper-quartile gap does: up to a quarter of the recent
+     gaps may be long pauses without changing it. */
+  for(int i=0;i<KLS_IDLE_GAP_HISTORY/4;++i) {
+    feed(&g,10*KLS_IDLE_GAP_SPIN_CAP_NS);
+    const uint64_t b=atomic_load(&g.budget_ns);
+    assert(b>=1500000 && b<=3000000);
+  }
+  /* One more long pause makes long gaps typical: polling is withdrawn. */
+  feed(&g,10*KLS_IDLE_GAP_SPIN_CAP_NS);
   assert(!atomic_load(&g.budget_ns));
   start=0;tick=0;
   assert(!kls_idle_gap_poll(&g,&start,&tick));
-  for(int i=0;i<KLS_IDLE_GAP_HISTORY-1;++i) {
+  /* It returns once a long pause has aged out of the history, leaving short
+     gaps as three quarters of it again. */
+  int restored=0;
+  for(int i=0;i<KLS_IDLE_GAP_HISTORY;++i) {
     feed(&g,1000000);
-    assert(!atomic_load(&g.budget_ns));
+    if(atomic_load(&g.budget_ns)){restored=i+1;break;}
   }
-  feed(&g,1000000);
-  assert(atomic_load(&g.budget_ns)>=1500000);
+  assert(restored==KLS_IDLE_GAP_HISTORY-KLS_IDLE_GAP_HISTORY/4);
+  /* The typical gap, not the shortest, sets the size. */
+  for(int i=0;i<KLS_IDLE_GAP_HISTORY;++i) feed(&g,4000000);
+  assert(atomic_load(&g.budget_ns)>=6000000);
+  /* Typical gaps beyond the cap never get extended polling. */
+  for(int i=0;i<KLS_IDLE_GAP_HISTORY;++i) feed(&g,KLS_IDLE_GAP_SPIN_CAP_NS);
+  assert(!atomic_load(&g.budget_ns));
   return 0;
 }

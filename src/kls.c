@@ -2264,13 +2264,29 @@ static void kls_idle_gap_dispatch(kls_idle_gap *g) {
     g->next = (g->next + 1u) % KLS_IDLE_GAP_HISTORY;
     if (g->count < KLS_IDLE_GAP_HISTORY) ++g->count;
   }
-  uint64_t longest = 0;
-  for (unsigned i = 0; i < g->count; ++i)
-    if (g->gaps[i] > longest) longest = g->gaps[i];
-  const uint64_t want = longest + longest / 2u;
-  atomic_store_explicit(&g->budget_ns,
-    g->count == KLS_IDLE_GAP_HISTORY && want <= KLS_IDLE_GAP_SPIN_CAP_NS
-      ? want : 0u, memory_order_relaxed);
+  /* The budget covers the longest recent gap when that fits under the cap.
+     Otherwise it follows the upper-quartile gap: callers alternate bursts of
+     closely spaced phases with an occasional long pause (a time step's
+     Newton iterations, then its output), and one long pause must not put the
+     crew to sleep across the whole next burst. Polling then pays off in at
+     least three of four recent gaps and wastes at most one budget in each of
+     the others. */
+  uint64_t sorted[KLS_IDLE_GAP_HISTORY];
+  for (unsigned i = 0; i < g->count; ++i) {
+    uint64_t x = g->gaps[i];
+    unsigned j = i;
+    while (j && sorted[j - 1u] > x) { sorted[j] = sorted[j - 1u]; --j; }
+    sorted[j] = x;
+  }
+  uint64_t want = 0u;
+  if (g->count == KLS_IDLE_GAP_HISTORY) {
+    const uint64_t longest = sorted[KLS_IDLE_GAP_HISTORY - 1u];
+    const uint64_t typical = sorted[(3u * KLS_IDLE_GAP_HISTORY) / 4u - 1u];
+    want = longest + longest / 2u;
+    if (want > KLS_IDLE_GAP_SPIN_CAP_NS) want = typical + typical / 2u;
+    if (want > KLS_IDLE_GAP_SPIN_CAP_NS) want = 0u;
+  }
+  atomic_store_explicit(&g->budget_ns, want, memory_order_relaxed);
 }
 /* Dispatching thread, after the job's workers have finished. */
 static void kls_idle_gap_finish(kls_idle_gap *g) {
