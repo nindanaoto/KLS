@@ -83,6 +83,51 @@ def screen(args, case):
                 ill_posed=ill_posed)
 
 
+STABILITY_FACTORS = (0.99, 1.01)
+STABILITY_STEP_RATIO = 1.25
+
+
+def stability(args, case):
+    """KLU-only check that the deck has one trajectory to compare solvers on.
+
+    The integration tolerance is moved 1% either way.  A well-conditioned deck takes
+    nearly the same steps both times.  A deck whose step count jumps, or which stops
+    with a too-small time step, follows a trajectory decided by rounding: solvers then
+    do different work on it and neither a step-count nor a waveform comparison means
+    anything.  No KLS or peer result enters this decision.
+    """
+    steps = []
+    for factor in STABILITY_FACTORS:
+        dest = args.work / (hashlib.sha256(case.encode()).hexdigest()[:16] + f'-s{factor}')
+        stage(args.regression / 'Netlists' / case, dest, 'KLU', 1, args.license)
+        text = (dest / 'input.cir').read_text()
+        flags = re.I | re.M
+        own = re.search(r'^\s*\.options\s+timeint\b[^\n]*?\breltol\s*=\s*([\d.eE+-]+)', text, flags)
+        if own:
+            text = text[:own.start(1)] + repr(float(own[1]) * factor) + text[own.end(1):]
+        else:
+            text = re.sub(r'^(\s*\.end\s*)$', lambda m: f'.options timeint reltol={1e-3 * factor!r}\n' + m[0],
+                          text, flags=flags)
+        (dest / 'input.cir').write_text(text)
+        cmd = ['apptainer', 'exec', '--bind', f'{args.workspace}:/work',
+               '--bind', f'{args.workspace}:{args.workspace}', '--pwd', str(dest),
+               str(args.image), str(args.xyce), 'input.cir']
+        env = {k: v for k, v in os.environ.items() if not k.startswith(('LD_', 'KLS_', 'OMP_'))}
+        env.update(OMP_NUM_THREADS='1', XYCE_NO_TRACKING='1')
+        try:
+            with (dest / 'stdout.log').open('w') as stream:
+                code = subprocess.run(cmd, stdout=stream, stderr=subprocess.STDOUT, env=env,
+                                      timeout=args.timeout).returncode
+            log = parse_log((dest / 'stdout.log').read_text(errors='replace'))
+            done = code == 0 and log['end_of_simulation'] and log['successful_steps']
+        except subprocess.TimeoutExpired:
+            done = False
+        shutil.rmtree(dest, ignore_errors=True)
+        steps.append(log['successful_steps'][-1] if done else None)
+    stable = all(steps) and max(steps) <= STABILITY_STEP_RATIO * min(steps)
+    return dict(stability_steps=steps, unstable=not stable)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ('workspace', 'regression', 'image', 'xyce', 'license', 'work', 'output'):
@@ -105,8 +150,16 @@ def main():
             rows = list(pool.map(lambda case: screen(args, case), cases))
         if args.rows:
             args.rows.write_text(json.dumps(rows, indent=1) + '\n')
-    eligible = [r for r in rows if r['status'] == 'ran' and not r['ill_posed'] and
-                r['klu_linear_seconds'] >= args.min_linear_seconds]
+    timed = [r for r in rows if r['status'] == 'ran' and not r['ill_posed'] and
+             r['klu_linear_seconds'] >= args.min_linear_seconds]
+    pending = [r for r in timed if 'unstable' not in r]
+    if pending:
+        with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+            for r, result in zip(pending, pool.map(lambda r: stability(args, r['case']), pending)):
+                r.update(result)
+        if args.rows:
+            args.rows.write_text(json.dumps(rows, indent=1) + '\n')
+    eligible = [r for r in timed if not r['unstable']]
     # Deterministic, timing-independent choice inside a directory.
     eligible.sort(key=lambda r: hashlib.sha256(r['case'].encode()).hexdigest())
     kept, seen, contents = [], {}, set()
@@ -129,6 +182,8 @@ def main():
         tuning_cases=list(CASES), min_linear_seconds=args.min_linear_seconds,
         per_directory=args.per_directory, screened=len(rows), screen_statuses=statuses,
         ill_posed_excluded=sum(bool(r.get('ill_posed')) for r in rows),
+        unstable_excluded=sum(bool(r.get('unstable')) for r in rows),
+        stability=dict(reltol_factors=STABILITY_FACTORS, step_ratio=STABILITY_STEP_RATIO),
         eligible=len(eligible), cases=kept)
     args.output.write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(dict(screened=len(rows), statuses=statuses, eligible=len(eligible),
