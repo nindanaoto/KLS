@@ -13881,9 +13881,13 @@ static int private_solve_body(kls_solver *solver,
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
   }
-  int tiny_singleton_ready =
+  /* A right-hand side the refactor kernel already solved is published by
+     the compact route below, not solved a second time here. */
+  const int fused_answer_pending = solver->small_btf_fused_ready &&
+    b == solver->small_btf_fused_rhs && solver->small_btf_fused_work != NULL;
+  int tiny_singleton_ready = !fused_answer_pending &&
     kls_tiny_singleton_cached_ready(solver, nrhs);
-  if (!tiny_singleton_ready &&
+  if (!tiny_singleton_ready && !fused_answer_pending &&
       kls_tiny_singleton_runtime_capable(solver, nrhs) &&
       kls_tiny_singleton_solve_ready(solver) &&
       kls_tiny_singleton_refresh_reciprocals(solver)) {

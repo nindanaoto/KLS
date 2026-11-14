@@ -8,9 +8,10 @@ static int fused_events,lane_events;
 #undef NDEBUG
 #include <assert.h>
 
-/* One tridiagonal block coupled to a chain of singleton blocks. */
-static int build(int n,int *ptr,int *idx,double *a) {
-  const int m=n-n/4;int nz=0;
+/* One tridiagonal block coupled to a chain of singleton blocks; with
+   `chain_only` the whole matrix is the chain, so every block is 1x1. */
+static int build(int n,int chain_only,int *ptr,int *idx,double *a) {
+  const int m=chain_only?0:n-n/4;int nz=0;
   for(int i=0;i<n;++i) {
     ptr[i]=nz;
     if(i<m) {
@@ -45,14 +46,14 @@ static double residual(int n,const int *ptr,const int *idx,const double *a,
   return worst/scale;
 }
 int main(void) {
-  static const int sizes[]={14,37,60};
+  static const int sizes[]={14,37,60,-6,-40};   /* negative: 1x1 blocks only */
   for(size_t c=0;c<sizeof sizes/sizeof *sizes;++c) {
-    const int n=sizes[c];
+    const int chain_only=sizes[c]<0,n=chain_only?-sizes[c]:sizes[c];
     int *ptr=malloc((size_t)(n+1)*sizeof *ptr),*idx=malloc((size_t)5*n*sizeof *idx);
     double *a=malloc((size_t)5*n*sizeof *a),*b=malloc((size_t)n*sizeof *b);
     double *x=malloc((size_t)n*sizeof *x),*y=malloc((size_t)n*sizeof *y);
     assert(ptr && idx && a && b && x && y);
-    const int nz=build(n,ptr,idx,a);
+    const int nz=build(n,chain_only,ptr,idx,a);
     kls_solver *fused=make(n,ptr,idx,a,1),*split=make(n,ptr,idx,a,1);
     kls_solver *certified=make(n,ptr,idx,a,0);
     fused_events=lane_events=0;

@@ -48,7 +48,9 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
      above and the executor's current floating environment are never cached. */
   const int policy=atomic_load_explicit(&s->compact_btf_policy,memory_order_relaxed);
   if(policy)return policy>0;
-  if(s->symbolic->nblocks<=1 || s->symbolic->maxblock<=1 ||
+  if(s->symbolic->nblocks<=1 ||
+     (s->symbolic->maxblock<=1 &&
+      s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED) ||
      s->numeric->lnz<0 || s->numeric->unz<0 ||
      s->numeric->lnz>UINT16_MAX || s->numeric->unz>UINT16_MAX ||
      s->numeric->Offp[s->n]<0 || s->numeric->Offp[s->n]>UINT16_MAX) {

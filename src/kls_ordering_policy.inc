@@ -10449,7 +10449,10 @@ static int kls_initial_low_work_btf_public_unscaled_candidate(
     solver->n <= UINT32_C(0x1000) &&
     solver->nnz > 0u && solver->nnz <= (UF_long)UINT16_MAX &&
     solver->symbolic->structural_rank == solver->n &&
-    solver->symbolic->est_flops > 0.0 &&
+    /* A factor made only of 1x1 blocks has no elimination work at all; in
+       application-managed mode it takes the same compact route. */
+    (solver->symbolic->est_flops > 0.0 ||
+     solver->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED) &&
     solver->symbolic->est_flops < 100000.0;
 }
 
