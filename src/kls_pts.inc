@@ -1047,11 +1047,108 @@ typedef struct {
   UF_long gk0;
   pthread_barrier_t *barrier;
   _Atomic int *go;
+  _Atomic int *tsync;               /* transpose hand-offs: [0] bins, [1] top */
   int forward_only;
   int tid;
 } kls_pts_arg;
 
+#define KLS_PTS_SWEEP_TRANSPOSE 2
+
+/* Transpose counterpart of the subtree solve: U^T y = b ascending, then
+   L^T x = y descending, as row gathers over the same column streams.  The
+   partition already guarantees that a private column's U entries stay in its
+   own bin and its L entries stay in the bin or the shared top, so the private
+   phases only read finished values and write their own columns; no fringe
+   accumulators are needed.  Phase hand-offs spin: the two serial windows are
+   a small part of a solve that is itself shorter than a futex round trip. */
+static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
+  kls_pts *pts = a->pts;
+  const int64_t b0 = pts->tcols_off[a->tid];
+  const int64_t b1 = pts->tcols_off[a->tid + 1];
+  double *Xb = a->Xb;
+  for (int64_t q = b0; q < b1; ++q) {
+    const int32_t k = pts->tcols[q];
+    const UF_long len = a->ulen32 != NULL
+      ? (UF_long)a->ulen32[k] : a->ulen[k];
+    const double *ux = a->u64 != NULL
+      ? a->u64[a->gk0 + (UF_long)k]
+      : a->lu + a->uip[k] + kls_klu_units_for_indices(len);
+    const int32_t *ui = a->i32u +
+      (a->uoff32 != NULL ? (int64_t)a->uoff32[k] : a->uoff[k]);
+    double value = Xb[k];
+    for (UF_long p = 0; p < len; ++p) {
+      value -= ux[p] * Xb[ui[p]];
+    }
+    Xb[k] = a->udiag_recip_b != NULL
+      ? value * a->udiag_recip_b[k] : value / a->udiag_b[k];
+  }
+  atomic_fetch_add_explicit(&a->tsync[0], 1, memory_order_release);
+  if (a->tid == 0) {
+    while (atomic_load_explicit(&a->tsync[0], memory_order_acquire) <
+           pts->nthreads) {
+      kls_cpu_relax();
+    }
+    const int64_t ntop = pts->ntop;
+    const int32_t *top_cols = pts->top_cols;
+    for (int64_t j = 0; j < ntop; ++j) {
+      const int32_t k = top_cols[j];
+      const UF_long len = a->ulen32 != NULL
+        ? (UF_long)a->ulen32[k] : a->ulen[k];
+      const double *ux = a->u64 != NULL
+        ? a->u64[a->gk0 + (UF_long)k]
+        : a->lu + a->uip[k] + kls_klu_units_for_indices(len);
+      const int32_t *ui = a->i32u +
+        (a->uoff32 != NULL ? (int64_t)a->uoff32[k] : a->uoff[k]);
+      double value = Xb[k];
+      for (UF_long p = 0; p < len; ++p) {
+        value -= ux[p] * Xb[ui[p]];
+      }
+      Xb[k] = a->udiag_recip_b != NULL
+        ? value * a->udiag_recip_b[k] : value / a->udiag_b[k];
+    }
+    for (int64_t j = ntop; j-- > 0;) {
+      const int32_t k = top_cols[j];
+      const UF_long len = a->llen32 != NULL
+        ? (UF_long)a->llen32[k] : a->llen[k];
+      const double *lx = a->l64 != NULL
+        ? a->l64[a->gk0 + (UF_long)k]
+        : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+      const int32_t *li = a->i32l +
+        (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
+      double value = Xb[k];
+      for (UF_long p = 0; p < len; ++p) {
+        value -= lx[p] * Xb[li[p]];
+      }
+      Xb[k] = value;
+    }
+    atomic_store_explicit(&a->tsync[1], 1, memory_order_release);
+  } else {
+    while (atomic_load_explicit(&a->tsync[1], memory_order_acquire) == 0) {
+      kls_cpu_relax();
+    }
+  }
+  for (int64_t q = b1; q-- > b0;) {
+    const int32_t k = pts->tcols[q];
+    const UF_long len = a->llen32 != NULL
+      ? (UF_long)a->llen32[k] : a->llen[k];
+    const double *lx = a->l64 != NULL
+      ? a->l64[a->gk0 + (UF_long)k]
+      : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
+    const int32_t *li = a->i32l +
+      (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
+    double value = Xb[k];
+    for (UF_long p = 0; p < len; ++p) {
+      value -= lx[p] * Xb[li[p]];
+    }
+    Xb[k] = value;
+  }
+}
+
 static void kls_pts_worker_body(kls_pts_arg *a) {
+  if (a->forward_only == KLS_PTS_SWEEP_TRANSPOSE) {
+    kls_pts_worker_body_transpose(a);
+    return;
+  }
   kls_pts *pts = a->pts;
   const int64_t b0 = pts->tcols_off[a->tid];
   const int64_t b1 = pts->tcols_off[a->tid + 1];
@@ -1187,6 +1284,7 @@ typedef struct kls_pts_pool_job {
   double *const *u64;
   UF_long gk0;
   int forward_only;
+  _Atomic int tsync[2];
 } kls_pts_pool_job;
 
 static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker) {
@@ -1219,6 +1317,7 @@ static void kls_pts_pool_worker_run(kls_egraph_refactor_worker *worker) {
   arg.gk0 = job->gk0;
   arg.barrier = &shared->barrier;
   arg.go = NULL;
+  arg.tsync = job->tsync;
   arg.forward_only = job->forward_only;
   arg.tid = worker->tid;
   kls_pts_worker_body(&arg);
@@ -1291,6 +1390,8 @@ static int kls_pts_block_pool(kls_solver *solver,
     ? (double *const *)solver->refactor_u_packed_values : NULL;
   job.gk0 = pts->k1;
   job.forward_only = forward_only;
+  atomic_init(&job.tsync[0], 0);
+  atomic_init(&job.tsync[1], 0);
 
   shared->solver = solver;
   shared->thread_count = pts->nthreads;
@@ -1414,6 +1515,7 @@ static int kls_pts_solve_block(kls_solver *solver, double *Xb, double *lu,
     args[t].barrier = &barrier;
     args[t].go = &go;
     args[t].forward_only = 0;
+    args[t].tsync = NULL;
     args[t].tid = t;
   }
   int spawned = 0;

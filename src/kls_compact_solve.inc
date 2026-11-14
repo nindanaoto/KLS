@@ -1768,6 +1768,136 @@ static UF_long kls_i32_solve(kls_solver *solver,
   return 1;
 }
 
+/* Whether the subtree partition may carry this transpose solve.  The pool
+   must already exist: a factor whose refactor stayed serial has no awake
+   crew, and creating one for the solve alone is a cost no trial here could
+   charge fairly. */
+static int kls_pts_transpose_solve_candidate(const kls_solver *solver) {
+  const kls_pts *pts = solver != NULL ? solver->pts : NULL;
+  return pts != NULL && pts->solve_ok && pts->tsolve_decision >= 0 &&
+    pts->nthreads >= 2 && solver->egraph_pool != NULL &&
+    solver->egraph_pool->thread_count == pts->nthreads &&
+    solver->symbolic != NULL && solver->numeric != NULL &&
+    pts->block < solver->symbolic->nblocks &&
+    solver->symbolic->R[pts->block] == pts->k1 &&
+    solver->symbolic->R[pts->block + 1u] == pts->k1 + pts->nk &&
+    solver->i32solve_l != NULL && solver->i32solve_u != NULL &&
+    solver->i32solve_loff != NULL && solver->i32solve_uoff != NULL &&
+    solver->numeric->Xwork != NULL && solver->numeric->Udiag != NULL &&
+    solver->numeric->LUbx != NULL &&
+    solver->numeric->LUbx[pts->block] != NULL;
+}
+
+/* One-rhs solve with klu_l_tsolve semantics over the i32 streams, reading
+   packed refactor values where they are authoritative.  The partitioned block
+   runs on the pool; every other block is a serial gather.  Returns 0 without
+   touching x when the pool is busy. */
+static UF_long kls_pts_transpose_solve(kls_solver *solver, double *x) {
+  const trilinos_klu_l_symbolic *symbolic = solver->symbolic;
+  trilinos_klu_l_numeric *numeric = solver->numeric;
+  kls_pts *pts = solver->pts;
+  const UF_long n = symbolic->n;
+  const UF_long *R = symbolic->R;
+  const UF_long *Q = symbolic->Q;
+  const UF_long *pnum = numeric->Pnum;
+  const UF_long *offp = numeric->Offp;
+  const UF_long *offi = numeric->Offi;
+  const double *offx = (const double *)numeric->Offx;
+  const double *udiag = (const double *)numeric->Udiag;
+  const double *rs = numeric->Rs;
+  const uint32_t *llen32 = solver->i32solve_llen;
+  const uint32_t *ulen32 = solver->i32solve_ulen;
+  const uint32_t *loff32 = solver->i32solve_loff32;
+  const uint32_t *uoff32 = solver->i32solve_uoff32;
+  double *const *l64 = solver->refactor_l_packed_valid
+    ? solver->refactor_l_packed_values : NULL;
+  double *const *u64 = solver->refactor_u_packed_valid
+    ? solver->refactor_u_packed_values : NULL;
+  double *X = (double *)numeric->Xwork;
+  {
+    kls_egraph_refactor_pool *pool = solver->egraph_pool;
+    if (atomic_load_explicit(&pool->active_workers,
+                             memory_order_acquire) != 0) {
+      return 0;
+    }
+  }
+  for (UF_long k = 0; k < n; ++k) {
+    X[k] = x[Q[k]];
+  }
+  int ok = 1;
+  for (UF_long block = 0; ok && block < symbolic->nblocks; ++block) {
+    const UF_long k1 = R[block];
+    const UF_long k2 = R[block + 1u];
+    const UF_long nk = k2 - k1;
+    if (block > 0u) {
+      for (UF_long k = k1; k < k2; ++k) {
+        double value = X[k];
+        const UF_long pend = offp[k + 1u];
+        for (UF_long p = offp[k]; p < pend; ++p) {
+          value -= offx[p] * X[offi[p]];
+        }
+        X[k] = value;
+      }
+    }
+    if (nk == 1u) {
+      X[k1] /= udiag[k1];
+      continue;
+    }
+    double *Xb = X + k1;
+    double *lu = (double *)numeric->LUbx[block];
+    if (block == pts->block) {
+      ok = kls_pts_block_pool(solver, Xb, lu, numeric->Lip + k1,
+                              numeric->Llen + k1, numeric->Uip + k1,
+                              numeric->Ulen + k1, udiag + k1, NULL,
+                              KLS_PTS_SWEEP_TRANSPOSE);
+      continue;
+    }
+    for (UF_long k = 0; k < nk; ++k) {
+      const UF_long g = k1 + k;
+      const UF_long len = ulen32 != NULL
+        ? (UF_long)ulen32[g] : numeric->Ulen[g];
+      const double *ux = u64 != NULL && u64[g] != NULL
+        ? u64[g] : lu + numeric->Uip[g] + kls_klu_units_for_indices(len);
+      const int32_t *ui = solver->i32solve_u +
+        (uoff32 != NULL ? (int64_t)uoff32[g] : solver->i32solve_uoff[g]);
+      double value = Xb[k];
+      for (UF_long p = 0; p < len; ++p) {
+        value -= ux[p] * Xb[ui[p]];
+      }
+      Xb[k] = value / udiag[g];
+    }
+    for (UF_long k = nk; k-- > 0;) {
+      const UF_long g = k1 + k;
+      const UF_long len = llen32 != NULL
+        ? (UF_long)llen32[g] : numeric->Llen[g];
+      const double *lx = l64 != NULL && l64[g] != NULL
+        ? l64[g] : lu + numeric->Lip[g] + kls_klu_units_for_indices(len);
+      const int32_t *li = solver->i32solve_l +
+        (loff32 != NULL ? (int64_t)loff32[g] : solver->i32solve_loff[g]);
+      double value = Xb[k];
+      for (UF_long p = 0; p < len; ++p) {
+        value -= lx[p] * Xb[li[p]];
+      }
+      Xb[k] = value;
+    }
+  }
+  if (!ok) {
+    /* The pool declined after the right-hand side was gathered; X still
+       holds only this call's scratch, and x is untouched. */
+    return 0;
+  }
+  if (rs != NULL) {
+    for (UF_long k = 0; k < n; ++k) {
+      x[pnum[k]] = X[k] / rs[k];
+    }
+  } else {
+    for (UF_long k = 0; k < n; ++k) {
+      x[pnum[k]] = X[k];
+    }
+  }
+  return 1;
+}
+
 /* KLU's threshold pivoting prefers the symbolic diagonal when it is at least
    tol times the largest active-column entry.  Model max-row scaling in the
    actual symbolic BTF frame and count crossings of that same tolerance.  A
