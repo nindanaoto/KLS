@@ -9,6 +9,7 @@
  */
 
 #include "trilinos_klu_internal.h"
+#include "kls_environment.h"
 
 /* KLS dense-tail refactor: the trailing kls_klu_refactor_tail_skip
  * columns of block kls_klu_refactor_tail_block were emitted by the
@@ -158,9 +159,9 @@ Int TRILINOS_KLU_refactor	/* returns TRUE if successful, FALSE otherwise */
      * into O(n) divides without changing factor storage or solve semantics.
      * Keep an A/B control for numerical audits of reciprocal rounding. */
     reciprocal_scale = scale > 0 &&
-	getenv ("KLS_DISABLE_KLU_SCALE_RECIPROCAL") == NULL ;
+	kls_getenv ("KLS_DISABLE_KLU_SCALE_RECIPROCAL") == NULL ;
     reciprocal_pivot =
-	getenv ("KLS_DISABLE_KLU_PIVOT_RECIPROCAL") == NULL ;
+	kls_getenv ("KLS_DISABLE_KLU_PIVOT_RECIPROCAL") == NULL ;
     if (reciprocal_scale)
     {
 	for (k = 0 ; k < n ; k++)
