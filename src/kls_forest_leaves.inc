@@ -163,9 +163,14 @@ static int kls_forest_vector_environment(const kls_solver *s) {
 #if defined(__x86_64__) && FLT_EVAL_METHOD==0 && KLS_HAVE_AVX512_KERNELS
   return s->n>=64 && s->options.backend==KLS_BACKEND_AUTO &&
     !kls_kernel_tuning_overridden(s) &&
-    s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+    /* The batch differs from the scalar sweep only by reciprocal rounding
+       and declines out-of-range leaves, so an application-managed caller
+       needs no pending residual check to accept it. */
+    ((s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+      s->solve_contract_probe==2) ||
+     s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) &&
     s->private_caller_depth==1 && !s->private_scaled_recovery &&
-    !s->in_solve_refinement && s->solve_contract_probe==2 &&
+    !s->in_solve_refinement &&
     kls_forest_masked_environment() && fegetround()==FE_TONEAREST &&
     (_mm_getcsr()&0x6000u)==0 && kls_avx512_scatter_enabled();
 #else

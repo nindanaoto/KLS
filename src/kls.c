@@ -10107,7 +10107,8 @@ static void kls_forest_consider_unscaled_update(kls_solver *solver,
     const double *values) {
   if(solver && values && solver->common.scale>0 && !solver->forest_unscale_attempted &&
      solver->options.backend==KLS_BACKEND_AUTO && solver->options.scale==KLS_SCALE_AUTO &&
-     solver->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+     (solver->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
+      solver->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) &&
      solver->private_caller_depth==1 && solver->forest_combined_depth==1 &&
      !solver->private_solve_depth && solver->symbolic && solver->numeric &&
      solver->symbolic->nblocks==1 && solver->n>1 && solver->n<=UINT16_MAX &&
