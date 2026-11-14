@@ -11,7 +11,7 @@ int main(void) {
     kls_observed_parallel_observe(&g,1,1,NAN);
   }
   assert(g.cycles==0 && g.total==0 && !kls_observed_parallel_start(&g));
-  for(int i=0;i<199;++i) {
+  for(int i=0;i<39;++i) {
     kls_observed_parallel_observe(&g,1,1,1);
     assert(!kls_observed_parallel_start(&g));
   }
@@ -20,7 +20,7 @@ int main(void) {
   assert(g.limit==4 && g.cycle==1);
   assert(kls_observed_parallel_preparation_budget(&g)==2);
   kls_observed_parallel_observe(&g,1,1,1000);
-  assert(g.limit==4 && g.total==200 && g.cycles==200);
+  assert(g.limit==4 && g.total==40 && g.cycles==40);
   g.spent=1.5;
   assert(!kls_observed_parallel_record(&g,1,0.94,1));
   assert(g.samples==1 && g.choice==1);
@@ -34,19 +34,38 @@ int main(void) {
     assert(!kls_observed_parallel_record(&bad,reason!=1,
         reason==2?0.951:reason==3?NAN:reason==4?0:0.9,
         reason==5?INFINITY:1));
+    if(reason==2) {
+      /* One cold loss is a warm-up: priced, unscored, and never repeated. */
+      assert(bad.choice==1 && bad.warmed && bad.samples==0);
+      assert(!kls_observed_parallel_record(&bad,1,0.951,1));
+    }
     assert(bad.choice==-1 && !kls_observed_parallel_start(&bad));
+  }
+  {
+    /* After a warm-up the engine still needs two fresh wins, and a loss
+       after a win declines. */
+    kls_observed_parallel_state w=g;w.choice=1;w.samples=0;w.warmed=0;
+    assert(!kls_observed_parallel_record(&w,1,2.0,1) && w.choice==1 && w.warmed);
+    assert(!kls_observed_parallel_record(&w,1,0.9,1) && w.samples==1);
+    kls_observed_parallel_state lose=w;
+    assert(!kls_observed_parallel_record(&lose,1,0.96,1) && lose.choice==-1);
+    assert(kls_observed_parallel_record(&w,1,0.9,1) && w.choice==2);
+    /* A warm-up never rescues a trial that overran its allowance. */
+    kls_observed_parallel_state over=g;over.choice=1;over.samples=0;over.warmed=0;
+    over.spent=over.limit+0.01;
+    assert(!kls_observed_parallel_record(&over,1,2.0,1) && over.choice==-1);
   }
   /* A timed-out joined job spends its budget permanently. Only later
      changed inputs can fund one retry, with two new scored comparisons. */
-  kls_observed_parallel_state retry={.choice=1,.cycles=200,.total=200,
+  kls_observed_parallel_state retry={.choice=1,.cycles=40,.total=40,
     .cycle=1,.limit=4,.spent=3.5,.samples=1};
   for(int i=0;i<8;++i)retry.history[i]=1;
   assert(kls_observed_parallel_defer_deadline(&retry));
   assert(retry.choice==0 && retry.samples==0 && retry.retry_pending && retry.deadline_retries==1);
-  assert(retry.spent==3.5 && retry.total==200 && !kls_observed_parallel_start(&retry));
+  assert(retry.spent==3.5 && retry.total==40 && !kls_observed_parallel_start(&retry));
   for(int i=0;i<100;++i)kls_observed_parallel_observe(&retry,0,1,100);
-  assert(retry.total==200 && !kls_observed_parallel_start(&retry));
-  for(int i=0;i<74;++i) {
+  assert(retry.total==40 && !kls_observed_parallel_start(&retry));
+  for(int i=0;i<14;++i) {
     kls_observed_parallel_observe(&retry,1,1,1);assert(!kls_observed_parallel_start(&retry));
   }
   kls_observed_parallel_observe(&retry,1,1,1);assert(kls_observed_parallel_start(&retry));
@@ -55,6 +74,18 @@ int main(void) {
   retry.spent+=.8;assert(!kls_observed_parallel_record(&retry,1,.8,1));
   retry.spent+=.8;assert(kls_observed_parallel_record(&retry,1,.8,1));
   assert(retry.choice==2 && !retry.retry_pending && retry.spent<retry.limit);
+  {
+    /* The first comparison never waits; later ones wait for the allowance
+       to cover both the two-cycle estimate and the observed price. */
+    kls_observed_parallel_state f={.choice=1,.cycle=1,.limit=10,.spent=9.9};
+    assert(kls_observed_parallel_funded(&f,0));
+    f.samples=1;f.spent=5;f.price=3;
+    assert(!kls_observed_parallel_funded(&f,1));       /* estimate not covered */
+    assert(kls_observed_parallel_funded(&f,1.5));      /* 5 left >= 3.75 */
+    f.spent=6.5;assert(!kls_observed_parallel_funded(&f,1.5)); /* 3.5 left */
+    f.samples=0;f.warmed=1;assert(!kls_observed_parallel_funded(&f,1.5));
+    f.spent=6.25;assert(kls_observed_parallel_funded(&f,1.5));
+  }
   g=(kls_observed_parallel_state){0};
   for(int i=0;i<32;++i) kls_observed_parallel_observe(&g,1,1,i==0?10000:1);
   assert(kls_observed_parallel_start(&g) && g.cycle==1);

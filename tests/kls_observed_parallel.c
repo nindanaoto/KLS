@@ -166,8 +166,11 @@ static void funding(void) {
   kls_observed_parallel_fund(&g,0,1.0);assert(g.total==400.0);
   kls_observed_parallel_fund(&g,1,NAN);assert(g.total==400.0);
   kls_observed_parallel_fund(&g,1,100.0);
-  assert(g.total==500.0 && g.limit==10.0 && g.spent==7.5);
-  assert(kls_observed_parallel_preparation_budget(&g)==1.5);
+  assert(g.total==500.0 && g.limit==50.0 && g.spent==7.5);
+  assert(kls_observed_parallel_preparation_budget(&g)==41.5);
+  /* Samples after a cold warm-up are funded the same way. */
+  kls_observed_parallel_state w={.choice=1,.cycle=1.0,.total=400.0,.limit=8.0,.spent=7.5,.warmed=1};
+  kls_observed_parallel_fund(&w,1,100.0);assert(w.total==500.0 && w.limit==50.0);
   g.choice=2;kls_observed_parallel_fund(&g,1,100.0);assert(g.total==500.0);
 }
 

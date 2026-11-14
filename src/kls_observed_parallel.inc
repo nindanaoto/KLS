@@ -88,7 +88,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
      whole extra cost must stay inside the allowance or the record is void:
      one cycle bounds the candidate (its deadline), a second covers its
      validation and the restoration of the incumbent representation. */
-  if(g->samples>0 && !retained_retry && !(budget>g->cycle)) return call;
+  if(!kls_observed_parallel_funded(g,budget)) return call;
   g->active=1;g->deadline=start+(retained_retry?fmax(budget,g->cycle):budget);
   /* The complete plan and joined pool survived a deadline, not a layout
      change. The actual refactor still revalidates every map/cache under its
@@ -132,6 +132,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
      is charged even on failed or timed-out trials. */
   if(call.epoch==s->observed_parallel_epoch) {
     g->spent=prior_spent+call.extra;
+    if(call.sampled && call.extra>g->price) g->price=call.extra;
   }
   call.incumbent_start=kls_now_seconds();
   return call;
