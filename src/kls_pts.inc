@@ -1059,23 +1059,36 @@ typedef struct {
    partition already guarantees that a private column's U entries stay in its
    own bin and its L entries stay in the bin or the shared top, so the private
    phases only read finished values and write their own columns; no fringe
-   accumulators are needed.  Phase hand-offs spin: the two serial windows are
+   accumulators are needed.  Each column also gathers its own right-hand-side
+   entry and off-diagonal block row on the way up and scatters its answer on
+   the way down, so those whole-vector passes ride the same phases: every
+   read of the caller's vector in this block precedes the first write.  Phase hand-offs spin: the two serial windows are
    a small part of a solve that is itself shorter than a futex round trip. */
 static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
   kls_pts *pts = a->pts;
+  const kls_pts_transpose_io *io = pts->tio;
   const int64_t b0 = pts->tcols_off[a->tid];
   const int64_t b1 = pts->tcols_off[a->tid + 1];
+  const UF_long gk0 = a->gk0;
   double *Xb = a->Xb;
+  const double *X = io->X;
   for (int64_t q = b0; q < b1; ++q) {
     const int32_t k = pts->tcols[q];
+    const UF_long g = gk0 + (UF_long)k;
     const UF_long len = a->ulen32 != NULL
       ? (UF_long)a->ulen32[k] : a->ulen[k];
     const double *ux = a->u64 != NULL
-      ? a->u64[a->gk0 + (UF_long)k]
+      ? a->u64[g]
       : a->lu + a->uip[k] + kls_klu_units_for_indices(len);
     const int32_t *ui = a->i32u +
       (a->uoff32 != NULL ? (int64_t)a->uoff32[k] : a->uoff[k]);
-    double value = Xb[k];
+    double value = io->x[io->q[g]];
+    if (io->offp != NULL) {
+      const UF_long pend = io->offp[g + 1u];
+      for (UF_long p = io->offp[g]; p < pend; ++p) {
+        value -= io->offx[p] * X[io->offi[p]];
+      }
+    }
     for (UF_long p = 0; p < len; ++p) {
       value -= ux[p] * Xb[ui[p]];
     }
@@ -1092,26 +1105,36 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
     const int32_t *top_cols = pts->top_cols;
     for (int64_t j = 0; j < ntop; ++j) {
       const int32_t k = top_cols[j];
+      const UF_long g = gk0 + (UF_long)k;
       const UF_long len = a->ulen32 != NULL
         ? (UF_long)a->ulen32[k] : a->ulen[k];
       const double *ux = a->u64 != NULL
-        ? a->u64[a->gk0 + (UF_long)k]
+        ? a->u64[g]
         : a->lu + a->uip[k] + kls_klu_units_for_indices(len);
       const int32_t *ui = a->i32u +
         (a->uoff32 != NULL ? (int64_t)a->uoff32[k] : a->uoff[k]);
-      double value = Xb[k];
+      double value = io->x[io->q[g]];
+      if (io->offp != NULL) {
+        const UF_long pend = io->offp[g + 1u];
+        for (UF_long p = io->offp[g]; p < pend; ++p) {
+          value -= io->offx[p] * X[io->offi[p]];
+        }
+      }
       for (UF_long p = 0; p < len; ++p) {
         value -= ux[p] * Xb[ui[p]];
       }
       Xb[k] = a->udiag_recip_b != NULL
         ? value * a->udiag_recip_b[k] : value / a->udiag_b[k];
     }
+    /* Every right-hand-side entry of the block has now been read, so the
+       descending sweeps may overwrite the caller's vector with answers. */
     for (int64_t j = ntop; j-- > 0;) {
       const int32_t k = top_cols[j];
+      const UF_long g = gk0 + (UF_long)k;
       const UF_long len = a->llen32 != NULL
         ? (UF_long)a->llen32[k] : a->llen[k];
       const double *lx = a->l64 != NULL
-        ? a->l64[a->gk0 + (UF_long)k]
+        ? a->l64[g]
         : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
       const int32_t *li = a->i32l +
         (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
@@ -1120,6 +1143,7 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
         value -= lx[p] * Xb[li[p]];
       }
       Xb[k] = value;
+      io->x[io->pnum[g]] = io->rs != NULL ? value / io->rs[g] : value;
     }
     atomic_store_explicit(&a->tsync[1], 1, memory_order_release);
   } else {
@@ -1129,10 +1153,11 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
   }
   for (int64_t q = b1; q-- > b0;) {
     const int32_t k = pts->tcols[q];
+    const UF_long g = gk0 + (UF_long)k;
     const UF_long len = a->llen32 != NULL
       ? (UF_long)a->llen32[k] : a->llen[k];
     const double *lx = a->l64 != NULL
-      ? a->l64[a->gk0 + (UF_long)k]
+      ? a->l64[g]
       : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
     const int32_t *li = a->i32l +
       (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
@@ -1141,6 +1166,7 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
       value -= lx[p] * Xb[li[p]];
     }
     Xb[k] = value;
+    io->x[io->pnum[g]] = io->rs != NULL ? value / io->rs[g] : value;
   }
 }
 

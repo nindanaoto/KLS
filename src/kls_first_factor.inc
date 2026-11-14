@@ -11915,6 +11915,20 @@ typedef struct kls_pts_stream_run {
   uint32_t length;
 } kls_pts_stream_run;
 
+/* Whole-system frame of one transpose solve, lent to the subtree workers so
+   the right-hand-side gather, the off-diagonal block rows and the answer
+   scatter of the partitioned block run inside the parallel phases. */
+typedef struct kls_pts_transpose_io {
+  double *x;                        /* caller vector: b in, answer out */
+  double *X;                        /* numeric-frame work vector, length n */
+  const UF_long *q;
+  const UF_long *pnum;
+  const UF_long *offp;              /* NULL for the first block */
+  const UF_long *offi;
+  const double *offx;
+  const double *rs;
+} kls_pts_transpose_io;
+
 typedef struct kls_pts_s {
   UF_long block;                    /* BTF block this partition covers */
   UF_long k1;
@@ -11948,6 +11962,7 @@ typedef struct kls_pts_s {
   int tsolve_decision;              /* transpose: 0 trial, 1 PTS, -1 incumbent */
   int tsolve_samples[2];            /* [0] incumbent, [1] PTS */
   double tsolve_min[2];             /* warm minimum for each transpose arm */
+  const kls_pts_transpose_io *tio;  /* set only for the duration of a solve */
   int egraph_terminal_decision;     /* 0 unknown, 1 eligible, -1 rejected */
   UF_long egraph_terminal_col;
 } kls_pts;

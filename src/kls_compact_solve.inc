@@ -1821,7 +1821,15 @@ static UF_long kls_pts_transpose_solve(kls_solver *solver, double *x) {
       return 0;
     }
   }
-  for (UF_long k = 0; k < n; ++k) {
+  /* The partitioned block gathers, applies its off-diagonal rows and
+     scatters inside its parallel phases; only the other blocks do so here.
+     Their gathers all precede that block's first write into x. */
+  const UF_long pk1 = pts->k1;
+  const UF_long pk2 = pts->k1 + pts->nk;
+  for (UF_long k = 0; k < pk1; ++k) {
+    X[k] = x[Q[k]];
+  }
+  for (UF_long k = pk2; k < n; ++k) {
     X[k] = x[Q[k]];
   }
   int ok = 1;
@@ -1829,7 +1837,7 @@ static UF_long kls_pts_transpose_solve(kls_solver *solver, double *x) {
     const UF_long k1 = R[block];
     const UF_long k2 = R[block + 1u];
     const UF_long nk = k2 - k1;
-    if (block > 0u) {
+    if (block > 0u && block != pts->block) {
       for (UF_long k = k1; k < k2; ++k) {
         double value = X[k];
         const UF_long pend = offp[k + 1u];
@@ -1846,10 +1854,17 @@ static UF_long kls_pts_transpose_solve(kls_solver *solver, double *x) {
     double *Xb = X + k1;
     double *lu = (double *)numeric->LUbx[block];
     if (block == pts->block) {
+      const kls_pts_transpose_io io = {
+        .x = x, .X = X, .q = Q, .pnum = pnum,
+        .offp = block > 0u ? offp : NULL, .offi = offi, .offx = offx,
+        .rs = rs,
+      };
+      pts->tio = &io;
       ok = kls_pts_block_pool(solver, Xb, lu, numeric->Lip + k1,
                               numeric->Llen + k1, numeric->Uip + k1,
                               numeric->Ulen + k1, udiag + k1, NULL,
                               KLS_PTS_SWEEP_TRANSPOSE);
+      pts->tio = NULL;
       continue;
     }
     for (UF_long k = 0; k < nk; ++k) {
@@ -1882,18 +1897,15 @@ static UF_long kls_pts_transpose_solve(kls_solver *solver, double *x) {
     }
   }
   if (!ok) {
-    /* The pool declined after the right-hand side was gathered; X still
-       holds only this call's scratch, and x is untouched. */
+    /* The pool declines only before dispatching a worker: X holds this
+       call's scratch and x is untouched. */
     return 0;
   }
-  if (rs != NULL) {
-    for (UF_long k = 0; k < n; ++k) {
-      x[pnum[k]] = X[k] / rs[k];
-    }
-  } else {
-    for (UF_long k = 0; k < n; ++k) {
-      x[pnum[k]] = X[k];
-    }
+  for (UF_long k = 0; k < pk1; ++k) {
+    x[pnum[k]] = rs != NULL ? X[k] / rs[k] : X[k];
+  }
+  for (UF_long k = pk2; k < n; ++k) {
+    x[pnum[k]] = rs != NULL ? X[k] / rs[k] : X[k];
   }
   return 1;
 }
