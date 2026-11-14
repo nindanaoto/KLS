@@ -1930,7 +1930,8 @@ static int kls_snb_auto_factor_prepare(kls_solver *s,double *elapsed) {
   if(s->snb_auto.choice)return s->snb_auto.choice>0;
   if(s->snb_recipe || s->snb || s->options.backend!=KLS_BACKEND_AUTO ||
      s->options.threads<2 || s->options.threads>64 ||
-     s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
+     (s->accuracy_policy!=KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+      s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED) ||
      kls_kernel_tuning_overridden(s) || !s->numeric || !s->symbolic ||
      s->symbolic->nblocks!=1 || s->n<=1 || s->n>UINT16_MAX ||
      (s->orientation!=KLS_ORIENTATION_TRANSPOSE && s->orientation!=KLS_ORIENTATION_NORMAL) ||

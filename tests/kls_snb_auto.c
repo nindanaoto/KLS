@@ -432,7 +432,37 @@ static void flag_scope_checks(void) {
  puts("PASS incumbent underflow preservation and fresh speculative row flag frame");
 }
 #include "kls_snb_mirrorless_parallel.inc"
-int main(void){setvbuf(stdout,NULL,_IOLBF,0);row_cache_checks();flag_scope_checks();unsigned original=_mm_getcsr();
+/* The engine consultation is a speed decision, not an accuracy one: an
+   application-managed solver runs the same measured trial and, under the
+   simulated timings, settles on the supernodal engine in both orientations
+   with unchanged answers. */
+static void application_mode_checks(int transpose) {
+ enum{N=129};int64_t ap[N+1],ai[N*N];double a[N*N],b[N],x[N];
+ for(int c=0;c<N;++c){ap[c]=c*N;for(int r=0;r<N;++r){ai[c*N+r]=r;a[c*N+r]=r==c?N+1.:.03125;}}ap[N]=N*N;
+ kls_options o;kls_default_options(&o);o.threads=2;o.use_btf=0;o.scale=0;
+ o.ordering=KLS_ORDERING_NATURAL;o.orientation=transpose?KLS_ORIENTATION_TRANSPOSE:KLS_ORIENTATION_NORMAL;
+ kls_solver *s=NULL;assert(kls_create(&s)==KLS_OK);
+ assert(kls_set_accuracy_policy(s,KLS_ACCURACY_APPLICATION_MANAGED)==KLS_OK);
+ assert(kls_analyze_csc(s,KLS_INDEX_INT64,N,ap,ai,0,&o)==KLS_OK);
+ assert(kls_factor(s,a)==KLS_OK);assert(s->snb_auto.choice==1);
+ s->snb_auto.factor_credit=1.;
+ auto_test_warm_pool(s);
+ for(int epoch=1;epoch<=12;++epoch) {
+  memset(b,0,sizeof b);
+  for(int c=0;c<N;++c)for(int r=0;r<N;++r){
+   a[c*N+r]=r==c?N+1.+.125*epoch:.03125*(1+.0625*epoch);
+   b[r]+=a[c*N+r]*(1.+.125*((c+epoch)%7));
+  }
+  assert(kls_refactor_solve(s,a,1,b,0,x,0)==KLS_OK);
+  for(int c=0;c<N;++c)assert(fabs(x[c]-(1.+.125*((c+epoch)%7)))<1e-11);
+ }
+ assert(s->snb_auto.choice==3 && s->snb_auto_candidate);
+ assert(s->snb_auto_candidate->stream_jobs>=4);
+ assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_SNB);
+ if(!transpose)assert(s->native_i16_normal_runs>=4);
+ kls_destroy(s);
+}
+int main(void){setvbuf(stdout,NULL,_IOLBF,0);row_cache_checks();flag_scope_checks();application_mode_checks(1);application_mode_checks(0);unsigned original=_mm_getcsr();
  for(force_mirrorless=0;force_mirrorless<2;++force_mirrorless)
   for(int ftz=0;ftz<4;++ftz){_mm_setcsr((original&~0x8040u)|((ftz&1?0x8000u:0)|(ftz&2?0x40u:0)));
    exercise(0,0);exercise(1,0);exercise(0,1);exercise(1,1);

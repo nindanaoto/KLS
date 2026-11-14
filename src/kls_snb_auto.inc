@@ -1,4 +1,4 @@
-/* Complete certified production calls own this consultation. No matrix or RHS
+/* Complete production calls (certified or application-managed) own this consultation. No matrix or RHS
  * is retained as an answer; the ordinary public frame publishes every epoch. */
 typedef struct {
   unsigned epoch;
@@ -13,7 +13,8 @@ static int kls_snb_auto_capable(const kls_solver *s) {
     s->symbolic && s->symbolic->nblocks==1 &&
     (s->orientation==KLS_ORIENTATION_TRANSPOSE || s->orientation==KLS_ORIENTATION_NORMAL) &&
     s->options.backend==KLS_BACKEND_AUTO && s->options.threads>1 && s->options.threads<=64 && s->n>1 && s->n<=UINT16_MAX &&
-    s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR &&
+    (s->accuracy_policy==KLS_ACCURACY_COMPONENTWISE_BACKWARD_ERROR ||
+     s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) &&
     s->common.scale<=0 && !s->numeric->Rs && !s->row_perm && !s->user_col_perm &&
     !s->row_scale && !s->col_scale && !s->numeric_is_predicted &&
     !s->numeric_needs_refinement && !s->tight_tol_refine && !s->pivot_nudge_count &&
