@@ -1,8 +1,9 @@
 /* Application-managed small-BTF fusion: the combined call must return the
    answer of a separate refactor and solve, engage only in that mode, and
    leave no stale answer behind after a failed update. */
-static int fused_events;
+static int fused_events,lane_events;
 #define KLS_SMALL_BTF_FUSED_TEST_EVENT() (++fused_events)
+#define KLS_FAST_LANE_TEST_EVENT() (++lane_events)
 #include "../src/kls.c"
 #undef NDEBUG
 #include <assert.h>
@@ -54,15 +55,29 @@ int main(void) {
     const int nz=build(n,ptr,idx,a);
     kls_solver *fused=make(n,ptr,idx,a,1),*split=make(n,ptr,idx,a,1);
     kls_solver *certified=make(n,ptr,idx,a,0);
-    fused_events=0;
-    for(int k=0;k<60;++k) {
+    fused_events=lane_events=0;
+    int replays_after_full=0;
+    for(int k=0;k<400;++k) {
       for(int p=0;p<nz;++p)a[p]*=1+1e-3*((p+k)%5-2);
       for(int i=0;i<n;++i)b[i]=1+(i+k)%7;
-      const int before=fused_events;
+      const int before=fused_events,lane_before=lane_events;
       assert(kls_refactor_solve(certified,a,1,b,0,y,0)==KLS_OK);
       assert(fused_events==before);             /* certified mode never fuses */
       assert(kls_refactor(split,a)==KLS_OK && kls_solve(split,1,b,0,y,0)==KLS_OK);
       assert(fused_events==before);             /* nor do separate calls */
+      assert(lane_events==lane_before);         /* and neither replays */
+      if(k%97==96) {
+        /* Separate calls on the replaying solver switch replay off; the
+           following combined call must be a full one. */
+        if(k&1)assert(kls_solve(fused,1,b,0,x,0)==KLS_OK);
+        else assert(kls_refactor(fused,a)==KLS_OK);
+        assert(!fused->fast_lane_armed);
+        const int events=lane_events;
+        assert(kls_refactor_solve(fused,a,1,b,0,x,0)==KLS_OK);
+        assert(lane_events==events);
+      }
+      if(fused->fast_lane_armed &&
+         fused->fast_lane_budget==KLS_FAST_LANE_BUDGET)++replays_after_full;
       if(k%3==2) {                              /* aliased right-hand side */
         memcpy(x,b,(size_t)n*sizeof *x);
         assert(kls_refactor_solve(fused,a,1,x,0,x,0)==KLS_OK);
@@ -72,17 +87,30 @@ int main(void) {
       for(int i=0;i<n;++i)assert(fabs(x[i]-y[i])<=1e-12*scale);
       assert(residual(n,ptr,idx,a,b,x)<=1e-12);
     }
-    assert(fused_events>0);
-    /* A singular update fails without publishing, and the next good update
-       is solved from its own values. */
-    const double kept=a[ptr[n-1]];
-    memcpy(y,x,(size_t)n*sizeof *y);
-    a[ptr[n-1]]=0;                              /* last singleton's pivot */
-    assert(kls_refactor_solve(fused,a,1,b,0,x,0)!=KLS_OK);
-    assert(!memcmp(x,y,(size_t)n*sizeof *x));
-    a[ptr[n-1]]=kept;
-    assert(kls_refactor_solve(fused,a,1,b,0,x,0)==KLS_OK);
-    assert(residual(n,ptr,idx,a,b,x)<=1e-12);
+    assert(fused_events>0 && lane_events>0);
+    /* Replay is interrupted by a full call more than once. */
+    assert(replays_after_full>2);
+    /* While replay is armed, every irregular call fails exactly as a full
+       call does: nothing is published and the next good update is solved
+       from its own values. */
+    for(int kind=0;kind<3;++kind) {
+      for(int k=0;k<2*KLS_FAST_LANE_STREAK && !fused->fast_lane_armed;++k)
+        assert(kls_refactor_solve(fused,a,1,b,0,x,0)==KLS_OK);
+      assert(fused->fast_lane_armed && fused->fast_lane_budget>0);
+      const double kept=a[ptr[n-1]],rhs=b[0];
+      memcpy(y,x,(size_t)n*sizeof *y);
+      if(kind==0)a[ptr[n-1]]=0;                 /* last singleton's pivot */
+      else if(kind==1)a[ptr[n-1]]=NAN;
+      else b[0]=INFINITY;
+      assert(kls_refactor_solve(fused,a,1,b,0,x,0)!=KLS_OK);
+      assert(!memcmp(x,y,(size_t)n*sizeof *x));
+      assert(!fused->fast_lane_armed);
+      a[ptr[n-1]]=kept;b[0]=rhs;
+      assert(kls_refactor_solve(fused,a,1,b,0,x,0)==KLS_OK);
+      assert(residual(n,ptr,idx,a,b,x)<=1e-12);
+      assert(kls_refactor(split,a)==KLS_OK && kls_solve(split,1,b,0,y,0)==KLS_OK);
+      for(int i=0;i<n;++i)assert(fabs(x[i]-y[i])<=1e-12*(1+fabs(y[i])));
+    }
     kls_destroy(fused);kls_destroy(split);kls_destroy(certified);
     free(ptr);free(idx);free(a);free(b);free(x);free(y);
   }

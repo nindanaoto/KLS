@@ -1155,6 +1155,11 @@ struct kls_solver {
   double *small_btf_fused_work;
   UF_long small_btf_fused_n;
   int small_btf_fused_ready;
+  /* Settled-call replay (see kls_fast_lane_call). */
+  int fast_lane_armed;      /* the next combined call may replay */
+  int fast_lane_streak;     /* consecutive full calls on the replayable route */
+  int fast_lane_route;      /* route marks collected by the current full call */
+  unsigned fast_lane_budget;/* replays left before a full revalidating call */
   /* Saved RHS and candidate answer of the outermost one-RHS public call.  The
      solver keeps the storage for its lifetime so a call of any size does not
      allocate; a nested public call finds it busy and allocates its own. */
@@ -2233,6 +2238,10 @@ static double kls_now_seconds(void) {
 static double kls_now_seconds(void) { return kls_monotonic_seconds(); }
 #endif
 
+/* Full calls on one route before replay starts, and replays between two
+   full calls. The full call keeps every adaptive policy advancing. */
+#define KLS_FAST_LANE_STREAK 8
+#define KLS_FAST_LANE_BUDGET 63u
 static void kls_separator_analysis_clear(kls_separator_analysis *);
 static void kls_small_btf_fallback_clear(kls_small_btf_fallback *f) {
   if(f->symbolic)trilinos_klu_l_free_symbolic(&f->symbolic,&f->common);
@@ -7659,6 +7668,7 @@ static void free_pivot_nudges(kls_solver *solver) {
 }
 
 static void free_numeric(kls_solver *solver) {
+  solver->fast_lane_armed = solver->fast_lane_streak = 0;
   kls_observed_parallel_invalidate(solver);
   atomic_store_explicit(&solver->compact_btf_policy,0,memory_order_relaxed);
   memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
@@ -7704,6 +7714,7 @@ static void free_numeric(kls_solver *solver) {
    derived from the old numeric's pattern or storage is now stale and must
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_invalidate_i32_solve(kls_solver *solver) {
+  solver->fast_lane_armed = solver->fast_lane_streak = 0;
   kls_free_forest_map(solver);
   kls_observed_parallel_invalidate(solver);
   atomic_store_explicit(&solver->compact_btf_policy,0,memory_order_relaxed);
@@ -7760,6 +7771,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
 }
 
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
+  solver->fast_lane_armed = solver->fast_lane_streak = 0;
   /* a replacement is a new pivot sequence: its contract accuracy is
      unknown until the next classification, and any captured refine
      values describe the DEAD numeric's input — drop them so no later
@@ -8074,6 +8086,7 @@ static void clear_matrix(kls_solver *solver) {
   KLS_FREE_AND_NULL(solver->solve_perm_workspace);
   KLS_FREE_AND_NULL(solver->fused_refactor_solve_work);
   KLS_FREE_AND_NULL(solver->small_btf_fused_work);
+  solver->fast_lane_armed = solver->fast_lane_streak = 0;
   solver->small_btf_fused_n = 0;
   solver->small_btf_fused_ready = 0;
   solver->small_btf_fused_values = NULL;
@@ -8633,6 +8646,7 @@ int kls_factor(kls_solver *solver, const double *values) {
   const int public_epoch = solver && !solver->private_numeric_depth &&
     !solver->private_solve_depth;
   if (solver) {
+    solver->fast_lane_armed = solver->fast_lane_streak = 0;
     if (public_epoch) {
       solver->private_original_valid = 0;
       /* Numeric validity ends here; compatible symbolic analysis and the
@@ -10201,6 +10215,8 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const int public_epoch = solver && !solver->private_numeric_depth &&
     !solver->private_solve_depth;
   if (solver) {
+    if (!solver->private_caller_depth)
+      solver->fast_lane_armed = solver->fast_lane_streak = 0;
     if (public_epoch) {
       solver->private_original_valid = 0;
       /* Numeric validity ends here; compatible symbolic analysis and the
@@ -10437,6 +10453,7 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
        solver->refactor_input_pos32) {
       const int result=kls_lean_btf_map32_refactor(solver,(double *)(uintptr_t)values);
       if(result>=0){ok=(UF_long)result;compact_used=1;}
+      if(result==1 && solver->small_btf_fused_ready)solver->fast_lane_route|=1;
     }
     if (!compact_used && (direct_compact_transpose || direct_low_work_public_btf ||
         !kls_try_compact_map32_klu_tournament(
@@ -13709,6 +13726,12 @@ static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
   double *candidate = NULL;
   double *frame = NULL;
   if (caller_gate) {
+    /* A separate solve may move solve-side state; the next combined call
+       takes the full path once and re-arms if its route is unchanged. */
+    if (solver->fast_lane_armed) {
+      solver->fast_lane_armed = 0;
+      solver->fast_lane_streak = KLS_FAST_LANE_STREAK - 1;
+    }
     frame = private_caller_frame_acquire(solver,nrhs);
     int status = private_caller_rhs_storage(solver,nrhs,b,ldb,x,ldx,&saved,frame);
     if (status != KLS_OK) { if(frame) solver->caller_frame_busy=0;return status; }
@@ -13921,6 +13944,7 @@ static int private_solve_body(kls_solver *solver,
       const double *fused_solution=solver->small_btf_fused_work;
       for(UF_long k=0;k<solver->n;++k)x[fused_pnum[k]]=fused_solution[k];
       solver->common.status=TRILINOS_KLU_OK;
+      solver->fast_lane_route|=2;
       compact_solved=1;
     } else {
       if(b!=x)memmove(x,b,(size_t)solver->n*sizeof(*x));
@@ -15698,9 +15722,81 @@ static int kls_refactor_solve_impl(kls_solver *solver,
 #include "kls_native_i16_admission.inc"
 #include "kls_snb_auto.inc"
 
+/* Settled-call replay for application-managed small-BTF systems.
+
+   Between two device evaluations the long dispatch of a combined call is
+   cold, and for a system of a few dozen rows it costs more than the
+   arithmetic. Once KLS_FAST_LANE_STREAK consecutive full calls have all
+   ended in the same place - the fused compact BTF kernel on the caller's own
+   values, answer published by the solve - the next calls run that kernel
+   directly. A replay keeps what later full calls rely on: the retained
+   input snapshot, the growth-check values, and the freshness flags the
+   direct refactor entry clears. It does not advance adaptive policies or
+   timing statistics; every KLS_FAST_LANE_BUDGET replays one full call does,
+   and re-arms only if it still takes the same route.
+
+   Anything irregular - a non-finite input or answer, a zero pivot, a changed
+   floating-point environment, a missing cache - declines before the answer
+   is published and lets the full call handle the same arguments. Any other
+   public numeric call, and any replacement of the numeric or its solve
+   cache, switches replay off. Returns 1 when it produced the answer. */
+static int kls_fast_lane_call(kls_solver *s,const double *values,
+    const double *b,double *x) {
+  if(!s->fast_lane_budget) {
+    s->fast_lane_armed=0;s->fast_lane_streak=KLS_FAST_LANE_STREAK-1;
+    return 0;
+  }
+  --s->fast_lane_budget;
+  private_original_operator *a=s->private_original;
+  const size_t n=(size_t)s->n,nnz=(size_t)s->nnz;
+  if(!b || !x || !s->numeric || !s->symbolic || !a || !a->values ||
+     a->nnz!=nnz || !s->private_original_valid ||
+     s->private_caller_depth || s->private_numeric_depth ||
+     s->private_solve_depth || s->caller_frame_busy ||
+     !s->small_btf_fused_work || s->small_btf_fused_n!=s->n ||
+     !kls_small_btf_cache_ready(s) || !kls_small_btf_environment() ||
+     !private_all_finite(values,nnz) || !private_all_finite(b,n))
+    goto decline;
+  s->private_cold_deadline=0;
+  /* The state a full call leaves behind for this route. */
+  if(values!=a->values) memcpy(a->values,values,nnz*sizeof(double));
+  if(s->solve_refine_values && s->solve_refine_values!=values)
+    memcpy(s->solve_refine_values,values,nnz*sizeof(double));
+  s->refactor_input_snapshot_valid=0;
+  s->solve_contract_verified=0;
+  s->verified_rhs_valid=0;
+  s->compact_amf_two_block_exact_recip_fresh=0;
+  s->parallel_refine_values_copied=0;
+  s->i32solve_udiag_recip_fresh=0;
+  s->tiny_singleton_rs_recip_fresh=0;
+  s->small_btf_fused_values=values;s->small_btf_fused_rhs=b;
+  const int ok=kls_compact_btf_map32_refactor(s,(double *)(uintptr_t)values);
+  s->small_btf_fused_values=NULL;s->small_btf_fused_rhs=NULL;
+  const int ready=s->small_btf_fused_ready;
+  s->small_btf_fused_ready=0;
+  if(ok!=1 || s->common.status!=TRILINOS_KLU_OK || !ready ||
+     !private_all_finite(s->small_btf_fused_work,n)) goto decline;
+  {
+    const uint16_t *pnum=s->i16solve_pnum;
+    const double *solution=s->small_btf_fused_work;
+    for(size_t k=0;k<n;++k)x[pnum[k]]=solution[k];
+  }
+#ifdef KLS_FAST_LANE_TEST_EVENT
+  KLS_FAST_LANE_TEST_EVENT();
+#endif
+  return 1;
+decline:
+  s->fast_lane_armed=0;s->fast_lane_streak=0;
+  return 0;
+}
+
 int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     const double *b, int64_t ldb, double *x, int64_t ldx) {
   if (!values) return KLS_ERR_INVALID_ARGUMENT;
+  if (s && s->fast_lane_armed && nrhs==1 &&
+      (!ldb || ldb==(int64_t)s->n) && (!ldx || ldx==(int64_t)s->n) &&
+      kls_fast_lane_call(s,values,b,x)) return KLS_OK;
+  if (s) s->fast_lane_route=0;
   /* The frame belongs to this call, including nested recovery. */
   double *const frame=private_caller_frame_acquire(s,nrhs);
   const int local=frame!=NULL;
@@ -15738,6 +15834,18 @@ int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
   --s->native_i16_combined_depth;
   --s->forest_combined_depth;
   --s->private_caller_depth;
+  if (status==KLS_OK && s->fast_lane_route==3 && nrhs==1 && local &&
+      !s->private_caller_depth &&
+      s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED &&
+      !s->observed_parallel.active && s->observed_parallel.choice<=0 &&
+      s->snb_auto.choice<=0 && !s->native_i16_policy.active) {
+    if (s->fast_lane_streak<KLS_FAST_LANE_STREAK) ++s->fast_lane_streak;
+    if (s->fast_lane_streak>=KLS_FAST_LANE_STREAK) {
+      s->fast_lane_armed=1;s->fast_lane_budget=KLS_FAST_LANE_BUDGET;
+    }
+  } else {
+    s->fast_lane_armed=0;s->fast_lane_streak=0;
+  }
   if (status != KLS_OK) s->verified_rhs_valid = 0;
   if (status == KLS_OK)
     for (int64_t k=0;k<nrhs;++k)
