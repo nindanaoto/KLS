@@ -2160,11 +2160,65 @@ static int transpose_candidate(const kls_pattern_candidate *source,
                                kls_pattern_candidate *candidate);
 
 
-static double kls_now_seconds(void) {
+static double kls_monotonic_seconds(void) {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
+
+/* Every public call reads the clock several times, and on a small system those
+   reads cost more than the arithmetic.  Where the processor has an invariant
+   time-stamp counter, read it instead and convert with a rate measured against
+   CLOCK_MONOTONIC.  The result stays on CLOCK_MONOTONIC's scale (other units
+   compare deadlines against that clock): each thread re-anchors once a second,
+   so the two differ by far less than any deadline, and a thread never sees
+   time run backwards.  A fixture that substitutes clock_gettime to control
+   time keeps the plain clock. */
+#if defined(__GNUC__) && defined(__x86_64__) && !defined(clock_gettime)
+#include <cpuid.h>
+static double kls_now_seconds(void) {
+  static _Atomic int invariant;            /* 0 unknown, 1 yes, -1 no */
+  static _Thread_local uint64_t anchor_ticks, reanchor_ticks;
+  static _Thread_local double anchor_seconds, rate, last;
+  static _Thread_local int ready;          /* 0 new, 1 anchored, 2 rated, -1 off */
+  if (ready == 2) {
+    const uint64_t elapsed = __rdtsc() - anchor_ticks;
+    if (elapsed < reanchor_ticks) {
+      const double now = anchor_seconds + (double)elapsed * rate;
+      if (now > last) last = now;
+      return last;
+    }
+  } else if (ready < 0) {
+    return kls_monotonic_seconds();
+  }
+  double now = kls_monotonic_seconds();
+  const uint64_t ticks = __rdtsc();
+  if (ready == 0) {
+    int known = atomic_load_explicit(&invariant, memory_order_relaxed);
+    if (!known) {
+      unsigned a = 0, b = 0, c = 0, d = 0;
+      known = __get_cpuid(0x80000007u, &a, &b, &c, &d) && (d & 0x100u) ? 1 : -1;
+      atomic_store_explicit(&invariant, known, memory_order_relaxed);
+    }
+    ready = known;
+    anchor_ticks = ticks; anchor_seconds = now;
+  } else if (now - anchor_seconds >= 0.01) {
+    const double measured = (now - anchor_seconds) / (double)(ticks - anchor_ticks);
+    /* Accept only a plausible counter: 100 MHz to 100 GHz, moving forward. */
+    if (ticks > anchor_ticks && measured > 1e-11 && measured < 1e-8) {
+      rate = measured; ready = 2;
+      reanchor_ticks = (uint64_t)(1.0 / measured);
+      anchor_ticks = ticks; anchor_seconds = now;
+    } else {
+      ready = -1;
+    }
+  }
+  if (now > last) last = now; else now = last;
+  return now;
+}
+#else
+static double kls_now_seconds(void) { return kls_monotonic_seconds(); }
+#endif
 
 static void kls_separator_analysis_clear(kls_separator_analysis *);
 static void kls_small_btf_fallback_clear(kls_small_btf_fallback *f) {
