@@ -12,7 +12,7 @@ def rows_for(times, passes=2, bad=()):
     for (case, threads, side), seconds in times.items():
         for trial in range(passes):
             rows.append(dict(domain='llc96', case=case, threads=threads, trial=trial, side=side,
-                             linear=seconds, wall_seconds=seconds + 1,
+                             linear=seconds, per_solve=seconds, wall_seconds=seconds + 1,
                              qualified=(case, threads, side) not in bad))
     return rows
 
@@ -83,6 +83,37 @@ def test_gate_applies_to_application_managed_mode_and_reports_certified():
     assert summary['gated_mode'] == 'kls-app' and summary['gate']
     assert summary['certified_overall']['losses'] == 4 and summary['overall']['losses'] == 0
     assert {c['mode'] for c in detail['cells']} == {'kls', 'kls-app'}
+
+
+def test_held_out_decks_with_differing_steps_are_scored_per_solve():
+    times = {('a', t, s): 1.0 for t in (1, 8) for s in g.sides_for(t, ['ck', 'st'], False)}
+    rows = rows_for(times, bad={('a', 1, 'kls-app'), ('a', 1, 'ck')})
+    for r in rows:
+        if not r['qualified']:
+            r['tolerant'] = True
+        if r['side'] == 'kls-app' and r['threads'] == 1:
+            r.update(linear=3.0, per_solve=0.5)       # more solves, each one faster
+    summary, detail = g.reduce_results(metadata(['a']), rows)
+    assert summary['complete'] and summary['time_metric'] == 'per_solve' and summary['tolerant_runs'] == 4
+    app = next(c for c in detail['cells'] if (c['mode'], c['threads'], c['peer']) == ('kls-app', 1, 'ck'))
+    assert abs(app['ratio'] - 0.5) < 1e-12
+    # The tuning set keeps the strict rule: a tolerant run there is a failure.
+    summary, _ = g.reduce_results(metadata(['a'], 'tune'), rows)
+    assert not summary['complete'] and summary['kls_failures'] == 1
+
+
+def test_trajectory_error_is_zero_for_identical_runs_and_scaled_by_tolerance(tmp=None):
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        a, b, c = (Path(directory) / n for n in 'abc')
+        a.write_text('Index TIME V(1)\n' + ''.join(f'{i} {i * 0.5} {float(i)}\n' for i in range(5)))
+        b.write_text('Index TIME V(1)\n' + ''.join(f'{i} {i * 1.0} {i * 2.0}\n' for i in range(3)))
+        c.write_text('Index TIME V(1)\n' + ''.join(f'{i} {i * 0.5} {i + 0.004}\n' for i in range(5)))
+        assert g.trajectory_error(a, a) == 0
+        assert g.trajectory_error(a, b) < 1e-9          # same line, coarser steps
+        assert abs(g.trajectory_error(a, c) - 0.004 / (4e-3 + 1e-6)) < 1e-9
+        b.write_text('Index TIME V(1)\n0 0 0\n1 1 1\n')   # stops early
+        assert g.trajectory_error(a, b) is None
 
 
 def test_sides_and_rotation():
