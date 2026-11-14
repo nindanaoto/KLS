@@ -20,6 +20,8 @@ typedef struct {
   int retry_pending;
   /* The first candidate ran cold and lost; it was a warm-up, not a sample. */
   int warmed;
+  /* One warm comparison has been lost; a second loss declines. */
+  int lost;
   unsigned cycles;
   double history[8],total,cycle,limit,spent,deadline;
   double candidate[2],incumbent[2];
@@ -30,10 +32,16 @@ typedef struct {
 /* A later comparison waits until the allowance covers what a comparison has
  * actually cost on this factor (with a quarter of headroom), not only the
  * two-cycle estimate: starting one that then overruns would turn a funding
- * shortfall of a few microseconds into a permanent decline. */
+ * shortfall of a few microseconds into a permanent decline. "Later" is any
+ * comparison after one has executed and set a price, which includes the
+ * retry of a candidate that ran into its deadline. */
+static int kls_observed_parallel_priced(const kls_observed_parallel_state *g) {
+  return g->samples>0 || g->warmed || g->lost || g->price>0;
+}
+
 static int kls_observed_parallel_funded(const kls_observed_parallel_state *g,
     double budget) {
-  if(g->samples<=0 && !g->warmed) return 1;
+  if(!kls_observed_parallel_priced(g)) return 1;
   return budget>g->cycle && g->limit-g->spent>=1.25*g->price;
 }
 
@@ -69,7 +77,7 @@ static int kls_observed_parallel_start(kls_observed_parallel_state *g) {
  * samples after a cold warm-up wait for funding in the same way. */
 static void kls_observed_parallel_fund(kls_observed_parallel_state *g,
     int successful,double seconds) {
-  if(g->choice!=1 || (g->samples<=0 && !g->warmed) || !successful ||
+  if(g->choice!=1 || !kls_observed_parallel_priced(g) || !successful ||
       !(seconds>0) || !isfinite(seconds) || !isfinite(g->total+seconds)) return;
   g->total+=seconds;g->limit=KLS_OBSERVED_PARALLEL_ALLOWANCE*g->total;
 }
@@ -108,9 +116,12 @@ static int kls_observed_parallel_record(kls_observed_parallel_state *g,
     /* The first candidate execution creates its crew and faults in its
        representation, costs a retained engine never pays again. Losing that
        one comparison proves nothing about the warm engine: keep its price in
-       the budget, discard its time, and require two fresh wins. A second
-       loss, or any loss after a win, declines. */
-    if(g->samples==0 && !g->warmed) {g->warmed=1;return 0;}
+       the budget, discard its time, and require two fresh wins. Among warm
+       comparisons one loss is tolerated: a single sample is one solver call
+       long, so interference on either arm can flip it, and the verdict is
+       two wins before two losses. */
+    if(g->samples==0 && !g->warmed && !g->lost) {g->warmed=1;return 0;}
+    if(!g->lost) {g->lost=1;return 0;}
     g->choice=-1;return 0;
   }
   if(++g->samples==2) {g->choice=2;g->retry_pending=0;}

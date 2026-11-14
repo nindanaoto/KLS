@@ -100,7 +100,14 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
   if(ready && remaining>=g->cycle &&
       call.epoch==s->observed_parallel_epoch) {
     const double trial_start=kls_now_seconds();
-    g->deadline=trial_start+fmin(g->cycle,remaining);
+    /* The very first candidate also faults in the engine's representation.
+       Cut off at one incumbent cycle it usually dies a few tens of
+       microseconds short, and the abandoned work plus the serial redo cost
+       more than letting it finish; half a cycle of the four-cycle reserve
+       that funded this start covers the difference. Later candidates are
+       warm and keep the one-cycle bound. */
+    const double bound=kls_observed_parallel_priced(g)?g->cycle:1.5*g->cycle;
+    g->deadline=trial_start+fmin(bound,remaining);
     int status=kls_refactor_solve_impl(s,values,1,b,0,x,0);
     /* The comparison must price what a retained candidate will cost. An
        application-managed caller pays no certificate afterwards, so the one
