@@ -7939,25 +7939,34 @@ declined:
 /* The caller still supplies values in its original compressed-input order.
  * Fresh storage also permits aliasing with the preceding snapshot and leaves
  * its bytes untouched if allocation or finite-input validation fails. */
+/* Branch-free so the scan vectorizes: an all-ones exponent is Inf or NaN. */
+static int private_all_finite(const double *v,size_t count) {
+  uint64_t bad=0;
+  for(size_t i=0;i<count;++i) {
+    uint64_t bits;memcpy(&bits,v+i,sizeof bits);
+    bad|=(uint64_t)((bits&UINT64_C(0x7ff0000000000000))==UINT64_C(0x7ff0000000000000));
+  }
+  return !bad;
+}
+
 static int private_original_input_values(const kls_solver *s,
     const double *values, private_original_operator *a) {
   if (!s || !values || !private_original_operator_input_order(a) ||
       !a->p || !a->rows || !a->n || a->n != (size_t)s->n ||
       a->nnz > SIZE_MAX / sizeof(double)) return KLS_ERR_INVALID_ARGUMENT;
-  double *fresh = malloc((a->nnz ? a->nnz : 1u) * sizeof(*fresh));
-  if (!fresh) return KLS_ERR_OUT_OF_MEMORY;
-  if (s->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED) {
-    for (size_t k = 0; k < a->nnz; ++k) {
-      if (!isfinite(values[k])) {
-        free(fresh);
-        return KLS_ERR_INVALID_ARGUMENT;
-      }
-    }
+  if (s->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED &&
+      !private_all_finite(values, a->nnz)) return KLS_ERR_INVALID_ARGUMENT;
+  /* The public numeric call withdrew the previous snapshot before it started
+     and republishes only on success, so the retained array (always nnz long
+     for this fixed pattern) is overwritten in place instead of being replaced
+     by a fresh allocation on every update. */
+  if (!a->values) {
+    a->values = malloc((a->nnz ? a->nnz : 1u) * sizeof(*a->values));
+    if (!a->values) return KLS_ERR_OUT_OF_MEMORY;
   }
   /* Copy representations, including signaling NaNs, without FP arithmetic. */
-  if (a->nnz) memcpy(fresh, values, a->nnz * sizeof(*fresh));
-  free(a->values);
-  a->values = fresh;
+  if (a->nnz && values != a->values)
+    memcpy(a->values, values, a->nnz * sizeof(*a->values));
   return KLS_OK;
 }
 
@@ -13482,16 +13491,6 @@ static double *private_caller_frame_acquire(kls_solver *s,int64_t nrhs) {
   }
   s->caller_frame_busy=1;
   return s->caller_frame;
-}
-
-/* Branch-free so the scan vectorizes: an all-ones exponent is Inf or NaN. */
-static int private_all_finite(const double *v,size_t count) {
-  uint64_t bad=0;
-  for(size_t i=0;i<count;++i) {
-    uint64_t bits;memcpy(&bits,v+i,sizeof bits);
-    bad|=(uint64_t)((bits&UINT64_C(0x7ff0000000000000))==UINT64_C(0x7ff0000000000000));
-  }
-  return !bad;
 }
 
 /* Heap-owning form, kept for the accuracy fixtures. */

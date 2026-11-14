@@ -77,8 +77,9 @@ int main(void) {
       assert(out.layout==layout && out.value_source==sources);
     }
     double old[5];memcpy(old,out.values,sizeof old);
+    /* A cache hit refills the retained values without allocating. */
     allocation=0;fail=1;
-    assert(private_original_operator_build(&s,a,&out)==KLS_ERR_OUT_OF_MEMORY);
+    assert(private_original_operator_build(&s,a,&out)==KLS_OK && allocation==0);
     assert(!memcmp(old,out.values,sizeof old));fail=0;
     s.accuracy_policy=KLS_ACCURACY_APPLICATION_MANAGED;a[1]=NAN;
     assert(private_original_operator_build(&s,a,&out)==KLS_ERR_INVALID_ARGUMENT);

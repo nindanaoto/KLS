@@ -72,24 +72,21 @@ static int private_original_operator_build(const kls_solver *s,
     saved+=n;
     if(s->input_to_csc && nnz) same &= !memcmp(saved,s->input_to_csc,nnz*sizeof(*saved));
     if(same) {
-      double *values=malloc((nnz?nnz:1)*sizeof(*values));
-      if(!values) return KLS_ERR_OUT_OF_MEMORY;
-      double *destination=values;
-      const double *end=values+nnz;
+      /* The numeric call withdrew the previous snapshot before it started, so
+       * the retained array is refilled in place; no allocation per update. */
       const int64_t *source=out->value_source;
-      if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) {
-        for(;destination!=end;++destination,++source) {
-          const double *value=caller_values+*source;
-          if(!isfinite(*value)) {
-            free(values);return KLS_ERR_INVALID_ARGUMENT;
-          }
-          private_original_operator_copy_value(destination,value);
-        }
-      } else {
-        for(;destination!=end;++destination,++source)
-          private_original_operator_copy_value(destination,caller_values+*source);
-      }
-      free(out->values);out->values=values;
+      if(!out->values) return KLS_ERR_INVALID_ARGUMENT;
+      if(s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED)
+        for(size_t k=0;k<nnz;++k)
+          if(!isfinite(caller_values[source[k]])) return KLS_ERR_INVALID_ARGUMENT;
+      /* An update may be given the snapshot it replaces; the gather permutes,
+       * so that one case goes through a temporary. */
+      double *staged=caller_values==out->values?malloc((nnz?nnz:1)*sizeof(*staged)):NULL;
+      if(caller_values==out->values && !staged) return KLS_ERR_OUT_OF_MEMORY;
+      double *destination=staged?staged:out->values;
+      for(const double *end=destination+nnz;destination!=end;++destination,++source)
+        private_original_operator_copy_value(destination,caller_values+*source);
+      if(staged) {memcpy(out->values,staged,nnz*sizeof(*staged));free(staged);}
       return KLS_OK;
     }
   }

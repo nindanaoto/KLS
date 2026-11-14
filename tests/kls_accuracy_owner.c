@@ -156,10 +156,20 @@ static void caller_pattern_faults(void) {
   assert(fetestexcept(FE_ALL_EXCEPT)==FE_DIVBYZERO);
   old=s.private_original->values;
   s.private_original_valid=0;s.private_numeric_depth=1;allocation_countdown=0;
+  /* An update overwrites the retained snapshot and cannot fail on memory. */
+  assert(private_numeric_snapshot_finish(&s,values,KLS_OK,1)==KLS_OK);
+  assert(allocation_countdown==0 && s.private_original_valid);
+  assert(s.private_original->values==old && !memcmp(old,bits,sizeof bits));
+  /* Only the first snapshot allocates; its failure publishes nothing. */
+  free(old);s.private_original->values=NULL;
+  s.private_original_valid=0;s.private_numeric_depth=1;
   assert(private_numeric_snapshot_finish(&s,values,KLS_OK,1)==KLS_ERR_OUT_OF_MEMORY);
   allocation_countdown=-1;
   assert(!s.private_original_valid && s.private_numeric_depth==0);
-  assert(s.private_original->values==old && !memcmp(old,bits,sizeof bits));
+  assert(!s.private_original->values);
+  s.private_numeric_depth=1;
+  assert(private_numeric_snapshot_finish(&s,values,KLS_OK,1)==KLS_OK);
+  assert(!memcmp(s.private_original->values,bits,sizeof bits));
   assert(fetestexcept(FE_ALL_EXCEPT)==FE_DIVBYZERO);
   assert(!fesetenv(&saved_environment));
   s.accuracy_policy=KLS_ACCURACY_APPLICATION_MANAGED;
@@ -216,17 +226,18 @@ int main(void) {
       assert(fabs(x[0]-2.0/3.0)<1e-14 && fabs(x[1]-2.0/3.0)<1e-14);
     }
     saved=s->private_original;saved_values=saved->values;
-    /* A cache hit allocates only fresh values. Failure still invalidates the
-     * numeric epoch without changing the previously published snapshot. */
+    /* A cache hit refills the retained values and allocates nothing. */
     assert(private_original_operator_input_order(saved) ||
            (saved->layout && saved->value_source));
     s->private_original_valid=0;++s->private_numeric_depth;
     allocation_countdown=0;
     int cached_status=private_numeric_snapshot_finish(s,a,KLS_OK,1);
     allocation_countdown=-1;
-    assert(cached_status==KLS_ERR_OUT_OF_MEMORY && !s->private_original_valid);
+    assert(cached_status==KLS_OK && s->private_original_valid);
     assert(s->private_original==saved && saved->values==saved_values);
     assert(s->private_numeric_depth==0);
+    /* A withdrawn snapshot still refuses to serve a solve. */
+    s->private_original_valid=0;
     assert(kls_solve(s,1,b,0,x,0)==KLS_ERR_SOLVE_FAILED);
     /* Disable optional metadata to retain coverage of every required rebuild
      * allocation, rather than assuming that every update rebuilds structure. */
