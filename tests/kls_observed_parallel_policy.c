@@ -117,6 +117,16 @@ int main(void) {
     r=(kls_observed_parallel_state){.choice=1,.cycle=1};
     assert(!kls_observed_parallel_audit(&r,1,9) && !r.audited);
   }
+  {
+    /* The first start also waits for the allowance to cover the crew. */
+    kls_observed_parallel_state u={.startup=6};
+    for(int i=0;i<32;++i) kls_observed_parallel_observe(&u,1,1,1);
+    assert(!kls_observed_parallel_start(&u));            /* 3.2 < 4 + 6 */
+    for(int i=0;i<67;++i) kls_observed_parallel_observe(&u,1,1,1);
+    assert(!kls_observed_parallel_start(&u));            /* 9.9 */
+    kls_observed_parallel_observe(&u,1,1,1);
+    assert(kls_observed_parallel_start(&u));             /* 10.0 */
+  }
   g=(kls_observed_parallel_state){0};
   for(int i=0;i<32;++i) kls_observed_parallel_observe(&g,1,1,i==0?10000:1);
   assert(kls_observed_parallel_start(&g) && g.cycle==1);

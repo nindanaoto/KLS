@@ -101,6 +101,10 @@
 /* Minimum work needed to amortize EGraph worker dispatch. */
 #define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 2.5e5
 #define KLS_EGRAPH_REFACTOR_MIN_SIZE 128u
+/* Expected whole cost of the first parallel candidate (starting the crew and
+   faulting in its data) until one has been measured in this process: about
+   half a millisecond for an eight-thread crew. */
+#define KLS_OBSERVED_PARALLEL_STARTUP_SECONDS 5.0e-4
 #define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
 /* The caller participates as worker zero. Background workers get only a short
  * grace period between SPICE refactors, avoiding contention in serial phases. */

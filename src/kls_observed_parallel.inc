@@ -45,6 +45,15 @@ static int kls_observed_parallel_incumbent_path(const kls_solver *s) {
     (s->common.scale>0 && s->stats.last_refactor_path==KLS_REFACTOR_PATH_KLU);
 }
 
+/* Whole extra cost of a first (crew-starting) candidate, in nanoseconds: the
+   last one measured in this process, or the tuning default before any. */
+static _Atomic uint64_t kls_observed_parallel_startup_ns;
+static double kls_observed_parallel_startup(void) {
+  const uint64_t ns=atomic_load_explicit(&kls_observed_parallel_startup_ns,
+      memory_order_relaxed);
+  return ns?(double)ns*1e-9:KLS_OBSERVED_PARALLEL_STARTUP_SECONDS;
+}
+
 typedef struct {
   unsigned epoch;
   int observed,changed,sampled,candidate_ok;
@@ -82,6 +91,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
   call.changed=s->private_original->nnz==(size_t)s->nnz &&
     s->private_original->values && memcmp(values,s->private_original->values,
                                         (size_t)s->nnz*sizeof(double))!=0;
+  g->startup=kls_observed_parallel_startup();
   if(!call.changed || !kls_observed_parallel_start(g)) return call;
   /* A process-level engine override is an explicit policy. Collection may
      precede the funding threshold, but no competing consultation starts. */
@@ -91,6 +101,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
   if(fegetround()!=FE_TONEAREST) {g->choice=-1;return call;}
   const double start=kls_now_seconds();
   const double prior_spent=g->spent;
+  const int first=!kls_observed_parallel_priced(g) && !g->retry_pending;
   const double budget=kls_observed_parallel_preparation_budget(g);
   const int retained_retry=g->retry_pending && s->egraph_pool && s->refactor_level_ptr;
   /* The confirming sample waits for funding; the first one never does. Its
@@ -150,6 +161,9 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
   if(call.epoch==s->observed_parallel_epoch) {
     g->spent=prior_spent+call.extra;
     if(call.sampled && call.extra>g->price) g->price=call.extra;
+    if(call.sampled && first && call.extra>0 && call.extra<1.0)
+      atomic_store_explicit(&kls_observed_parallel_startup_ns,
+          (uint64_t)(call.extra*1e9),memory_order_relaxed);
   }
   call.incumbent_start=kls_now_seconds();
   return call;

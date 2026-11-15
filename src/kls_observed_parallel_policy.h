@@ -27,6 +27,8 @@ typedef struct {
   double candidate[2],incumbent[2];
   /* Largest whole extra cost of one executed comparison so far. */
   double price;
+  /* What starting a crew for the first candidate is expected to cost. */
+  double startup;
   /* Retained-engine calls seen in the current audit window. */
   unsigned audited;
 } kls_observed_parallel_state;
@@ -65,7 +67,11 @@ static int kls_observed_parallel_start(kls_observed_parallel_state *g) {
   }
   const double cycle=0.5*v[3]+0.5*v[4],
     allowance=KLS_OBSERVED_PARALLEL_ALLOWANCE*g->total;
-  const double reserve=(g->retry_pending?2.0:4.0)*cycle;
+  /* The first candidate also starts the crew, which costs the same on a
+     ten-microsecond cycle as on a ten-millisecond one: the allowance must
+     cover it too, so a run too short to repay a crew never starts one. */
+  const double reserve=(g->retry_pending?2.0:4.0)*cycle+
+    (kls_observed_parallel_priced(g) || g->retry_pending?0.0:g->startup);
   if(!(cycle>0) || !isfinite(cycle) || !isfinite(allowance) ||
       !isfinite(g->spent) || g->spent<0 || allowance-g->spent<reserve) return 0;
   g->cycle=cycle;g->limit=allowance;g->choice=1;

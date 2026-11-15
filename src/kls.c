@@ -13701,7 +13701,14 @@ static int private_componentwise_finish(kls_solver *s,int transpose,int64_t nrhs
       int certificate_threads=s->options.threads;
       if((s->refactor_pool && s->refactor_pool->created_count>0) ||
          (s->egraph_pool && s->egraph_pool->created_count>0)) certificate_threads=1;
-      const int owned_threads=s->options.threads>1?private_componentwise_pool_threads(s):0;
+      /* An application-managed caller never certifies, so the check that
+       * validates its speculative parallel candidate is a one-off: run it on
+       * the calling thread instead of starting or waking a team for it. */
+      const int one_off=s->observed_parallel.active==1 &&
+        s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED;
+      if(one_off) certificate_threads=1;
+      const int owned_threads=s->options.threads>1 && !one_off?
+        private_componentwise_pool_threads(s):0;
       if(certificate_threads==1 && s->componentwise_team) {
         kls_componentwise_team_destroy(s->componentwise_team);
         s->componentwise_team=NULL;
