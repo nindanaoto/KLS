@@ -11,9 +11,8 @@ static int kls_observed_parallel_capable(const kls_solver *s) {
     s->options.expected_refactorizations<=0 && s->options.expected_solves<=0 &&
     !kls_kernel_tuning_overridden(s) &&
     s->n>=(UF_long)s->tuning.egraph_min_size &&
-    s->common.flops>0 && s->common.flops<
-      s->tuning.egraph_min_flops_per_thread*s->options.threads &&
-    s->common.scale<=0 && s->numeric->Rs==NULL &&
+    s->common.flops>0 &&
+    (s->common.scale>0)==(s->numeric->Rs!=NULL) &&
     s->row_perm==NULL && s->user_col_perm==NULL &&
     s->row_scale==NULL && s->col_scale==NULL &&
     !s->dense_tail_cols && !s->numeric_is_predicted &&
@@ -37,6 +36,13 @@ static int kls_observed_parallel_capable(const kls_solver *s) {
     !getenv("KLS_DISABLE_EGRAPH_REFACTOR") &&
     !getenv("KLS_DISABLE_OBSERVED_PARALLEL") &&
     !kls_row_refactor_env_enabled();
+}
+
+/* The serial incumbent a candidate is compared with: the mapped refactor,
+   or the vendor refactor a row-scaled factor uses. */
+static int kls_observed_parallel_incumbent_path(const kls_solver *s) {
+  return s->stats.last_refactor_path==KLS_REFACTOR_PATH_MAPPED ||
+    (s->common.scale>0 && s->stats.last_refactor_path==KLS_REFACTOR_PATH_KLU);
 }
 
 typedef struct {
@@ -68,7 +74,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
     call.epoch=s->observed_parallel_epoch;call.observed=2;return call;
   }
   if(g->choice<0 ||
-      s->stats.last_refactor_path!=KLS_REFACTOR_PATH_MAPPED) return call;
+      !kls_observed_parallel_incumbent_path(s)) return call;
   call.epoch=s->observed_parallel_epoch;call.observed=1;
   /* The snapshot is used solely to classify observed workload. It never
      proves factor validity, a solve, nonsingularity or accuracy. Most changed
@@ -157,11 +163,11 @@ static void kls_observed_parallel_after(kls_solver *s,
     const double incumbent=kls_now_seconds()-call.incumbent_start;
     if(stable && call.sampled)
       (void)kls_observed_parallel_record(g,call.candidate_ok && status==KLS_OK &&
-          s->stats.last_refactor_path==KLS_REFACTOR_PATH_MAPPED,
+          kls_observed_parallel_incumbent_path(s),
           call.candidate_seconds,incumbent);
     else if(g->choice==1) g->choice=-1;
     if(!stable || status!=KLS_OK ||
-       (g->retry_pending && s->stats.last_refactor_path!=KLS_REFACTOR_PATH_MAPPED))g->choice=-1;
+       (g->retry_pending && !kls_observed_parallel_incumbent_path(s)))g->choice=-1;
     g->active=0;
     s->stats.refactor_seconds+=call.extra;
     if(g->choice<0) {
@@ -185,7 +191,7 @@ static void kls_observed_parallel_after(kls_solver *s,
   }
   if(call.observed && stable && !call.incumbent_start) {
     const int clean=status==KLS_OK && kls_observed_parallel_capable(s) &&
-      s->stats.last_refactor_path==KLS_REFACTOR_PATH_MAPPED;
+      kls_observed_parallel_incumbent_path(s);
     kls_observed_parallel_observe(g,call.changed,clean,
         s->stats.refactor_seconds+s->stats.solve_seconds);
     if(call.changed) kls_observed_parallel_fund(g,clean,
