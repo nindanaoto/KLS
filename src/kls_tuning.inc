@@ -100,7 +100,7 @@
   KLS_ROW_REFACTOR_BATCH_SUPERNODE_MIN_WORK_PER_ENTRY
 /* Minimum work needed to amortize EGraph worker dispatch. */
 #define KLS_EGRAPH_REFACTOR_MIN_FLOPS_PER_THREAD 2.5e5
-#define KLS_EGRAPH_REFACTOR_MIN_SIZE 5000u
+#define KLS_EGRAPH_REFACTOR_MIN_SIZE 128u
 #define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
 /* The caller participates as worker zero. Background workers get only a short
  * grace period between SPICE refactors, avoiding contention in serial phases. */

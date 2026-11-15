@@ -64,7 +64,10 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
     }
     return call;
   }
-  if(g->choice==2 || g->choice<0 ||
+  if(g->choice==2) {
+    call.epoch=s->observed_parallel_epoch;call.observed=2;return call;
+  }
+  if(g->choice<0 ||
       s->stats.last_refactor_path!=KLS_REFACTOR_PATH_MAPPED) return call;
   call.epoch=s->observed_parallel_epoch;call.observed=1;
   /* The snapshot is used solely to classify observed workload. It never
@@ -169,6 +172,16 @@ static void kls_observed_parallel_after(kls_solver *s,
       const double cleanup_seconds=kls_now_seconds()-cleanup_start;
       g->spent+=cleanup_seconds;s->stats.refactor_seconds+=cleanup_seconds;
     }
+  }
+  if(call.observed==2) {
+    /* A retained engine keeps being measured at the caller's own rhythm. */
+    if(stable && kls_observed_parallel_audit(g,status==KLS_OK &&
+          s->stats.last_refactor_path==KLS_REFACTOR_PATH_EGRAPH,
+          s->stats.refactor_seconds+s->stats.solve_seconds)) {
+      kls_observed_parallel_restore_native(s);
+      destroy_egraph_refactor_pool(s);free_refactor_schedule(s);
+    }
+    return;
   }
   if(call.observed && stable && !call.incumbent_start) {
     const int clean=status==KLS_OK && kls_observed_parallel_capable(s) &&

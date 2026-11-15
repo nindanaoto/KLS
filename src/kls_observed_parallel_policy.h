@@ -27,6 +27,8 @@ typedef struct {
   double candidate[2],incumbent[2];
   /* Largest whole extra cost of one executed comparison so far. */
   double price;
+  /* Retained-engine calls seen in the current audit window. */
+  unsigned audited;
 } kls_observed_parallel_state;
 
 /* A later comparison waits until the allowance covers what a comparison has
@@ -126,5 +128,26 @@ static int kls_observed_parallel_record(kls_observed_parallel_state *g,
   }
   if(++g->samples==2) {g->choice=2;g->retry_pending=0;}
   return g->choice==2;
+}
+/* Two paired samples retain the engine, but each is one call long and taken
+ * with the crew already awake. What the caller then pays is the engine at
+ * the application's own call rhythm, which the samples cannot see (workers
+ * that fell asleep between calls, a crew shared with other work). So every
+ * retained call is observed like the incumbent calls were, and whenever the
+ * median of eight of them is no better than the incumbent's median cycle the
+ * retention is withdrawn. Returns 1 when the engine must be dropped. */
+static int kls_observed_parallel_audit(kls_observed_parallel_state *g,
+    int successful,double seconds) {
+  if(g->choice!=2 || !(g->cycle>0)) return 0;
+  if(!successful || !(seconds>0) || !isfinite(seconds)) return 0;
+  g->history[g->audited%8]=seconds;
+  if(++g->audited%8) return 0;
+  _Alignas(64) double v[8];memcpy(v,g->history,sizeof(v));
+  for(int i=1;i<8;++i) {
+    double x=v[i];int j=i;
+    while(j && v[j-1]>x) {v[j]=v[j-1];--j;}v[j]=x;
+  }
+  if(0.5*v[3]+0.5*v[4]<g->cycle) return 0;
+  g->choice=-1;g->retry_pending=0;return 1;
 }
 #endif

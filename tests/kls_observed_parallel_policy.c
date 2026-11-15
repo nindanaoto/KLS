@@ -103,6 +103,20 @@ int main(void) {
     assert(f.total==110 && f.limit==11 && kls_observed_parallel_funded(&f,1.5));
     f.lost=1;f.spent=10.9;assert(!kls_observed_parallel_funded(&f,1.5));
   }
+  {
+    /* A retained engine is audited in windows of eight calls against the
+       incumbent's median cycle: failed calls are not samples, a minority of
+       slow calls is tolerated, a slow median withdraws the retention. */
+    kls_observed_parallel_state r={.choice=2,.cycle=1};
+    for(int i=0;i<8;++i) assert(!kls_observed_parallel_audit(&r,1,i<3?5:.5));
+    assert(r.choice==2 && r.audited==8);
+    assert(!kls_observed_parallel_audit(&r,0,9) && r.audited==8);
+    for(int i=0;i<7;++i) assert(!kls_observed_parallel_audit(&r,1,i<3?.5:1.5));
+    assert(kls_observed_parallel_audit(&r,1,1.5) && r.choice==-1);
+    assert(!kls_observed_parallel_audit(&r,1,1.5));
+    r=(kls_observed_parallel_state){.choice=1,.cycle=1};
+    assert(!kls_observed_parallel_audit(&r,1,9) && !r.audited);
+  }
   g=(kls_observed_parallel_state){0};
   for(int i=0;i<32;++i) kls_observed_parallel_observe(&g,1,1,i==0?10000:1);
   assert(kls_observed_parallel_start(&g) && g.cycle==1);
