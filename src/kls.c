@@ -1700,6 +1700,7 @@ static _Thread_local kls_egraph_refactor_worker *kls_dense_help_self;
    in charge, so an idle solver does not hold processors. */
 typedef struct {
   _Atomic uint64_t budget_ns;       /* 0: no extended polling */
+  _Atomic uint64_t hold_until_ns;   /* poll at least until then */
   uint64_t last_finish_ns;
   uint64_t gaps[KLS_IDLE_GAP_HISTORY];
   unsigned next, count;
@@ -2292,16 +2293,29 @@ static void kls_idle_gap_dispatch(kls_idle_gap *g) {
 static void kls_idle_gap_finish(kls_idle_gap *g) {
   g->last_finish_ns = kls_idle_gap_now();
 }
+/* A crew whose gap history is still short has no budget, so it sleeps
+   between jobs even when the caller's calls are a millisecond apart. While
+   an engine is being judged (or was just retained) that would time, and then
+   audit, wake-ups the settled engine never pays. The caller therefore renews
+   a hold on each of its calls until the history is complete; the hold lapses
+   by itself one cap after the caller's last call. */
+static void kls_idle_gap_hold(kls_idle_gap *g) {
+  if (g->count < KLS_IDLE_GAP_HISTORY)
+    atomic_store_explicit(&g->hold_until_ns,
+      kls_idle_gap_now() + KLS_IDLE_GAP_SPIN_CAP_NS, memory_order_relaxed);
+}
 /* Idle worker whose ordinary spin budget is spent: 1 to keep polling. */
 static KLS_ALWAYS_INLINE int kls_idle_gap_poll(const kls_idle_gap *g,
     uint64_t *idle_start, unsigned *tick) {
   const uint64_t budget =
     atomic_load_explicit(&g->budget_ns, memory_order_relaxed);
-  if (!budget) return 0;
+  const uint64_t hold =
+    atomic_load_explicit(&g->hold_until_ns, memory_order_relaxed);
+  if (!budget && !hold) return 0;
   if (!((*tick)++ & 127u)) {
     const uint64_t now = kls_idle_gap_now();
     if (!*idle_start) *idle_start = now;
-    if (now - *idle_start >= budget) return 0;
+    if (now >= hold && now - *idle_start >= budget) return 0;
   }
   kls_cpu_relax();
   return 1;

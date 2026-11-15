@@ -58,5 +58,21 @@ int main(void) {
   /* Typical gaps beyond the cap never get extended polling. */
   for(int i=0;i<KLS_IDLE_GAP_HISTORY;++i) feed(&g,KLS_IDLE_GAP_SPIN_CAP_NS);
   assert(!atomic_load(&g.budget_ns));
+  {
+    /* A hold keeps a crew without history polling for one cap after the
+       caller's last renewal; a complete history takes no hold. */
+    kls_idle_gap h={0};
+    uint64_t s0=0;unsigned t0=0;
+    assert(!kls_idle_gap_poll(&h,&s0,&t0));
+    kls_idle_gap_hold(&h);
+    const uint64_t until=atomic_load(&h.hold_until_ns),t1=kls_idle_gap_now();
+    assert(until>t1 && until<=t1+KLS_IDLE_GAP_SPIN_CAP_NS);
+    unsigned long n=0;s0=0;t0=0;
+    while(kls_idle_gap_poll(&h,&s0,&t0))++n;
+    const uint64_t t2=kls_idle_gap_now();
+    assert(n>0 && t2>=until && t2<=until+50000000);
+    kls_idle_gap full={0};full.count=KLS_IDLE_GAP_HISTORY;
+    kls_idle_gap_hold(&full);assert(!atomic_load(&full.hold_until_ns));
+  }
   return 0;
 }

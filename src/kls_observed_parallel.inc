@@ -137,6 +137,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
     const int deadline=s->egraph_pool &&
       atomic_load_explicit(&s->egraph_pool->shared.trial_deadline_hit,memory_order_acquire) &&
       !atomic_load_explicit(&s->egraph_pool->active_workers,memory_order_acquire);
+    if(s->egraph_pool) kls_idle_gap_hold(&s->egraph_pool->idle_gap);
     kls_observed_parallel_restore_native(s);
     if(status==KLS_OK && !call.candidate_ok && deadline && s->refactor_level_ptr &&
        call.epoch==s->observed_parallel_epoch && kls_observed_parallel_capable(s))
@@ -159,6 +160,7 @@ static void kls_observed_parallel_after(kls_solver *s,
     kls_observed_parallel_call call,int status) {
   kls_observed_parallel_state *g=&s->observed_parallel;
   const int stable=call.epoch==s->observed_parallel_epoch;
+  if(g->choice>0 && s->egraph_pool) kls_idle_gap_hold(&s->egraph_pool->idle_gap);
   if(call.incumbent_start) {
     const double incumbent=kls_now_seconds()-call.incumbent_start;
     if(stable && call.sampled)
