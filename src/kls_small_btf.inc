@@ -76,8 +76,19 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
   const uint64_t bytes=256+(160+sizeof(kls_btf_l_descriptor))*(uint64_t)s->n+16*(uint64_t)s->nnz+
     8*((uint64_t)s->numeric->lnz+(uint64_t)s->numeric->unz)+
     4*(uint64_t)s->numeric->Offp[s->n]+8*(uint64_t)s->symbolic->nblocks;
-  const uint64_t llc=kls_execution_domain_llc_bytes();
   const uint64_t fallback_bytes=kls_small_btf_fallback_bytes(&s->small_btf_fallback);
+  /* The budget is a share of the last-level cache, and finding which one
+     this process may use reads the machine topology (about 0.7 ms the first
+     time, as much as thousands of solves of a system of a few rows). A
+     last-level cache is never smaller than a core's second-level cache, so
+     a footprint within the same share of that one needs no discovery. */
+  uint64_t llc=0;
+#if defined(_SC_LEVEL2_CACHE_SIZE)
+  const long l2=sysconf(_SC_LEVEL2_CACHE_SIZE);
+  if(l2>0 && fallback_bytes<=UINT64_MAX-bytes &&
+     bytes+fallback_bytes<=(uint64_t)l2/32) llc=(uint64_t)l2;
+#endif
+  if(!llc)llc=kls_execution_domain_llc_bytes();
   const int allowed=llc && fallback_bytes<=UINT64_MAX-bytes &&
     bytes+fallback_bytes<=llc/32;
   atomic_store_explicit(&s->compact_btf_policy,allowed?1:-1,memory_order_relaxed);
