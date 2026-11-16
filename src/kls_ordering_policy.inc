@@ -38,7 +38,10 @@ static int kls_low_work_btf_public_klu_capable(const kls_solver *solver) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       solver->n == 0u || solver->n > (UF_long)INT32_MAX ||
       solver->nnz == 0u || solver->nnz > (UF_long)INT32_MAX ||
-      solver->symbolic->nblocks <= 1u ||
+      solver->symbolic->nblocks < 1u ||
+      (solver->symbolic->nblocks == 1u &&
+       (solver->accuracy_policy != KLS_ACCURACY_APPLICATION_MANAGED ||
+        kls_one_block_route_claimed(solver))) ||
       !isfinite(solver->common.flops) || solver->common.flops < 0.0 ||
       solver->common.flops >= 100000.0) {
     return 0;

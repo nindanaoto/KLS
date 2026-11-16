@@ -23,6 +23,15 @@ static int kls_small_btf_cache_ready(const kls_solver *s) {
     s->i16solve_offp && s->i16solve_offi;
 }
 
+/* A one-block factor that the measured single-block route (the transpose
+   cycle that follows a forest un-scaling) owns, or is still about to try,
+   stays with it: that route was chosen by timing on this very factor. */
+static int kls_one_block_route_claimed(const kls_solver *s) {
+  return s->symbolic && s->symbolic->nblocks==1 &&
+    (s->transpose_cycle.active || s->transpose_cycle.choice>0 ||
+     (s->forest_unscale_attempted>0 && s->transpose_cycle.choice==0));
+}
+
 static int kls_small_btf_cache_capable(kls_solver *s) {
   /* An ineligible symbolic frame must not traverse numerical ownership state
      on every ordinary solve/refactor. This is rejection only; positive frames
@@ -43,13 +52,17 @@ static int kls_small_btf_cache_capable(kls_solver *s) {
      s->row_refactor_values_ready || s->row_refactor_values_dirty ||
      s->refactor_l_packed_valid || s->refactor_u_packed_valid ||
      s->numeric_is_predicted || s->numeric_needs_refinement || s->tight_tol_refine ||
-     s->pivot_nudge_count || s->common.kls_perturb_count) return 0;
+     s->pivot_nudge_count || s->common.kls_perturb_count ||
+     kls_one_block_route_claimed(s)) return 0;
   /* Only the immutable geometry/budget verdict persists. Numerical ownership
      above and the executor's current floating environment are never cached. */
   const int policy=atomic_load_explicit(&s->compact_btf_policy,memory_order_relaxed);
   if(policy)return policy>0;
-  if(s->symbolic->nblocks<=1 ||
-     (s->symbolic->maxblock<=1 &&
+  if(s->symbolic->nblocks<1 ||
+     /* One block has no block structure to exploit, but it has the same
+        per-call dispatch to avoid: an application-managed caller gets the
+        compact walk and its replay for it too. */
+     ((s->symbolic->nblocks==1 || s->symbolic->maxblock<=1) &&
       s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED) ||
      s->numeric->lnz<0 || s->numeric->unz<0 ||
      s->numeric->lnz>UINT16_MAX || s->numeric->unz>UINT16_MAX ||

@@ -269,7 +269,7 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
   }
   /* Optional immutable descriptors share the cache's numeric lifetime.
      Failure retains the existing compact executor. */
-  if(n<=4096 && nblocks>1) {
+  if(n<=4096 && nblocks>=1) {
 #ifdef KLS_BTF_DESCRIPTOR_MALLOC
     kls_btf_l_descriptor *desc=KLS_BTF_DESCRIPTOR_MALLOC((size_t)n*sizeof(*desc));
 #else

@@ -5771,11 +5771,20 @@ static void kls_build_lean_btf_off_runs(kls_solver *solver,
   *count_slot = out;
 }
 
+/* Where a column's own-block entries start in the refactor map. A one-block
+   map keeps no such array: every entry is in the block, so the column start
+   is the answer. */
+static const UF_long *kls_lean_block_start(const kls_solver *solver) {
+  if (solver->refactor_block_start != NULL) return solver->refactor_block_start;
+  return solver->symbolic != NULL && solver->symbolic->nblocks == 1u
+    ? solver->refactor_col_ptr : NULL;
+}
+
 static int kls_build_lean_btf_off_map(kls_solver *solver,
                                       int direct_user_values) {
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Offp == NULL || solver->refactor_col_ptr == NULL ||
-      solver->refactor_block_start == NULL ||
+      kls_lean_block_start(solver) == NULL ||
       (direct_user_values ? solver->refactor_input_user_pos32
                           : solver->refactor_input_pos32) == NULL) {
     return 0;
@@ -5806,7 +5815,7 @@ static int kls_build_lean_btf_off_map(kls_solver *solver,
     UF_long dst = solver->numeric->Offp[col];
     const UF_long end = solver->numeric->Offp[col + 1u];
     for (UF_long p = solver->refactor_col_ptr[col];
-         p < solver->refactor_block_start[col]; ++p) {
+         p < kls_lean_block_start(solver)[col]; ++p) {
       const int32_t input = input_pos[p];
       if (dst >= end || input < 0) {
         free(map);
@@ -5836,14 +5845,17 @@ static int kls_native_btf_map32_refactor(kls_solver *solver,
                                        double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || solver->symbolic->nblocks <= 1u ||
+      solver->numeric->Rs != NULL || solver->symbolic->nblocks < 1u ||
       solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
-      solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Offp == NULL ||
+      /* One block has no off-diagonal entries and KLU keeps no array for them. */
+      (solver->numeric->Offx == NULL &&
+       solver->numeric->Offp[solver->n] != 0) ||
       solver->numeric->Udiag == NULL || solver->numeric->Lip == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Uip == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->LUbx == NULL ||
       solver->numeric->Xwork == NULL || solver->refactor_col_ptr == NULL ||
-      solver->refactor_block_start == NULL ||
+      kls_lean_block_start(solver) == NULL ||
       solver->refactor_row_idx32 == NULL ||
       (solver->refactor_direct_user_values_active
          ? solver->refactor_input_user_pos32
@@ -5856,7 +5868,7 @@ static int kls_native_btf_map32_refactor(kls_solver *solver,
   const UF_long *restrict r = symbolic->R;
   const UF_long *restrict q = symbolic->Q;
   const UF_long *restrict map_col_ptr = solver->refactor_col_ptr;
-  const UF_long *restrict map_block_start = solver->refactor_block_start;
+  const UF_long *restrict map_block_start = kls_lean_block_start(solver);
   const int32_t *restrict map_row = solver->refactor_row_idx32;
   const int direct_user_values = solver->refactor_direct_user_values_active;
   const int32_t *restrict map_input = direct_user_values
@@ -6030,14 +6042,17 @@ static int kls_compact_btf_plain_refactor(kls_solver *solver,
                                        double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || solver->symbolic->nblocks <= 1u ||
+      solver->numeric->Rs != NULL || solver->symbolic->nblocks < 1u ||
       solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
-      solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Offp == NULL ||
+      /* One block has no off-diagonal entries and KLU keeps no array for them. */
+      (solver->numeric->Offx == NULL &&
+       solver->numeric->Offp[solver->n] != 0) ||
       solver->numeric->Udiag == NULL || solver->numeric->Lip == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Uip == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->LUbx == NULL ||
       solver->numeric->Xwork == NULL || solver->refactor_col_ptr == NULL ||
-      solver->refactor_block_start == NULL ||
+      kls_lean_block_start(solver) == NULL ||
       solver->refactor_row_idx32 == NULL ||
       (solver->refactor_direct_user_values_active
          ? solver->refactor_input_user_pos32
@@ -6050,7 +6065,7 @@ static int kls_compact_btf_plain_refactor(kls_solver *solver,
   const UF_long *restrict r = symbolic->R;
   const UF_long *restrict q = symbolic->Q;
   const UF_long *restrict map_col_ptr = solver->refactor_col_ptr;
-  const UF_long *restrict map_block_start = solver->refactor_block_start;
+  const UF_long *restrict map_block_start = kls_lean_block_start(solver);
   const int32_t *restrict map_row = solver->refactor_row_idx32;
   const int direct_user_values = solver->refactor_direct_user_values_active;
   const int32_t *restrict map_input = direct_user_values
@@ -6224,14 +6239,17 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
                                        double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->common.scale > 0 ||
-      solver->numeric->Rs != NULL || solver->symbolic->nblocks <= 1u ||
+      solver->numeric->Rs != NULL || solver->symbolic->nblocks < 1u ||
       solver->symbolic->R == NULL || solver->symbolic->Q == NULL ||
-      solver->numeric->Offp == NULL || solver->numeric->Offx == NULL ||
+      solver->numeric->Offp == NULL ||
+      /* One block has no off-diagonal entries and KLU keeps no array for them. */
+      (solver->numeric->Offx == NULL &&
+       solver->numeric->Offp[solver->n] != 0) ||
       solver->numeric->Udiag == NULL || solver->numeric->Lip == NULL ||
       solver->numeric->Llen == NULL || solver->numeric->Uip == NULL ||
       solver->numeric->Ulen == NULL || solver->numeric->LUbx == NULL ||
       solver->numeric->Xwork == NULL || solver->refactor_col_ptr == NULL ||
-      solver->refactor_block_start == NULL ||
+      kls_lean_block_start(solver) == NULL ||
       solver->refactor_row_idx32 == NULL ||
       (solver->refactor_direct_user_values_active
          ? solver->refactor_input_user_pos32
@@ -6249,7 +6267,7 @@ static int kls_compact_btf_map32_refactor(kls_solver *solver,
   const UF_long *restrict r = symbolic->R;
   const UF_long *restrict q = symbolic->Q;
   const UF_long *restrict map_col_ptr = solver->refactor_col_ptr;
-  const UF_long *restrict map_block_start = solver->refactor_block_start;
+  const UF_long *restrict map_block_start = kls_lean_block_start(solver);
   const int32_t *restrict map_row = solver->refactor_row_idx32;
   const int direct_user_values = solver->refactor_direct_user_values_active;
   const int32_t *restrict map_input = direct_user_values
@@ -14028,7 +14046,7 @@ static int private_solve_body(kls_solver *solver,
      contract or transformed/packed/observed owner is bypassed. */
   if(solver->n<=4096 && solver->orientation==KLS_ORIENTATION_TRANSPOSE &&
      !solver->in_solve_refinement && !solver->certified_unscaled_l2_contract &&
-     !transpose && nrhs==1 && solver->symbolic->nblocks>1 && ldb==(int64_t)solver->n && ldx==(int64_t)solver->n &&
+     !transpose && nrhs==1 && (solver->symbolic->nblocks>1 || solver->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) && ldb==(int64_t)solver->n && ldx==(int64_t)solver->n &&
      kls_small_btf_cache_capable(solver) && kls_small_btf_cache_ready(solver)) {
     int compact_solved;
     if(solver->small_btf_fused_ready && b==solver->small_btf_fused_rhs &&
