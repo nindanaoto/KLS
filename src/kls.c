@@ -1160,6 +1160,11 @@ struct kls_solver {
   int fast_lane_streak;     /* consecutive full calls on the replayable route */
   int fast_lane_route;      /* route marks collected by the current full call */
   unsigned fast_lane_budget;/* replays left before a full revalidating call */
+  /* Settled separate solves (see kls_solve_lane_call). */
+  int solve_lane_armed;     /* the next separate solve may replay */
+  int solve_lane_streak;    /* consecutive full solves on the compact walk */
+  int solve_lane_route;     /* the current full solve took the compact walk */
+  unsigned solve_lane_budget;/* replays left before a full solve */
   /* Saved RHS and candidate answer of the outermost one-RHS public call.  The
      solver keeps the storage for its lifetime so a call of any size does not
      allocate; a nested public call finds it busy and allocates its own. */
@@ -7774,6 +7779,7 @@ static void free_pivot_nudges(kls_solver *solver) {
 
 static void free_numeric(kls_solver *solver) {
   solver->fast_lane_armed = solver->fast_lane_streak = 0;
+  solver->solve_lane_armed = solver->solve_lane_streak = 0;
   kls_observed_parallel_invalidate(solver);
   atomic_store_explicit(&solver->compact_btf_policy,0,memory_order_relaxed);
   memset(&solver->transpose_cycle, 0, sizeof(solver->transpose_cycle));
@@ -7820,6 +7826,7 @@ static void free_numeric(kls_solver *solver) {
    be dropped, or later refactorizations read freed or mismatched LU data. */
 static void kls_invalidate_i32_solve(kls_solver *solver) {
   solver->fast_lane_armed = solver->fast_lane_streak = 0;
+  solver->solve_lane_armed = solver->solve_lane_streak = 0;
   kls_free_forest_map(solver);
   kls_observed_parallel_invalidate(solver);
   atomic_store_explicit(&solver->compact_btf_policy,0,memory_order_relaxed);
@@ -7877,6 +7884,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
 
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->fast_lane_armed = solver->fast_lane_streak = 0;
+  solver->solve_lane_armed = solver->solve_lane_streak = 0;
   /* a replacement is a new pivot sequence: its contract accuracy is
      unknown until the next classification, and any captured refine
      values describe the DEAD numeric's input — drop them so no later
@@ -8192,6 +8200,7 @@ static void clear_matrix(kls_solver *solver) {
   KLS_FREE_AND_NULL(solver->fused_refactor_solve_work);
   KLS_FREE_AND_NULL(solver->small_btf_fused_work);
   solver->fast_lane_armed = solver->fast_lane_streak = 0;
+  solver->solve_lane_armed = solver->solve_lane_streak = 0;
   solver->small_btf_fused_n = 0;
   solver->small_btf_fused_ready = 0;
   solver->small_btf_fused_values = NULL;
@@ -8752,6 +8761,7 @@ int kls_factor(kls_solver *solver, const double *values) {
     !solver->private_solve_depth;
   if (solver) {
     solver->fast_lane_armed = solver->fast_lane_streak = 0;
+    solver->solve_lane_armed = solver->solve_lane_streak = 0;
     if (public_epoch) {
       solver->private_original_valid = 0;
       /* Numeric validity ends here; compatible symbolic analysis and the
@@ -10320,8 +10330,10 @@ int kls_refactor(kls_solver *solver, const double *values) {
   const int public_epoch = solver && !solver->private_numeric_depth &&
     !solver->private_solve_depth;
   if (solver) {
-    if (!solver->private_caller_depth)
+    if (!solver->private_caller_depth) {
       solver->fast_lane_armed = solver->fast_lane_streak = 0;
+      solver->solve_lane_armed = solver->solve_lane_streak = 0;
+    }
     if (public_epoch) {
       solver->private_original_valid = 0;
       /* Numeric validity ends here; compatible symbolic analysis and the
@@ -13844,6 +13856,7 @@ static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
       solver->fast_lane_armed = 0;
       solver->fast_lane_streak = KLS_FAST_LANE_STREAK - 1;
     }
+    solver->solve_lane_route = 0;
     frame = private_caller_frame_acquire(solver,nrhs);
     int status = private_caller_rhs_storage(solver,nrhs,b,ldb,x,ldx,&saved,frame);
     if (status != KLS_OK) { if(frame) solver->caller_frame_busy=0;return status; }
@@ -13879,6 +13892,18 @@ static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
                candidate+(size_t)k*solver->n,(size_t)solver->n*sizeof(double));
     if (frame) solver->caller_frame_busy=0; else free(candidate);
     --solver->private_caller_depth;
+    if (status == KLS_OK && solver->solve_lane_route && frame && !transpose &&
+        nrhs == 1 && !solver->private_caller_depth &&
+        solver->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED) {
+      if (solver->solve_lane_streak < KLS_FAST_LANE_STREAK)
+        ++solver->solve_lane_streak;
+      if (solver->solve_lane_streak >= KLS_FAST_LANE_STREAK) {
+        solver->solve_lane_armed = 1;
+        solver->solve_lane_budget = KLS_FAST_LANE_BUDGET;
+      }
+    } else {
+      solver->solve_lane_armed = 0; solver->solve_lane_streak = 0;
+    }
   }
   if (public_call && status != KLS_OK) solver->verified_rhs_valid = 0;
   return status;
@@ -14065,6 +14090,7 @@ static int private_solve_body(kls_solver *solver,
     } else {
       if(b!=x)memmove(x,b,(size_t)solver->n*sizeof(*x));
       compact_solved=kls_compact_btf_transpose_prechecked(solver,x)!=0;
+      solver->solve_lane_route=compact_solved;
     }
     if(compact_solved) {
       const double seconds=kls_now_seconds()-start;
@@ -15593,12 +15619,78 @@ static int private_solve_body(kls_solver *solver,
   return KLS_OK;
 }
 
+/* Settled-solve replay for application-managed small systems.
+
+   A caller whose matrix did not change asks for a solve only, and for a
+   system of a few rows the public solve's frame, bookkeeping and clock
+   reads cost more than the two triangular sweeps. Once
+   KLS_FAST_LANE_STREAK consecutive full solves have all been answered by
+   the compact walk, the next ones run that walk directly on the current
+   factors. A replay makes the same per-solve resets and leaves the
+   combined-call replay in the state a full solve leaves it; it does not
+   advance timing statistics or audits, and every KLS_FAST_LANE_BUDGET
+   replays one full solve does and re-arms only if it takes the same walk.
+   Anything irregular declines before the answer is published and the full
+   solve handles the same arguments. Returns 1 when it produced the answer. */
+static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
+  if(!s->solve_lane_budget) {
+    s->solve_lane_armed=0;s->solve_lane_streak=KLS_FAST_LANE_STREAK-1;
+    return 0;
+  }
+  --s->solve_lane_budget;
+  const size_t n=(size_t)s->n;
+  if(!b || !x || !s->numeric || !s->symbolic || !s->private_original_valid ||
+     s->private_caller_depth || s->private_numeric_depth ||
+     s->private_solve_depth || s->caller_frame_busy ||
+     s->in_solve_refinement || s->certified_unscaled_l2_contract ||
+     s->small_btf_fused_ready || s->caller_frame_n!=n ||
+     s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED ||
+     s->orientation!=KLS_ORIENTATION_TRANSPOSE ||
+     !kls_small_btf_cache_capable(s) || !kls_small_btf_cache_ready(s) ||
+     !private_all_finite(b,n))
+    goto decline;
+  {
+    double *work=s->caller_frame;
+    s->caller_frame_busy=1;
+    memcpy(work,b,n*sizeof(double));
+    s->common.status=TRILINOS_KLU_OK;
+    const int ok=kls_compact_btf_transpose_prechecked(s,work)!=0 &&
+      s->common.status>=0 && private_all_finite(work,n);
+    s->caller_frame_busy=0;
+    if(!ok) goto decline;
+    /* What a full public solve leaves behind. */
+    s->private_cold_deadline=0;
+    if(s->solve_contract_probe==1 || s->solve_contract_probe==3)
+      s->solve_contract_probe=0;
+    if(s->low_rcond_solve_contract_state==1)
+      s->low_rcond_solve_contract_state=0;
+    s->solve_contract_verified=0;
+    if(s->fast_lane_armed) {
+      s->fast_lane_armed=0;s->fast_lane_streak=KLS_FAST_LANE_STREAK-1;
+    }
+    memcpy(x,work,n*sizeof(double));
+  }
+#ifdef KLS_SOLVE_LANE_TEST_EVENT
+  KLS_SOLVE_LANE_TEST_EVENT();
+#endif
+  return 1;
+decline:
+  s->solve_lane_armed=0;s->solve_lane_streak=0;
+  return 0;
+}
+
 int kls_solve(kls_solver *solver,
               int64_t nrhs,
               const double *b,
               int64_t ldb,
               double *x,
               int64_t ldx) {
+  /* The solve nested in a combined call is not a separate solve. */
+  if (solver != NULL && solver->solve_lane_armed && nrhs == 1 &&
+      !solver->private_caller_depth && !solver->private_solve_depth &&
+      (!ldb || ldb == (int64_t)solver->n) &&
+      (!ldx || ldx == (int64_t)solver->n) &&
+      kls_solve_lane_call(solver, b, x)) return KLS_OK;
   if (solver != NULL && nrhs != 1 && solver->refactor_l_packed_valid) {
     kls_sync_authoritative_packed_l_values(solver);
     kls_sync_authoritative_packed_u_values(solver);
