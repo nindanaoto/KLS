@@ -2,8 +2,9 @@
    return what the full solve returns, replay only for an application-managed
    caller on the compact walk, publish nothing on an irregular right-hand
    side, and keep taking a full solve at the budget. */
-static int lane_events;
+static int lane_events,combined_events;
 #define KLS_SOLVE_LANE_TEST_EVENT() (++lane_events)
+#define KLS_FAST_LANE_TEST_EVENT() (++combined_events)
 #include "../src/kls.c"
 #undef NDEBUG
 #include <assert.h>
@@ -94,6 +95,26 @@ int main(void) {
     b[n/2]=1;
     while(!lane->solve_lane_armed)assert(kls_solve(lane,1,b,0,x,0)==KLS_OK);
     assert(kls_refactor(lane,a)==KLS_OK && !lane->solve_lane_armed);
+    /* One new matrix followed by a few solves, repeated: both replays stay
+       in use, and every answer matches separate full calls. */
+    lane_events=combined_events=0;
+    for(int k=0;k<400;++k) {
+      for(int p=0;p<nz;++p)a[p]*=1+1e-3*((p+k)%5-2);
+      for(int i=0;i<n;++i)b[i]=1+(i+k)%7;
+      assert(kls_refactor_solve(lane,a,1,b,0,x,0)==KLS_OK);
+      assert(kls_refactor(full,a)==KLS_OK && kls_solve(full,1,b,0,y,0)==KLS_OK);
+      double scale=0;
+      for(int i=0;i<n;++i)if(fabs(y[i])>scale)scale=fabs(y[i]);
+      for(int i=0;i<n;++i)assert(fabs(x[i]-y[i])<=1e-12*scale);
+      for(int j=0;j<4;++j) {
+        for(int i=0;i<n;++i)b[i]=2+(i+k+j)%5;
+        assert(kls_solve(lane,1,b,0,x,0)==KLS_OK);
+        assert(kls_solve(full,1,b,0,y,0)==KLS_OK);
+        for(int i=0;i<n;++i)assert(fabs(x[i]-y[i])<=1e-12*scale+1e-300);
+        assert(residual(n,ptr,idx,a,b,x)<=1e-12);
+      }
+    }
+    assert(lane_events>1200 && combined_events>300);
     kls_destroy(lane);kls_destroy(full);kls_destroy(certified);
     free(ptr);free(idx);free(a);free(b);free(x);free(y);
   }

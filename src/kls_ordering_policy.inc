@@ -10448,7 +10448,12 @@ static int kls_initial_low_work_btf_public_unscaled_candidate(
       solver->orientation == KLS_ORIENTATION_TRANSPOSE)) &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
-    solver->symbolic->nblocks > 1u && solver->n > 0u &&
+    /* One block takes the same compact route for an application-managed
+       caller (see kls_small_btf_cache_capable). */
+    (solver->symbolic->nblocks > 1u ||
+     (solver->symbolic->nblocks == 1u &&
+      solver->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED)) &&
+    solver->n > 0u &&
     solver->n <= UINT32_C(0x1000) &&
     solver->nnz > 0u && solver->nnz <= (UF_long)UINT16_MAX &&
     solver->symbolic->structural_rank == solver->n &&

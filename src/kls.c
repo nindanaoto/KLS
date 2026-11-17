@@ -10499,7 +10499,10 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
     solver->direct_klu_choice == 2 ||
     (solver->direct_klu_choice == 0 &&
      kls_low_work_btf_public_klu_capable(solver) &&
-     solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FIRST &&
+     /* A later full factorization by the same plain KLU leaves the same
+        kind of factor as the first one. */
+     (solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FIRST ||
+      solver->stats.last_factor_path == KLS_FACTOR_PATH_KLU_FALLBACK) &&
      kls_direct_klu_public_frame_capable(solver));
   const int settled_direct_klu =
     solver->direct_klu_choice == 2 ||
@@ -15626,8 +15629,10 @@ static int private_solve_body(kls_solver *solver,
    reads cost more than the two triangular sweeps. Once
    KLS_FAST_LANE_STREAK consecutive full solves have all been answered by
    the compact walk, the next ones run that walk directly on the current
-   factors. A replay makes the same per-solve resets and leaves the
-   combined-call replay in the state a full solve leaves it; it does not
+   factors. A replay makes the same per-solve resets. It reads the factors
+   and writes only its own frame, so it leaves the combined-call replay
+   armed: a caller that alternates one new matrix with a few solves keeps
+   both (a full solve still switches that one off). It does not
    advance timing statistics or audits, and every KLS_FAST_LANE_BUDGET
    replays one full solve does and re-arms only if it takes the same walk.
    Anything irregular declines before the answer is published and the full
@@ -15665,9 +15670,6 @@ static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
     if(s->low_rcond_solve_contract_state==1)
       s->low_rcond_solve_contract_state=0;
     s->solve_contract_verified=0;
-    if(s->fast_lane_armed) {
-      s->fast_lane_armed=0;s->fast_lane_streak=KLS_FAST_LANE_STREAK-1;
-    }
     memcpy(x,work,n*sizeof(double));
   }
 #ifdef KLS_SOLVE_LANE_TEST_EVENT
