@@ -4846,6 +4846,25 @@ static KLS_ALWAYS_INLINE void kls_egraph_refactor_pool_run_worker(
              (size_t)(end - begin) * sizeof(*shared->refine_copy_output));
     }
   }
+  if (shared->snapshot_copy_input != NULL &&
+      shared->snapshot_copy_output != NULL) {
+    const UF_long begin =
+      (shared->snapshot_copy_nnz * (UF_long)worker->tid) /
+      (UF_long)shared->thread_count;
+    const UF_long end =
+      (shared->snapshot_copy_nnz * (UF_long)(worker->tid + 1)) /
+      (UF_long)shared->thread_count;
+    if (end > begin) {
+      memcpy(shared->snapshot_copy_output + begin,
+             shared->snapshot_copy_input + begin,
+             (size_t)(end - begin) * sizeof(*shared->snapshot_copy_output));
+      if (!private_all_finite(shared->snapshot_copy_input + begin,
+                              (size_t)(end - begin))) {
+        atomic_store_explicit(&shared->snapshot_copy_nonfinite, 1,
+                              memory_order_relaxed);
+      }
+    }
+  }
   kls_dense_help_self = NULL;
 }
 
@@ -7393,6 +7412,7 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   const int parallel_refine_copy =
     !solver->parallel_refine_values_copied &&
     solver->solve_refine_values != NULL &&
+    kls_solve_refine_values_read(solver) &&
     solver->solve_refine_values != numeric_values &&
     solver->nnz >= (UF_long)(16384 * thread_count);
   shared->refine_copy_input =
@@ -7400,6 +7420,17 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->refine_copy_output =
     parallel_refine_copy ? solver->solve_refine_values : NULL;
   shared->refine_copy_nnz = parallel_refine_copy ? solver->nnz : 0u;
+  const int parallel_snapshot_copy =
+    solver->caller_snapshot_source != NULL &&
+    !solver->caller_snapshot_copied && solver->private_original != NULL &&
+    solver->private_original->values != NULL;
+  shared->snapshot_copy_input =
+    parallel_snapshot_copy ? solver->caller_snapshot_source : NULL;
+  shared->snapshot_copy_output =
+    parallel_snapshot_copy ? solver->private_original->values : NULL;
+  shared->snapshot_copy_nnz = parallel_snapshot_copy ? solver->nnz : 0u;
+  atomic_store_explicit(&shared->snapshot_copy_nonfinite, 0,
+                        memory_order_relaxed);
 
   if (kls_authoritative_packed_lu_enabled(solver) &&
       kls_ensure_authoritative_packed_l_values(solver) &&
@@ -7468,6 +7499,15 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->refine_copy_input = NULL;
   shared->refine_copy_output = NULL;
   shared->refine_copy_nnz = 0u;
+  if (!shared->invalid && !shared->pivot_rejected && !shared->singular &&
+      parallel_snapshot_copy) {
+    solver->caller_snapshot_copied = 1;
+    solver->caller_snapshot_nonfinite = atomic_load_explicit(
+      &shared->snapshot_copy_nonfinite, memory_order_relaxed);
+  }
+  shared->snapshot_copy_input = NULL;
+  shared->snapshot_copy_output = NULL;
+  shared->snapshot_copy_nnz = 0u;
   if (!shared->invalid && !shared->pivot_rejected && !shared->singular &&
       shared->udiag_recip != NULL) {
     /* Every BTF column published its reciprocal alongside Udiag while the

@@ -725,6 +725,12 @@ struct kls_solver {
   double verified_rhs_norm2;
   int verified_rhs_valid;
   int parallel_refine_values_copied;
+  /* Caller-frame values of the public numeric update in progress, and
+     whether an active numeric crew already copied them into the retained
+     caller-frame snapshot (checking finiteness on the way). */
+  const double *caller_snapshot_source;
+  int caller_snapshot_copied;
+  int caller_snapshot_nonfinite;
   int compact_amf_two_block_exact_recip_fresh;
   uint16_t *solve_refine_csc_ptr16;
   uint16_t *solve_refine_csc_row16;
@@ -1656,6 +1662,13 @@ typedef struct kls_egraph_refactor_shared {
   const double *refine_copy_input;
   double *refine_copy_output;
   UF_long refine_copy_nnz;
+  /* The caller-frame snapshot every public update retains is the same kind
+     of contiguous copy; each worker also reports whether its slice was
+     finite, which an application-managed update must establish. */
+  const double *snapshot_copy_input;
+  double *snapshot_copy_output;
+  UF_long snapshot_copy_nnz;
+  _Atomic int snapshot_copy_nonfinite;
 } kls_egraph_refactor_shared;
 
 static KLS_ALWAYS_INLINE void kls_egraph_store_udiag(
@@ -8144,11 +8157,29 @@ static int private_all_finite(const double *v,size_t count) {
   return !bad;
 }
 
+/* The per-refactor copy in solve_refine_values exists for one reader: the
+   in-solve residual check, which only the strict right-hand-side policy
+   runs.  The componentwise and application-managed policies certify (or
+   leave to the caller) against the caller-frame snapshot instead, so for
+   them refreshing this copy on every numeric update is a full pass over the
+   matrix values that nothing reads.  The buffer itself stays allocated:
+   several route predicates test only that it exists. */
+static inline int kls_solve_refine_values_read(const kls_solver *s) {
+  return s->accuracy_policy == KLS_ACCURACY_STRICT_RHS_L2;
+}
+
 static int private_original_input_values(const kls_solver *s,
     const double *values, private_original_operator *a) {
   if (!s || !values || !private_original_operator_input_order(a) ||
       !a->p || !a->rows || !a->n || a->n != (size_t)s->n ||
       a->nnz > SIZE_MAX / sizeof(double)) return KLS_ERR_INVALID_ARGUMENT;
+  if (s->caller_snapshot_copied && s->caller_snapshot_source == values &&
+      a->values && a->nnz == (size_t)s->nnz) {
+    /* The numeric crew of this update already wrote the retained array from
+       these values and classified every slice. */
+    return s->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED &&
+      s->caller_snapshot_nonfinite ? KLS_ERR_INVALID_ARGUMENT : KLS_OK;
+  }
   if (s->accuracy_policy == KLS_ACCURACY_APPLICATION_MANAGED &&
       !private_all_finite(values, a->nnz)) return KLS_ERR_INVALID_ARGUMENT;
   /* The public numeric call withdrew the previous snapshot before it started
@@ -10354,6 +10385,18 @@ int kls_refactor(kls_solver *solver, const double *values) {
   kls_forest_consider_unscaled_update(solver,values);
   const double fallback_start=public_epoch && solver->small_btf_fallback.symbolic
     ?kls_now_seconds():0.0;
+  if (solver) {
+    solver->caller_snapshot_copied = 0;
+    solver->caller_snapshot_nonfinite = 0;
+    /* Only a public update republishes the snapshot, and only an
+       input-order snapshot is a plain copy of the caller's array. */
+    solver->caller_snapshot_source =
+      public_epoch && values && solver->private_original &&
+      private_original_operator_input_order(solver->private_original) &&
+      solver->private_original->values &&
+      solver->private_original->values != values &&
+      solver->private_original->nnz == (size_t)solver->nnz ? values : NULL;
+  }
   int status=private_refactor_body(solver,values);
   if(public_epoch && values && kls_small_btf_numeric_failure(status) &&
      kls_small_btf_restore(solver)) {
@@ -10362,7 +10405,9 @@ int kls_refactor(kls_solver *solver, const double *values) {
     solver->stats.refactor_seconds=kls_now_seconds()-fallback_start;
     kls_set_last_refactor_path(solver,KLS_REFACTOR_PATH_KLU);
   }
-  return private_numeric_snapshot_finish(solver, values, status, public_epoch);
+  status = private_numeric_snapshot_finish(solver, values, status, public_epoch);
+  if (solver) solver->caller_snapshot_source = NULL;
+  return status;
 }
 static int private_refactor_body(kls_solver *solver, const double *values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL || values == NULL) {
@@ -10606,7 +10651,8 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
       }
       if (direct_compact_transpose && solver->solve_refine_values == NULL)
         return KLS_ERR_OUT_OF_MEMORY;
-      if (solver->solve_refine_values != NULL) {
+      if (solver->solve_refine_values != NULL &&
+          kls_solve_refine_values_read(solver)) {
         memcpy(solver->solve_refine_values, values,
                (size_t)solver->nnz * sizeof(*values));
       }
@@ -12416,7 +12462,8 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
           (size_t)solver->nnz * sizeof(*solver->solve_refine_values));
       }
       if (solver->solve_refine_values != NULL) {
-        if (!solver->parallel_refine_values_copied) {
+        if (!solver->parallel_refine_values_copied &&
+            kls_solve_refine_values_read(solver)) {
           memcpy(solver->solve_refine_values, numeric_values,
                  (size_t)solver->nnz * sizeof(*numeric_values));
         }
@@ -16052,7 +16099,8 @@ static int kls_fast_lane_call(kls_solver *s,const double *values,
   s->private_cold_deadline=0;
   /* The state a full call leaves behind for this route. */
   if(values!=a->values) memcpy(a->values,values,nnz*sizeof(double));
-  if(s->solve_refine_values && s->solve_refine_values!=values)
+  if(s->solve_refine_values && s->solve_refine_values!=values &&
+     kls_solve_refine_values_read(s))
     memcpy(s->solve_refine_values,values,nnz*sizeof(double));
   s->refactor_input_snapshot_valid=0;
   s->solve_contract_verified=0;

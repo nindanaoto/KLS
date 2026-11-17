@@ -174,8 +174,75 @@ static void funding(void) {
   g.choice=2;kls_observed_parallel_fund(&g,1,100.0);assert(g.total==500.0);
 }
 
+/* A running numeric crew writes the caller-frame snapshot and classifies the
+   values while it refactors; the retained copy must be the caller's values,
+   an irregular value must still fail an application-managed update, and a
+   serial update must keep publishing the snapshot itself. */
+static void crew_snapshot(int app) {
+  enum {N=256,NZ=3*N};int64_t p[N+1],rows[NZ];double a[NZ];
+  double truth[N],rhs[N],answer[N];int nz=0;
+  for(int j=0;j<N;++j) {
+    p[j]=nz;
+    for(int i=0;i<N;++i) if(i==j || (i&~1)==(j&~1)) {
+      rows[nz]=i;a[nz++]=i==j?4:((i+2*j)%3+1)*0.015625;
+    }
+    truth[j]=1+(j%7)*0.0625;
+  }
+  p[N]=nz;
+  kls_options o;kls_default_options(&o);o.threads=1;o.use_btf=0;
+  o.scale=0;o.static_pivoting=0;o.ordering=KLS_ORDERING_NATURAL;
+  o.orientation=KLS_ORIENTATION_NORMAL;
+  kls_solver *s=NULL;assert(kls_create(&s)==KLS_OK);
+  if(app)assert(kls_set_accuracy_policy(s,KLS_ACCURACY_APPLICATION_MANAGED)==KLS_OK);
+  assert(kls_analyze_csc(s,KLS_INDEX_INT64,N,p,rows,0,&o)==KLS_OK);
+  assert(kls_factor(s,a)==KLS_OK);
+  s->options.threads=8;s->tuning.egraph_min_size=0;
+  s->tuning.egraph_min_flops_per_thread=0;
+  s->lean_choice=-1;s->lean_probe_arm=0;s->solve_contract_probe=2;
+  s->factor_preps_deferred=0;s->rowmatch_deferred=0;
+  s->unchanged_refactor_state=-1;
+  s->observed_parallel.choice=2; /* the retained-engine state */
+  for(int round=0;round<4;++round) {
+    a[0]+=0.125;a[nz-1]+=0.0625;
+    for(int i=0;i<N;++i) rhs[i]=0;
+    for(int j=0;j<N;++j) for(int k=p[j];k<p[j+1];++k) rhs[rows[k]]+=a[k]*truth[j];
+    assert(kls_refactor(s,a)==KLS_OK);
+    assert(s->stats.last_refactor_path==KLS_REFACTOR_PATH_EGRAPH);
+    assert(s->caller_snapshot_copied && !s->caller_snapshot_nonfinite);
+    assert(!s->caller_snapshot_source && s->private_original_valid);
+    assert(s->private_original->values!=a &&
+      !memcmp(s->private_original->values,a,(size_t)nz*sizeof *a));
+    assert(kls_solve(s,1,rhs,0,answer,0)==KLS_OK);
+    for(int j=0;j<N;++j) assert(fabs(answer[j]-truth[j])<1e-11);
+  }
+  /* An irregular off-diagonal value in the last worker's slice. */
+  const double saved=a[nz-2];a[nz-2]=NAN;
+  assert(rows[nz-2]!=N-1);
+  if(app) {
+    /* Only this policy establishes finiteness at the update itself. */
+    assert(kls_refactor(s,a)==KLS_ERR_INVALID_ARGUMENT);
+    assert(s->caller_snapshot_copied && s->caller_snapshot_nonfinite);
+    assert(!s->private_original_valid);
+  }
+  a[nz-2]=saved;
+  assert(kls_refactor(s,a)==KLS_OK && s->private_original_valid);
+  assert(!memcmp(s->private_original->values,a,(size_t)nz*sizeof *a));
+  assert(kls_solve(s,1,rhs,0,answer,0)==KLS_OK);
+  for(int j=0;j<N;++j) assert(fabs(answer[j]-truth[j])<1e-11);
+  /* Without a crew the public call still owns the copy. */
+  s->options.threads=1;s->observed_parallel.choice=-1;a[0]+=0.125;
+  for(int i=0;i<N;++i) rhs[i]=0;
+  for(int j=0;j<N;++j) for(int k=p[j];k<p[j+1];++k) rhs[rows[k]]+=a[k]*truth[j];
+  assert(kls_refactor(s,a)==KLS_OK && !s->caller_snapshot_copied);
+  assert(!memcmp(s->private_original->values,a,(size_t)nz*sizeof *a));
+  assert(kls_solve(s,1,rhs,0,answer,0)==KLS_OK);
+  for(int j=0;j<N;++j) assert(fabs(answer[j]-truth[j])<1e-11);
+  kls_destroy(s);
+}
+
 int main(void) {
   funding();
+  crew_snapshot(0);crew_snapshot(1);
   caller_thread=pthread_self();atomic_init(&expire_worker,0);
   for(int pipeline=0;pipeline<2;++pipeline) for(int csr=0;csr<2;++csr)
     exercise(pipeline,csr);

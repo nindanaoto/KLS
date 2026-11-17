@@ -5053,6 +5053,7 @@ static int kls_lean_parallel_refactor_run(kls_solver *solver,
   const int parallel_refine_copy =
     !solver->parallel_refine_values_copied &&
     solver->solve_refine_values != NULL &&
+    kls_solve_refine_values_read(solver) &&
     solver->solve_refine_values != numeric_values &&
     (solver->nnz >= (UF_long)(16384 * thread_count) ||
      compact_parallel_refine_copy);
