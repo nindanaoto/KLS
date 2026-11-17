@@ -1161,9 +1161,10 @@ struct kls_solver {
   int fast_lane_route;      /* route marks collected by the current full call */
   unsigned fast_lane_budget;/* replays left before a full revalidating call */
   /* Settled separate solves (see kls_solve_lane_call). */
-  int solve_lane_armed;     /* the next separate solve may replay */
+  int solve_lane_armed;     /* the next separate solve may replay: 1 the
+                               compact walk, 2 the all-singleton walk */
   int solve_lane_streak;    /* consecutive full solves on the compact walk */
-  int solve_lane_route;     /* the current full solve took the compact walk */
+  int solve_lane_route;     /* walk the current full solve took (0 neither) */
   unsigned solve_lane_budget;/* replays left before a full solve */
   /* Saved RHS and candidate answer of the outermost one-RHS public call.  The
      solver keeps the storage for its lifetime so a call of any size does not
@@ -1962,9 +1963,10 @@ static UF_long kls_tiny_singleton_solve_one_rhs(
   return 1u;
 }
 
-static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
-                                               int64_t nrhs) {
-  return solver != NULL && nrhs == 1 && !solver->in_solve_refinement &&
+/* The solver state a raw singleton walk needs, apart from who certifies
+   the answer. */
+static int kls_tiny_singleton_state_capable(const kls_solver *solver) {
+  return !solver->in_solve_refinement &&
     !solver->certified_unscaled_l2_contract &&
     solver->row_perm == NULL && solver->user_col_perm == NULL &&
     solver->row_scale == NULL && solver->col_scale == NULL &&
@@ -1975,7 +1977,13 @@ static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
     !solver->promoted_tolerance_l2_recovery_required &&
     !solver->solve_recovery_active &&
     solver->pivot_nudge_count == 0u &&
-    solver->common.kls_perturb_count == 0u &&
+    solver->common.kls_perturb_count == 0u;
+}
+
+static int kls_tiny_singleton_runtime_capable(const kls_solver *solver,
+                                               int64_t nrhs) {
+  return solver != NULL && nrhs == 1 &&
+    kls_tiny_singleton_state_capable(solver) &&
     /* Raw tiny solves are safe under the current call's final certificate;
        they must not require reusing a verdict from an earlier RHS. */
     (solver->solve_contract_probe == 1 ||
@@ -13901,7 +13909,7 @@ static int solve_impl(kls_solver *solver, int transpose, int64_t nrhs,
       if (solver->solve_lane_streak < KLS_FAST_LANE_STREAK)
         ++solver->solve_lane_streak;
       if (solver->solve_lane_streak >= KLS_FAST_LANE_STREAK) {
-        solver->solve_lane_armed = 1;
+        solver->solve_lane_armed = solver->solve_lane_route;
         solver->solve_lane_budget = KLS_FAST_LANE_BUDGET;
       }
     } else {
@@ -14049,6 +14057,7 @@ static int private_solve_body(kls_solver *solver,
     solver->common.status = TRILINOS_KLU_OK;
     const UF_long direct_ok = kls_tiny_singleton_solve_one_rhs(
       solver, kernel_transpose, b, x);
+    solver->solve_lane_route = 2;
     const double direct_seconds = unmeasured_tiny_singleton
       ? 0.0 : kls_now_seconds() - start;
     kls_tiny_singleton_finish_solve(solver, direct_seconds);
@@ -15628,8 +15637,8 @@ static int private_solve_body(kls_solver *solver,
    system of a few rows the public solve's frame, bookkeeping and clock
    reads cost more than the two triangular sweeps. Once
    KLS_FAST_LANE_STREAK consecutive full solves have all been answered by
-   the compact walk, the next ones run that walk directly on the current
-   factors. A replay makes the same per-solve resets. It reads the factors
+   the compact walk, or by the walk for factors made only of one-row
+   blocks, the next ones run that walk directly on the current factors. A replay makes the same per-solve resets. It reads the factors
    and writes only its own frame, so it leaves the combined-call replay
    armed: a caller that alternates one new matrix with a few solves keeps
    both (a full solve still switches that one off). It does not
@@ -15650,17 +15659,32 @@ static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
      s->in_solve_refinement || s->certified_unscaled_l2_contract ||
      s->small_btf_fused_ready || s->caller_frame_n!=n ||
      s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED ||
-     s->orientation!=KLS_ORIENTATION_TRANSPOSE ||
-     !kls_small_btf_cache_capable(s) || !kls_small_btf_cache_ready(s) ||
      !private_all_finite(b,n))
+    goto decline;
+  const int singleton=s->solve_lane_armed==2;
+  if(singleton
+     ? s->tiny_singleton_solve_state<=0 ||
+       !kls_tiny_singleton_state_capable(s) ||
+       ((!s->i32solve_udiag_recip_fresh ||
+         (s->numeric->Rs && !s->tiny_singleton_rs_recip_fresh)) &&
+        !kls_tiny_singleton_refresh_reciprocals(s)) ||
+       s->refactor_l_packed_valid || s->refactor_u_packed_valid
+     : s->orientation!=KLS_ORIENTATION_TRANSPOSE ||
+       !kls_small_btf_cache_capable(s) || !kls_small_btf_cache_ready(s))
     goto decline;
   {
     double *work=s->caller_frame;
     s->caller_frame_busy=1;
-    memcpy(work,b,n*sizeof(double));
     s->common.status=TRILINOS_KLU_OK;
-    const int ok=kls_compact_btf_transpose_prechecked(s,work)!=0 &&
-      s->common.status>=0 && private_all_finite(work,n);
+    int ok;
+    if(singleton) {
+      ok=kls_tiny_singleton_solve_one_rhs(
+        s,s->orientation==KLS_ORIENTATION_TRANSPOSE,b,work)!=0;
+    } else {
+      memcpy(work,b,n*sizeof(double));
+      ok=kls_compact_btf_transpose_prechecked(s,work)!=0;
+    }
+    ok=ok && s->common.status>=0 && private_all_finite(work,n);
     s->caller_frame_busy=0;
     if(!ok) goto decline;
     /* What a full public solve leaves behind. */

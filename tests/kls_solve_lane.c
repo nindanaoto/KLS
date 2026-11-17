@@ -1,6 +1,6 @@
 /* Settled-solve replay: separate solves on an unchanged small system must
    return what the full solve returns, replay only for an application-managed
-   caller on the compact walk, publish nothing on an irregular right-hand
+   caller on the compact or all-singleton walk, publish nothing on an irregular right-hand
    side, and keep taking a full solve at the budget. */
 static int lane_events,combined_events;
 #define KLS_SOLVE_LANE_TEST_EVENT() (++lane_events)
@@ -43,7 +43,8 @@ static double residual(int n,const int *ptr,const int *idx,const double *a,
   return worst/scale;
 }
 int main(void) {
-  static const int shapes[][2]={{1,2},{1,5},{1,12},{3,4},{7,5}};
+  /* The last three are made only of one-row blocks. */
+  static const int shapes[][2]={{1,2},{1,5},{1,12},{3,4},{7,5},{2,1},{3,1},{9,1}};
   for(size_t c=0;c<sizeof shapes/sizeof *shapes;++c) {
     const int n=shapes[c][0]*shapes[c][1];
     int *ptr=malloc((size_t)(n+1)*sizeof *ptr),*idx=malloc((size_t)3*n*sizeof *idx);
