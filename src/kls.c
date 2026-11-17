@@ -691,6 +691,8 @@ struct kls_solver {
   int padded_choice;   /* padded-panel probe: 0 undecided, 1 adopted,
                           -1 declined (panels torn down) */
   int padded_pending;  /* probe refactors remaining (8, alternating) */
+  int padded_probe_path;     /* executor the probe's samples were timed on */
+  int padded_probe_restarts; /* windows voided by an executor change */
   int padded_probe_build;  /* builder force flag for the probe */
   int padded_active;   /* refresh+consume enabled this refactor */
   double padded_probe_min;
@@ -8058,6 +8060,8 @@ static void kls_numeric_replaced_invalidate(kls_solver *solver) {
   solver->lean_reaudit_row_cycle_min = 0.0;
   solver->padded_choice = 0;
   solver->padded_pending = 0;
+  solver->padded_probe_path = 0;
+  solver->padded_probe_restarts = 0;
   solver->padded_probe_build = 0;
   solver->padded_active = 0;
   solver->padded_probe_min = 0.0;
@@ -12270,10 +12274,29 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
   }
   if (solver->padded_pending > 0 && solver->padded_choice == 0) {
     if (ok && solver->common.status >= 0) {
-      double *slot = solver->padded_active ? &solver->padded_probe_min
-                                           : &solver->padded_probe_min_off;
-      if (*slot <= 0.0 || elapsed < *slot) {
-        *slot = elapsed;
+      /* The two arms are compared by their minima, which means something
+         only when every sample ran on the same numeric executor.  A window
+         that straddles an engine change (a parallel consultation's candidate
+         and incumbent passes, or the adoption itself) would compare a padded
+         pass on one engine with an unpadded pass on another.  Void such a
+         window and take it again on the executor now in use; an executor
+         that keeps changing leaves the default unpadded layout. */
+      const int path = (int)solver->stats.last_refactor_path;
+      if (!(solver->padded_probe_min > 0.0) &&
+          !(solver->padded_probe_min_off > 0.0)) {
+        solver->padded_probe_path = path;
+      }
+      if (path != solver->padded_probe_path) {
+        solver->padded_probe_min = 0.0;
+        solver->padded_probe_min_off = 0.0;
+        solver->padded_pending =
+          ++solver->padded_probe_restarts <= 4 ? 8 + 1 : 1;
+      } else {
+        double *slot = solver->padded_active ? &solver->padded_probe_min
+                                             : &solver->padded_probe_min_off;
+        if (*slot <= 0.0 || elapsed < *slot) {
+          *slot = elapsed;
+        }
       }
     }
     if (--solver->padded_pending == 0) {
