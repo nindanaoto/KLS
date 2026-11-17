@@ -127,6 +127,33 @@ int main(void) {
     kls_observed_parallel_observe(&u,1,1,1);
     assert(kls_observed_parallel_start(&u));             /* 10.0 */
   }
+  {
+    /* A cost model that promises a gain widens the allowance to that gain
+       and lets the consultation start on the first full median. */
+    assert(kls_observed_parallel_plausible_gain(1,8,0.075)==0.4);
+    assert(kls_observed_parallel_plausible_gain(1,8,1)==0);    /* dispatch eats it */
+    assert(kls_observed_parallel_plausible_gain(1,1,0.075)==0); /* no crew */
+    assert(kls_observed_parallel_plausible_gain(1,8,0)==0);    /* no model */
+    kls_observed_parallel_state m={.crew=8,.dispatch=0.075};
+    for(int i=0;i<9;++i) {
+      kls_observed_parallel_observe(&m,1,1,1);
+      assert(!kls_observed_parallel_start(&m));          /* 0.4*9 < 4 */
+    }
+    kls_observed_parallel_observe(&m,1,1,1);
+    assert(kls_observed_parallel_start(&m));             /* 0.4*10 == 4 */
+    assert(m.gain==0.4 && m.limit==4 && m.cycle==1);
+    /* Later funding uses the same share. */
+    m.samples=1;kls_observed_parallel_fund(&m,1,5);
+    assert(m.total==15 && m.limit==6);
+    /* A gain below the base allowance changes nothing: 32 cycles, a tenth. */
+    kls_observed_parallel_state q={.crew=8,.dispatch=0.8};
+    for(int i=0;i<39;++i) {
+      kls_observed_parallel_observe(&q,1,1,1);
+      assert(!kls_observed_parallel_start(&q));
+    }
+    kls_observed_parallel_observe(&q,1,1,1);
+    assert(kls_observed_parallel_start(&q) && q.limit==4);
+  }
   g=(kls_observed_parallel_state){0};
   for(int i=0;i<32;++i) kls_observed_parallel_observe(&g,1,1,i==0?10000:1);
   assert(kls_observed_parallel_start(&g) && g.cycle==1);

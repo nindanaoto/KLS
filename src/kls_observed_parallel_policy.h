@@ -12,6 +12,20 @@
  * as a share of every longer run. */
 #define KLS_OBSERVED_PARALLEL_ALLOWANCE 0.10
 
+/* What a crew of `crew` threads could plausibly take off a serial cycle, as
+ * a share of that cycle. An ideal crew leaves cycle/crew; every dispatch
+ * also pays a fixed wake-and-join cost, and real factor dependencies deliver
+ * about half of the ideal. A cycle shorter than its own dispatch cost has
+ * nothing to gain. */
+#define KLS_OBSERVED_PARALLEL_REALIZED_SHARE 0.5
+static double kls_observed_parallel_plausible_gain(double cycle,int crew,
+    double dispatch) {
+  if(!(cycle>0) || !isfinite(cycle) || crew<2 || !(dispatch>0) ||
+      !isfinite(dispatch)) return 0;
+  const double saved=cycle*(1.0-1.0/crew)-dispatch;
+  return saved>0?KLS_OBSERVED_PARALLEL_REALIZED_SHARE*saved/cycle:0;
+}
+
 typedef struct {
   /* choice: 0 collecting, 1 sampling, 2 retained, -1 declined.
    * active: 1 speculative candidate, 2 mandatory incumbent restoration. */
@@ -31,7 +45,24 @@ typedef struct {
   double startup;
   /* Retained-engine calls seen in the current audit window. */
   unsigned audited;
+  /* The caller's cost model for a retained crew: its size and the fixed
+     cost of one dispatch. Zero means no model, and the base allowance. */
+  int crew;
+  double dispatch;
+  /* Share of observed time exploration may spend (see _share below). */
+  double gain;
 } kls_observed_parallel_state;
+
+/* The base allowance bounds what a consultation can cost a run it does not
+ * help, but it also makes a run it would help wait ten times the
+ * consultation's cost on the serial engine first. When the cost model says a
+ * crew could take a larger share than that off every cycle, exploration that
+ * costs no more than that share of the time already observed repays itself
+ * if the run merely lasts as long again, so the larger share is allowed. */
+static double kls_observed_parallel_share(const kls_observed_parallel_state *g) {
+  return g->gain>KLS_OBSERVED_PARALLEL_ALLOWANCE && g->gain<1?g->gain:
+    KLS_OBSERVED_PARALLEL_ALLOWANCE;
+}
 
 /* A later comparison waits until the allowance covers what a comparison has
  * actually cost on this factor (with a quarter of headroom), not only the
@@ -59,14 +90,18 @@ static void kls_observed_parallel_observe(kls_observed_parallel_state *g,
 }
 
 static int kls_observed_parallel_start(kls_observed_parallel_state *g) {
-  if(g->choice || g->cycles<32) return g->choice==1;
+  /* The median needs its eight samples; without a cost model that promises
+     a gain the consultation also waits for a longer record. */
+  if(g->choice || g->cycles<8) return g->choice==1;
   _Alignas(64) double v[8];memcpy(v,g->history,sizeof(v));
   for(int i=1;i<8;++i) {
     double x=v[i];int j=i;
     while(j && v[j-1]>x) {v[j]=v[j-1];--j;}v[j]=x;
   }
-  const double cycle=0.5*v[3]+0.5*v[4],
-    allowance=KLS_OBSERVED_PARALLEL_ALLOWANCE*g->total;
+  const double cycle=0.5*v[3]+0.5*v[4];
+  g->gain=kls_observed_parallel_plausible_gain(cycle,g->crew,g->dispatch);
+  if(g->cycles<32 && !(g->gain>KLS_OBSERVED_PARALLEL_ALLOWANCE)) return 0;
+  const double allowance=kls_observed_parallel_share(g)*g->total;
   /* The first candidate also starts the crew, which costs the same on a
      ten-microsecond cycle as on a ten-millisecond one: the allowance must
      cover it too, so a run too short to repay a crew never starts one. */
@@ -87,7 +122,7 @@ static void kls_observed_parallel_fund(kls_observed_parallel_state *g,
     int successful,double seconds) {
   if(g->choice!=1 || !kls_observed_parallel_priced(g) || !successful ||
       !(seconds>0) || !isfinite(seconds) || !isfinite(g->total+seconds)) return;
-  g->total+=seconds;g->limit=KLS_OBSERVED_PARALLEL_ALLOWANCE*g->total;
+  g->total+=seconds;g->limit=kls_observed_parallel_share(g)*g->total;
 }
 
 static double kls_observed_parallel_preparation_budget(

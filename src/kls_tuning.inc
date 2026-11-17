@@ -105,6 +105,10 @@
    faulting in its data) until one has been measured in this process: about
    half a millisecond for an eight-thread crew. */
 #define KLS_OBSERVED_PARALLEL_STARTUP_SECONDS 5.0e-4
+/* Fixed cost of one dispatch to an awake crew (wake, barriers, join): about
+   twenty microseconds, which is why cycles of a few tens of microseconds
+   gain nothing from one. */
+#define KLS_OBSERVED_PARALLEL_DISPATCH_SECONDS 2.0e-5
 #define KLS_EGRAPH_POOL_SPIN_ITERS 200000u
 /* The caller participates as worker zero. Background workers get only a short
  * grace period between SPICE refactors, avoiding contention in serial phases. */
