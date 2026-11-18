@@ -3865,6 +3865,7 @@ static UF_long kls_parallel_refactor(kls_solver *solver,
      republish the reciprocal mirror from its worker pool; all other paths
      leave the public wrapper to refresh it serially. */
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->solve_pack_state = 0;
   solver->tiny_singleton_rs_recip_fresh = 0;
   solver->parallel_refine_values_copied = 0;
   solver->compact_amf_two_block_exact_recip_fresh = 0;

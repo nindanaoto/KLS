@@ -55,7 +55,7 @@ int main(void) {
     kls_solver *lane=make(n,ptr,idx,a,1),*full=make(n,ptr,idx,a,1);
     kls_solver *certified=make(n,ptr,idx,a,0);
     lane_events=0;
-    int replays=0,full_after_budget=0;
+    int replays=0,full_after_budget=0,packed=0;
     for(int k=0;k<600;++k) {
       for(int i=0;i<n;++i)b[i]=1+(i+k)%7;
       if(k%40==0) {
@@ -79,10 +79,16 @@ int main(void) {
       } else assert(kls_solve(lane,1,b,0,x,0)==KLS_OK);
       if(lane_events!=events) {assert(armed && budget>0);++replays;}
       else if(armed) {assert(!budget);++full_after_budget;}
+      if(lane_events!=events && lane->solve_pack_state==2)++packed;
       for(int i=0;i<n;++i)assert(x[i]==y[i]);   /* the same walk, the same bits */
       assert(residual(n,ptr,idx,a,b,x)<=1e-12);
     }
     assert(replays>400 && full_after_budget>0);
+    /* Repeated solves on unchanged factors of real blocks replay the packed
+       image (the bitwise comparison above covers it); one-row blocks keep
+       their own walk. */
+    if(shapes[c][1]>1)assert(packed>300 && lane->solve_pack);
+    else assert(!packed);
     /* An irregular right-hand side is declined before anything is published
        and switches replay off. */
     while(!lane->solve_lane_armed)assert(kls_solve(lane,1,b,0,x,0)==KLS_OK);
@@ -96,6 +102,7 @@ int main(void) {
     b[n/2]=1;
     while(!lane->solve_lane_armed)assert(kls_solve(lane,1,b,0,x,0)==KLS_OK);
     assert(kls_refactor(lane,a)==KLS_OK && !lane->solve_lane_armed);
+    assert(lane->solve_pack_state==0);  /* new factors, no image */
     /* One new matrix followed by a few solves, repeated: both replays stay
        in use, and every answer matches separate full calls. */
     lane_events=combined_events=0;

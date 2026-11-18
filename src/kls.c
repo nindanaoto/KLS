@@ -1174,6 +1174,13 @@ struct kls_solver {
   int solve_lane_streak;    /* consecutive full solves on the compact walk */
   int solve_lane_route;     /* walk the current full solve took (0 neither) */
   unsigned solve_lane_budget;/* replays left before a full solve */
+  /* One contiguous image of the compact walk's factors for repeated separate
+     solves on unchanged factors (see kls_solve_pack_build): 0 none, 1 one
+     separate solve seen since the factors last changed, 2 current, -1 these
+     factors cannot be packed. Every numeric update returns it to 0. */
+  void *solve_pack;
+  size_t solve_pack_bytes;
+  int solve_pack_state;
   /* Saved RHS and candidate answer of the outermost one-RHS public call.  The
      solver keeps the storage for its lifetime so a call of any size does not
      allocate; a nested public call finds it busy and allocates its own. */
@@ -7892,6 +7899,9 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
   KLS_FREE_AND_NULL(solver->i16solve_ux);
   KLS_FREE_AND_NULL(solver->i32solve_udiag_recip);
   solver->i32solve_udiag_recip_fresh = 0;
+  KLS_FREE_AND_NULL(solver->solve_pack);
+  solver->solve_pack_bytes = 0;
+  solver->solve_pack_state = 0;
   KLS_FREE_AND_NULL(solver->tiny_singleton_rs_recip);
   solver->tiny_singleton_rs_recip_fresh = 0;
   solver->tiny_singleton_solve_state = 0;
@@ -7906,6 +7916,7 @@ static void kls_invalidate_i32_solve(kls_solver *solver) {
 }
 
 static void kls_numeric_replaced_invalidate(kls_solver *solver) {
+  solver->solve_pack_state = 0;
   solver->fast_lane_armed = solver->fast_lane_streak = 0;
   solver->solve_lane_armed = solver->solve_lane_streak = 0;
   /* a replacement is a new pivot sequence: its contract accuracy is
@@ -8865,6 +8876,7 @@ static int private_factor_body(kls_solver *solver, const double *values) {
      the ordinary exact division path. */
   KLS_FREE_AND_NULL(solver->i32solve_udiag_recip);
   solver->i32solve_udiag_recip_fresh = 0;
+  solver->solve_pack_state = 0;
   solver->tiny_singleton_rs_recip_fresh = 0;
   solver->tiny_singleton_solve_state = 0;
   solver->stats.tiny_singleton_solve_eligible = 0;
@@ -10519,6 +10531,7 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
     solver->compact_amf_two_block_exact_recip_fresh = 0;
     solver->parallel_refine_values_copied = 0;
     solver->i32solve_udiag_recip_fresh = 0;
+    solver->solve_pack_state = 0;
     solver->tiny_singleton_rs_recip_fresh = 0;
     kls_clear_fast_reject_stats(solver);
     kls_clear_row_refactor_last_stats(solver);
@@ -10602,6 +10615,7 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
     solver->compact_amf_two_block_exact_recip_fresh = 0;
     solver->parallel_refine_values_copied = 0;
     solver->i32solve_udiag_recip_fresh = 0;
+    solver->solve_pack_state = 0;
     solver->tiny_singleton_rs_recip_fresh = 0;
     /* These large diagnostic families are already zero after the first
        settled vendor update.  Clear them once at the representation handoff,
@@ -15712,6 +15726,127 @@ static int private_solve_body(kls_solver *solver,
   return KLS_OK;
 }
 
+/* Packed image of the compact transpose walk for the settled-solve replay.
+
+   A separate solve of a system of a few rows spends its time fetching the
+   walk's inputs - about fifteen separately allocated index and value arrays -
+   and dividing by each pivot again, not on arithmetic. When the factors have
+   not changed since the previous separate solve, the same walk is laid out
+   once as one contiguous record: the two permutations, then per row its
+   counts and operand positions, and the reciprocal pivot and coefficients
+   in the order the walk consumes them, with the U coefficients already
+   multiplied by the reciprocal exactly as kls_compact_btf_transpose_scaled
+   multiplies them on every solve. Replaying the record performs the same
+   floating-point operations in the same order; where the compiler fuses a
+   multiply with a subtraction differently in the two loops the answers can
+   differ by rounding. A pivot without a finite reciprocal keeps the walk. */
+typedef struct {
+  uint32_t n,ops;
+  uint32_t index_offset,coefficient_offset,work_offset;
+} kls_solve_pack_header;
+
+static void kls_solve_pack_build(kls_solver *s) {
+  s->solve_pack_state=-1;
+  const size_t n=(size_t)s->n;
+  const trilinos_klu_l_numeric *numeric=s->numeric;
+  const double *diagonal=numeric->Udiag,*offx=numeric->Offx;
+  const uint16_t *offp=s->i16solve_offp,*offi=s->i16solve_offi;
+  const uint16_t *up=s->i16solve_uoff,*ui=s->i16solve_u;
+  const uint16_t *lp=s->i16solve_loff,*li=s->i16solve_l;
+  const size_t nblocks=(size_t)s->symbolic->nblocks;
+  size_t terms=0,ops=0;
+  for(size_t block=0;block<nblocks;++block) {
+    const size_t first=s->i16solve_r[block],last=s->i16solve_r[block+1];
+    for(size_t k=first;k<last;++k) {
+      if(!isfinite(1.0/diagonal[k])) return;
+      terms+=(size_t)(offp[k+1]-offp[k])+(size_t)(up[k+1]-up[k]);
+      const size_t lower=(size_t)(lp[k+1]-lp[k]);
+      terms+=lower;
+      ops+=1+(lower!=0);
+    }
+  }
+  /* u16 stream: q[n], pnum[n], then per op {row,count,count} and operands. */
+  const size_t indices=2*n+3*ops+terms;
+  const size_t index_offset=sizeof(kls_solve_pack_header);
+  const size_t coefficient_offset=
+    (index_offset+indices*sizeof(uint16_t)+7u)&~(size_t)7u;
+  const size_t work_offset=coefficient_offset+(ops+terms)*sizeof(double);
+  const size_t bytes=work_offset+n*sizeof(double);
+  if(bytes>s->solve_pack_bytes) {
+    void *pack=realloc(s->solve_pack,bytes);
+    if(!pack) return;
+    s->solve_pack=pack;s->solve_pack_bytes=bytes;
+  }
+  char *base=(char *)s->solve_pack;
+  kls_solve_pack_header *h=(kls_solve_pack_header *)(void *)base;
+  h->n=(uint32_t)n;h->ops=(uint32_t)ops;
+  h->index_offset=(uint32_t)index_offset;
+  h->coefficient_offset=(uint32_t)coefficient_offset;
+  h->work_offset=(uint32_t)work_offset;
+  uint16_t *ix=(uint16_t *)(void *)(base+index_offset);
+  double *cx=(double *)(void *)(base+coefficient_offset);
+  memcpy(ix,s->i16solve_q,n*sizeof(uint16_t));ix+=n;
+  memcpy(ix,s->i16solve_pnum,n*sizeof(uint16_t));ix+=n;
+  for(size_t block=0;block<nblocks;++block) {
+    const size_t first=s->i16solve_r[block],last=s->i16solve_r[block+1];
+    for(size_t k=first;k<last;++k) {
+      const double inverse=1.0/diagonal[k];
+      const double *ux=s->i16solve_ux[k];
+      const uint32_t ob=offp[k],oe=offp[k+1],ub=up[k],ue=up[k+1];
+      *ix++=(uint16_t)k;*ix++=(uint16_t)(oe-ob);*ix++=(uint16_t)(ue-ub);
+      for(uint32_t z=ob;z<oe;++z) { *ix++=offi[z];*cx++=offx[z]; }
+      *cx++=inverse;
+      for(uint32_t z=ub;z<ue;++z) {
+        *ix++=(uint16_t)(first+ui[z]);*cx++=ux[z-ub]*inverse;
+      }
+    }
+    for(size_t k=last;k-->first;) {
+      const uint32_t lb=lp[k],le=lp[k+1];
+      if(lb==le) continue;
+      const double *lx=s->i16solve_lx[k];
+      /* A backward row has no first group and a unit multiplier. */
+      *ix++=(uint16_t)k;*ix++=0;*ix++=(uint16_t)(le-lb);
+      *cx++=1.0;
+      for(uint32_t z=lb;z<le;++z) {
+        *ix++=(uint16_t)(first+li[z]);*cx++=lx[z-lb];
+      }
+    }
+  }
+  s->solve_pack_state=2;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline,hot,aligned(64)))
+#endif
+static int kls_solve_pack_run(kls_solver *s,const double *b,double *x) {
+  if(!kls_small_btf_environment()) return 0;
+  const char *base=(const char *)s->solve_pack;
+  const kls_solve_pack_header *h=(const kls_solve_pack_header *)(const void *)base;
+  const size_t n=h->n;
+  const uint16_t *ix=(const uint16_t *)(const void *)(base+h->index_offset);
+  const double *cx=(const double *)(const void *)(base+h->coefficient_offset);
+  double *work=(double *)(void *)((char *)s->solve_pack+h->work_offset);
+  const uint16_t *q=ix,*pnum=ix+n;
+  ix+=2*n;
+  for(size_t k=0;k<n;++k) work[k]=b[q[k]];
+  for(uint32_t op=h->ops;op;--op) {
+    const size_t row=ix[0];
+    const uint32_t before=ix[1],after=ix[2];
+    ix+=3;
+    double value=work[row];
+    for(uint32_t z=0;z<before;++z) value-=cx[z]*work[ix[z]];
+    cx+=before;ix+=before;
+    value*=*cx++;
+    for(uint32_t z=0;z<after;++z) value-=cx[z]*work[ix[z]];
+    cx+=after;ix+=after;
+    work[row]=value;
+  }
+  if(!private_all_finite(work,n)) return 0;
+  for(size_t k=0;k<n;++k) x[pnum[k]]=work[k];
+  s->common.status=TRILINOS_KLU_OK;
+  return 1;
+}
+
 /* Settled-solve replay for application-managed small systems.
 
    A caller whose matrix did not change asks for a solve only, and for a
@@ -15743,6 +15878,12 @@ static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
      !private_all_finite(b,n))
     goto decline;
   const int singleton=s->solve_lane_armed==2;
+  /* A current image was built from factors that passed the checks below,
+     and every numeric update discards it. */
+  if(!singleton && s->solve_pack_state==2) {
+    if(!kls_solve_pack_run(s,b,x)) goto decline;
+    goto answered;
+  }
   if(singleton
      ? s->tiny_singleton_solve_state<=0 ||
        !kls_tiny_singleton_state_capable(s) ||
@@ -15753,6 +15894,14 @@ static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
      : s->orientation!=KLS_ORIENTATION_TRANSPOSE ||
        !kls_small_btf_cache_capable(s) || !kls_small_btf_cache_ready(s))
     goto decline;
+  if(!singleton) {
+    /* The second separate solve on the same factors pays for the image;
+       a caller that alternates one update with one solve never builds it.
+       (The all-singleton walk is already one sweep over two arrays; packing
+       it measured slower.) */
+    if(s->solve_pack_state==1) kls_solve_pack_build(s);
+    else if(s->solve_pack_state==0) s->solve_pack_state=1;
+  }
   {
     double *work=s->caller_frame;
     s->caller_frame_busy=1;
@@ -15768,15 +15917,16 @@ static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
     ok=ok && s->common.status>=0 && private_all_finite(work,n);
     s->caller_frame_busy=0;
     if(!ok) goto decline;
-    /* What a full public solve leaves behind. */
-    s->private_cold_deadline=0;
-    if(s->solve_contract_probe==1 || s->solve_contract_probe==3)
-      s->solve_contract_probe=0;
-    if(s->low_rcond_solve_contract_state==1)
-      s->low_rcond_solve_contract_state=0;
-    s->solve_contract_verified=0;
     memcpy(x,work,n*sizeof(double));
   }
+answered:
+  /* What a full public solve leaves behind. */
+  s->private_cold_deadline=0;
+  if(s->solve_contract_probe==1 || s->solve_contract_probe==3)
+    s->solve_contract_probe=0;
+  if(s->low_rcond_solve_contract_state==1)
+    s->low_rcond_solve_contract_state=0;
+  s->solve_contract_verified=0;
 #ifdef KLS_SOLVE_LANE_TEST_EVENT
   KLS_SOLVE_LANE_TEST_EVENT();
 #endif
@@ -16142,6 +16292,7 @@ static int kls_fast_lane_call(kls_solver *s,const double *values,
   s->compact_amf_two_block_exact_recip_fresh=0;
   s->parallel_refine_values_copied=0;
   s->i32solve_udiag_recip_fresh=0;
+  s->solve_pack_state=0;
   s->tiny_singleton_rs_recip_fresh=0;
   s->small_btf_fused_values=values;s->small_btf_fused_rhs=b;
   const int ok=kls_compact_btf_map32_refactor(s,(double *)(uintptr_t)values);

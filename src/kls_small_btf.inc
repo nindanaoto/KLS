@@ -8,9 +8,11 @@ static uint64_t kls_execution_domain_llc_bytes(void);
 static int kls_small_btf_environment(void) {
 #if defined(__x86_64__) && FLT_EVAL_METHOD==0
   unsigned short control;__asm__ volatile("fnstcw %0":"=m"(control));
-  return (control&63u)==63u && (_mm_getcsr()&0x1f80u)==0x1f80u &&
-    fegetround()==FE_TONEAREST &&
-    (_mm_getcsr()&0x6000u)==0;
+  /* x87: exceptions masked, round to nearest (the field fegetround reads,
+     without the library call). SSE: exceptions masked, round to nearest. */
+  const unsigned mxcsr=_mm_getcsr();
+  return (control&63u)==63u && (control&0x0c00u)==0 &&
+    (mxcsr&0x1f80u)==0x1f80u && (mxcsr&0x6000u)==0;
 #else
   return 0;
 #endif
