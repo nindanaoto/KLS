@@ -8152,13 +8152,24 @@ declined:
  * Fresh storage also permits aliasing with the preceding snapshot and leaves
  * its bytes untouched if allocation or finite-input validation fails. */
 /* Branch-free so the scan vectorizes: an all-ones exponent is Inf or NaN. */
+/* An all-ones exponent is the only one that carries into the sign position
+   when its lowest bit is added, so the scan is a mask, an add and an or per
+   value with no comparison - four independent lanes the compiler can keep
+   in one vector register. */
 static int private_all_finite(const double *v,size_t count) {
-  uint64_t bad=0;
-  for(size_t i=0;i<count;++i) {
-    uint64_t bits;memcpy(&bits,v+i,sizeof bits);
-    bad|=(uint64_t)((bits&UINT64_C(0x7ff0000000000000))==UINT64_C(0x7ff0000000000000));
+  const uint64_t exponent=UINT64_C(0x7ff0000000000000);
+  const uint64_t unit=UINT64_C(0x0010000000000000);
+  uint64_t bad[4]={0,0,0,0};
+  size_t i=0;
+  for(;i+4<=count;i+=4) {
+    uint64_t bits[4];memcpy(bits,v+i,sizeof bits);
+    for(int k=0;k<4;++k) bad[k]|=(bits[k]&exponent)+unit;
   }
-  return !bad;
+  for(;i<count;++i) {
+    uint64_t bits;memcpy(&bits,v+i,sizeof bits);
+    bad[0]|=(bits&exponent)+unit;
+  }
+  return !((bad[0]|bad[1]|bad[2]|bad[3])>>63);
 }
 
 /* The per-refactor copy in solve_refine_values exists for one reader: the
