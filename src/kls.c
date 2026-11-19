@@ -15765,8 +15765,10 @@ static void kls_solve_pack_build(kls_solver *s) {
       ops+=1+(lower!=0);
     }
   }
-  /* u16 stream: q[n], pnum[n], then per op {row,count,count} and operands. */
-  const size_t indices=2*n+3*ops+terms;
+  /* u16 stream: pnum[n], then per op {row,count,count,source} and operands;
+     source is the right-hand-side entry a forward row starts from, or
+     UINT16_MAX for a backward row, which continues from its own answer. */
+  const size_t indices=n+4*ops+terms;
   const size_t index_offset=sizeof(kls_solve_pack_header);
   const size_t coefficient_offset=
     (index_offset+indices*sizeof(uint16_t)+7u)&~(size_t)7u;
@@ -15785,7 +15787,6 @@ static void kls_solve_pack_build(kls_solver *s) {
   h->work_offset=(uint32_t)work_offset;
   uint16_t *ix=(uint16_t *)(void *)(base+index_offset);
   double *cx=(double *)(void *)(base+coefficient_offset);
-  memcpy(ix,s->i16solve_q,n*sizeof(uint16_t));ix+=n;
   memcpy(ix,s->i16solve_pnum,n*sizeof(uint16_t));ix+=n;
   for(size_t block=0;block<nblocks;++block) {
     const size_t first=s->i16solve_r[block],last=s->i16solve_r[block+1];
@@ -15793,7 +15794,9 @@ static void kls_solve_pack_build(kls_solver *s) {
       const double inverse=1.0/diagonal[k];
       const double *ux=s->i16solve_ux[k];
       const uint32_t ob=offp[k],oe=offp[k+1],ub=up[k],ue=up[k+1];
+      /* A forward row starts from the right-hand side itself. */
       *ix++=(uint16_t)k;*ix++=(uint16_t)(oe-ob);*ix++=(uint16_t)(ue-ub);
+      *ix++=s->i16solve_q[k];
       for(uint32_t z=ob;z<oe;++z) { *ix++=offi[z];*cx++=offx[z]; }
       *cx++=inverse;
       for(uint32_t z=ub;z<ue;++z) {
@@ -15806,6 +15809,7 @@ static void kls_solve_pack_build(kls_solver *s) {
       const double *lx=s->i16solve_lx[k];
       /* A backward row has no first group and a unit multiplier. */
       *ix++=(uint16_t)k;*ix++=0;*ix++=(uint16_t)(le-lb);
+      *ix++=UINT16_MAX;
       *cx++=1.0;
       for(uint32_t z=lb;z<le;++z) {
         *ix++=(uint16_t)(first+li[z]);*cx++=lx[z-lb];
@@ -15819,29 +15823,38 @@ static void kls_solve_pack_build(kls_solver *s) {
 __attribute__((noinline,hot,aligned(64)))
 #endif
 static int kls_solve_pack_run(kls_solver *s,const double *b,double *x) {
-  if(!kls_small_btf_environment()) return 0;
+  /* The replay is SSE arithmetic only: its rounding and exception masks are
+     the ones in MXCSR. */
+  const unsigned mxcsr=_mm_getcsr();
+  if((mxcsr&0x7f80u)!=0x1f80u) return 0;
   const char *base=(const char *)s->solve_pack;
   const kls_solve_pack_header *h=(const kls_solve_pack_header *)(const void *)base;
   const size_t n=h->n;
   const uint16_t *ix=(const uint16_t *)(const void *)(base+h->index_offset);
   const double *cx=(const double *)(const void *)(base+h->coefficient_offset);
   double *work=(double *)(void *)((char *)s->solve_pack+h->work_offset);
-  const uint16_t *q=ix,*pnum=ix+n;
-  ix+=2*n;
-  for(size_t k=0;k<n;++k) work[k]=b[q[k]];
+  const uint16_t *pnum=ix;
+  ix+=n;
+  const uint64_t exponent=UINT64_C(0x7ff0000000000000),unit=UINT64_C(1)<<52;
+  uint64_t bad=0;
   for(uint32_t op=h->ops;op;--op) {
     const size_t row=ix[0];
-    const uint32_t before=ix[1],after=ix[2];
-    ix+=3;
-    double value=work[row];
+    const uint32_t before=ix[1],after=ix[2],source=ix[3];
+    ix+=4;
+    double value;
+    if(source!=UINT16_MAX) value=b[source]; else value=work[row];
     for(uint32_t z=0;z<before;++z) value-=cx[z]*work[ix[z]];
     cx+=before;ix+=before;
     value*=*cx++;
     for(uint32_t z=0;z<after;++z) value-=cx[z]*work[ix[z]];
     cx+=after;ix+=after;
     work[row]=value;
+    /* Every stored value is tested as it leaves the register; a value that
+       is not finite stays so through the rows that follow. */
+    uint64_t bits;memcpy(&bits,&value,sizeof bits);
+    bad|=(bits&exponent)+unit;
   }
-  if(!private_all_finite(work,n)) return 0;
+  if(bad>>63) return 0;
   for(size_t k=0;k<n;++k) x[pnum[k]]=work[k];
   s->common.status=TRILINOS_KLU_OK;
   return 1;
@@ -15874,16 +15887,17 @@ static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
      s->private_solve_depth || s->caller_frame_busy ||
      s->in_solve_refinement || s->certified_unscaled_l2_contract ||
      s->small_btf_fused_ready || s->caller_frame_n!=n ||
-     s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED ||
-     !private_all_finite(b,n))
+     s->accuracy_policy!=KLS_ACCURACY_APPLICATION_MANAGED)
     goto decline;
   const int singleton=s->solve_lane_armed==2;
   /* A current image was built from factors that passed the checks below,
      and every numeric update discards it. */
-  if(!singleton && s->solve_pack_state==2) {
+  if(s->solve_pack_state==2) {
+    /* A right-hand side that is not finite makes the answer not finite. */
     if(!kls_solve_pack_run(s,b,x)) goto decline;
     goto answered;
   }
+  if(!private_all_finite(b,n)) goto decline;
   if(singleton
      ? s->tiny_singleton_solve_state<=0 ||
        !kls_tiny_singleton_state_capable(s) ||
@@ -15894,11 +15908,13 @@ static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
      : s->orientation!=KLS_ORIENTATION_TRANSPOSE ||
        !kls_small_btf_cache_capable(s) || !kls_small_btf_cache_ready(s))
     goto decline;
-  if(!singleton) {
+  if(!singleton || (s->orientation==KLS_ORIENTATION_TRANSPOSE &&
+      !s->numeric->Rs && kls_small_btf_cache_capable(s) &&
+      kls_small_btf_cache_ready(s))) {
     /* The second separate solve on the same factors pays for the image;
        a caller that alternates one update with one solve never builds it.
-       (The all-singleton walk is already one sweep over two arrays; packing
-       it measured slower.) */
+       Factors made only of one-row blocks take it too when the compact
+       solve cache describes them and no row scaling applies. */
     if(s->solve_pack_state==1) kls_solve_pack_build(s);
     else if(s->solve_pack_state==0) s->solve_pack_state=1;
   }

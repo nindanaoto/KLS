@@ -84,11 +84,9 @@ int main(void) {
       assert(residual(n,ptr,idx,a,b,x)<=1e-12);
     }
     assert(replays>400 && full_after_budget>0);
-    /* Repeated solves on unchanged factors of real blocks replay the packed
-       image (the bitwise comparison above covers it); one-row blocks keep
-       their own walk. */
-    if(shapes[c][1]>1)assert(packed>300 && lane->solve_pack);
-    else assert(!packed);
+    /* Repeated solves on unchanged factors replay the packed image, whether
+       the blocks are real ones or single rows. */
+    assert(packed>300 && lane->solve_pack);
     /* An irregular right-hand side is declined before anything is published
        and switches replay off. */
     while(!lane->solve_lane_armed)assert(kls_solve(lane,1,b,0,x,0)==KLS_OK);
