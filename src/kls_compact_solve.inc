@@ -498,10 +498,19 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     kls_repeated_update_workload(&solver->options) &&
     solver->row_perm != NULL && solver->numeric != NULL &&
     solver->numeric->Rs == NULL;
-  if (!generic_fused_matched_solve_candidate &&
-      solver->n < 16384u && solver->numeric != NULL &&
-      (solver->numeric->lnz > (UF_long)UINT16_MAX ||
-       solver->numeric->unz > (UF_long)UINT16_MAX)) {
+  /* A crew and a block the subtree planner accepts are a second capability
+     the mirror can buy: the planner reads these streams, and its partition
+     may carry the solve in parallel.  Whether it does is settled below, once
+     the planner has seen the factor. */
+  const int subtree_solve_prospect =
+    solver->options.threads > 1 && solver->symbolic != NULL &&
+    solver->symbolic->maxblock >= KLS_PTS_MIN_BLOCK;
+  const int small_vector_wide_streams =
+    !generic_fused_matched_solve_candidate &&
+    solver->n < 16384u && solver->numeric != NULL &&
+    (solver->numeric->lnz > (UF_long)UINT16_MAX ||
+     solver->numeric->unz > (UF_long)UINT16_MAX);
+  if (small_vector_wide_streams && !subtree_solve_prospect) {
     /* For a small vector whose factor streams exceed the uint16_t cache,
        KLU's packed native-index walk avoids an unprofitable i32 mirror.
        A repeated statically matched factor is admitted separately: its i32
@@ -527,7 +536,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     numeric->unz <= (UF_long)UINT16_MAX;
   const int refactor_forest_candidate =
     kls_repeated_update_workload(&solver->options) &&
-    solver->options.threads > 1 && symbolic->maxblock >= 2048u;
+    solver->options.threads > 1 && symbolic->maxblock >= KLS_PTS_MIN_BLOCK;
   if ((generic_direct_i16_solve ||
        kls_low_work_single_block_policy_enabled(solver)) &&
       !refactor_forest_candidate &&
@@ -873,6 +882,15 @@ static int kls_i32_solve_ready(kls_solver *solver) {
   } else {
     solver->pts_build_deferred = 0;
     kls_pts_try_build(solver);
+    if (small_vector_wide_streams &&
+        (solver->pts == NULL || !solver->pts->streams_ordered)) {
+      /* No partition came of it, so the mirror has nothing to offer this
+         factor: answer as before it was tried.  The streams stay valid and
+         are released with the numeric object. */
+      kls_pts_free(solver);
+      solver->i32solve_state = -1;
+      return 0;
+    }
   }
   return 1;
 }
@@ -1605,16 +1623,23 @@ static UF_long kls_i32_solve(kls_solver *solver,
         const UF_long *ulen = numeric->Ulen + k1;
         double *lu = (double *)numeric->LUbx[block];
         kls_pts *const pts = solver->pts;
-        const int pts_candidate =
-          pts != NULL && pts->block == block &&
-          (pts->nk >= 16384u ||
-           kls_repeated_update_workload(&solver->options)) &&
-          pts->solve_ok;
+        /* The caller's timed trial names the subtree arm itself; it keeps
+           its own samples and verdict, so this block's are left alone. */
+        const int pts_trial =
+          solver->pts_trial_solve != 0 && pts != NULL &&
+          pts->block == block && pts->streams_ordered;
+        const int pts_candidate = pts_trial ||
+          (pts != NULL && pts->block == block &&
+           (pts->nk >= 16384u ||
+            kls_repeated_update_workload(&solver->options)) &&
+           pts->solve_ok);
         int use_pts = 0;
         int pts_used = 0;
         double pts_probe_start = 0.0;
         if (pts_candidate) {
-          if (pts->solve_decision != 0) {
+          if (pts_trial) {
+            use_pts = 1;
+          } else if (pts->solve_decision != 0) {
             use_pts = pts->solve_decision > 0;
           } else {
             /* Order the four samples serial,PTS,PTS,serial so neither arm
@@ -1628,7 +1653,9 @@ static UF_long kls_i32_solve(kls_solver *solver,
             pts_used = kls_pts_solve_block(
               solver, Xb, lu, lip, llen, uip, ulen, udiag + k1,
               udiag_recip != NULL ? udiag_recip + k1 : NULL);
-            if (!pts_used) {
+            if (pts_used && pts_trial) {
+              solver->pts_trial_solve = 2;
+            } else if (!pts_used && !pts_trial) {
               pts->solve_decision = -1;
             }
           }
@@ -1677,7 +1704,7 @@ static UF_long kls_i32_solve(kls_solver *solver,
             }
           }
         }
-        if (pts_candidate && pts->solve_decision == 0) {
+        if (pts_candidate && !pts_trial && pts->solve_decision == 0) {
           const int arm = pts_used ? 1 : 0;
           const double elapsed = kls_now_seconds() - pts_probe_start;
           pts->solve_probe_samples[arm]++;
@@ -1766,6 +1793,26 @@ static UF_long kls_i32_solve(kls_solver *solver,
     }
   }
   return 1;
+}
+
+/* Whether the subtree partition may carry this normal-orientation solve in
+   the caller's timed trial.  As for the transpose trial below, the crew must
+   already exist and any published partition qualifies; the scatter kernels
+   additionally need ascending index streams. */
+static int kls_pts_normal_solve_candidate(const kls_solver *solver) {
+  const kls_pts *pts = solver != NULL ? solver->pts : NULL;
+  return pts != NULL && pts->nsolve_decision >= 0 && pts->streams_ordered &&
+    pts->nthreads >= 2 && solver->egraph_pool != NULL &&
+    solver->egraph_pool->thread_count == pts->nthreads &&
+    solver->symbolic != NULL && solver->numeric != NULL &&
+    pts->block < solver->symbolic->nblocks &&
+    solver->symbolic->R[pts->block] == pts->k1 &&
+    solver->symbolic->R[pts->block + 1u] == pts->k1 + pts->nk &&
+    solver->i32solve_l != NULL && solver->i32solve_u != NULL &&
+    solver->i32solve_loff != NULL && solver->i32solve_uoff != NULL &&
+    solver->numeric->Xwork != NULL && solver->numeric->Udiag != NULL &&
+    solver->numeric->LUbx != NULL &&
+    solver->numeric->LUbx[pts->block] != NULL;
 }
 
 /* Whether the subtree partition may carry this transpose solve.  The pool

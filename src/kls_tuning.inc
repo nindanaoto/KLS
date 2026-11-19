@@ -87,6 +87,9 @@
   KLS_ROW_SOLVE_DENSE_TAIL_MIN_NNZ
 #define KLS_ROW_SOLVE_CLUSTER_ALPHA_NUMERATOR 2u
 #define KLS_PTS_MAX_THREADS 16
+/* Smallest block the subtree planner partitions; callers that prepare its
+   inputs use the same floor. */
+#define KLS_PTS_MIN_BLOCK 2048u
 
 /* Supernode batching and EGraph execution. */
 #define KLS_SNODE_DEFAULT_MIN_BATCH 3u

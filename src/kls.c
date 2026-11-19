@@ -1403,6 +1403,7 @@ struct kls_solver {
   struct kls_native_i16_plan *native_i16;
   kls_observed_parallel_state native_i16_policy;
   unsigned native_i16_epoch,native_i16_combined_depth;
+  int pts_trial_solve; /* 1: this compact solve must use the subtree plan; 2: it did */
   int native_i16_last_native;
   uint64_t native_i16_runs,native_i16_serial_calls,native_i16_normal_runs;
   unsigned snb_recipe;
@@ -14476,8 +14477,64 @@ static int private_solve_body(kls_solver *solver,
       solver->row_refactor_values_ready = 0;
     }
   }
-  if(!kernel_transpose && nrhs==1 && solver->snb_auto_candidate &&
-     solver->snb==solver->snb_auto_candidate && solver->native_i16 &&
+  /* The subtree partition can carry a normal-orientation solve on the crew
+     the refactor left awake, whichever serial engine would otherwise run it.
+     Six alternating timed solves (incumbent, subtree, subtree, incumbent,
+     subtree, incumbent) settle it, as for the transpose solve further down.
+     Only a plain one-vector frame whose factor values are already in place
+     is eligible, and only after a pool refactor whose own engine comparison
+     has finished, so neither trial is charged to the other. */
+  const int block_engine_solve = !kernel_transpose && nrhs==1 &&
+    solver->snb_auto_candidate && solver->snb==solver->snb_auto_candidate &&
+    solver->native_i16;
+  const int nsolve_candidate = !kernel_transpose && nrhs == 1 &&
+    !fused_compact_match_rhs && !fused_matched_i32_rhs &&
+    !fused_matched_i32_rhs32 && !prepared_single_block_row_solve &&
+    !serial_mapped_vendor_solve &&
+    !solver->row_refactor_values_ready &&
+    !solver->row_refactor_values_dirty &&
+    solver->options.threads > 1 && solver->egraph_pool != NULL &&
+    !solver->observed_parallel.active &&
+    solver->observed_parallel.choice != 1 &&
+    (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH ||
+     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_POOL ||
+     (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_SNB &&
+      block_engine_solve && solver->snb_auto.choice == 3)) &&
+    kls_i32_solve_ready(solver) &&
+    kls_pts_normal_solve_candidate(solver);
+  kls_pts *const npts = solver->pts;
+  int nsolve_arm = 0;
+  double nsolve_start = 0.0;
+  if (nsolve_candidate) {
+    if (npts->nsolve_decision > 0) {
+      nsolve_arm = 1;
+    } else {
+      const int sample = npts->nsolve_samples[0] + npts->nsolve_samples[1];
+      nsolve_arm = sample == 1 || sample == 2 || sample == 4;
+      nsolve_start = kls_now_seconds();
+    }
+    if (nsolve_arm) {
+      solver->common.status = TRILINOS_KLU_OK;
+      solver->pts_trial_solve = 1;
+      ok = kls_i32_solve(solver, fused_general_i32_rhs ? b : x, x,
+                         NULL, NULL, NULL, 0);
+      const int carried = solver->pts_trial_solve == 2;
+      solver->pts_trial_solve = 0;
+      /* The block engine's bookkeeping asks that its factor was solved in
+         the call that produced it; either arm does that. */
+      if (ok && block_engine_solve) ++solver->native_i16_normal_runs;
+      if (!ok || !carried) {
+        /* A compact solve that finished without the crew still answered;
+           the subtree arm is withdrawn rather than retried. */
+        npts->nsolve_decision = -1;
+        nsolve_arm = 0;
+        nsolve_start = 0.0;
+      }
+    }
+  }
+  if (ok) {
+    /* solved by the subtree arm (or its serial completion) */
+  } else if(block_engine_solve &&
      kls_native_i16_normal_solve(solver,solver->native_i16,b,x,0,NULL)==1) {
     ++solver->native_i16_normal_runs;ok=1;
   } else if(kernel_transpose && nrhs==1 && kls_compact_btf_transpose_solve(solver,x)) {
@@ -14678,6 +14735,19 @@ static int private_solve_body(kls_solver *solver,
             tpts->tsolve_min[1] < 0.95 * tpts->tsolve_min[0] ? 1 : -1;
         }
       }
+    }
+  }
+  if (nsolve_candidate && npts->nsolve_decision == 0 && ok &&
+      nsolve_start > 0.0) {
+    const double elapsed = kls_now_seconds() - nsolve_start;
+    npts->nsolve_samples[nsolve_arm]++;
+    if (npts->nsolve_min[nsolve_arm] <= 0.0 ||
+        elapsed < npts->nsolve_min[nsolve_arm]) {
+      npts->nsolve_min[nsolve_arm] = elapsed;
+    }
+    if (npts->nsolve_samples[0] >= 3 && npts->nsolve_samples[1] >= 3) {
+      npts->nsolve_decision =
+        npts->nsolve_min[1] < 0.95 * npts->nsolve_min[0] ? 1 : -1;
     }
   }
   if (ok && !kernel_transpose && has_col_scale &&

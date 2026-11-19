@@ -413,7 +413,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       best = block;
     }
   }
-  if (best < 0 || best_nk < 2048u) {
+  if (best < 0 || best_nk < KLS_PTS_MIN_BLOCK) {
     return;
   }
   const UF_long k1 = symbolic->R[best];
@@ -658,6 +658,8 @@ static void kls_pts_try_build(kls_solver *solver) {
   int balanced_wide_solve_plan = 0;
   int balanced_runtime_solve_plan = 0;
   int balanced_very_wide_solve_plan = 0;
+  int timed_trial_solve_plan = 0;
+  int untimed_top_ok = 0;
   double bin_work[KLS_PTS_MAX_THREADS];
   if (ok) {
     for (int32_t root = head[nk]; root != -1; root = next[root]) {
@@ -796,11 +798,21 @@ static void kls_pts_try_build(kls_solver *solver) {
         balanced_runtime_solve_plan;
       const int allow_very_wide_top =
         balanced_very_wide_solve_plan;
+      /* The untimed gates below bound the shared top by itself.  What a
+         subtree solve costs is the serial top plus its slowest private bin,
+         so a top above those bounds can still leave most of the crew's
+         time private.  Publish such a partition when that predicted cost
+         keeps a fifth of the serial sweep in hand for dispatch; it earns no
+         untimed adoption, only the caller's alternating timed trial. */
+      timed_trial_solve_plan =
+        total > 0.0 && top_work + max_bin <= 0.80 * total;
       /* the refactor tolerates a fatter serial top (Amdahl on 99
          repeated calls still pays); the solve keeps the tight gate */
       ok = ntop <= (int64_t)(nk / 3u) &&
-           top_work <= (allow_very_wide_top ? 0.60 :
-                       (allow_wide_top ? 0.45 : 0.40)) * total &&
+           ((untimed_top_ok =
+               top_work <= (allow_very_wide_top ? 0.60 :
+                           (allow_wide_top ? 0.45 : 0.40)) * total) ||
+            timed_trial_solve_plan) &&
            max_bin <= 0.6 * total;
     }
   }
@@ -818,6 +830,7 @@ static void kls_pts_try_build(kls_solver *solver) {
       top_work <= (balanced_wide_solve_plan ? 0.45 : 0.30) * total;
     pts->solve_ok = streams_ordered && (pts->solve_direct_verified ||
       balanced_runtime_solve_plan || balanced_very_wide_solve_plan);
+    pts->streams_ordered = streams_ordered;
     /* flop-weighted top share: refactor flops concentrate quadratically
        in the separator top, so entry-weighted balance can look fine
        while the top strangles the refactor (the ASIC_320ks failure
@@ -850,10 +863,12 @@ static void kls_pts_try_build(kls_solver *solver) {
          synchronization.  A repeated generic factor should not consume a
          complete numeric update timing that dominated refactor arm; retain
          the independently useful subtree solve plan. */
-      pts->refactor_ok =
-        total_flops <= 0.0 ||
+      /* A partition published only for the timed solve trial keeps the
+         refactor verdict its rejection used to give: no subtree refactor. */
+      pts->refactor_ok = untimed_top_ok &&
+        (total_flops <= 0.0 ||
          (top_flops <= 0.45 * total_flops &&
-          critical_refactor_flops <= 0.50 * total_flops);
+          critical_refactor_flops <= 0.50 * total_flops));
       pts->refactor_top_flops = top_flops;
       pts->refactor_total_flops = total_flops;
     }

@@ -11962,6 +11962,10 @@ typedef struct kls_pts_s {
   int tsolve_decision;              /* transpose: 0 trial, 1 PTS, -1 incumbent */
   int tsolve_samples[2];            /* [0] incumbent, [1] PTS */
   double tsolve_min[2];             /* warm minimum for each transpose arm */
+  int streams_ordered;              /* scatter kernels need ascending streams */
+  int nsolve_decision;              /* normal after a block refactor: 0 trial, 1 PTS, -1 incumbent */
+  int nsolve_samples[2];            /* [0] incumbent, [1] PTS */
+  double nsolve_min[2];             /* warm minimum for each normal arm */
   const kls_pts_transpose_io *tio;  /* set only for the duration of a solve */
   int egraph_terminal_decision;     /* 0 unknown, 1 eligible, -1 rejected */
   UF_long egraph_terminal_col;
