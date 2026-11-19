@@ -21,6 +21,16 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
+/* The code a settled replay runs, kept together. Between two calls the
+   caller's own work evicts it, so every separate place it lives in is
+   fetched again; scattered through the library that cost moved by a
+   quarter of a tiny solve from one unrelated build to the next. */
+#if (defined(__GNUC__) || defined(__clang__)) && defined(__ELF__)
+#define KLS_REPLAY_TEXT __attribute__((section(".text.kls_replay")))
+#else
+#define KLS_REPLAY_TEXT
+#endif
+
 #include "kls/kls.h"
 #include "kls_componentwise.h"
 #include "kls_policy.h"
@@ -1924,7 +1934,7 @@ static int kls_tiny_singleton_refresh_reciprocals(kls_solver *solver) {
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline, hot, aligned(64)))
 #endif
-static UF_long kls_tiny_singleton_solve_one_rhs(
+KLS_REPLAY_TEXT static UF_long kls_tiny_singleton_solve_one_rhs(
   kls_solver *solver,
   int kernel_transpose,
   const double *b,
@@ -5753,7 +5763,7 @@ static UF_long kls_snode_batch_consume(
    the scalar position map as the canonical representation makes this plan
    profitable even when most positions are fragmented: each triplet replaces
    at least sixteen indexed loads with one bulk copy. */
-static void kls_build_lean_btf_off_runs(kls_solver *solver,
+KLS_REPLAY_TEXT static void kls_build_lean_btf_off_runs(kls_solver *solver,
                                         int direct_user_values,
                                         const uint32_t *map,
                                         UF_long offcount) {
@@ -5815,7 +5825,7 @@ static const UF_long *kls_lean_block_start(const kls_solver *solver) {
     ? solver->refactor_col_ptr : NULL;
 }
 
-static int kls_build_lean_btf_off_map(kls_solver *solver,
+KLS_REPLAY_TEXT static int kls_build_lean_btf_off_map(kls_solver *solver,
                                       int direct_user_values) {
   if (solver == NULL || solver->numeric == NULL ||
       solver->numeric->Offp == NULL || solver->refactor_col_ptr == NULL ||
@@ -6270,7 +6280,7 @@ static int kls_compact_btf_plain_refactor(kls_solver *solver,
   return 1;
 }
 
-static int kls_compact_btf_map32_refactor(kls_solver *solver,
+KLS_REPLAY_TEXT static int kls_compact_btf_map32_refactor(kls_solver *solver,
                                        double *numeric_values) {
   if (solver == NULL || solver->symbolic == NULL || solver->numeric == NULL ||
       numeric_values == NULL || solver->common.scale > 0 ||
@@ -8167,7 +8177,7 @@ declined:
    when its lowest bit is added, so the scan is a mask, an add and an or per
    value with no comparison - four independent lanes the compiler can keep
    in one vector register. */
-static int private_all_finite(const double *v,size_t count) {
+KLS_REPLAY_TEXT static int private_all_finite(const double *v,size_t count) {
   const uint64_t exponent=UINT64_C(0x7ff0000000000000);
   const uint64_t unit=UINT64_C(0x0010000000000000);
   uint64_t bad[4]={0,0,0,0};
@@ -8181,6 +8191,20 @@ static int private_all_finite(const double *v,size_t count) {
     bad[0]|=(bits&exponent)+unit;
   }
   return !((bad[0]|bad[1]|bad[2]|bad[3])>>63);
+}
+
+/* The same verdict for an answer written one element at a time just before.
+   A wide load of such data cannot be forwarded from the pending stores and
+   waits for them to reach the cache; this loop reads each element the way
+   it was written. (The early exit keeps the compiler from turning it back
+   into wide loads.) */
+KLS_REPLAY_TEXT static int private_fresh_finite(const double *v,size_t count) {
+  const uint64_t exponent=UINT64_C(0x7ff0000000000000);
+  for(size_t i=0;i<count;++i) {
+    uint64_t bits;memcpy(&bits,v+i,sizeof bits);
+    if((bits&exponent)==exponent) return 0;
+  }
+  return 1;
 }
 
 /* The per-refactor copy in solve_refine_values exists for one reader: the
@@ -15822,7 +15846,7 @@ static void kls_solve_pack_build(kls_solver *s) {
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline,hot,aligned(64)))
 #endif
-static int kls_solve_pack_run(kls_solver *s,const double *b,double *x) {
+KLS_REPLAY_TEXT static int kls_solve_pack_run(kls_solver *s,const double *b,double *x) {
   /* The replay is SSE arithmetic only: its rounding and exception masks are
      the ones in MXCSR. */
   const unsigned mxcsr=_mm_getcsr();
@@ -15875,7 +15899,7 @@ static int kls_solve_pack_run(kls_solver *s,const double *b,double *x) {
    replays one full solve does and re-arms only if it takes the same walk.
    Anything irregular declines before the answer is published and the full
    solve handles the same arguments. Returns 1 when it produced the answer. */
-static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
+KLS_REPLAY_TEXT static int kls_solve_lane_call(kls_solver *s,const double *b,double *x) {
   if(!s->solve_lane_budget) {
     s->solve_lane_armed=0;s->solve_lane_streak=KLS_FAST_LANE_STREAK-1;
     return 0;
@@ -15952,7 +15976,7 @@ decline:
   return 0;
 }
 
-int kls_solve(kls_solver *solver,
+KLS_REPLAY_TEXT int kls_solve(kls_solver *solver,
               int64_t nrhs,
               const double *b,
               int64_t ldb,
@@ -16279,7 +16303,7 @@ static int kls_refactor_solve_impl(kls_solver *solver,
    is published and lets the full call handle the same arguments. Any other
    public numeric call, and any replacement of the numeric or its solve
    cache, switches replay off. Returns 1 when it produced the answer. */
-static int kls_fast_lane_call(kls_solver *s,const double *values,
+KLS_REPLAY_TEXT static int kls_fast_lane_call(kls_solver *s,const double *values,
     const double *b,double *x) {
   if(!s->fast_lane_budget) {
     s->fast_lane_armed=0;s->fast_lane_streak=KLS_FAST_LANE_STREAK-1;
@@ -16293,8 +16317,8 @@ static int kls_fast_lane_call(kls_solver *s,const double *values,
      s->private_caller_depth || s->private_numeric_depth ||
      s->private_solve_depth || s->caller_frame_busy ||
      !s->small_btf_fused_work || s->small_btf_fused_n!=s->n ||
-     !kls_small_btf_cache_ready(s) || !kls_small_btf_environment() ||
-     !private_all_finite(values,nnz) || !private_all_finite(b,n))
+     !kls_small_btf_cache_ready(s) || (_mm_getcsr()&0x7f80u)!=0x1f80u ||
+     !private_all_finite(values,nnz))
     goto decline;
   s->private_cold_deadline=0;
   /* The state a full call leaves behind for this route. */
@@ -16316,7 +16340,7 @@ static int kls_fast_lane_call(kls_solver *s,const double *values,
   const int ready=s->small_btf_fused_ready;
   s->small_btf_fused_ready=0;
   if(ok!=1 || s->common.status!=TRILINOS_KLU_OK || !ready ||
-     !private_all_finite(s->small_btf_fused_work,n)) goto decline;
+     !private_fresh_finite(s->small_btf_fused_work,n)) goto decline;
   {
     const uint16_t *pnum=s->i16solve_pnum;
     const double *solution=s->small_btf_fused_work;
@@ -16331,12 +16355,25 @@ decline:
   return 0;
 }
 
-int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
+static int kls_refactor_solve_full(kls_solver *s, const double *values,
+    int64_t nrhs, const double *b, int64_t ldb, double *x, int64_t ldx);
+
+/* Small on purpose: a replayed call returns from here without setting up
+   the full call's frame. */
+KLS_REPLAY_TEXT int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
     const double *b, int64_t ldb, double *x, int64_t ldx) {
   if (!values) return KLS_ERR_INVALID_ARGUMENT;
   if (s && s->fast_lane_armed && nrhs==1 &&
       (!ldb || ldb==(int64_t)s->n) && (!ldx || ldx==(int64_t)s->n) &&
       kls_fast_lane_call(s,values,b,x)) return KLS_OK;
+  return kls_refactor_solve_full(s,values,nrhs,b,ldb,x,ldx);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+static int kls_refactor_solve_full(kls_solver *s, const double *values,
+    int64_t nrhs, const double *b, int64_t ldb, double *x, int64_t ldx) {
   if (s) s->fast_lane_route=0;
   /* The frame belongs to this call, including nested recovery. */
   double *const frame=private_caller_frame_acquire(s,nrhs);
