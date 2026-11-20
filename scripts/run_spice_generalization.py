@@ -143,8 +143,17 @@ def reduce_results(metadata, rows):
 
     cells, kls_failures, scaling, baseline = [], [], [], []
     modes = [m for m in ('kls', 'kls-app') if any(r['side'] == m for r in rows)]
+    # A circuit on which no solver under test (KLS, baseline or any peer configuration)
+    # reproduced the reference in any run measures the circuit, not a solver: it is
+    # reported and left out of the score for everyone instead of failing KLS alone.
+    measured = {(r['domain'], r['case']) for r in rows if r['side'] != 'klu'}
+    verified = {(r['domain'], r['case']) for r in rows if r['side'] != 'klu' and usable(r)}
+    has_peer = {(r['domain'], r['case']) for r in rows if r['side'] not in KLS_SIDES and r['side'] != 'klu'}
+    unverifiable = sorted((measured & has_peer) - verified)
     for domain, _ in metadata['domains']:
         for case in metadata['cases']:
+            if (domain, case) in unverifiable:
+                continue
             for threads in metadata['threads']:
                 for mode in modes:
                     if any(not usable(index.get((domain, case, threads, t, mode), {}))
@@ -207,12 +216,14 @@ def reduce_results(metadata, rows):
                    certified_groups=groups_for('kls') if gated_mode != 'kls' else None,
                    certified_overall=aggregate([c for c in cells if c['mode'] == 'kls']) if gated_mode != 'kls' else None,
                    kls_failures=len(kls_failures), time_metric=time_metric,
+                   unverifiable_cases=len(unverifiable),
                    tolerant_runs=sum(bool(r.get('tolerant')) and not r.get('qualified') for r in index.values()),
                    peer_cells_without_valid_configuration=len(unscored),
                    thread_scaling=aggregate(scaling),
                    peer_hangs=sum(bool(r.get('timed_out')) and r['side'] not in KLS_SIDES for r in rows),
                    baseline=aggregate([b for b in baseline]) if baseline else None)
     detail = dict(cells=cells, kls_failures=kls_failures, unscored_peer_cells=unscored,
+                  unverifiable_cases=[dict(domain=d, case=c) for d, c in unverifiable],
                   thread_scaling=scaling, baseline=baseline)
     return summary, detail
 

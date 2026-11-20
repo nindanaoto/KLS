@@ -62,6 +62,19 @@ def test_kls_failure_and_thread_regression_are_reported():
     assert summary['kls_failures'] == 1 and not summary['complete'] and not summary['gate']
 
 
+def test_circuit_no_solver_reproduces_is_left_out_for_everyone():
+    times = {('a', t, s): 1.0 for t in (1, 8) for s in ('kls',) + tuple(g.peer_sides(t, ['ck', 'st']))}
+    times.update({('a', t, s): 2.0 for t in (1, 8) for s in g.peer_sides(t, ['ck', 'st'])})
+    times.update({('b', t, s): 1.0 for t in (1, 8) for s in ('kls',) + tuple(g.peer_sides(t, ['ck', 'st']))})
+    everyone = {k for k in times if k[0] == 'b'}
+    summary, detail = g.reduce_results(metadata(['a', 'b']), rows_for(times, bad=everyone))
+    assert summary['unverifiable_cases'] == 1 and summary['kls_failures'] == 0
+    assert summary['complete'] and all(c['case'] == 'a' for c in detail['cells'])
+    one_peer_run_ok = everyone - {('b', 8, 'st')}
+    summary, _ = g.reduce_results(metadata(['a', 'b']), rows_for(times, bad=one_peer_run_ok))
+    assert summary['unverifiable_cases'] == 0 and summary['kls_failures'] and not summary['gate']
+
+
 def test_tune_gate_needs_every_cell_and_holdout_needs_geomean_and_cap():
     fast = {('a', 1, 'kls'): 1.0, ('a', 8, 'kls'): 1.0}
     fast.update({('a', t, s): 1.05 for t in (1, 8) for s in g.peer_sides(t, ['ck', 'st'])})
