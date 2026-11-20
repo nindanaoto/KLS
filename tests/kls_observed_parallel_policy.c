@@ -116,6 +116,16 @@ int main(void) {
     assert(!kls_observed_parallel_audit(&r,1,1.5));
     r=(kls_observed_parallel_state){.choice=1,.cycle=1};
     assert(!kls_observed_parallel_audit(&r,1,9) && !r.audited);
+    /* An engine that is ahead on balance survives slow windows until they
+       have used up what it saved; one that never got ahead goes at once. */
+    r=(kls_observed_parallel_state){.choice=2,.cycle=1};
+    for(int i=0;i<32;++i) assert(!kls_observed_parallel_audit(&r,1,.5));
+    assert(r.saved==16);
+    for(int i=0;i<8;++i) assert(!kls_observed_parallel_audit(&r,1,2.5));
+    assert(r.choice==2 && r.saved==4);
+    for(int i=0;i<8;++i) assert(!kls_observed_parallel_audit(&r,1,.5));
+    for(int i=0;i<7;++i) assert(!kls_observed_parallel_audit(&r,1,2.5));
+    assert(kls_observed_parallel_audit(&r,1,2.5) && r.choice==-1);
   }
   {
     /* The first start also waits for the allowance to cover the crew. */

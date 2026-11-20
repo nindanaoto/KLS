@@ -45,6 +45,9 @@ typedef struct {
   double startup;
   /* Retained-engine calls seen in the current audit window. */
   unsigned audited;
+  /* Time the retained engine has taken off the incumbent's cycle so far,
+     summed over every audited call (negative when it has cost time). */
+  double saved;
   /* The caller's cost model for a retained crew: its size and the fixed
      cost of one dispatch. Zero means no model, and the base allowance. */
   int crew;
@@ -176,19 +179,26 @@ static int kls_observed_parallel_record(kls_observed_parallel_state *g,
  * that fell asleep between calls, a crew shared with other work). So every
  * retained call is observed like the incumbent calls were, and whenever the
  * median of eight of them is no better than the incumbent's median cycle the
- * retention is withdrawn. Returns 1 when the engine must be dropped. */
+ * retention is withdrawn, unless the engine is still ahead on balance. A
+ * window can be slow because the engine does not suit the rhythm, or because
+ * a crew thread lost its processor for a few milliseconds: the first shows
+ * as a balance that never turned positive, the second as a dent in savings
+ * already made. Withdrawal is permanent, so it waits until the engine has
+ * given back everything it saved; a run can then lose at most what the
+ * engine had earned it. Returns 1 when the engine must be dropped. */
 static int kls_observed_parallel_audit(kls_observed_parallel_state *g,
     int successful,double seconds) {
   if(g->choice!=2 || !(g->cycle>0)) return 0;
   if(!successful || !(seconds>0) || !isfinite(seconds)) return 0;
   g->history[g->audited%8]=seconds;
+  if(isfinite(g->saved+g->cycle-seconds)) g->saved+=g->cycle-seconds;
   if(++g->audited%8) return 0;
   _Alignas(64) double v[8];memcpy(v,g->history,sizeof(v));
   for(int i=1;i<8;++i) {
     double x=v[i];int j=i;
     while(j && v[j-1]>x) {v[j]=v[j-1];--j;}v[j]=x;
   }
-  if(0.5*v[3]+0.5*v[4]<g->cycle) return 0;
+  if(0.5*v[3]+0.5*v[4]<g->cycle || g->saved>0) return 0;
   g->choice=-1;g->retry_pending=0;return 1;
 }
 #endif
