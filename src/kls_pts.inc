@@ -1069,6 +1069,36 @@ typedef struct {
 
 #define KLS_PTS_SWEEP_TRANSPOSE 2
 
+/* Row gather of one transpose equation.  A single running difference makes
+   every term wait for the previous one; four partial sums let a long row
+   (the shared top's rows span whole subtrees) overlap its loads and
+   multiplies.  Short rows keep the plain loop, whose trip count the branch
+   predictor learns. */
+static KLS_ALWAYS_INLINE double kls_pts_row_gather(
+  const double *restrict values,
+  const int32_t *restrict rows,
+  const double *restrict x,
+  UF_long len,
+  double value) {
+  UF_long p = 0;
+  if (len >= 4u) {
+    double sum1 = 0.0;
+    double sum2 = 0.0;
+    double sum3 = 0.0;
+    for (; p + 3u < len; p += 4u) {
+      value -= values[p] * x[rows[p]];
+      sum1 -= values[p + 1u] * x[rows[p + 1u]];
+      sum2 -= values[p + 2u] * x[rows[p + 2u]];
+      sum3 -= values[p + 3u] * x[rows[p + 3u]];
+    }
+    value = (value + sum1) + (sum2 + sum3);
+  }
+  for (; p < len; ++p) {
+    value -= values[p] * x[rows[p]];
+  }
+  return value;
+}
+
 /* Transpose counterpart of the subtree solve: U^T y = b ascending, then
    L^T x = y descending, as row gathers over the same column streams.  The
    partition already guarantees that a private column's U entries stay in its
@@ -1104,9 +1134,7 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
         value -= io->offx[p] * X[io->offi[p]];
       }
     }
-    for (UF_long p = 0; p < len; ++p) {
-      value -= ux[p] * Xb[ui[p]];
-    }
+    value = kls_pts_row_gather(ux, ui, Xb, len, value);
     Xb[k] = a->udiag_recip_b != NULL
       ? value * a->udiag_recip_b[k] : value / a->udiag_b[k];
   }
@@ -1135,9 +1163,7 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
           value -= io->offx[p] * X[io->offi[p]];
         }
       }
-      for (UF_long p = 0; p < len; ++p) {
-        value -= ux[p] * Xb[ui[p]];
-      }
+      value = kls_pts_row_gather(ux, ui, Xb, len, value);
       Xb[k] = a->udiag_recip_b != NULL
         ? value * a->udiag_recip_b[k] : value / a->udiag_b[k];
     }
@@ -1153,10 +1179,7 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
         : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
       const int32_t *li = a->i32l +
         (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
-      double value = Xb[k];
-      for (UF_long p = 0; p < len; ++p) {
-        value -= lx[p] * Xb[li[p]];
-      }
+      const double value = kls_pts_row_gather(lx, li, Xb, len, Xb[k]);
       Xb[k] = value;
       io->x[io->pnum[g]] = io->rs != NULL ? value / io->rs[g] : value;
     }
@@ -1176,10 +1199,7 @@ static void kls_pts_worker_body_transpose(kls_pts_arg *a) {
       : a->lu + a->lip[k] + kls_klu_units_for_indices(len);
     const int32_t *li = a->i32l +
       (a->loff32 != NULL ? (int64_t)a->loff32[k] : a->loff[k]);
-    double value = Xb[k];
-    for (UF_long p = 0; p < len; ++p) {
-      value -= lx[p] * Xb[li[p]];
-    }
+    const double value = kls_pts_row_gather(lx, li, Xb, len, Xb[k]);
     Xb[k] = value;
     io->x[io->pnum[g]] = io->rs != NULL ? value / io->rs[g] : value;
   }
