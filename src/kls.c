@@ -9227,8 +9227,22 @@ static int private_factor_body(kls_solver *solver, const double *values) {
       kls_pipeline_refactor_fast_factor_repair_is_risky(solver);
     if (!pipeline_refactor_guard) {
       const double start = kls_now_seconds();
+      /* This path starts thread crews of its own, and what it competes with
+         is a full factor whose time was measured. When starting a crew is
+         expected to cost more than that whole factor, no crew can repay
+         itself here, so the path runs on the calling thread. A diagnostic
+         repair mode names its engine and is taken at its word. */
+      const int crew_threads = solver->options.threads;
+      if (crew_threads > 1 && solver->numeric_full_factor_seconds > 0.0 &&
+          kls_fast_reject_repair_mode_from_env() ==
+            KLS_FAST_REJECT_REPAIR_DEFAULT &&
+          solver->numeric_full_factor_seconds <
+            KLS_OBSERVED_PARALLEL_STARTUP_SECONDS) {
+        solver->options.threads = 1;
+      }
       const UF_long ok = kls_fast_factor_with_block_restarts(solver,
                                                              numeric_values);
+      solver->options.threads = crew_threads;
       const double fast_seconds = kls_now_seconds() - start;
       elapsed += fast_seconds;
       if (ok && solver->common.status >= 0 &&
