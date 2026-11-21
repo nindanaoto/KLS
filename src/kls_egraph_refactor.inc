@@ -5291,8 +5291,8 @@ static void *kls_egraph_refactor_pool_worker_main(void *arg) {
                              memory_order_acquire)) {
       atomic_store_explicit(&worker->completed_generation, generation,
                             memory_order_release);
-    } else if (atomic_fetch_sub_explicit(&pool->active_workers, 1,
-                                         memory_order_acq_rel) == 1) {
+    } else if (atomic_fetch_sub(&pool->active_workers, 1) == 1 &&
+               atomic_load(&pool->done_sleeper)) {
       pthread_mutex_lock(&shared->lock);
       pthread_cond_signal(&pool->done_cond);
       pthread_mutex_unlock(&shared->lock);
@@ -5318,11 +5318,32 @@ static void kls_egraph_pool_dispatch_and_wait(
   atomic_fetch_add_explicit(&pool->generation, 1ul, memory_order_release);
   pthread_cond_broadcast(&pool->work_cond);
   pthread_mutex_unlock(&shared->lock);
+  const uint64_t share_start = kls_idle_gap_now();
   kls_egraph_refactor_pool_run_worker(&pool->workers[0]);
+  /* The crew was handed shares of about the caller's size, so it is normally
+     within a share of finishing when the caller is. Sleeping here puts a
+     futex wake on every dispatch, which costs more than the wait it covers
+     when shares are tens of microseconds; so the caller first polls for as
+     long as its own share took, and sleeps only when the crew is further
+     behind than that (a worker lost its processor, or holds a much larger
+     share). The poll can therefore at most double the caller's busy time. */
+  const uint64_t share_end = kls_idle_gap_now();
+  const uint64_t poll_until = share_end + (share_end - share_start);
+  for (unsigned spin = 1;
+       atomic_load_explicit(&pool->active_workers, memory_order_acquire) > 0;
+       ++spin) {
+    kls_cpu_relax();
+    if ((spin & 31u) == 0u && kls_idle_gap_now() >= poll_until) break;
+  }
   pthread_mutex_lock(&shared->lock);
-  while (atomic_load_explicit(&pool->active_workers,
-                              memory_order_acquire) > 0) {
-    pthread_cond_wait(&pool->done_cond, &shared->lock);
+  if (atomic_load(&pool->active_workers) > 0) {
+    /* The last worker reads done_sleeper after its decrement and this reads
+       the count after raising done_sleeper, so one of them sees the other. */
+    atomic_store(&pool->done_sleeper, 1);
+    while (atomic_load(&pool->active_workers) > 0) {
+      pthread_cond_wait(&pool->done_cond, &shared->lock);
+    }
+    atomic_store(&pool->done_sleeper, 0);
   }
   kls_idle_gap_finish(&pool->idle_gap);
   kls_affinity_scope_leave(&affinity);
@@ -5474,6 +5495,7 @@ static kls_egraph_refactor_pool *ensure_egraph_refactor_pool(
   atomic_init(&pool->generation, 0ul);
   atomic_init(&pool->active_workers, 0);
   atomic_init(&pool->spin_completion, 0);
+  atomic_init(&pool->done_sleeper, 0);
   atomic_init(&pool->shutdown, 0);
   {
     /* These retained numerics return after every update/solve pair.  Keep

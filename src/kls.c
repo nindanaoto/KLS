@@ -1757,6 +1757,8 @@ struct kls_egraph_refactor_pool {
   int created_count;
   atomic_int active_workers;
   atomic_int spin_completion;
+  /* The caller is, or is about to be, asleep on done_cond. */
+  atomic_int done_sleeper;
   atomic_int shutdown;
   int caller_affinity_cpu;
   atomic_uint worker_spin_iters;
