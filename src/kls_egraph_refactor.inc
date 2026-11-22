@@ -7352,6 +7352,14 @@ static int kls_egraph_mapped_refactor(kls_solver *solver,
   shared->row_pipeline_ordered_private = 0;
   shared->trial_deadline_seconds = solver->observed_parallel.active==1
     ? solver->observed_parallel.deadline : 0;
+  if (shared->trial_deadline_seconds != 0.0 &&
+      solver->observed_parallel.bound > 0) {
+    /* The crew exists from here on: the candidate's own bound starts now. */
+    const double due = kls_now_seconds() + solver->observed_parallel.bound;
+    if (due < shared->trial_deadline_seconds) {
+      shared->trial_deadline_seconds = due;
+    }
+  }
   atomic_store_explicit(&shared->trial_deadline_hit,0,memory_order_relaxed);
   atomic_store_explicit(&shared->stop, 0, memory_order_release);
   shared->invalid = 0;

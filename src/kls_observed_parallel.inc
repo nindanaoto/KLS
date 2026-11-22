@@ -56,7 +56,7 @@ static double kls_observed_parallel_startup(void) {
 
 typedef struct {
   unsigned epoch;
-  int observed,changed,sampled,candidate_ok;
+  int observed,changed,sampled,candidate_ok,timed_out;
   double candidate_seconds,extra,incumbent_start;
 } kls_observed_parallel_call;
 
@@ -129,7 +129,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
        that funded this start covers the difference. Later candidates are
        warm and keep the one-cycle bound. */
     const double bound=kls_observed_parallel_priced(g)?g->cycle:1.5*g->cycle;
-    g->deadline=trial_start+fmin(bound,remaining);
+    g->deadline=trial_start+remaining;g->bound=fmin(bound,remaining);
     int status=kls_refactor_solve_impl(s,values,1,b,0,x,0);
     /* The comparison must price what a retained candidate will cost. An
        application-managed caller pays no certificate afterwards, so the one
@@ -153,10 +153,14 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
     if(s->egraph_pool) kls_idle_gap_hold(&s->egraph_pool->idle_gap);
     kls_observed_parallel_restore_native(s);
     if(status==KLS_OK && !call.candidate_ok && deadline && s->refactor_level_ptr &&
-       call.epoch==s->observed_parallel_epoch && kls_observed_parallel_capable(s))
-      (void)kls_observed_parallel_defer_deadline(g);
+       call.epoch==s->observed_parallel_epoch && kls_observed_parallel_capable(s) &&
+       !kls_observed_parallel_defer_deadline(g))
+      /* The refunded retry is spent. A candidate cut off at its bound was
+         correct but no faster than the incumbent: that is a lost comparison,
+         judged like one that finished late, not a failed one. */
+      call.timed_out=1;
   } else g->choice=-1;
-  g->deadline=0;g->active=2;
+  g->deadline=0;g->bound=0;g->active=2;
   call.extra=kls_now_seconds()-start;
   /* Full extra work, including setup, numeric, snapshot, solve and proof,
      is charged even on failed or timed-out trials. */
@@ -180,9 +184,11 @@ static void kls_observed_parallel_after(kls_solver *s,
   if(call.incumbent_start) {
     const double incumbent=kls_now_seconds()-call.incumbent_start;
     if(stable && call.sampled)
-      (void)kls_observed_parallel_record(g,call.candidate_ok && status==KLS_OK &&
+      (void)kls_observed_parallel_record(g,
+          (call.candidate_ok || call.timed_out) && status==KLS_OK &&
           kls_observed_parallel_incumbent_path(s),
-          call.candidate_seconds,incumbent);
+          call.timed_out?fmax(call.candidate_seconds,incumbent):
+            call.candidate_seconds,incumbent);
     else if(g->choice==1) g->choice=-1;
     if(!stable || status!=KLS_OK ||
        (g->retry_pending && !kls_observed_parallel_incumbent_path(s)))g->choice=-1;

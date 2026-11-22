@@ -38,6 +38,12 @@ typedef struct {
   int lost;
   unsigned cycles;
   double history[8],total,cycle,limit,spent,deadline;
+  /* How long a candidate may run once its crew has been dispatched. The
+     deadline above is the budget's hard stop and is on the clock from the
+     start of the call; this bound starts at dispatch, so the time taken to
+     create the crew, which the start-up reserve already paid for, is not
+     taken out of the candidate's own running time. */
+  double bound;
   double candidate[2],incumbent[2];
   /* Largest whole extra cost of one executed comparison so far. */
   double price;
