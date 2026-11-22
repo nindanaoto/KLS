@@ -10464,6 +10464,21 @@ static int kls_initial_low_work_btf_public_unscaled_candidate(
     solver->symbolic->est_flops < 100000.0;
 }
 
+/* Row scaling is a second pass over the values on every refactor and solve,
+   and the fixed-pattern kernels that consume the caller's values directly
+   need an unscaled factor.  Start unscaled whatever the size of the matrix:
+   the first factor is not an extra one unless its realized pivoting rejects
+   it, and then the value-selected scale is the retry, exactly as for the
+   small frames above. */
+static int kls_initial_unscaled_first_candidate(
+  const kls_solver *solver, int robust_scale) {
+  return solver != NULL && solver->symbolic != NULL &&
+    solver->numeric == NULL && robust_scale > 0 &&
+    solver->options.scale == KLS_SCALE_AUTO &&
+    solver->row_scale == NULL && solver->col_scale == NULL &&
+    solver->symbolic->structural_rank == solver->n;
+}
+
 /* A scaled factor can be numerically condition-sensitive yet structurally
    stable, while scaling also excludes the branch-reduced unscaled EGraph
    kernels on every later update.  For a long caller-declared lifecycle,

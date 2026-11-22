@@ -9278,6 +9278,7 @@ static int private_factor_body(kls_solver *solver, const double *values) {
   int generic_nd_robust_scale = 0;
   int initial_certified_unscaled_recovery_scale = 0;
   int initial_low_work_btf_public_unscaled = 0;
+  int initial_unscaled_first = 0;
   if (!had_numeric && !solver->prestatic_adopted_unfactored) {
     int selected_scale = choose_auto_scale_from_values(solver, numeric_values);
     if (solver->generic_nd_portfolio_selected &&
@@ -9316,6 +9317,11 @@ static int private_factor_body(kls_solver *solver, const double *values) {
           solver, selected_scale)) {
       initial_certified_unscaled_recovery_scale = selected_scale;
       solver->common.scale = 0;
+    } else if (kls_initial_unscaled_first_candidate(solver, selected_scale)) {
+      initial_certified_unscaled_recovery_scale = selected_scale;
+      initial_low_work_btf_public_unscaled = 1;
+      initial_unscaled_first = 1;
+      solver->common.scale = -1;
     }
     kls_signal_metis_race_values(solver, numeric_values);
   }
@@ -9636,8 +9642,9 @@ static int private_factor_body(kls_solver *solver, const double *values) {
           solver->common.status >= TRILINOS_KLU_OK &&
           solver->common.status != TRILINOS_KLU_SINGULAR &&
           solver->numeric->Rs == NULL &&
-          solver->numeric->lnz <= (UF_long)UINT16_MAX &&
-          solver->numeric->unz <= (UF_long)UINT16_MAX &&
+          (initial_unscaled_first ||
+           (solver->numeric->lnz <= (UF_long)UINT16_MAX &&
+            solver->numeric->unz <= (UF_long)UINT16_MAX)) &&
           solver->common.noffdiag <= pivot_cap;
         if (!candidate_ok) {
           if (solver->numeric != NULL) {
