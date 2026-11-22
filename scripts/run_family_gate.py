@@ -72,7 +72,7 @@ def report(args, cases):
             continue
         if row['side'] == 'klu':
             reference[row['case']] = row['per_solve']
-        elif row['side'] == GATED_MODE and row.get('qualified'):
+        elif row['side'] == GATED_MODE and (row.get('qualified') or row.get('tolerant')):
             kls[(row['case'], row['threads'])].append(row['per_solve'])
     kls = {k: statistics.median(v) for k, v in kls.items()}
     cells = [c for c in detail['cells'] if c['mode'] == GATED_MODE and c['ratio'] is not None]

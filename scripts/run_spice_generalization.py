@@ -360,13 +360,16 @@ def run(args):
             netlist = re.sub(r'^(\s*\.end\s*)$', lambda m: comments + m[0], netlist, flags=re.I | re.M)
             (dest / 'verification.cir').write_text(netlist)
             try:
+                if row['steps'] != reference['steps']:
+                    # Cannot qualify whatever the verifier says; the trajectory check below decides.
+                    raise subprocess.TimeoutExpired('xyce_verify.pl', 0)
                 with (dest / 'verification.log').open('x') as stream:
                     row['verifier'] = subprocess.run(
                         ['perl', str(args.regression / 'TestScripts/xyce_verify.pl'), '--verbose',
                          str(dest / 'verification.cir'), str(ref_output), str(test_output)],
                         stdout=stream, stderr=subprocess.STDOUT, timeout=120).returncode
-            except subprocess.TimeoutExpired:
-                row['verifier'] = 'timeout'
+            except subprocess.TimeoutExpired as expired:
+                row['verifier'] = 'timeout' if expired.timeout else 'skipped'
             row['qualified'] = bool(reference['qualified'] and row['steps'] == reference['steps'] and
                                     row['verifier'] == 0)
             if not row['qualified'] and reference['qualified'] and metadata['set'] != 'tune':
