@@ -1,0 +1,8 @@
+nano v nmos
+V1 g 0 SIN(1 1 1e6)
+V2 d 0 2
+M1 d g 0 0 nm l=1u w=10u
+.model nm nmos(level=1 vto=0.7 kp=1e-4)
+.tran 1n 5m
+.print tran i(V2)
+.end

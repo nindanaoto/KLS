@@ -1,0 +1,10 @@
+zoo opamp vcvs
+VIN i 0 SIN(0 1 1e6)
+R1 i m 1k
+R2 m o 10k
+E1 o 0 0 m 1e5
+RL o 0 1k
+C1 m 0 1p
+.tran 1n 0.2m
+.print tran v(o)
+.end

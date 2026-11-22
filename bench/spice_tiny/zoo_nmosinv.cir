@@ -1,0 +1,10 @@
+zoo nmos inverter
+VDD d 0 3.3
+VIN g 0 PULSE(0 3.3 0 1n 1n 0.5u 1u)
+RL d o 10k
+M1 o g 0 0 NM L=1u W=10u
+CL o 0 10f
+.model NM NMOS(LEVEL=1 VTO=0.7 KP=100u)
+.tran 1n 0.1m
+.print tran v(o)
+.end

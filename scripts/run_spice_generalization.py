@@ -233,11 +233,15 @@ def run(args):
     spec = importlib.util.spec_from_file_location('cleanup', root / 'bench/process_session_cleanup.py')
     cleanup = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cleanup)
+    staging = {}
+    case_root = args.case_root or args.regression / 'Netlists'
     if args.set == 'tune':
         cases = list(CASES)
     else:
         manifest = json.loads(args.manifest.read_text())
         cases = [c['case'] for c in manifest['cases'] if c['split'] == args.set]
+        staging = {c['case']: dict(companions=bool(c.get('companions')), tran_scale=c.get('tran_scale', 1))
+                   for c in manifest['cases']}
     if args.case:
         if args.set == 'holdout':
             raise SystemExit('held-out decks are never run individually')
@@ -274,7 +278,7 @@ def run(args):
         binaries[name] = target
     inputs = [Path(__file__), Path(__file__).with_name('run_spice_campaign.py'), args.image, args.license,
               args.regression / 'TestScripts/xyce_verify.pl', *args.peer_library,
-              *[args.regression / 'Netlists' / c for c in cases]]
+              *[case_root / c for c in cases]]
     if args.manifest:
         inputs.append(args.manifest)
     hashes.update({str(p.resolve()): sha(p) for p in inputs})
@@ -303,7 +307,7 @@ def run(args):
         # reference has run, every other run gets a bound scaled from its wall time.
         limit = args.timeout if reference is None else min(
             args.timeout, max(args.min_timeout, args.timeout_factor * reference['wall_seconds']))
-        label = hashes[str((args.regression / 'Netlists' / case).resolve())][:12] if quiet else Path(case).stem
+        label = hashes[str((case_root / case).resolve())][:12] if quiet else Path(case).stem
         dest = output / domain / label / (f't{count}-p{trial}-{side}' + (f'-retry{attempt}' if attempt else ''))
         if side == 'klu':
             solver, extra, overrides = 'KLU', '', {}
@@ -311,7 +315,8 @@ def run(args):
             solver, extra, overrides = KLS_SIDES[side]
         else:
             solver, extra, overrides = next(c[side] for c in PEER_CONFIGS.values() if side in c)
-        stage(args.regression / 'Netlists' / case, dest, solver, count, args.license, extra)
+        stage(case_root / case, dest, solver, count, args.license, extra,
+              **staging.get(case, {}))
         executable = binaries['baseline' if side == 'baseline' and 'baseline' in binaries else 'kls']
         cmd = ['taskset', '-c', cpus, 'apptainer', 'exec', '--bind', f'{args.workspace}:/work',
                '--bind', f'{args.workspace}:{args.workspace}', '--bind', '/tmp:/tmp',
@@ -414,6 +419,8 @@ def main():
     p.add_argument('--manifest', type=Path, help='Held-out manifest (required for dev and holdout)')
     p.add_argument('--set', choices=['tune', 'dev', 'holdout'], required=True)
     p.add_argument('--case', action='append', default=[], help='Substring filter; not allowed for holdout')
+    p.add_argument('--case-root', type=Path,
+                   help='Directory the manifest cases are relative to (default: the regression Netlists)')
     p.add_argument('--peer-library', type=Path, action='append', default=[])
     p.add_argument('--no-peers', action='store_true')
     p.add_argument('--passes', type=int, default=4)

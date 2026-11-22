@@ -59,11 +59,45 @@ def wait_child(child, seconds):
         timer.join()
 
 
-def stage(source, destination, solver, threads, license_file, extra=''):
+SPICE_SCALE = dict(t=1e12, g=1e9, meg=1e6, k=1e3, m=1e-3, mil=25.4e-6, u=1e-6, n=1e-9, p=1e-12, f=1e-15)
+
+
+def spice_number(token):
+    match = re.fullmatch(r'([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(meg|mil|[tgkmunpf])?[a-z]*', token, re.I)
+    if not match:
+        raise ValueError(f'not a plain SPICE number: {token}')
+    return float(match[1]) * SPICE_SCALE.get((match[2] or '').lower(), 1.0)
+
+
+def scale_tran(text, factor):
+    """Multiply the final time of the deck's single .tran line."""
+    lines = re.findall(r'^\s*\.tran\b[^\n]*', text, re.I | re.M)
+    if len(lines) != 1:
+        raise ValueError('expected exactly one .tran')
+    fields = lines[0].split()
+    if len(fields) < 3:
+        raise ValueError('.tran without a final time')
+    fields[2] = repr(spice_number(fields[2]) * factor)
+    return text.replace(lines[0], ' '.join(fields), 1)
+
+
+def stage(source, destination, solver, threads, license_file, extra='', companions=False, tran_scale=1):
+    """Write a retargeted copy of a deck.
+
+    companions: the deck reads other files (.include, .lib, file=); the regular files
+    beside it are copied too.  tran_scale: multiply the transient's final time, used
+    for decks that are too short to time as shipped (the circuit is unchanged).
+    """
     destination.mkdir(parents=True)
     text = source.read_text()
-    if re.search(r'^\s*\.(?:include|inc|lib)\b', text, re.I | re.M):
+    if companions:
+        for other in sorted(source.parent.iterdir()):
+            if other.is_file() and other != source and other.stat().st_size <= 16 << 20:
+                shutil.copyfile(other, destination / other.name)
+    elif re.search(r'^\s*\.(?:include|inc|lib)\b', text, re.I | re.M):
         raise ValueError('campaign requires the original self-contained circuits')
+    if tran_scale != 1:
+        text = scale_tran(text, tran_scale)
     option = f'.options linsol type={solver}'
     if solver != 'KLU':
         option += f' {solver}_THREADS={threads}'

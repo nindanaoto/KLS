@@ -1,0 +1,14 @@
+zoo bjt amp
+VCC c 0 12
+VIN i 0 SIN(0 10m 1e6)
+CIN i b 1u
+R1 c b 100k
+R2 b 0 22k
+RC c o 4.7k
+RE e 0 1k
+CE e 0 10u
+Q1 o b e QN
+.model QN NPN(BF=100 IS=1e-15 CJE=1p CJC=1p)
+.tran 1n 0.1m
+.print tran v(o)
+.end

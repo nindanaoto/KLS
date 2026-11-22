@@ -1,0 +1,10 @@
+zoo transformer
+V1 a 0 SIN(0 1 1e6)
+R1 a b 10
+L1 b 0 1m
+L2 c 0 1m
+K1 L1 L2 0.99
+R2 c 0 100
+.tran 1n 0.2m
+.print tran v(c)
+.end

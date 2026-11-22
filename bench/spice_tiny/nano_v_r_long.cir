@@ -1,0 +1,6 @@
+nano v r
+V1 a 0 SIN(0 1 1e6)
+R1 a 0 1k
+.tran 1n 5m
+.print tran i(V1)
+.end

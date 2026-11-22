@@ -1,0 +1,7 @@
+nano v diode
+V1 a 0 SIN(0 0.7 1e6)
+D1 a 0 dm
+.model dm d(is=1e-14)
+.tran 1n 5m
+.print tran i(V1)
+.end

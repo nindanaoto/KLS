@@ -1,0 +1,9 @@
+nano two node rc
+I1 0 a SIN(0 1m 1e6)
+R1 a b 1k
+C1 a 0 1p
+R2 b 0 1k
+C2 b 0 1p
+.tran 1n 5m
+.print tran v(b)
+.end

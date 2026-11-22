@@ -1,0 +1,10 @@
+zoo bsource
+V1 a 0 SIN(0 1 1e6)
+R1 a b 1k
+B1 c 0 V={v(b)*v(b)}
+R2 c d 1k
+C1 d 0 1p
+C2 b 0 1p
+.tran 1n 0.2m
+.print tran v(d)
+.end

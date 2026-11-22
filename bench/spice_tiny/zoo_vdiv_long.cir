@@ -1,0 +1,8 @@
+zoo vdiv
+V1 a 0 SIN(0 1 1e6)
+R1 a b 1k
+R2 b 0 1k
+C1 b 0 1p
+.tran 1n 5m
+.print tran v(b)
+.end

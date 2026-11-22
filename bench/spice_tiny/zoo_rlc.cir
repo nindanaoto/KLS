@@ -1,0 +1,9 @@
+zoo rlc
+V1 a 0 PULSE(0 1 0 1n 1n 0.5u 1u)
+R1 a b 50
+L1 b c 1u
+C1 c 0 1n
+R2 c 0 1k
+.tran 1n 0.2m
+.print tran v(c)
+.end

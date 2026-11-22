@@ -1,0 +1,8 @@
+zoo tline
+V1 a 0 PULSE(0 1 0 0.1n 0.1n 5n 10n)
+R1 a b 50
+T1 b 0 c 0 Z0=50 TD=1n
+R2 c 0 75
+.tran 0.05n 20u
+.print tran v(c)
+.end

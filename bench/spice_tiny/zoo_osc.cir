@@ -1,0 +1,17 @@
+zoo ring3 cmos
+VDD d 0 3.3
+M1 b a 0 0 NM L=1u W=10u
+M2 b a d d PM L=1u W=20u
+M3 c b 0 0 NM L=1u W=10u
+M4 c b d d PM L=1u W=20u
+M5 a c 0 0 NM L=1u W=10u
+M6 a c d d PM L=1u W=20u
+C1 a 0 10f
+C2 b 0 10f
+C3 c 0 10f
+.ic v(a)=0 v(b)=3.3 v(c)=0
+.model NM NMOS(LEVEL=1 VTO=0.7 KP=100u)
+.model PM PMOS(LEVEL=1 VTO=-0.7 KP=50u)
+.tran 1p 0.2u
+.print tran v(a)
+.end

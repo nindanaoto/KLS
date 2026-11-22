@@ -1,0 +1,7 @@
+zoo rc one node
+I1 0 a SIN(0 1m 1e6)
+R1 a 0 1k
+C1 a 0 1p
+.tran 1n 5m
+.print tran v(a)
+.end

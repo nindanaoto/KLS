@@ -1,0 +1,13 @@
+zoo switch buck
+VIN a 0 12
+VC c 0 PULSE(0 1 0 1n 1n 0.5u 1u)
+S1 a b c 0 SW
+D1 0 b DM
+L1 b o 10u
+C1 o 0 1u
+RL o 0 5
+.model SW VSWITCH(RON=0.01 ROFF=1e6 VON=0.6 VOFF=0.4)
+.model DM D(IS=1e-12)
+.tran 1n 0.1m
+.print tran v(o)
+.end

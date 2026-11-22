@@ -25,33 +25,44 @@ from run_spice_campaign import CASES, parse_log, sha, stage
 ANALYSES = r'step|sampling|embeddedsampling|pce|hb|mpde|ac|noise|dc|sens|lin|result'
 
 
-def candidate(path):
-    """Plain single-run transient decks that stage() can retarget."""
+def candidate(path, companions=False):
+    """Plain single-run transient decks that stage() can retarget.
+
+    companions=True selects instead the decks that read other files (.include, .lib,
+    file=), which stage() can run when it copies the files beside the deck.
+    """
     try:
         text = path.read_text(errors='strict')
     except (UnicodeDecodeError, OSError):
         return False
     flags = re.I | re.M
+    reads_files = bool(re.search(r'^\s*\.(?:include|inc|lib)\b', text, flags) or
+                       re.search(r'\bfile\s*=', text, re.I))
     return bool(re.search(r'^\s*\.tran\b', text, flags) and
                 re.search(r'^\s*\.print\s+tran\b', text, flags) and
                 len(re.findall(r'^\s*\.end\s*$', text, flags)) == 1 and
-                not re.search(r'^\s*\.(?:include|inc|lib)\b', text, flags) and
                 not re.search(rf'^\s*\.(?:{ANALYSES})\b', text, flags) and
-                not re.search(r'\bfile\s*=', text, re.I))
+                reads_files == companions)
 
 
 def split_of(case):
     return 'holdout' if hashlib.sha256(case.encode()).digest()[0] & 1 else 'dev'
 
 
-def screen(args, case):
-    dest = args.work / hashlib.sha256(case.encode()).hexdigest()[:16]
+def pinned(args):
+    cpus = getattr(args, 'cpus', None)
+    return ['taskset', '-c', cpus] if cpus else []
+
+
+def screen(args, case, **staging):
+    tag = case + (repr(sorted(staging.items())) if staging else '')
+    dest = args.work / hashlib.sha256(tag.encode()).hexdigest()[:16]
     row = dict(case=case, sha256=sha(args.regression / 'Netlists' / case))
     try:
-        stage(args.regression / 'Netlists' / case, dest, 'KLU', 1, args.license)
+        stage(args.regression / 'Netlists' / case, dest, 'KLU', 1, args.license, **staging)
     except (ValueError, OSError) as error:
         return dict(row, status='unstageable', detail=str(error))
-    cmd = ['apptainer', 'exec', '--bind', f'{args.workspace}:/work',
+    cmd = [*pinned(args), 'apptainer', 'exec', '--bind', f'{args.workspace}:/work',
            '--bind', f'{args.workspace}:{args.workspace}', '--pwd', str(dest),
            str(args.image), str(args.xyce), 'input.cir']
     env = {k: v for k, v in os.environ.items() if not k.startswith(('LD_', 'KLS_', 'OMP_'))}
@@ -87,7 +98,7 @@ STABILITY_FACTORS = (0.99, 1.01)
 STABILITY_STEP_RATIO = 1.25
 
 
-def stability(args, case):
+def stability(args, case, **staging):
     """KLU-only check that the deck has one trajectory to compare solvers on.
 
     The integration tolerance is moved 1% either way.  A well-conditioned deck takes
@@ -99,7 +110,7 @@ def stability(args, case):
     steps = []
     for factor in STABILITY_FACTORS:
         dest = args.work / (hashlib.sha256(case.encode()).hexdigest()[:16] + f'-s{factor}')
-        stage(args.regression / 'Netlists' / case, dest, 'KLU', 1, args.license)
+        stage(args.regression / 'Netlists' / case, dest, 'KLU', 1, args.license, **staging)
         text = (dest / 'input.cir').read_text()
         flags = re.I | re.M
         own = re.search(r'^\s*\.options\s+timeint\b[^\n]*?\breltol\s*=\s*([\d.eE+-]+)', text, flags)
@@ -109,7 +120,7 @@ def stability(args, case):
             text = re.sub(r'^(\s*\.end\s*)$', lambda m: f'.options timeint reltol={1e-3 * factor!r}\n' + m[0],
                           text, flags=flags)
         (dest / 'input.cir').write_text(text)
-        cmd = ['apptainer', 'exec', '--bind', f'{args.workspace}:/work',
+        cmd = [*pinned(args), 'apptainer', 'exec', '--bind', f'{args.workspace}:/work',
                '--bind', f'{args.workspace}:{args.workspace}', '--pwd', str(dest),
                str(args.image), str(args.xyce), 'input.cir']
         env = {k: v for k, v in os.environ.items() if not k.startswith(('LD_', 'KLS_', 'OMP_'))}

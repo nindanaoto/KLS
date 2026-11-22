@@ -1,0 +1,13 @@
+zoo bridge
+V1 a b SIN(0 5 1e6)
+D1 a p DM
+D2 b p DM
+D3 n a DM
+D4 n b DM
+RL p n 1k
+CL p n 1n
+R0 n 0 1
+.model DM D(IS=1e-14 CJO=1p)
+.tran 1n 0.1m
+.print tran v(p)
+.end
