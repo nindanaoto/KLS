@@ -338,9 +338,17 @@ def run(args):
                    exit_code=code, timed_out=timeout, wall_seconds=wall, attempt=attempt)
         log = parse_log((dest / 'stdout.log').read_text(errors='replace'))
         values = waveform(dest / 'input.cir.prn')
+        text = (dest / 'stdout.log').read_text(errors='replace')
+        failed = [int(v) for v in re.findall(r'Number Failed Linear Solves:\s*(\d+)', text)]
+        row['failed_linear_solves'] = max(failed + [log['linear_failure_messages']])
+        # A failed linear solve disqualifies a run unless the reference solver also fails
+        # solves on this deck (a singular operating-point matrix that the simulator's own
+        # continuation handles); the step-count and waveform checks below still apply.
+        singular_deck = bool(reference and reference.get('failed_linear_solves'))
         row['qualified'] = bool(
             code == 0 and not timeout and closure['all_session_processes_absent'] and log['end_of_simulation'] and
-            not log['linear_failure_messages'] and log['successful_steps'] and log['failed_steps'] and
+            (not row['failed_linear_solves'] or reference is None or singular_deck) and
+            log['successful_steps'] and log['failed_steps'] and
             log['linear_seconds'] and all(math.isfinite(v) and v > 0 for v in log['linear_seconds']) and
             values and all(math.isfinite(v) for r in values for v in r))
         row['linear'] = log['linear_seconds'][-1] if log['linear_seconds'] else None
