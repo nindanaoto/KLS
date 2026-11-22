@@ -16451,6 +16451,16 @@ decline:
 static int kls_refactor_solve_full(kls_solver *s, const double *values,
     int64_t nrhs, const double *b, int64_t ldb, double *x, int64_t ldx);
 
+/* Replayed calls are not observed, so a factor that replays could never fund
+   the parallel consultation. While that consultation is still open - too few
+   cycles to judge, or a cycle its cost model says a crew could shorten - full
+   calls continue; a decline, or a cycle too short to gain, lets replay arm. */
+static int kls_observed_parallel_pending(const kls_solver *s) {
+  const kls_observed_parallel_state *g=&s->observed_parallel;
+  return s->options.threads>1 && g->choice==0 && (g->cycles<8 || g->gain>0) &&
+    kls_observed_parallel_capable(s);
+}
+
 /* Small on purpose: a replayed call returns from here without setting up
    the full call's frame. */
 KLS_REPLAY_TEXT int kls_refactor_solve(kls_solver *s, const double *values, int64_t nrhs,
@@ -16509,6 +16519,7 @@ static int kls_refactor_solve_full(kls_solver *s, const double *values,
       !s->private_caller_depth &&
       s->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED &&
       !s->observed_parallel.active && s->observed_parallel.choice<=0 &&
+      !kls_observed_parallel_pending(s) &&
       s->snb_auto.choice<=0 && !s->native_i16_policy.active) {
     if (s->fast_lane_streak<KLS_FAST_LANE_STREAK) ++s->fast_lane_streak;
     if (s->fast_lane_streak>=KLS_FAST_LANE_STREAK) {
