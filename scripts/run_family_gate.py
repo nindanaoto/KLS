@@ -20,6 +20,7 @@ import argparse
 import collections
 import json
 import math
+import re
 from pathlib import Path
 import shutil
 import statistics
@@ -27,10 +28,19 @@ import subprocess
 import sys
 
 from make_spice_family import FAMILIES
-from run_spice_campaign import scale_tran
+from run_spice_campaign import scale_tran, spice_number
 
 CLIFF = 1.3
 GATED_MODE = 'kls-app'
+
+
+def thin_output(text, points=2000):
+    """Print the transient on a fixed grid.  These decks take up to a million steps, and
+    printing each one makes the output, and its comparison against the reference run,
+    far larger than the simulation."""
+    final = spice_number(re.search(r'^\s*\.tran\b[^\n]*', text, re.I | re.M)[0].split()[2])
+    line = f'.options output initial_interval={final / points!r}\n'
+    return re.sub(r'^(\s*\.end\s*)$', lambda m: line + m[0], text, count=1, flags=re.I | re.M)
 
 
 def prepare(args):
@@ -41,16 +51,17 @@ def prepare(args):
         for exponent in range(args.min_log2, args.max_log2 + 1):
             text = FAMILIES[family](2 ** exponent, None)
             name = f'{family}_{exponent:02d}.cir'
-            (decks / name).write_text(text)
+            (decks / name).write_text(thin_output(text))
             cases.append(dict(case=name, split='dev', family=family, log2_size=exponent, length=1))
             if exponent in args.long_log2 and args.long_scale > 1:
                 name = f'{family}_{exponent:02d}_x{args.long_scale}.cir'
-                (decks / name).write_text(scale_tran(text, args.long_scale))
+                (decks / name).write_text(thin_output(scale_tran(text, args.long_scale)))
                 cases.append(dict(case=name, split='dev', family=family, log2_size=exponent,
                                   length=args.long_scale))
     if args.tiny and not args.family:
         for path in sorted(args.tiny.glob('*.cir')):
-            shutil.copyfile(path, decks / path.name)
+            text = path.read_text()
+            (decks / path.name).write_text(thin_output(text))
             cases.append(dict(case=path.name, split='dev', family='tiny', log2_size=None, length=1))
     manifest = args.output / 'family_manifest.json'
     manifest.write_text(json.dumps(dict(schema=1, cases=cases), indent=1) + '\n')
@@ -149,7 +160,8 @@ def main():
            '--image', str(args.image), '--license', str(args.license), '--candidate', str(args.candidate),
            '--output', str(args.output / 'run'), '--manifest', str(manifest), '--case-root', str(decks),
            '--set', 'dev', '--passes', str(args.passes), '--threads', args.threads, '--domain', args.domain,
-           '--order', args.order, '--timeout', str(args.timeout)]
+           '--order', args.order, '--timeout', str(args.timeout), '--min-timeout', '20',
+           '--timeout-factor', '10', '--peer-retries', '1']
     if args.baseline:
         cmd += ['--baseline', str(args.baseline)]
     with (args.output / 'run.log').open('w') as log:
