@@ -1,0 +1,608 @@
+{
+  "schema": 2,
+  "purpose": "Second sealed SPICE set; membership decided from KLU reference runs only",
+  "regression_commit": "59a5f3f40e4a053d1a95fe31ee3d351fa74b7b89",
+  "tuning_cases": [
+    "PDE_2D_BJT/invertbjt.cir",
+    "MOS13_IC/invert50_mos1.cir",
+    "CircuitSim90/MOS2_LARGE/mem_plus.cir",
+    "CircuitSim90/MOS2/mux8.cir",
+    "CircuitSim90/MOS2_LARGE/dac.cir",
+    "NEURON/rallpack3.cir",
+    "CircuitSim90/MOS2_LARGE/ram2k.cir"
+  ],
+  "seen_manifest": "spice_holdout_manifest.json",
+  "min_linear_seconds": 0.05,
+  "extend_from": 0.01,
+  "max_tran_scale": 64,
+  "per_directory": 2,
+  "stability": {
+    "reltol_factors": [
+      0.99,
+      1.01
+    ],
+    "step_ratio": 1.25
+  },
+  "considered": 1447,
+  "measured": 63,
+  "timed": 55,
+  "eligible": 52,
+  "cases": [
+    {
+      "case": "BSIMCMG_110/inverter_transient.cir",
+      "sha256": "e6d3bf9c754f303c23654501bffc3a04354b3d9f418b52b9477c23be73e3e363",
+      "status": "ran",
+      "wall_seconds": 1.9239857549546286,
+      "klu_linear_seconds": 0.105065,
+      "successful_steps": 14044,
+      "failed_steps": 1838,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 10,
+      "stability_steps": [
+        14208,
+        13774
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "BUG_1301/rlc_tranline.cir",
+      "sha256": "f75b62bc4198c0b5858c96d1ff459fe3452b4c6a584ee3dc0ea89bacc9b5c104",
+      "status": "ran",
+      "wall_seconds": 1.2544364150380716,
+      "klu_linear_seconds": 0.102259,
+      "successful_steps": 3140,
+      "failed_steps": 2,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 7,
+      "stability_steps": [
+        2698,
+        2818
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_1041_SON/b3soi_invert_scale.cir",
+      "sha256": "129e2603aaba293c7a7faea925b48a8290dd200dcfc6a8946664ad509cac0aa5",
+      "status": "ran",
+      "wall_seconds": 1.3918311030138284,
+      "klu_linear_seconds": 0.105771,
+      "successful_steps": 40208,
+      "failed_steps": 1667,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 7,
+      "stability_steps": [
+        39228,
+        39388
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_1041_SON/b3soi_invert_scale2Ref.cir",
+      "sha256": "73adc56cbad8db47987d3a872e70983767f403cc77bf14c9676b47e11982d04d",
+      "status": "ran",
+      "wall_seconds": 1.32952601602301,
+      "klu_linear_seconds": 0.101838,
+      "successful_steps": 40208,
+      "failed_steps": 1667,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 7,
+      "stability_steps": [
+        39228,
+        39388
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_243/bug_243_mpi.cir",
+      "sha256": "f641188c541b2279e7a24868ef4626d3b06a024501f03cf5ab19f2eaf81566f0",
+      "status": "ran",
+      "wall_seconds": 0.9227663979399949,
+      "klu_linear_seconds": 0.1153,
+      "successful_steps": 31206,
+      "failed_steps": 1237,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 5,
+      "stability_steps": [
+        32191,
+        31640
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_277_SON/ring51_srcstep1.cir",
+      "sha256": "09ac259524c75d19c4231ba844d418bd1a7bcf7d1b54585fddf9c2d519beea6b",
+      "status": "ran",
+      "wall_seconds": 1.123705189093016,
+      "klu_linear_seconds": 0.129533,
+      "successful_steps": 1944,
+      "failed_steps": 9,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 1,
+      "stability_steps": [
+        1871,
+        1796
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_277_SON/ring51_trans.cir",
+      "sha256": "ed5f9f7388ec6fa89e0227206347fa8e0d7a484edd4ea3d7c336fab89399beb5",
+      "status": "ran",
+      "wall_seconds": 1.0737241179449484,
+      "klu_linear_seconds": 0.134761,
+      "successful_steps": 1944,
+      "failed_steps": 9,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 1,
+      "stability_steps": [
+        1871,
+        1796
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_372/invert1-sim.cir",
+      "sha256": "0210d74d502c9084594b83bd66eafe760c0c01f155963b631744da6d74ddad64",
+      "status": "ran",
+      "wall_seconds": 1.083562958985567,
+      "klu_linear_seconds": 0.107975,
+      "successful_steps": 40728,
+      "failed_steps": 1788,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 9,
+      "stability_steps": [
+        41088,
+        41173
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_372/invert2.cir",
+      "sha256": "743f9929ad0aeff7ec56707f8f9899158720da39935f44550555b8a1a99350ae",
+      "status": "ran",
+      "wall_seconds": 1.1821072220336646,
+      "klu_linear_seconds": 0.116442,
+      "successful_steps": 36340,
+      "failed_steps": 1588,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 8,
+      "stability_steps": [
+        37535,
+        37462
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_456/push_pull_xyce_baseline.cir",
+      "sha256": "f449f6e84b4d860d48852d02ad1e0f789a5ed3ec0150acd927d20412037fabd9",
+      "status": "ran",
+      "wall_seconds": 0.7761894300347194,
+      "klu_linear_seconds": 0.0862703,
+      "successful_steps": 4583,
+      "failed_steps": 244,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 1,
+      "stability_steps": [
+        4602,
+        4578
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_456/push_pull_xyce_baseline_unpacked.cir",
+      "sha256": "56de641b4046e31c847660aa3f632d110fe37a80d1562275616d4af2852c6ad7",
+      "status": "ran",
+      "wall_seconds": 0.8373035610420629,
+      "klu_linear_seconds": 0.0877669,
+      "successful_steps": 4583,
+      "failed_steps": 244,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 1,
+      "stability_steps": [
+        4602,
+        4578
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_700_SON/bug700son.cir",
+      "sha256": "9b5500928f3b1fa85458a9697aaa7701cbe1b39c6eb85eb008b43673adf11db5",
+      "status": "ran",
+      "wall_seconds": 1.2774261080194265,
+      "klu_linear_seconds": 0.123615,
+      "successful_steps": 58124,
+      "failed_steps": 302,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 3,
+      "stability_steps": [
+        57414,
+        60121
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_706_SON/rc_simple_lib.cir",
+      "sha256": "dedb76e09b682b8ef2261265599f47028da1262d9424343c7ee371deb7a7b255",
+      "status": "ran",
+      "wall_seconds": 0.48584645602386445,
+      "klu_linear_seconds": 0.100564,
+      "successful_steps": 468,
+      "failed_steps": 1,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 5,
+      "stability_steps": [
+        469,
+        468
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_706_SON/rc_simple_xyce.cir",
+      "sha256": "c5c1820b22300b6c684f42469ae1d2d26e5bac06fc7b894ab4e1ecd34d5fa264",
+      "status": "ran",
+      "wall_seconds": 0.5012384899891913,
+      "klu_linear_seconds": 0.0817528,
+      "successful_steps": 381,
+      "failed_steps": 1,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 4,
+      "stability_steps": [
+        382,
+        381
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_746_SON/raw_file_mutual_inductors.cir",
+      "sha256": "0edeec1b197caedc4dfe32c147eef8795494bc2c9bd33c69bfc74a9c72afbc39",
+      "status": "ran",
+      "wall_seconds": 0.6779494530055672,
+      "klu_linear_seconds": 0.100866,
+      "successful_steps": 5153,
+      "failed_steps": 1606,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 4,
+      "stability_steps": [
+        5143,
+        5104
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_807_SON/inverter_transient_xyce.cir",
+      "sha256": "b394a04c6e360e73432eae5c24e485bd38abeaaf632e335546acb968193bb281",
+      "status": "ran",
+      "wall_seconds": 0.9976257150992751,
+      "klu_linear_seconds": 0.0957799,
+      "successful_steps": 17297,
+      "failed_steps": 1806,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 4,
+      "stability_steps": [
+        17296,
+        17038
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "Certification_Tests/BUG_846/ring51_loca.cir",
+      "sha256": "56bc86eed293afaed21fe619b39c7b0643bdaf366bbd28cd39bdf7d16bc8fffa",
+      "status": "ran",
+      "wall_seconds": 1.4369938799645752,
+      "klu_linear_seconds": 0.183919,
+      "successful_steps": 928,
+      "failed_steps": 109,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 10,
+      "stability_steps": [
+        1011,
+        947
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "GenCoupAPI/rlc_series_vccs_nogenext.cir",
+      "sha256": "9f49f1b4ead72009e46b83b7e25c19c3815b1d23d9379e7cede1cd8dd62bb4d3",
+      "status": "ran",
+      "wall_seconds": 1.4362513690721244,
+      "klu_linear_seconds": 0.102392,
+      "successful_steps": 54878,
+      "failed_steps": 1963,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 10,
+      "stability_steps": [
+        56736,
+        54018
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "HB/RC/simpleRC.cir",
+      "sha256": "422bfa144573d2a296369428757545fd27784850b0d79cc3d80f859687fb66b9",
+      "status": "ran",
+      "wall_seconds": 2.016057298023952,
+      "klu_linear_seconds": 0.136746,
+      "successful_steps": 127302,
+      "failed_steps": 1688,
+      "ill_posed": false,
+      "stability_steps": [
+        141863,
+        127702
+      ],
+      "unstable": false,
+      "companions": false,
+      "tran_scale": 1,
+      "split": "holdout"
+    },
+    {
+      "case": "IC_AND_NODESET/pierce.cir",
+      "sha256": "ea703be759a198d7d562b8fa511513dcc43b64317a6a1857aa1820ed59deaa68",
+      "status": "ran",
+      "wall_seconds": 1.522756441961974,
+      "klu_linear_seconds": 0.101161,
+      "successful_steps": 75275,
+      "failed_steps": 161,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 8,
+      "stability_steps": [
+        75407,
+        72225
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "IC_AND_NODESET/pierce_noop.cir",
+      "sha256": "a62eecde9de5bbb7d9d671f418a1ceff935558fa1e3e5d0c5a82059c39e90ff2",
+      "status": "ran",
+      "wall_seconds": 1.5306193699361756,
+      "klu_linear_seconds": 0.108242,
+      "successful_steps": 75275,
+      "failed_steps": 161,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 8,
+      "stability_steps": [
+        75407,
+        72225
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "MCNC_BJT_OPAMPAL/opampal.cir",
+      "sha256": "690904bc6bc2fc65367e1b13eed7625b647fa8d8131dff71687c558da2a9ca8b",
+      "status": "ran",
+      "wall_seconds": 0.68107344803866,
+      "klu_linear_seconds": 0.0925362,
+      "successful_steps": 3001,
+      "failed_steps": 0,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 3,
+      "stability_steps": [
+        3001,
+        3001
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "MEASURE/STEP/Off_TimeTest.s0.cir",
+      "sha256": "28c859848eebeb2419fafe9ece0d3cdd8cb86c6ec0215eaa35740bb4b0d57b1f",
+      "status": "ran",
+      "wall_seconds": 1.44037240894977,
+      "klu_linear_seconds": 0.0971031,
+      "successful_steps": 91884,
+      "failed_steps": 7294,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 7,
+      "stability_steps": [
+        91884,
+        91884
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "MEASURE/STEP/Off_TimeTest.s1.cir",
+      "sha256": "d9c96fbd62181abe9deabe94e69e8d3193b2df4a06b17c8fce2b4ec1123bdfa5",
+      "status": "ran",
+      "wall_seconds": 1.7284558130195364,
+      "klu_linear_seconds": 0.114927,
+      "successful_steps": 109032,
+      "failed_steps": 6000,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 8,
+      "stability_steps": [
+        109032,
+        109031
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "PDE_1D_BJT/gilbert_cell_pde_four.cir",
+      "sha256": "1caa0f7f06135ab6f8a386575faf53b04744946ed8cb1115bdded6ebdb555abe",
+      "status": "ran",
+      "wall_seconds": 1.761042456026189,
+      "klu_linear_seconds": 0.236765,
+      "successful_steps": 218,
+      "failed_steps": 8,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 1,
+      "stability_steps": [
+        219,
+        229
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "PJFET_SWITCH/pjfet_tran.cir",
+      "sha256": "22f4c18f8eca0ba98ddf00e7e10e1f7d120b2f5d9e54e1db070ee6a2e6c5ec7c",
+      "status": "ran",
+      "wall_seconds": 1.5247026060242206,
+      "klu_linear_seconds": 0.105237,
+      "successful_steps": 85628,
+      "failed_steps": 3,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 8,
+      "stability_steps": [
+        85628,
+        85628
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "POWER/power_min2_gear.cir",
+      "sha256": "b01aaf5455984e84baac9d504f9b54e749a086daa9f66d9d514eb2099913603c",
+      "status": "ran",
+      "wall_seconds": 1.2540690110763535,
+      "klu_linear_seconds": 0.163943,
+      "successful_steps": 15800,
+      "failed_steps": 2748,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 5,
+      "stability_steps": [
+        15911,
+        15913
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "POWER/power_min2_trap.cir",
+      "sha256": "7b9ac2b71aea7742ddea085c4cdb15552fcae83771b6d124d606fc75d245c6f5",
+      "status": "ran",
+      "wall_seconds": 1.1550541389733553,
+      "klu_linear_seconds": 0.141322,
+      "successful_steps": 15777,
+      "failed_steps": 2520,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 6,
+      "stability_steps": [
+        15856,
+        15886
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "ROM/AUTODETECT/rc_simple.cir",
+      "sha256": "c0281ee51aec9776506eb31a55e75a11ae5ea4b2cd31cc72de1f83c4d21b276c",
+      "status": "ran",
+      "wall_seconds": 0.6318546669790521,
+      "klu_linear_seconds": 0.10214,
+      "successful_steps": 738,
+      "failed_steps": 1,
+      "ill_posed": false,
+      "companions": true,
+      "tran_scale": 4,
+      "stability_steps": [
+        739,
+        737
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "SANDLER21/sandler21.cir",
+      "sha256": "04f2b149b6ee09744b69b4bc9173e980fdf5eee7064738ca47334a5953a4fabb",
+      "status": "ran",
+      "wall_seconds": 0.8246027129935101,
+      "klu_linear_seconds": 0.108933,
+      "successful_steps": 8645,
+      "failed_steps": 611,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 3,
+      "stability_steps": [
+        8987,
+        8898
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "SANDLER22/sandler22.cir",
+      "sha256": "f437228dd6af82c13025394ee827c917502d5454dac7df93ad2ee60bb4ad0c0b",
+      "status": "ran",
+      "wall_seconds": 0.5558618200011551,
+      "klu_linear_seconds": 0.0868247,
+      "successful_steps": 5572,
+      "failed_steps": 312,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 5,
+      "stability_steps": [
+        5573,
+        5524
+      ],
+      "unstable": false,
+      "split": "holdout"
+    },
+    {
+      "case": "TIA/MINORDER/capacitor.cir",
+      "sha256": "1d63b05b00bb0330ec81015605317cc99325f02ff5e7e895e34bbd3c9de13a84",
+      "status": "ran",
+      "wall_seconds": 1.4351216049399227,
+      "klu_linear_seconds": 0.0970907,
+      "successful_steps": 89954,
+      "failed_steps": 48,
+      "ill_posed": false,
+      "companions": false,
+      "tran_scale": 6,
+      "stability_steps": [
+        90736,
+        88094
+      ],
+      "unstable": false,
+      "split": "holdout"
+    }
+  ]
+}
