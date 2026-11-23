@@ -66,6 +66,9 @@ typedef struct {
   double dispatch;
   /* Share of observed time exploration may spend (see _share below). */
   double gain;
+  /* Observed time at which a declined consultation may be asked again
+     (see _decline below); zero when the decline is final. */
+  double reopen;
 } kls_observed_parallel_state;
 
 /* The base allowance bounds what a consultation can cost a run it does not
@@ -89,6 +92,39 @@ static double kls_observed_parallel_seen(const kls_observed_parallel_state *g) {
  * shortfall of a few microseconds into a permanent decline. "Later" is any
  * comparison after one has executed and set a price, which includes the
  * retry of a candidate that ran into its deadline. */
+/* A verdict rests on two or three comparisons, each one solver call long, or
+ * on a budget that one stalled call can exhaust. Either can go wrong once (a
+ * crew thread that lost its processor for a few milliseconds), and a wrong
+ * decline costs the whole rest of the run. So a decline that came from a
+ * measured loss or an exhausted budget is not final: the question may be
+ * asked again once the run has seen KLS_OBSERVED_PARALLEL_REOPEN times the
+ * time it had seen at the decline. Each further consultation then costs a
+ * geometrically shrinking share of the run, and it must fit, together with
+ * everything already spent, in the base allowance. Declines for a reason
+ * that will not change (a failed candidate, an explicit policy) stay final. */
+#define KLS_OBSERVED_PARALLEL_REOPEN 8.0
+static void kls_observed_parallel_decline(kls_observed_parallel_state *g) {
+  const double seen=kls_observed_parallel_seen(g);
+  g->choice=-1;g->retry_pending=0;g->cycles=0;
+  g->reopen=seen>0 && isfinite(seen)?KLS_OBSERVED_PARALLEL_REOPEN*seen:0;
+}
+
+/* A declined run keeps being observed, so that it knows when it has grown
+ * enough to ask again and what its cycle is by then. */
+static void kls_observed_parallel_wait(kls_observed_parallel_state *g,
+    int successful,double seconds) {
+  if(g->choice>=0 || !(g->reopen>0) || !successful || !(seconds>0) ||
+      !isfinite(seconds) || !isfinite(g->total+seconds)) return;
+  g->history[g->cycles%8]=seconds;
+  if(g->cycles<UINT_MAX) ++g->cycles;
+  g->total+=seconds;
+}
+
+static int kls_observed_parallel_due(const kls_observed_parallel_state *g) {
+  return g->choice<0 && g->reopen>0 && g->cycles>=8 &&
+    kls_observed_parallel_seen(g)>=g->reopen;
+}
+
 static int kls_observed_parallel_priced(const kls_observed_parallel_state *g) {
   return g->samples>0 || g->warmed || g->lost || g->price>0;
 }
@@ -138,6 +174,26 @@ static int kls_observed_parallel_start(kls_observed_parallel_state *g) {
  * later changed incumbent calls extend the same allowance instead. The
  * confirming sample is taken only once the allowance again covers it. The
  * samples after a cold warm-up wait for funding in the same way. */
+static int kls_observed_parallel_start(kls_observed_parallel_state *g);
+/* Ask a declined consultation again (see _decline). It starts as a fresh
+ * verdict, but what it has already spent stays spent, and it starts only
+ * when the cost model still predicts a gain and the base allowance covers a
+ * whole comparison and a new crew on top of that. Otherwise the run waits
+ * for a quarter more observed time before looking again. */
+static int kls_observed_parallel_reopen(kls_observed_parallel_state *g) {
+  if(!kls_observed_parallel_due(g)) return 0;
+  const double seen=kls_observed_parallel_seen(g),reopen=g->reopen;
+  g->choice=0;g->samples=0;g->warmed=0;g->lost=0;g->retry_pending=0;
+  g->deadline_retries=0;g->audited=0;g->saved=0;g->reopen=0;
+  memset(g->candidate,0,sizeof g->candidate);
+  memset(g->incumbent,0,sizeof g->incumbent);
+  if(kls_observed_parallel_start(g) && g->gain>KLS_OBSERVED_PARALLEL_ALLOWANCE &&
+      KLS_OBSERVED_PARALLEL_ALLOWANCE*seen-g->spent>=
+        fmax(4.0*g->cycle,1.25*g->price)+g->startup) return 1;
+  g->choice=-1;g->reopen=fmax(reopen,1.25*seen);
+  return 0;
+}
+
 static void kls_observed_parallel_fund(kls_observed_parallel_state *g,
     int successful,double seconds) {
   if(g->choice!=1 || !kls_observed_parallel_priced(g) || !successful ||
@@ -174,7 +230,12 @@ static int kls_observed_parallel_record(kls_observed_parallel_state *g,
       !(candidate>0) || !(incumbent>0) || !isfinite(candidate) ||
       !isfinite(incumbent) || !isfinite(g->spent) ||
       g->spent>g->limit) {
-    g->choice=-1;return 0;
+    /* A candidate that failed is final; one that only overran is not. */
+    if(successful && g->samples>=0 && g->samples<2 && candidate>0 &&
+        incumbent>0 && isfinite(candidate) && isfinite(incumbent) &&
+        isfinite(g->spent)) kls_observed_parallel_decline(g);
+    else g->choice=-1;
+    return 0;
   }
   if(candidate>0.95*incumbent) {
     /* The first candidate execution creates its crew and faults in its
@@ -186,7 +247,7 @@ static int kls_observed_parallel_record(kls_observed_parallel_state *g,
        two wins before two losses. */
     if(g->samples==0 && !g->warmed && !g->lost) {g->warmed=1;return 0;}
     if(!g->lost) {g->lost=1;return 0;}
-    g->choice=-1;return 0;
+    kls_observed_parallel_decline(g);return 0;
   }
   if(++g->samples==2) {g->choice=2;g->retry_pending=0;}
   return g->choice==2;
@@ -217,6 +278,6 @@ static int kls_observed_parallel_audit(kls_observed_parallel_state *g,
     while(j && v[j-1]>x) {v[j]=v[j-1];--j;}v[j]=x;
   }
   if(0.5*v[3]+0.5*v[4]<g->cycle || g->saved>0) return 0;
-  g->choice=-1;g->retry_pending=0;return 1;
+  kls_observed_parallel_decline(g);return 1;
 }
 #endif

@@ -82,9 +82,14 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
   if(g->choice==2) {
     call.epoch=s->observed_parallel_epoch;call.observed=2;return call;
   }
-  if(g->choice<0 ||
-      !kls_observed_parallel_incumbent_path(s)) return call;
-  call.epoch=s->observed_parallel_epoch;call.observed=1;
+  if(!kls_observed_parallel_incumbent_path(s)) return call;
+  if(g->choice<0) {
+    /* Declined, but perhaps not for good: keep the clock running. */
+    if(!(g->reopen>0)) return call;
+    call.epoch=s->observed_parallel_epoch;call.observed=3;
+    if(!kls_observed_parallel_due(g)) return call;
+  }
+  call.epoch=s->observed_parallel_epoch;
   /* The snapshot is used solely to classify observed workload. It never
      proves factor validity, a solve, nonsingularity or accuracy. Most changed
      inputs differ early; exact repeats contribute no exploration funding. */
@@ -95,6 +100,10 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
   g->prior=s->stats.analysis_seconds+s->stats.factor_seconds;
   g->crew=(int)s->options.threads;
   g->dispatch=KLS_OBSERVED_PARALLEL_DISPATCH_SECONDS;
+  if(call.observed==3) {
+    if(!call.changed || !kls_observed_parallel_reopen(g)) return call;
+  }
+  call.observed=1;
   if(!call.changed || !kls_observed_parallel_start(g)) return call;
   /* A process-level engine override is an explicit policy. Collection may
      precede the funding threshold, but no competing consultation starts. */
@@ -160,7 +169,10 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
          correct but no faster than the incumbent: that is a lost comparison,
          judged like one that finished late, not a failed one. */
       call.timed_out=1;
-  } else g->choice=-1;
+  } else if(ready && call.epoch==s->observed_parallel_epoch)
+    /* Preparation used up the budget: a cost, not a verdict. */
+    kls_observed_parallel_decline(g);
+  else g->choice=-1;
   g->deadline=0;g->bound=0;g->active=2;
   call.extra=kls_now_seconds()-start;
   /* Full extra work, including setup, numeric, snapshot, solve and proof,
@@ -203,6 +215,12 @@ static void kls_observed_parallel_after(kls_solver *s,
       const double cleanup_seconds=kls_now_seconds()-cleanup_start;
       g->spent+=cleanup_seconds;s->stats.refactor_seconds+=cleanup_seconds;
     }
+  }
+  if(call.observed==3) {
+    if(stable) kls_observed_parallel_wait(g,status==KLS_OK &&
+        kls_observed_parallel_incumbent_path(s),
+        s->stats.refactor_seconds+s->stats.solve_seconds);
+    return;
   }
   if(call.observed==2) {
     /* A retained engine keeps being measured at the caller's own rhythm. */

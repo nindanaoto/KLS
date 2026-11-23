@@ -176,6 +176,45 @@ int main(void) {
     kls_observed_parallel_observe(&q,1,1,1);
     assert(kls_observed_parallel_start(&q) && q.limit==4);
   }
+  {
+    /* Two warm losses decline, but not for good: the run may ask again once
+       it has seen eight times as much, and only inside the base allowance. */
+    kls_observed_parallel_state r={.crew=8,.dispatch=0.075};
+    for(int i=0;i<10;++i) kls_observed_parallel_observe(&r,1,1,1);
+    assert(kls_observed_parallel_start(&r));
+    r.spent=1;r.price=1;
+    assert(!kls_observed_parallel_record(&r,1,2,1) && r.choice==1); /* cold */
+    assert(!kls_observed_parallel_record(&r,1,2,1) && r.choice==1); /* one loss */
+    assert(!kls_observed_parallel_record(&r,1,2,1) && r.choice==-1);
+    assert(r.reopen==80 && !kls_observed_parallel_due(&r));
+    for(int i=0;i<69;++i) kls_observed_parallel_wait(&r,1,1);
+    assert(r.total==79 && !kls_observed_parallel_reopen(&r) && r.choice==-1);
+    kls_observed_parallel_wait(&r,0,1);                   /* failed call */
+    assert(r.total==79);
+    kls_observed_parallel_wait(&r,1,1);
+    assert(kls_observed_parallel_due(&r));
+    assert(kls_observed_parallel_reopen(&r) && r.choice==1 && r.spent==1 &&
+        !r.lost && !r.warmed && r.cycle==1);
+    /* Two wins now retain. */
+    assert(!kls_observed_parallel_record(&r,1,0.5,1));
+    assert(kls_observed_parallel_record(&r,1,0.5,1) && r.choice==2);
+    /* What was spent stays spent: a run that cannot afford another
+       comparison inside the base allowance waits for more time instead. */
+    kls_observed_parallel_state p={.crew=8,.dispatch=0.075};
+    for(int i=0;i<10;++i) kls_observed_parallel_observe(&p,1,1,1);
+    assert(kls_observed_parallel_start(&p));
+    p.spent=4;p.price=4;p.warmed=1;p.lost=1;
+    assert(!kls_observed_parallel_record(&p,1,2,1) && p.reopen==80);
+    for(int i=0;i<70;++i) kls_observed_parallel_wait(&p,1,1);
+    assert(!kls_observed_parallel_reopen(&p) && p.choice==-1 && p.reopen==100);
+    /* A failed candidate is final. */
+    kls_observed_parallel_state f={.crew=8,.dispatch=0.075};
+    for(int i=0;i<10;++i) kls_observed_parallel_observe(&f,1,1,1);
+    assert(kls_observed_parallel_start(&f));
+    assert(!kls_observed_parallel_record(&f,0,2,1) && f.choice==-1 && f.reopen==0);
+    for(int i=0;i<1000;++i) kls_observed_parallel_wait(&f,1,1);
+    assert(!kls_observed_parallel_due(&f) && f.total==10);
+  }
   g=(kls_observed_parallel_state){0};
   for(int i=0;i<32;++i) kls_observed_parallel_observe(&g,1,1,i==0?10000:1);
   assert(kls_observed_parallel_start(&g) && g.cycle==1);
