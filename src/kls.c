@@ -14227,7 +14227,19 @@ static int private_solve_body(kls_solver *solver,
   if(solver->n<=4096 && solver->orientation==KLS_ORIENTATION_TRANSPOSE &&
      !solver->in_solve_refinement && !solver->certified_unscaled_l2_contract &&
      !transpose && nrhs==1 && (solver->symbolic->nblocks>1 || solver->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) && ldb==(int64_t)solver->n && ldx==(int64_t)solver->n &&
-     kls_small_btf_cache_capable(solver) && kls_small_btf_cache_ready(solver)) {
+     kls_small_btf_cache_capable(solver) && kls_small_btf_cache_ready(solver) &&
+     /* An answer the refactor kernel already produced is taken here in any
+        case.  Otherwise a crew the last refactor left awake and a subtree
+        partition whose timed trial is open or won make this solve part of
+        that trial further down, where this same walk is its incumbent. */
+     ((solver->small_btf_fused_ready && b==solver->small_btf_fused_rhs &&
+       solver->small_btf_fused_work) ||
+      !(solver->options.threads>1 && solver->egraph_pool!=NULL &&
+        !solver->observed_parallel.active &&
+        solver->observed_parallel.choice!=1 &&
+        (solver->stats.last_refactor_path==KLS_REFACTOR_PATH_EGRAPH ||
+         solver->stats.last_refactor_path==KLS_REFACTOR_PATH_POOL) &&
+        kls_pts_transpose_solve_candidate(solver)))) {
     int compact_solved;
     if(solver->small_btf_fused_ready && b==solver->small_btf_fused_rhs &&
        solver->small_btf_fused_work) {
@@ -14555,6 +14567,49 @@ static int private_solve_body(kls_solver *solver,
       }
     }
   }
+  /* The subtree partition can carry the transpose solve on the crew
+     the refactor already keeps awake.  Six alternating timed solves
+     (incumbent, subtree, subtree, incumbent, subtree, incumbent) settle
+     it; each arm includes everything it needs, so the incumbent is
+     charged its value publication and the challenger its hand-offs.
+     Only a solve that follows a pool refactor is eligible, in the trial
+     and afterwards: that refactor is what left the crew awake, and a
+     solve after a serial one would pay the wake-up it was spared.
+     While the complete-call consultation is still comparing engines the
+     solve stays out of it: preparing the plan inside one of its timed
+     cycles would be charged to the engine under comparison. */
+  const int tsolve_candidate = kernel_transpose && nrhs == 1 &&
+    !serial_mapped_vendor_solve &&
+    solver->options.threads > 1 && solver->egraph_pool != NULL &&
+    !solver->observed_parallel.active &&
+    solver->observed_parallel.choice != 1 &&
+    (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH ||
+     solver->stats.last_refactor_path == KLS_REFACTOR_PATH_POOL) &&
+    kls_i32_solve_ready(solver) &&
+    kls_pts_transpose_solve_candidate(solver);
+  /* Read the plan only now: preparing the index streams above is what
+     rebuilds it after a sort or pivot restart invalidated both. */
+  kls_pts *const tpts = solver->pts;
+  int tsolve_arm = 0;
+  double tsolve_start = 0.0;
+  if (tsolve_candidate) {
+    if (tpts->tsolve_decision > 0) {
+      tsolve_arm = 1;
+    } else {
+      const int sample =
+        tpts->tsolve_samples[0] + tpts->tsolve_samples[1];
+      tsolve_arm = sample == 1 || sample == 2 || sample == 4;
+      tsolve_start = kls_now_seconds();
+    }
+    if (tsolve_arm) {
+      solver->common.status = TRILINOS_KLU_OK;
+      ok = kls_pts_transpose_solve(solver, x);
+      if (!ok) {
+        tsolve_arm = 0;
+        tsolve_start = 0.0;
+      }
+    }
+  }
   if (ok) {
     /* solved by the subtree arm (or its serial completion) */
   } else if(block_engine_solve &&
@@ -14688,52 +14743,7 @@ static int private_solve_body(kls_solver *solver,
     } else {
       /* One-block transpose reads packed values directly. Multiple blocks
          and multiple RHS require native publication for the vendor path. */
-      /* The subtree partition can carry the transpose solve on the crew
-         the refactor already keeps awake.  Six alternating timed solves
-         (incumbent, subtree, subtree, incumbent, subtree, incumbent) settle
-         it; each arm includes everything it needs, so the incumbent is
-         charged its value publication and the challenger its hand-offs.
-         Only a solve that follows a pool refactor is eligible, in the trial
-         and afterwards: that refactor is what left the crew awake, and a
-         solve after a serial one would pay the wake-up it was spared.
-         While the complete-call consultation is still comparing engines the
-         solve stays out of it: preparing the plan inside one of its timed
-         cycles would be charged to the engine under comparison. */
-      const int tsolve_candidate = kernel_transpose && nrhs == 1 &&
-        !serial_mapped_vendor_solve &&
-        solver->options.threads > 1 && solver->egraph_pool != NULL &&
-        !solver->observed_parallel.active &&
-        solver->observed_parallel.choice != 1 &&
-        (solver->stats.last_refactor_path == KLS_REFACTOR_PATH_EGRAPH ||
-         solver->stats.last_refactor_path == KLS_REFACTOR_PATH_POOL) &&
-        kls_i32_solve_ready(solver) &&
-        kls_pts_transpose_solve_candidate(solver);
-      /* Read the plan only now: preparing the index streams above is what
-         rebuilds it after a sort or pivot restart invalidated both. */
-      kls_pts *const tpts = solver->pts;
-      int tsolve_arm = 0;
-      double tsolve_start = 0.0;
-      if (tsolve_candidate) {
-        if (tpts->tsolve_decision > 0) {
-          tsolve_arm = 1;
-        } else {
-          const int sample =
-            tpts->tsolve_samples[0] + tpts->tsolve_samples[1];
-          tsolve_arm = sample == 1 || sample == 2 || sample == 4;
-          tsolve_start = kls_now_seconds();
-        }
-        if (tsolve_arm) {
-          solver->common.status = TRILINOS_KLU_OK;
-          ok = kls_pts_transpose_solve(solver, x);
-          if (!ok) {
-            tsolve_arm = 0;
-            tsolve_start = 0.0;
-          }
-        }
-      }
-      if (ok) {
-        /* solved by the subtree arm */
-      } else if (kernel_transpose && nrhs == 1 && solver->n > 1 &&
+      if (kernel_transpose && nrhs == 1 && solver->n > 1 &&
           solver->symbolic->nblocks == 1) {
         ok = kls_native_transpose_solve(solver, x);
       } else {
@@ -14745,19 +14755,19 @@ static int private_solve_body(kls_solver *solver,
                                  (UF_long)ldx, (UF_long)nrhs, x,
                                  &solver->common);
       }
-      if (tsolve_candidate && tpts->tsolve_decision == 0 && ok &&
-          tsolve_start > 0.0) {
-        const double elapsed = kls_now_seconds() - tsolve_start;
-        tpts->tsolve_samples[tsolve_arm]++;
-        if (tpts->tsolve_min[tsolve_arm] <= 0.0 ||
-            elapsed < tpts->tsolve_min[tsolve_arm]) {
-          tpts->tsolve_min[tsolve_arm] = elapsed;
-        }
-        if (tpts->tsolve_samples[0] >= 3 && tpts->tsolve_samples[1] >= 3) {
-          tpts->tsolve_decision =
-            tpts->tsolve_min[1] < 0.95 * tpts->tsolve_min[0] ? 1 : -1;
-        }
-      }
+    }
+  }
+  if (tsolve_candidate && tpts->tsolve_decision == 0 && ok &&
+      tsolve_start > 0.0) {
+    const double elapsed = kls_now_seconds() - tsolve_start;
+    tpts->tsolve_samples[tsolve_arm]++;
+    if (tpts->tsolve_min[tsolve_arm] <= 0.0 ||
+        elapsed < tpts->tsolve_min[tsolve_arm]) {
+      tpts->tsolve_min[tsolve_arm] = elapsed;
+    }
+    if (tpts->tsolve_samples[0] >= 3 && tpts->tsolve_samples[1] >= 3) {
+      tpts->tsolve_decision =
+        tpts->tsolve_min[1] < 0.95 * tpts->tsolve_min[0] ? 1 : -1;
     }
   }
   if (nsolve_candidate && npts->nsolve_decision == 0 && ok &&

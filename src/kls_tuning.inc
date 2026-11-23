@@ -88,8 +88,12 @@
 #define KLS_ROW_SOLVE_CLUSTER_ALPHA_NUMERATOR 2u
 #define KLS_PTS_MAX_THREADS 16
 /* Smallest block the subtree planner partitions; callers that prepare its
-   inputs use the same floor. */
-#define KLS_PTS_MIN_BLOCK 2048u
+   inputs use the same floor.  The floor only spares the plan's construction
+   where no partition can repay a crew hand-off: whether a published plan
+   carries a solve is settled by the timed trials, and on the generated mesh,
+   ring and memory families those trials stop finding a gain at a few
+   hundred columns (4.7 against 4.0 microseconds at 529). */
+#define KLS_PTS_MIN_BLOCK 256u
 
 /* Supernode batching and EGraph execution. */
 #define KLS_SNODE_DEFAULT_MIN_BATCH 3u
