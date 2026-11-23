@@ -1186,8 +1186,11 @@ struct kls_solver {
   unsigned solve_lane_budget;/* replays left before a full solve */
   /* One contiguous image of the compact walk's factors for repeated separate
      solves on unchanged factors (see kls_solve_pack_build): 0 none, 1 one
-     separate solve seen since the factors last changed, 2 current, -1 these
-     factors cannot be packed. Every numeric update returns it to 0. */
+     separate solve seen since the factors last changed, 2 current, 3 laid
+     out but holding the coefficients of the previous factors, -1 these
+     factors cannot be packed. A combined-call replay, which rewrites the
+     factor values in place, takes 2 to 3; every other numeric update
+     returns it to 0. */
   void *solve_pack;
   size_t solve_pack_bytes;
   int solve_pack_state;
@@ -15872,8 +15875,12 @@ typedef struct {
   uint32_t index_offset,coefficient_offset,work_offset;
 } kls_solve_pack_header;
 
-static void kls_solve_pack_build(kls_solver *s) {
-  s->solve_pack_state=-1;
+/* With `refresh` the record is already laid out for these factors' pattern
+   and only its coefficients are rewritten, in the order the layout fixed.
+   That is the whole per-update cost of the record, so a caller that follows
+   every new matrix with only a few solves still gets the replay. */
+static void kls_solve_pack_build(kls_solver *s,int refresh) {
+  s->solve_pack_state=refresh?0:-1;
   const size_t n=(size_t)s->n;
   const trilinos_klu_l_numeric *numeric=s->numeric;
   const double *diagonal=numeric->Udiag,*offx=numeric->Offx;
@@ -15882,6 +15889,35 @@ static void kls_solve_pack_build(kls_solver *s) {
   const uint16_t *lp=s->i16solve_loff,*li=s->i16solve_l;
   const size_t nblocks=(size_t)s->symbolic->nblocks;
   size_t terms=0,ops=0;
+  if(refresh) {
+    const kls_solve_pack_header *h=
+      (const kls_solve_pack_header *)(const void *)s->solve_pack;
+    double *cx=(double *)(void *)((char *)s->solve_pack+h->coefficient_offset);
+    double sum=0;
+    for(size_t block=0;block<nblocks;++block) {
+      const size_t first=s->i16solve_r[block],last=s->i16solve_r[block+1];
+      for(size_t k=first;k<last;++k) {
+        const double inverse=1.0/diagonal[k];
+        const double *ux=s->i16solve_ux[k];
+        const uint32_t ob=offp[k],oe=offp[k+1],ub=up[k],ue=up[k+1];
+        sum+=inverse-inverse;
+        for(uint32_t z=ob;z<oe;++z) *cx++=offx[z];
+        *cx++=inverse;
+        for(uint32_t z=ub;z<ue;++z) *cx++=ux[z-ub]*inverse;
+      }
+      for(size_t k=last;k-->first;) {
+        const uint32_t lb=lp[k],le=lp[k+1];
+        if(lb==le) continue;
+        const double *lx=s->i16solve_lx[k];
+        *cx++=1.0;
+        for(uint32_t z=lb;z<le;++z) *cx++=lx[z-lb];
+      }
+    }
+    /* A reciprocal that is not finite leaves the walk in charge, as it
+       does when the record is first laid out. */
+    if(sum==0) s->solve_pack_state=2;
+    return;
+  }
   for(size_t block=0;block<nblocks;++block) {
     const size_t first=s->i16solve_r[block],last=s->i16solve_r[block+1];
     for(size_t k=first;k<last;++k) {
@@ -16019,6 +16055,7 @@ KLS_REPLAY_TEXT static int kls_solve_lane_call(kls_solver *s,const double *b,dou
   const int singleton=s->solve_lane_armed==2;
   /* A current image was built from factors that passed the checks below,
      and every numeric update discards it. */
+  if(s->solve_pack_state==3) kls_solve_pack_build(s,1);
   if(s->solve_pack_state==2) {
     /* A right-hand side that is not finite makes the answer not finite. */
     if(!kls_solve_pack_run(s,b,x)) goto decline;
@@ -16042,7 +16079,7 @@ KLS_REPLAY_TEXT static int kls_solve_lane_call(kls_solver *s,const double *b,dou
        a caller that alternates one update with one solve never builds it.
        Factors made only of one-row blocks take it too when the compact
        solve cache describes them and no row scaling applies. */
-    if(s->solve_pack_state==1) kls_solve_pack_build(s);
+    if(s->solve_pack_state==1) kls_solve_pack_build(s,0);
     else if(s->solve_pack_state==0) s->solve_pack_state=1;
   }
   {
@@ -16435,6 +16472,9 @@ KLS_REPLAY_TEXT static int kls_fast_lane_call(kls_solver *s,const double *values
   s->compact_amf_two_block_exact_recip_fresh=0;
   s->parallel_refine_values_copied=0;
   s->i32solve_udiag_recip_fresh=0;
+  /* This replay rewrites the factor values where they are; the pattern, and
+     with it the layout of a solve record, stays. */
+  const int packed=s->solve_pack_state>=2;
   s->solve_pack_state=0;
   s->tiny_singleton_rs_recip_fresh=0;
   s->small_btf_fused_values=values;s->small_btf_fused_rhs=b;
@@ -16449,6 +16489,7 @@ KLS_REPLAY_TEXT static int kls_fast_lane_call(kls_solver *s,const double *values
     const double *solution=s->small_btf_fused_work;
     for(size_t k=0;k<n;++k)x[pnum[k]]=solution[k];
   }
+  if(packed) s->solve_pack_state=3;
 #ifdef KLS_FAST_LANE_TEST_EVENT
   KLS_FAST_LANE_TEST_EVENT();
 #endif

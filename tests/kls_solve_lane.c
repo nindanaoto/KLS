@@ -104,6 +104,7 @@ int main(void) {
     /* One new matrix followed by a few solves, repeated: both replays stay
        in use, and every answer matches separate full calls. */
     lane_events=combined_events=0;
+    int refreshed=0;
     for(int k=0;k<400;++k) {
       for(int p=0;p<nz;++p)a[p]*=1+1e-3*((p+k)%5-2);
       for(int i=0;i<n;++i)b[i]=1+(i+k)%7;
@@ -114,13 +115,22 @@ int main(void) {
       for(int i=0;i<n;++i)assert(fabs(x[i]-y[i])<=1e-12*scale);
       for(int j=0;j<4;++j) {
         for(int i=0;i<n;++i)b[i]=2+(i+k+j)%5;
+        /* A combined-call replay keeps the image's layout; the first solve
+           after it rewrites the coefficients and replays the image. */
+        const int stale=lane->solve_pack_state==3;
+        const int events=lane_events;
+        assert(!stale || j==0);
         assert(kls_solve(lane,1,b,0,x,0)==KLS_OK);
+        if(stale && lane_events!=events) {
+          assert(lane->solve_pack_state==2);++refreshed;
+        }
         assert(kls_solve(full,1,b,0,y,0)==KLS_OK);
         for(int i=0;i<n;++i)assert(fabs(x[i]-y[i])<=1e-12*scale+1e-300);
         assert(residual(n,ptr,idx,a,b,x)<=1e-12);
       }
     }
     assert(lane_events>1200 && combined_events>300);
+    assert(refreshed>300);
     kls_destroy(lane);kls_destroy(full);kls_destroy(certified);
     free(ptr);free(idx);free(a);free(b);free(x);free(y);
   }
