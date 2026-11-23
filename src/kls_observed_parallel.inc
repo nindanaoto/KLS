@@ -92,6 +92,7 @@ static kls_observed_parallel_call kls_observed_parallel_before(kls_solver *s,
     s->private_original->values && memcmp(values,s->private_original->values,
                                         (size_t)s->nnz*sizeof(double))!=0;
   g->startup=kls_observed_parallel_startup();
+  g->prior=s->stats.analysis_seconds+s->stats.factor_seconds;
   g->crew=(int)s->options.threads;
   g->dispatch=KLS_OBSERVED_PARALLEL_DISPATCH_SECONDS;
   if(!call.changed || !kls_observed_parallel_start(g)) return call;

@@ -45,6 +45,12 @@ typedef struct {
      taken out of the candidate's own running time. */
   double bound;
   double candidate[2],incumbent[2];
+  /* Time the caller had already spent on this matrix before the first
+     observed cycle (its analysis and first factorization). It is observed
+     time like the cycles are, and it grows with the same matrix, so the
+     allowance counts it: a run pays for exploration out of everything it
+     has spent so far, not only out of its refactorizations. */
+  double prior;
   /* Largest whole extra cost of one executed comparison so far. */
   double price;
   /* What starting a crew for the first candidate is expected to cost. */
@@ -71,6 +77,10 @@ typedef struct {
 static double kls_observed_parallel_share(const kls_observed_parallel_state *g) {
   return g->gain>KLS_OBSERVED_PARALLEL_ALLOWANCE && g->gain<1?g->gain:
     KLS_OBSERVED_PARALLEL_ALLOWANCE;
+}
+
+static double kls_observed_parallel_seen(const kls_observed_parallel_state *g) {
+  return g->prior>0 && isfinite(g->total+g->prior)?g->total+g->prior:g->total;
 }
 
 /* A later comparison waits until the allowance covers what a comparison has
@@ -110,7 +120,8 @@ static int kls_observed_parallel_start(kls_observed_parallel_state *g) {
   const double cycle=0.5*v[3]+0.5*v[4];
   g->gain=kls_observed_parallel_plausible_gain(cycle,g->crew,g->dispatch);
   if(g->cycles<32 && !(g->gain>KLS_OBSERVED_PARALLEL_ALLOWANCE)) return 0;
-  const double allowance=kls_observed_parallel_share(g)*g->total;
+  const double allowance=kls_observed_parallel_share(g)*
+    kls_observed_parallel_seen(g);
   /* The first candidate also starts the crew, which costs the same on a
      ten-microsecond cycle as on a ten-millisecond one: the allowance must
      cover it too, so a run too short to repay a crew never starts one. */
@@ -131,7 +142,8 @@ static void kls_observed_parallel_fund(kls_observed_parallel_state *g,
     int successful,double seconds) {
   if(g->choice!=1 || !kls_observed_parallel_priced(g) || !successful ||
       !(seconds>0) || !isfinite(seconds) || !isfinite(g->total+seconds)) return;
-  g->total+=seconds;g->limit=kls_observed_parallel_share(g)*g->total;
+  g->total+=seconds;
+  g->limit=kls_observed_parallel_share(g)*kls_observed_parallel_seen(g);
 }
 
 static double kls_observed_parallel_preparation_budget(

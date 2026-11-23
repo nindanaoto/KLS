@@ -155,6 +155,18 @@ int main(void) {
     /* Later funding uses the same share. */
     m.samples=1;kls_observed_parallel_fund(&m,1,5);
     assert(m.total==15 && m.limit==6);
+    /* Time already spent on the matrix counts as observed: with two
+       cycles' worth of it the same start needs only the median's eight. */
+    kls_observed_parallel_state w={.crew=8,.dispatch=0.075,.prior=2};
+    for(int i=0;i<7;++i) {
+      kls_observed_parallel_observe(&w,1,1,1);
+      assert(!kls_observed_parallel_start(&w));          /* no median yet */
+    }
+    kls_observed_parallel_observe(&w,1,1,1);
+    assert(kls_observed_parallel_start(&w));             /* 0.4*(8+2) == 4 */
+    assert(w.total==8 && w.limit==4);
+    w.samples=1;kls_observed_parallel_fund(&w,1,5);
+    assert(w.total==13 && w.limit==6);
     /* A gain below the base allowance changes nothing: 32 cycles, a tenth. */
     kls_observed_parallel_state q={.crew=8,.dispatch=0.8};
     for(int i=0;i<39;++i) {
