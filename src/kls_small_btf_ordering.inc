@@ -17,7 +17,7 @@ static void kls_auto_small_btf_candidate(kls_pattern_candidate *c,const kls_opti
      (o->tuning_profile_path && !kls_policy_model_only(c->policy)) ||
      c->orientation!=KLS_ORIENTATION_TRANSPOSE || c->selected_ordering!=KLS_ORDERING_AMD ||
      c->small_btf_fallback.symbolic || c->block_order_perm || !c->symbolic ||
-     c->n<=1 || c->n>4096 || !c->nnz || c->nnz>UINT16_MAX ||
+     c->n<=1 || c->n>UINT16_MAX || !c->nnz || c->nnz>UINT16_MAX ||
      !c->symbolic->do_btf || c->symbolic->nblocks<=1 || c->symbolic->maxblock<=1 ||
      c->symbolic->structural_rank!=c->n ||
      kls_prestatic_ordering_ctx || kls_matched_low_pair_ordering_ctx ||

@@ -35,10 +35,12 @@ static int kls_one_block_route_claimed(const kls_solver *s) {
 }
 
 static int kls_small_btf_cache_capable(kls_solver *s) {
+  /* The i16 cache indexes rows and entries with 16 bits; that representation
+     is the engine's only size limit. */
   /* An ineligible symbolic frame must not traverse numerical ownership state
      on every ordinary solve/refactor. This is rejection only; positive frames
      still pass the complete ownership, factor-count, budget and FP gates. */
-  if(!s || s->n<=1 || s->n>4096 || s->nnz<=0 || s->nnz>UINT16_MAX ||
+  if(!s || s->n<=1 || s->n>UINT16_MAX || s->nnz<=0 || s->nnz>UINT16_MAX ||
      s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
   if(!s->symbolic || !s->numeric ||
      s->options.backend!=KLS_BACKEND_AUTO || kls_kernel_tuning_overridden(s) ||
@@ -260,7 +262,7 @@ static UF_long kls_compact_btf_transpose_prechecked(kls_solver *s,double *out) {
 /* Preserve the complete admission and optional cache preparation for every
    raw/ordinary caller. No solve or answer is cached by either entry. */
 static UF_long kls_compact_btf_transpose_solve(kls_solver *s,double *out) {
-  if(!s || s->n<=1 || s->n>4096 || s->nnz<=0 || s->nnz>UINT16_MAX ||
+  if(!s || s->n<=1 || s->n>UINT16_MAX || s->nnz<=0 || s->nnz>UINT16_MAX ||
      s->orientation!=KLS_ORIENTATION_TRANSPOSE)return 0;
   if(!kls_small_btf_environment() || !kls_small_btf_cache_capable(s) ||
      !kls_i32_solve_ready(s) || !kls_small_btf_cache_ready(s))return 0;

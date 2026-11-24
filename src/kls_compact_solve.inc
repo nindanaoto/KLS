@@ -269,7 +269,7 @@ static int kls_build_i16_solve_cache(kls_solver *solver,
   }
   /* Optional immutable descriptors share the cache's numeric lifetime.
      Failure retains the existing compact executor. */
-  if(n<=4096 && nblocks>=1) {
+  if(n<=UINT16_MAX && nblocks>=1) {
 #ifdef KLS_BTF_DESCRIPTOR_MALLOC
     kls_btf_l_descriptor *desc=KLS_BTF_DESCRIPTOR_MALLOC((size_t)n*sizeof(*desc));
 #else
@@ -487,7 +487,7 @@ static int kls_i32_solve_ready(kls_solver *solver) {
     return solver->i32solve_state > 0;
   }
   if (kls_low_work_btf_prefers_native_solve(solver) &&
-      (solver->n>4096 || solver->orientation!=KLS_ORIENTATION_TRANSPOSE ||
+      (solver->n>UINT16_MAX || solver->orientation!=KLS_ORIENTATION_TRANSPOSE ||
        !kls_small_btf_cache_capable(solver))) {
     /* Building a second solve-index representation does not repay while the
        complete low-work factor and RHS remain in this cache-sized regime. */

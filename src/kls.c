@@ -2387,7 +2387,7 @@ static void kls_small_btf_fallback_clear(kls_small_btf_fallback *f) {
 static uint64_t kls_small_btf_fallback_bytes(const kls_small_btf_fallback *f) {
   if(!f->symbolic)return 0;
   const uint64_t n=f->n,nz=f->nnz,c=f->separator.component_count;
-  if(n>4096 || nz>UINT16_MAX || c>2*n+1)return UINT64_MAX;
+  if(n>UINT16_MAX || nz>UINT16_MAX || c>2*n+1)return UINT64_MAX;
   uint64_t bytes=sizeof(*f)+sizeof(*f->symbolic)+
     (n+1+nz)*sizeof(UF_long)+(3*n+1)*sizeof(UF_long)+n*sizeof(double);
   const kls_separator_analysis *p=&f->separator;
@@ -6541,7 +6541,7 @@ KLS_REPLAY_TEXT static int kls_compact_btf_map32_refactor(kls_solver *solver,
 }
 
 static int kls_lean_btf_map32_refactor(kls_solver *s,double *values) {
-  if(s && s->n<=4096 && s->orientation==KLS_ORIENTATION_TRANSPOSE &&
+  if(s && s->n<=UINT16_MAX && s->orientation==KLS_ORIENTATION_TRANSPOSE &&
      kls_small_btf_cache_capable(s) && kls_small_btf_cache_ready(s))
     return kls_compact_btf_map32_refactor(s,values);
   return kls_native_btf_map32_refactor(s,values);
@@ -10701,7 +10701,7 @@ static int private_refactor_body(kls_solver *solver, const double *values) {
         solver->forest_leaf_ready = 0;
       }
     }
-    if(!compact_used && solver->n<=4096 && direct_low_work_public_btf &&
+    if(!compact_used && solver->n<=UINT16_MAX && direct_low_work_public_btf &&
        kls_small_btf_cache_capable(solver) && kls_small_btf_environment() &&
        kls_build_refactor_map(solver) && solver->refactor_row_idx32 &&
        solver->refactor_input_pos32) {
@@ -14228,7 +14228,7 @@ static int private_solve_body(kls_solver *solver,
      wrapper still owns its original-operator certificate and correction.
      Only the default componentwise policy can enter here: no L2 refinement
      contract or transformed/packed/observed owner is bypassed. */
-  if(solver->n<=4096 && solver->orientation==KLS_ORIENTATION_TRANSPOSE &&
+  if(solver->n<=UINT16_MAX && solver->orientation==KLS_ORIENTATION_TRANSPOSE &&
      !solver->in_solve_refinement && !solver->certified_unscaled_l2_contract &&
      !transpose && nrhs==1 && (solver->symbolic->nblocks>1 || solver->accuracy_policy==KLS_ACCURACY_APPLICATION_MANAGED) && ldb==(int64_t)solver->n && ldx==(int64_t)solver->n &&
      kls_small_btf_cache_capable(solver) && kls_small_btf_cache_ready(solver) &&
