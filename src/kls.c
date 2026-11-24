@@ -710,7 +710,8 @@ struct kls_solver {
   struct kls_snb_state *snb;
   int snb_decision;      /* 0 undecided, 1 adopted, -1 rejected */
   int snb_retrial;       /* near-miss rejection: 0 none, 1 armed for a
-                            steady re-trial, 2 concluded */
+                            steady re-trial, 2 concluded, 3 armed for
+                            the confirming sample of a small win */
   int snb_retrial_wait;
   int snb_declined;      /* prep declined; do not retry */
   int snb_trial_verdict; /* -1: a real timed trial rejected on this

@@ -2115,13 +2115,22 @@ static int kls_snb_try_refactor(kls_solver *solver,
     kls_snb_free(solver);
   }
 
-  if (!check_pivots && solver->snb_retrial == 1 && solver->snb != NULL &&
+  if (!check_pivots &&
+      (solver->snb_retrial == 1 || solver->snb_retrial == 3) &&
+      solver->snb != NULL &&
       solver->snb_decision < 0 && !kls_snb_env_disabled() &&
       solver->numeric != NULL && solver->symbolic != NULL &&
       ++solver->snb_retrial_wait >= 8 &&
       solver->adaptive_refactor_seconds > 0.0) {
     /* steady re-trial of a near-miss rejection: the incumbent's rate
-       is now its true steady (updated every refactor) */
+       is now its true steady (updated every refactor).  One sample adopts
+       only on a clear win.  A smaller measured win is a real one as often
+       as it is noise, and a fixed margin placed at the engine's true gain
+       turns the whole run into a coin flip; an inconclusive sample (a
+       small win, or a loss within one scheduling hiccup) asks for one
+       confirming sample eight calls later instead, and that sample adopts
+       on any win beyond timer noise. */
+    const int confirming = solver->snb_retrial == 3;
     solver->snb_retrial = 2;
     const double t0 = kls_now_seconds();
     const UF_long rok = solver->options.threads > 1
@@ -2129,8 +2138,17 @@ static int kls_snb_try_refactor(kls_solver *solver,
                                   solver->options.threads)
       : kls_snb_refactor(solver, numeric_values);
     const double dt = kls_now_seconds() - t0;
-    if (rok && dt < 0.85 * solver->adaptive_refactor_seconds) {
+    if (rok && dt < (confirming ? 0.95 : 0.85) *
+                     solver->adaptive_refactor_seconds) {
       solver->snb_decision = 1;
+      *ok_out = rok;
+      kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
+      return 1;
+    }
+    if (rok && !confirming &&
+        dt < 1.10 * solver->adaptive_refactor_seconds) {
+      solver->snb_retrial = 3;
+      solver->snb_retrial_wait = 0;
       *ok_out = rok;
       kls_set_last_refactor_path(solver, KLS_REFACTOR_PATH_SNB);
       return 1;
@@ -2190,11 +2208,12 @@ static int kls_snb_try_refactor(kls_solver *solver,
       snb_ok && snb_seconds < adoption_ratio * solver->snb_incumbent_seconds
         ? 1 : -1;
     if (solver->snb_decision < 0) {
-      if (snb_ok && snb_seconds < solver->snb_incumbent_seconds &&
+      if (snb_ok && snb_seconds < 1.30 * solver->snb_incumbent_seconds &&
           solver->snb_retrial == 0) {
-        /* Near miss: the engine measured faster but not by the conservative
-           margin, and both samples are from warm-up. Keep the engine and
-           rerun the comparison once at steady state,
+        /* Near miss: the engine did not win by the conservative margin,
+           but both samples are from warm-up, where one cold sample swings
+           by the 20-30% noted above in either direction. Keep the engine
+           and rerun the comparison once at steady state,
            when adaptive_refactor_seconds carries the incumbent's true
            rate. */
         solver->snb_retrial = 1;
