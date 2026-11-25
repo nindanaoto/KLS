@@ -4874,33 +4874,50 @@ typedef struct kls_affinity_scope {
   int active;
 } kls_affinity_scope;
 
-static int kls_read_sysfs_integer(const char *path, int *value_out) {
-  FILE *file = fopen(path, "r");
-  if (file == NULL) {
+/* One short read: a stdio stream would allocate and release a buffer for
+   each of these one-line files. */
+static int kls_read_sysfs_line(const char *path, char *text, size_t size) {
+  const int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
     return 0;
   }
-  int value = -1;
-  const int ok = fscanf(file, "%d", &value) == 1 && value >= 0;
-  fclose(file);
-  if (ok) {
-    *value_out = value;
+  const ssize_t got = read(fd, text, size - 1u);
+  close(fd);
+  if (got <= 0) {
+    return 0;
   }
-  return ok;
+  text[got] = '\0';
+  return 1;
+}
+
+static int kls_read_sysfs_integer(const char *path, int *value_out) {
+  char text[32];
+  if (!kls_read_sysfs_line(path, text, sizeof(text))) {
+    return 0;
+  }
+  char *end = NULL;
+  errno = 0;
+  const long value = strtol(text, &end, 10);
+  if (end == text || errno != 0 || value < 0 || value > INT_MAX) {
+    return 0;
+  }
+  *value_out = (int)value;
+  return 1;
 }
 
 static int kls_read_sysfs_cache_size(const char *path,
                                      uint64_t *bytes_out) {
-  FILE *file = fopen(path, "r");
-  if (file == NULL) {
+  char text[32];
+  if (!kls_read_sysfs_line(path, text, sizeof(text))) {
     return 0;
   }
-  unsigned long long amount = 0u;
-  char unit = '\0';
-  const int fields = fscanf(file, "%llu%c", &amount, &unit);
-  fclose(file);
-  if (fields < 1) {
+  char *end = NULL;
+  errno = 0;
+  const unsigned long long amount = strtoull(text, &end, 10);
+  if (end == text || errno != 0 || text[0] == '-') {
     return 0;
   }
+  const char unit = *end;
   uint64_t multiplier = 1u;
   if (unit == 'K' || unit == 'k') {
     multiplier = UINT64_C(1024);
@@ -4924,10 +4941,49 @@ typedef struct kls_topology_cache {
 } kls_topology_cache;
 
 static kls_topology_cache kls_cached_topology;
-static pthread_once_t kls_topology_once = PTHREAD_ONCE_INIT;
+static unsigned char kls_topology_loaded[CPU_SETSIZE];
+static pthread_mutex_t kls_topology_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void kls_initialize_topology_cache(void) {
-  memset(&kls_cached_topology, 0, sizeof(kls_cached_topology));
+static void kls_load_topology_cpu(int cpu) {
+  char path[160];
+  snprintf(path, sizeof(path),
+           "/sys/devices/system/cpu/cpu%d/topology/physical_package_id",
+           cpu);
+  if (!kls_read_sysfs_integer(path, &kls_cached_topology.package[cpu])) {
+    return;
+  }
+  snprintf(path, sizeof(path),
+           "/sys/devices/system/cpu/cpu%d/topology/core_id", cpu);
+  if (!kls_read_sysfs_integer(path, &kls_cached_topology.core_id[cpu])) {
+    return;
+  }
+  snprintf(path, sizeof(path),
+           "/sys/devices/system/cpu/cpu%d/cache/index3/id", cpu);
+  if (!kls_read_sysfs_integer(path, &kls_cached_topology.llc_id[cpu])) {
+    return;
+  }
+  snprintf(path, sizeof(path),
+           "/sys/devices/system/cpu/cpu%d/cache/index3/size", cpu);
+  if (!kls_read_sysfs_cache_size(path,
+                                 &kls_cached_topology.llc_bytes[cpu])) {
+    return;
+  }
+  snprintf(path, sizeof(path),
+           "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+  int max_frequency_khz = 0;
+  if (kls_read_sysfs_integer(path, &max_frequency_khz)) {
+    kls_cached_topology.max_frequency_khz[cpu] = (uint64_t)max_frequency_khz;
+  }
+  kls_cached_topology.valid[cpu] = 1u;
+}
+
+/* Every reader of the topology looks only at the processors of an affinity
+   mask, so only those are discovered: each costs several sysfs reads, and a
+   process confined to a few processors of a large machine would otherwise
+   pay for all of them (0.5 ms on 32, more than a whole short run of a small
+   system).  An entry is written once, under the lock, before it is marked
+   loaded; a caller reads the entries of its own mask after this returns. */
+static void kls_ensure_topology(const cpu_set_t *cpus) {
   long configured = sysconf(_SC_NPROCESSORS_CONF);
   if (configured < 1) {
     return;
@@ -4935,46 +4991,22 @@ static void kls_initialize_topology_cache(void) {
   if (configured > CPU_SETSIZE) {
     configured = CPU_SETSIZE;
   }
+  pthread_mutex_lock(&kls_topology_mutex);
   for (int cpu = 0; cpu < (int)configured; ++cpu) {
-    char path[160];
-    snprintf(path, sizeof(path),
-             "/sys/devices/system/cpu/cpu%d/topology/physical_package_id",
-             cpu);
-    if (!kls_read_sysfs_integer(path,
-                                &kls_cached_topology.package[cpu])) {
+    if (kls_topology_loaded[cpu] || !CPU_ISSET(cpu, cpus)) {
       continue;
     }
-    snprintf(path, sizeof(path),
-             "/sys/devices/system/cpu/cpu%d/topology/core_id", cpu);
-    if (!kls_read_sysfs_integer(path,
-                                &kls_cached_topology.core_id[cpu])) {
-      continue;
-    }
-    snprintf(path, sizeof(path),
-             "/sys/devices/system/cpu/cpu%d/cache/index3/id", cpu);
-    if (!kls_read_sysfs_integer(path,
-                                &kls_cached_topology.llc_id[cpu])) {
-      continue;
-    }
-    snprintf(path, sizeof(path),
-             "/sys/devices/system/cpu/cpu%d/cache/index3/size", cpu);
-    if (!kls_read_sysfs_cache_size(
-          path, &kls_cached_topology.llc_bytes[cpu])) {
-      continue;
-    }
-    snprintf(path, sizeof(path),
-             "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
-    int max_frequency_khz = 0;
-    if (kls_read_sysfs_integer(path, &max_frequency_khz)) {
-      kls_cached_topology.max_frequency_khz[cpu] =
-        (uint64_t)max_frequency_khz;
-    }
-    kls_cached_topology.valid[cpu] = 1u;
+    kls_load_topology_cpu(cpu);
+    kls_topology_loaded[cpu] = 1u;
   }
+  pthread_mutex_unlock(&kls_topology_mutex);
 }
 
 static void kls_warm_topology_cache(void) {
-  (void)pthread_once(&kls_topology_once, kls_initialize_topology_cache);
+  cpu_set_t allowed;
+  if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+    kls_ensure_topology(&allowed);
+  }
 }
 
 /* Return the cache capacity of a caller-constrained execution domain.  libc's
@@ -4984,9 +5016,9 @@ static void kls_warm_topology_cache(void) {
    CPU belongs to one known LLC, that domain is authoritative.  With a broad
    or unavailable affinity mask, retain the conservative libc fallback. */
 static uint64_t kls_execution_domain_llc_bytes(void) {
-  kls_warm_topology_cache();
   cpu_set_t allowed;
   if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+    kls_ensure_topology(&allowed);
     int representative = -1;
     int constrained = 1;
     for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
@@ -5036,10 +5068,10 @@ static int kls_compact_llc_affinity_plan(const kls_solver *solver,
     return 0;
   }
 
-  kls_warm_topology_cache();
   if (sched_getaffinity(0, sizeof(*allowed_out), allowed_out) != 0) {
     return 0;
   }
+  kls_ensure_topology(allowed_out);
   const int *package = kls_cached_topology.package;
   const int *llc_id = kls_cached_topology.llc_id;
   const int *core_id = kls_cached_topology.core_id;

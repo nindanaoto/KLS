@@ -68,6 +68,7 @@
 #include <sched.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
